@@ -25,6 +25,23 @@ Resume the same manifest without re-running completed trial keys:
 fak armbench run --manifest INPUT/manifest.json --corpus INPUT/corpus.json --out ARTIFACTS/run.json --resume ARTIFACTS/prior-run.json
 ```
 
+The default remains serial. On a single host with explicitly assigned GPUs,
+launch bounded arm waves with:
+
+```text
+fak armbench run --manifest INPUT/manifest.json --corpus INPUT/corpus.json --out ARTIFACTS/run.json --max-parallel 8
+```
+
+`--max-parallel N` is a global provider-launch bound, not device discovery.
+CLI values must be at least one; zero is refused.
+Values above one require every arm to declare a unique, non-negative
+`gpu_index`; missing, negative, or duplicate assignments are refused before
+provider setup or trial launch. The runner passes the assignment to adapters as
+both the typed request field and the exact `CUDA_VISIBLE_DEVICES` value. It also
+holds one lock per assigned device, so concurrent paired units cannot overlap
+two trials on the same GPU. There is no automatic capacity probe, remote
+scheduler, or fallback device selection.
+
 The provider is selected by `manifest.model.provider`. `--provider NAME` is an
 optional assertion and is refused if it disagrees with the manifest. The first
 spine registers only `fake`; later provider adapters extend that registry while
@@ -56,7 +73,21 @@ The strict `fak.armbench.manifest/1` schema records:
 - OS, architecture, host class, fak version, and pricing date; and
 - one or more typed arms: `baseline`, `upstream_treatment`, `fak_passthrough`,
   or `fak_capability`. A capability arm names exactly one capability; other arm
-  kinds name none.
+  kinds name none. Each arm may additionally pin one host-local `gpu_index`:
+
+```json
+{
+  "id": "native-qwen38-a",
+  "kind": "baseline",
+  "prompt_hash": "sha256:...",
+  "gpu_index": 0
+}
+```
+
+Omitting `gpu_index` preserves manifest/1 compatibility and the historical
+manifest identity. Adding or changing an assignment is identity-bearing. An
+omitted assignment is valid for the serial default, but concurrent mode refuses
+it because device capacity would be unknown.
 
 The corpus hash is `sha256:` plus SHA-256 over the compact JSON encoding of the
 ordered `tasks` array. The runner recomputes it before the first provider call.
@@ -66,8 +97,21 @@ request/response/judge evidence, and incomparable manifests all fail closed.
 
 Each raw trial row retains request, response, provider-reported input/output
 usage and cost, wall/TTFT/inter-token latency (with availability bits), cache
-counters, failure/retry data, and raw judge evidence. Each arm also records its
-one-time setup cost; the human and JSON reports show its per-trial amortization.
+counters, failure/retry data, and raw judge evidence. New rows also carry a
+launch receipt with deterministic wave membership, assigned `gpu_index` and
+`CUDA_VISIBLE_DEVICES`, start/end/wall timing, exit code, and reap outcome.
+Process-backed providers return only after reaping their child; a provider or
+grader error cancels sibling launches and the runner waits for every in-flight
+call before returning. Ledger rows are sorted by task, trial, then arm, and
+report arms by arm ID, so completion races never reorder either artifact. Each
+arm also records its one-time setup cost; the human and JSON reports show its
+per-trial amortization. Pre-wave run/1 ledgers without launch receipts or
+`max_parallel` remain readable and report as the serial bound of one.
+The Go API's zero-value `Options{}` is the compatibility-only sentinel used by
+the committed deterministic selfcheck: on an unassigned legacy manifest it
+runs serially while retaining the pre-wave artifact bytes. The CLI always
+passes its explicit default of one, so ordinary `fak armbench run` ledgers use
+the receipt path.
 
 ## Immutable Caveman/Ponytail fixture import
 

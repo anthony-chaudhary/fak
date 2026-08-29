@@ -8,8 +8,10 @@ import (
 	"hash/fnv"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RunSchema tags the run artifact (the raw trial ledger + per-arm rollup).
@@ -35,9 +37,14 @@ type Request struct {
 	TaskID           string   `json:"task_id"`
 	Trial            int      `json:"trial"`
 	Position         int      `json:"position"`
-	Input            string   `json:"input"`
-	PromptHash       string   `json:"prompt_hash"`
-	Model            Model    `json:"model"`
+	Wave             int      `json:"wave,omitempty"`
+	GPUIndex         *int     `json:"gpu_index,omitempty"`
+	// CUDAVisibleDevices is the exact value a process-backed provider must set
+	// for CUDA_VISIBLE_DEVICES in the child environment.
+	CUDAVisibleDevices string `json:"cuda_visible_devices,omitempty"`
+	Input              string `json:"input"`
+	PromptHash         string `json:"prompt_hash"`
+	Model              Model  `json:"model"`
 }
 
 // Usage is the provider-reported accounting. Input and output tokens are kept
@@ -121,6 +128,14 @@ type Provider interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
 
+// ReceiptProvider is the optional process-aware provider seam. Implementations
+// return only after the launched child has been reaped and report its actual
+// timing and exit outcome. Providers that implement only Provider receive a
+// conservative wrapper receipt around their Complete call.
+type ReceiptProvider interface {
+	CompleteWithReceipt(ctx context.Context, req Request) (Response, LaunchReceipt, error)
+}
+
 // ArmSetup is the optional half of Provider: a provider that has a real per-arm
 // setup cost implements it and the runner charges what it reports. A provider
 // that does not is charged zero — an honest zero, not a hidden one.
@@ -144,10 +159,27 @@ type TrialResult struct {
 	Position         int      `json:"position"`
 	Response         Response `json:"response"`
 	Judgment         Judgment `json:"judgment"`
+	// Launch records the bounded-wave execution envelope. It is optional only so
+	// run/1 ledgers written before bounded waves remain readable and reportable.
+	Launch *LaunchReceipt `json:"launch,omitempty"`
 	// Resumed marks a row carried over from a prior run's ledger rather than
 	// re-executed. It is recorded so a resumed report can never be mistaken for
 	// a fresh full run.
 	Resumed bool `json:"resumed"`
+}
+
+// LaunchReceipt proves where and when one arm trial ran and that its provider
+// invocation returned through the reap boundary.
+type LaunchReceipt struct {
+	Wave               int     `json:"wave"`
+	GPUIndex           *int    `json:"gpu_index,omitempty"`
+	CUDAVisibleDevices string  `json:"cuda_visible_devices,omitempty"`
+	StartedAt          string  `json:"started_at"`
+	EndedAt            string  `json:"ended_at"`
+	WallMS             float64 `json:"wall_ms"`
+	ExitCode           int     `json:"exit_code"`
+	Reaped             bool    `json:"reaped"`
+	ReapOutcome        string  `json:"reap_outcome"`
 }
 
 // Key is the trial's resume identity. Every field in it is part of what makes
@@ -167,6 +199,10 @@ type Run struct {
 	Trials           []TrialResult        `json:"trials"`
 	Executed         int                  `json:"executed"`
 	ResumedCount     int                  `json:"resumed"`
+	// MaxParallel is the global launch bound used by this run. Zero is accepted
+	// only when reading a legacy run/1 ledger and means the historical serial
+	// default of one.
+	MaxParallel int `json:"max_parallel,omitempty"`
 }
 
 // Options configures one Run call.
@@ -174,6 +210,11 @@ type Options struct {
 	// Resume, when non-nil, supplies a prior run whose completed trials are
 	// carried over instead of re-executed.
 	Resume *Run
+	// MaxParallel bounds provider launches across all paired units. Zero keeps
+	// source compatibility with older callers and selects the serial default 1.
+	MaxParallel int
+	// Now is an injectable receipt clock. Nil uses time.Now.
+	Now func() time.Time
 }
 
 // PairUnit is one paired execution unit: the same (task, trial) run through
@@ -257,9 +298,19 @@ func Execute(ctx context.Context, m *Manifest, tasks []Task, prov Provider, grad
 	if prov == nil || grader == nil {
 		return nil, refuse(ReasonManifestInvalid, "a provider and a grader are both required")
 	}
+	maxParallel, err := normalizeMaxParallel(opts.MaxParallel)
+	if err != nil {
+		return nil, err
+	}
+	// Admission precedes setup: a duplicate or unknown assignment must not run
+	// even a provider's setup child before the campaign is refused.
+	if err := validateParallelAssignments(m, maxParallel); err != nil {
+		return nil, err
+	}
+	receiptMode := opts.MaxParallel != 0 || hasGPUAssignments(m)
 	identity := m.Identity()
 
-	carried, err := carryOver(identity, m, tasks, opts.Resume)
+	carried, err := carryOver(identity, m, tasks, maxParallel, opts.Resume)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +326,11 @@ func Execute(ctx context.Context, m *Manifest, tasks []Task, prov Provider, grad
 		byID[t.ID] = t
 	}
 
-	rows, executed, err := executeUnits(ctx, m, identity, units, byID, carried, prov, grader)
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	rows, executed, err := executeUnits(ctx, m, identity, units, byID, carried, prov, grader, maxParallel, receiptMode, now)
 	if err != nil {
 		return nil, err
 	}
@@ -289,14 +344,85 @@ func Execute(ctx context.Context, m *Manifest, tasks []Task, prov Provider, grad
 		Trials:           rows,
 		Executed:         executed,
 		ResumedCount:     len(rows) - executed,
+		MaxParallel:      recordedMaxParallel(maxParallel, receiptMode),
 	}, nil
+}
+
+func hasGPUAssignments(m *Manifest) bool {
+	for _, arm := range m.Arms {
+		if arm.GPUIndex != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func recordedMaxParallel(maxParallel int, receiptMode bool) int {
+	if !receiptMode {
+		return 0
+	}
+	return maxParallel
+}
+
+func normalizeMaxParallel(n int) (int, error) {
+	if n == 0 {
+		return 1, nil
+	}
+	if n < 0 {
+		return 0, refuse(ReasonManifestInvalid, "max_parallel is %d, want >= 1", n)
+	}
+	return n, nil
+}
+
+func effectiveRunMaxParallel(r *Run) int {
+	if r == nil || r.MaxParallel == 0 {
+		return 1
+	}
+	return r.MaxParallel
+}
+
+// CheckRunsComparable extends manifest comparability with the additive runtime
+// launch bound. Legacy ledgers normalize an omitted max_parallel to one.
+func CheckRunsComparable(a, b *Run) ([]ComparabilityField, error) {
+	if a == nil || b == nil || a.Manifest == nil || b.Manifest == nil {
+		return nil, refuse(ReasonIncomparableManifest, "a nil run or manifest is comparable to nothing")
+	}
+	fields, manifestErr := CheckComparable(a.Manifest, b.Manifest)
+	aMax, bMax := effectiveRunMaxParallel(a), effectiveRunMaxParallel(b)
+	if aMax != bMax {
+		fields = append(fields, ComparabilityField{Field: "run.max_parallel", A: strconv.Itoa(aMax), B: strconv.Itoa(bMax)})
+	}
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	if manifestErr != nil && aMax == bMax {
+		return fields, manifestErr
+	}
+	names := make([]string, 0, len(fields))
+	for _, field := range fields {
+		names = append(names, fmt.Sprintf("%s (%q vs %q)", field.Field, field.A, field.B))
+	}
+	return fields, refuse(ReasonIncomparableManifest, "%d term(s) decide what was measured and disagree: %s", len(fields), strings.Join(names, "; "))
+}
+
+func validateParallelAssignments(m *Manifest, maxParallel int) error {
+	if maxParallel == 1 {
+		return nil
+	}
+	for i, arm := range m.Arms {
+		if arm.GPUIndex == nil {
+			return refuse(ReasonGPUAssignmentUnknown,
+				"arms[%d] (%s) has no gpu_index; --max-parallel %d requires one explicit host-local GPU per arm", i, arm.ID, maxParallel)
+		}
+	}
+	return nil
 }
 
 // carryOver indexes a resume ledger by trial key. A ledger from a DIFFERENT
 // manifest identity is refused outright: silently mixing two experiments is the
 // exact failure resume is supposed to prevent, and it is invisible in the
 // output once it happens.
-func carryOver(identity string, m *Manifest, tasks []Task, resume *Run) (map[string]TrialResult, error) {
+func carryOver(identity string, m *Manifest, tasks []Task, maxParallel int, resume *Run) (map[string]TrialResult, error) {
 	carried := map[string]TrialResult{}
 	if resume == nil {
 		return carried, nil
@@ -309,6 +435,9 @@ func carryOver(identity string, m *Manifest, tasks []Task, resume *Run) (map[str
 	}
 	if resume.Manifest == nil || resume.Manifest.Identity() != identity {
 		return nil, refuse(ReasonResumeIdentityMismatch, "resume ledger's embedded manifest does not hash to %s", identity)
+	}
+	if prior := effectiveRunMaxParallel(resume); prior != maxParallel {
+		return nil, refuse(ReasonResumeIdentityMismatch, "resume ledger used max_parallel %d but this run requested %d", prior, maxParallel)
 	}
 	taskIDs := make(map[string]bool, len(tasks))
 	for _, task := range tasks {
@@ -362,110 +491,302 @@ func chargeSetup(ctx context.Context, m *Manifest, prov Provider) (map[string]Se
 	return setup, nil
 }
 
-// executeUnits runs the plan with at most Trials.Concurrency paired units in
-// flight. The unit — not the trial — is the concurrency atom, so the arms inside
-// one pair stay adjacent in time and the pairing stays meaningful.
-func executeUnits(ctx context.Context, m *Manifest, identity string, units []PairUnit, byID map[string]Task, carried map[string]TrialResult, prov Provider, grader Grader) ([]TrialResult, int, error) {
+type executionState struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	now      func() time.Time
+	global   chan struct{}
+	devices  map[int]chan struct{}
+	errOnce  sync.Once
+	mu       sync.Mutex
+	firstErr error
+}
+
+func newExecutionState(ctx context.Context, m *Manifest, launchCapacity int, now func() time.Time) *executionState {
+	runCtx, cancel := context.WithCancel(ctx)
+	s := &executionState{
+		ctx: runCtx, cancel: cancel, now: now,
+		global:  make(chan struct{}, launchCapacity),
+		devices: map[int]chan struct{}{},
+	}
+	for _, arm := range m.Arms {
+		if arm.GPUIndex != nil {
+			s.devices[*arm.GPUIndex] = make(chan struct{}, 1)
+		}
+	}
+	return s
+}
+
+func (s *executionState) fail(err error) {
+	if err == nil {
+		return
+	}
+	s.errOnce.Do(func() {
+		s.mu.Lock()
+		s.firstErr = err
+		s.mu.Unlock()
+		s.cancel()
+	})
+}
+
+func (s *executionState) err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstErr
+}
+
+func (s *executionState) acquire(gpu *int) (func(), error) {
+	releaseDevice := func() {}
+	if gpu != nil {
+		device := s.devices[*gpu]
+		select {
+		case device <- struct{}{}:
+			releaseDevice = func() { <-device }
+		case <-s.ctx.Done():
+			return nil, s.ctx.Err()
+		}
+	}
+	select {
+	case s.global <- struct{}{}:
+		return func() {
+			<-s.global
+			releaseDevice()
+		}, nil
+	case <-s.ctx.Done():
+		releaseDevice()
+		return nil, s.ctx.Err()
+	}
+}
+
+// executeUnits keeps the manifest's paired-unit admission bound while applying
+// one global arm-launch bound and one lock per explicitly assigned GPU.
+func executeUnits(ctx context.Context, m *Manifest, identity string, units []PairUnit, byID map[string]Task, carried map[string]TrialResult, prov Provider, grader Grader, maxParallel int, receiptMode bool, now func() time.Time) ([]TrialResult, int, error) {
 	var (
 		mu       sync.Mutex
 		rows     []TrialResult
 		executed int
-		firstErr error
 		wg       sync.WaitGroup
 	)
-	sem := make(chan struct{}, m.Trials.Concurrency)
+	waveWidth := usefulParallelism(maxParallel, len(m.Arms))
+	state := newExecutionState(ctx, m, waveWidth, now)
+	defer state.cancel()
+	unitConcurrency := m.Trials.Concurrency
+	if unitConcurrency > len(units) {
+		unitConcurrency = len(units)
+	}
+	if maxParallel == 1 {
+		// The command's compatibility default is truly serial, including across
+		// paired units. This also makes the first refusal deterministic.
+		unitConcurrency = 1
+	}
+	sem := make(chan struct{}, unitConcurrency)
+
+	launching := true
 	for _, unit := range units {
-		sem <- struct{}{}
+		if !launching {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-state.ctx.Done():
+			launching = false
+			continue
+		}
 		wg.Add(1)
 		go func(unit PairUnit) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			mu.Lock()
-			stop := firstErr != nil
-			mu.Unlock()
-			if stop {
+			got, ran, err := runUnit(state, m, identity, unit, byID[unit.TaskID], carried, prov, grader, waveWidth, receiptMode)
+			if err != nil {
+				state.fail(err)
 				return
 			}
-			got, ran, err := runUnit(ctx, m, identity, unit, byID[unit.TaskID], carried, prov, grader)
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				return
-			}
 			rows = append(rows, got...)
 			executed += ran
 		}(unit)
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return nil, 0, firstErr
+	if err := state.err(); err != nil {
+		return nil, 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
 	}
 	return rows, executed, nil
 }
 
-// runUnit runs every arm of one paired unit, in the unit's declared order.
-func runUnit(ctx context.Context, m *Manifest, identity string, unit PairUnit, task Task, carried map[string]TrialResult, prov Provider, grader Grader) ([]TrialResult, int, error) {
+// runUnit partitions one paired arm order into deterministic, barrier-separated
+// waves. Completion order inside a wave never affects ledger order.
+func runUnit(state *executionState, m *Manifest, identity string, unit PairUnit, task Task, carried map[string]TrialResult, prov Provider, grader Grader, waveWidth int, receiptMode bool) ([]TrialResult, int, error) {
 	out := make([]TrialResult, 0, len(unit.ArmOrder))
 	executed := 0
-	for pos, armID := range unit.ArmOrder {
-		arm, ok := m.ArmByID(armID)
-		if !ok {
-			return nil, 0, refuse(ReasonManifestInvalid, "planned arm %q is not declared in the manifest", armID)
+	for start := 0; start < len(unit.ArmOrder); {
+		width := waveWidth
+		if remaining := len(unit.ArmOrder) - start; width > remaining {
+			width = remaining
 		}
-		key := strings.Join([]string{identity, armID, unit.TaskID, fmt.Sprint(unit.Trial)}, "|")
-		if prior, ok := carried[key]; ok {
-			// Position is part of the paired execution plan even though it is not
-			// part of the uniqueness key. Refuse a hand-edited resume row rather
-			// than carrying it under a counterbalanced position it never occupied.
-			if prior.Position != pos {
-				return nil, 0, refuse(ReasonResumeIdentityMismatch,
-					"resume row %s records position %d but the manifest plan requires %d", key, prior.Position, pos)
+		end := start + width
+		wave := start/waveWidth + 1
+		results := make([]*TrialResult, end-start)
+		var wg sync.WaitGroup
+		for pos := start; pos < end; pos++ {
+			armID := unit.ArmOrder[pos]
+			arm, ok := m.ArmByID(armID)
+			if !ok {
+				err := refuse(ReasonManifestInvalid, "planned arm %q is not declared in the manifest", armID)
+				state.fail(err)
+				wg.Wait()
+				return nil, 0, err
 			}
-			out = append(out, prior)
-			continue
+			key := strings.Join([]string{identity, armID, unit.TaskID, fmt.Sprint(unit.Trial)}, "|")
+			if prior, ok := carried[key]; ok {
+				if prior.Position != pos {
+					err := refuse(ReasonResumeIdentityMismatch,
+						"resume row %s records position %d but the manifest plan requires %d", key, prior.Position, pos)
+					state.fail(err)
+					wg.Wait()
+					return nil, 0, err
+				}
+				priorCopy := prior
+				results[pos-start] = &priorCopy
+				continue
+			}
+			slot := pos - start
+			wg.Add(1)
+			go func(arm Arm, pos, slot int) {
+				defer wg.Done()
+				row, err := runArmTrial(state, m, identity, unit, task, arm, pos, wave, receiptMode, prov, grader)
+				if err != nil {
+					state.fail(err)
+					return
+				}
+				results[slot] = &row
+			}(arm, pos, slot)
 		}
-		req := Request{
-			ManifestIdentity: identity,
-			ArmID:            arm.ID,
-			ArmKind:          arm.Kind,
-			Capabilities:     arm.Capabilities,
-			TaskID:           task.ID,
-			Trial:            unit.Trial,
-			Position:         pos,
-			Input:            task.Input,
-			PromptHash:       arm.PromptHash,
-			Model:            m.Model,
+		wg.Wait()
+		if err := state.err(); err != nil {
+			return nil, 0, err
 		}
-		resp, err := prov.Complete(ctx, req)
-		if err != nil {
-			return nil, 0, fmt.Errorf("arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
-		}
-		var judgment Judgment
-		if resp.Failure == "" {
-			judgment, err = grader.Grade(ctx, req, resp)
-			if err != nil {
-				return nil, 0, fmt.Errorf("grade arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
+		for _, row := range results {
+			if row != nil {
+				out = append(out, *row)
+				if !row.Resumed {
+					executed++
+				}
 			}
 		}
-		if err := checkEvidence(resp, judgment); err != nil {
-			return nil, 0, fmt.Errorf("arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
-		}
-		out = append(out, TrialResult{
-			ManifestIdentity: identity,
-			ArmID:            arm.ID,
-			ArmKind:          arm.Kind,
-			TaskID:           task.ID,
-			Trial:            unit.Trial,
-			Position:         pos,
-			Response:         resp,
-			Judgment:         judgment,
-		})
-		executed++
+		start = end
 	}
 	return out, executed, nil
+}
+
+func usefulParallelism(requested, arms int) int {
+	if requested < arms {
+		return requested
+	}
+	return arms
+}
+
+func runArmTrial(state *executionState, m *Manifest, identity string, unit PairUnit, task Task, arm Arm, pos, wave int, receiptMode bool, prov Provider, grader Grader) (TrialResult, error) {
+	release, err := state.acquire(arm.GPUIndex)
+	if err != nil {
+		return TrialResult{}, err
+	}
+	defer release()
+
+	req := Request{
+		ManifestIdentity: identity,
+		ArmID:            arm.ID, ArmKind: arm.Kind, Capabilities: arm.Capabilities,
+		TaskID: task.ID, Trial: unit.Trial, Position: pos,
+		Input: task.Input, PromptHash: arm.PromptHash, Model: m.Model,
+	}
+	var (
+		resp   Response
+		launch *LaunchReceipt
+	)
+	if receiptMode {
+		gpu := cloneInt(arm.GPUIndex)
+		req.Wave = wave
+		req.GPUIndex = gpu
+		if gpu != nil {
+			req.CUDAVisibleDevices = strconv.Itoa(*gpu)
+		}
+		var receipt LaunchReceipt
+		resp, receipt, err = completeWithReceipt(state.ctx, state.now, prov, req)
+		if err == nil {
+			receipt.Wave = wave
+			receipt.GPUIndex = cloneInt(gpu)
+			receipt.CUDAVisibleDevices = req.CUDAVisibleDevices
+			if err = validateLaunchReceipt(receipt); err == nil {
+				launch = &receipt
+			}
+		}
+	} else {
+		resp, err = prov.Complete(state.ctx, req)
+	}
+	if err != nil {
+		return TrialResult{}, fmt.Errorf("arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
+	}
+	var judgment Judgment
+	if resp.Failure == "" {
+		judgment, err = grader.Grade(state.ctx, req, resp)
+		if err != nil {
+			return TrialResult{}, fmt.Errorf("grade arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
+		}
+	}
+	if err := checkEvidence(resp, judgment); err != nil {
+		return TrialResult{}, fmt.Errorf("arm %s task %s trial %d: %w", arm.ID, task.ID, unit.Trial, err)
+	}
+	return TrialResult{
+		ManifestIdentity: identity, ArmID: arm.ID, ArmKind: arm.Kind,
+		TaskID: task.ID, Trial: unit.Trial, Position: pos,
+		Response: resp, Judgment: judgment, Launch: launch,
+	}, nil
+}
+
+func completeWithReceipt(ctx context.Context, now func() time.Time, prov Provider, req Request) (Response, LaunchReceipt, error) {
+	if rp, ok := prov.(ReceiptProvider); ok {
+		return rp.CompleteWithReceipt(ctx, req)
+	}
+	started := now().UTC()
+	resp, err := prov.Complete(ctx, req)
+	ended := now().UTC()
+	return resp, LaunchReceipt{
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
+		WallMS:   float64(ended.Sub(started)) / float64(time.Millisecond),
+		ExitCode: 0, Reaped: true, ReapOutcome: "provider_returned",
+	}, err
+}
+
+func validateLaunchReceipt(r LaunchReceipt) error {
+	if r.Wave <= 0 {
+		return refuse(ReasonManifestInvalid, "receipt wave is %d, want >= 1", r.Wave)
+	}
+	started, err := time.Parse(time.RFC3339Nano, r.StartedAt)
+	if err != nil {
+		return refuse(ReasonManifestInvalid, "receipt started_at %q is not RFC3339Nano", r.StartedAt)
+	}
+	ended, err := time.Parse(time.RFC3339Nano, r.EndedAt)
+	if err != nil {
+		return refuse(ReasonManifestInvalid, "receipt ended_at %q is not RFC3339Nano", r.EndedAt)
+	}
+	if ended.Before(started) || r.WallMS < 0 {
+		return refuse(ReasonManifestInvalid, "receipt timing is negative (started=%s ended=%s wall_ms=%v)", r.StartedAt, r.EndedAt, r.WallMS)
+	}
+	if !r.Reaped || strings.TrimSpace(r.ReapOutcome) == "" {
+		return refuse(ReasonManifestInvalid, "provider returned without a witnessed reap outcome")
+	}
+	return nil
+}
+
+func cloneInt(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // checkEvidence is the fail-closed evidence fence. A number with no raw artifact

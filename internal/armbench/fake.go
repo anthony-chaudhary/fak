@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"time"
 )
 
 // FakeProvider is the deterministic spine provider. It exists so the whole
@@ -35,8 +36,9 @@ type FakeProvider struct {
 }
 
 var (
-	_ Provider = (*FakeProvider)(nil)
-	_ ArmSetup = (*FakeProvider)(nil)
+	_ Provider        = (*FakeProvider)(nil)
+	_ ArmSetup        = (*FakeProvider)(nil)
+	_ ReceiptProvider = (*FakeProvider)(nil)
 )
 
 // SetupArm charges the declared one-time setup to every arm that installs a
@@ -131,6 +133,30 @@ func (p *FakeProvider) Complete(_ context.Context, req Request) (Response, error
 		return Response{}, err
 	}
 	return resp, nil
+}
+
+// CompleteWithReceipt gives the synthetic provider a synthetic but fully
+// deterministic process envelope. Real process-backed adapters report their
+// observed child timestamps and exit/reap result through the same seam.
+func (p *FakeProvider) CompleteWithReceipt(ctx context.Context, req Request) (Response, LaunchReceipt, error) {
+	resp, err := p.Complete(ctx, req)
+	seed := hashSeed(req.ManifestIdentity, req.ArmID, req.TaskID, fmt.Sprint(req.Trial), fmt.Sprint(req.Position))
+	started := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(seed%86_400_000) * time.Millisecond)
+	wall := resp.Latency.WallMS
+	if wall < 0 {
+		wall = 0
+	}
+	ended := started.Add(time.Duration(wall * float64(time.Millisecond)))
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+	}
+	return resp, LaunchReceipt{
+		StartedAt: started.Format(time.RFC3339Nano),
+		EndedAt:   ended.Format(time.RFC3339Nano),
+		WallMS:    wall, ExitCode: exitCode,
+		Reaped: true, ReapOutcome: "synthetic_provider_returned",
+	}, err
 }
 
 // FakeGrader is the deterministic spine grader. It grades on the synthetic
