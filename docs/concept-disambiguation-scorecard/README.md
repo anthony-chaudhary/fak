@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **970** crystal of 2684 positioned |
+| **Crystal-clear concepts (and climbing)** | **971** crystal of 2685 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2803 / 2815** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **79** of 3807 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **79** of 3809 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2684 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2685 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 970
+  * crystal       ################............ 971
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -49,7 +49,7 @@ clarity mix by family (each cell = one concept):
   gateway-engine   *****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 41 crystal)
   guard-gate       **********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (443 concept(s); 202 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
-  loop             *********************************************oooooooooooooooooooooooooooooooooooooo (83 concept(s); 45 crystal)
+  loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
   plan             ***********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (347 concept(s); 107 crystal)
   policy-capability ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (189 concept(s); 84 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3807 lookup name(s) -> 2684 concept(s), 79 ambiguous
+name index: 3809 lookup name(s) -> 2685 concept(s), 79 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1790 / 4780 |
+| Boundaries drawn (mutual / total) | 1792 / 4782 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3807 over 2684 concepts |
+| Lookup names indexed | 3809 over 2685 concepts |
 | Lookup names landing on several concepts | 79 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2684 |
+| Concepts carrying a contrast set | 2685 |
 
 ## The concepts (best verdict first)
 
@@ -651,6 +651,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | loop | **rsiloop (RSI keep-or-revert loop)** - The recursive-self-improvement loop (internal/rsiloop): proposes a change, measures a witness-verified metric gain, and keeps-or-reverts on a non-forgeable keep-bit. |
 | * | crystal | subsystem | loop | **loopmap (loop-family map surface)** - The package (internal/loopmap, fak loopmap) that renders the loop-family map: which mechanism plays which role (timer / selector / executor / witness) and where the names collide. |
 | * | crystal | concept | loop | **loopback (network 127.0.0.1)** - The networking term: the 127.0.0.1 loopback address / same-host bind (isLoopback, loopbackOnly), swallowed by the `loop` root but from a different domain entirely. |
+| * | crystal | symbol | loop | **performance-RSI loop-turn scorer** - ScoreLoopTurn evaluates one completed loop run's strict performance-RSI evidence and emits the nonfatal loop-turn receipt. |
 | * | crystal | symbol | loop | **KindLoopFleet (whole-fleet member kind)** - KindLoopFleet is the superloop member kind (#4955) whose single registry member with Ref=all ENUMERATES into one MemberStatus per ledgered loop on the canonical roster, so a walk covers every folded loop without hand-naming each one. |
 | * | crystal | symbol | loop | **superloop.LoopFleetStatuses (fleet member expansion)** - LoopFleetStatuses is the pure expansion behind KindLoopFleet: it turns one fleet member plus the shell-read folded loops and skipped-ledger gaps into per-loop MemberStatus rows, surfacing every gap as UNMEASURED so it blocks Satisfied. |
 | * | crystal | symbol | loop | **superloop.RosterLoop (folded-loop input row)** - RosterLoop is the plain-data input row the shell hands the pure roster builder for ONE folded loop: its stable identity (Kind), folded state, and dark flag, mirroring a loopfleet.LoopHealth row without importing it. |
@@ -2957,8 +2958,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2990/4780 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2684 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2990/4782 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2685 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2966,7 +2967,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3807 lookup name(s) resolves - 79 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3809 lookup name(s) resolves - 79 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)

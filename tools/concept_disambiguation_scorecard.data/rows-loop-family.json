@@ -119,7 +119,7 @@
       "kind": "subsystem",
       "definition": "The durability scorecard (internal/loopscore): are firing loops registered, non-dark, outcome-recorded, and guard-wrapped.",
       "distinction": "A DURABILITY scorecard (is a loop registered + non-dark + witnessed) - NOT loop-index (stage coverage) and NOT loopfleet (the live health fold it reads).",
-      "distinct_from": ["loopindex", "loopfleet"],
+      "distinct_from": ["loopindex", "loopfleet", "performance-rsi-loop-turn-scorer"],
       "aliases": [],
       "grounding": "loopscore",
       "grounding_kind": "path",
