@@ -445,13 +445,53 @@ func TestLoadRuntimeProofsRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) 
 	}
 }
 
+func TestRealRuntimeWitnessRegistryEveryRowMeetsContract(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	data, err := os.ReadFile(filepath.Join(root, "internal", "maturity", "runtime-proofs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registry runtimeProofFile
+	if err := json.Unmarshal(data, &registry); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Schema != runtimeProofSchema {
+		t.Fatalf("schema = %q, want %q", registry.Schema, runtimeProofSchema)
+	}
+	if len(registry.Witnesses) == 0 {
+		t.Fatal("runtime proof registry must retain at least one live witness")
+	}
+
+	seen := make(map[string]int, len(registry.Witnesses))
+	for i, proof := range registry.Witnesses {
+		if previous, ok := seen[proof.Lane]; ok {
+			t.Errorf("row %d duplicates lane %q from row %d", i, proof.Lane, previous)
+		} else {
+			seen[proof.Lane] = i
+		}
+		t.Run(fmt.Sprintf("%03d_%s", i, proof.Lane), func(t *testing.T) {
+			fixture := t.TempDir()
+			writeRuntimeProofFixture(t, fixture, []RuntimeProof{proof})
+			if _, err := loadRuntimeProofs(fixture); err != nil {
+				t.Errorf("registry row %d (%q) violates the runtime proof contract: %v", i, proof.Lane, err)
+			}
+		})
+	}
+}
+
 func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	headOutput, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()
 	if err != nil {
 		t.Fatalf("resolve fixture HEAD: %v: %s", err, headOutput)
 	}
-	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), "fak: loaded capability floor from examples/customer-support-readonly-policy.json\nfak ablate")
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), strings.Join([]string{
+		"fak: loaded capability floor from examples/customer-support-readonly-policy.json",
+		"fak ablate",
+		"news - slackenv",
+		"slackmeta",
+		"slackwire",
+	}, "\n"))
 	oldResolver := resolveRuntimeFak
 	resolveRuntimeFak = func() (string, error) { return artifact, nil }
 	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
