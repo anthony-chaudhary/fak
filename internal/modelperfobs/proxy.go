@@ -58,12 +58,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	completed := false
 	defer func() {
 		if !completed {
-			p.finishRequest(id)
+			p.completeObservation(&obs, started)
 		}
 	}()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		obs.Error = err.Error()
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -74,6 +75,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := p.Backend.ResolveReference(r.URL)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(body))
 	if err != nil {
+		obs.Error = err.Error()
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
