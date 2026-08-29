@@ -75,6 +75,27 @@ func TestValidateReceiptFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateReceiptRequiresFakNativeZeroFallbackForBothRoles(t *testing.T) {
+	for _, role := range []string{RoleBaseline, RoleCandidate} {
+		t.Run(role+"/other engine", func(t *testing.T) {
+			r := validReceipt(t, role, "metal.command-buffer-amortization")
+			r.Execution.Engine = "other"
+			err := ValidateReceipt(ActiveGraph(), r)
+			if err == nil || !strings.Contains(err.Error(), "engine must be fak-native") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+		t.Run(role+"/nonzero fallback", func(t *testing.T) {
+			r := validReceipt(t, role, "metal.command-buffer-amortization")
+			r.Execution.FallbackCount = 1
+			err := ValidateReceipt(ActiveGraph(), r)
+			if err == nil || !strings.Contains(err.Error(), "fallback count must be zero") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
 func TestValidateReceiptRejectsTamperedSystemBaseline(t *testing.T) {
 	r := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
 	r.SystemBaselines = []systembaseline.Report{baselineAttestation(systembaseline.VerdictClean, true)}
@@ -202,5 +223,10 @@ func TestCompareReceiptsDeterministicAndRejectsDrift(t *testing.T) {
 	c.Controls.Batch = 2
 	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "undeclared control axis drifted") {
 		t.Fatalf("drift err=%v", err)
+	}
+	c.Controls.Batch = b.Controls.Batch
+	c.Execution.FallbackCount = 1
+	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "fallback count must be zero") {
+		t.Fatalf("fallback drift err=%v", err)
 	}
 }
