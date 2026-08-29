@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/modeldescriptor"
@@ -50,10 +51,36 @@ func TestManifestCompilerDeterministicWitness(t *testing.T) {
 	if got, want := packet.Descriptor.Aliases, []string{"qwen38", "qwen38forcausallm"}; !equalStrings(got, want) {
 		t.Fatalf("normalized aliases = %v, want %v", got, want)
 	}
-	if len(packet.SupportLadder) != 5 || packet.SupportLadder[0].Status != "complete" || packet.SupportLadder[2].Status != "pending" {
-		t.Fatalf("support ladder does not separate intake from promotion: %+v", packet.SupportLadder)
+	for _, name := range []string{"release-pinned", "descriptor-validated"} {
+		if rung := requireSupportRung(t, packet.SupportLadder, name); rung.Status != "complete" {
+			t.Fatalf("support rung %q status = %q, want complete", name, rung.Status)
+		}
 	}
-	if packet.RegistrationClosure.Closed || len(packet.RegistrationClosure.Open) != 6 {
+	for _, name := range []string{"semantic-reference", "fak-native", "optimized"} {
+		if rung := requireSupportRung(t, packet.SupportLadder, name); rung.Status != "pending" {
+			t.Fatalf("support rung %q status = %q, want pending", name, rung.Status)
+		}
+	}
+	obligationRung := map[string]string{
+		"semantic":    "semantic-reference",
+		"oracle":      "semantic-reference",
+		"backend":     "fak-native",
+		"test":        "fak-native",
+		"docs":        "fak-native",
+		"performance": "optimized",
+	}
+	for _, obligation := range packet.Obligations {
+		rung := requireSupportRung(t, packet.SupportLadder, obligationRung[obligation.Kind])
+		if !contains(rung.Obligations, obligation.ID) {
+			t.Fatalf("obligation %s:%s missing from support rung %q: %+v", obligation.Kind, obligation.ID, rung.Name, rung)
+		}
+	}
+	wantOpen := make([]string, 0, len(packet.Obligations))
+	for _, obligation := range packet.Obligations {
+		wantOpen = append(wantOpen, obligation.Kind+":"+obligation.ID)
+	}
+	sort.Strings(wantOpen)
+	if packet.RegistrationClosure.Closed != (len(wantOpen) == 0) || !equalStrings(packet.RegistrationClosure.Open, wantOpen) {
 		t.Fatalf("registration closure hid unresolved work: %+v", packet.RegistrationClosure)
 	}
 	if !packet.Coupling.WithinBudget || packet.Coupling.DescriptorDigest == "" {
@@ -161,6 +188,17 @@ func fixture(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func requireSupportRung(t *testing.T, ladder []SupportRung, name string) SupportRung {
+	t.Helper()
+	for _, rung := range ladder {
+		if rung.Name == name {
+			return rung
+		}
+	}
+	t.Fatalf("support ladder missing rung %q: %+v", name, ladder)
+	return SupportRung{}
 }
 
 func equalStrings(a, b []string) bool {
