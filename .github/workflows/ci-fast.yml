@@ -22,13 +22,12 @@ on:
 permissions:
   contents: read
 
-# Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
-# re-push/force-push. On main — and on schedule/workflow_dispatch — github.head_ref
-# is empty, so the group key falls back to the unique commit SHA: every trunk commit
-# runs its own fast gate in parallel, uncancelled, preserving the per-commit
-# decisive conclusion release_decide reads on main.
+# Queue control (CI/CD run-speed): converge each branch or PR ref on its newest
+# head. A push to main now supersedes that ref's obsolete in-flight run instead of
+# retaining one 30-minute gate per historical SHA. The newest head still runs the
+# complete decisive package set, and release_decide ignores cancelled conclusions.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,10 +38,11 @@ jobs:
       # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
       # `go` fetch it if the runner's Go is older.
       GOTOOLCHAIN: auto
-      # Serialize package/compiler fan-out below the hosted runner process ceiling.
-      # This changes no package set, test semantics, job name, or release check.
+      # Bound package/compiler fan-out to the job's explicit two-way runtime budget.
+      # Matching -p to GOMAXPROCS lets independent packages make progress
+      # without unbounded process pressure or changing the package/test set.
       GOMAXPROCS: "2"
-      GOFLAGS: "-p=1"
+      GOFLAGS: "-p=2"
     defaults:
       run:
         working-directory: .
