@@ -284,6 +284,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Ultracode OSS variants: mechanisms are real; comparative effectiveness is not yet proven (2026-08-29)](docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md) — pinned nine-source inventory, current FAK effectiveness audit, license/evidence boundaries, and a fail-closed matched-comparison backlog decision.
+
 - [Harness ABI stability under rapid upstream churn (2026-08-29)](docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md) — pinned Codex, Claude Code, Gemini CLI, and OpenCode compatibility study; separates shipped evidence from open failures, maps FAK's present/partial seams, and sets the default-versus-coverage frontier for #6805/#10020.
 
 - [Cactus Needle: borrow the negative tool-call corpus, not the runtime (2026-08-28)](docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md) — pinned source, tests, history, forge, and license study; keeps FAK's descriptor/acceptance/native-engine contracts, excludes unpinned binaries/confidence authority/default telemetry, and files the attributed six-class Qwen3.8 tool-call corpus as #9864.

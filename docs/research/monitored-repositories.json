@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-29T15:40:00Z",
+  "updated_at": "2026-08-29T21:57:24Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -3445,6 +3445,114 @@
           }
         ]
       }
+    },
+    {
+      "repository": "diepquynh/ultracode",
+      "url": "https://github.com/diepquynh/ultracode",
+      "status": "candidate",
+      "priority": 63,
+      "why": "Newly discovered named Ultracode plugin with repository inventory, multi-role workflow stages, approval gates, and an explicit quality-versus-token-cost posture directly relevant to the FAK Ultracode effectiveness audit.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "63f0d6e4dbf62258190e938ee4ebf9b93278f119",
+      "stars_at_check": 4,
+      "last_push_at_check": "2026-08-29T19:44:24Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "hesreallyhim/ultracode-workflows",
+      "url": "https://github.com/hesreallyhim/ultracode-workflows",
+      "status": "candidate",
+      "priority": 64,
+      "why": "Named Ultracode workflow library with deterministic scripts, resumable checkpoints, adversarial verification, arithmetic coverage, plan previews, and runtime observation; it was absent from the earlier source ledger and is directly comparable on effectiveness controls.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "9b5404d11b885b28380d3eb17471ef7b17601b5e",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-08-07T06:48:37Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Suraj1235/open-dynamic-workflows",
+      "url": "https://github.com/Suraj1235/open-dynamic-workflows",
+      "status": "candidate",
+      "priority": 65,
+      "why": "Open-source script-as-orchestrator engine for Ultracode-style workflows across Codex, OpenCode, MCP clients, and local models, with daemon and embedded execution paths that may inform FAK portability and control-plane boundaries.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "972bb98494ea23f907df88850024bd7022b099d4",
+      "stars_at_check": 33,
+      "last_push_at_check": "2026-07-09T16:35:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Caleb0796/codex-ultracode-kit",
+      "url": "https://github.com/Caleb0796/codex-ultracode-kit",
+      "status": "candidate",
+      "priority": 66,
+      "why": "Small Codex-specific Ultracode kit combining an in-session skill with a deterministic external fan-out harness and skeptic verification, directly overlapping FAK's Codex adapter and effectiveness-envelope questions.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "8176113ed18b0df1ef1a2717e2eb556aaf132018",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-07-04T05:40:28Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "KangarooKi/Ultracode",
+      "url": "https://github.com/KangarooKi/Ultracode",
+      "status": "candidate",
+      "priority": 67,
+      "why": "Independent local coding CLI named UltraCode with task graphs, permissions, hooks, background commands, MCP, memory, worktrees, and subagents; useful as a product-surface variant but license provenance requires explicit review.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "4a7d1b6eb10e4e020b628b7fbaa21c1837b31edd",
+      "stars_at_check": 5,
+      "last_push_at_check": "2026-06-01T01:19:52Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "toel1234/oh-my-opencode",
+      "url": "https://github.com/toel1234/oh-my-opencode",
+      "status": "candidate",
+      "priority": 68,
+      "why": "Ultrawork lineage with multi-model orchestration, background agents, opt-in team mode, intent routing, progress tooling, and completion enforcement; adjacent rather than name-identical, but relevant to the OSS variant inventory.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "18d7643bc1eb4f3e99e0e80e7b8cca9fe199ff1a",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-05-10T20:12:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "QuintinShaw/pi-dynamic-workflows",
+      "url": "https://github.com/QuintinShaw/pi-dynamic-workflows",
+      "status": "candidate",
+      "priority": 69,
+      "why": "High-signal dynamic-workflow runtime with batch-scoped cancellation, nested caps, deterministic state deltas, prefix resume, and terminal child draining; its directional authoring study lacks a committed matched provider artifact.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "2f85c9eb350319e14a2ff16b98986a30b3c8bb4d",
+      "stars_at_check": 458,
+      "last_push_at_check": "2026-08-29T15:48:04Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "code-yeongyu/oh-my-openagent",
+      "url": "https://github.com/code-yeongyu/oh-my-openagent",
+      "status": "candidate",
+      "priority": 70,
+      "why": "Current Ultrawork lineage with an observable stop goal, atomic todos, cleanup, real-surface QA scenarios, and bounded reviewer resubmission; repository-level license metadata is inconclusive and requires a full provenance pass before reuse.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "b4e0094c04df49360271fd9e449681d0c386eb35",
+      "stars_at_check": 68507,
+      "last_push_at_check": "2026-08-29T16:59:42Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Yeachan-Heo/oh-my-claudecode",
+      "url": "https://github.com/Yeachan-Heo/oh-my-claudecode",
+      "status": "candidate",
+      "priority": 71,
+      "why": "Historical Ultrawork lineage whose retirement and stop-hook echo-loop reports provide negative evidence for live-goal-derived persistence and immediate cancellation semantics.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "adf4bf3280c8a8d7b932d5c11aef84ba22d6a11d",
+      "stars_at_check": 38876,
+      "last_push_at_check": "2026-08-29T16:39:27Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
     }
   ]
 }
