@@ -463,7 +463,7 @@ type nativeInferenceMeasurement struct {
 	decodeTokenIDs                      []int
 	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
 	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
-	cudaImmutableWeightUploadsBefore    NativeCUDAImmutableWeightUploadCounters
+	cudaImmutableWeightUploadsBefore    model.NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
 }
 

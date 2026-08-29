@@ -392,7 +392,7 @@ func TestNativeInferenceReceiptCarriesCumulativeCUDAUploadDelta(t *testing.T) {
 	if got == nil {
 		t.Fatal("native inference receipt omitted available CUDA immutable-weight upload counters")
 	}
-	if got.Before != (NativeCUDAImmutableWeightUploadCounters{}) || got.After != (NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048}) || got.Delta != got.After {
+	if got.Before != (model.NativeCUDAImmutableWeightUploadCounters{}) || got.After != (model.NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048}) || got.Delta != got.After {
 		t.Fatalf("CUDA immutable-weight upload window = %+v, want zero before and exact 1/4096/2048 after+delta", got)
 	}
 }

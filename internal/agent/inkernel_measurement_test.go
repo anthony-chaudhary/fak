@@ -173,7 +173,7 @@ func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalStateIdentity(t *te
 	const requests = 32
 	type result struct {
 		index   int
-		receipt *NativeInferenceReceipt
+		receipt *model.NativeInferenceReceipt
 		want    model.Qwen35MetalStateIdentityReceipt
 		source  *model.Qwen35MetalStateIdentityReceipt
 		reset   *model.Qwen35MetalStateIdentityReceipt
@@ -335,7 +335,7 @@ func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalForwardSequence(t *
 	const requests = 32
 	type result struct {
 		index   int
-		receipt *NativeInferenceReceipt
+		receipt *model.NativeInferenceReceipt
 		reset   model.Qwen35MetalForwardSequenceReceipt
 	}
 	results := make(chan result, requests)
@@ -419,7 +419,7 @@ func TestNativeInferenceReceiptRejectsModifiedLogits(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts = append(opts, WithNativeInferenceReceipt(true))
 			_, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hello"}}, nil, opts...)
-			var unsupported *NativeInferenceReceiptUnsupportedError
+			var unsupported *model.NativeInferenceReceiptUnsupportedError
 			if !errors.As(err, &unsupported) {
 				t.Fatalf("error = %T %v, want typed receipt refusal", err, err)
 			}

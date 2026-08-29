@@ -1,7 +1,6 @@
 package qwen38quantrun
 
 import (
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
 )
@@ -56,7 +55,7 @@ type QwenMetalSequenceArm struct {
 	Artifact                  qwen38quant.Identity
 	ExpectedHostUploadBytes   uint64
 	ExpectedHostReadbackBytes uint64
-	Receipt                   *agent.NativeInferenceReceipt
+	Receipt                   *model.NativeInferenceReceipt
 }
 
 // QwenMetalSequenceFinding identifies one arm and its stable HOLD reason.

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 )
@@ -44,7 +45,7 @@ func (p *inputTriggerIngressPlanner) Complete(_ context.Context, _ []agent.Messa
 		Usage:        agent.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}
 	if sample.NativeInferenceReceipt {
-		completion.NativeInference = &agent.NativeInferenceReceipt{
+		completion.NativeInference = &model.NativeInferenceReceipt{
 			TokenIDs:       []int{38},
 			TokenLogprobs:  []float64{-0.25},
 			Model:          nativeModel,

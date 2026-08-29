@@ -64,7 +64,7 @@ type InKernelPlanner struct {
 	// construction. The error is request-gated to the exact resident hybrid path,
 	// so an unrelated model remains byte-for-byte on its historical forward.
 	qwenQ4KPrefillChunkTokens    int
-	qwenQ4KPrefillChunkConfigErr *InKernelQwenQ4KPrefillChunkConfigError
+	qwenQ4KPrefillChunkConfigErr *model.InKernelQwenQ4KPrefillChunkConfigError
 	qwen35MetalGDNSequence       bool
 	qwen35MetalGDNExecuted       atomic.Bool
 
@@ -260,7 +260,7 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	return p
 }
 
-func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *InKernelQwenQ4KPrefillChunkConfigError) {
+func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *model.InKernelQwenQ4KPrefillChunkConfigError) {
 	switch raw {
 	case "":
 		return inKernelQwenQ4KPrefillChunkTokens, nil
@@ -275,7 +275,7 @@ func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *InKernelQwenQ4K
 	case "8192":
 		return 8192, nil
 	default:
-		return 0, &InKernelQwenQ4KPrefillChunkConfigError{Value: raw}
+		return 0, &model.InKernelQwenQ4KPrefillChunkConfigError{Value: raw}
 	}
 }
 
@@ -858,7 +858,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		presPenalty = *sp.PresencePenalty
 	}
 	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
-		return nil, &NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
+		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
 
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice)
@@ -1062,7 +1062,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	return comp, nil
 }
 
-func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *NativeInferenceReceipt {
+func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *model.NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
 	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
 	if measurement.qwen35MetalForwardSequence.Available {
@@ -1073,14 +1073,14 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 	if measurement.qwen35MetalStateIdentity != nil && measurement.qwen35MetalStateIdentity.Available {
 		qwen35MetalStateIdentity = cloneQwen35MetalStateIdentityReceipt(*measurement.qwen35MetalStateIdentity)
 	}
-	var cudaImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta
+	var cudaImmutableWeightUploads *model.NativeCUDAImmutableWeightUploadDelta
 	if after, ok := cudaImmutableWeightUploadSnapshot(p.backend); ok && measurement.cudaImmutableWeightUploadsAvailable {
 		before := measurement.cudaImmutableWeightUploadsBefore
 		if after.Calls >= before.Calls && after.TransferBytes >= before.TransferBytes && after.ResidentBytes >= before.ResidentBytes {
-			cudaImmutableWeightUploads = &NativeCUDAImmutableWeightUploadDelta{
+			cudaImmutableWeightUploads = &model.NativeCUDAImmutableWeightUploadDelta{
 				Before: before,
 				After:  after,
-				Delta: NativeCUDAImmutableWeightUploadCounters{
+				Delta: model.NativeCUDAImmutableWeightUploadCounters{
 					Calls:         after.Calls - before.Calls,
 					TransferBytes: after.TransferBytes - before.TransferBytes,
 					ResidentBytes: after.ResidentBytes - before.ResidentBytes,
@@ -1088,7 +1088,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 			}
 		}
 	}
-	return &NativeInferenceReceipt{
+	return &model.NativeInferenceReceipt{
 		TokenIDs:                   append([]int(nil), measurement.tokenIDs...),
 		TokenLogprobs:              append([]float64(nil), measurement.logprobs...),
 		PrefillSeconds:             prefillS,
@@ -1118,13 +1118,13 @@ type cudaImmutableWeightUploadSnapshotter interface {
 	CUDAImmutableWeightUploadSnapshot() (calls, transferBytes, residentBytes uint64)
 }
 
-func cudaImmutableWeightUploadSnapshot(be compute.Backend) (NativeCUDAImmutableWeightUploadCounters, bool) {
+func cudaImmutableWeightUploadSnapshot(be compute.Backend) (model.NativeCUDAImmutableWeightUploadCounters, bool) {
 	provider, ok := be.(cudaImmutableWeightUploadSnapshotter)
 	if !ok {
-		return NativeCUDAImmutableWeightUploadCounters{}, false
+		return model.NativeCUDAImmutableWeightUploadCounters{}, false
 	}
 	calls, transferBytes, residentBytes := provider.CUDAImmutableWeightUploadSnapshot()
-	return NativeCUDAImmutableWeightUploadCounters{Calls: calls, TransferBytes: transferBytes, ResidentBytes: residentBytes}, true
+	return model.NativeCUDAImmutableWeightUploadCounters{Calls: calls, TransferBytes: transferBytes, ResidentBytes: residentBytes}, true
 }
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {

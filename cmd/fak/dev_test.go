@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -52,6 +54,42 @@ func TestRunDevHandoffMissingArtifactIsActionable(t *testing.T) {
 	for _, want := range []string{"separate 'fak-dev' executable", "fak-dev <command>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("missing %q in actionable error:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestExactTopLevelBuildPreservesArgvAndChildExit(t *testing.T) {
+	old := executeExactDevHandoff
+	defer func() { executeExactDevHandoff = old }()
+	var captured []string
+	executeExactDevHandoff = func(_ io.Reader, _, _ io.Writer, argv []string) int {
+		captured = append([]string(nil), argv...)
+		return 7
+	}
+
+	code, handled := runExactDevHandoff(nil, nil, nil, "build", []string{"--profile", "release", "--json"})
+	if !handled || code != 7 {
+		t.Fatalf("handled=%v code=%d, want true/7", handled, code)
+	}
+	if want := []string{"build", "--profile", "release", "--json"}; !reflect.DeepEqual(captured, want) {
+		t.Fatalf("child argv = %v, want %v", captured, want)
+	}
+	if code, handled := runExactDevHandoff(nil, nil, nil, "buildcheck", []string{"--json"}); handled || code != 0 {
+		t.Fatalf("non-exact command handled=%v code=%d, want false/0", handled, code)
+	}
+}
+
+func TestRuntimeDependencyClosureDoesNotImportDevcmd(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	cmd := exec.Command("go", "list", "-deps", "./cmd/fak")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list runtime dependencies: %v\n%s", err, out)
+	}
+	for _, dependency := range strings.Fields(string(out)) {
+		if dependency == "github.com/anthony-chaudhary/fak/internal/devcmd" {
+			t.Fatal("runtime fak dependency closure imports internal/devcmd")
 		}
 	}
 }

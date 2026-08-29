@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 const defaultReceiptMetricStaleAfter = 5 * time.Minute
@@ -61,7 +61,7 @@ func NewReceiptMetrics(staleAfter time.Duration) *ReceiptMetrics {
 
 // Observe records one completed fak-native request. Invalid, fallback-active, or
 // non-native receipts are counted as unsupported and never enter native totals.
-func (m *ReceiptMetrics) Observe(receipt *agent.NativeInferenceReceipt, observedAt time.Time) bool {
+func (m *ReceiptMetrics) Observe(receipt *model.NativeInferenceReceipt, observedAt time.Time) bool {
 	if m == nil {
 		return false
 	}
