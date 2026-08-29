@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:f784dff9f940dbbafb11202aa673a6d57f669cdda39a80098d7edb3f0d5c97b9",
-  "tracked_files": 18455,
-  "tracked_bytes": 420235711,
+  "content_root": "sha256:6955884afe571ef86c51a4f75829d7e8059734e1891ab7071c2398d53fa7ceb3",
+  "tracked_files": 18457,
+  "tracked_bytes": 420283616,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1862,8 +1862,8 @@
     },
     {
       "path": "INDEX.md",
-      "content_sha256": "sha256:94a13e2af6321760388d477d7cd2518d85fe5ac8f84438883b4ea4f850f876c0",
-      "bytes": 490694,
+      "content_sha256": "sha256:85cec7146b8f79b948a642309ddea8ad7c2503e6033c865e1b0acbfc61e34ec4",
+      "bytes": 491802,
       "classification": "documentation"
     },
     {
@@ -42911,6 +42911,15 @@
       ]
     },
     {
+      "path": "docs/notes/CONCEPT-AGENT-KERNEL-UNION-2026-08-29.md",
+      "content_sha256": "sha256:20f5111828bf840bdfca81b53e798d188df4e2c43208283867403d8effcd4805",
+      "bytes": 36515,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md",
       "content_sha256": "sha256:18ab4840d1569597df047c45f042499a75d29d2a43c65e0179d22b31a89b95c1",
       "bytes": 13579,
@@ -43049,6 +43058,15 @@
       "path": "docs/notes/CONCEPT-GO-BUILD-PATH-CACHE-2026-08-27.md",
       "content_sha256": "sha256:7d121f1fbbe71b52a1d04629e2e6cb35763337900392813ebdafcad594c05ee1",
       "bytes": 14816,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/notes/CONCEPT-GO-NATIVE-PERFORMANCE-SYSTEM-2026-08-29.md",
+      "content_sha256": "sha256:39d954cf5b10f8bf0884b9e61492a08b807539164ec874dad3f18a06aecd5e2c",
+      "bytes": 7460,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -94133,8 +94151,8 @@
     },
     {
       "path": "internal/gateway/native_inference_receipt_test.go",
-      "content_sha256": "sha256:4c853c4b6ae0daef5cb6a80483c85bfa65a4c9b2d7ca70f8bf8ca6a4ca7a0c07",
-      "bytes": 19195,
+      "content_sha256": "sha256:0e27bdca3fd31694a4ebb0681daa22e4ead50a496ee3ba2937df1c2b09bebf5a",
+      "bytes": 22017,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
