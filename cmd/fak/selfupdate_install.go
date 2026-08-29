@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 )
 
 func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
@@ -218,10 +219,19 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	audit := selfUpdateAudit(repoRoot, headRev)
 	stopHeartbeat()
 	printHotCopyAudit(audit)
-	if !audit.Converged {
+	posture := selfupdate.ClassifyInstall(audit.Partition())
+	if !posture.Completed {
 		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget,
-			"target installed; hot copies still divergent: "+strings.Join(audit.Lines(), " | "))
+			"target installed; convergeable hot copies still need repair: "+strings.Join(audit.Lines(), " | "))
 		return
+	}
+	if posture.AuditOnlyAttention {
+		attention := "automatic targets converged; audit-only hot copies need manual attention: " + strings.Join(audit.Lines(), " | ")
+		if strings.TrimSpace(res.Detail) == "" {
+			res.Detail = attention
+		} else {
+			res.Detail = strings.TrimSpace(res.Detail) + "; " + attention
+		}
 	}
 	if handoffSession != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), handoffTimeout)

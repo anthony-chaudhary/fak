@@ -164,6 +164,50 @@ type Audit struct {
 	Missing    []Role   // no file at the canonical path
 }
 
+// Drift is one repair scope's unsafe portion of an Audit. A role may appear in both Dirty and
+// Divergent: dirty says its provenance is unreviewable, while divergent says the stamped base
+// revision is not Want. Missing roles are intentionally absent because AuditCopies reports but
+// does not create install locations.
+type Drift struct {
+	Divergent  []Role
+	Dirty      []Role
+	Unattested []Role
+}
+
+// Present reports whether this scope contains any installed copy that is not clean, attested,
+// and on the reference build.
+func (d Drift) Present() bool {
+	return len(d.Divergent) != 0 || len(d.Dirty) != 0 || len(d.Unattested) != 0
+}
+
+// AuditPartition separates drift self-update can repair from drift it may only report. It does
+// not weaken Audit.Converged: that remains the strict all-role safety verdict used by admission.
+// The partition exists because successful automatic convergence and safe gate admission answer
+// different questions.
+type AuditPartition struct {
+	Convergeable Drift
+	AuditOnly    Drift
+}
+
+// Partition classifies every unsafe role by the same Convergeable policy used to select swap
+// targets. This keeps updater posture aligned with what the installer can actually change.
+func (a Audit) Partition() AuditPartition {
+	var p AuditPartition
+	partition := func(roles []Role, writable, auditOnly *[]Role) {
+		for _, role := range roles {
+			if Convergeable(role) {
+				*writable = append(*writable, role)
+			} else {
+				*auditOnly = append(*auditOnly, role)
+			}
+		}
+	}
+	partition(a.Divergent, &p.Convergeable.Divergent, &p.AuditOnly.Divergent)
+	partition(a.Dirty, &p.Convergeable.Dirty, &p.AuditOnly.Dirty)
+	partition(a.Unattested, &p.Convergeable.Unattested, &p.AuditOnly.Unattested)
+	return p
+}
+
 // AuditCopies grades a census against a reference build. want is normally origin/main's
 // revision; when it is empty the reference is inferred as the most common attested build (ties
 // broken lexicographically so the verdict is deterministic), which lets a caller with no git

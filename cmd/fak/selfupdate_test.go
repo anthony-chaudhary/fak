@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
@@ -574,9 +575,9 @@ func TestSelfUpdateCheckOnlyReceiptReportsCurrentRevision(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateHotCopyDivergentReceiptIsActionable(t *testing.T) {
+func TestSelfUpdateRepairableHotCopyReceiptIsActionable(t *testing.T) {
 	receipt := newSelfUpdateReceipt(outcomeHotCopyDivergent, "bin/fak", "")
-	if receipt.Status != "divergent" || receipt.NextCommand != "fak self-update --force" {
+	if receipt.Status != "divergent" || receipt.NextCommand != "fak self-update" {
 		t.Fatalf("divergent receipt = status %q next %q", receipt.Status, receipt.NextCommand)
 	}
 }
@@ -593,14 +594,15 @@ func TestEmitSelfUpdateCheckJSONPostures(t *testing.T) {
 	cases := []struct {
 		name      string
 		freshness binstamp.Freshness
-		converged bool
-		status    selfUpdateCheckStatus
+		audit     selfinstall.AuditPartition
+		status    selfupdate.CheckStatus
 		next      string
 	}{
-		{"fresh and converged", binstamp.Fresh, true, selfUpdateCheckCurrent, "fak version"},
-		{"revision differs", binstamp.Stale, true, selfUpdateCheckStale, "fak self-update"},
-		{"revision differs and copies diverge", binstamp.Stale, false, selfUpdateCheckStale, "fak self-update"},
-		{"hot copies diverge", binstamp.Fresh, false, selfUpdateCheckDivergent, "fak self-update --force"},
+		{"fresh and converged", binstamp.Fresh, selfinstall.AuditPartition{}, selfupdate.StatusCurrent, "fak version"},
+		{"revision differs", binstamp.Stale, selfinstall.AuditPartition{}, selfupdate.StatusStale, "fak self-update"},
+		{"revision differs and repairable copies drift", binstamp.Stale, selfinstall.Audit{Divergent: []selfinstall.Role{selfinstall.RoleWorker}}.Partition(), selfupdate.StatusStale, "fak self-update"},
+		{"repairable hot copies drift", binstamp.Fresh, selfinstall.Audit{Divergent: []selfinstall.Role{selfinstall.RoleWorker}}.Partition(), selfupdate.StatusDivergent, "fak self-update"},
+		{"audit-only gate needs attention", binstamp.Fresh, selfinstall.Audit{Dirty: []selfinstall.Role{selfinstall.RoleGate}}.Partition(), selfupdate.StatusAttention, "fak self-update --check"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -610,7 +612,7 @@ func TestEmitSelfUpdateCheckJSONPostures(t *testing.T) {
 			selfUpdateReceiptOldRevision = "oldrev"
 			selfUpdateReceiptNewRevision = "newrev"
 
-			emitSelfUpdateCheckOutcome("bin/fak", "check-only", tc.freshness, tc.converged)
+			emitSelfUpdateCheckOutcome("bin/fak", "check-only", tc.freshness, tc.audit)
 
 			var receipt selfUpdateReceipt
 			if err := json.Unmarshal([]byte(stdout.String()), &receipt); err != nil {
@@ -623,6 +625,36 @@ func TestEmitSelfUpdateCheckJSONPostures(t *testing.T) {
 				t.Fatalf("check receipt reports mutation: %+v", receipt)
 			}
 		})
+	}
+}
+
+func TestSelfUpdateCheckJSONAuditOnlyHelperProcess(t *testing.T) {
+	const helperEnv = "GO_WANT_SELFUPDATE_CHECK_JSON_HELPER"
+	if os.Getenv(helperEnv) == "1" {
+		selfUpdateProgress = io.Discard
+		selfUpdateJSON = os.Stdout
+		selfUpdateReceiptOldRevision = "abcdef012345"
+		selfUpdateReceiptNewRevision = "abcdef012345"
+		audit := selfinstall.Audit{Dirty: []selfinstall.Role{selfinstall.RoleGate}}.Partition()
+		emitSelfUpdateCheckOutcome("bin/fak", "audit-only gate drift", binstamp.Fresh, audit)
+		os.Exit(0)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSelfUpdateCheckJSONAuditOnlyHelperProcess$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("self-update check helper failed: %v", err)
+	}
+	var receipt selfUpdateReceipt
+	if err := json.Unmarshal(out, &receipt); err != nil {
+		t.Fatalf("helper receipt is not JSON: %v: %q", err, out)
+	}
+	if receipt.Status != string(selfupdate.StatusAttention) {
+		t.Fatalf("audit-only helper status = %q, want attention", receipt.Status)
+	}
+	if receipt.NextCommand != "fak self-update --check" || strings.Contains(receipt.NextCommand, "--force") {
+		t.Fatalf("audit-only helper advertised impossible repair %q", receipt.NextCommand)
 	}
 }
 
