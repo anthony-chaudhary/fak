@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:a278c7b4e8643610f8c2b5289ebeba6323d6d67a3e8ec4250c16ffe3487fbda9",
-  "tracked_files": 18454,
-  "tracked_bytes": 420213831,
+  "content_root": "sha256:c5b056b32fe6adbc6d941c7b71ded0a1bb93ee6c6c68d0449ad096de414ce902",
+  "tracked_files": 18455,
+  "tracked_bytes": 420232555,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1862,8 +1862,8 @@
     },
     {
       "path": "INDEX.md",
-      "content_sha256": "sha256:2a63c16ecbc1d3c51d8782c8b9a550491020cddae05d86fefdfe6271351e8d37",
-      "bytes": 490373,
+      "content_sha256": "sha256:94a13e2af6321760388d477d7cd2518d85fe5ac8f84438883b4ea4f850f876c0",
+      "bytes": 490694,
       "classification": "documentation"
     },
     {
@@ -43883,6 +43883,15 @@
       ]
     },
     {
+      "path": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md",
+      "content_sha256": "sha256:3e4d36bc1a2f5aff86330df2a2d00c6b4ffbf6b875f9948a0aa0349669f57c66",
+      "bytes": 12183,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.json",
       "content_sha256": "sha256:8631171ab4106504bd669f2fabfde82faa3e37b27e82a38ed425849ff04bf523",
       "bytes": 43433,
@@ -51607,8 +51616,8 @@
     },
     {
       "path": "docs/research/monitored-repositories.json",
-      "content_sha256": "sha256:331a6679f90334fdd43d62111c6af3efbd2ea184bcf162df0bc5ed6c13f3999b",
-      "bytes": 171634,
+      "content_sha256": "sha256:a3005f62b3e93ded48ac6d7b1338e79db81565f4cdae85476c45003d67480f0f",
+      "bytes": 177854,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
