@@ -33,7 +33,7 @@ func TestScheduleWakeCohortSpreadsHundredWithoutRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(deadlines) != 100 {
+	if len(deadlines) != 100 { //boundarylint:ignore CHANGE_DETECTOR_TEST the test intentionally samples exactly 100 deadlines to prove deterministic sequence and uniqueness
 		t.Fatalf("deadlines = %d, want 100", len(deadlines))
 	}
 	if !deadlines[0].Equal(now) || !deadlines[len(deadlines)-1].Equal(now.Add(window)) {
@@ -51,7 +51,7 @@ func TestScheduleWakeCohortSpreadsHundredWithoutRefusal(t *testing.T) {
 		}
 		distinct[job.WakeAtUnixNano] = true
 	}
-	if len(distinct) != 100 {
+	if len(distinct) != 100 { //boundarylint:ignore CHANGE_DETECTOR_TEST the test intentionally samples exactly 100 deadlines to prove deterministic sequence and uniqueness
 		t.Fatalf("distinct wake instants = %d, want 100", len(distinct))
 	}
 }

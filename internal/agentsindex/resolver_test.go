@@ -60,7 +60,7 @@ func TestResolveEffectivePrecedenceProvenanceAndDigest(t *testing.T) {
 		if strings.Contains(source.Path, "\\") {
 			t.Fatalf("source path is not normalized: %q", source.Path)
 		}
-		if source.Bytes > 0 && (len(source.SHA256) != 64 || source.Content == "") {
+		if source.Bytes > 0 && (len(source.SHA256) != 64 || source.Content == "") { //boundarylint:ignore CHANGE_DETECTOR_TEST SHA-256 provenance digests are exactly 64 hexadecimal characters
 			t.Fatalf("incomplete provenance: %+v", source)
 		}
 		if source.Included && (source.Span == nil || source.Span.End-source.Span.Start != source.Bytes) {

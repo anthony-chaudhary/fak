@@ -114,7 +114,7 @@ func TestServeAdapterObserveProjectsBoundedContentFreeEvidence(t *testing.T) {
 	if got.Provenance != ServeMeasured || !got.ObservedAt.Equal(source.ObservedAt) || !got.ValidUntil.Equal(source.ValidUntil) || got.Generation != source.Generation || !got.Fresh {
 		t.Fatalf("projected evidence = %#v", got)
 	}
-	if len(got.StableID) != 32 {
+	if len(got.StableID) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST stable IDs are specified as 128-bit values encoded in exactly 32 hexadecimal characters
 		t.Fatalf("StableID length = %d, want bounded 32-byte hex", len(got.StableID))
 	}
 }
@@ -454,7 +454,7 @@ func TestServeAdapterSelfCheckDeterministicAndContentFree(t *testing.T) {
 	if !first.Passed || first.Action != ServeDefer || first.Error != "" {
 		t.Fatalf("SelfCheck = %#v", first)
 	}
-	if first != second || len(first.Digest) != 64 {
+	if first != second || len(first.Digest) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST stable IDs are specified as 128-bit values encoded in exactly 32 hexadecimal characters
 		t.Fatalf("SelfCheck not deterministic: first %#v second %#v", first, second)
 	}
 	for _, forbidden := range []string{"prompt", "payload", "private", "context"} {
