@@ -57,6 +57,8 @@ import bench_provenance  # noqa: E402
 
 REGISTRY_REL = "docs/benchmarks/registry.jsonl"
 DEFAULT_VIEW_REL = "docs/benchmarks/AUTHORITY-GENERATED-SAMPLE.md"
+CANONICAL_AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
+CANONICAL_ROW_IDS = ("support-maturity-matrix",)
 
 # Required fields on every registry row. A missing one is a hard error (exit 2) —
 # the record must be complete or the view would silently drop a claim.
@@ -260,6 +262,36 @@ def render(rows: list[dict[str, Any]]) -> str:
     return "\n".join(header + body).rstrip() + "\n"
 
 
+def canonical_row(row: dict[str, Any]) -> str:
+    """Render the canonical authority-table row for a registry record."""
+    return (
+        f"| **{_md(row['claim'])}** | **{_md(row['headline'])}** | "
+        f"{_md(row['model'])} | {_md(row['baseline'])} | "
+        f"{_md(row['commit'])} | {_md(row['artifact'])} — "
+        f"Reproduce: `{row['reproduce']}` |"
+    )
+
+
+def check_canonical_rows(root: str, rows: list[dict[str, Any]]) -> list[str]:
+    """Return canonical rows that do not match their registry-backed rendering."""
+    path = os.path.join(root, CANONICAL_AUTHORITY_REL)
+    try:
+        with open(path, encoding="utf-8") as f:
+            canonical = f.read()
+    except FileNotFoundError:
+        return [f"missing {CANONICAL_AUTHORITY_REL}"]
+
+    by_id = {row["id"]: row for row in rows}
+    stale: list[str] = []
+    for claim_id in CANONICAL_ROW_IDS:
+        row = by_id.get(claim_id)
+        if row is None:
+            stale.append(f"registry missing {claim_id}")
+        elif canonical_row(row) not in canonical:
+            stale.append(claim_id)
+    return stale
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -301,8 +333,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"benchmark-authority: STALE — {args.check} differs from the registry.\n"
                   f"  fix: python tools/benchmark_authority.py --write {args.check}", file=sys.stderr)
             return 1
-        print(f"benchmark-authority: fresh — {args.check} matches the registry "
-              f"({len(rows)} claims).")
+        stale_canonical = check_canonical_rows(root, rows)
+        if stale_canonical:
+            ids = ", ".join(stale_canonical)
+            print(f"benchmark-authority: STALE — {CANONICAL_AUTHORITY_REL} differs from "
+                  f"the registry for: {ids}.\n"
+                  f"  fix: reconcile those canonical rows from {REGISTRY_REL}", file=sys.stderr)
+            return 1
+        print(f"benchmark-authority: fresh — {args.check} and "
+              f"{CANONICAL_AUTHORITY_REL} match the registry ({len(rows)} claims).")
         return 0
 
     if args.write is not None:
