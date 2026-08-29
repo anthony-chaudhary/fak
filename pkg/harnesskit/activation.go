@@ -165,6 +165,19 @@ type ActivationError struct {
 	cleanupErr error
 }
 
+// CompatibilityError preserves the complete machine report for an activation
+// refused before any factory is started.
+type CompatibilityError struct {
+	Report CompatibilityReport
+}
+
+func (e *CompatibilityError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return e.Report.Error()
+}
+
 func (e *ActivationError) Error() string {
 	if e == nil {
 		return "<nil>"
@@ -274,6 +287,18 @@ func Activate(ctx context.Context, lock ProductLock, services Services, factorie
 	}
 	activationErr.cleanupErr = active.Close()
 	return nil, activationErr
+}
+
+// ActivateCompatible negotiates the builder and host contracts before lock
+// verification or any Factory.Start call. Legacy Activate remains available
+// for callers whose compatibility is established by an older host boundary.
+func ActivateCompatible(ctx context.Context, lock ProductLock, services Services, factories map[string]Factory, builder BuilderContract, host RuntimeContract) (*Activation, CompatibilityReport, error) {
+	report := NegotiateCompatibility(builder, host)
+	if !report.Compatible {
+		return nil, report, &Error{Code: CodeUnsupported, Op: "activate compatibility", Err: &CompatibilityError{Report: report}}
+	}
+	active, err := Activate(ctx, lock, services, factories)
+	return active, report, err
 }
 
 func verifyActivationLock(lock ProductLock) (ProductLock, error) {
