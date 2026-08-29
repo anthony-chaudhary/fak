@@ -23,6 +23,7 @@ const (
 	JournalStatusAdvanced                    = "advanced"
 	JournalStatusMissingTranscript           = "missing_transcript"
 	JournalStatusPresentNoPostLaunchProgress = "present_no_post_launch_progress"
+	JournalStatusSyntheticOrUnbound          = "synthetic_or_unbound_identity"
 )
 
 // JournalLaunchIdentity is one provider-session identity observed at SessionStart.
@@ -103,6 +104,7 @@ type JournalAuditCounts struct {
 	MissingTranscript           int            `json:"missing_transcript"`
 	PresentNoPostLaunchProgress int            `json:"present_no_post_launch_progress"`
 	ExcludedUnsupportedProvider int            `json:"excluded_unsupported_provider"`
+	ExcludedSyntheticOrUnbound  int            `json:"excluded_synthetic_or_unbound"`
 	AuthorityErrors             int            `json:"authority_errors"`
 	ByProvider                  map[string]int `json:"by_provider"`
 }
@@ -221,6 +223,8 @@ func AuditRecentLaunches(opt JournalAuditOptions) JournalAuditReport {
 		case JournalStatusPresentNoPostLaunchProgress:
 			rep.Counts.ExactTranscripts++
 			rep.Counts.PresentNoPostLaunchProgress++
+		case JournalStatusSyntheticOrUnbound:
+			rep.Counts.ExcludedSyntheticOrUnbound++
 		default:
 			rep.Counts.MissingTranscript++
 		}
@@ -234,13 +238,20 @@ func AuditRecentLaunches(opt JournalAuditOptions) JournalAuditReport {
 		rep.Summary = fmt.Sprintf("authority unreadable (%d error(s)); no healthy verdict is possible", rep.Counts.AuthorityErrors)
 	case rep.Counts.MissingTranscript > 0 || rep.Counts.PresentNoPostLaunchProgress > 0:
 		rep.Verdict = JournalVerdictRed
-		rep.Summary = fmt.Sprintf("%d/%d recent launch identities advanced; missing=%d present_without_post_launch_progress=%d", rep.Counts.Advanced, rep.Counts.Identities, rep.Counts.MissingTranscript, rep.Counts.PresentNoPostLaunchProgress)
+		rep.Summary = fmt.Sprintf("%d/%d recent launch identities advanced; missing=%d present_without_post_launch_progress=%d excluded_synthetic_or_unbound=%d", rep.Counts.Advanced, rep.Counts.Identities, rep.Counts.MissingTranscript, rep.Counts.PresentNoPostLaunchProgress, rep.Counts.ExcludedSyntheticOrUnbound)
 	default:
-		rep.Summary = fmt.Sprintf("all %d recent launch identities advanced in provider journals", rep.Counts.Identities)
+		rep.Summary = fmt.Sprintf("all %d recent launch identities advanced in provider journals; excluded_synthetic_or_unbound=%d", rep.Counts.Identities, rep.Counts.ExcludedSyntheticOrUnbound)
 	}
 	return rep
 }
 
+func isSyntheticOrUnboundLaunch(launch JournalLaunchIdentity) bool {
+	if strings.ToLower(strings.TrimSpace(launch.Source)) != "startup" {
+		return false
+	}
+	trace := strings.ToLower(strings.TrimSpace(launch.Trace))
+	return trace == "model-controlled-trace" || strings.HasPrefix(trace, "guard-trace-")
+}
 func journalAuditRow(identityPath string, launch JournalLaunchIdentity, evidence []journalEvidence, authorityErrors *[]JournalAuthorityError) JournalAuditRow {
 	row := JournalAuditRow{
 		Identity: launch.Identity,
@@ -252,6 +263,10 @@ func journalAuditRow(identityPath string, launch JournalLaunchIdentity, evidence
 			Provider: launch.Provider, Source: launch.Source,
 		},
 		Status: JournalStatusMissingTranscript,
+	}
+	if isSyntheticOrUnboundLaunch(launch) && len(evidence) == 0 {
+		row.Status = JournalStatusSyntheticOrUnbound
+		return row
 	}
 	byProvider := map[string][]journalEvidence{}
 	for _, item := range evidence {

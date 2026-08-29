@@ -98,3 +98,31 @@ func TestSessionJournalAuditPresentWithoutPostLaunchProgressIsNonzeroRed(t *test
 		t.Fatalf("stdout missing RED present-no-progress row: %s", stdout.String())
 	}
 }
+
+func TestSessionJournalAuditReportsExcludedUnboundStartup(t *testing.T) {
+	userRoot := t.TempDir()
+	regDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	const identity = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+	rows := strings.Join([]string{
+		`{"ts":"2026-08-29T09:00:00Z","uuid":"` + identity + `","trace":"guard-trace-9849","provider":"codex","via":"guard-sessionstart","source":"startup"}`,
+		`{"ts":"2026-08-29T10:00:00Z","uuid":"` + identity + `","trace":"model-controlled-trace","provider":"codex","via":"guard-sessionstart","source":"startup"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(regDir, "resume_identity.jsonl"), []byte(rows), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldNow := sessionJournalAuditNow
+	t.Cleanup(func() { sessionJournalAuditNow = oldNow })
+	sessionJournalAuditNow = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+
+	var stdout, stderr bytes.Buffer
+	code := runSessionJournalAudit(&stdout, &stderr, []string{"--since", "24h", "--reg-dir", regDir, "--home", userRoot})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "excluded_synthetic_or_unbound=1") || !strings.Contains(got, sessiondiag.JournalStatusSyntheticOrUnbound) {
+		t.Fatalf("human verdict=%q", got)
+	}
+}
