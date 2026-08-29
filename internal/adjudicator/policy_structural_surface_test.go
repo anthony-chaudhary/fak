@@ -89,6 +89,7 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 		{"shell_dialect", isShellDialectArgRule, []string{defaultShellDialectDenyRegex}},
 		{"out_of_tree_write", isOutOfTreeWriteArgRule, []string{ootDashORegex, ootOutputRegex, ootRedirectRegex, ootCopyVerbRegex}},
 		{"device_op", isDeviceOpArgRule, []string{defaultDeviceOpDenyRegex, defaultPSDiskOpDenyRegex}},
+		{"build_cache_clean", isBuildCacheCleanArgRule, []string{defaultBuildCacheCleanDenyRegex}},
 	}
 
 	undecided := shippedUndecidedRules

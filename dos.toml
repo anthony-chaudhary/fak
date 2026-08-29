@@ -1692,6 +1692,19 @@ summary  = "a destructive or write op targets a path OUTSIDE this repo -- it wou
 fix      = "operate inside the workspace; send scratch to a temp dir (/tmp, ~/.cache), never a sibling. Floor: tools/repo_guard.py (a Claude Code PreToolUse hook in .claude/settings.json) resolves each target against the repo root and denies out-of-tree ones; set FAK_REPO_GUARD=warn for advisory, off to disable. FAK regex twin: examples/repo-guard-policy.json."
 see_also = ["tools/repo_guard.py", "examples/repo-guard-policy.json", ".claude/settings.json", "DOGFOOD-CLAUDE.md", "tools/check_committed_files.py"]
 
+# Shared Go build-cache deletion race (#10074): `go clean -cache` removes
+# archives from the ambient action graph while concurrent build/vet processes may
+# still reference them. Three independent sessions performed this operation at
+# the same timestamp before a freshness build failed on missing stdlib archives.
+# The compiled PreToolUse hook denies the executed command shape by default; the
+# embedded guard policy mirrors it across the host shell aliases.
+[reasons.BUILD_CACHE_CLEAN_RACE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "an agent-issued go clean requests deletion of the ambient Go build cache while peer build or vet processes may still reference its entries"
+fix      = "use the managed isolated paths: fak-dev buildcheck --vet or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off."
+see_also = ["internal/repoguard/build_cache_clean.go", "cmd/repoguard/main.go", "cmd/fak/guard-default-policy.json"]
+
 # Would-hang interactive commands (#2080): an interactive invocation assumes a
 # human is watching; under a headless agent harness it is a silent hang (`git
 # commit` opening an editor, `git rebase -i`, `vim`, `gh auth login`) or a
