@@ -15,6 +15,8 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("runtime-capabilities", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "runtime-capabilities")
+	receiptSchema := fs.String("receipt-schema", runtimecap.Schema, "output schema: fak-runtime-capabilities/1 or fak-execution-mode-receipt/1")
+	fixtureMode := fs.String("execution-mode-fixture", "", "deterministic execution-mode fixture; explicitly unwitnessed and valid only with --receipt-schema fak-execution-mode-receipt/1")
 	backend := fs.String("backend", "", "require an exact registered backend name; unknown names never fall back")
 	preferBackend := fs.String("prefer-backend", "", "prefer a backend; when it is unavailable, only the explicit local_cpu_degraded policy may select cpu-ref")
 	fallbackPolicy := fs.String("fallback-policy", runtimecap.FallbackPolicyPinOrRefuse, "pin_or_refuse or local_cpu_degraded")
@@ -49,6 +51,18 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak runtime-capabilities: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
+	}
+	if *receiptSchema != runtimecap.Schema && *receiptSchema != runtimecap.ExecutionModeReceiptSchema {
+		fmt.Fprintf(stderr, "fak runtime-capabilities: unsupported --receipt-schema %q\n", *receiptSchema)
+		return 2
+	}
+	if strings.TrimSpace(*fixtureMode) != "" && *receiptSchema != runtimecap.ExecutionModeReceiptSchema {
+		fmt.Fprintln(stderr, "fak runtime-capabilities: --execution-mode-fixture requires --receipt-schema fak-execution-mode-receipt/1")
+		return 2
+	}
+	if strings.TrimSpace(*fixtureMode) != "" && !runtimecap.IsExecutionMode(*fixtureMode) {
+		fmt.Fprintf(stderr, "fak runtime-capabilities: unsupported --execution-mode-fixture %q\n", *fixtureMode)
 		return 2
 	}
 	if strings.TrimSpace(*backend) != "" && strings.TrimSpace(*preferBackend) != "" {
@@ -101,9 +115,17 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	report := runtimecap.Probe(opts)
+	var output any = report
+	if *receiptSchema == runtimecap.ExecutionModeReceiptSchema {
+		if strings.TrimSpace(*fixtureMode) != "" {
+			output = runtimecap.ExecutionModeFixture(*fixtureMode)
+		} else {
+			output = runtimecap.ExecutionModeReceiptFromReport(report)
+		}
+	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
+	if err := encoder.Encode(output); err != nil {
 		fmt.Fprintf(stderr, "fak runtime-capabilities: encode: %v\n", err)
 		return 1
 	}

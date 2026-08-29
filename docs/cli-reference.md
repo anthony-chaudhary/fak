@@ -22,7 +22,7 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 ## `runtime-capabilities`: inspect the deployable runtime before payload load
 
 ```text
-fak runtime-capabilities [--backend NAME] [--prefer-backend NAME] [--fallback-policy pin_or_refuse|local_cpu_degraded] [--cpu-envelope ID] [--placement local_only|prefer_local|remote_allowed] [remote gate flags]
+fak runtime-capabilities [--receipt-schema fak-runtime-capabilities/1|fak-execution-mode-receipt/1] [--backend NAME] [--prefer-backend NAME] [--fallback-policy pin_or_refuse|local_cpu_degraded] [--cpu-envelope ID] [--placement local_only|prefer_local|remote_allowed] [remote gate flags]
 ```
 
 Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command performs no model-weight load and keeps three states separate: the executable runs, the governed control plane runs, and a fak-native model backend can execute for the requested policy. `--backend` remains an exact lookup: unknown, uncompiled, unavailable, or platform-unsupported backends return structured reasons and remediation without falling back to `cpu-ref` or another engine.
@@ -32,6 +32,10 @@ Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command pe
 `--placement remote_allowed` adds an explicit remote admission path after an unavailable `--prefer-backend`; `local_only`, `prefer_local`, exact `--backend`, and pinned-native requests never use it. The caller must exactly match `--remote-target` with `--authorize-remote-target` and declare provider, engine, model, endpoint class/region when applicable, boundary state classes, egress, credential name/presence, TLS/proxy, reachability, timeout, retry ceiling, and budget. The machine-readable `remote_placement` receipt names local `fak` control-plane ownership and the remote execution trigger and gates. This command performs no outbound traffic and accepts no credential secret. It never silently chooses llama.cpp, Ollama, a provider, or a future fak cloud target.
 
 The report includes `goos`, `goarch`, build tags, host memory, registered backend names/classes/tiers, portable `cpu-ref` status, supported CPU envelopes, `engine: "fak-native"` when execution is available, and `payload_compatibility: "supported" | "refused" | "not_checked"` for explicit CPU-envelope admission. This is distinct from `fak preflight`, which adjudicates a tool call against policy and grammar.
+
+The default remains `fak-runtime-capabilities/1`. Opt into `--receipt-schema fak-execution-mode-receipt/1` for the uniform execution record. Its closed modes are `local_accelerator`, `local_cpu_degraded`, `remote_backed`, `offline_control_mock`, `offline_model_backed`, `control_only`, and `refused`; status and audit views carry explicit evidence states; independently observed views must agree or the receipt refuses, while the pre-payload projection marks both views `unwitnessed`. Model-backed records require exact engine, model, and local backend or remote provider evidence. A native/performance record is invalid unless `engine` is exactly `fak-native`, so engine substitution cannot masquerade as native execution. Unknown and unavailable facts are emitted as `unknown` or `unwitnessed`, not inferred.
+
+`--execution-mode-fixture MODE` is available only with that opt-in schema. It emits deterministic schema coverage for one of the seven modes and stamps `witness.status: "fixture"` plus `witness.certification: "unwitnessed"`; it is not clean-host, device, provider, or model-execution evidence. Receipt collection is a bounded projection of the already-built capabilities report and performs no payload load or outbound probe.
 ## `native-performance`: query the raw-model hill climb
 
 `fak native-performance` renders the committed Qwen3.8-27B optimization graph as a

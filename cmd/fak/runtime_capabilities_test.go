@@ -140,3 +140,57 @@ func TestRunRuntimeCapabilitiesRemotePlacementDenialIsMachineReadable(t *testing
 		t.Fatalf("execution = %+v", report.ModelExecution)
 	}
 }
+
+func TestRunRuntimeCapabilitiesExecutionModeReceiptIsOptIn(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	args := []string{"--receipt-schema", runtimecap.ExecutionModeReceiptSchema, "--backend", "definitely-not-a-backend"}
+	if code := runRuntimeCapabilities(&stdout, &stderr, args); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var receipt runtimecap.ExecutionModeReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Schema != runtimecap.ExecutionModeReceiptSchema || receipt.Mode != runtimecap.ExecutionModeRefused || !receipt.Valid {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	if receipt.Identity.Engine != runtimecap.EvidenceUnknown || receipt.Witness.Status != runtimecap.EvidenceObserved {
+		t.Fatalf("explicit evidence = %+v / %+v", receipt.Identity, receipt.Witness)
+	}
+}
+
+func TestRunRuntimeCapabilitiesExecutionModeFixturesCoverSevenStates(t *testing.T) {
+	modes := []string{
+		runtimecap.ExecutionModeLocalAccelerator, runtimecap.ExecutionModeLocalCPUDegraded, runtimecap.ExecutionModeRemoteBacked,
+		runtimecap.ExecutionModeOfflineControlMock, runtimecap.ExecutionModeOfflineModelBacked, runtimecap.ExecutionModeControlOnly, runtimecap.ExecutionModeRefused,
+	}
+	for _, mode := range modes {
+		var stdout, stderr bytes.Buffer
+		args := []string{"--receipt-schema", runtimecap.ExecutionModeReceiptSchema, "--execution-mode-fixture", mode}
+		if code := runRuntimeCapabilities(&stdout, &stderr, args); code != 0 {
+			t.Fatalf("%s: code=%d stderr=%s", mode, code, stderr.String())
+		}
+		var receipt runtimecap.ExecutionModeReceipt
+		if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.Mode != mode || !receipt.Valid || receipt.Witness.Certification != runtimecap.EvidenceUnwitnessed {
+			t.Fatalf("%s = %+v", mode, receipt)
+		}
+	}
+}
+
+func TestRunRuntimeCapabilitiesRejectsFixtureOnLegacySchema(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runRuntimeCapabilities(&stdout, &stderr, []string{"--execution-mode-fixture", runtimecap.ExecutionModeRefused}); code != 2 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunRuntimeCapabilitiesRejectsUnknownExecutionModeFixture(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	args := []string{"--receipt-schema", runtimecap.ExecutionModeReceiptSchema, "--execution-mode-fixture", "not_a_mode"}
+	if code := runRuntimeCapabilities(&stdout, &stderr, args); code != 2 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}

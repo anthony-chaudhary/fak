@@ -1,0 +1,682 @@
+[
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "local_accelerator",
+    "health": "ready",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "local_accelerator",
+      "health": "ready",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "local_accelerator",
+      "health": "ready",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": true,
+    "native_performance": true,
+    "identity": {
+      "engine": "fak-native",
+      "backend": "vulkan",
+      "device": "fixture-device",
+      "provider": "unknown",
+      "model": "fixture-qwen3.8"
+    },
+    "fallback_reason": {
+      "code": "not_applicable",
+      "detail": "the fixture describes a direct accelerator selection"
+    },
+    "offline": "unknown",
+    "egress": "unknown",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "local_cpu_degraded",
+    "health": "degraded",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "local_cpu_degraded",
+      "health": "degraded",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "local_cpu_degraded",
+      "health": "degraded",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": true,
+    "native_performance": true,
+    "identity": {
+      "engine": "fak-native",
+      "backend": "cpu-ref",
+      "device": "unknown",
+      "provider": "unknown",
+      "model": "fixture-qwen3.8"
+    },
+    "fallback_reason": {
+      "code": "fixture_accelerator_unavailable",
+      "detail": "deterministic fixture only"
+    },
+    "offline": "unknown",
+    "egress": "unknown",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "remote_backed",
+    "health": "ready",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "remote_backed",
+      "health": "ready",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "remote_backed",
+      "health": "ready",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": true,
+    "native_performance": false,
+    "identity": {
+      "engine": "fixture-remote-engine",
+      "backend": "remote:fixture",
+      "device": "unknown",
+      "provider": "fixture-provider",
+      "model": "fixture-qwen3.8"
+    },
+    "fallback_reason": {
+      "code": "fixture_local_unavailable",
+      "detail": "deterministic fixture only"
+    },
+    "offline": "unknown",
+    "egress": "unknown",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "offline_control_mock",
+    "health": "offline",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "offline_control_mock",
+      "health": "offline",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "offline_control_mock",
+      "health": "offline",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": false,
+    "native_performance": false,
+    "identity": {
+      "engine": "mock",
+      "backend": "mock",
+      "device": "unknown",
+      "provider": "unknown",
+      "model": "unknown"
+    },
+    "fallback_reason": null,
+    "offline": "full",
+    "egress": "denied",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "offline_model_backed",
+    "health": "offline",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "offline_model_backed",
+      "health": "offline",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "offline_model_backed",
+      "health": "offline",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": true,
+    "native_performance": true,
+    "identity": {
+      "engine": "fak-native",
+      "backend": "cpu-ref",
+      "device": "unknown",
+      "provider": "unknown",
+      "model": "fixture-qwen3.8"
+    },
+    "fallback_reason": {
+      "code": "not_applicable",
+      "detail": "the fixture describes a directly selected offline model"
+    },
+    "offline": "full",
+    "egress": "denied",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "control_only",
+    "health": "control_only",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "control_only",
+      "health": "control_only",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "control_only",
+      "health": "control_only",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": false,
+    "native_performance": false,
+    "identity": {
+      "engine": "unknown",
+      "backend": "unknown",
+      "device": "unknown",
+      "provider": "unknown",
+      "model": "unknown"
+    },
+    "fallback_reason": null,
+    "offline": "unknown",
+    "egress": "unknown",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  },
+  {
+    "schema": "fak-execution-mode-receipt/1",
+    "mode": "refused",
+    "health": "refused",
+    "control_plane_owner": "fak-local",
+    "binary": {
+      "goos": "unknown",
+      "goarch": "unknown",
+      "runnable": false,
+      "build_tags": null
+    },
+    "status": {
+      "mode": "refused",
+      "health": "refused",
+      "evidence": "unwitnessed"
+    },
+    "audit": {
+      "mode": "refused",
+      "health": "refused",
+      "evidence": "unwitnessed"
+    },
+    "model_backed": false,
+    "native_performance": false,
+    "identity": {
+      "engine": "unknown",
+      "backend": "unknown",
+      "device": "unknown",
+      "provider": "unknown",
+      "model": "unknown"
+    },
+    "fallback_reason": {
+      "code": "fixture_refusal",
+      "detail": "deterministic fixture only"
+    },
+    "offline": "unknown",
+    "egress": "unknown",
+    "operating_envelope": "unwitnessed",
+    "prerequisite_witness": "unwitnessed",
+    "witness": {
+      "status": "fixture",
+      "source": "deterministic-fixture",
+      "certification": "unwitnessed"
+    },
+    "transitions": [
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "local_accelerator",
+        "trigger": "local_accelerator_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator"
+        ],
+        "to": "local_cpu_degraded",
+        "trigger": "explicit_cpu_fallback_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded"
+        ],
+        "to": "remote_backed",
+        "trigger": "explicit_remote_fallback_admitted"
+      },
+      {
+        "from": [
+          "control_only"
+        ],
+        "to": "offline_control_mock",
+        "trigger": "offline_mock_selected"
+      },
+      {
+        "from": [
+          "control_only",
+          "offline_control_mock"
+        ],
+        "to": "offline_model_backed",
+        "trigger": "offline_model_admitted"
+      },
+      {
+        "from": [
+          "local_accelerator",
+          "local_cpu_degraded",
+          "remote_backed",
+          "offline_control_mock",
+          "offline_model_backed",
+          "control_only"
+        ],
+        "to": "refused",
+        "trigger": "policy_or_capability_refusal"
+      }
+    ],
+    "valid": true,
+    "validation_reason": null
+  }
+]

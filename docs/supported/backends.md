@@ -17,7 +17,7 @@ and use that row's wiring route.
 
 ## Inspect this binary before loading a model
 
-Run `fak runtime-capabilities` to get the stable `fak-runtime-capabilities/1` JSON report for the current executable and host. The probe does not open or load a model payload. It reports:
+Run `fak runtime-capabilities` to get the stable `fak-runtime-capabilities/1` JSON report for the current executable and host. The default schema is unchanged. Add `--receipt-schema fak-execution-mode-receipt/1` when a health, audit, deployment, or benchmark consumer needs the uniform seven-mode execution record. The probe does not open or load a model payload. It reports:
 
 - whether the binary and governed control plane are runnable;
 - `goos`, `goarch`, build tags, host memory, and every backend that actually registered;
@@ -35,6 +35,15 @@ fak runtime-capabilities --prefer-backend vulkan --fallback-policy local_cpu_deg
 A default build normally reports only `cpu-ref`. CUDA and Vulkan require their build tags and vendor/runtime prerequisites; Metal requires a cgo-enabled Darwin/arm64 build and a reachable Metal device. A missing exact backend request is a diagnostic result, not permission to switch engines. The only built-in degraded path is the explicit `--prefer-backend ... --fallback-policy local_cpu_degraded --cpu-envelope ...` flow: it keeps the requested accelerator reason, selects `cpu-ref` only for a supported envelope, and refuses unsupported or over-budget envelopes before payload load. The command never substitutes `llama.cpp` or another engine.
 
 Remote placement is a separate, pre-payload policy decision. `--placement local_only` (the default) and `prefer_local` never cross a network boundary. `remote_allowed` is considered only after a `--prefer-backend` local failure; an exact `--backend` pin always fails closed. Admission requires an identical `--remote-target` and `--authorize-remote-target`, named provider/engine/model, explicit allowed egress, credential reference name plus presence (never a secret value), verified TLS and proxy state, independently declared reachability, positive timeout and budget, a non-negative retry ceiling, and declared state classes crossing the boundary. The receipt retains local `fak` control-plane ownership while naming remote execution and every gate. The probe opens no network connection, and no provider—including a future fak cloud—has a privileged or automatic path.
+### Uniform execution-mode receipt
+
+`fak-execution-mode-receipt/1` is an additive projection over the capability report. It uses exactly seven modes: `local_accelerator`, `local_cpu_degraded`, `remote_backed`, `offline_control_mock`, `offline_model_backed`, `control_only`, and `refused`. The receipt carries binary identity, one health value, status/audit projections with explicit evidence states, local `fak` control-plane ownership, execution identity, fallback reason, offline/egress state, operating envelope, prerequisite witness, and closed transition rules. When both views are independently `observed`, a mode or health mismatch invalidates the receipt. Pre-payload projections and fixtures mark those views `unwitnessed`. Missing evidence is the literal `unknown` or `unwitnessed`; omission never implies readiness.
+
+Every model-backed mode must name the actual engine and model plus a local backend or remote provider. Native/performance receipts additionally require `engine: "fak-native"`; a substituted engine makes the record invalid and refused. `remote_backed` preserves `control_plane_owner: "fak-local"` and the existing explicit remote boundary gates. The projection is pre-payload observation rather than proof that a turn ran.
+
+The CLI's `--execution-mode-fixture MODE` covers all seven schema states deterministically, but each fixture says `certification: "unwitnessed"`. Use real run receipts for deployment certification; unavailable hardware or provider states remain unwitnessed instead of being simulated as successful runs.
+
+
 ## Choose by operating envelope
 
 | Choose | When it fits | Current support boundary | Continue with |
