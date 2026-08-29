@@ -4,6 +4,7 @@ package compute
 
 import (
 	"math"
+	"math/rand"
 	"os"
 	"slices"
 	"strings"
@@ -42,6 +43,72 @@ func TestVulkanDispatchProfileDisabledIsZero(t *testing.T) {
 	}
 }
 
+func TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded(t *testing.T) {
+	v, ok := Pick("vulkan").(*vulkanBackend)
+	if !ok {
+		t.Skip("Vulkan backend unavailable")
+	}
+	v.VulkanDebugResetQ4KStage()
+	defer v.VulkanDebugResetQ4KStage()
+	v.VulkanDebugResetQ4KProfile()
+	v.BeginBatch()
+	v.VulkanDebugResetDispatchProfile()
+	if !v.VulkanDebugBatchActive() {
+		v.FlushBatch()
+		t.Fatal("batch inactive at BeginBatch")
+	}
+	const out, in = 12, 768
+	rng := rand.New(rand.NewSource(9811))
+	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
+	for b := 0; b < out*(in/q4kSuper); b++ {
+		randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+	}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = rng.Float32()*2 - 1
+	}
+	hw := NewQ4K(Default(), []int{out, in}, raw)
+	dw := v.Upload(hw, Q4_K)
+	defer v.Free(dw)
+	// The target failure occurs for streamed host-visible Q4_K weights. Mark this
+	// fixture equivalently without changing the allocation or residency budget.
+	dw.buf.(*vulkanBuf).hostVisibleWeight = true
+	defer func() { dw.buf.(*vulkanBuf).hostVisibleWeight = false }()
+	oldStage := v.q4kStage
+	v.q4kStage = true
+	defer func() { v.q4kStage = oldStage }()
+	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
+	defer v.Free(dx)
+	before := v.VulkanDebugDispatchProfileSnapshot()
+	if before.OneShotComputeSubmits != 0 {
+		v.FlushBatch()
+		t.Fatalf("unexpected precompute one-shot submits=%d", before.OneShotComputeSubmits)
+	}
+	got := v.MatMul(dw, dx)
+	defer v.Free(got)
+	if !v.VulkanDebugBatchActive() {
+		v.FlushBatch()
+		t.Fatal("batch not restored after Q4_K staging growth")
+	}
+	mid := v.VulkanDebugDispatchProfileSnapshot()
+	if mid.OneShotComputeSubmits != 0 {
+		v.FlushBatch()
+		t.Fatalf("staged Q4_K matmul used one-shot path: %d", mid.OneShotComputeSubmits)
+	}
+	want := Default().Read(Default().MatMul(hw, NewF32(Default(), []int{in}, x)))
+	if c := cosineC(v.Read(got), want); c < 0.995 {
+		v.FlushBatch()
+		t.Fatalf("staged Q4_K cosine %.8f < 0.995", c)
+	}
+	v.FlushBatch()
+	final := v.VulkanDebugDispatchProfileSnapshot()
+	if final.OneShotComputeSubmits != 0 {
+		t.Fatalf("flush path regressed to one-shot compute submits=%d", final.OneShotComputeSubmits)
+	}
+	if final.BatchSubmits == 0 {
+		t.Fatalf("flush path did not produce a bounded batch submit: %+v", final)
+	}
+}
 func TestVulkanDispatchProfileCountsClassificationAndReset(t *testing.T) {
 	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
 		t.Skip("set FAK_VULKAN_DISPATCH_PROFILE=1")
