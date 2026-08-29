@@ -1,3 +1,8 @@
+---
+title: "exported Go symbol candidate - disambiguation:go-symbol-candidate identity"
+description: "A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification. Scope: disambiguation:go-symbol-candidate. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # exported Go symbol candidate
 
 **Meaning:** A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.

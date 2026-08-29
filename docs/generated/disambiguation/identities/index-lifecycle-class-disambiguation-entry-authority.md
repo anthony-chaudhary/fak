@@ -1,3 +1,8 @@
+---
+title: "index lifecycle class - disambiguation:entry-authority identity"
+description: "The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled. Scope: disambiguation:entry-authority. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # index lifecycle class
 
 **Meaning:** The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.

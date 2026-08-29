@@ -1,3 +1,8 @@
+---
+title: "dispatch wave - dispatch:wave identity"
+description: "An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims. Scope: dispatch:wave. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # dispatch wave
 
 **Meaning:** An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims.

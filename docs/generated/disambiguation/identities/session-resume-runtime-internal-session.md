@@ -1,3 +1,8 @@
+---
+title: "session resume - runtime:internal/session identity"
+description: "The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. Scope: runtime:internal/session. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # session resume
 
 **Meaning:** The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.

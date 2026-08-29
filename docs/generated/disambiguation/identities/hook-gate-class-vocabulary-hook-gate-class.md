@@ -1,3 +1,8 @@
+---
+title: "hook gate class - vocabulary:hook-gate-class identity"
+description: "A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. Scope: vocabulary:hook-gate-class. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # hook gate class
 
 **Meaning:** A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.

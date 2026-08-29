@@ -1,3 +1,8 @@
+---
+title: "capability floor - policy:authority identity"
+description: "The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call. Scope: policy:authority. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # capability floor
 
 **Meaning:** The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.

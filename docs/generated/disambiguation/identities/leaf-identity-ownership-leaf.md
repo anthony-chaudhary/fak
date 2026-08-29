@@ -1,3 +1,8 @@
+---
+title: "leaf identity - ownership:leaf identity"
+description: "The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp. Scope: ownership:leaf. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # leaf identity
 
 **Meaning:** The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.

@@ -1,3 +1,8 @@
+---
+title: "naive baseline - claims:naive-baseline identity"
+description: "A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative. Scope: claims:naive-baseline. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # naive baseline
 
 **Meaning:** A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.

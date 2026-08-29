@@ -1,3 +1,8 @@
+---
+title: "runtime - runtime:guard-enforcement identity"
+description: "The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement. Scope: runtime:guard-enforcement. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # runtime
 
 **Meaning:** The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement.

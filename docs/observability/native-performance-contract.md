@@ -1,3 +1,8 @@
+---
+title: "fak-native performance observability contract"
+description: "Frozen observability contract for fak-native performance metrics, labels, correlation identifiers, evidence handling, and compatibility."
+---
+
 # fak-native performance observability contract
 
 Status: frozen contract v1 (2026-08-28)  

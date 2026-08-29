@@ -1,3 +1,8 @@
+---
+title: "context compaction - runtime:codex-context identity"
+description: "A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. Scope: runtime:codex-context. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # context compaction
 
 **Meaning:** A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.

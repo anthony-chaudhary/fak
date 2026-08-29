@@ -1,3 +1,8 @@
+---
+title: "lane lease - dispatch:lease identity"
+description: "A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. Scope: dispatch:lease. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # lane lease
 
 **Meaning:** A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission.

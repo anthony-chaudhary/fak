@@ -1,3 +1,8 @@
+---
+title: "fak measurement arm - claims:fak-arm identity"
+description: "The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator. Scope: claims:fak-arm. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # fak measurement arm
 
 **Meaning:** The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.

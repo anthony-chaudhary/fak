@@ -1,3 +1,8 @@
+---
+title: "policy declaration - policy:declaration identity"
+description: "A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call. Scope: policy:declaration. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # policy declaration
 
 **Meaning:** A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.

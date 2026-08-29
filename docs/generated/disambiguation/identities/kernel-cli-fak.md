@@ -1,3 +1,8 @@
+---
+title: "kernel - cli:fak identity"
+description: "The fak command-line product surface for operating the agent kernel. Scope: cli:fak. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # kernel
 
 **Meaning:** The fak command-line product surface for operating the agent kernel.

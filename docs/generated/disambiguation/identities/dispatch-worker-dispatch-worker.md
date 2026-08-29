@@ -1,3 +1,8 @@
+---
+title: "dispatch worker - dispatch:worker identity"
+description: "One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration. Scope: dispatch:worker. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # dispatch worker
 
 **Meaning:** One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration.

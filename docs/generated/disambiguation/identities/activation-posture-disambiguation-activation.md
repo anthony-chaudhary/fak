@@ -1,3 +1,8 @@
+---
+title: "activation posture - disambiguation:activation identity"
+description: "The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity. Scope: disambiguation:activation. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # activation posture
 
 **Meaning:** The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.

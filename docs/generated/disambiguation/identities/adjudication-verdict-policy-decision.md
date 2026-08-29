@@ -1,3 +1,8 @@
+---
+title: "adjudication verdict - policy:decision identity"
+description: "The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung. Scope: policy:decision. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # adjudication verdict
 
 **Meaning:** The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.

@@ -1,3 +1,8 @@
+---
+title: "runtime - runtime:gateway-serving identity"
+description: "The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability. Scope: runtime:gateway-serving. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # runtime
 
 **Meaning:** The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability.

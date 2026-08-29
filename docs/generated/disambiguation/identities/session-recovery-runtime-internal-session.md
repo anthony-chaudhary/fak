@@ -1,3 +1,8 @@
+---
+title: "session recovery - runtime:internal/session identity"
+description: "A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. Scope: runtime:internal/session. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # session recovery
 
 **Meaning:** A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.

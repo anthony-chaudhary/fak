@@ -1,3 +1,8 @@
+---
+title: "FlashInfer current-source refresh - August 28, 2026"
+description: "Pinned FlashInfer source refresh covering repository state, releases, issues, pull requests, and implications for fak-native inference work."
+---
+
 # FlashInfer current-source refresh — 2026-08-28
 
 **Verdict:** pinned main advanced eight commits to `93f4f2642e1b3680a52ebb51cf68e0fdad237796`. The synchronized forge corpus validates at cutoff `2026-08-28T13:46:58Z` with **5,248 records** (3,543 pulls, 1,232 issues, 360 releases, 87 labels, 24 discussions, 2 milestones). `v0.6.18rc10` is divergent: 45 release-only commits and a different CCCL gitlink. The refresh preserves the earlier 2026-08-22/27 observations and supersedes their current-state decision surfaces without rewriting history.

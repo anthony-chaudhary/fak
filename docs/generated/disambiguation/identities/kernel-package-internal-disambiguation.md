@@ -1,3 +1,8 @@
+---
+title: "kernel - package:internal/disambiguation identity"
+description: "The internal/disambiguation Go package that validates and queries public terminology records. Scope: package:internal/disambiguation. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # kernel
 
 **Meaning:** The internal/disambiguation Go package that validates and queries public terminology records.

@@ -1,3 +1,8 @@
+---
+title: "fleet supervisor - dispatch:supervisor identity"
+description: "A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. Scope: dispatch:supervisor. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # fleet supervisor
 
 **Meaning:** A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference.

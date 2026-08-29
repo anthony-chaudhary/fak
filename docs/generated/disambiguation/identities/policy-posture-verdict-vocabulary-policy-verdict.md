@@ -1,3 +1,8 @@
+---
+title: "policy posture verdict - vocabulary:policy-verdict identity"
+description: "The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. Scope: vocabulary:policy-verdict. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # policy posture verdict
 
 **Meaning:** The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.

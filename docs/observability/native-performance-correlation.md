@@ -1,3 +1,8 @@
+---
+title: "Native performance evidence correlation"
+description: "Operational contract for resolving a native-performance dashboard point to its scrubbed evidence without exposing private infrastructure details."
+---
+
 # Native-performance evidence correlation
 
 Status: shipped package contract for issue #9812. This is the bounded lookup seam between a

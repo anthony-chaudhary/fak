@@ -1,3 +1,8 @@
+---
+title: "module revision identity - ownership:module-revision identity"
+description: "A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision. Scope: ownership:module-revision. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # module revision identity
 
 **Meaning:** A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.

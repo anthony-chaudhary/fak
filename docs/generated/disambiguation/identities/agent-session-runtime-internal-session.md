@@ -1,3 +1,8 @@
+---
+title: "agent session - runtime:internal/session identity"
+description: "A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. Scope: runtime:internal/session. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # agent session
 
 **Meaning:** A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.

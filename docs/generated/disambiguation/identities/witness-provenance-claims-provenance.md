@@ -1,3 +1,8 @@
+---
+title: "witness provenance - claims:provenance identity"
+description: "The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness. Scope: claims:provenance. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # witness provenance
 
 **Meaning:** The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.

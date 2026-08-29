@@ -1,3 +1,8 @@
+---
+title: "ABI refusal reason - vocabulary:abi-reason identity"
+description: "A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it. Scope: vocabulary:abi-reason. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # ABI refusal reason
 
 **Meaning:** A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.
