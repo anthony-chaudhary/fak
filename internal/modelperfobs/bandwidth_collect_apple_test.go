@@ -11,10 +11,11 @@ import (
 )
 
 func TestImportAppleMemoryDirectByteRates(t *testing.T) {
-	collection := importAppleMemoryFixture(t, "apple-memory-direct-rate.json", AppleMemoryImportOptions{
+	options := AppleMemoryImportOptions{
 		Provider: "fixture-apple-counter-export", ProviderVersion: "1.0",
 		Scope: AppleMemoryScope{Kind: "package"}, Phase: PhaseDecode, Shape: ShapeSmall,
-	})
+	}
+	collection := importAppleMemoryFixture(t, "apple-memory-direct-rate.json", options)
 	artifact := collection.AppleMemoryArtifact
 	if artifact == nil || artifact.Schema != AppleMemoryArtifactSchema || artifact.ImportFormat != AppleMemoryFormatGenericJSON {
 		t.Fatalf("Apple memory artifact=%+v", artifact)
@@ -22,7 +23,7 @@ func TestImportAppleMemoryDirectByteRates(t *testing.T) {
 	if artifact.IntervalNS != int64(500*time.Millisecond) || collection.IntervalMS != 500 {
 		t.Fatalf("interval artifact=%d collection_ms=%d", artifact.IntervalNS, collection.IntervalMS)
 	}
-	if artifact.Provider != "fixture-apple-counter-export" || artifact.ProviderVersion != "1.0" ||
+	if artifact.Provider != options.Provider || artifact.ProviderVersion != options.ProviderVersion ||
 		artifact.Scope != (AppleMemoryScope{Kind: "package"}) {
 		t.Fatalf("provider/scope artifact=%+v", artifact)
 	}

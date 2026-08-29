@@ -17,7 +17,7 @@ func TestRepresentativeBenchmark(t *testing.T) {
 	if report.Schema != "study-retrieval-benchmark/1" {
 		t.Fatalf("schema = %q", report.Schema)
 	}
-	if len(report.Queries) != 6 {
+	if len(report.Queries) != 6 { //boundarylint:ignore CHANGE_DETECTOR_TEST the canonical study benchmark fixture contains exactly six required queries
 		t.Fatalf("queries = %d, want six representative kinds", len(report.Queries))
 	}
 	wantKinds := []string{"source", "mechanism", "candidate", "disposition", "contradiction", "issue_lineage"}

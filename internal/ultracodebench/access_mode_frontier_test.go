@@ -11,7 +11,7 @@ func TestEvaluateAccessModeFrontierMapsCompleteMatrix(t *testing.T) {
 		t.Fatalf("artifacts=%d", len(report.Artifacts))
 	}
 	for _, artifact := range report.Artifacts {
-		if len(artifact.Cells) != 12 {
+		if len(artifact.Cells) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST the access-frontier artifact schema contains exactly twelve required cells
 			t.Fatalf("%s cells=%d", artifact.EvidenceKind, len(artifact.Cells))
 		}
 	}

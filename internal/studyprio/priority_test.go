@@ -35,7 +35,7 @@ func TestBuildActualFiveClusterLedgerDeterministically(t *testing.T) {
 			owners[m.ClusterID] = c.ID
 		}
 	}
-	if len(owners) != 5 {
+	if len(owners) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture defines exactly five owner classes and requires all to be ranked
 		t.Fatalf("source mapping count=%d", len(owners))
 	}
 	for _, id := range vllmIRClusters {

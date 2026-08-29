@@ -12,11 +12,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionmine"
 )
 
+func defaultHistoryIndexPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".fak", "session-history", "index.json")
+}
+
 func runSessionHistoryRefresh(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("session-history refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home, _ := os.UserHomeDir()
-	index := fs.String("index", filepath.Join(home, ".fak", "session-history", "index.json"), "durable history index path")
+	index := fs.String("index", defaultHistoryIndexPath(), "durable history index path")
 	codex := fs.String("codex-root", filepath.Join(home, ".codex", "sessions"), "Codex session JSONL root")
 	claude := fs.String("claude-root", filepath.Join(home, ".claude", "projects"), "Claude project JSONL root")
 	days := fs.Int("days", 30, "files modified in the last N days (0 scans all)")

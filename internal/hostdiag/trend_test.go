@@ -74,7 +74,7 @@ func TestSummarizeTrendBoundedDeterministicAndFiniteZeroBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Recent.TopApps) != 10 || len(got.Recent.TopEvents) != 10 || got.Recent.TopApps[0].Identity != "app-00.exe" {
+	if len(got.Recent.TopApps) != 10 || len(got.Recent.TopEvents) != 10 || got.Recent.TopApps[0].Identity != "app-00.exe" { //boundarylint:ignore CHANGE_DETECTOR_TEST the trend report contract caps both ranked lists at exactly ten entries
 		t.Fatalf("tops apps=%+v events=%+v", got.Recent.TopApps, got.Recent.TopEvents)
 	}
 	if !got.Comparison.BaselineZero || got.Comparison.TotalRatio != 0 || got.Comparison.CrashRatio != 0 || got.Comparison.HangRatio != 0 {

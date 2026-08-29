@@ -20,6 +20,9 @@ func renderCachevalueStatus(w io.Writer, rep cachevalueStatusReport) {
 	fmt.Fprintf(w, "headroom: selected=%s reachable=%v url=%s\n", rep.Headroom.Selected, rep.Headroom.HeadroomReachable, rep.Sources.HeadroomURL)
 	fmt.Fprintf(w, "vcache: provider_actions=%s transport=%s recent_provider=%s recent_context=%s\n",
 		rep.VCache.ProviderActions, rep.VCache.ProviderActionTransport, cachevalueEmptyDash(rep.VCache.RecentProviderStatus), cachevalueEmptyDash(rep.VCache.RecentContextStatus))
+	if rep.Value.RejectedTierAccesses > 0 {
+		fmt.Fprintf(w, "value: rejected_tier_accesses=%d\n", rep.Value.RejectedTierAccesses)
+	}
 	if rep.Session != nil {
 		s := rep.Session
 		fmt.Fprintf(w, "session: %s status=%s likely=%s turns=%d cache_read=%d cache_create=%d total_context=%d io=%s finding=%s\n",

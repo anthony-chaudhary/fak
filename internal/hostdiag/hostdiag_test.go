@@ -344,7 +344,7 @@ func TestCorrelateRetainsBoundedApplicationHang(t *testing.T) {
 	if len(got.Candidates) != 0 || got.OwnedLaunch != nil {
 		t.Fatalf("application hang was attributed: candidates=%+v owned=%+v", got.Candidates, got.OwnedLaunch)
 	}
-	if got.Hang == nil || got.Hang.AppVersion != "151.0.7922.109" || got.Hang.Class != "Cross-process" {
+	if got.Hang == nil || got.Hang.AppVersion != "151.0.7922.109" || got.Hang.Class != "Cross-process" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture pins the parsed Chrome version and crash class as the parser contract
 		t.Fatalf("bounded hang identity not retained: %+v", got.Hang)
 	}
 	encoded, err := json.Marshal(got)

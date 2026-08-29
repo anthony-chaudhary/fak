@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ablate"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
@@ -82,6 +87,113 @@ func TestCachevalueStatusJSONRollsUpOwnersFidelityAndDependencies(t *testing.T) 
 	}
 	if len(rep.NextActions) == 0 {
 		t.Fatalf("expected next actions for partial status: %+v", rep)
+	}
+}
+
+func TestCachevalueStatusSurfacesRejectedTierAccesses(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "cache-value.jsonl")
+	args := []string{
+		"--ledger", ledger,
+		"--savings-ledger", filepath.Join(dir, "absent-savings.jsonl"),
+		"--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
+	}
+	withCachevalueStatusHeadroom(t, headroom.NoopName)
+	t.Setenv("FAK_HEADROOM_URL", "http://127.0.0.1:9")
+	t.Setenv("FAK_HEADROOM_TIMEOUT_MS", "50")
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(dir, "absent-vcache.json"))
+	t.Setenv("FAK_VCACHE_CONTEXT_SNAPSHOT", "off")
+
+	rowAt := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	rowWithRejected := func(rejected uint64) cachevalueledger.Row {
+		return cachevalueledger.NewSessionRow("guard", "active-track-1", "issue-10151", cacheobs.Stats{
+			Turns:                10,
+			PromptTokens:         1000,
+			ReusedTokens:         700,
+			RejectedTierAccesses: rejected,
+			FrozenTurns:          7,
+			PartialTurns:         2,
+			ColdTurns:            1,
+			ReuseRatio:           0.7,
+		}, rowAt)
+	}
+	writeRow := func(row cachevalueledger.Row) {
+		t.Helper()
+		line, err := cachevalueledger.AppendLedgerLine(row)
+		if err != nil {
+			t.Fatalf("encode Track-1 row: %v", err)
+		}
+		if err := os.WriteFile(ledger, []byte(line+"\n"), 0o600); err != nil {
+			t.Fatalf("write Track-1 ledger: %v", err)
+		}
+	}
+	runJSON := func(row cachevalueledger.Row) (string, cachevalueStatusReport) {
+		t.Helper()
+		writeRow(row)
+		var out, errb bytes.Buffer
+		if code := runCachevalueStatus(&out, &errb, append(append([]string{}, args...), "--json")); code != 0 {
+			t.Fatalf("cachevalue status --json exit=%d stderr=%s", code, errb.String())
+		}
+		var rep cachevalueStatusReport
+		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+			t.Fatalf("decode cachevalue status JSON: %v\n%s", err, out.String())
+		}
+		return out.String(), rep
+	}
+	runHuman := func(row cachevalueledger.Row) string {
+		t.Helper()
+		writeRow(row)
+		var out, errb bytes.Buffer
+		if code := runCachevalueStatus(&out, &errb, args); code != 0 {
+			t.Fatalf("cachevalue status exit=%d stderr=%s", code, errb.String())
+		}
+		return out.String()
+	}
+
+	baselineRow := rowWithRejected(0)
+	rejectedRow := rowWithRejected(7)
+	baselineRaw, baseline := runJSON(baselineRow)
+	rejectedRaw, rejected := runJSON(rejectedRow)
+	if !strings.Contains(baselineRaw, `"rejected_tier_accesses": 0`) {
+		t.Fatalf("zero-rejection JSON omitted always-present field:\n%s", baselineRaw)
+	}
+	if rejected.Value.RejectedTierAccesses != 7 || !strings.Contains(rejectedRaw, `"rejected_tier_accesses": 7`) {
+		t.Fatalf("rejected-tier JSON value=%d, want 7:\n%s", rejected.Value.RejectedTierAccesses, rejectedRaw)
+	}
+
+	baselineValue, rejectedValue := baseline.Value, rejected.Value
+	baselineValue.RejectedTierAccesses = 0
+	rejectedValue.RejectedTierAccesses = 0
+	if !reflect.DeepEqual(rejectedValue, baselineValue) {
+		t.Fatalf("rejections changed accepted value digest:\nbaseline=%+v\nrejected=%+v", baselineValue, rejectedValue)
+	}
+	if rejected.Verdict != baseline.Verdict || rejected.Summary != baseline.Summary ||
+		!reflect.DeepEqual(rejected.Counts, baseline.Counts) || !reflect.DeepEqual(rejected.Rows, baseline.Rows) ||
+		!reflect.DeepEqual(rejected.NextActions, baseline.NextActions) {
+		t.Fatalf("rejections changed overall status outputs:\nbaseline verdict=%s summary=%q counts=%v rows=%v actions=%v\nrejected verdict=%s summary=%q counts=%v rows=%v actions=%v",
+			baseline.Verdict, baseline.Summary, baseline.Counts, baseline.Rows, baseline.NextActions,
+			rejected.Verdict, rejected.Summary, rejected.Counts, rejected.Rows, rejected.NextActions)
+	}
+
+	baselineTrack1 := cachevaluereport.Fold([]cachevalueledger.Row{baselineRow}, rowAt)
+	rejectedTrack1 := cachevaluereport.Fold([]cachevalueledger.Row{rejectedRow}, rowAt)
+	if baselineTrack1.TotalRows != rejectedTrack1.TotalRows || baselineTrack1.TotalSessions != rejectedTrack1.TotalSessions ||
+		baselineTrack1.MultiTurnSessions != rejectedTrack1.MultiTurnSessions || baselineTrack1.LatestReuseRatio != rejectedTrack1.LatestReuseRatio ||
+		baselineTrack1.Verdict != rejectedTrack1.Verdict || baselineTrack1.NextAction != rejectedTrack1.NextAction ||
+		baselineTrack1.Buckets[0].Turns != rejectedTrack1.Buckets[0].Turns ||
+		baselineTrack1.Buckets[0].PromptTokens != rejectedTrack1.Buckets[0].PromptTokens ||
+		baselineTrack1.Buckets[0].ReusedTokens != rejectedTrack1.Buckets[0].ReusedTokens ||
+		baselineTrack1.Buckets[0].RealizedReuseRatio != rejectedTrack1.Buckets[0].RealizedReuseRatio {
+		t.Fatalf("rejections changed accepted Track-1 counters, ratio, verdict, or next action:\nbaseline=%+v\nrejected=%+v", baselineTrack1, rejectedTrack1)
+	}
+
+	baselineHuman := runHuman(baselineRow)
+	if strings.Contains(baselineHuman, "rejected_tier_accesses") {
+		t.Fatalf("zero-rejection human output named rejected tier accesses:\n%s", baselineHuman)
+	}
+	rejectedHuman := runHuman(rejectedRow)
+	if !strings.Contains(rejectedHuman, "value: rejected_tier_accesses=7") {
+		t.Fatalf("human output missing rejected tier accesses:\n%s", rejectedHuman)
 	}
 }
 

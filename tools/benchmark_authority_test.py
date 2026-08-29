@@ -192,6 +192,30 @@ class ShippedRegistryTest(unittest.TestCase):
                 self.assertIn(r["superseded_by"], ids,
                               f"{r['id']} superseded_by dangling {r['superseded_by']!r}")
 
+    def test_canonical_support_maturity_row_rejects_stale_and_accepts_registry(self):
+        rows = ba.load_registry(str(ROOT / ba.REGISTRY_REL))
+        support = next(r for r in rows if r["id"] == "support-maturity-matrix")
+        stale = ba.canonical_row({
+            **support,
+            "headline": (
+                "Grade A · score 100 · support_maturity_debt 0 · "
+                "32/56 cells SUPPORTED (0 PROOF-PATH-ONLY, 24 FENCED, "
+                "0 UNDEFINED across 14 families × 4 backends) — "
+                "a coverage instrument, not a vs-baseline win"
+            ),
+        })
+        fresh = ba.canonical_row(support)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / ba.CANONICAL_AUTHORITY_REL
+            target.write_text(stale + "\n", encoding="utf-8")
+            self.assertEqual(
+                ba.check_canonical_rows(str(root), rows),
+                ["support-maturity-matrix"],
+            )
+            target.write_text(fresh + "\n", encoding="utf-8")
+            self.assertEqual(ba.check_canonical_rows(str(root), rows), [])
+
     def test_committed_sample_view_is_fresh(self):
         # Mirrors --check: the shipped AUTHORITY-GENERATED-SAMPLE.md must equal
         # a fresh render of the shipped registry, or the doc has drifted.

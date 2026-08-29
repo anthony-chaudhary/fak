@@ -2,12 +2,14 @@ package nativeperfobscontract
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
 
 func TestFrozenContractIsValidAndMachineReadable(t *testing.T) {
-	got, err := JSON(Frozen())
+	want := Frozen()
+	got, err := JSON(want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,8 +23,8 @@ func TestFrozenContractIsValidAndMachineReadable(t *testing.T) {
 	if decoded.DefaultModel != "Qwen3.8" {
 		t.Fatalf("default model = %q", decoded.DefaultModel)
 	}
-	if len(decoded.Surfaces) != 14 {
-		t.Fatalf("surface count = %d, want 14", len(decoded.Surfaces))
+	if !slices.Equal(decoded.Surfaces, want.Surfaces) {
+		t.Fatalf("decoded surfaces = %#v, want frozen contract surfaces %#v", decoded.Surfaces, want.Surfaces)
 	}
 	for _, s := range decoded.Surfaces {
 		if s.Status != StatusExported && s.Status != StatusExcluded {

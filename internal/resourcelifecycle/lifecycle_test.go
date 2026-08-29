@@ -33,7 +33,7 @@ func TestUnifiedKindsReuseAndTeardown(t *testing.T) {
 		t.Fatal("incompatible state reused")
 	}
 	released := m.Teardown("session-a")
-	if len(released) != 5 {
+	if len(released) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture creates five owned resources and requires every one to be released
 		t.Fatalf("released=%d", len(released))
 	}
 	for _, ref := range refs {
