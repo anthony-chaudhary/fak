@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -49,9 +50,49 @@ func TestRunDevHandoffMissingArtifactIsActionable(t *testing.T) {
 	if got := runDevHandoff(strings.NewReader(""), io.Discard, &stderr, []string{"index"}); got != 2 {
 		t.Fatalf("exit = %d, want 2", got)
 	}
-	for _, want := range []string{"separate 'fak-dev' executable", "fak-dev <command>"} {
+	for _, want := range []string{"separate 'fak-dev' executable", "go install ./cmd/fak-dev", "go install github.com/anthony-chaudhary/fak/cmd/fak-dev@latest", "fak-dev <command>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("missing %q in actionable error:\n%s", want, stderr.String())
 		}
+	}
+}
+
+func TestDevAvailabilityMissingIsMachineReadable(t *testing.T) {
+	old := findFakDev
+	findFakDev = func() (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { findFakDev = old })
+
+	var stdout, stderr bytes.Buffer
+	if got := runDevHandoff(strings.NewReader(""), &stdout, &stderr, []string{"availability", "--json"}); got != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	var result devAvailability
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode availability: %v\n%s", err, stdout.String())
+	}
+	if result.Schema != "fak-dev-availability/1" || result.Available || result.Source != "missing" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.Recovery != "go install ./cmd/fak-dev" {
+		t.Fatalf("recovery = %q", result.Recovery)
+	}
+}
+
+func TestDevAvailabilityReportsResolvedPath(t *testing.T) {
+	old := findFakDev
+	path := filepath.Join(t.TempDir(), "fak-dev")
+	findFakDev = func() (string, error) { return path, nil }
+	t.Cleanup(func() { findFakDev = old })
+
+	var stdout, stderr bytes.Buffer
+	if got := runDevHandoff(strings.NewReader(""), &stdout, &stderr, []string{"availability", "--json"}); got != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	var result devAvailability
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Available || result.Source != "path" || result.Path != path {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }
