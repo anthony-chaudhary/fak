@@ -61,6 +61,29 @@ func TestDispatchWaveFreshStartCapLimitsNewFrontsButNotAttemptedWIP(t *testing.T
 	})
 }
 
+func TestDispatchWaveDivergenceCapPreservesFinishers(t *testing.T) {
+	root := t.TempDir()
+	writeDispatchAttemptWitness(t, root, 10)
+	router := dispatchtick.RouterPayload{Lanes: map[string]dispatchtick.RouterLaneGroup{
+		"finish": {Count: 1, Issues: []int{10}, Tree: []string{"internal/finish"}},
+		"fresh":  {Count: 1, Issues: []int{20}, Tree: []string{"internal/fresh"}},
+	}}
+	admission := evaluateDispatchFinishFirstAdmission(dispatchFinishFirstAdmissionInput{
+		EvidenceAvailable: true, GitHubAvailable: true, WIPFilesDelta: 86, WIPLinesDelta: 500,
+		OldestWIPMinutes: 5210, RequestedFreshStarts: 2, Finishers: 2,
+	})
+	price, err := priceDispatchWavePayloadFilteredWithFreshCap(root, router, 2, 2, "", nil, 0, nil, admission.AllowedFreshStarts, dispatchGoalProfileThroughput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(price.RunTargets) != 1 || price.RunTargets[0].Issue != 10 || price.FreshStarts != 0 {
+		t.Fatalf("price = %+v, want attempted issue 10 only", price)
+	}
+	if admission.AllowedFinishers != 2 || admission.DeniedFreshStarts != 2 {
+		t.Fatalf("admission = %+v", admission)
+	}
+}
+
 func writeDispatchAttemptWitness(t *testing.T, root string, issue int) {
 	t.Helper()
 	runs := filepath.Join(root, dispatchtick.RunsDirName)
