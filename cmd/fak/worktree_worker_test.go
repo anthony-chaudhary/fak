@@ -1032,6 +1032,46 @@ func TestLandVerifyFlagParsesGoBuild(t *testing.T) {
 	// here we only assert the CLI's go-build hook is a valid VerifyHook value.
 	var _ workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
 }
+
+func TestGoBuildVerifyRecreatesMissingBuildDirectories(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain is not installed")
+	}
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, "go.mod"), []byte("module example.com/verify\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "verify.go"), []byte("package verify\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, detail := worktreeWorkerGoBuildVerify(wt); !ok {
+		t.Fatalf("go-build verify failed after healing absent build directories: %s", detail)
+	}
+	for _, name := range []string{".gocache", ".gotmp"} {
+		if info, err := os.Stat(filepath.Join(wt, name)); err != nil || !info.IsDir() {
+			t.Fatalf("%s was not recreated: info=%v err=%v", name, info, err)
+		}
+	}
+}
+
+func TestGoBuildVerifyFailsClosedWhenBuildDirectoryCannotBeCreated(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain is not installed")
+	}
+	wt := t.TempDir()
+	gotmp := filepath.Join(wt, ".gotmp")
+	if err := os.WriteFile(gotmp, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ok, detail := worktreeWorkerGoBuildVerify(wt)
+	if ok {
+		t.Fatal("go-build verify passed despite an unusable GOTMPDIR")
+	}
+	if !strings.Contains(detail, "prepare isolated Go build directories") ||
+		!strings.Contains(detail, "create GOTMPDIR directory") || !strings.Contains(detail, gotmp) {
+		t.Fatalf("failure detail is not actionable: %q", detail)
+	}
+}
 func TestBoundedColdStatusCountsBoundsConcurrencyAndPreservesAnswers(t *testing.T) {
 	const (
 		count = 40
