@@ -58,21 +58,30 @@ func TestRunDevHandoffMissingArtifactIsActionable(t *testing.T) {
 	}
 }
 
-func TestExactTopLevelBuildPreservesArgvAndChildExit(t *testing.T) {
+func TestExactTopLevelDevCommandsPreserveArgvAndChildExit(t *testing.T) {
 	old := executeExactDevHandoff
 	defer func() { executeExactDevHandoff = old }()
-	var captured []string
+	var captured [][]string
 	executeExactDevHandoff = func(_ io.Reader, _, _ io.Writer, argv []string) int {
-		captured = append([]string(nil), argv...)
+		captured = append(captured, append([]string(nil), argv...))
 		return 7
 	}
 
-	code, handled := runExactDevHandoff(nil, nil, nil, "build", []string{"--profile", "release", "--json"})
-	if !handled || code != 7 {
-		t.Fatalf("handled=%v code=%d, want true/7", handled, code)
-	}
-	if want := []string{"build", "--profile", "release", "--json"}; !reflect.DeepEqual(captured, want) {
-		t.Fatalf("child argv = %v, want %v", captured, want)
+	for _, tc := range []struct {
+		verb string
+		args []string
+	}{
+		{verb: "build", args: []string{"--profile", "release", "--json"}},
+		{verb: "study-inventory", args: []string{"--self", "--verify", "--json"}},
+	} {
+		code, handled := runExactDevHandoff(nil, nil, nil, tc.verb, tc.args)
+		if !handled || code != 7 {
+			t.Fatalf("%s: handled=%v code=%d, want true/7", tc.verb, handled, code)
+		}
+		want := append([]string{tc.verb}, tc.args...)
+		if got := captured[len(captured)-1]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: child argv = %v, want %v", tc.verb, got, want)
+		}
 	}
 	if code, handled := runExactDevHandoff(nil, nil, nil, "buildcheck", []string{"--json"}); handled || code != 0 {
 		t.Fatalf("non-exact command handled=%v code=%d, want false/0", handled, code)

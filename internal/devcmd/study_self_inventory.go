@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -24,10 +24,9 @@ type studySelfInventoryOutput struct {
 	Verification *studymonitor.SelfInventoryVerification `json:"verification,omitempty"`
 }
 
-// runStudyInventory is the public self-inventory surface. Unlike the existing external-repo
-// mapper in fak-dev, this mode resolves and extracts one Git object before inspecting content;
-// no dirty checkout path is passed to the inventory builder.
-func runStudyInventory(stdout, stderr io.Writer, args []string) int {
+// runStudySelfInventory resolves and extracts one Git object before inspecting
+// content, so peer-dirty checkout state cannot affect the committed-tree witness.
+func runStudySelfInventory(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("study-inventory", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	self := fs.Bool("self", false, "inventory fak's own committed tree")

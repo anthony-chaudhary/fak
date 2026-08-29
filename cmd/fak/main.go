@@ -53,11 +53,6 @@ func main() {
 	start := time.Now()
 	verb, argv := parseVerbArgv()
 	defer recoverUsage(&verb, &argv, start)
-	// Self-inventory is intentionally public even though the external-checkout mapper with the
-	// same historical name remains a fak-dev command.
-	if verb == "study-inventory" {
-		os.Exit(runStudyInventory(os.Stdout, os.Stderr, argv))
-	}
 	// The two pre-switch gates (empty verb, `fak dev <verb>` namespace) live in
 	// resolveEarlyDispatch so main() stays at the routing table; a true return means
 	// the call was fully handled there.

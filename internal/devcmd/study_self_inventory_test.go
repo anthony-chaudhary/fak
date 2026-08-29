@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ func TestStudyInventoryCommittedAuthorityIgnoresDirtyAndUntrackedWIP(t *testing.
 	gitStudySelf(t, git, "commit", "-qm", "seed")
 
 	var out, errOut bytes.Buffer
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo, "--json"}); code != 0 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo, "--json"}); code != 0 {
 		t.Fatalf("refresh=%d stderr=%s", code, errOut.String())
 	}
 	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
@@ -28,7 +28,7 @@ func TestStudyInventoryCommittedAuthorityIgnoresDirtyAndUntrackedWIP(t *testing.
 	writeStudySelfFile(t, repo, "peer-untracked.go", "package peer\n")
 	out.Reset()
 	errOut.Reset()
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo, "--json"}); code != 0 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo, "--json"}); code != 0 {
 		t.Fatalf("verify=%d stderr=%s output=%s", code, errOut.String(), out.String())
 	}
 	var result studySelfInventoryOutput
@@ -46,7 +46,7 @@ func TestStudyInventoryCommittedMutationFailsThenRefreshPasses(t *testing.T) {
 	gitStudySelf(t, git, "add", "README.md")
 	gitStudySelf(t, git, "commit", "-qm", "seed")
 	var out, errOut bytes.Buffer
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
 		t.Fatalf("refresh: %s", errOut.String())
 	}
 	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
@@ -57,7 +57,7 @@ func TestStudyInventoryCommittedMutationFailsThenRefreshPasses(t *testing.T) {
 	gitStudySelf(t, git, "commit", "-qm", "mutation")
 	out.Reset()
 	errOut.Reset()
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo, "--json"}); code != 1 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo, "--json"}); code != 1 {
 		t.Fatalf("stale verify=%d output=%s stderr=%s", code, out.String(), errOut.String())
 	}
 	var stale studySelfInventoryOutput
@@ -70,14 +70,14 @@ func TestStudyInventoryCommittedMutationFailsThenRefreshPasses(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
 		t.Fatalf("second refresh: %s", errOut.String())
 	}
 	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
 	gitStudySelf(t, git, "commit", "-qm", "refresh")
 	out.Reset()
 	errOut.Reset()
-	if code := runStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo}); code != 0 {
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo}); code != 0 {
 		t.Fatalf("verify after refresh=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
 	}
 }
