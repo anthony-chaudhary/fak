@@ -86,13 +86,14 @@ type cachevalueStatusSources struct {
 }
 
 type cachevalueValueDigest struct {
-	Verdict         string `json:"verdict"`
-	Finding         string `json:"finding,omitempty"`
-	NextAction      string `json:"next_action,omitempty"`
-	Track1Verdict   string `json:"track1_verdict"`
-	Track2Buckets   int    `json:"track2_buckets"`
-	FleetUsageRows  int    `json:"fleet_usage_rows"`
-	DollarBlindRows int    `json:"dollar_blind_rows,omitempty"`
+	Verdict              string `json:"verdict"`
+	Finding              string `json:"finding,omitempty"`
+	NextAction           string `json:"next_action,omitempty"`
+	Track1Verdict        string `json:"track1_verdict"`
+	RejectedTierAccesses uint64 `json:"rejected_tier_accesses"`
+	Track2Buckets        int    `json:"track2_buckets"`
+	FleetUsageRows       int    `json:"fleet_usage_rows"`
+	DollarBlindRows      int    `json:"dollar_blind_rows,omitempty"`
 }
 
 type cachevalueHeadroomDigest struct {
@@ -468,13 +469,14 @@ func buildCachevalueStatus(opt cachevalueStatusOptions, now time.Time) cachevalu
 		Counts:      counts,
 		Attribution: attribution,
 		Value: cachevalueValueDigest{
-			Verdict:         value.Verdict,
-			Finding:         value.Finding,
-			NextAction:      value.NextAction,
-			Track1Verdict:   value.Track1.Verdict,
-			Track2Buckets:   len(value.Track2),
-			FleetUsageRows:  value.FleetBenefit.UsageRows,
-			DollarBlindRows: value.DollarBlindRows,
+			Verdict:              value.Verdict,
+			Finding:              value.Finding,
+			NextAction:           value.NextAction,
+			Track1Verdict:        value.Track1.Verdict,
+			RejectedTierAccesses: value.Track1.RejectedTierAccesses,
+			Track2Buckets:        len(value.Track2),
+			FleetUsageRows:       value.FleetBenefit.UsageRows,
+			DollarBlindRows:      value.DollarBlindRows,
 		},
 		Headroom: cachevalueHeadroomDigest{
 			Selected:          head.Selected,
