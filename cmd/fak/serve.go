@@ -432,7 +432,7 @@ func cmdServe(argv []string) {
 	// before the gateway exists but installed only after it does.
 	rt.resolveCompute(sf)
 	defer rt.closeEPGroup()
-	releaseMetalResidency, err := loadServeModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
+	releaseMetalResidency, err := loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
 		rt.loadModel(sf)
 	})
 	if err != nil {
