@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
@@ -34,6 +35,26 @@ const (
 )
 
 var nativeProfileComparisonPhaseSelection = profileComparisonPhasePrefill
+
+type profileComparisonAxis string
+
+const (
+	profileComparisonAxisSequence        profileComparisonAxis = "sequence"
+	profileComparisonAxisM3DecodeHandoff profileComparisonAxis = "m3-decode-handoff"
+)
+
+var nativeProfileComparisonAxisSelection = profileComparisonAxisSequence
+
+func (a profileComparisonAxis) String() string { return string(a) }
+
+func (a *profileComparisonAxis) Set(value string) error {
+	axis := profileComparisonAxis(strings.TrimSpace(value))
+	if axis != profileComparisonAxisSequence && axis != profileComparisonAxisM3DecodeHandoff {
+		return fmt.Errorf("comparison axis %q is invalid; want sequence or m3-decode-handoff", value)
+	}
+	*a = axis
+	return nil
+}
 
 func (p profileComparisonPhase) String() string { return string(p) }
 
@@ -84,13 +105,23 @@ func newProfileComparison() profileComparison {
 }
 
 func newProfileComparisonForPhase(phase profileComparisonPhase) profileComparison {
+	return newProfileComparisonForPhaseAxis(phase, profileComparisonAxisSequence)
+}
+
+func newProfileComparisonForPhaseAxis(phase profileComparisonPhase, axis profileComparisonAxis) profileComparison {
+	selector, control, candidate := nativeProfileSequenceSelector, nativeProfileSelectorOff, nativeProfileSelectorOn
+	if axis == profileComparisonAxisM3DecodeHandoff {
+		selector = nativeProfileDecodeHandoffControl
+		control = model.Qwen35DecodeHandoffControl.String()
+		candidate = model.Qwen35DecodeHandoffMixer.String()
+	}
 	return profileComparison{
 		Schema:                          profileComparisonSchema,
 		Verdict:                         "HOLD",
 		Phase:                           phase,
-		Selector:                        nativeProfileSequenceSelector,
-		ControlSelector:                 nativeProfileSelectorOff,
-		CandidateSelector:               nativeProfileSelectorOn,
+		Selector:                        selector,
+		ControlSelector:                 control,
+		CandidateSelector:               candidate,
 		MinimumMedianImprovementPercent: nativeProfileMinimumGain,
 	}
 }
@@ -99,13 +130,25 @@ func newProfileComparisonForPhase(phase profileComparisonPhase) profileCompariso
 // captures. Receipt paths are derived from each profile path, so a profile can never be
 // admitted without the raw event/source/binary companion produced alongside it.
 func compareNativeProfileCampaign(spec string) profileComparison {
-	return compareNativeProfileCampaignPhase(spec, nativeProfileComparisonPhaseSelection)
+	return compareNativeProfileCampaignPhaseAxis(spec, nativeProfileComparisonPhaseSelection, nativeProfileComparisonAxisSelection)
 }
 
 func compareNativeProfileCampaignPhase(spec string, phase profileComparisonPhase) profileComparison {
-	r := newProfileComparisonForPhase(phase)
+	return compareNativeProfileCampaignPhaseAxis(spec, phase, profileComparisonAxisSequence)
+}
+
+func compareNativeProfileCampaignPhaseAxis(spec string, phase profileComparisonPhase, axis profileComparisonAxis) profileComparison {
+	r := newProfileComparisonForPhaseAxis(phase, axis)
 	if !phase.valid() {
 		r.Reason = fmt.Sprintf("comparison phase %q is invalid", phase)
+		return r
+	}
+	if axis != profileComparisonAxisSequence && axis != profileComparisonAxisM3DecodeHandoff {
+		r.Reason = fmt.Sprintf("comparison axis %q is invalid", axis)
+		return r
+	}
+	if axis == profileComparisonAxisM3DecodeHandoff && phase == profileComparisonPhasePrefill {
+		r.Reason = "m3-decode-handoff comparison requires steady-decode or end-to-end phase"
 		return r
 	}
 	paths := splitProfileComparisonPaths(spec)
@@ -118,16 +161,20 @@ func compareNativeProfileCampaignPhase(spec string, phase profileComparisonPhase
 	profileDigests := make(map[string]int, len(paths))
 	receiptBindings := make(map[string]int, len(paths))
 	for i, path := range paths {
-		input, err := loadNativeProfileComparisonInput(path, phase)
+		input, err := loadNativeProfileComparisonInput(path, phase, axis)
 		if err != nil {
 			r.Reason = fmt.Sprintf("pair %d is invalid: %v", i+1, err)
 			return r
 		}
-		wantSelector := nativeProfileSelectorOff
+		wantSelector := r.ControlSelector
 		if i >= nativeProfileArmRuns {
-			wantSelector = nativeProfileSelectorOn
+			wantSelector = r.CandidateSelector
 		}
-		if got := input.receipt.Controls[nativeProfileSequenceSelector]; got != wantSelector {
+		if axis == profileComparisonAxisM3DecodeHandoff && input.receipt.Controls[nativeProfileSequenceSelector] != nativeProfileSelectorOn {
+			r.Reason = fmt.Sprintf("pair %d sequence selector must be ON for M3 decode handoff", i+1)
+			return r
+		}
+		if got := input.receipt.Controls[r.Selector]; got != wantSelector {
 			r.Reason = fmt.Sprintf("pair %d selector = %q, want %q", i+1, got, wantSelector)
 			return r
 		}
@@ -166,6 +213,9 @@ func compareNativeProfileCampaignPhase(spec string, phase profileComparisonPhase
 		candidate[i] = inputs[i+nativeProfileArmRuns].duration
 	}
 	result := compareProfilePhase(phase, control, candidate)
+	result.Selector = r.Selector
+	result.ControlSelector = r.ControlSelector
+	result.CandidateSelector = r.CandidateSelector
 	result.EnvelopeID = first.profile.EnvelopeID
 	result.ControlForwardPath = r.ControlForwardPath
 	result.CandidateForwardPath = r.CandidateForwardPath
@@ -184,7 +234,7 @@ func splitProfileComparisonPaths(spec string) []string {
 	return paths
 }
 
-func loadNativeProfileComparisonInput(profilePath string, phase profileComparisonPhase) (nativeProfileComparisonInput, error) {
+func loadNativeProfileComparisonInput(profilePath string, phase profileComparisonPhase, axis profileComparisonAxis) (nativeProfileComparisonInput, error) {
 	profileBytes, err := os.ReadFile(profilePath)
 	if err != nil {
 		return nativeProfileComparisonInput{}, fmt.Errorf("read profile: %w", err)
@@ -217,7 +267,7 @@ func loadNativeProfileComparisonInput(profilePath string, phase profileCompariso
 	}
 	return nativeProfileComparisonInput{
 		profile: profile, receipt: receipt, duration: duration,
-		controls: controlsWithoutSequenceSelector(receipt.Controls),
+		controls: controlsWithoutSelector(receipt.Controls, newProfileComparisonForPhaseAxis(phase, axis).Selector),
 	}, nil
 }
 
@@ -297,10 +347,10 @@ func decodeExactJSON(data []byte, out any) error {
 	return nil
 }
 
-func controlsWithoutSequenceSelector(controls map[string]string) map[string]string {
+func controlsWithoutSelector(controls map[string]string, selector string) map[string]string {
 	out := make(map[string]string, len(controls)-1)
 	for key, value := range controls {
-		if key != nativeProfileSequenceSelector {
+		if key != selector {
 			out[key] = value
 		}
 	}

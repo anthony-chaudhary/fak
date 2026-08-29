@@ -482,6 +482,13 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 			return fmt.Errorf("native performance candidate route unavailable: %w", err)
 		}
 	}
+	var handoffMode model.Qwen35DecodeHandoffMode
+	if err := handoffMode.Set(controls[nativeProfileDecodeHandoffControl]); err != nil {
+		return fmt.Errorf("native performance decode handoff: %w", err)
+	}
+	if err := s.SetQwen35DecodeHandoffMode(handoffMode); err != nil {
+		return fmt.Errorf("native performance decode handoff unavailable: %w", err)
+	}
 	profiler := model.NewPhaseProfiler()
 	s.PhaseProfiler = profiler
 	prompt := lcgIDs(32, vocab)
@@ -543,6 +550,10 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	}
 	d = time.Since(t)
 	phases = appendNativeProfilePhase(phases, "verification", d)
+	handoffReceipt := s.Qwen35DecodeHandoffReceipt()
+	if err := model.ValidateQwen35DecodeHandoffReceipt(handoffReceipt); err != nil {
+		return fmt.Errorf("native performance decode handoff receipt: %w", err)
+	}
 
 	t = time.Now()
 	finishProfile()
@@ -623,19 +634,20 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	profileSum := sha256.Sum256(b)
 	q4kResidency := m.Q4KResidencyReceipt()
 	receipt := nativeProfileReceipt{
-		Schema:            nativeProfileReceiptSchema,
-		ProfileSHA256:     fmt.Sprintf("%x", profileSum),
-		EnvelopeID:        envelope.ID,
-		Artifact:          nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
-		ModelConfig:       loadedConfig,
-		ModelConfigSHA256: loadedConfigSHA,
-		Host:              host,
-		Source:            source,
-		Binary:            binary,
-		Controls:          controls,
-		Execution:         executionReceipt,
-		Fallbacks:         fallbackReceipt,
-		Q4KResidency:      &q4kResidency,
+		Schema:              nativeProfileReceiptSchema,
+		ProfileSHA256:       fmt.Sprintf("%x", profileSum),
+		EnvelopeID:          envelope.ID,
+		Artifact:            nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
+		ModelConfig:         loadedConfig,
+		ModelConfigSHA256:   loadedConfigSHA,
+		Host:                host,
+		Source:              source,
+		Binary:              binary,
+		Controls:            controls,
+		Execution:           executionReceipt,
+		Fallbacks:           fallbackReceipt,
+		Q4KResidency:        &q4kResidency,
+		Qwen35DecodeHandoff: &handoffReceipt,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -873,7 +885,7 @@ func main() {
 	var nativeControls map[string]string
 	if *f.nativeProfileOut != "" {
 		var err error
-		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget)
+		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget, *f.nativeDecodeHandoff)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
