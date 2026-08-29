@@ -151,45 +151,30 @@ class RenderPromptTest(unittest.TestCase):
             self.assertIn(witness.split(" --")[0], go_src,
                           f"witness {witness!r} for {rid!r} is not in the Go spec")
 
-    def test_top_five_thought_check_precedes_repository_work(self) -> None:
+    def test_retired_thought_check_rule_is_absent_and_remaining_rules_stay_ordered(self) -> None:
         mod = load()
         rules = mod._work_rules(9568, "issuecheck")
-        self.assertEqual("top-five-thought-check", rules[0][0])
-        rid, imperative, witness = rules[0]
-        self.assertEqual("top-five-thought-check", rid)
-        for want in (
-            "Before ANY repository edit",
-            "fak thought-check prepare --issue 9568 --json",
-            "versioned catalog",
-            "bound `.review_template`",
-            "temporary `<review.json>` path OUTSIDE the repository",
-            "preserve its schema, issue number, issue digest, catalog version",
-            "auto-filled `.issue_binding` exactly",
-            "Copy `.row_template` EXACTLY FIVE times into `.review_template.rows`",
-            "select five distinct IDs from `.checks`",
-            "specific to issue #9568",
-            "every row's selection reason",
-            "explicit evidence gap",
-            "required action",
-            "fak thought-check upsert --issue 9568 --input <review.json> --live",
-            "fak thought-check verify --issue 9568 --json",
-            "durable `fak-issuecheck` marker",
-            "material scope, architecture, or acceptance change",
-            "SAME marker-keyed comment",
-        ):
-            self.assertIn(want, imperative)
-        self.assertNotIn("> prepare.json", imperative)
-        self.assertEqual("fak thought-check verify --issue 9568 --json", witness)
+        expected_ids = [
+            "lane-lease",
+            "refusal-taxonomy",
+            "smallest-change",
+            "checkpoint-commit",
+            "gate-before-done",
+            "proof-by-default",
+            "browser-display",
+            "no-delete",
+            "honest-bail",
+        ]
+        self.assertEqual(expected_ids, [rid for rid, _imperative, _witness in rules])
+        for rule in rules:
+            for value in rule:
+                self.assertNotIn("thought-check", value)
 
         p = mod.render_prompt(self.ISSUE, "issuecheck", workspace="C:/work/fak")
-        top_five = p.index("- top-five-thought-check:")
-        for later in (
-            "- lane-lease:",
-            "- smallest-change:",
-            "- checkpoint-commit:",
-        ):
-            self.assertLess(top_five, p.index(later),
-                            f"top-five rule must precede {later!r}")
+        for rid in expected_ids:
+            self.assertIn(f"- {rid}:", p)
+        for stale in ("thought-check", "top-five-thought-check", "fak-issuecheck"):
+            self.assertNotIn(stale, p)
 
     def test_has_an_honest_block_clause(self) -> None:
         mod = load()

@@ -256,6 +256,8 @@ func aggregate(layers []Layer) State {
 			seenWarn = true
 		case Unknown:
 			seenUnknown = true
+		case Pass:
+			// Passing layers are neutral while stronger states are folded.
 		}
 	}
 	if seenUnknown {

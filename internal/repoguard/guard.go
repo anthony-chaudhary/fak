@@ -738,7 +738,8 @@ func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot 
 	switch toolName {
 	case "Bash":
 		command := stringField(toolInput, "command")
-		violations := classifyCommand(command, workspaceRoot, safeRoots)
+		violations := ClassifyBuildCacheClean(command)
+		violations = append(violations, classifyCommand(command, workspaceRoot, safeRoots)...)
 		violations = append(violations, classifyInteractive(command)...)
 		violations = append(violations, classifyWorkspaceCd(command, workspaceRoot)...)
 		violations = append(violations, classifySleepWait(command)...)
@@ -747,8 +748,13 @@ func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot 
 		// PowerShell has its own syntax-aware inventory rung in addition to
 		// the cross-shell foreground-wait advisory.
 		command := stringField(toolInput, "command")
-		violations := classifySleepWait(command)
+		violations := ClassifyBuildCacheClean(command)
+		violations = append(violations, classifySleepWait(command)...)
 		return append(violations, classifyForegroundPowerShellInventory(command)...)
+	case "shell_command", "functions.shell_command":
+		return ClassifyBuildCacheClean(stringField(toolInput, "command"))
+	case "exec_command":
+		return ClassifyBuildCacheClean(stringField(toolInput, "cmd"))
 	case "Read":
 		return classifyLiveMonitorOutputRead(readPath(toolInput), liveMonitorIDs)
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":
@@ -798,9 +804,11 @@ func readPath(m map[string]any) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops, undeclaredLeaves []Violation
+	var outOfTree, buildCacheCleans, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops, undeclaredLeaves []Violation
 	for _, v := range violations {
 		switch v.Reason {
+		case ReasonBuildCacheCleanRace:
+			buildCacheCleans = append(buildCacheCleans, v)
 		case ReasonUndeclaredLeaf:
 			undeclaredLeaves = append(undeclaredLeaves, v)
 		case ReasonInteractiveHang:
@@ -818,6 +826,9 @@ func renderReason(violations []Violation) string {
 		}
 	}
 	var blocks []string
+	if len(buildCacheCleans) > 0 {
+		blocks = append(blocks, renderBuildCacheCleanReason(buildCacheCleans))
+	}
 	if len(outOfTree) > 0 {
 		blocks = append(blocks, renderOutOfTreeReason(outOfTree))
 	}
@@ -840,6 +851,10 @@ func renderReason(violations []Violation) string {
 		blocks = append(blocks, renderUndeclaredLeafReason(undeclaredLeaves))
 	}
 	return strings.Join(blocks, " | ")
+}
+
+func renderBuildCacheCleanReason(violations []Violation) string {
+	return ReasonBuildCacheCleanRace + ": `" + violations[0].Target + "` would delete Go build-cache entries while concurrent build/vet processes may still reference them. Fix: " + violations[0].Fix + "."
 }
 
 func renderOutOfTreeReason(violations []Violation) string {

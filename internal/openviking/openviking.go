@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const maxResponseBytes = 8 << 20
+
+const defaultHTTPTimeout = 30 * time.Second
 
 const (
 	CodeUnavailable     = "UNAVAILABLE"
@@ -192,12 +195,16 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = newDefaultHTTPClient()
 	}
 	return &Client{
 		baseURL: base, apiKey: cfg.APIKey, account: cfg.Account,
 		user: cfg.User, actorPeer: cfg.ActorPeer, http: hc,
 	}, nil
+}
+
+func newDefaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: defaultHTTPTimeout}
 }
 
 // Health probes the raw health endpoint.

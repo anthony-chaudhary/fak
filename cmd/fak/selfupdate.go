@@ -269,7 +269,7 @@ func selfUpdateFakDevNeedsConverge(targets []string, headRev string, probe selfi
 // prepareFakDevUpdate builds and smokes the dev companion before the primary fak swap. This
 // keeps the update fail-closed: a broken fak-dev build cannot leave fak current while the
 // already-installed repository tool remains on an older local revision.
-func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string, headRev string) (string, []string, error) {
+func prepareFakDevUpdate(ctx context.Context, runner selfinstall.Runner, buildDir string, targets []string, headRev string) (string, []string, error) {
 	if len(targets) == 0 {
 		return "", nil, nil
 	}
@@ -277,13 +277,13 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 	_ = os.Remove(candidate)
 	stamp := "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit=" + headRev
 	stopHeartbeat := startSelfUpdateHeartbeat(40, "building fak-dev companion")
-	if out, ok := selfinstall.RealRunner(ctx, buildDir, "go", "build", "-trimpath", "-buildvcs=true", "-ldflags", stamp, "-o", candidate, "./cmd/fak-dev"); !ok {
+	if out, ok := runner(ctx, buildDir, "go", "build", "-trimpath", "-buildvcs=true", "-ldflags", stamp, "-o", candidate, "./cmd/fak-dev"); !ok {
 		stopHeartbeat()
 		return "", nil, fmt.Errorf("build fak-dev companion: %s", strings.TrimSpace(out))
 	}
 	stopHeartbeat()
 	stopHeartbeat = startSelfUpdateHeartbeat(46, "verifying fak-dev companion")
-	out, ok := selfinstall.RealRunner(ctx, buildDir, candidate, "version")
+	out, ok := runner(ctx, buildDir, candidate, "version")
 	stopHeartbeat()
 	if !ok || !strings.Contains(out, "build: "+headRev) {
 		_ = os.Remove(candidate)
@@ -294,29 +294,31 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 
 // selfUpdateGateRunner exposes the gated install ladder's actual blocking operation instead
 // of flattening build, vet, and smoke into one long ambiguous wait.
-func selfUpdateGateRunner(ctx context.Context, dir, name string, args ...string) (string, bool) {
-	percent := 0
-	operation := ""
-	phase := selfUpdatePhase("")
-	switch {
-	case name == "go" && len(args) > 0 && args[0] == "build":
-		percent, operation = 55, "building fak candidate"
-		phase = selfUpdatePhaseBuild
-	case name == "go" && len(args) > 0 && args[0] == "vet":
-		percent, operation = 70, "vetting fak candidate"
-		phase = selfUpdatePhaseVet
-	case len(args) >= 1 && args[0] == "version":
-		percent, operation = 78, "smoke-verifying fak candidate"
-		phase = selfUpdatePhaseSmoke
+func selfUpdateGateRunner(runner selfinstall.Runner) selfinstall.Runner {
+	return func(ctx context.Context, dir, name string, args ...string) (string, bool) {
+		percent := 0
+		operation := ""
+		phase := selfUpdatePhase("")
+		switch {
+		case name == "go" && len(args) > 0 && args[0] == "build":
+			percent, operation = 55, "building fak candidate"
+			phase = selfUpdatePhaseBuild
+		case name == "go" && len(args) > 0 && args[0] == "vet":
+			percent, operation = 70, "vetting fak candidate"
+			phase = selfUpdatePhaseVet
+		case len(args) >= 1 && args[0] == "version":
+			percent, operation = 78, "smoke-verifying fak candidate"
+			phase = selfUpdatePhaseSmoke
+		}
+		if percent == 0 {
+			return runner(ctx, dir, name, args...)
+		}
+		startSelfUpdatePhase(phase)
+		stopHeartbeat := startSelfUpdateHeartbeat(percent, operation)
+		out, ok := runner(ctx, dir, name, args...)
+		stopHeartbeat()
+		return out, ok
 	}
-	if percent == 0 {
-		return selfinstall.RealRunner(ctx, dir, name, args...)
-	}
-	startSelfUpdatePhase(phase)
-	stopHeartbeat := startSelfUpdateHeartbeat(percent, operation)
-	out, ok := selfinstall.RealRunner(ctx, dir, name, args...)
-	stopHeartbeat()
-	return out, ok
 }
 
 // selfUpdateOutcome is the closed vocabulary of self-update tick outcomes.
@@ -456,6 +458,7 @@ type selfUpdateReceipt struct {
 	RollbackErrors  []string                  `json:"rollback_errors"`
 	RestartRequired bool                      `json:"restart_required"`
 	NextCommand     string                    `json:"next_command"`
+	Detail          string                    `json:"detail,omitempty"`
 	Handoff         *selfUpdateHandoffReceipt `json:"handoff,omitempty"`
 	TotalMS         int64                     `json:"total_ms"`
 	PhaseMS         selfUpdatePhaseMS         `json:"phase_ms"`
@@ -768,6 +771,12 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 	switch cause {
 	case outcomeInstalled:
 		status = "updated"
+	case outcomeGateFailed:
+		status, nextCommand = "gate_failed", "fak self-update"
+	case outcomePrepareFailed:
+		status, nextCommand = "prepare_failed", "fak self-update"
+	case outcomePinSkew:
+		status, nextCommand = "pin_skew", "fak self-update --check"
 	case outcomeRolledBack:
 		status, rollbackStatus, nextCommand = "rolled_back", "succeeded", "fak self-update"
 	case outcomeRollbackFailed:
@@ -804,7 +813,7 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
 		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
-		TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
+		Detail: strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
 	}
 }
 

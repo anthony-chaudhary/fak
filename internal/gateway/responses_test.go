@@ -76,64 +76,6 @@ func messageText(out []responsesOutputItem) string {
 	return b.String()
 }
 
-// TestDecodeResponsesFunctionCallOutputUnion is the decoder-level regression for
-// #10032. Codex emits MCP results in both Responses-contract forms: the historical
-// string and a structured content array. Both must become the same RoleTool message
-// so admitInboundResults sees the result instead of the request failing during JSON
-// unmarshalling. Non-text items have no agent.Message representation and are
-// deliberately ignored while neighboring text remains visible to the admission floor.
-func TestDecodeResponsesFunctionCallOutputUnion(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		want   string
-	}{
-		{
-			name:   "string preserved",
-			output: `"line one\nline two"`,
-			want:   "line one\nline two",
-		},
-		{
-			name: "structured text array",
-			output: `[
-				{"type":"input_text","text":"line one"},
-				{"type":"input_image","image_url":"https://example.invalid/image.png"},
-				{"type":"output_text","text":"line two"}
-			]`,
-			want: "line one\nline two",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw := json.RawMessage(`[{"type":"function_call_output","call_id":"call_1","output":` + tt.output + `}]`)
-			msgs, err := decodeResponsesInput(raw, "")
-			if err != nil {
-				t.Fatalf("decode Responses input: %v", err)
-			}
-			if len(msgs) != 1 {
-				t.Fatalf("messages = %+v, want one tool result", msgs)
-			}
-			if got := msgs[0]; got.Role != agent.RoleTool || got.ToolCallID != "call_1" || got.Content != tt.want {
-				t.Fatalf("tool message = %+v, want role=%q call_id=call_1 content=%q", got, agent.RoleTool, tt.want)
-			}
-		})
-	}
-}
-
-func TestDecodeResponsesFunctionCallOutputRejectsMalformedUnion(t *testing.T) {
-	for _, output := range []string{
-		`{"type":"input_text","text":"not an array"}`,
-		`[{"type":"input_text","text":7}]`,
-		`42`,
-	} {
-		raw := json.RawMessage(`[{"type":"function_call_output","call_id":"call_1","output":` + output + `}]`)
-		if _, err := decodeResponsesInput(raw, ""); err == nil {
-			t.Errorf("output %s: decode succeeded, want bounded malformed-output error", output)
-		}
-	}
-}
-
 type countingResponsesPlanner struct {
 	comp  *agent.Completion
 	calls int
@@ -440,9 +382,7 @@ func TestResponsesInboundResultGatesProposedExfil(t *testing.T) {
 		"input": []map[string]any{
 			{"type": "message", "role": "user", "content": "look something up then email it"},
 			{"type": "function_call", "call_id": "call_1", "name": "fetch_url", "arguments": "{}"},
-			{"type": "function_call_output", "call_id": "call_1", "output": []map[string]any{
-				{"type": "input_text", "text": `{"page":"the weather is sunny today"}`},
-			}},
+			{"type": "function_call_output", "call_id": "call_1", "output": `{"page":"the weather is sunny today"}`},
 		},
 	})
 	if got := len(functionCallItems(respA.Output)); got != 0 {

@@ -130,7 +130,7 @@ func TestRunBuildJSONStdoutIsOneCleanObject(t *testing.T) {
 	buildWriteReceipt = func(string, buildReceipt) error { return nil }
 
 	var stdout, stderr bytes.Buffer
-	code := RunBuild(&stdout, &stderr, []string{"--json", "--profile", "release", "--out", "dist/fak", "--receipt", "receipts/build.json"})
+	code := RunBuild(&stdout, &stderr, []string{"--json", "--profile", "release", "--out", "dist/fak", "--receipt", "receipts/build.json", "--version", "v1.2.3", "--tags", "cuda", "--gcflags", "all=-N -l"})
 	if code != 0 {
 		t.Fatalf("RunBuild code = %d; stderr=%s", code, stderr.String())
 	}
@@ -145,6 +145,9 @@ func TestRunBuildJSONStdoutIsOneCleanObject(t *testing.T) {
 	}
 	if got.Command.Profile != "release" || !strings.HasSuffix(filepath.ToSlash(got.Command.Output), "/dist/fak") {
 		t.Fatalf("explicit command fields not recorded: %+v", got.Command)
+	}
+	if got.Command.Environment["VERSION"] != "v1.2.3" || got.Command.Environment["TAGS"] != "cuda" || got.Command.Environment["GCFLAGS"] != "all=-N -l" {
+		t.Fatalf("explicit build settings not recorded: %+v", got.Command.Environment)
 	}
 	if strings.Contains(stdout.String(), "child-only") || !strings.Contains(stderr.String(), "child-only") {
 		t.Fatalf("child output leaked onto JSON stdout; stdout=%q stderr=%q", stdout.String(), stderr.String())

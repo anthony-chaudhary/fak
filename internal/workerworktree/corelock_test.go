@@ -31,17 +31,56 @@ const kernelPatch = "diff --git a/internal/adjudicator/decide.go b/internal/adju
 const leafPatch = "diff --git a/internal/tools/a.go b/internal/tools/a.go\n" +
 	"--- a/internal/tools/a.go\n+++ b/internal/tools/a.go\n@@\n-old\n+new\n"
 
-// coreLockFake stubs one land: the captured diff, then the --name-only pathset
-// Land reads once, then the worktree-tip message, then a green apply+commit. A
+// coreLockFake stubs one land: declared-path admission, the captured patch, then
+// the whole-diff pathset, followed by the worktree-tip message and green
+// apply+commit. A
 // land that reaches apply/commit therefore SUCCEEDS — so a refusal in these tests
 // can only come from the gate under test.
 func coreLockFake(patch, nameOnly, tipMsg string) *fakeGit {
-	return newFakeGit().
-		replyOnce("diff", 0, patch).
-		replyOnce("diff", 0, nameOnly).
+	return replyLandDiff(newFakeGit(), nameOnly, patch, nameOnly).
 		reply("log", 0, tipMsg).
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc1234] landed")
+}
+
+// installLiveDisambiguationFixture gives the tiny live repositories a complete,
+// self-consistent concept corpus. The scorecard emits the same generated README
+// and reverse-index bytes that are tracked in the repository, while an empty
+// family catalog truthfully reports no ambiguity or coverage debt. Live land
+// tests must satisfy the production post-apply gate, never stub or disable it.
+func installLiveDisambiguationFixture(t *testing.T, repo string) {
+	t.Helper()
+	files := map[string]string{
+		"docs/concept-disambiguation-scorecard/README.md":        "# Synthetic concept scorecard\n\nNo concepts are declared in this fixture.\n",
+		"docs/concept-disambiguation-scorecard/INDEX.md":         "# Synthetic concept index\n\nNo concept names are declared in this fixture.\n",
+		"docs/fak/concept-glossary.md":                           "# Synthetic concept glossary\n\nThis live-land fixture declares no concepts.\n",
+		"tools/concept_disambiguation_scorecard.data/_meta.json": "{\"families\":[]}\n",
+		"tools/concept_disambiguation_scorecard.py": `import argparse
+import json
+import os
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--workspace")
+parser.add_argument("--json", action="store_true")
+parser.add_argument("--markdown-dir", required=True)
+args = parser.parse_args()
+os.makedirs(args.markdown_dir, exist_ok=True)
+with open(os.path.join(args.markdown_dir, "README.md"), "w", encoding="utf-8") as handle:
+    handle.write("# Synthetic concept scorecard\n\nNo concepts are declared in this fixture.\n")
+with open(os.path.join(args.markdown_dir, "INDEX.md"), "w", encoding="utf-8") as handle:
+    handle.write("# Synthetic concept index\n\nNo concept names are declared in this fixture.\n")
+print(json.dumps({"ok": True, "reason": "", "corpus": {"coverage_debt": 0, "clarity_defects": 0, "coverage": {"coverage_pct": 100, "per_family": []}}}))
+`,
+	}
+	for rel, body := range files {
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func landTouchedTrunk(g *fakeGit) bool {
@@ -242,7 +281,8 @@ func TestLiveCoreLockRefusesUnwitnessedKernelLand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(kernel, "decide.go"), []byte("package adjudicator\n\nfunc Decide() bool { return false }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git("add", "internal/adjudicator/decide.go")
+	installLiveDisambiguationFixture(t, repo)
+	git("add", ".")
 	git("commit", "-q", "-m", "base")
 
 	base := TrunkHeadSHA(repo, nil)
@@ -334,7 +374,8 @@ func TestLiveCoreLockOrdinaryLeafLandsWithoutWitness(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(leaf, "a.go"), []byte("package tools\n\nfunc A() int { return 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git("add", "internal/tools/a.go")
+	installLiveDisambiguationFixture(t, repo)
+	git("add", ".")
 	git("commit", "-q", "-m", "base")
 
 	base := TrunkHeadSHA(repo, nil)

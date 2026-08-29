@@ -77,6 +77,35 @@ func TestMCPCapabilitiesNegativeLimitInvalidParams(t *testing.T) {
 	}
 }
 
+func TestMCPCapabilitiesExposesNativePerformanceStages(t *testing.T) {
+	srv := newTestServer(t)
+	root := writeMCPIndexRepo(t)
+	tests := []struct {
+		query   string
+		detail  string
+		command []string
+	}{
+		{"serve native model", "docs/model-engine-env.md", []string{"fak", "serve", "--gguf", "<model.gguf>", "--metal"}},
+		{"benchmark native inference", "docs/model-engine-env.md", []string{"fak", "benchmarks", "describe", "modelbench"}},
+		{"evaluate model quality", "docs/quality/output-quality-regression-runbook.md", []string{"fak", "quality", "run", "--json"}},
+		{"profile native bottleneck", "docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md", []string{"fak", "native-performance", "--profile-next", "profile.json"}},
+		{"performance receipt", "docs/benchmarks/NATIVE-PERFORMANCE-REGRESSION-GATE.md", []string{"fak", "native-performance", "--gate", "gate-request.json"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			resp := callMCPTool[selfquery.CapabilitiesResponse](t, srv, "fak_capabilities", map[string]any{
+				"root": root, "query": tc.query, "limit": 1,
+			})
+			if len(resp.Cards) != 1 || resp.Cards[0].DetailRef != tc.detail {
+				t.Fatalf("fak_capabilities(%q) = %#v, want detail %q first", tc.query, resp.Cards, tc.detail)
+			}
+			if !reflect.DeepEqual(resp.Cards[0].Request.Command, tc.command) {
+				t.Fatalf("fak_capabilities(%q) command = %#v, want %#v", tc.query, resp.Cards[0].Request.Command, tc.command)
+			}
+		})
+	}
+}
+
 // A successful capabilities lookup is stable and side-effect-free. Once the
 // MCP boundary has returned it, identical immediate retries should reuse that
 // result instead of reopening and rebuilding the catalog each time. The cache's

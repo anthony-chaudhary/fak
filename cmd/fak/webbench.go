@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,10 +84,15 @@ usage:
 
   fak webbench serving --dataset FILE [--tracks ours,sglang,vllm,fak-fronts-fleet]
         [--endpoints track=http://host/v1,...] [--metrics track=http://host/metrics,...]
-        [--model MODEL] [--agents 100] [--concurrency 16] [--out FILE]
+        [--model MODEL] [--agents 100] [--concurrency 16]
+        [--concurrencies 1,2,4,8 --batch-capacities track=N,...]
+        [--engines track=ENGINE,... --engine-receipts track=sha256:DIGEST,...]
+        [--capacity-sources track=SOURCE,...] [--out FILE]
         Client-measured serving parity harness: same workload, same JSON schema,
         measured TTFT/ITL/TPOT/latency/throughput/goodput where an endpoint is
-        configured; missing endpoints are emitted as "not_measured".
+        configured; missing endpoints are emitted as "not_measured". Supplying
+        --concurrencies emits one capacity-valid sweep receipt and derives peak
+        plus an optional p99-SLA knee without changing the single-point schema.
 
   fak webbench parity-gate --claim-file FILE --artifact FILE
         Reject a "parity or better" serving claim unless the artifact contains
@@ -345,9 +351,16 @@ func cmdWebbenchServing(argv []string) {
 	machine := fs.String("machine", "", "machine id for artifact path (default: hostname)")
 	agents := fs.Int("agents", 100, "number of agent requests to replay; repeats dataset tasks if needed")
 	concurrency := fs.Int("concurrency", 16, "parallel request workers")
+	concurrenciesArg := fs.String("concurrencies", "", "comma-separated concurrency points; when set, emit a capacity-valid serving sweep receipt")
+	batchCapacitiesArg := fs.String("batch-capacities", "", "comma-separated track=positive-capacity declarations required for sweep peak/knee claims")
+	capacitySourcesArg := fs.String("capacity-sources", "", "comma-separated track=provenance labels for the declared batch capacities")
+	enginesArg := fs.String("engines", "", "comma-separated track=engine identities used by a serving sweep")
+	engineReceiptsArg := fs.String("engine-receipts", "", "comma-separated track=engine-receipt digests used by a serving sweep")
 	limit := fs.Int("limit", 0, "cap source dataset tasks before agent replay (0 = all)")
 	maxOutput := fs.Int("max-output-tokens", 64, "max output tokens per request")
 	sloMS := fs.Int("slo-ms", 2000, "goodput SLO threshold in milliseconds")
+	ttftP99BudgetMS := fs.Int("ttft-p99-budget-ms", 0, "optional sweep TTFT p99 budget; 0 emits no SLA-knee claim for TTFT")
+	itlP99BudgetMS := fs.Int("itl-p99-budget-ms", 0, "optional sweep ITL p99 budget; 0 emits no SLA-knee claim for ITL")
 	timeoutSec := fs.Int("timeout-sec", 60, "per-request timeout in seconds")
 	apiKeyEnv := fs.String("api-key-env", "", "optional env var containing a bearer token for all endpoints")
 	replicas := fs.Int("replicas", 1, "replica count described by the fak-fronts-fleet plan script")
@@ -402,6 +415,50 @@ func cmdWebbenchServing(argv []string) {
 			APIKeyEnv:  *apiKeyEnv,
 			Replicas:   *replicas,
 		})
+	}
+	if strings.TrimSpace(*concurrenciesArg) != "" {
+		concurrencies, parseErr := parsePositiveIntList(*concurrenciesArg)
+		must(parseErr)
+		batchCapacities, parseErr := parseServingTrackIntMap(*batchCapacitiesArg)
+		must(parseErr)
+		capacitySources, parseErr := parseServingTrackMap(*capacitySourcesArg)
+		must(parseErr)
+		engines, parseErr := parseServingTrackMap(*enginesArg)
+		must(parseErr)
+		engineReceipts, parseErr := parseServingTrackMap(*engineReceiptsArg)
+		must(parseErr)
+		contracts := make(map[webbench.ServingTrack]webbench.ServingSweepTrackContract, len(tracks))
+		for _, tr := range tracks {
+			contracts[tr] = webbench.ServingSweepTrackContract{
+				Track:               tr,
+				Model:               *model,
+				Engine:              engines[tr],
+				EngineReceiptDigest: engineReceipts[tr],
+				BatchCapacity:       batchCapacities[tr],
+				CapacitySource:      capacitySources[tr],
+			}
+		}
+		rep, runErr := webbench.RunServingSweep(ctx(), webbench.ServingSweepConfig{
+			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+			MachineID:     machineID,
+			Model:         *model,
+			Tracks:        cfgTracks,
+			Contracts:     contracts,
+			Workload:      workload,
+			Concurrencies: concurrencies,
+			GoodputSLO:    time.Duration(*sloMS) * time.Millisecond,
+			TTFTP99Budget: time.Duration(*ttftP99BudgetMS) * time.Millisecond,
+			ITLP99Budget:  time.Duration(*itlP99BudgetMS) * time.Millisecond,
+			Timeout:       time.Duration(*timeoutSec) * time.Second,
+		})
+		must(runErr)
+		outPath := *out
+		if outPath == "" {
+			outPath = webbench.DefaultServingSweepArtifactPath(*outDir, machineID, rep.GeneratedAt, tracks)
+		}
+		must(webbench.WriteServingSweepReport(rep, outPath))
+		printServingSweepSummary(os.Stderr, rep, outPath)
+		return
 	}
 
 	rep, err := webbench.RunServingParity(ctx(), webbench.ServingParityConfig{
@@ -476,6 +533,52 @@ func parseServingTrackMap(arg string) (map[webbench.ServingTrack]string, error) 
 	return out, nil
 }
 
+func parseServingTrackIntMap(arg string) (map[webbench.ServingTrack]int, error) {
+	out := make(map[webbench.ServingTrack]int)
+	if strings.TrimSpace(arg) == "" {
+		return out, nil
+	}
+	for _, part := range strings.Split(arg, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, raw, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(raw) == "" {
+			return nil, fmt.Errorf("track integer map entry %q must be track=positive-integer", part)
+		}
+		track, err := webbench.ParseServingTrack(key)
+		if err != nil {
+			return nil, err
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || value <= 0 {
+			return nil, fmt.Errorf("track integer map entry %q must have a positive integer value", part)
+		}
+		out[track] = value
+	}
+	return out, nil
+}
+
+func parsePositiveIntList(arg string) ([]int, error) {
+	var out []int
+	for _, part := range strings.Split(arg, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil || value <= 0 {
+			return nil, fmt.Errorf("concurrency %q must be a positive integer", part)
+		}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("at least one concurrency value is required")
+	}
+	return out, nil
+}
+
 func printServingSummary(w *os.File, rep *webbench.ServingParityReport, out string) {
 	fmt.Fprintf(w, "\n== fak webbench serving ==\n")
 	fmt.Fprintf(w, "artifact      : %s\n", out)
@@ -497,6 +600,27 @@ func printServingSummary(w *os.File, rep *webbench.ServingParityReport, out stri
 			fmt.Fprintf(w, " prefix-hit=%.3f", *tr.Stats.PrefixCacheHitRate.Value)
 		} else {
 			fmt.Fprintf(w, " prefix-hit=%s", tr.Stats.PrefixCacheHitRate.Status)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func printServingSweepSummary(w *os.File, rep *webbench.ServingSweepReport, out string) {
+	fmt.Fprintf(w, "\n== fak webbench serving sweep ==\n")
+	fmt.Fprintf(w, "artifact      : %s\n", out)
+	fmt.Fprintf(w, "workload      : %s  requests: %d  points: %v\n", rep.Workload.Digest, rep.Workload.Requests, rep.Workload.Concurrencies)
+	for _, track := range rep.Tracks {
+		fmt.Fprintf(w, "  %-16s %-12s valid=%d", track.Track, track.Status, track.ValidPoints)
+		if track.Peak != nil {
+			fmt.Fprintf(w, " peak=c%d/%.3f tok/s", track.Peak.Concurrency, track.Peak.ThroughputTokens)
+		}
+		if track.SLAKnee != nil {
+			fmt.Fprintf(w, " sla-knee=c%d/%.3f tok/s", track.SLAKnee.Concurrency, track.SLAKnee.ThroughputTokens)
+		} else {
+			fmt.Fprintf(w, " sla-knee=%s", track.SLAStatus)
+		}
+		if track.Reason != "" {
+			fmt.Fprintf(w, " %s", track.Reason)
 		}
 		fmt.Fprintln(w)
 	}

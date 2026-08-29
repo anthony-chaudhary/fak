@@ -72,6 +72,18 @@ func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestCollectorDefaultsUseTimeoutBoundClients(t *testing.T) {
+	fromConstructor := NewCollector(nil)
+	if got := fromConstructor.Client.Timeout; got != defaultHTTPTimeout || got <= 0 {
+		t.Fatalf("NewCollector default timeout = %s, want %s", got, defaultHTTPTimeout)
+	}
+	var zero Collector
+	zero.defaults()
+	if got := zero.Client.Timeout; got != defaultHTTPTimeout || got <= 0 {
+		t.Fatalf("zero Collector default timeout = %s, want %s", got, defaultHTTPTimeout)
+	}
+}
+
 func TestCapturePinsDefaultBranchRevisionAtInclusiveCutoff(t *testing.T) {
 	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	const historicalRevision = "revision-at-cutoff"

@@ -92,6 +92,9 @@ func Render(v View) string {
 		title = "Update repaired"
 		detail = "The new local asset failed verification. The previous working version was restored."
 		action = "Retry update or keep current"
+	case StateReady:
+		// The ready copy is the initialized default above; spelling the case
+		// keeps future lifecycle states from silently inheriting it.
 	}
 	return fmt.Sprintf("%s\n%s\nMode: %s\nAction: %s\n", title, detail, labelMode(v.Mode), action)
 }

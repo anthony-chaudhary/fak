@@ -56,6 +56,12 @@ type buildCommand struct {
 	Output      string            `json:"output"`
 }
 
+type buildSettings struct {
+	Version string
+	Tags    string
+	GCFlags string
+}
+
 type buildArtifact struct {
 	Path      string `json:"path"`
 	SizeBytes int64  `json:"size_bytes"`
@@ -116,6 +122,9 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	profile := fs.String("profile", "dev", "scripts/build.sh profile (release|dev|race)")
 	outFlag := fs.String("out", defaultBuildOutput(), "output binary path (default: .fak/bin/fak[.exe]; relative paths are resolved from the repository root)")
 	receiptFlag := fs.String("receipt", defaultBuildReceiptPath, "durable JSON receipt path (relative paths are resolved from the repository root)")
+	versionFlag := fs.String("version", "", "version stamped into the binary (default: repository VERSION file)")
+	tagsFlag := fs.String("tags", "", "space-separated Go build tags")
+	gcflagsFlag := fs.String("gcflags", "", "extra Go compiler flags for dev or race profiles")
 	asJSON := fs.Bool("json", false, "write the receipt as one JSON object to stdout; progress and child output stay on stderr")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -141,12 +150,13 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	overallStart := buildNow()
+	settings := buildSettings{Version: *versionFlag, Tags: *tagsFlag, GCFlags: *gcflagsFlag}
 	receipt := buildReceipt{
 		Schema:      buildReceiptSchema,
 		Outcome:     "running",
 		StartedAt:   overallStart.UTC().Format(time.RFC3339Nano),
 		ReceiptPath: receiptPath,
-		Command:     canonicalBuildCommand(root, output, *profile, buildToolchain{}),
+		Command:     canonicalBuildCommand(root, output, *profile, buildToolchain{}, settings),
 		CacheState:  "inherited_uncontrolled",
 	}
 
@@ -164,7 +174,7 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	receipt.Source = provenance.Source
 	receipt.Toolchain = provenance.Toolchain
 	receipt.PackageCount = provenance.PackageCount
-	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain)
+	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain, settings)
 
 	phaseStart = buildNow()
 	err = buildPrepareOutput(output)
@@ -235,9 +245,13 @@ func rootedBuildPath(root, path string) string {
 }
 
 func defaultBuildOutput() string {
-	goos := strings.TrimSpace(os.Getenv("GOOS"))
-	if goos == "" {
-		goos = runtime.GOOS
+	// GOOS is Go toolchain configuration, so ask the toolchain for its effective
+	// target instead of creating a second implicit environment-config surface.
+	goos := runtime.GOOS
+	if raw, err := buildCaptureOutput(repoRoot(), "go", "env", "GOOS"); err == nil {
+		if configured := strings.TrimSpace(string(raw)); configured != "" {
+			goos = configured
+		}
 	}
 	name := "fak"
 	if goos == "windows" {
@@ -335,8 +349,8 @@ func formatBuildDuration(ms int64) string {
 	return (time.Duration(ms) * time.Millisecond).String()
 }
 
-func canonicalBuildCommand(root, output, profile string, toolchain buildToolchain) buildCommand {
-	version := os.Getenv("VERSION")
+func canonicalBuildCommand(root, output, profile string, toolchain buildToolchain, settings buildSettings) buildCommand {
+	version := settings.Version
 	if version == "" {
 		if raw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
 			version = strings.TrimSpace(string(raw))
@@ -351,8 +365,8 @@ func canonicalBuildCommand(root, output, profile string, toolchain buildToolchai
 			"OUT":         output,
 			"PROFILE":     profile,
 			"VERSION":     version,
-			"TAGS":        os.Getenv("TAGS"),
-			"GCFLAGS":     os.Getenv("GCFLAGS"),
+			"TAGS":        settings.Tags,
+			"GCFLAGS":     settings.GCFlags,
 			"GOFLAGS":     toolchain.GoFlags,
 			"CGO_ENABLED": toolchain.CGOEnabled,
 			"GOTOOLCHAIN": toolchain.GoToolchain,

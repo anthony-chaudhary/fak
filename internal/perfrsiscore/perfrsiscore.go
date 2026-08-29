@@ -342,6 +342,45 @@ type DebtSummary struct {
 	Evidence           []DebtEvidence `json:"evidence"`
 }
 
+// InvocationOutcome is the observable disposition of one score invocation.
+// A refusal means input was unset or supplied evidence could not satisfy the
+// strict scorecard contract; an error means the evidence path could not be read.
+type InvocationOutcome string
+
+const (
+	OutcomeSuccess InvocationOutcome = "success"
+	OutcomeRefusal InvocationOutcome = "refusal"
+	OutcomeError   InvocationOutcome = "error"
+)
+
+// OutcomeCounts makes one invocation's disposition machine-queryable on the
+// existing report and automatic loop-turn receipt surfaces.
+type OutcomeCounts struct {
+	Success int `json:"success"`
+	Refusal int `json:"refusal"`
+	Error   int `json:"error"`
+}
+
+func (c *OutcomeCounts) observe(outcome InvocationOutcome) {
+	switch outcome {
+	case OutcomeSuccess:
+		c.Success++
+	case OutcomeRefusal:
+		c.Refusal++
+	case OutcomeError:
+		c.Error++
+	}
+}
+
+// Total returns the number of score invocations represented by the counts.
+func (c OutcomeCounts) Total() int { return c.Success + c.Refusal + c.Error }
+
+func oneOutcome(outcome InvocationOutcome) OutcomeCounts {
+	var counts OutcomeCounts
+	counts.observe(outcome)
+	return counts
+}
+
 type Report struct {
 	Schema             string         `json:"schema"`
 	Snapshot           string         `json:"snapshot"`
@@ -351,6 +390,7 @@ type Report struct {
 	UnknownDebt        int            `json:"unknown_debt"`
 	LoopHealth         *HealthSummary `json:"loop_health,omitempty"`
 	DebtSummary        *DebtSummary   `json:"debt_summary,omitempty"`
+	InvocationOutcomes OutcomeCounts  `json:"invocation_outcomes"`
 	Comparison         *Comparison    `json:"comparison,omitempty"`
 }
 
@@ -368,6 +408,7 @@ type LoopTurnReceipt struct {
 	PerformanceRSIDebt    *int           `json:"performance_rsi_debt,omitempty"`
 	DominantBottleneck    string         `json:"dominant_bottleneck,omitempty"`
 	UnavailableDiagnostic string         `json:"unavailable_diagnostic,omitempty"`
+	InvocationOutcomes    OutcomeCounts  `json:"invocation_outcomes"`
 }
 
 var dimensionIDs = []string{
@@ -392,17 +433,24 @@ func ScoreLoopTurnFromEnvironment() LoopTurnReceipt {
 func ScoreLoopTurn(input string) LoopTurnReceipt {
 	input = strings.TrimSpace(input)
 	receipt := LoopTurnReceipt{
-		Schema: LoopTurnSchema,
-		Status: LoopTurnUnavailable,
-		Reason: "SCORE_INPUT_UNAVAILABLE",
-		Input:  input,
+		Schema:             LoopTurnSchema,
+		Status:             LoopTurnUnavailable,
+		Reason:             "SCORE_INPUT_UNAVAILABLE",
+		Input:              input,
+		InvocationOutcomes: oneOutcome(OutcomeRefusal),
 	}
 	if input == "" {
 		receipt.UnavailableDiagnostic = LoopTurnInputEnv + " is not set"
 		return receipt
 	}
 
-	evidence, err := Load(input)
+	b, err := os.ReadFile(input)
+	if err != nil {
+		receipt.InvocationOutcomes = oneOutcome(OutcomeError)
+		receipt.UnavailableDiagnostic = err.Error()
+		return receipt
+	}
+	evidence, err := Decode(bytes.NewReader(b))
 	if err != nil {
 		receipt.UnavailableDiagnostic = err.Error()
 		return receipt
@@ -415,6 +463,7 @@ func ScoreLoopTurn(input string) LoopTurnReceipt {
 	receipt.LoopHealth = &health
 	receipt.PerformanceRSIDebt = intPointer(debt.PerformanceRSIDebt)
 	receipt.DominantBottleneck = report.DominantBottleneck
+	receipt.InvocationOutcomes = report.InvocationOutcomes
 	return receipt
 }
 
@@ -1248,7 +1297,12 @@ func coverageInUnit(fraction float64, unit string) (float64, error) {
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func Score(e Evidence) Report {
-	r := Report{Schema: ReportSchema, Snapshot: e.Snapshot, TargetMultiplier: e.TargetMultiplier}
+	r := Report{
+		Schema:             ReportSchema,
+		Snapshot:           e.Snapshot,
+		TargetMultiplier:   e.TargetMultiplier,
+		InvocationOutcomes: oneOutcome(OutcomeSuccess),
+	}
 	worst := math.Inf(1)
 	for _, d := range e.Dimensions {
 		x := Result{ID: d.ID, Source: d.Source, EvidenceKind: d.EvidenceKind, Engine: d.Engine, Current: d.Current, Target: d.Target, Unit: d.Unit, NextAction: d.NextAction, Status: "UNKNOWN"}
@@ -1370,6 +1424,7 @@ func RenderHuman(r Report) string {
 	health, debt := reportHealth(r)
 	fmt.Fprintf(&b, "performance RSI: %s | target %.0fx | health %s %.1f/100 | performance RSI debt %d\n", r.Snapshot, r.TargetMultiplier, health.Grade, health.Score, debt.PerformanceRSIDebt)
 	fmt.Fprintf(&b, "loop health: clean=%t | measured %d/%d | BEHIND %d | UNKNOWN %d\n", health.Clean, debt.DimensionsMeasured, debt.DimensionsTotal, debt.Behind, debt.Unknown)
+	fmt.Fprintf(&b, "invocation outcomes: success=%d refusal=%d error=%d\n", r.InvocationOutcomes.Success, r.InvocationOutcomes.Refusal, r.InvocationOutcomes.Error)
 	fmt.Fprintf(&b, "grade scope: %s\n", health.Interpretation)
 	fmt.Fprintf(&b, "dominant bottleneck: %s\n", r.DominantBottleneck)
 	for _, d := range r.Dimensions {
@@ -1384,7 +1439,7 @@ func RenderHuman(r Report) string {
 func RenderMarkdown(r Report) string {
 	var b strings.Builder
 	health, debt := reportHealth(r)
-	fmt.Fprintf(&b, "# Performance RSI — %s\n\n- Explicit target: **%.0fx** (unsaturated)\n- Loop-health grade: **%s** (%.1f/100; clean: **%t**)\n- Performance RSI debt: **%d** (%d BEHIND, %d UNKNOWN; %d/%d measured)\n- Grade scope: %s\n- Dominant bottleneck: `%s`\n\n", r.Snapshot, r.TargetMultiplier, health.Grade, health.Score, health.Clean, debt.PerformanceRSIDebt, debt.Behind, debt.Unknown, debt.DimensionsMeasured, debt.DimensionsTotal, health.Interpretation, r.DominantBottleneck)
+	fmt.Fprintf(&b, "# Performance RSI — %s\n\n- Explicit target: **%.0fx** (unsaturated)\n- Loop-health grade: **%s** (%.1f/100; clean: **%t**)\n- Performance RSI debt: **%d** (%d BEHIND, %d UNKNOWN; %d/%d measured)\n- invocation outcomes: success=%d refusal=%d error=%d\n- Grade scope: %s\n- Dominant bottleneck: `%s`\n\n", r.Snapshot, r.TargetMultiplier, health.Grade, health.Score, health.Clean, debt.PerformanceRSIDebt, debt.Behind, debt.Unknown, debt.DimensionsMeasured, debt.DimensionsTotal, r.InvocationOutcomes.Success, r.InvocationOutcomes.Refusal, r.InvocationOutcomes.Error, health.Interpretation, r.DominantBottleneck)
 	b.WriteString("| Dimension | Status | Current | Target | Normalized ratio | Source | Next action |\n|---|---:|---:|---:|---:|---|---|\n")
 	for _, d := range r.Dimensions {
 		fmt.Fprintf(&b, "| %s | %s | %s %s | %s %s | %s | %s | %s |\n", d.ID, d.Status, number(d.Current), d.Unit, number(d.Target), d.Unit, number(d.NormalizedRatio), d.Source, d.NextAction)

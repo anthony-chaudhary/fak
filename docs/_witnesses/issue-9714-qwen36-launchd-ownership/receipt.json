@@ -1,0 +1,63 @@
+{
+  "schema": "fak.issue-9714-qwen36-launchd-ownership-hold/1",
+  "issue": 9714,
+  "observed_at": "2026-08-29T17:45:36Z",
+  "verdict": "HOLD",
+  "reason": "alternate_launchd_supervisor_owns_incumbent",
+  "source": {
+    "revision": "d9ac41475c0c52e9e32ec3a0122ac0d2e5402aa1"
+  },
+  "scope": {
+    "ownership_only": true,
+    "qwen38_artifact_touched": false,
+    "qwen38_model_arms": 0
+  },
+  "expected_owner": {
+    "service_label": "com.fak.qwen36-model",
+    "launchd_job_present": false,
+    "launchagent_plist_present": false,
+    "listener_pid_bound": false
+  },
+  "incumbent": {
+    "listener_count": 1,
+    "command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "command_matches_preserved_identity": true,
+    "owner_label_sha256": "b567298df044cecdac3cf921d7cb971e4665db7b5407fb634647a910e3abbdb7",
+    "owner_matches_expected": false,
+    "health_status": 200,
+    "models_status": 200,
+    "model_alias": "qwen3.6-27b"
+  },
+  "stability": {
+    "sample_count": 91,
+    "first_observed_at": "2026-08-29T17:43:47Z",
+    "last_observed_at": "2026-08-29T17:45:36Z",
+    "elapsed_seconds": 109,
+    "listener_count_stable": true,
+    "command_sha256_stable": true,
+    "owner_label_sha256_stable": true,
+    "health_200_continuous": true,
+    "models_200_continuous": true,
+    "model_alias_stable": true,
+    "classification": "preexisting_incumbent_stability_not_post_restore_credit"
+  },
+  "operations": {
+    "gpu_lease_acquired": false,
+    "signals_sent": 0,
+    "bootout_attempts": 0,
+    "bootstrap_attempts": 0,
+    "service_configuration_mutations": 0,
+    "unmatched_signals": 0,
+    "pid_reuse_signals": 0
+  },
+  "external_state": {
+    "mutated": false,
+    "restoration_required": false,
+    "incumbent_healthy_at_exit": true,
+    "expected_job_absent_at_exit": true
+  },
+  "done_condition": {
+    "complete": false,
+    "missing": "explicit authority and a reviewed service definition for migrating the proven alternate launchd owner"
+  }
+}

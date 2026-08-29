@@ -101,6 +101,7 @@ func assertState(t *testing.T, evaluator *Evaluator, now time.Time, baseline, ca
 func observation(at time.Time, envelope Envelope, scale float64) Observation {
 	return Observation{
 		At: at, Envelope: envelope, Receipts: 100, Expected: 100,
+		//enumlint:exempt EvidenceFresh and ReceiptCoverage are derived by Observe from At and receipt counts; callers must not supply them in Values.
 		Values: map[Objective]Value{
 			TTFT:            {Available: true, Value: 1.0 * scale},
 			TPOT:            {Available: true, Value: 0.03 * scale},

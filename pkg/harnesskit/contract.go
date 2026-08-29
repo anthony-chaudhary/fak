@@ -21,9 +21,36 @@ type Contract struct {
 	Hardware      HardwareContract               `json:"hardware"`
 }
 
+// CompatibilityContract publishes the stable machine formats used at upgrade
+// and activation boundaries.
+type CompatibilityContract struct {
+	ReportSchema string                `json:"report_schema"`
+	DiffSchema   string                `json:"diff_schema"`
+	PlanSchema   string                `json:"plan_schema"`
+	Statuses     []CapabilityStatus    `json:"statuses"`
+	Reasons      []CompatibilityReason `json:"reasons"`
+	Absence      string                `json:"absence"`
+	Planning     string                `json:"planning"`
+}
+
 // SupportedPlanes returns a fresh copy of all public extension planes.
 func SupportedPlanes() []ExtensionPlane {
 	return []ExtensionPlane{PlaneTools, PlaneModels, PlaneContext, PlaneInstructions, PlaneTransports, PlaneEvents, PlaneHardware}
+}
+
+// PublicCompatibilityContract returns the machine formats and closed
+// vocabularies for negotiation and read-only upgrade planning. It is separate
+// from Contract so adding this surface does not break unkeyed v1alpha1 literals.
+func PublicCompatibilityContract() CompatibilityContract {
+	return CompatibilityContract{
+		ReportSchema: CompatibilityReportSchema,
+		DiffSchema:   ContractDiffSchema,
+		PlanSchema:   UpgradePlanSchema,
+		Statuses:     []CapabilityStatus{StatusStable, StatusExperimental, StatusDeprecated},
+		Reasons:      []CompatibilityReason{ReasonCompatible, ReasonContractMismatch, ReasonCapabilityAbsent, ReasonRevisionBelowMin, ReasonRevisionAboveMax, ReasonStatusMismatch, ReasonInvalidRequirement, ReasonInvalidOffer, ReasonDuplicateRequirement, ReasonDuplicateOffer, ReasonInvalidDeprecation},
+		Absence:      "unknown or absent capabilities are incompatible; version provenance is not proof",
+		Planning:     "upgrade planning is pure and never edits builder-owned code or configuration",
+	}
 }
 
 // PublicContract returns the normative machine-readable contract.

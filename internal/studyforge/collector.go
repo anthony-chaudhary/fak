@@ -21,6 +21,8 @@ type sourceSpec struct{ name, path string }
 // Its exact body digest remains in the page receipt so unrelated 410s stay closed.
 const discussionsDisabledPayload = `{"message":"Discussions are disabled for this repo","documentation_url":"https://docs.github.com/rest/repos/discussions#list-discussions-for-repository","status":"410"}`
 
+const defaultHTTPTimeout = 30 * time.Second
+
 var sourceSpecs = []sourceSpec{
 	{"issues", "issues?state=all&sort=created&direction=asc&per_page=100&page=1"},
 	{"pulls", "pulls?state=all&sort=created&direction=asc&per_page=100&page=1"},
@@ -33,7 +35,7 @@ var sourceSpecs = []sourceSpec{
 // NewCollector returns a REST-first collector with bounded transient retries.
 func NewCollector(client *http.Client) *Collector {
 	if client == nil {
-		client = http.DefaultClient
+		client = newDefaultHTTPClient()
 	}
 	return &Collector{Client: client, BaseURL: "https://api.github.com", MaxRetries: 2, Now: time.Now, RetryWait: waitContext}
 }
@@ -294,7 +296,7 @@ func escapeRepository(repository string) string {
 
 func (c *Collector) defaults() {
 	if c.Client == nil {
-		c.Client = http.DefaultClient
+		c.Client = newDefaultHTTPClient()
 	}
 	if c.BaseURL == "" {
 		c.BaseURL = "https://api.github.com"
@@ -308,6 +310,10 @@ func (c *Collector) defaults() {
 	if c.MaxRetries < 0 {
 		c.MaxRetries = 0
 	}
+}
+
+func newDefaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: defaultHTTPTimeout}
 }
 
 func (c *Collector) resolveRevision(ctx context.Context, owner, repo string, cutoff time.Time) (string, []APIReceipt, error) {

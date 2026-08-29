@@ -252,14 +252,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
 		var executed bool
 		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
-		if measurement != nil && !measurement.inferenceDisabled {
-			measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceReceipt()
-		}
 		if err != nil {
+			captureQwen35MetalForwardSequenceReceipt(p, s, measurement)
 			return
 		}
 		p.qwen35MetalGDNExecuted.Store(executed)
 	}
+	captureQwen35MetalForwardSequenceReceipt(p, s, measurement)
 	if qwen35MetalStateIdentityEnabled {
 		if err = finalizeAndCaptureQwen35MetalStateIdentity(s, measurement); err != nil {
 			return
@@ -421,6 +420,14 @@ type decodeLane struct {
 	stopped bool
 	done    bool
 	err     error
+}
+
+func captureQwen35MetalForwardSequenceReceipt(p *InKernelPlanner, s *model.Session, measurement *nativeInferenceMeasurement) {
+	if p == nil || s == nil || measurement == nil || measurement.inferenceDisabled || p.m == nil ||
+		p.backend != nil || !p.metal || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() {
+		return
+	}
+	measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceStatus()
 }
 
 func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {

@@ -32,6 +32,12 @@ func TestRichDashboardServerSurvivesPriorABIReset(t *testing.T) {
 	}
 }
 
+func TestRichDashboardProbeClientHasTimeout(t *testing.T) {
+	if got := richDashboardProbeClient.Timeout; got != richDashboardProbeTimeout || got <= 0 {
+		t.Fatalf("Grafana probe client timeout = %s, want %s", got, richDashboardProbeTimeout)
+	}
+}
+
 func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 	m := newRichDashboardManager(RichDashboardConfig{})
 	defer m.close()

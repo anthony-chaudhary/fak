@@ -255,23 +255,6 @@ def _render_rules(header: str, rules: list[tuple[str, str, str]]) -> str:
 def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
     """The `how to work it:` rules. Mirrors dispatchtick.WorkRules."""
     return [
-        ("top-five-thought-check",
-         "Before ANY repository edit, run `fak thought-check prepare --issue "
-         f"{n} --json` to inspect the versioned catalog and bound `.review_template`. "
-         "Copy it to a temporary `<review.json>` path OUTSIDE the repository; preserve "
-         "its schema, issue number, issue digest, catalog version, and auto-filled "
-         "`.issue_binding` exactly. Copy `.row_template` EXACTLY FIVE times "
-         "into `.review_template.rows`, select five distinct IDs from `.checks` that are "
-         f"specific to issue #{n}, and fill the reviewer version plus every row's "
-         "selection reason, assessment with "
-         "issue evidence or an explicit evidence gap, and required "
-         "action. Upsert the review with `fak thought-check upsert --issue "
-         f"{n} --input <review.json> --live`, then read it back with "
-         f"`fak thought-check verify --issue {n} --json`; do not begin implementation "
-         "until that readback verifies the durable `fak-issuecheck` marker. After any "
-         "material scope, architecture, or acceptance change, refresh the SAME "
-         "marker-keyed comment and verify it again",
-         f"fak thought-check verify --issue {n} --json"),
         ("lane-lease",
          "Take the lease for the lane whose files you will actually edit before "
          f"touching them (`{lane}` here) and never --force onto a lane a LIVE holder "

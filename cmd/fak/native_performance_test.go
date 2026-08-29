@@ -291,10 +291,10 @@ func nativePerformanceSystemBaselineFixture() systembaseline.Report {
 	metric := systembaseline.Metric{Available: true, Value: 1, Unit: "percent", Source: "test"}
 	report := systembaseline.Report{
 		Schema: systembaseline.Schema, Verdict: systembaseline.VerdictClean,
-		Baseline:        systembaseline.Window{StartedAtUTC: "2026-08-25T23:59:59Z", EndedAtUTC: "2026-08-26T00:00:00Z", DurationNS: 1e9, Samples: 2},
+		Baseline:        systembaseline.Window{StartedAtUTC: "2026-08-25T23:59:59Z", EndedAtUTC: "2026-08-26T00:00:00Z", DurationNS: 1e9, IntervalNS: 5e8, Samples: 2},
 		BaselineHost:    systembaseline.HostTotals{CPUPercent: metric},
 		BaselineSampler: systembaseline.SamplerOverhead{CountedSamples: 1, WallNS: 1e7, DutyPercent: metric},
-		Window:          systembaseline.Window{StartedAtUTC: "2026-08-26T00:00:00Z", EndedAtUTC: "2026-08-26T00:00:01Z", DurationNS: 1e9, Samples: 2},
+		Window:          systembaseline.Window{StartedAtUTC: "2026-08-26T00:00:00Z", EndedAtUTC: "2026-08-26T00:00:01Z", DurationNS: 1e9, IntervalNS: 5e8, Samples: 2},
 		CommandSampler:  systembaseline.SamplerOverhead{CountedSamples: 1, WallNS: 1e7, DutyPercent: metric},
 		Coverage:        systembaseline.Coverage{SUTRootPID: 7, DescendantAttribution: "sampled_pid_ppid_tree"},
 		Host:            systembaseline.HostTotals{CPUPercent: metric},

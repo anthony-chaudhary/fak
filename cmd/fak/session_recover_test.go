@@ -302,8 +302,8 @@ func TestSessionRecoverFailsClosedOnDuplicateGuardedTrees(t *testing.T) {
 
 func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 	installSessionRecoverIdentityFixture(t)
-	oldInv := recoveryInventory
-	defer func() { recoveryInventory = oldInv }()
+	oldInv, oldJournal := recoveryInventory, recoveryJournalCrashes
+	defer func() { recoveryInventory, recoveryJournalCrashes = oldInv, oldJournal }()
 	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
 		return sessionrecovery.InventoryReport{}, nil
 	}
@@ -314,6 +314,14 @@ func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 		TS: "2000-01-01T00:00:00Z", Boot: "boot-old",
 	}); err != nil {
 		t.Fatal(err)
+	}
+	// Classification against the host's real boot time is covered by sessionjournal.
+	// This CLI witness pins the merger and recorded-CWD contract independently.
+	recoveryJournalCrashes = func(path string, _ time.Time) ([]sessionjournal.Classified, error) {
+		if path != journalPath {
+			t.Fatalf("journal path = %q, want %q", path, journalPath)
+		}
+		return []sessionjournal.Classified{{Session: sessionjournal.Session{ID: "journal-thread", CWD: `D:\repos\actual tree`, Agent: "claude"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}, nil
 	}
 	var out, er bytes.Buffer
 	code := runSessionRecover(&out, &er, []string{"--limit", "1", "--journal-path", journalPath, "--receipts", t.TempDir(), "--prompt", "continue exactly", "--json"})

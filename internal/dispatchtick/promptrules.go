@@ -43,22 +43,6 @@ type PromptRule struct {
 // explicit structured rows with their own executable witnesses.
 func WorkRules(issue int, lane string) []PromptRule {
 	return []PromptRule{{
-		ID: "top-five-thought-check",
-		Imperative: fmt.Sprintf("Before ANY repository edit, run "+
-			"`fak thought-check prepare --issue %[1]d --json` to inspect the versioned catalog "+
-			"and bound `.review_template`. Copy it to a temporary `<review.json>` path OUTSIDE "+
-			"the repository; preserve its schema, issue number, issue digest, catalog version, and "+
-			"auto-filled `.issue_binding` exactly. Copy `.row_template` EXACTLY FIVE "+
-			"times into `.review_template.rows`, select five distinct IDs from `.checks` that are "+
-			"specific to issue #%[1]d, and fill the reviewer version plus every row's selection reason, assessment with issue "+
-			"evidence or an explicit evidence gap, and required action. Upsert the review "+
-			"with `fak thought-check upsert --issue %[1]d --input <review.json> --live`, then "+
-			"read it back with `fak thought-check verify --issue %[1]d --json`; do not begin "+
-			"implementation until that readback verifies the durable `fak-issuecheck` marker. "+
-			"After any material scope, architecture, or acceptance change, refresh the SAME "+
-			"marker-keyed comment and verify it again", issue),
-		Witness: fmt.Sprintf("fak thought-check verify --issue %d --json", issue),
-	}, {
 		ID: "lane-lease",
 		Imperative: fmt.Sprintf("Take the lease for the lane whose files you will actually edit "+
 			"before touching them (`%s` here) and never --force onto a lane a LIVE holder owns. "+

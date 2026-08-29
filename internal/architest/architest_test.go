@@ -739,7 +739,32 @@ var tier = map[string]int{
 	"placementtax":               1,
 	"localappcert":               1, // stdlib-only deterministic Mac certification-matrix validator (#9157).
 	"localapphelper":             2, // authenticated app-scoped helper admission boundary (#9149).
-	"openviking": 1,
+	"openviking":                 1,
+	"agentdescriptor":            1, // stdlib-only agent descriptor identity and validation contract.
+	"agentic":                    2, // deterministic agentic-objective fold over native performance evidence.
+	"archfitness":                1, // stdlib-only architecture fitness report contract.
+	"causalreceipt":              1, // stdlib-only causal-receipt validation and ordering primitive.
+	"cloudhandoff":               1, // stdlib-only cloud handoff contract and deterministic planner.
+	"composition":                1, // stdlib-only immutable composition identity and validation contract.
+	"docsearch":                  2, // shared documentation loader/search composite over trigram ranking.
+	"issuecheck":                 1, // stdlib-only issue-bound Top-5 review record contract.
+	"localadmission":             1, // stdlib-only local runtime admission state primitive.
+	"localappcontract":           1, // stdlib-only local application protocol contract.
+	"localappmetrics":            1, // stdlib-only local application metrics fold.
+	"localappux":                 1, // stdlib-only local application UX state renderer.
+	"macromailbox":               1, // stdlib-only authenticated macro mailbox primitive.
+	"macrostate":                 1, // stdlib-only deterministic macro-state contract.
+	"modelpack":                  1, // stdlib-only signed model-pack artifact contract.
+	"openaiadapter":              1, // stdlib-only authenticated OpenAI-compatible adapter contract.
+	"opensweharder":              1, // stdlib-only OpenSWE-hardening evidence contract.
+	"perfrsiscore":               2, // deterministic performance-RSI scorecard over the shared scorecard kernel.
+	"providerjobaccounting":      1, // stdlib-only provider-job accounting contract.
+	"resourcelifecycle":          1, // stdlib-only resource lifecycle state primitive.
+	"shelltoken":                 1, // stdlib-only shell-token parsing primitive.
+	"studyforge":                 1, // stdlib-only forge evidence collector; network and filesystem stay at its explicit boundary.
+	"studylink":                  1, // stdlib-only study evidence join and validation primitive.
+	"witnessprocess":             1, // stdlib-only process-witness classification contract.
+	"dockerprocess":              1, // static-literal Docker Compose launcher; stdlib-only, called only by off-path control flows.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -867,6 +892,12 @@ func leafOf(path string) string {
 // concurrent peer pushes to wedge.
 func leavesTouchedByPush(internal string) (map[string]bool, bool) {
 	repo := filepath.Dir(internal) // internal/ -> repo root
+	top := exec.Command("git", "rev-parse", "--show-toplevel")
+	top.Dir = repo
+	topOut, err := top.Output()
+	if err != nil || !samePath(strings.TrimSpace(string(topOut)), repo) {
+		return nil, false
+	}
 	base := exec.Command("git", "merge-base", trunkRef(), "HEAD")
 	base.Dir = repo
 	baseOut, err := base.Output()
@@ -890,6 +921,19 @@ func leavesTouchedByPush(internal string) (map[string]bool, bool) {
 		}
 	}
 	return set, true
+}
+
+func samePath(a, b string) bool {
+	canonical := func(p string) (string, error) {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return "", err
+		}
+		return filepath.EvalSymlinks(abs)
+	}
+	ca, errA := canonical(a)
+	cb, errB := canonical(b)
+	return errA == nil && errB == nil && filepath.Clean(ca) == filepath.Clean(cb)
 }
 
 // undeclaredLeafVerdict classifies an undeclared on-disk leaf as either an advisory (a leaf

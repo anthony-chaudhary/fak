@@ -510,9 +510,9 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 			case "function_call_output":
 				// A tool RESULT the client executed — the bytes the result-side floor
 				// screens (poison quarantine, secret redaction) before the model sees them.
-				output, err := responsesFunctionOutputText(it.Output)
+				output, err := decodeResponsesFunctionCallOutput(it.Output)
 				if err != nil {
-					return nil, fmt.Errorf("function_call_output.output: %w", err)
+					return nil, err
 				}
 				msgs = append(msgs, agent.Message{
 					Role:       agent.RoleTool,
@@ -530,62 +530,83 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 	}
 }
 
-// responsesFunctionOutputText decodes the Responses function_call_output.output
-// union. Existing string results retain their decoded bytes exactly. Structured
-// results are flattened only from text parts because agent.Message has no image or
-// file representation; those parts are ignored rather than letting their URLs or
-// metadata masquerade as tool text. Invalid union arms and malformed text entries
-// fail the request before any result reaches the model. The request body cap bounds
-// both the number of parts and the total text accumulated here.
-func responsesFunctionOutputText(raw json.RawMessage) (string, error) {
-	b := trimLeadingWS(raw)
-	if len(b) == 0 || string(b) == "null" {
-		// Preserve the old string field's zero-value behavior for omitted/null output.
-		return "", nil
-	}
-	if b[0] == '"' {
-		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return "", err
-		}
-		return s, nil
-	}
-	if b[0] != '[' {
-		return "", errInvalidFunctionOutput
-	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", err
-	}
-	out := make([]byte, 0, 64)
-	for _, p := range parts {
-		switch p.Type {
-		case "input_text", "output_text", "text":
-		default:
-			continue
-		}
-		if p.Text == "" {
-			continue
-		}
-		if len(out) > 0 {
-			out = append(out, '\n')
-		}
-		out = append(out, p.Text...)
-	}
-	return string(out), nil
-}
-
 // errInvalidInput is the 400 cause when `input` is neither a string nor an array.
 var errInvalidInput = errInput("input must be a string or an array of input items")
-
-var errInvalidFunctionOutput = errInput("must be a string or an array of structured content items")
 
 type errInput string
 
 func (e errInput) Error() string { return string(e) }
+
+const (
+	// Codex currently emits a short list of textual MCP result parts. Keep that
+	// compatibility path finite even when a hostile client sends tiny fragments.
+	maxResponsesFunctionOutputParts = 256
+	// The route-level transcript limit is the compatibility ceiling for a single
+	// decoded tool result too; no valid HTTP request can exceed it.
+	maxResponsesFunctionOutputBytes = maxTranscriptBody
+)
+
+type responsesFunctionOutputPart struct {
+	Type string  `json:"type"`
+	Text *string `json:"text,omitempty"`
+}
+
+// decodeResponsesFunctionCallOutput normalizes the Responses output union without
+// weakening result admission. Legacy strings retain their exact decoded value.
+// Structured output accepts only textual input-content parts; image, file, unknown,
+// and malformed parts are refused instead of silently disappearing before the
+// result-side policy sees them.
+func decodeResponsesFunctionCallOutput(raw json.RawMessage) (string, error) {
+	b := trimLeadingWS(raw)
+	if len(b) == 0 {
+		return "", errInput("function_call_output.output is required")
+	}
+	switch b[0] {
+	case '"':
+		var output string
+		if err := json.Unmarshal(raw, &output); err != nil {
+			return "", errInput("function_call_output.output string is malformed: " + err.Error())
+		}
+		if len(output) > maxResponsesFunctionOutputBytes {
+			return "", errInput(fmt.Sprintf("function_call_output.output exceeds the %d-byte limit", maxResponsesFunctionOutputBytes))
+		}
+		return output, nil
+	case '[':
+		var parts []responsesFunctionOutputPart
+		if err := json.Unmarshal(raw, &parts); err != nil {
+			return "", errInput("function_call_output.output content array is malformed: " + err.Error())
+		}
+		if len(parts) > maxResponsesFunctionOutputParts {
+			return "", errInput(fmt.Sprintf("function_call_output.output has too many content parts (maximum %d)", maxResponsesFunctionOutputParts))
+		}
+		var output strings.Builder
+		for i, part := range parts {
+			if part.Type == "" {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d] content type is required", i))
+			}
+			if part.Type != "input_text" {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d] has unsupported content type %q", i, part.Type))
+			}
+			if part.Text == nil {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d].input_text.text is required", i))
+			}
+			separatorBytes := 0
+			if i > 0 {
+				separatorBytes = 1
+			}
+			if len(*part.Text) > maxResponsesFunctionOutputBytes-output.Len()-separatorBytes {
+				return "", errInput(fmt.Sprintf("function_call_output.output exceeds the %d-byte limit", maxResponsesFunctionOutputBytes))
+			}
+			if separatorBytes != 0 {
+				output.WriteByte('\n')
+			}
+			output.WriteString(*part.Text)
+		}
+		return output.String(), nil
+	default:
+		return "", errInput("function_call_output.output must be a string or an array of content parts")
+	}
+}
 
 // responsesContentText flattens a Responses message item's `content` (a bare string
 // OR an array of typed parts: input_text / output_text / text) to a single string.

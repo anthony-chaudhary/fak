@@ -165,3 +165,77 @@ func TestHookInternalReadErrorKeepsGuardBugLabel(t *testing.T) {
 		t.Fatalf("stderr = %q, want unchanged internal-error label", errOut.String())
 	}
 }
+
+func TestHookDeniesAmbientBuildCacheCleanAcrossShellAliases(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
+	for _, tc := range []struct {
+		tool, field, command string
+	}{
+		{"Bash", "command", "go clean -cache"},
+		{"Bash", "command", "go clean -cache -testcache"},
+		{"Bash", "command", "go clean -testcache -cache"},
+		{"shell_command", "command", "env GOENV=off go clean -cache"},
+		{"functions.shell_command", "command", "cd /tmp && go clean -cache"},
+		{"exec_command", "cmd", "go clean --cache=true"},
+	} {
+		t.Run(tc.tool+"/"+tc.command, func(t *testing.T) {
+			input, err := json.Marshal(map[string]any{
+				"tool_name": tc.tool,
+				"cwd":       wsTest,
+				"tool_input": map[string]any{
+					tc.field: tc.command,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, out, _ := runHookString(t, string(input))
+			var decision hookDecision
+			if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &decision); err != nil {
+				t.Fatalf("hook stdout is not a decision: %v (out=%q)", err, out)
+			}
+			reason := decision.HookSpecificOutput.PermissionDecisionReason
+			if decision.HookSpecificOutput.PermissionDecision != "deny" ||
+				!strings.Contains(reason, "BUILD_CACHE_CLEAN_RACE") ||
+				!strings.Contains(reason, "fak-dev buildcheck --vet") ||
+				!strings.Contains(reason, "OS-temp directory") ||
+				!strings.Contains(reason, "BUILD_CACHE_CLEAN_RACE=off") {
+				t.Fatalf("decision = %+v, want typed deny with private-cache route and override", decision.HookSpecificOutput)
+			}
+		})
+	}
+}
+
+func TestHookAllowsBuildCacheCleanNearMisses(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "")
+	for _, command := range []string{
+		"go clean -testcache",
+		"go test ./...",
+		"go vet ./...",
+		"echo 'go clean -cache'",
+		"rg -n 'go clean -cache' docs",
+	} {
+		payload, err := json.Marshal(map[string]any{
+			"tool_name": "Bash", "cwd": wsTest,
+			"tool_input": map[string]any{"command": command},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out, _ := runHookString(t, string(payload))
+		if strings.TrimSpace(out) != "" {
+			t.Errorf("near miss %q produced deny output %q", command, out)
+		}
+	}
+}
+
+func TestHookBuildCacheCleanPerReasonOverride(t *testing.T) {
+	t.Setenv("FAK_REPO_GUARD", "")
+	t.Setenv("FAK_REPO_GUARD_SEVERITY", "BUILD_CACHE_CLEAN_RACE=off")
+	_, out, errOut := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"go clean -cache"}}`)
+	if strings.TrimSpace(out) != "" || strings.TrimSpace(errOut) != "" {
+		t.Fatalf("per-reason override must allow quietly: stdout=%q stderr=%q", out, errOut)
+	}
+}

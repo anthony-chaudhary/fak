@@ -161,3 +161,25 @@ consumer's soft-fail; migrate it.
 
 If you change a CI/CD spec and can't point to the migrated consumers and the impact statement,
 the change isn't done — it's armed.
+
+## Current `ci-fast` queue and parallelism contract
+
+The release-critical `ci-fast.yml` gate converges on the newest commit for each GitHub ref:
+its concurrency group is `github.workflow` plus `github.ref`, with in-progress supersession
+enabled. On a hot `main`, an obsolete run is cancelled so the available runner advances to the
+newest head instead of spending the full test budget on every ancestor. Pull requests remain
+isolated by their `refs/pull/<number>/merge` ref. Cancelled runs are not decisive release signals;
+the release decision remains fail-closed until a completed fast gate is green.
+
+The job keeps `GOMAXPROCS=2` and `GOFLAGS=-p=2`. That is bounded two-way Go package/compiler
+parallelism, not a package-set change: build remains `go build ./...`, vet remains
+`go vet ./...`, and the correctness step remains `go test ./...` without `-race`. Its existing
+30-minute step limit, heartbeat, status file, log file, cache keys, workflow name, and job/check
+name are unchanged.
+
+**Impact:** superseded runs for the same ref stop consuming the queue, and two independent Go
+packages may progress at once within the job's explicit two-way package bound. **Cutover:** the contract
+takes effect on the first push containing the workflow change; that push's run may cancel an
+older `main` run and becomes the head-convergent release signal. **Rollback:** restore the prior
+SHA-keyed concurrency group and `-p=1`; this is safe but reintroduces ancestor retention and the
+observed risk that the full package set does not complete within the existing step budget.

@@ -17,11 +17,19 @@ func populatedSnapshot() Snapshot {
 		DeviceUtilization:  ptr(0.81),
 		MemoryBytes:        map[MemoryKind]float64{MemoryAllocated: 12, MemoryResident: 10},
 		MemoryPressure:     ptr(0.73),
-		DelaySeconds:       map[DelayKind]float64{DelayQueue: 0.003, DelayCommandBuffer: 0.001},
+		DelaySeconds:       map[DelayKind]float64{DelayQueue: 0.003, DelayStream: 0.002, DelayCommandBuffer: 0.001},
 		TransferBytesTotal: map[Direction]float64{DirectionUpload: 1024, DirectionDownload: 512},
-		KernelCallsTotal:   map[KernelFamily]float64{KernelMatmul: 20, KernelAttention: 8},
-		SyncEventsTotal:    map[SyncKind]float64{SyncFence: 2},
-		GraphState:         ptr(GraphReady),
+		KernelCallsTotal: map[KernelFamily]float64{
+			KernelMatmul:        20,
+			KernelAttention:     8,
+			KernelNormalization: 6,
+			KernelEmbedding:     4,
+			KernelSampling:      3,
+			KernelTransfer:      2,
+			KernelOther:         1,
+		},
+		SyncEventsTotal: map[SyncKind]float64{SyncFence: 2},
+		GraphState:      ptr(GraphReady),
 	}
 }
 

@@ -324,6 +324,17 @@ var maintainerDevCommands = []string{
 	"workflow-audit",
 	"workpattern",
 	"worktype",
+	"agentic",
+	"compute-trace",
+	"coordinate",
+	"hostdiag",
+	"learning-mesh",
+	"performance-rsi-scorecard",
+	"runtime-capabilities",
+	"shellprov",
+	"up",
+	"watchdog-audit-health",
+	"watchdog-audit-run",
 }
 
 var labDevCommands = map[string]string{

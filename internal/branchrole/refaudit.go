@@ -262,6 +262,7 @@ var refClassByExactPath = map[string]string{
 	"cmd/fak/release_status.go":              RefClassPublicFrontDoor,
 	"cmd/fak/releasestale.go":                RefClassPublicFrontDoor,
 	"cmd/fak/selfupdate.go":                  RefClassPublicFrontDoor,
+	"cmd/fak/selfupdate_install.go":          RefClassPublicFrontDoor,
 	"cmd/fak/usage.go":                       RefClassPublicFrontDoor,
 	"internal/devindex/verbs.go":             RefClassPublicFrontDoor,
 	"internal/releasestale/releasestale.go":  RefClassPublicFrontDoor,
@@ -270,6 +271,7 @@ var refClassByExactPath = map[string]string{
 	"tools/glm_witness_record.py":            RefClassPublicFrontDoor,
 	"tools/install_self_update_schedule.ps1": RefClassPublicFrontDoor,
 	"tools/release_status.py":                RefClassPublicFrontDoor,
+	"tools/issue_resolve_progress.py":        RefClassDevelopmentSource,
 
 	"tools/demo_robustness_scorecard.py": RefClassPublicGuard,
 

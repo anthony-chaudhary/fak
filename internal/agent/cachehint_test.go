@@ -131,3 +131,31 @@ func TestNilCacheIntentPreservesWire(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestUnsupportedProviderCacheHintsRemainWireNeutral(t *testing.T) {
+	xai := CacheHintResult{Provider: ProviderXAI, Requested: intent(CacheHorizonFiveMinutes, CacheResidencyMemory), Status: CacheHintSupported, Emitted: map[string]any{"affinity": "tenant/session"}}
+	body, err := applyCacheHintToJSON([]byte(`{"model":"grok"}`), xai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xaiBody map[string]any
+	if err := json.Unmarshal(body, &xaiBody); err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := xaiBody["prompt_cache_key"]; leaked {
+		t.Fatalf("xAI request gained an unsupported cache field: %s", body)
+	}
+
+	gemini := CacheHintResult{Provider: ProviderGemini, Requested: intent(CacheHorizonFiveMinutes, CacheResidencyMemory), Status: CacheHintDowngraded, Emitted: map[string]any{"affinity": "must-not-leak"}}
+	body, err = applyCacheHintToJSON([]byte(`{"model":"gemini","future":true}`), gemini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var geminiBody map[string]any
+	if err := json.Unmarshal(body, &geminiBody); err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := geminiBody["prompt_cache_key"]; leaked || geminiBody["future"] != true {
+		t.Fatalf("Gemini advisory mutated unsupported cache fields: %s", body)
+	}
+}

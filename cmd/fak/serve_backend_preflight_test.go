@@ -117,10 +117,10 @@ func TestServeBackendForwardPreflightSupportMatrix(t *testing.T) {
 				t.Fatalf("error=%T %v, want *model.UnsupportedBackendForwardError", err, err)
 			}
 			if unsupported.Backend != "cuda" || unsupported.Forward != fakmodel.ForwardQwen35GDN ||
-				unsupported.IntendedPath != fakmodel.Qwen35GDNCUDAPath {
+				unsupported.IntendedPath != fakmodel.Qwen35GDNCUDAPath+" or "+fakmodel.Qwen35GDNVulkanPath {
 				t.Fatalf("wrong typed refusal: %#v", unsupported)
 			}
-			for _, want := range []string{fakmodel.Qwen35GDNCUDAPath, "refusing generic QKV/CPU fallback"} {
+			for _, want := range []string{fakmodel.Qwen35GDNCUDAPath, fakmodel.Qwen35GDNVulkanPath, "refusing generic QKV/CPU fallback"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal missing %q: %v", want, err)
 				}

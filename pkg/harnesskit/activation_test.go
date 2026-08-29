@@ -105,6 +105,26 @@ func TestActivationOwnsSuccessfulRuntimeLifecycle(t *testing.T) {
 	}
 }
 
+func TestActivateCompatibleRefusesBeforeFactoryStart(t *testing.T) {
+	lock := activationLock(t, "provider")
+	starts := 0
+	active, report, err := ActivateCompatible(context.Background(), lock, activationTestServices{}, map[string]Factory{
+		"provider": activationTestFactory{id: "provider", runtime: &activationTestRuntime{status: RuntimeReadiness{State: StateRunning}}, starts: &starts},
+	}, contractWith(CapabilityRequirement{Name: "tools.invoke", MinRevision: 1, MaxRevision: 2}), hostWith(
+		CapabilityOffer{Name: "tools.invoke", Revision: 3, Status: StatusStable},
+	))
+	if active != nil || err == nil || report.Compatible {
+		t.Fatalf("incompatible activation = active:%v report:%+v err:%v", active, report, err)
+	}
+	var compatibilityErr *CompatibilityError
+	if !errors.As(err, &compatibilityErr) || compatibilityErr.Report.Outcomes[0].Reason != ReasonRevisionAboveMax {
+		t.Fatalf("activation lost machine refusal: %T %v", err, err)
+	}
+	if starts != 0 {
+		t.Fatalf("factory started %d times before compatibility refusal", starts)
+	}
+}
+
 func activationLock(t *testing.T, ids ...string) ProductLock {
 	t.Helper()
 	lock := ProductLock{Schema: ProductLockSchema, Environment: LockEnvironment{OS: "linux", Arch: "amd64", Contract: ContractVersion}}
@@ -125,6 +145,7 @@ type activationTestFactory struct {
 	id      string
 	runtime Runtime
 	err     error
+	starts  *int
 }
 
 func (f activationTestFactory) Manifest() Extension {
@@ -132,6 +153,9 @@ func (f activationTestFactory) Manifest() Extension {
 }
 
 func (f activationTestFactory) Start(context.Context, Services) (Runtime, error) {
+	if f.starts != nil {
+		*f.starts++
+	}
 	return f.runtime, f.err
 }
 

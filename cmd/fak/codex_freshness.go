@@ -65,10 +65,18 @@ var (
 		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable)...)
 		var receipt bytes.Buffer
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, &receipt, os.Stderr
-		if err := cmd.Run(); err != nil {
-			return "", err
+		runErr := cmd.Run()
+		installed, receiptErr := codexFreshnessInstalledRevision(receipt.Bytes(), executable)
+		if receiptErr != nil {
+			if runErr != nil {
+				return "", fmt.Errorf("%w: %v", runErr, receiptErr)
+			}
+			return "", receiptErr
 		}
-		return codexFreshnessInstalledRevision(receipt.Bytes(), executable)
+		if runErr != nil {
+			return "", runErr
+		}
+		return installed, nil
 	}
 	codexFreshnessReexec    = runCodexFreshnessReexec
 	codexFreshnessParentPID = os.Getppid
@@ -215,6 +223,9 @@ func codexFreshnessInstalledRevision(data []byte, executable string) (string, er
 		return "", fmt.Errorf("self-update returned an unexpected receipt schema")
 	}
 	if receipt.Status != "updated" {
+		if detail := strings.TrimSpace(receipt.Detail); detail != "" {
+			return "", fmt.Errorf("self-update receipt status is %q: %s", receipt.Status, detail)
+		}
 		return "", fmt.Errorf("self-update receipt status is %q, want updated", receipt.Status)
 	}
 	if receipt.Changed < 1 || receipt.NewRevision == nil || !isFullGitCommit(strings.TrimSpace(*receipt.NewRevision)) {

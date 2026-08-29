@@ -114,6 +114,8 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // outcome-language queries such as "token savings" and "turn control" without
 // requiring the separately built maintainer executable. This is the discovery
 // front door for the other 26 verbs, not another specialist operation.
+// 28 (was 27): `study` is the product-owned local content-addressed receipt store;
+// its separate study-* forge/classify/link operators remain development commands.
 func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
 		if got, ok := TierOf(name); !ok || got != TierDev {
@@ -126,7 +128,7 @@ func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 }
 
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 27
+	const ceiling = 28
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {

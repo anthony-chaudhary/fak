@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/frontmatter"
 )
 
 // IndexName is the file a cold session reads first, and the one whose absence
@@ -109,10 +111,11 @@ func ParseRows(tier, text string) []Row {
 	return out
 }
 
-// ParseFrontmatter reads the leading YAML block by line scan. Values keep their
-// inner content verbatim apart from surrounding quotes; only `name`,
-// `description` and the nested `metadata.type` are extracted, because those are
-// the three the grammar requires.
+// ParseFrontmatter reads the leading YAML block by line scan. Values use the
+// shared dependency-free scalar decoder so every frontmatter consumer agrees
+// on quoted escapes and preserves malformed quoted input verbatim. Only
+// `name`, `description` and the nested `metadata.type` are extracted, because
+// those are the three the grammar requires.
 func ParseFrontmatter(body string) Frontmatter {
 	var fm Frontmatter
 	lines := strings.Split(body, "\n")
@@ -133,7 +136,7 @@ func ParseFrontmatter(body string) Frontmatter {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		val, _ = frontmatter.DecodeScalar(val)
 		if indented {
 			if inMetadata && key == "type" {
 				fm.Type = val

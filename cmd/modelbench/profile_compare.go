@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
@@ -24,36 +25,69 @@ const (
 	nativeProfileMinimumGain      = 15.0
 )
 
+type profileComparisonPhase string
+
+const (
+	profileComparisonPhasePrefill      profileComparisonPhase = "prefill"
+	profileComparisonPhaseSteadyDecode profileComparisonPhase = "steady-decode"
+	profileComparisonPhaseEndToEnd     profileComparisonPhase = "end-to-end"
+)
+
+var nativeProfileComparisonPhaseSelection = profileComparisonPhasePrefill
+
+func (p profileComparisonPhase) String() string { return string(p) }
+
+func (p *profileComparisonPhase) Set(value string) error {
+	phase := profileComparisonPhase(strings.TrimSpace(value))
+	if !phase.valid() {
+		return fmt.Errorf("comparison phase %q is invalid; want prefill, steady-decode, or end-to-end", value)
+	}
+	*p = phase
+	return nil
+}
+
+func (p profileComparisonPhase) valid() bool {
+	return p == profileComparisonPhasePrefill || p == profileComparisonPhaseSteadyDecode || p == profileComparisonPhaseEndToEnd
+}
+
 type profileComparison struct {
-	Schema                           string    `json:"schema"`
-	Verdict                          string    `json:"verdict"`
-	Reason                           string    `json:"reason"`
-	EnvelopeID                       string    `json:"envelope_id,omitempty"`
-	Selector                         string    `json:"selector"`
-	ControlSelector                  string    `json:"control_selector"`
-	CandidateSelector                string    `json:"candidate_selector"`
-	ControlForwardPath               string    `json:"control_forward_path,omitempty"`
-	CandidateForwardPath             string    `json:"candidate_forward_path,omitempty"`
-	ControlPrefillMilliseconds       []float64 `json:"control_prefill_milliseconds,omitempty"`
-	CandidatePrefillMilliseconds     []float64 `json:"candidate_prefill_milliseconds,omitempty"`
-	ControlMedianMilliseconds        float64   `json:"control_median_milliseconds,omitempty"`
-	CandidateMedianMilliseconds      float64   `json:"candidate_median_milliseconds,omitempty"`
-	MedianImprovementPercent         float64   `json:"median_improvement_percent,omitempty"`
-	MinimumMedianImprovementPercent  float64   `json:"minimum_median_improvement_percent"`
-	EveryCandidateBelowControlMedian bool      `json:"every_candidate_below_control_median"`
+	Schema                           string                 `json:"schema"`
+	Verdict                          string                 `json:"verdict"`
+	Reason                           string                 `json:"reason"`
+	Phase                            profileComparisonPhase `json:"phase"`
+	EnvelopeID                       string                 `json:"envelope_id,omitempty"`
+	Selector                         string                 `json:"selector"`
+	ControlSelector                  string                 `json:"control_selector"`
+	CandidateSelector                string                 `json:"candidate_selector"`
+	ControlForwardPath               string                 `json:"control_forward_path,omitempty"`
+	CandidateForwardPath             string                 `json:"candidate_forward_path,omitempty"`
+	ControlPrefillMilliseconds       []float64              `json:"control_prefill_milliseconds,omitempty"`
+	CandidatePrefillMilliseconds     []float64              `json:"candidate_prefill_milliseconds,omitempty"`
+	ControlPhaseMilliseconds         []float64              `json:"control_phase_milliseconds,omitempty"`
+	CandidatePhaseMilliseconds       []float64              `json:"candidate_phase_milliseconds,omitempty"`
+	ControlMedianMilliseconds        float64                `json:"control_median_milliseconds,omitempty"`
+	CandidateMedianMilliseconds      float64                `json:"candidate_median_milliseconds,omitempty"`
+	MedianImprovementPercent         float64                `json:"median_improvement_percent,omitempty"`
+	MinimumMedianImprovementPercent  float64                `json:"minimum_median_improvement_percent"`
+	EveryCandidateBelowControlMedian bool                   `json:"every_candidate_below_control_median"`
 }
 
 type nativeProfileComparisonInput struct {
 	profile  nativeperf.ProfileBundle
 	receipt  nativeProfileReceipt
-	prefill  float64
+	duration float64
 	controls map[string]string
 }
 
 func newProfileComparison() profileComparison {
+	return newProfileComparisonForPhase(profileComparisonPhasePrefill)
+}
+
+func newProfileComparisonForPhase(phase profileComparisonPhase) profileComparison {
 	return profileComparison{
 		Schema:                          profileComparisonSchema,
 		Verdict:                         "HOLD",
+		Phase:                           phase,
 		Selector:                        nativeProfileSequenceSelector,
 		ControlSelector:                 nativeProfileSelectorOff,
 		CandidateSelector:               nativeProfileSelectorOn,
@@ -65,7 +99,15 @@ func newProfileComparison() profileComparison {
 // captures. Receipt paths are derived from each profile path, so a profile can never be
 // admitted without the raw event/source/binary companion produced alongside it.
 func compareNativeProfileCampaign(spec string) profileComparison {
-	r := newProfileComparison()
+	return compareNativeProfileCampaignPhase(spec, nativeProfileComparisonPhaseSelection)
+}
+
+func compareNativeProfileCampaignPhase(spec string, phase profileComparisonPhase) profileComparison {
+	r := newProfileComparisonForPhase(phase)
+	if !phase.valid() {
+		r.Reason = fmt.Sprintf("comparison phase %q is invalid", phase)
+		return r
+	}
 	paths := splitProfileComparisonPaths(spec)
 	if len(paths) != nativeProfileCampaignRuns {
 		r.Reason = fmt.Sprintf("campaign requires exactly 6 ordered profile paths (3 OFF then 3 ON), got %d", len(paths))
@@ -76,7 +118,7 @@ func compareNativeProfileCampaign(spec string) profileComparison {
 	profileDigests := make(map[string]int, len(paths))
 	receiptBindings := make(map[string]int, len(paths))
 	for i, path := range paths {
-		input, err := loadNativeProfileComparisonInput(path)
+		input, err := loadNativeProfileComparisonInput(path, phase)
 		if err != nil {
 			r.Reason = fmt.Sprintf("pair %d is invalid: %v", i+1, err)
 			return r
@@ -120,10 +162,10 @@ func compareNativeProfileCampaign(spec string) profileComparison {
 	control := make([]float64, nativeProfileArmRuns)
 	candidate := make([]float64, nativeProfileArmRuns)
 	for i := range nativeProfileArmRuns {
-		control[i] = inputs[i].prefill
-		candidate[i] = inputs[i+nativeProfileArmRuns].prefill
+		control[i] = inputs[i].duration
+		candidate[i] = inputs[i+nativeProfileArmRuns].duration
 	}
-	result := compareProfiles(control, candidate)
+	result := compareProfilePhase(phase, control, candidate)
 	result.EnvelopeID = first.profile.EnvelopeID
 	result.ControlForwardPath = r.ControlForwardPath
 	result.CandidateForwardPath = r.CandidateForwardPath
@@ -142,7 +184,7 @@ func splitProfileComparisonPaths(spec string) []string {
 	return paths
 }
 
-func loadNativeProfileComparisonInput(profilePath string) (nativeProfileComparisonInput, error) {
+func loadNativeProfileComparisonInput(profilePath string, phase profileComparisonPhase) (nativeProfileComparisonInput, error) {
 	profileBytes, err := os.ReadFile(profilePath)
 	if err != nil {
 		return nativeProfileComparisonInput{}, fmt.Errorf("read profile: %w", err)
@@ -169,13 +211,75 @@ func loadNativeProfileComparisonInput(profilePath string) (nativeProfileComparis
 	if envelope.PromptTokens != 32 || envelope.DecodeTokens != 64 || envelope.Repetitions != nativeProfileArmRuns || envelope.Engine != "fak-native" || envelope.Backend != "metal" {
 		return nativeProfileComparisonInput{}, fmt.Errorf("envelope is not the canonical fak-native Metal P32/T64 three-repetition lineage")
 	}
-	if len(profile.Phases) != 6 || profile.Phases[1].Name != "prefill" || !positiveFinite(profile.Phases[1].DurationMilliseconds) {
-		return nativeProfileComparisonInput{}, fmt.Errorf("canonical prefill phase is missing or invalid")
+	duration, err := profileComparisonPhaseDuration(profile.Phases, phase)
+	if err != nil {
+		return nativeProfileComparisonInput{}, err
 	}
 	return nativeProfileComparisonInput{
-		profile: profile, receipt: receipt, prefill: profile.Phases[1].DurationMilliseconds,
+		profile: profile, receipt: receipt, duration: duration,
 		controls: controlsWithoutSequenceSelector(receipt.Controls),
 	}, nil
+}
+
+type profileComparisonPhaseError struct {
+	Phase  profileComparisonPhase
+	Detail string
+}
+
+func (e profileComparisonPhaseError) Error() string {
+	return fmt.Sprintf("selected comparison phase %q %s", e.Phase, e.Detail)
+}
+
+func profileComparisonPhaseDuration(phases []nativeperf.ProfilePhase, selected profileComparisonPhase) (float64, error) {
+	if !selected.valid() {
+		return 0, profileComparisonPhaseError{Phase: selected, Detail: "is invalid"}
+	}
+	if selected != profileComparisonPhaseEndToEnd {
+		var duration float64
+		matches := 0
+		for _, phase := range phases {
+			if phase.Name == selected.String() {
+				matches++
+				duration = phase.DurationMilliseconds
+			}
+		}
+		if matches != 1 {
+			return 0, profileComparisonPhaseError{Phase: selected, Detail: fmt.Sprintf("must appear exactly once, got %d", matches)}
+		}
+		if !positiveFinite(duration) {
+			return 0, profileComparisonPhaseError{Phase: selected, Detail: "duration must be finite and positive"}
+		}
+		return duration, nil
+	}
+
+	// End-to-end is the full canonical capture wall. Including load setup,
+	// verification, and teardown prevents a phase-local gain from hiding the
+	// setup or proof overhead needed to obtain it.
+	wanted := [...]string{"load-setup", "prefill", "first-token", "steady-decode", "verification", "teardown"}
+	if len(phases) != len(wanted) {
+		return 0, profileComparisonPhaseError{Phase: selected, Detail: fmt.Sprintf("requires all %d canonical phases exactly once, got %d", len(wanted), len(phases))}
+	}
+	for i, name := range wanted {
+		phase := phases[i]
+		if phase.Name != name {
+			return 0, profileComparisonPhaseError{Phase: selected, Detail: fmt.Sprintf("requires canonical phase %q at position %d, got %q", name, i+1, phase.Name)}
+		}
+		if i > 0 {
+			previous := phases[i-1]
+			previousEnd := previous.StartMilliseconds + previous.DurationMilliseconds
+			if phase.StartMilliseconds != previousEnd {
+				return 0, profileComparisonPhaseError{Phase: selected, Detail: fmt.Sprintf("requires contiguous canonical phases; %q ends at %g ms but %q starts at %g ms", previous.Name, previousEnd, phase.Name, phase.StartMilliseconds)}
+			}
+		}
+	}
+	start := phases[0].StartMilliseconds
+	last := phases[len(phases)-1]
+	end := last.StartMilliseconds + last.DurationMilliseconds
+	duration := end - start
+	if !positiveFinite(duration) {
+		return 0, profileComparisonPhaseError{Phase: selected, Detail: "interval must be finite and positive"}
+	}
+	return duration, nil
 }
 
 func decodeExactJSON(data []byte, out any) error {
@@ -216,19 +320,34 @@ func sameNativeProfileComparisonIdentity(a, b nativeProfileComparisonInput) bool
 }
 
 func compareProfiles(control, candidate []float64) profileComparison {
-	r := newProfileComparison()
+	return compareProfilePhase(profileComparisonPhasePrefill, control, candidate)
+}
+
+func compareProfilePhase(phase profileComparisonPhase, control, candidate []float64) profileComparison {
+	r := newProfileComparisonForPhase(phase)
+	if !phase.valid() {
+		r.Reason = fmt.Sprintf("comparison phase %q is invalid", phase)
+		return r
+	}
 	if len(control) != nativeProfileArmRuns || len(candidate) != nativeProfileArmRuns {
 		r.Reason = "campaign requires exactly three control and three candidate repetitions"
 		return r
 	}
 	for _, duration := range append(append([]float64(nil), control...), candidate...) {
 		if !positiveFinite(duration) {
-			r.Reason = "prefill durations must be finite and positive"
+			r.Reason = fmt.Sprintf("%s durations must be finite and positive", phase)
 			return r
 		}
 	}
-	r.ControlPrefillMilliseconds = append([]float64(nil), control...)
-	r.CandidatePrefillMilliseconds = append([]float64(nil), candidate...)
+	// Keep the original prefill keys byte-for-byte available to existing readers;
+	// non-prefill selectors use neutral keys so decode evidence is never mislabeled.
+	if phase == profileComparisonPhasePrefill {
+		r.ControlPrefillMilliseconds = append([]float64(nil), control...)
+		r.CandidatePrefillMilliseconds = append([]float64(nil), candidate...)
+	} else {
+		r.ControlPhaseMilliseconds = append([]float64(nil), control...)
+		r.CandidatePhaseMilliseconds = append([]float64(nil), candidate...)
+	}
 	r.ControlMedianMilliseconds = median(control)
 	r.CandidateMedianMilliseconds = median(candidate)
 	r.MedianImprovementPercent = (r.ControlMedianMilliseconds - r.CandidateMedianMilliseconds) / r.ControlMedianMilliseconds * 100
@@ -241,7 +360,7 @@ func compareProfiles(control, candidate []float64) profileComparison {
 	}
 	r.Verdict = "REJECT"
 	if !r.EveryCandidateBelowControlMedian {
-		r.Reason = "not every candidate prefill improved on the control median"
+		r.Reason = fmt.Sprintf("not every candidate %s improved on the control median", phase)
 		return r
 	}
 	if r.MedianImprovementPercent < nativeProfileMinimumGain {
@@ -268,14 +387,14 @@ func median(xs []float64) float64 {
 }
 
 func writeProfileComparison(f *benchFlags, comparison profileComparison) error {
-	b, err := json.MarshalIndent(comparison, "", "  ")
+	if *f.out != "" {
+		return benchcli.WriteReport(*f.out, comparison)
+	}
+	b, err := benchcli.MarshalReport(comparison)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	if *f.out == "" {
-		_, err = os.Stdout.Write(b)
-		return err
-	}
-	return os.WriteFile(*f.out, b, 0o644)
+	_, err = os.Stdout.Write(b)
+	return err
 }

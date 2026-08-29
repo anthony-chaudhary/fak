@@ -365,6 +365,32 @@ func WorktreeEnv(base map[string]string, wtDir string) map[string]string {
 	return env
 }
 
+// EnsureBuildDirs recreates the disposable Go build directories owned by a
+// managed worktree and returns the matching child environment. Reapers and
+// manual disk maintenance may remove either directory while the source
+// worktree remains valid, so callers must run this immediately before invoking
+// Go rather than relying on prepare-time state. The worktree itself must already
+// exist: refusing to recreate it keeps a reaped checkout from being resurrected
+// as an empty directory.
+func EnsureBuildDirs(wtDir string) (map[string]string, error) {
+	info, err := os.Stat(wtDir)
+	if err != nil {
+		return nil, fmt.Errorf("stat managed worktree %q: %w", wtDir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("managed worktree %q is not a directory", wtDir)
+	}
+
+	env := WorktreeEnv(nil, wtDir)
+	for _, name := range []string{"GOCACHE", "GOTMPDIR"} {
+		path := env[name]
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return nil, fmt.Errorf("create %s directory %q: %w", name, path, err)
+		}
+	}
+	return env, nil
+}
+
 // parseWorktreePaths extracts the worktree paths from `git worktree list
 // --porcelain` output — the pure half of the tracked-check and enumeration.
 func parseWorktreePaths(porcelain string) []string {
@@ -386,7 +412,15 @@ func IsWorkerWorktree(path string) bool {
 }
 
 func samePath(a, b string) bool {
-	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	return strings.EqualFold(canonicalComparisonPath(a), canonicalComparisonPath(b))
+}
+
+func canonicalComparisonPath(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return clean
 }
 
 // --------------------------------------------------------------------------- //

@@ -103,7 +103,7 @@
       "kind": "symbol",
       "definition": "The cmd/fak TUI data model for the guard pane: tuiGuardReport (built by buildTUIGuardReport from artifacts loaded by loadTUIGuard) holds the counts, rows, and sources rendered as the guard overview card.",
       "distinction": "It is the read-only RENDER/REPORT model that visualizes guard journal artifacts in the TUI, NOT the guard kernel that produces them and NOT any adjudication gate.",
-      "distinct_from": ["guard-kernel", "gate"],
+      "distinct_from": ["guard-kernel", "gate", "issue10049-tui-guard-json-input"],
       "aliases": ["buildtuiguardreport", "loadtuiguard", "tuiguardartifact", "tuiguardrow", "tuiguardsource"],
       "grounding": "tuiguardreport",
       "grounding_kind": "symbol",

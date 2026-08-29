@@ -82,6 +82,14 @@ func TestSelfUpdateAttemptRejectsUnpinnedSelection(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateGateFailureReceiptCarriesActionableCacheDetail(t *testing.T) {
+	detail := "vet: Go build cache /tmp/fak-cache became unavailable after the one bounded recovery; stop concurrent cache cleanup and rerun fak self-update"
+	receipt := newSelfUpdateReceipt(outcomeGateFailed, filepath.Join("bin", "fak"), detail)
+	if receipt.Status != "gate_failed" || receipt.Detail != detail || receipt.NextCommand != "fak self-update" {
+		t.Fatalf("gate receipt=%+v, want typed failure with preserved cache remediation", receipt)
+	}
+}
+
 func TestSelfUpdateAttemptRealGitPinsSelectionAcrossMovingOrigin(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is required for moving-ref acceptance")

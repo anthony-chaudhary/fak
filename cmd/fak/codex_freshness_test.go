@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -139,6 +140,36 @@ func TestRunCodexFreshnessAdmissionFailuresRefuseLaunch(t *testing.T) {
 	}
 }
 
+func TestRunCodexFreshnessAdmissionPrintsCacheRecoveryExhaustion(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessBehind, RunningCommit: "old", TargetCommit: "new"})
+	defer restore()
+	const diagnostic = "vet: Go build cache /tmp/fak-cache became unavailable after the one bounded recovery; stop concurrent cache cleanup and rerun fak self-update"
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		return "", errors.New("exit status 1: self-update receipt status is \"gate_failed\": " + diagnostic)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = writeEnd
+	_, code, stop := runCodexFreshnessAdmission(nil)
+	_ = writeEnd.Close()
+	os.Stderr = originalStderr
+	captured, readErr := io.ReadAll(readEnd)
+	_ = readEnd.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if code == 0 || !stop {
+		t.Fatalf("code=%d stop=%v, want fail-closed freshness refusal", code, stop)
+	}
+	if got := string(captured); !strings.Contains(got, diagnostic) || !strings.Contains(got, "freshness admission refused") {
+		t.Fatalf("freshness stderr=%q, want cache exhaustion and refusal context", got)
+	}
+}
+
 func TestRunCodexFreshnessAdmissionRecursionRefusesSecondUpdate(t *testing.T) {
 	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessBehind, RunningCommit: "old", TargetCommit: "new"})
 	defer restore()
@@ -236,6 +267,24 @@ func TestCodexFreshnessInstalledRevisionRequiresChangedPrimaryReceipt(t *testing
 	data, _ = json.Marshal(receipt)
 	if _, err := codexFreshnessInstalledRevision(data, `C:\bin\fak.exe`); err == nil {
 		t.Fatal("non-updated receipt status admitted a re-exec identity")
+	}
+}
+
+func TestCodexFreshnessInstalledRevisionPreservesFailedReceiptDetail(t *testing.T) {
+	const diagnostic = "vet: Go build cache /tmp/fak-cache became unavailable after the one bounded recovery; stop concurrent cache cleanup and rerun fak self-update"
+	receipt := selfUpdateReceipt{
+		Schema:        selfUpdateReceiptSchema,
+		SchemaVersion: 1,
+		Status:        "gate_failed",
+		Detail:        diagnostic,
+	}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = codexFreshnessInstalledRevision(data, `C:\bin\fak.exe`)
+	if err == nil || !strings.Contains(err.Error(), diagnostic) {
+		t.Fatalf("failed receipt error=%v, want actionable cache detail preserved", err)
 	}
 }
 

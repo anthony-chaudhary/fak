@@ -9,27 +9,28 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/dockerprocess"
 )
 
 const (
 	richDashboardDefaultUID         = "fak-gateway-observability"
 	richDashboardTimeout            = 90 * time.Second
+	richDashboardProbeTimeout       = 5 * time.Second
 	bundledGrafanaURL               = "http://localhost:3000"
 	bundledPrometheusConfigEnv      = "FAK_PROMETHEUS_CONFIG"
 	bundledPrometheusConfigMount    = "${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}"
 	bundledPrometheusTemplateTarget = "host.docker.internal:8080"
 )
 
-var dashboardDockerAvailable = func() bool {
-	_, err := exec.LookPath("docker")
-	return err == nil
-}
+var richDashboardProbeClient = &http.Client{Timeout: richDashboardProbeTimeout}
+
+var dashboardDockerAvailable = dockerprocess.Available
 
 type richDashboardLink struct {
 	UID         string
@@ -299,8 +300,9 @@ func startBundledGrafana(ctx context.Context, compose, listenerAddress string) (
 	if err != nil {
 		return richDashboardStack{}, err
 	}
-	cmd := bundledGrafanaComposeCommand(ctx, stack, "--profile", "local-prometheus", "up", "-d")
-	out, err := cmd.CombinedOutput()
+	out, err := dockerprocess.ComposeCombinedOutput(ctx, filepath.Dir(stack.composePath),
+		dashboardComposeEnv(os.Environ(), stack.prometheusConfigPath),
+		"-f", stack.composePath, "--profile", "local-prometheus", "up", "-d")
 	if err != nil {
 		cleanupErr := cleanupBundledGrafanaStack(stack)
 		return richDashboardStack{}, errors.Join(fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out))), cleanupErr)
@@ -309,7 +311,9 @@ func startBundledGrafana(ctx context.Context, compose, listenerAddress string) (
 }
 
 func stopBundledGrafana(ctx context.Context, stack richDashboardStack) error {
-	err := bundledGrafanaComposeCommand(ctx, stack, "down").Run()
+	err := dockerprocess.ComposeRun(ctx, filepath.Dir(stack.composePath),
+		dashboardComposeEnv(os.Environ(), stack.prometheusConfigPath),
+		"-f", stack.composePath, "down")
 	return errors.Join(err, cleanupBundledGrafanaStack(stack))
 }
 
@@ -376,15 +380,6 @@ func rewriteBundledPrometheusTarget(templateText, target string) (string, error)
 	return strings.Replace(templateText, needle, `targets: ["`+target+`"]`, 1), nil
 }
 
-func bundledGrafanaComposeCommand(ctx context.Context, stack richDashboardStack, args ...string) *exec.Cmd {
-	argv := []string{"compose", "-f", stack.composePath}
-	argv = append(argv, args...)
-	cmd := exec.CommandContext(ctx, "docker", argv...)
-	cmd.Dir = filepath.Dir(stack.composePath)
-	cmd.Env = dashboardComposeEnv(os.Environ(), stack.prometheusConfigPath)
-	return cmd
-}
-
 func dashboardComposeEnv(env []string, prometheusConfigPath string) []string {
 	out := make([]string, 0, len(env)+1)
 	prefix := bundledPrometheusConfigEnv + "="
@@ -422,7 +417,7 @@ func probeGrafana(ctx context.Context, base string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := richDashboardProbeClient.Do(req)
 	if err != nil {
 		return err
 	}

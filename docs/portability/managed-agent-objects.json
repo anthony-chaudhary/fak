@@ -1,7 +1,7 @@
 {
   "schema": "fak-managed-agent-object-inventory/v1",
   "discovery": {
-    "revision": "883662e2514288b0198052b8ec90ef7870e8dcee",
+    "revision": "e8add47fafcd0bfeb04244f1ba39ec9157954575",
     "scope": [
       ".claude",
       "cmd",
@@ -14,29 +14,29 @@
         "id": "managed-vocabulary",
         "pattern": "skill|workflow|loop|memory|history|session|policy|profile|binding|receipt|checkpoint|trajectory|lease|task",
         "paths": [".claude", "cmd", "internal", "docs", "examples"],
-        "expected_lines": 106703,
-        "expected_files": 8097
+        "expected_lines": 173533,
+        "expected_files": 10908
       },
       {
         "id": "storage-roots",
         "pattern": "\\.fak|\\.claude|FAK_[A-Z0-9_]+|CLAUDE_CONFIG_DIR|refs/fak",
         "paths": ["cmd", "internal", "docs", "examples"],
-        "expected_lines": 10923,
-        "expected_files": 2189
+        "expected_lines": 12620,
+        "expected_files": 2599
       },
       {
         "id": "movement-surfaces",
         "pattern": "export|import|sync|snapshot|restore|teleport|archive",
         "paths": ["cmd", "internal", "docs", "examples"],
-        "expected_lines": 26052,
-        "expected_files": 9800
+        "expected_lines": 43601,
+        "expected_files": 12774
       },
       {
         "id": "adapter-surfaces",
         "pattern": "adapter|harness|provider|model route|tool binding",
         "paths": ["cmd", "internal", "docs", "examples"],
-        "expected_lines": 19018,
-        "expected_files": 2701
+        "expected_lines": 31505,
+        "expected_files": 3946
       }
     ]
   },
