@@ -762,6 +762,7 @@ var tier = map[string]int{
 	"resourcelifecycle":          1, // stdlib-only resource lifecycle state primitive.
 	"shelltoken":                 1, // stdlib-only shell-token parsing primitive.
 	"studyforge":                 1, // stdlib-only forge evidence collector; network and filesystem stay at its explicit boundary.
+	"sweepcert":                  1,
 	"studylink":                  1, // stdlib-only study evidence join and validation primitive.
 	"witnessprocess":             1, // stdlib-only process-witness classification contract.
 	"dockerprocess":              1, // static-literal Docker Compose launcher; stdlib-only, called only by off-path control flows.

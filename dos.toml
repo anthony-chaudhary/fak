@@ -398,6 +398,7 @@ concurrent = [
   "studylink",
   "studyprio",
   "studytickets",
+  "sweepcert",
   "microfleeteconomics",
   "modeldescriptor",
   "openviking",
@@ -565,6 +566,7 @@ autopick = [
   "studylink",
   "studyprio",
   "studytickets",
+  "sweepcert",
   "microfleeteconomics",
   "openviking",
   "dockerprocess",
@@ -1194,6 +1196,7 @@ studylink = ["internal/studylink/**"]
 studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]
 microfleeteconomics = ["internal/microfleeteconomics/**"]
+sweepcert = ["internal/sweepcert/**"]
 modeldescriptor = ["internal/modeldescriptor/**"]
 openviking = ["internal/openviking/**"]
 dockerprocess = ["internal/dockerprocess/**"]

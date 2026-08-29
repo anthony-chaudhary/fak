@@ -67,8 +67,43 @@ func TestEvaluateServingSweepSelectsCapacityValidPeakAndSLAKnee(t *testing.T) {
 	if summary.Peak == nil || summary.Peak.Concurrency != 4 || summary.Peak.ThroughputTokens != 24 {
 		t.Fatalf("peak = %#v, want concurrency 4 / 24 tok/s", summary.Peak)
 	}
+	if summary.PeakStatus != "measured" || summary.EnvelopeDigest == "" {
+		t.Fatalf("peak evidence status/digest = %q / %q", summary.PeakStatus, summary.EnvelopeDigest)
+	}
 	if summary.SLAStatus != "measured" || summary.SLAKnee == nil || summary.SLAKnee.Concurrency != 4 {
 		t.Fatalf("SLA knee = status %q value %#v, want concurrency 4", summary.SLAStatus, summary.SLAKnee)
+	}
+}
+
+func TestEvaluateServingSweepCensorsMonotonicTerminalPeakBeforeCapacity(t *testing.T) {
+	report := syntheticSweepReport([]syntheticSweepPoint{
+		{concurrency: 1, throughput: 10, ttftP99: 20, itlP99: 5},
+		{concurrency: 2, throughput: 18, ttftP99: 30, itlP99: 6},
+		{concurrency: 4, throughput: 24, ttftP99: 50, itlP99: 7},
+	})
+	if err := EvaluateServingSweep(report); err != nil {
+		t.Fatal(err)
+	}
+	summary := report.Tracks[0]
+	if summary.PeakStatus != "right_censored" || summary.Peak == nil || summary.Peak.Concurrency != 4 {
+		t.Fatalf("terminal peak = status %q value %+v", summary.PeakStatus, summary.Peak)
+	}
+}
+
+func TestEvaluateServingSweepMissingPointMakesFindingsNotIdentifiable(t *testing.T) {
+	report := syntheticSweepReport([]syntheticSweepPoint{
+		{concurrency: 1, throughput: 10, ttftP99: 20, itlP99: 5},
+		{concurrency: 2, throughput: 18, ttftP99: 30, itlP99: 6},
+		{concurrency: 4, throughput: 24, ttftP99: 50, itlP99: 7},
+	})
+	report.Points[1].Tracks[0].MeasurementStatus = "not_measured"
+	report.Points[1].Tracks[0].Stats.OK = 0
+	if err := EvaluateServingSweep(report); err != nil {
+		t.Fatal(err)
+	}
+	summary := report.Tracks[0]
+	if summary.PeakStatus != "not_identifiable" || summary.Peak != nil || summary.SLAStatus != "not_identifiable" {
+		t.Fatalf("missing-point findings = %+v", summary)
 	}
 }
 
@@ -110,6 +145,9 @@ func TestEvaluateServingSweepRefusesIdentityDriftWithoutZeroingIt(t *testing.T) 
 	summary := report.Tracks[0]
 	if summary.Status != "invalid" || summary.Peak != nil || summary.ValidPoints != 1 {
 		t.Fatalf("identity-drift summary = %#v, want invalid/no peak", summary)
+	}
+	if summary.PeakStatus != "invalid" || summary.SLAStatus != "invalid" {
+		t.Fatalf("identity drift finding status = %+v", summary)
 	}
 	if report.Points[1].Tracks[0].Stats.ThroughputTokensS.Value == nil || *report.Points[1].Tracks[0].Stats.ThroughputTokensS.Value != 18 {
 		t.Fatal("invalid point was rewritten as zero instead of preserving the observation")

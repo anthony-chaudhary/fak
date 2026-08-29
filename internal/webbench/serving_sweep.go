@@ -11,8 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sweepcert"
 )
 
 const ServingSweepSchema = "fak.serving-sweep.v1"
@@ -98,14 +101,17 @@ type ServingSweepTrackPoint struct {
 }
 
 type ServingSweepTrackSummary struct {
-	Track       ServingTrack           `json:"track"`
-	Status      string                 `json:"status"`
-	Reason      string                 `json:"reason,omitempty"`
-	ValidPoints int                    `json:"valid_points"`
-	Peak        *ServingSweepSelection `json:"peak,omitempty"`
-	SLAStatus   string                 `json:"sla_status"`
-	SLAReason   string                 `json:"sla_reason,omitempty"`
-	SLAKnee     *ServingSweepSelection `json:"sla_knee,omitempty"`
+	Track          ServingTrack           `json:"track"`
+	Status         string                 `json:"status"`
+	Reason         string                 `json:"reason,omitempty"`
+	ValidPoints    int                    `json:"valid_points"`
+	EnvelopeDigest string                 `json:"envelope_digest,omitempty"`
+	PeakStatus     string                 `json:"peak_status,omitempty"`
+	PeakReason     string                 `json:"peak_reason,omitempty"`
+	Peak           *ServingSweepSelection `json:"peak,omitempty"`
+	SLAStatus      string                 `json:"sla_status"`
+	SLAReason      string                 `json:"sla_reason,omitempty"`
+	SLAKnee        *ServingSweepSelection `json:"sla_knee,omitempty"`
 }
 
 type ServingSweepSelection struct {
@@ -408,7 +414,6 @@ func summarizeServingSweepTrack(report *ServingSweepReport, track ServingTrack) 
 	var firstInvalid string
 	var hardInvalid string
 	var valid []*ServingSweepTrackPoint
-	var concurrencies []int
 	for pointIndex := range report.Points {
 		point := &report.Points[pointIndex]
 		for trackIndex := range point.Tracks {
@@ -418,7 +423,6 @@ func summarizeServingSweepTrack(report *ServingSweepReport, track ServingTrack) 
 			}
 			if trackPoint.Status == "valid" {
 				valid = append(valid, trackPoint)
-				concurrencies = append(concurrencies, point.Concurrency)
 			} else if firstInvalid == "" && trackPoint.Reason != "" {
 				firstInvalid = trackPoint.Reason
 			}
@@ -431,50 +435,140 @@ func summarizeServingSweepTrack(report *ServingSweepReport, track ServingTrack) 
 	if hardInvalid != "" {
 		summary.Status = "invalid"
 		summary.Reason = hardInvalid
-		summary.SLAStatus = "invalid"
+		summary.PeakStatus = string(sweepcert.FindingInvalid)
+		summary.SLAStatus = string(sweepcert.FindingInvalid)
 		summary.SLAReason = "identity/capacity invalidity prevents a sweep claim"
 		return summary
 	}
+	evidence, selections, err := servingSweepEvidence(report, track)
+	if err != nil {
+		summary.Status = "invalid"
+		summary.Reason = err.Error()
+		summary.PeakStatus = string(sweepcert.FindingInvalid)
+		summary.SLAStatus = string(sweepcert.FindingInvalid)
+		return summary
+	}
+	summary.EnvelopeDigest = evidence.EnvelopeDigest
 	if len(valid) < 2 {
 		summary.Reason = "fewer than two comparable valid points"
+		summary.PeakStatus = string(sweepcert.FindingNotIdentifiable)
 		if firstInvalid != "" {
 			summary.Reason += ": " + firstInvalid
 		}
 		summary.SLAStatus = servingSweepSLAStatus(report)
 		if summary.SLAStatus == "configured" {
-			summary.SLAStatus = "not_measured"
+			summary.SLAStatus = string(sweepcert.FindingNotIdentifiable)
 			summary.SLAReason = summary.Reason
 		}
 		return summary
 	}
 	summary.Status = "measured"
-	summary.Peak = chooseServingSweepPoint(valid, concurrencies, nil)
+	peakFinding := sweepcert.ObservedExtremum(evidence, "throughput_tok_s", sweepcert.Maximum)
+	summary.PeakStatus = string(peakFinding.Status)
+	summary.PeakReason = peakFinding.Reason
+	summary.Peak = selections[peakFinding.PointID]
 	if !servingSweepSLAConfigured(report) {
 		summary.SLAStatus = "not_configured"
 		summary.SLAReason = "no p99 latency budget configured; no SLA knee claimed"
 		return summary
 	}
-	passes := func(point *ServingSweepTrackPoint) bool {
-		if report.SLA.TTFTP99Millis > 0 {
-			if point.Stats.TTFTMillis.P99 == nil || *point.Stats.TTFTMillis.P99 > float64(report.SLA.TTFTP99Millis) {
-				return false
-			}
-		}
-		if report.SLA.ITLP99Millis > 0 {
-			if point.Stats.ITLMillis.P99 == nil || *point.Stats.ITLMillis.P99 > float64(report.SLA.ITLP99Millis) {
-				return false
-			}
-		}
-		return true
+	constraints := make([]sweepcert.Constraint, 0, 2)
+	if report.SLA.TTFTP99Millis > 0 {
+		constraints = append(constraints, sweepcert.Constraint{Metric: "ttft_p99_ms", Operator: sweepcert.AtOrBelow, Threshold: float64(report.SLA.TTFTP99Millis)})
 	}
-	summary.SLAKnee = chooseServingSweepPoint(valid, concurrencies, passes)
-	if summary.SLAKnee == nil {
-		summary.SLAStatus = "not_measured"
+	if report.SLA.ITLP99Millis > 0 {
+		constraints = append(constraints, sweepcert.Constraint{Metric: "itl_p99_ms", Operator: sweepcert.AtOrBelow, Threshold: float64(report.SLA.ITLP99Millis)})
+	}
+	slaFinding := sweepcert.ConstrainedExtremum(evidence, "throughput_tok_s", sweepcert.Maximum, constraints)
+	summary.SLAStatus = string(slaFinding.Status)
+	summary.SLAReason = slaFinding.Reason
+	summary.SLAKnee = selections[slaFinding.PointID]
+	if summary.SLAKnee == nil && summary.SLAReason == "" {
 		summary.SLAReason = "no comparable valid point satisfies every configured p99 budget"
-	} else {
-		summary.SLAStatus = "measured"
 	}
 	return summary
+}
+
+func servingSweepEvidence(report *ServingSweepReport, track ServingTrack) (sweepcert.Evidence, map[string]*ServingSweepSelection, error) {
+	contract := ServingSweepTrackContract{}
+	for _, candidate := range report.Contracts {
+		if candidate.Track == track {
+			contract = candidate
+			break
+		}
+	}
+	coordinates := make([]float64, len(report.Points))
+	for i := range report.Points {
+		coordinates[i] = float64(report.Points[i].Concurrency)
+	}
+	sort.Float64s(coordinates)
+	axis := sweepcert.Axis{Name: "serving_concurrency", Unit: "requests", Coordinates: coordinates, LowerClosed: len(coordinates) > 0 && coordinates[0] == 1}
+	axis.UpperClosed = len(coordinates) > 0 && int(coordinates[len(coordinates)-1]) == contract.BatchCapacity
+	envelope := sweepcert.Envelope{Axis: axis, Bindings: []sweepcert.Binding{
+		{Name: "model", Value: nonemptySweepBinding(contract.Model)},
+		{Name: "workload", Value: nonemptySweepBinding(report.Workload.Digest)},
+		{Name: "engine", Value: nonemptySweepBinding(contract.Engine + "/" + contract.EngineReceiptDigest)},
+		{Name: "configuration", Value: fmt.Sprintf("track=%s;ttft=%d;itl=%d", track, report.SLA.TTFTP99Millis, report.SLA.ITLP99Millis)},
+		{Name: "capacity", Value: strconv.Itoa(contract.BatchCapacity) + "/" + nonemptySweepBinding(contract.CapacitySource)},
+		{Name: "reset_order", Value: "ascending-concurrency;declared-track-order;no-reset"},
+		{Name: "environment", Value: nonemptySweepBinding(report.MachineID)},
+	}}
+	digest, err := sweepcert.CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		return sweepcert.Evidence{}, nil, err
+	}
+	evidence := sweepcert.Evidence{
+		Envelope: envelope, EnvelopeDigest: digest,
+		DeclaredInvalidReasons: []string{"contract_missing", "workload_identity_mismatch", "model_identity_mismatch", "engine_identity_unknown", "engine_identity_mismatch", "capacity_unknown", "capacity_identity_mismatch", "capacity_exceeded"},
+	}
+	selections := make(map[string]*ServingSweepSelection)
+	for _, coordinate := range coordinates {
+		id := "concurrency:" + strconv.Itoa(int(coordinate))
+		point := sweepcert.Point{ID: id, Coordinate: coordinate, Status: sweepcert.PointNotMeasured, EnvelopeDigest: digest, Observations: make(map[string]sweepcert.Observation)}
+		for pointIndex := range report.Points {
+			if report.Points[pointIndex].Concurrency != int(coordinate) {
+				continue
+			}
+			for trackIndex := range report.Points[pointIndex].Tracks {
+				trackPoint := &report.Points[pointIndex].Tracks[trackIndex]
+				if trackPoint.Track != track {
+					continue
+				}
+				switch trackPoint.Status {
+				case "valid":
+					point.Status = sweepcert.PointMeasured
+				case "invalid":
+					point.Status, point.InvalidReason = sweepcert.PointInvalid, trackPoint.ReasonCode
+				default:
+					point.Status = sweepcert.PointNotMeasured
+				}
+				addServingSweepObservation(point.Observations, "throughput_tok_s", "tok/s", trackPoint.Stats.ThroughputTokensS.Value, digest, track)
+				addServingSweepObservation(point.Observations, "ttft_p99_ms", "ms", trackPoint.Stats.TTFTMillis.P99, digest, track)
+				addServingSweepObservation(point.Observations, "itl_p99_ms", "ms", trackPoint.Stats.ITLMillis.P99, digest, track)
+				if trackPoint.Stats.ThroughputTokensS.Value != nil {
+					selections[id] = chooseServingSweepPoint([]*ServingSweepTrackPoint{trackPoint}, []int{int(coordinate)}, nil)
+				}
+				break
+			}
+			break
+		}
+		evidence.Points = append(evidence.Points, point)
+	}
+	return evidence, selections, nil
+}
+
+func addServingSweepObservation(observations map[string]sweepcert.Observation, metric, unit string, value *float64, digest string, track ServingTrack) {
+	if value == nil {
+		return
+	}
+	observations[metric] = sweepcert.Observation{Status: sweepcert.ObservationMeasured, Value: value, Provenance: sweepcert.Provenance{Source: string(track), Method: "serving-sse-fold", Unit: unit, EnvelopeDigest: digest}}
+}
+
+func nonemptySweepBinding(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "<missing>"
+	}
+	return value
 }
 
 func hardServingSweepInvalidity(code string) bool {

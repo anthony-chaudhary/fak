@@ -6,9 +6,12 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sweepcert"
 )
 
 const RooflineMeasurementSchema = "fak-host-memory-roofline/1"
@@ -100,8 +103,12 @@ type RooflineMeasurement struct {
 	StabilityRule               string                  `json:"stability_rule,omitempty"`
 	RawObservedPeakWorkerCount  int                     `json:"raw_observed_peak_worker_count,omitempty"`
 	RawObservedPeakMedianGBS    float64                 `json:"raw_observed_peak_median_gb_s,omitempty"`
+	EnvelopeDigest              string                  `json:"envelope_digest,omitempty"`
+	RawObservedPeakStatus       string                  `json:"raw_observed_peak_status,omitempty"`
 	PlateauWorkerCounts         []int                   `json:"plateau_worker_counts,omitempty"`
 	SaturationKneeWorkerCount   int                     `json:"saturation_knee_worker_count,omitempty"`
+	SaturationKneeStatus        string                  `json:"saturation_knee_status,omitempty"`
+	SaturationKneeReason        string                  `json:"saturation_knee_reason,omitempty"`
 	Points                      []RooflineSweepPoint    `json:"points,omitempty"`
 }
 
@@ -611,22 +618,14 @@ func buildRooflineSweepMeasurement(o RooflineBenchmarkOptions, results []rooflin
 	}
 
 	floor := o.KneeThreshold * sustainable
-	kneeIndex := -1
-	for i := range points {
-		stableSuffix := true
-		for j := i; j < len(points); j++ {
-			if points[j].MedianGBS < floor {
-				stableSuffix = false
-				break
-			}
-		}
-		if stableSuffix {
-			kneeIndex = i
-			break
-		}
+	evidence, err := rooflineSweepEvidence(o, counts, points, omissions)
+	if err != nil {
+		return RooflineMeasurement{}, err
 	}
-	if kneeIndex < 0 {
-		return RooflineMeasurement{}, fmt.Errorf("roofline sweep has no stable knee: every candidate has a later valid point below %.6g GB/s (threshold %.6g of sustainable peak %.6g)", floor, o.KneeThreshold, sustainable)
+	rawPeakFinding := sweepcert.ObservedExtremum(evidence, "median_gb_s", sweepcert.Maximum)
+	kneeFinding := sweepcert.StableSuffixThreshold(evidence, "median_gb_s", sweepcert.AtOrAbove, floor)
+	if kneeFinding.Status == sweepcert.FindingNotIdentifiable && len(omissions) == 0 {
+		return RooflineMeasurement{}, fmt.Errorf("roofline sweep has no stable knee: %s; later valid point fell below %.6g GB/s (threshold %.6g of sustainable peak %.6g)", kneeFinding.Reason, floor, o.KneeThreshold, sustainable)
 	}
 
 	for i := range points {
@@ -650,12 +649,67 @@ func buildRooflineSweepMeasurement(o RooflineBenchmarkOptions, results []rooflin
 	measurement.OmittedPoints = omissions
 	measurement.KneeThreshold = o.KneeThreshold
 	measurement.StabilityRule = rooflineStabilityRule
+	measurement.EnvelopeDigest = evidence.EnvelopeDigest
 	measurement.RawObservedPeakWorkerCount = points[rawPeakIndex].WorkerCount
 	measurement.RawObservedPeakMedianGBS = points[rawPeakIndex].MedianGBS
+	measurement.RawObservedPeakStatus = string(rawPeakFinding.Status)
 	measurement.PlateauWorkerCounts = []int{points[plateauIndex].WorkerCount, points[plateauIndex+1].WorkerCount}
-	measurement.SaturationKneeWorkerCount = points[kneeIndex].WorkerCount
+	measurement.SaturationKneeStatus = string(kneeFinding.Status)
+	measurement.SaturationKneeReason = kneeFinding.Reason
+	if kneeFinding.PointID != "" {
+		for _, point := range points {
+			if kneeFinding.PointID == "workers:"+strconv.Itoa(point.WorkerCount) {
+				measurement.SaturationKneeWorkerCount = point.WorkerCount
+				break
+			}
+		}
+	}
 	measurement.Points = points
 	return measurement, nil
+}
+
+func rooflineSweepEvidence(o RooflineBenchmarkOptions, counts []int, points []RooflineSweepPoint, omissions []RooflineSweepOmission) (sweepcert.Evidence, error) {
+	coordinates := make([]float64, len(counts))
+	for i, count := range counts {
+		coordinates[i] = float64(count)
+	}
+	envelope := sweepcert.Envelope{
+		Axis: sweepcert.Axis{Name: "host_memory_workers", Unit: "workers", Coordinates: coordinates, LowerClosed: true, UpperClosed: true},
+		Bindings: []sweepcert.Binding{
+			{Name: "model", Value: "none-host-memory-copy"},
+			{Name: "workload", Value: "parallel-copy-read-plus-write"},
+			{Name: "engine", Value: "go-runtime/" + runtime.Version()},
+			{Name: "configuration", Value: fmt.Sprintf("working_set=%d;trials=%d;target_ms=%d;knee=%g", o.WorkingSetBytes, o.Trials, o.TargetDuration.Milliseconds(), o.KneeThreshold)},
+			{Name: "capacity", Value: strconv.Itoa(o.Threads)},
+			{Name: "reset_order", Value: "ascending-workers;reallocate-first-touch;gc-between-points"},
+			{Name: "environment", Value: runtime.GOOS + "/" + runtime.GOARCH},
+		},
+	}
+	digest, err := sweepcert.CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		return sweepcert.Evidence{}, err
+	}
+	evidence := sweepcert.Evidence{Envelope: envelope, EnvelopeDigest: digest}
+	byWorkers := make(map[int]RooflineSweepPoint, len(points))
+	for _, point := range points {
+		byWorkers[point.WorkerCount] = point
+	}
+	omitted := make(map[int]bool, len(omissions))
+	for _, omission := range omissions {
+		omitted[omission.WorkerCount] = true
+	}
+	for _, count := range counts {
+		point := sweepcert.Point{ID: "workers:" + strconv.Itoa(count), Coordinate: float64(count), Status: sweepcert.PointNotMeasured, EnvelopeDigest: digest}
+		if measured, ok := byWorkers[count]; ok {
+			value := measured.MedianGBS
+			point.Status = sweepcert.PointMeasured
+			point.Observations = map[string]sweepcert.Observation{"median_gb_s": {Status: sweepcert.ObservationMeasured, Value: &value, Provenance: sweepcert.Provenance{Source: "host-memory-roofline", Method: "median-parallel-copy", Unit: "GB/s", EnvelopeDigest: digest}}}
+		} else if !omitted[count] {
+			return sweepcert.Evidence{}, fmt.Errorf("roofline evidence has no point or omission for worker_count=%d", count)
+		}
+		evidence.Points = append(evidence.Points, point)
+	}
+	return evidence, nil
 }
 
 func newRooflineOmission(workers int, err error) RooflineSweepOmission {
