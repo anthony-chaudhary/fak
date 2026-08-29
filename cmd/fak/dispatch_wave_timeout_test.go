@@ -236,3 +236,40 @@ func TestDispatchWaveContractTimeoutFallsBackOnceAtEight(t *testing.T) {
 		t.Fatalf("audited=%d calls=%d, want 4 and 2", len(audited), calls)
 	}
 }
+
+func TestWaitDispatchWaveSnapshotDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+
+	_, err := waitDispatchWaveSnapshot(ctx, make(chan *runsSnapshot))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestWaitDispatchWaveSnapshotBufferedExactPointer(t *testing.T) {
+	snap := &runsSnapshot{}
+	ch := make(chan *runsSnapshot, 1)
+	ch <- snap
+
+	got, err := waitDispatchWaveSnapshot(context.Background(), ch)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if got != snap {
+		t.Fatalf("got = %p, want %p", got, snap)
+	}
+}
+
+func TestWaitDispatchWaveSnapshotClosedChannel(t *testing.T) {
+	ch := make(chan *runsSnapshot)
+	close(ch)
+
+	got, err := waitDispatchWaveSnapshot(context.Background(), ch)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("err = %v, want io.EOF", err)
+	}
+	if got != nil {
+		t.Fatalf("got = %v, want nil", got)
+	}
+}
