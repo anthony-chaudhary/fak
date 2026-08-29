@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:77b340ded3963b50effdbc5a6b9a133610f0202e432827f17671b955cc076421",
-  "tracked_files": 18447,
-  "tracked_bytes": 420145605,
+  "content_root": "sha256:0142309f74a5162328f295c70542d417b4ecbcb968f7cb31b0b15c1edf2b1915",
+  "tracked_files": 18449,
+  "tracked_bytes": 420184067,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -13024,8 +13024,8 @@
     },
     {
       "path": "cmd/fak/harness_release.go",
-      "content_sha256": "sha256:73f3394f72e8692690b3c5cd2a8271afc8b50922c2b7c2306ea6b810f69eb293",
-      "bytes": 1665,
+      "content_sha256": "sha256:48c2dc6bb05056e4126e2feee6a7e21fb1f2693dae0510b2985f62ef8eb81536",
+      "bytes": 5413,
       "classification": "runtime_source",
       "source_classes": [
         "history_changelog_releases",
@@ -13034,8 +13034,8 @@
     },
     {
       "path": "cmd/fak/harness_release_test.go",
-      "content_sha256": "sha256:efda9008adc70c02916c4105687273ad22ba225c4c5e3a65cc8dbaca2cfa7d13",
-      "bytes": 399,
+      "content_sha256": "sha256:c53f0695a4d15ead0e1b4785d935c2b02d634898840b0230071a48122bd31151",
+      "bytes": 4234,
       "classification": "test_fixture",
       "source_classes": [
         "history_changelog_releases",
@@ -99339,6 +99339,24 @@
       "path": "internal/harnessartifact/model_serving_test.go",
       "content_sha256": "sha256:27e32c193c0f9413b20c91395f0d3c38fd27a27952c24015df2fee7561ba7816",
       "bytes": 2354,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/harnessartifact/model_upgrade.go",
+      "content_sha256": "sha256:bf46a18e62b19baa12aeb9d42d5d6077caf0a1ffe196361a0838d53508f073e4",
+      "bytes": 18767,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/harnessartifact/model_upgrade_test.go",
+      "content_sha256": "sha256:b201cee7c5f662b88e5a78b064841b9110e1fbbeb76c76888ddfe09d890300a8",
+      "bytes": 12112,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
