@@ -340,6 +340,78 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 	}
 }
 
+func TestNativeInferenceReceiptMetalSequenceRouteAccountingWire(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "off")
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "off")
+	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "1")
+	m := model.NewSynthetic(gatewayQwen35MetalReceiptConfig())
+	m.Quantize()
+	srv, err := New(Config{
+		InKernelModel: m, Tokenizer: newByteLevelTokenizer(t), Model: "qwen38-metal-wire-receipt",
+		InKernelQ4K: true, Metal: true,
+		InKernelPlanner: agent.InKernelPlannerConfig{Qwen35MetalGDNSequence: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := postNativeReceipt(t, srv, `{"messages":[{"role":"user","content":"receipt-proof"}],"max_tokens":1,"temperature":0,"fak":{"native_inference_receipt":true}}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var envelope struct {
+		Fak struct {
+			Native json.RawMessage `json:"native_inference_receipt"`
+		} `json:"fak"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Fak.Native, &wire); err != nil {
+		t.Fatalf("native receipt is not a public JSON object: %v", err)
+	}
+	assertWireValue := func(field, want string) {
+		t.Helper()
+		if got := string(wire[field]); got != want {
+			t.Fatalf("native receipt %s=%s, want %s; receipt=%s", field, got, want, envelope.Fak.Native)
+		}
+	}
+	assertWireValue("backend", `"metal"`)
+	assertWireValue("forward_path", `"metal/qwen35-gdn-preprojected-sequence-v1"`)
+	assertWireValue("q4k", "true")
+	assertWireValue("fallback_active", "false")
+
+	var sequence map[string]json.RawMessage
+	if err := json.Unmarshal(wire["qwen35_metal_forward_sequence"], &sequence); err != nil {
+		t.Fatalf("sequence accounting is not a public JSON object: %v", err)
+	}
+	for field, want := range map[string]string{
+		"path":                   `"metal/qwen35-gdn-preprojected-sequence-v1"`,
+		"available":              "true",
+		"selector_state":         `"on"`,
+		"evidence_state":         `"executed"`,
+		"tokens":                 "32",
+		"command_buffers":        "1",
+		"intermediate_waits":     "0",
+		"intermediate_readbacks": "0",
+		"terminal_waits":         "1",
+		"terminal_readbacks":     "1",
+		"committed":              "true",
+		"completed_wait":         "true",
+	} {
+		if got := string(sequence[field]); got != want {
+			t.Fatalf("sequence receipt %s=%s, want %s; receipt=%s", field, got, want, wire["qwen35_metal_forward_sequence"])
+		}
+	}
+	for _, field := range []string{"encoders", "host_upload_bytes", "host_readback_bytes"} {
+		var got uint64
+		if err := json.Unmarshal(sequence[field], &got); err != nil || got == 0 {
+			t.Fatalf("sequence receipt %s=%s, want positive accounting", field, sequence[field])
+		}
+	}
+}
+
 func TestNativeInferenceReceiptBackendNilQ4KMetalControlAndTypedAbsence(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
