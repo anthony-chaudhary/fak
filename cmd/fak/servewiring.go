@@ -140,9 +140,9 @@ func runServeWiring(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak serve-wiring: read serve.go: %v\n", err)
 		return 1
 	}
-	gwSrc, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "gateway.go"))
+	gwSrc, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "config.go"))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak serve-wiring: read gateway.go: %v\n", err)
+		fmt.Fprintf(stderr, "fak serve-wiring: read config.go: %v\n", err)
 		return 1
 	}
 

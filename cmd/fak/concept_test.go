@@ -33,11 +33,12 @@ func TestConceptPositionDryRunJSONShowsFilesCountsAndDoesNotWrite(t *testing.T) 
 		t.Fatalf("code=%d err=%s", code, errb.String())
 	}
 	var got struct {
-		Dry           bool `json:"dry_run"`
-		Before, After int
-		Files         []string
+		Dry    bool `json:"dry_run"`
+		Before int  `json:"before_family_count"`
+		After  int  `json:"after_family_count"`
+		Files  []string
 	}
-	if json.Unmarshal(out.Bytes(), &got) != nil || !got.Dry || !strings.Contains(out.String(), "before_family_count") || len(got.Files) < 2 {
+	if json.Unmarshal(out.Bytes(), &got) != nil || !got.Dry || got.Before != 1 || got.After != 2 || len(got.Files) < 2 {
 		t.Fatalf("bad plan %s", out.String())
 	}
 	if _, e := os.Stat(filepath.Join(root, conceptcatalog.DataRel, "rows-cache-authored.json")); !os.IsNotExist(e) {

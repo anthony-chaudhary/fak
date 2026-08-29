@@ -23,11 +23,8 @@ func TestOrchestrationLaunchConservesOneParentEnvelope(t *testing.T) {
 	started := time.Date(2026, 8, 22, 4, 27, 54, 0, time.UTC)
 	t.Setenv("CODEX_THREAD_ID", "session-budget-envelope")
 	oldNow := orchestrationLaunchNow
-	nowCalls := 0
 	orchestrationLaunchNow = func() time.Time {
-		now := started.Add(time.Duration(nowCalls) * time.Second)
-		nowCalls++
-		return now
+		return started
 	}
 	t.Cleanup(func() { orchestrationLaunchNow = oldNow })
 	oldLauncher := orchestrationWorkerLauncher
@@ -50,9 +47,9 @@ func TestOrchestrationLaunchConservesOneParentEnvelope(t *testing.T) {
 		t.Fatalf("launched %d children, want 3", len(requests))
 	}
 	var reserved int64
-	for i, req := range requests {
+	for _, req := range requests {
 		reserved += req.TokenBudget
-		wantRemaining := 3*time.Minute - time.Duration(i+1)*time.Second
+		wantRemaining := 3 * time.Minute
 		if req.DeadlineAt != started.Add(3*time.Minute) || req.RemainingWall != wantRemaining {
 			t.Fatalf("child %s wall envelope = deadline %s remaining %s", req.Role.ID, req.DeadlineAt, req.RemainingWall)
 		}

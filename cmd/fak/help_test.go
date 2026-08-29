@@ -176,6 +176,7 @@ func TestCommitHelpShowsDeepHelpAboveFlagDump(t *testing.T) {
 // usage, never the bare dump — the same rationale as the original "ps" exemption:
 //   - "version"/"help" have no top-level flag.FlagSet at all (custom arg parse);
 //   - "ps" sets fs.Usage to its own psUsage;
+//   - "up" delegates to serve's compatible parser and hand-curated usage;
 //   - "manage" shares guard's hand-curated usage and fully compatible flag parser;
 //   - "audit"/"egress"/"model"/"signal" are subcommand dispatchers whose no-arg /
 //     --help path prints a bespoke usage (auditUsage/egressUsage/modelUsage/
@@ -200,7 +201,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 	}
 	src := all.String()
 	exempt := map[string]bool{
-		"version": true, "help": true, "ps": true,
+		"version": true, "help": true, "ps": true, "up": true,
 		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
 		"progress": true, "ultracode": true,
 	}

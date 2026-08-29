@@ -13,6 +13,14 @@ import (
 
 const outputPath = "docs/generated/verb-surface.md"
 
+const pageFrontmatter = `---
+title: "fak verb surface (generated)"
+description: "Generated reference for fak CLI verbs, their purpose, implementation surface, and help coverage, produced by go run ./cmd/verbsdoc from the Go source tree."
+---
+`
+
+var surfaceTableMarker = []byte("\n| VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |\n")
+
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
@@ -32,7 +40,11 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	rendered := surface.Markdown()
+	rendered, err := renderPage(surface.Markdown())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if *printPage {
 		_, _ = os.Stdout.Write(rendered)
 		return 0
@@ -59,4 +71,16 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// renderPage owns the generated document shell that sits around devindex's source-derived
+// table. Keeping the frontmatter and section heading here makes -write idempotent instead of
+// deleting the metadata that documentation tooling requires on every regeneration.
+func renderPage(surface []byte) ([]byte, error) {
+	if bytes.Count(surface, surfaceTableMarker) != 1 {
+		return nil, fmt.Errorf("verb surface table marker count = %d, want 1", bytes.Count(surface, surfaceTableMarker))
+	}
+	body := bytes.Replace(surface, surfaceTableMarker,
+		append([]byte("\n## Surface table\n"), surfaceTableMarker...), 1)
+	return append([]byte(pageFrontmatter), body...), nil
 }
