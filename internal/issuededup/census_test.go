@@ -2,6 +2,7 @@ package issuededup
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -227,5 +228,85 @@ func TestCensusSuppressesTemplateFamily(t *testing.T) {
 	}
 	if len(c.Members) != 2 {
 		t.Fatalf("twin cluster = %v, want exactly {5001,5002}", c.Members)
+	}
+}
+
+// exactSupersetBacklog reproduces the live duplicate shape without coupling
+// production logic or the regression to live issue numbers: two normalized-
+// title-equal filings share more than four fifths of the shorter body, the
+// later filing lightly edits the final section, then appends a work breakdown.
+// The adjacent control is a legitimate template family with equal titles but
+// distinct bodies; title equality alone must not let it escape suppression.
+func exactSupersetBacklog() []BacklogIssue {
+	shared := strings.Repeat(
+		"The architecture contract keeps model identity, resource lifecycle, and receipt evidence explicit across every execution plane. ",
+		18,
+	)
+	tail := strings.Repeat("The existing contract remains the authority for compatibility and rollback. ", 5)
+	issues := []BacklogIssue{
+		{
+			Number: 6001,
+			Title:  "feat(model): compose model runtimes through one architecture contract",
+			Labels: []Label{{Name: "architecture"}, {Name: "model"}},
+			Body: "## Current state\n" + shared +
+				"The follow-on issues should cover descriptors and observability.\n" + tail,
+		},
+		{
+			Number: 6002,
+			Title:  "  FEAT(model):   compose model runtimes through one architecture contract ",
+			Labels: []Label{{Name: "architecture"}, {Name: "model"}},
+			Body: "<!-- producer marker -->\n## Current state\n" + shared +
+				"The follow-on issues cover descriptors and observability.\n" + tail +
+				strings.Repeat("Work breakdown: implement and witness one bounded composition leaf. ", 8),
+		},
+	}
+
+	controlShared := strings.Repeat(
+		"All facets use the same scorecard, witness format, rollout boundary, and shared epic dashboard. ",
+		20,
+	)
+	for i := 0; i < CensusMaxCluster+2; i++ {
+		issues = append(issues, BacklogIssue{
+			Number: 6100 + i,
+			Title:  "docs(adoption): advance one distinct template-family facet",
+			Labels: []Label{{Name: "adoption"}},
+			Body:   fmt.Sprintf("Facet %d has a distinct audience, artifact, and acceptance witness.\n%s", i, controlShared),
+		})
+	}
+	return issues
+}
+
+func TestCensusExactTitleBodySupersetPrecedesFamilySuppression(t *testing.T) {
+	rep := Census(exactSupersetBacklog(), 0, 0)
+
+	c := clusterOf(rep, 6001)
+	if c == nil || len(c.Members) != 2 || c.Members[0] != 6001 || c.Members[1] != 6002 {
+		t.Fatalf("exact-title/body-superset cluster = %+v, want exactly {6001,6002}\nreport: %+v", c, rep)
+	}
+	exactPairs := 0
+	for _, cluster := range rep.Clusters {
+		for _, p := range cluster.Pairs {
+			if p.A == 6001 && p.B == 6002 {
+				exactPairs++
+				if p.MatchedOn != MatchedOnExactBodySuperset || p.Reason != CensusReasonExactBodySuperset {
+					t.Fatalf("exact pair lacks typed reason: %+v", p)
+				}
+				if p.CommonPrefixChars < censusSupersetPrefixMinChars || p.ShorterBodyChars <= 0 || p.LongerBodyChars <= p.ShorterBodyChars {
+					t.Fatalf("exact pair lacks falsifiable prefix/length evidence: %+v", p)
+				}
+			}
+		}
+	}
+	if exactPairs != 1 {
+		t.Fatalf("exact pair emitted %d times, want exactly once: %+v", exactPairs, rep.Clusters)
+	}
+	if rep.SuppressedFamilies != 1 || rep.SuppressedIssues != CensusMaxCluster+2 {
+		t.Fatalf("equal-title template control escaped family suppression: families=%d issues=%d report=%+v",
+			rep.SuppressedFamilies, rep.SuppressedIssues, rep)
+	}
+	for n := 6100; n < 6100+CensusMaxCluster+2; n++ {
+		if got := clusterOf(rep, n); got != nil {
+			t.Fatalf("legitimate template sibling #%d leaked as a duplicate proposal: %+v", n, got)
+		}
 	}
 }

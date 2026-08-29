@@ -46,6 +46,20 @@ const CensusDefaultTopK = 12
 // conservative backstop that keeps the report usable.
 const CensusMaxCluster = 6
 
+// The exact-title pre-pass is intentionally much narrower than the fuzzy
+// census. A dominant-prefix extension must share at least this much of the
+// shorter normalized body and add a material suffix. The absolute floors keep
+// a common one-line template from becoming exact evidence.
+const (
+	censusExactBodyMinChars       = 256
+	censusSupersetPrefixMinChars  = 512
+	censusSupersetPrefixMinRatio  = 0.80
+	censusSupersetSuffixMinChars  = 128
+	MatchedOnExactBodySuperset    = "exact-title+body-superset"
+	CensusReasonCosineThreshold   = "cosine-threshold"
+	CensusReasonExactBodySuperset = "exact-title-body-superset"
+)
+
 // pathRe matches a slash-bearing, extensioned path token in an issue body
 // (internal/gateway/foo.go, cmd/fak/x.go, tools/y.py, docs/z.md) so two issues
 // that name the same file are cited as sharing it. A bare `./internal/gateway`
@@ -60,16 +74,23 @@ var pathRe = regexp.MustCompile(`(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-
 // issues share, and a short prose excerpt from each so a reviewer sees *what*
 // overlapped, not only a number.
 type PairEvidence struct {
-	A            int      `json:"a"`
-	B            int      `json:"b"`
-	Similarity   float64  `json:"similarity"`
-	TitleScore   float64  `json:"title_score"`
-	BodyScore    float64  `json:"body_score"`
-	MatchedOn    string   `json:"matched_on"`
-	SharedPaths  []string `json:"shared_paths,omitempty"`
-	SharedLabels []string `json:"shared_labels,omitempty"`
-	ExcerptA     string   `json:"excerpt_a,omitempty"`
-	ExcerptB     string   `json:"excerpt_b,omitempty"`
+	A          int     `json:"a"`
+	B          int     `json:"b"`
+	Similarity float64 `json:"similarity"`
+	TitleScore float64 `json:"title_score"`
+	BodyScore  float64 `json:"body_score"`
+	MatchedOn  string  `json:"matched_on"`
+	Reason     string  `json:"reason"`
+	// Exact-title/body-superset evidence is deliberately numeric and therefore
+	// falsifiable from the two normalized bodies. These fields stay zero for a
+	// cosine link.
+	CommonPrefixChars int      `json:"common_prefix_chars,omitempty"`
+	ShorterBodyChars  int      `json:"shorter_body_chars,omitempty"`
+	LongerBodyChars   int      `json:"longer_body_chars,omitempty"`
+	SharedPaths       []string `json:"shared_paths,omitempty"`
+	SharedLabels      []string `json:"shared_labels,omitempty"`
+	ExcerptA          string   `json:"excerpt_a,omitempty"`
+	ExcerptB          string   `json:"excerpt_b,omitempty"`
 }
 
 // Cluster is a connected component of dup-suspected issues plus the ranked
@@ -102,12 +123,14 @@ type CensusReport struct {
 
 // censusRow is one issue's precomputed vectors and evidence metadata.
 type censusRow struct {
-	title   string
-	titleV  simhash.Vector
-	combV   simhash.Vector
-	paths   map[string]bool
-	labels  map[string]bool
-	excerpt string
+	title     string
+	normTitle string
+	body      string
+	titleV    simhash.Vector
+	combV     simhash.Vector
+	paths     map[string]bool
+	labels    map[string]bool
+	excerpt   string
 }
 
 // Census builds the body-aware duplicate-cluster report over a read-only
@@ -139,12 +162,14 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 		}
 		nb := normalizeBody(is.Body)
 		r := &censusRow{
-			title:   title,
-			titleV:  simhash.Embed(title),
-			combV:   simhash.Embed(title + "\n" + nb),
-			paths:   tokenSet(pathRe.FindAllString(is.Body, -1)),
-			labels:  labelSet(is.Labels),
-			excerpt: excerpt(nb),
+			title:     title,
+			normTitle: normalizeCensusTitle(title),
+			body:      nb,
+			titleV:    simhash.Embed(title),
+			combV:     simhash.Embed(title + "\n" + nb),
+			paths:     tokenSet(pathRe.FindAllString(is.Body, -1)),
+			labels:    labelSet(is.Labels),
+			excerpt:   excerpt(nb),
 		}
 		rows[is.Number] = r
 		comb.Add(strconv.Itoa(is.Number), r.combV, "")
@@ -170,12 +195,59 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 	}
 
 	seen := make(map[[2]int]bool)
+	exactMembers := make(map[int]bool)
 	pairs := make([]PairEvidence, 0)
+
+	// Strong evidence must not enter through the approximate top-k path: a
+	// dense template family can push a real superset outside top-k, or absorb it
+	// into an oversized component that the family guard suppresses. Group exact
+	// normalized titles first, then test the bounded body predicate. Members of
+	// an exact component are withheld from fuzzy unioning so that component
+	// remains independently reviewable rather than disappearing into a family.
+	numbers := append([]int(nil), order...)
+	sort.Ints(numbers)
+	for i, n := range numbers {
+		r := rows[n]
+		for _, other := range numbers[i+1:] {
+			o := rows[other]
+			if r.normTitle != o.normTitle {
+				continue
+			}
+			prefix, shorter, longer, ok := exactBodySupersetEvidence(r.body, o.body)
+			if !ok {
+				continue
+			}
+			key := [2]int{n, other}
+			seen[key] = true
+			exactMembers[n], exactMembers[other] = true, true
+			union(n, other)
+			pairs = append(pairs, PairEvidence{
+				A:                 n,
+				B:                 other,
+				Similarity:        1,
+				TitleScore:        simhash.Cosine(r.titleV, o.titleV),
+				BodyScore:         simhash.Cosine(r.combV, o.combV),
+				MatchedOn:         MatchedOnExactBodySuperset,
+				Reason:            CensusReasonExactBodySuperset,
+				CommonPrefixChars: prefix,
+				ShorterBodyChars:  shorter,
+				LongerBodyChars:   longer,
+				SharedPaths:       sharedKeys(r.paths, o.paths),
+				SharedLabels:      sharedKeys(r.labels, o.labels),
+				ExcerptA:          r.excerpt,
+				ExcerptB:          o.excerpt,
+			})
+		}
+	}
+
 	for _, n := range order {
+		if exactMembers[n] {
+			continue
+		}
 		r := rows[n]
 		for _, mt := range comb.TopK(r.combV, topK+1) {
 			other, err := strconv.Atoi(mt.ID)
-			if err != nil || other == n {
+			if err != nil || other == n || exactMembers[other] {
 				continue
 			}
 			key := [2]int{min(n, other), max(n, other)}
@@ -202,6 +274,7 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 				TitleScore:   titleScore,
 				BodyScore:    bodyScore,
 				MatchedOn:    axis,
+				Reason:       CensusReasonCosineThreshold,
 				SharedPaths:  sharedKeys(lo.paths, hi.paths),
 				SharedLabels: sharedKeys(lo.labels, hi.labels),
 				ExcerptA:     lo.excerpt,
@@ -221,7 +294,14 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 		if len(ms) < 2 {
 			continue
 		}
-		if len(ms) > CensusMaxCluster {
+		hasExactEvidence := false
+		for _, p := range pairs {
+			if p.Reason == CensusReasonExactBodySuperset && find(p.A) == root {
+				hasExactEvidence = true
+				break
+			}
+		}
+		if len(ms) > CensusMaxCluster && !hasExactEvidence {
 			// A component this large is a shared-template family, not a duplicate
 			// set — withhold it from the proposals but account for it so the cap
 			// is transparent, never a silent drop.
@@ -311,8 +391,12 @@ func RenderCensus(rep CensusReport) string {
 		}
 		b.WriteString(".\nEvidence:\n")
 		for _, p := range c.Pairs {
-			fmt.Fprintf(&b, "- #%d ↔ #%d — similarity %.2f on %s (title %.2f / body %.2f)\n",
-				p.A, p.B, p.Similarity, p.MatchedOn, p.TitleScore, p.BodyScore)
+			fmt.Fprintf(&b, "- #%d ↔ #%d — similarity %.2f on %s (title %.2f / body %.2f; reason %s)\n",
+				p.A, p.B, p.Similarity, p.MatchedOn, p.TitleScore, p.BodyScore, p.Reason)
+			if p.Reason == CensusReasonExactBodySuperset {
+				fmt.Fprintf(&b, "  - exact normalized title; common body prefix: %d/%d shorter chars; longer body: %d chars\n",
+					p.CommonPrefixChars, p.ShorterBodyChars, p.LongerBodyChars)
+			}
 			if len(p.SharedLabels) > 0 {
 				fmt.Fprintf(&b, "  - shared labels: %s\n", strings.Join(p.SharedLabels, ", "))
 			}
@@ -328,6 +412,41 @@ func RenderCensus(rep CensusReport) string {
 		}
 	}
 	return b.String()
+}
+
+// normalizeCensusTitle is the exact-title identity used only by the census
+// pre-pass. It folds case and whitespace without rewriting punctuation or
+// vocabulary, keeping the predicate materially narrower than semantic title
+// matching.
+func normalizeCensusTitle(title string) string {
+	return strings.ToLower(strings.Join(strings.Fields(title), " "))
+}
+
+// exactBodySupersetEvidence recognizes two high-confidence shapes after exact
+// normalized-title equality: literal containment (including identical bodies),
+// or a dominant identical prefix followed by a materially longer suffix. The
+// latter admits a duplicate filing that lightly edits its final section before
+// appending a work breakdown, while rejecting equal-length template siblings.
+func exactBodySupersetEvidence(a, b string) (prefix, shorter, longer int, ok bool) {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	short, long := a, b
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	shorter, longer = len(short), len(long)
+	if shorter < censusExactBodyMinChars {
+		return 0, shorter, longer, false
+	}
+	if strings.HasPrefix(long, short) {
+		return shorter, shorter, longer, true
+	}
+	for prefix < shorter && short[prefix] == long[prefix] {
+		prefix++
+	}
+	if prefix < censusSupersetPrefixMinChars || longer-shorter < censusSupersetSuffixMinChars {
+		return prefix, shorter, longer, false
+	}
+	return prefix, shorter, longer, float64(prefix)/float64(shorter) >= censusSupersetPrefixMinRatio
 }
 
 // labelSet folds an issue's gh labels into a name set for the shared-label
