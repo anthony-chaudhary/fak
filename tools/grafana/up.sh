@@ -24,6 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GRAFANA_DIR="$ROOT/tools/grafana"
 RUN_DIR="$GRAFANA_DIR/.run"
 mkdir -p "$RUN_DIR"
+chmod 700 "$RUN_DIR"
 RUN_ID="${FAK_GRAFANA_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}}"
 
 GATEWAY_HOSTPORT="127.0.0.1:8080"                  # where WE health-check it
@@ -95,12 +96,15 @@ start_bg() {  # name port-check-path command… → records only processes this 
   local pid_file="$RUN_DIR/$name.pid"
   if port_live "${check%% *}" "${check#* }"; then
     if [ "$(uname)" = "Darwin" ] && [ -s "$pid_file" ]; then
-      local recorded_owner recorded_label expected_label
+      local recorded_owner recorded_label recorded_runtime expected_label
       recorded_owner="$(sed -n 's/^owner=//p' "$pid_file" 2>/dev/null | head -1)"
       recorded_label="$(sed -n 's/^label=//p' "$pid_file" 2>/dev/null | head -1)"
+      recorded_runtime="$(sed -n 's/^runtime=//p' "$pid_file" 2>/dev/null | head -1)"
       expected_label="com.fak.grafana.$(id -u).${name//_/-}.$recorded_owner"
       if [[ "$recorded_owner" =~ ^[A-Za-z0-9.-]+$ ]] \
         && [ "$recorded_label" = "$expected_label" ] \
+        && [[ "$recorded_runtime" == "${TMPDIR:-/tmp}"/fak-grafana-* ]] \
+        && [ -d "$recorded_runtime" ] \
         && launchctl print "gui/$(id -u)/$recorded_label" >/dev/null 2>&1; then
         log "$name already healthy — retaining owned launchd job."
         return
@@ -116,19 +120,34 @@ start_bg() {  # name port-check-path command… → records only processes this 
     [[ "$RUN_ID" =~ ^[A-Za-z0-9.-]+$ ]] \
       || die "FAK_GRAFANA_RUN_ID must contain only letters, digits, dots, and hyphens."
     local label="com.fak.grafana.$(id -u).${name//_/-}.$RUN_ID"
-    # launchd owns the wrapper after this launcher exits. The wrapper records
-    # its current PID on every launchd restart and forwards teardown to its child.
-    # With -p, launchctl takes argv[0] after --, so supply it before Bash's -c.
+    local runtime runtime_fak runtime_log command_path
+    runtime="$(mktemp -d "${TMPDIR:-/tmp}/fak-grafana-${name}.${RUN_ID}.XXXXXX")" \
+      || die "could not allocate a private launchd runtime for $name."
+    chmod 700 "$runtime"
+    runtime_fak="$runtime/fak"
+    runtime_log="$runtime/$name.log"
+    command_path="$1"
+    if [ "$command_path" = "$FAK_BIN" ]; then
+      cp "$FAK_BIN" "$runtime_fak"
+      chmod 700 "$runtime_fak"
+      shift
+      set -- "$runtime_fak" "$@"
+    fi
+    # launchd owns the wrapper after this launcher exits. Its executable and logs
+    # live under a private TMPDIR runtime, so protected-checkout cwd/log access is
+    # never required. The wrapper atomically publishes exact teardown metadata.
     launchctl submit \
       -p /bin/bash \
       -l "$label" \
-      -o "$RUN_DIR/$name.log" \
-      -e "$RUN_DIR/$name.log" \
+      -o "$runtime_log" \
+      -e "$runtime_log" \
       -- /bin/bash -c '
         pid_file="$1"
         owner="$2"
         label="$3"
-        shift 3
+        runtime="$4"
+        workspace="$5"
+        shift 5
         child=""
         pid_file_tmp="$pid_file.tmp.$$"
         stop_child() {
@@ -143,17 +162,22 @@ start_bg() {  # name port-check-path command… → records only processes this 
           printf "owner=%s\n" "$owner"
           printf "supervisor=launchd\n"
           printf "label=%s\n" "$label"
+          printf "runtime=%s\n" "$runtime"
         } >"$pid_file_tmp"
         /bin/mv "$pid_file_tmp" "$pid_file"
-        "$@" &
+        cd "$runtime"
+        FAK_WORKSPACE_ROOT="$workspace" "$@" &
         child=$!
         wait "$child"
-      ' "fak-grafana-owner=$RUN_ID" "$pid_file" "$RUN_ID" "$label" "$@"
+      ' "fak-grafana-owner=$RUN_ID" "$pid_file" "$RUN_ID" "$label" "$runtime" "$ROOT" "$@"
     for _ in $(seq 1 50); do
-      [ -s "$pid_file" ] && return
+      if [ -s "$pid_file" ] && grep -qx "runtime=$runtime" "$pid_file"; then
+        return
+      fi
       sleep 0.02
     done
     launchctl remove "$label" 2>/dev/null || true
+    rm -rf "$runtime"
     die "$name launchd supervisor did not publish ownership metadata."
   fi
   # nohup makes the supervisor independent of the launcher's shell lifetime. Keep
@@ -336,7 +360,7 @@ start_bg fak_fleet "$FLEET_METRICS_PORT /metrics" \
   "$FAK_BIN" fleet metrics --serve --addr "0.0.0.0:$FLEET_METRICS_PORT"
 
 if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
-  start_bg fak_gateway "8080 /metrics" \
+  start_bg fak_gateway "${GATEWAY_ADDR##*:} /metrics" \
     "$FAK_BIN" serve --addr "$GATEWAY_ADDR" --engine inkernel --model "$MODEL_LABEL"
   # The cache-value roll-up exporter re-folds the nightrun ledgers + ablate arms on
   # each scrape (no model/weights needed). Its panels read "No data" until the
