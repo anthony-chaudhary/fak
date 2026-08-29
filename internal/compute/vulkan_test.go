@@ -75,8 +75,10 @@ func TestVulkanQ4KStageGrowthKeepsBatchActiveAndBounded(t *testing.T) {
 	dw.buf.(*vulkanBuf).hostVisibleWeight = true
 	defer func() { dw.buf.(*vulkanBuf).hostVisibleWeight = false }()
 	oldStage := v.q4kStage
+	oldBudget := v.budgetBytes
+	v.budgetBytes = 0 // keep this regression focused on the single-stage batch path
 	v.q4kStage = true
-	defer func() { v.q4kStage = oldStage }()
+	defer func() { v.q4kStage = oldStage; v.budgetBytes = oldBudget }()
 	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
 	defer v.Free(dx)
 	before := v.VulkanDebugDispatchProfileSnapshot()
@@ -1366,5 +1368,55 @@ func TestVulkanTeardownResourcesIsIdempotent(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("continued result[%d] = %v, want %v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestVulkanQ4KTensorHomeReusesCopyAndResets(t *testing.T) {
+	v := vk(t)
+	v.VulkanDebugResetQ4KStage()
+	defer v.VulkanDebugResetQ4KStage()
+	const out, in = 8, 256
+	rng := rand.New(rand.NewSource(9833))
+	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
+	for b := 0; b < out*(in/q4kSuper); b++ {
+		randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+	}
+	xv := make([]float32, in)
+	for i := range xv {
+		xv[i] = rng.Float32()*2 - 1
+	}
+	hw := NewQ4K(Default(), []int{out, in}, raw)
+	w := v.Upload(hw, Q4_K)
+	defer v.Free(w)
+	w.buf.(*vulkanBuf).hostVisibleWeight = true
+	x := v.Upload(NewF32(Default(), []int{in}, xv), F32)
+	defer v.Free(x)
+	oldStage, oldBudget := v.q4kStage, v.budgetBytes
+	v.q4kStage, v.budgetBytes = true, v.dlUsed+int64(len(raw))*16+(64<<20)
+	defer func() { v.q4kStage, v.budgetBytes = oldStage, oldBudget }()
+	v.BeginBatch()
+	y1 := v.MatMul(w, x)
+	v.FlushBatch()
+	defer v.Free(y1)
+	h1, m1, b1, e1, r1, c1 := v.VulkanDebugQ4KTensorHomeSnapshot()
+	if h1 != 0 || m1 != 1 || b1 != 0 || e1 != 1 || r1 != int64(len(raw)) || c1 != int64(len(raw)) {
+		t.Fatalf("first snapshot=%d,%d,%d,%d,%d,%d", h1, m1, b1, e1, r1, c1)
+	}
+	v.BeginBatch()
+	y2 := v.MatMul(w, x)
+	v.FlushBatch()
+	defer v.Free(y2)
+	h2, m2, b2, e2, r2, c2 := v.VulkanDebugQ4KTensorHomeSnapshot()
+	if h2 != 1 || m2 != 1 || b2 != 0 || e2 != 1 || r2 != r1 || c2 != c1 {
+		t.Fatalf("reuse snapshot=%d,%d,%d,%d,%d,%d", h2, m2, b2, e2, r2, c2)
+	}
+	want := Default().Read(Default().MatMul(hw, NewF32(Default(), []int{in}, xv)))
+	if c := cosineC(v.Read(y2), want); c < 0.995 {
+		t.Fatalf("cosine %.8f", c)
+	}
+	v.VulkanDebugResetQ4KStage()
+	_, _, _, entries, resident, _ := v.VulkanDebugQ4KTensorHomeSnapshot()
+	if entries != 0 || resident != 0 {
+		t.Fatalf("reset entries=%d resident=%d", entries, resident)
 	}
 }
