@@ -1065,7 +1065,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *model.NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
 	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
-	if measurement.qwen35MetalForwardSequence.Available {
+	if measurement.qwen35MetalForwardSequence.EvidenceState != "" || measurement.qwen35MetalForwardSequence.Available {
 		snapshot := measurement.qwen35MetalForwardSequence
 		qwen35MetalForwardSequence = &snapshot
 	}
