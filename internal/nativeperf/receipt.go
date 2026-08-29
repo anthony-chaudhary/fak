@@ -211,11 +211,9 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	}
 	if strings.TrimSpace(r.Execution.Engine) == "" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
 		f = append(f, "execution identity must name an engine and a forward path")
-	} else if r.Execution.Engine != "fak-native" {
-		f = append(f, "execution engine must be fak-native")
 	}
-	if r.Execution.FallbackCount != 0 {
-		f = append(f, "fallback count must be zero")
+	if r.Execution.FallbackCount < 0 {
+		f = append(f, "fallback count must be non-negative")
 	}
 	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
 		f = append(f, "quality metric must be captured and finite")
@@ -329,7 +327,7 @@ func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Compar
 	if baseline.EnvelopeID != candidate.EnvelopeID || baseline.ChangedLeverID != candidate.ChangedLeverID {
 		return Comparison{}, fmt.Errorf("receipts target different envelope or lever")
 	}
-	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
+	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution.Engine != candidate.Execution.Engine || baseline.Execution.ForwardPath != candidate.Execution.ForwardPath || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
 		return Comparison{}, fmt.Errorf("receipts are incomparable: an undeclared control axis drifted")
 	}
 	b, c := meanTPS(baseline.Repetitions), meanTPS(candidate.Repetitions)

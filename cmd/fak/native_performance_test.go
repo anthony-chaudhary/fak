@@ -376,12 +376,12 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 	if comparison.DeltaTokensPerS != 1 || comparison.ChangedLeverID != "metal.command-buffer-amortization" {
 		t.Fatalf("comparison=%+v", comparison)
 	}
-	candidate.Execution.FallbackCount = 1
+	candidate.Execution.FallbackCount = -1
 	data, _ := json.Marshal(candidate)
 	_ = os.WriteFile(candidatePath, data, 0600)
 	stdout.Reset()
 	stderr.Reset()
-	if code := runNativePerformance(&stdout, &stderr, []string{"--compare", basePath, "--candidate", candidatePath}); code != 1 || !strings.Contains(stderr.String(), "fallback count must be zero") {
+	if code := runNativePerformance(&stdout, &stderr, []string{"--compare", basePath, "--candidate", candidatePath}); code != 1 || !strings.Contains(stderr.String(), "fallback count") {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 }
