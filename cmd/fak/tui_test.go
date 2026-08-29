@@ -1172,6 +1172,158 @@ func TestTUIAgentDryRunDefaultsToClaudeGuardOAuth(t *testing.T) {
 	}
 }
 
+func TestTUIAgentConsumesSavedModelAndEffort(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"agent":{"model":"claude-fable-5","effort":"xhigh"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent", "--console-config", cfg, "--json",
+		"--at", "2026-08-28T12:00:00Z",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI saved agent controls code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent report: %v\n%s", err, stdout.String())
+	}
+	if report.Model != "claude-fable-5" || report.Effort != "xhigh" {
+		t.Fatalf("saved generation controls = model %q effort %q", report.Model, report.Effort)
+	}
+	if !hasTUIArgPair(report.Launch, "--model", "claude-fable-5") || !hasTUIArgPair(report.Command, "--effort", "xhigh") {
+		t.Fatalf("saved generation controls missing from argv: command=%v launch=%v", report.Command, report.Launch)
+	}
+}
+
+func TestTUIAgentExplicitGenerationFlagsWinAndModelRemainsOpen(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"agent":{"model":"claude-opus-5","effort":"low"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent", "--console-config", cfg, "--model", "vendor/custom-model-v9", "--effort", "max", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI explicit agent controls code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent report: %v\n%s", err, stdout.String())
+	}
+	if report.Model != "vendor/custom-model-v9" || report.Effort != "max" {
+		t.Fatalf("explicit generation controls lost: model %q effort %q", report.Model, report.Effort)
+	}
+	if !hasTUIArgPair(report.Launch, "--model", "vendor/custom-model-v9") || !hasTUIArgPair(report.Command, "--effort", "max") {
+		t.Fatalf("explicit generation controls missing from argv: command=%v launch=%v", report.Command, report.Launch)
+	}
+}
+
+func TestTUIAgentRawModelOverridesManagedModelOnGuard(t *testing.T) {
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"agent":{"model":"claude-opus-5"}}}`)
+	cases := []struct {
+		name string
+		raw  []string
+	}{
+		{name: "long split", raw: []string{"--model", "raw-model"}},
+		{name: "long joined", raw: []string{"--model=raw-model"}},
+		{name: "short split", raw: []string{"-m", "raw-model"}},
+		{name: "short joined", raw: []string{"-m=raw-model"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := []string{"agent", "--console-config", cfg, "--json", "--"}
+			args = append(args, tc.raw...)
+			if code := runTUI(&stdout, &stderr, args); code != 0 {
+				t.Fatalf("raw model guard code=%d stderr=%s", code, stderr.String())
+			}
+			var report tuiAgentReport
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("unmarshal raw model guard report: %v\n%s", err, stdout.String())
+			}
+			if report.Model != "raw-model" || countTUIArgPairBeforeSeparator(report.Launch, "--model", "raw-model") != 1 {
+				t.Fatalf("raw model did not reach guard exactly once: model=%q command=%v launch=%v", report.Model, report.Command, report.Launch)
+			}
+			if hasTUIString(report.Launch, "claude-opus-5") {
+				t.Fatalf("stale saved model remained in launch: %v", report.Launch)
+			}
+		})
+	}
+}
+
+func TestTUIAgentRawModelOverridesManagedModelOnGateway(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "gateway-test-key")
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"agent":{"model":"claude-opus-5"}}}`)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent", "--console-config", cfg, "--gateway-url", "http://node.example:8080", "--json", "--", "-m=raw-gateway-model",
+	})
+	if code != 0 {
+		t.Fatalf("raw model gateway code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal raw model gateway report: %v\n%s", err, stdout.String())
+	}
+	if report.Model != "raw-gateway-model" || !hasTUIAgentEnv(report.Env, "ANTHROPIC_MODEL", "raw-gateway-model") {
+		t.Fatalf("raw model did not reach gateway env: model=%q env=%+v", report.Model, report.Env)
+	}
+	for _, entry := range report.Env {
+		if entry.Source == "model" && entry.Value != "raw-gateway-model" {
+			t.Fatalf("stale managed model remained in gateway env: %+v", report.Env)
+		}
+	}
+	if hasTUIString(report.Launch, "claude-opus-5") || len(report.Launch) == 0 || report.Launch[len(report.Launch)-1] != "-m=raw-gateway-model" {
+		t.Fatalf("gateway launch did not preserve raw model without stale selection: %v", report.Launch)
+	}
+}
+
+func TestTUIAgentEffortValidationAndRawEscapeHatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runTUI(&stdout, &stderr, []string{"agent", "--effort", "extreme", "--json"}); code != 2 {
+		t.Fatalf("invalid typed effort code=%d, want 2; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `invalid --effort "extreme"`) {
+		t.Fatalf("invalid typed effort stderr=%q", stderr.String())
+	}
+
+	cfg := writeTUIConsoleConfig(t, `{"pane_defaults":{"agent":{"effort":"low"}}}`)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runTUI(&stdout, &stderr, []string{"agent", "--console-config", cfg, "--json", "--", "--effort", "future"}); code != 0 {
+		t.Fatalf("raw effort escape hatch code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal raw effort report: %v\n%s", err, stdout.String())
+	}
+	if report.Effort != "future" || countTUIArg(report.Command, "--effort") != 1 || countTUIArg(report.Launch, "--effort") != 1 {
+		t.Fatalf("raw effort should win without duplication: effort=%q command=%v launch=%v", report.Effort, report.Command, report.Launch)
+	}
+}
+
+func TestTUIAgentGenerationControlsCapturedDryRun(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent", "--model", "claude-opus-5", "--effort", "high", "--dry-run",
+		"--at", "2026-08-28T12:00:00Z", "--width", "120",
+	})
+	if code != 0 {
+		t.Fatalf("generation dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"model/version=claude-opus-5", "effort=high", "claude --permission-mode bypassPermissions --effort high", "Backend Command", "Launch"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("captured dry-run missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("captured dry-run contains terminal escape corruption: %q", out)
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if len([]rune(line)) > 120 {
+			t.Fatalf("captured line exceeds width 120 (%d): %q", len([]rune(line)), line)
+		}
+	}
+}
+
 // TestTUIAgentDefaultsBypassPermissions proves the fix: spawning an account
 // session injects Claude's --permission-mode bypassPermissions by DEFAULT (no
 // manual passthrough flag), so every account launches with the guarded backend
@@ -1319,6 +1471,7 @@ func TestTUIAgentGatewayDryRunRedactsBearer(t *testing.T) {
 		"--dry-run",
 		"--gateway-url", "http://node.example:8080/v1",
 		"--model", "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+		"--effort", "high",
 		"--prompt", "Reply with exactly: OK",
 		"--width", "1000",
 	})
@@ -1326,7 +1479,7 @@ func TestTUIAgentGatewayDryRunRedactsBearer(t *testing.T) {
 		t.Fatalf("runTUI agent gateway dry-run code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"provider=existing-fak-gateway", "auth=gateway-bearer", "gateway=http://node.example:8080", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "<redacted from FAK_GATEWAY_KEY>", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "API_TIMEOUT_MS", "claude --permission-mode bypassPermissions -p"} {
+	for _, want := range []string{"provider=existing-fak-gateway", "auth=gateway-bearer", "gateway=http://node.example:8080", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "<redacted from FAK_GATEWAY_KEY>", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "API_TIMEOUT_MS", "effort=high", "claude --permission-mode bypassPermissions --effort high -p"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gateway dry-run output missing %q:\n%s", want, out)
 		}
@@ -1905,6 +2058,18 @@ func TestTUIPanesRegistryListsControls(t *testing.T) {
 	if _, ok := paneDescriptorByID(report.Panes, "config"); ok {
 		t.Fatalf("config compatibility alias should not be advertised: %+v", report.Panes)
 	}
+	agent, ok := paneDescriptorByID(report.Panes, "agent")
+	if !ok {
+		t.Fatalf("agent pane missing from registry: %+v", report.Panes)
+	}
+	model, modelOK := tuiPaneControlByID(agent.Controls, "model")
+	effort, effortOK := tuiPaneControlByID(agent.Controls, "effort")
+	if !modelOK || !sameTUIStrings(model.Options, []string{"claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-5"}) {
+		t.Fatalf("agent model control = %+v ok=%v", model, modelOK)
+	}
+	if !effortOK || !sameTUIStrings(effort.Options, []string{"low", "medium", "high", "xhigh", "max"}) {
+		t.Fatalf("agent effort control = %+v ok=%v", effort, effortOK)
+	}
 	guard, ok := paneDescriptorByID(report.Panes, "guard")
 	if !ok {
 		t.Fatalf("guard pane missing from registry: %+v", report.Panes)
@@ -2069,6 +2234,36 @@ func paneDescriptorByID(panes []tuiplugin.Descriptor, id string) (tuiplugin.Desc
 func hasTUIPaneControl(controls []tuiplugin.Control, id string) bool {
 	_, ok := tuiPaneControlByID(controls, id)
 	return ok
+}
+
+func hasTUIArgPair(args []string, name, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func countTUIArg(args []string, name string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			count++
+		}
+	}
+	return count
+}
+
+func countTUIArgPairBeforeSeparator(args []string, name, value string) int {
+	count := 0
+	for i := 0; i+1 < len(args) && args[i] != "--"; i++ {
+		if args[i] == name && args[i+1] == value {
+			count++
+			i++
+		}
+	}
+	return count
 }
 
 func tuiPaneControlByID(controls []tuiplugin.Control, id string) (tuiplugin.Control, bool) {

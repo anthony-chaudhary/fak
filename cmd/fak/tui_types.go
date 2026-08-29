@@ -434,6 +434,7 @@ type tuiAgentReport struct {
 	PermissionMode      string        `json:"permission_mode,omitempty"`
 	Policy              string        `json:"policy,omitempty"`
 	Model               string        `json:"model,omitempty"`
+	Effort              string        `json:"effort,omitempty"`
 	ContextBudget       int           `json:"context_budget_tokens,omitempty"`
 	RestartOnBudget     bool          `json:"restart_on_budget,omitempty"`
 	RestartLimit        int           `json:"restart_limit,omitempty"`
@@ -466,6 +467,7 @@ type tuiAgentOptions struct {
 	Home                string
 	Policy              string
 	Model               string
+	Effort              string
 	SessionID           string
 	ContextBudgetTokens int
 	RestartOnBudget     bool
