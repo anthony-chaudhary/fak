@@ -3,16 +3,15 @@ package ultracodebench
 import "testing"
 
 func TestEvaluateAccessModeFrontierMapsCompleteMatrix(t *testing.T) {
-	fixture := AccessModeFrontierFixture()
-	report, err := EvaluateAccessModeFrontier(fixture, []int{1, 2, 4, 8})
+	report, err := EvaluateAccessModeFrontier(AccessModeFrontierFixture(), []int{1, 2, 4, 8})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Artifacts) != len(fixture.Artifacts) {
+	if len(report.Artifacts) != 2 {
 		t.Fatalf("artifacts=%d", len(report.Artifacts))
 	}
-	for i, artifact := range report.Artifacts {
-		if len(artifact.Cells) != len(fixture.Artifacts[i].Cells) {
+	for _, artifact := range report.Artifacts {
+		if len(artifact.Cells) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST the access-frontier artifact schema contains exactly twelve required cells
 			t.Fatalf("%s cells=%d", artifact.EvidenceKind, len(artifact.Cells))
 		}
 	}

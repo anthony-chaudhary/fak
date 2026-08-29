@@ -11,7 +11,7 @@ func TestPolicyValueBenchmarkPricesSafetyWithoutHidingCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Metrics) != 6 || len(r.Traces) != 48 {
+	if len(r.Metrics) != 6 || len(r.Traces) != 48 { //boundarylint:ignore CHANGE_DETECTOR_TEST the safety fixture defines exactly 6 metrics across its fixed 48 policy traces
 		t.Fatalf("metrics=%d traces=%d", len(r.Metrics), len(r.Traces))
 	}
 	for _, m := range r.Metrics {

@@ -65,7 +65,7 @@ func TestReceiptSerializationIsPrivacySafe(t *testing.T) {
 	if err := json.Unmarshal(encoded, &keys); err != nil {
 		t.Fatal(err)
 	}
-	if len(keys) != 12 {
+	if len(keys) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST the receipt schema contract contains exactly 12 serialized keys
 		t.Fatalf("receipt key count = %d, want closed 12-field schema: %s", len(keys), encoded)
 	}
 	wantTimestamp := time.Date(2026, 8, 26, 12, 34, 56, 789123000, time.FixedZone("west", -7*60*60)).UTC().UnixMilli()

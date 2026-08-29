@@ -84,7 +84,7 @@ func fixture(t *testing.T) Evidence {
 
 func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 	e := fixture(t)
-	if len(e.Dimensions) != 16 {
+	if len(e.Dimensions) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST the scorecard schema exposes exactly 16 named dimensions and this test guards that schema
 		t.Fatalf("got %d", len(e.Dimensions))
 	}
 	a := Score(e)

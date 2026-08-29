@@ -112,7 +112,7 @@ func runFake(t *testing.T, mode string, mutate func(*Source)) Receipt {
 }
 func TestRunFullSpine(t *testing.T) {
 	r := runFake(t, "", nil)
-	if !r.Calibration.Pass || len(r.Application.Pairs) != 60 || len(r.Application.Pairs[0].Directions) != 2 {
+	if !r.Calibration.Pass || len(r.Application.Pairs) != 60 || len(r.Application.Pairs[0].Directions) != 2 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixed calibration/application fixture requires all 60 pairs and both comparison directions
 		t.Fatalf("bad run: cal=%v pairs=%d", r.Calibration.Pass, len(r.Application.Pairs))
 	}
 	for _, m := range r.Application.ByComparison {
@@ -232,7 +232,7 @@ func TestDiagnoseV1AccountsForFrozenFlips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Count != 14 || len(d.Flips) != 14 {
+	if d.Count != 14 || len(d.Flips) != 14 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixed calibration/application fixture requires all 60 pairs and both comparison directions
 		t.Fatalf("count=%d flips=%d", d.Count, len(d.Flips))
 	}
 	seen := map[string]bool{}

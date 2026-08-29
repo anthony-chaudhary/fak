@@ -23,7 +23,7 @@ func TestBuildCompleteCoverageUncoveredAndDeterministic(t *testing.T) {
 	if !reflect.DeepEqual(one, two) {
 		t.Fatal("build is not deterministic")
 	}
-	if len(one.Joins) != 6 || summary.Total != 6 || summary.Actionable != 5 {
+	if len(one.Joins) != 6 || summary.Total != 6 || summary.Actionable != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture cardinalities are fixed evidence for complete join and ledger preservation
 		t.Fatalf("coverage summary=%+v joins=%d", summary, len(one.Joins))
 	}
 	want := map[string]Disposition{
@@ -125,7 +125,7 @@ func TestCheckedArtifactsCoverCompactIndex(t *testing.T) {
 	if err := ValidateStructure(ledger, &index, root); err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Joins) != 193 {
+	if len(ledger.Joins) != 193 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture cardinalities are fixed evidence for complete join and ledger preservation
 		t.Fatalf("checked ledger joins=%d want 193", len(ledger.Joins))
 	}
 	for _, join := range ledger.Joins {

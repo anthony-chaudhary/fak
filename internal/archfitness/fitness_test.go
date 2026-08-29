@@ -11,7 +11,7 @@ func f(file, symbol, reason string) Finding {
 func TestEveryHardDimensionAndStableOutput(t *testing.T) {
 	in := Input{ForbiddenImports: []Finding{f("a.go", "Import", "lateral import")}, FrozenSeamChurn: []Finding{f("b.go", "Submit", "frozen seam bypass")}, FamilySwitches: []Finding{f("c.go", "switchModel", "family switch outside leaf")}, CrossPlaneAmplification: []Finding{f("d.go", "Feature", "touch set exceeds budget")}, BespokeBranches: []Finding{f("e.go", "ifQwen", "descriptor bypass")}, AmbiguousResources: []Finding{f("f.go", "State", "missing owner/lifetime")}, MissingCompositionFixtures: []Finding{f("g.go", "Fixture", "forbidden interaction untested")}, MissingCausalProjection: []Finding{f("h.go", "Node", "no receipt projection")}, UnversionedSchemas: []Finding{f("i.go", "Schema", "migration absent")}, DynamicHotPath: []Finding{f("j.go", "Resolve", "dynamic lookup after resolve")}, PrivacyCardinality: []Finding{f("k.go", "Labels", "causal ID metric label")}, StaleExceptions: []Finding{f("l.go", "Waiver", "missing owner/expiry/issue")}}
 	r := Analyze(in)
-	if r.HardDebt != 12 || r.Score != 40 || len(r.Dimensions) != 12 {
+	if r.HardDebt != 12 || r.Score != 40 || len(r.Dimensions) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture supplies one finding for each of the 12 declared hard architecture dimensions
 		t.Fatalf("report=%+v", r)
 	}
 	a, _ := JSON(r)

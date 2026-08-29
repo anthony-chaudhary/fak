@@ -62,7 +62,7 @@ func TestIndexAgentsForJSONAndDeterminism(t *testing.T) {
 	if got.Instructions != "# root\n\n## Root rules\nroot body\noverride\nsecond fallback\n" {
 		t.Fatalf("instructions=%q", got.Instructions)
 	}
-	if len(got.Sources) != 5 || got.Sources[0].Span == nil {
+	if len(got.Sources) != 5 || got.Sources[0].Span == nil { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture declares exactly five indexed agent sources and verifies the first source span
 		t.Fatalf("missing precedence/span provenance: %+v", got.Sources)
 	}
 }

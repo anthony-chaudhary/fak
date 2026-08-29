@@ -40,7 +40,7 @@ func TestPinnedPack(t *testing.T) {
 	if p.Schema != "fak.edgequal.pack.v1" || p.Version != PackVersion || p.ContextTokens != 2048 || len(p.Cases) != 3 {
 		t.Fatalf("unexpected pack: %+v", p)
 	}
-	if len(PackSHA256()) != 64 {
+	if len(PackSHA256()) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST PackSHA256 returns a SHA-256 digest encoded as exactly 64 hexadecimal characters
 		t.Fatal("pack is not digestible")
 	}
 }
