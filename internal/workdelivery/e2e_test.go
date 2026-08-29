@@ -21,24 +21,36 @@ func TestCapturedDeliverySpine(t *testing.T) {
 	if fixture.Schema != "fak.work-delivery-e2e/v1" {
 		t.Fatalf("schema=%q", fixture.Schema)
 	}
-	set, err := DeriveCompileSet([]WorkUnit{
-		compileUnit("recorded-excluded", AdmissionExcluded, "fixture/recorded_broken.go"),
-		compileUnit(fixture.Unit.ID, AdmissionAdmitted, "fixture/active.go"),
-	})
-	if err != nil {
-		t.Fatal(err)
+	now := time.Date(2026, 8, 17, 18, 30, 0, 0, time.UTC)
+	first := produceCapturedDeliverySpine(t, now)
+	second := produceCapturedDeliverySpine(t, now)
+	if !reflect.DeepEqual(first, second) {
+		firstJSON, _ := json.MarshalIndent(first, "", "  ")
+		secondJSON, _ := json.MarshalIndent(second, "", "  ")
+		t.Fatalf("two complete explicit-time producer witnesses differ:\nfirst=%s\nsecond=%s", firstJSON, secondJSON)
 	}
-	if !reflect.DeepEqual(set.Admitted, fixture.CompileSet.Admitted) || !reflect.DeepEqual(set.Excluded, fixture.CompileSet.Excluded) {
-		t.Fatalf("compile set=%+v fixture=%+v", set, fixture.CompileSet)
-	}
-	for _, path := range set.Admitted {
+	for _, path := range first.CompileSet.Admitted {
 		if path == "fixture/recorded_broken.go" {
 			t.Fatal("committed excluded source entered compile set")
 		}
 	}
+	if !reflect.DeepEqual(first, fixture) {
+		gotJSON, _ := json.MarshalIndent(first, "", "  ")
+		t.Fatalf("captured spine drifted:\n%s", gotJSON)
+	}
+}
 
-	unit := WorkUnit{Schema: Schema, ID: fixture.Unit.ID, Artifacts: fixture.Unit.Artifacts, Axes: InitialAxes()}
-	now := time.Date(2026, 8, 17, 18, 30, 0, 0, time.UTC)
+func produceCapturedDeliverySpine(t *testing.T, now time.Time) deliveryE2EWitness {
+	t.Helper()
+	const unitID = "issue-7106"
+	set, err := DeriveCompileSetAt([]WorkUnit{
+		compileUnit("recorded-excluded", AdmissionExcluded, "fixture/recorded_broken.go"),
+		compileUnit(unitID, AdmissionAdmitted, "fixture/active.go"),
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := WorkUnit{Schema: Schema, ID: unitID, Artifacts: []Artifact{{Path: "fixture/active.go", Kind: "go-source"}}, Axes: InitialAxes()}
 	recorded, err := RecordingObservation(unit, "abc123", "fak commit", now)
 	if err != nil {
 		t.Fatal(err)
@@ -84,10 +96,7 @@ func TestCapturedDeliverySpine(t *testing.T) {
 			t.Fatalf("recorded-but-unadmitted artifact entered compile set: %+v", set.Admitted)
 		}
 	}
-	if !reflect.DeepEqual(unit.Axes, fixture.Unit.Axes) || !reflect.DeepEqual(got, fixture.Receipts) {
-		gotJSON, _ := json.MarshalIndent(deliveryE2EWitness{Schema: fixture.Schema, Unit: unit, CompileSet: set, Receipts: got}, "", "  ")
-		t.Fatalf("captured spine drifted:\n%s", gotJSON)
-	}
+	return deliveryE2EWitness{Schema: "fak.work-delivery-e2e/v1", Unit: unit, CompileSet: set, Receipts: got}
 }
 
 func TestCapturedAggregateFailureConvergesToLeaf(t *testing.T) {

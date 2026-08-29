@@ -50,6 +50,17 @@ func LoadCompileSet(paths ...string) (CompileSet, error) {
 
 // DeriveCompileSet validates records and creates one receipt per compile-admission decision.
 func DeriveCompileSet(units []WorkUnit) (CompileSet, error) {
+	return DeriveCompileSetAt(units, time.Now().UTC())
+}
+
+// DeriveCompileSetAt is the deterministic compile-admission producer. Every receipt in one
+// compile set carries the same caller-supplied observation time; runtime callers use
+// DeriveCompileSet, while captures and replay can provide their witnessed event time.
+func DeriveCompileSetAt(units []WorkUnit, observedAt time.Time) (CompileSet, error) {
+	if observedAt.IsZero() {
+		return CompileSet{}, &CompileAdmissionError{Code: "MISSING_OBSERVED_AT", Detail: "compile admission requires an observation time"}
+	}
+	observedAt = observedAt.UTC()
 	set := CompileSet{Schema: Schema, Receipts: []Receipt{}}
 	seen := map[string]string{}
 	for _, unit := range units {
@@ -83,7 +94,7 @@ func DeriveCompileSet(units []WorkUnit) (CompileSet, error) {
 			UnitID:     unit.ID,
 			Gate:       "go.compile-set",
 			Transition: Transition{Axis: AxisAdmission, From: string(AdmissionUndeclared), To: string(unit.Axes.Admission)},
-			ObservedAt: time.Now().UTC(),
+			ObservedAt: observedAt,
 			Evidence:   []Evidence{{Kind: "delivery-record", Reference: unit.ID, Witnessed: true}},
 		})
 	}

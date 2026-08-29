@@ -46,6 +46,16 @@
 // Anything else — a new operator-facing script, or a capability with no Go home — is
 // refused: write it in Go. Even the sanctioned widen is temporary; when the callers are
 // ported the module leaves with them and the recipe below drops the rows.
+
+// # The narrower test-companion contract
+
+// Historical gate policy admitted tests of grandfathered modules because a test adds no
+// operator-facing Python capability. testcompanions.go makes that policy explicit without
+// widening baseline.go: every reviewed row names its exact sibling module and introducing
+// commit, and the live gate admits it only while the sibling is tracked, grandfathered, and
+// imported in-process by the test. There is deliberately no wildcard for *_test.py; a new
+// test still reds until its provenance is reviewed. A Python test for shell, Go, or a new
+// Python capability does not qualify and must be ported or removed.
 //
 // # Regenerating the baseline
 //

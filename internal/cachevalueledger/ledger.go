@@ -18,24 +18,26 @@ const (
 )
 
 type Row struct {
-	Schema       string         `json:"schema"`
-	Date         string         `json:"date"`
-	SessionType  string         `json:"session_type"`
-	Provider     string         `json:"provider,omitempty"`
-	Mechanism    string         `json:"mechanism,omitempty"`
-	Context      string         `json:"context"`
-	SessionID    string         `json:"session_id,omitempty"`
-	PID          int            `json:"pid"`
-	UnixMillis   int64          `json:"unix_millis"`
-	Turns        uint64         `json:"turns"`
-	PromptTokens uint64         `json:"prompt_tokens"`
-	ReusedTokens uint64         `json:"reused_tokens"`
-	FrozenTurns  uint64         `json:"frozen_turns"`
-	PartialTurns uint64         `json:"partial_turns"`
-	ColdTurns    uint64         `json:"cold_turns"`
-	ReuseRatio   float64        `json:"reuse_ratio"`
-	Stats        cacheobs.Stats `json:"stats"`
-	GeneratedAt  string         `json:"generated_at"`
+	Schema       string `json:"schema"`
+	Date         string `json:"date"`
+	SessionType  string `json:"session_type"`
+	Provider     string `json:"provider,omitempty"`
+	Mechanism    string `json:"mechanism,omitempty"`
+	Context      string `json:"context"`
+	SessionID    string `json:"session_id,omitempty"`
+	PID          int    `json:"pid"`
+	UnixMillis   int64  `json:"unix_millis"`
+	Turns        uint64 `json:"turns"`
+	PromptTokens uint64 `json:"prompt_tokens"`
+	ReusedTokens uint64 `json:"reused_tokens"`
+	// RejectedTierAccesses is the cumulative process snapshot, not a per-row delta.
+	RejectedTierAccesses uint64         `json:"rejected_tier_accesses"`
+	FrozenTurns          uint64         `json:"frozen_turns"`
+	PartialTurns         uint64         `json:"partial_turns"`
+	ColdTurns            uint64         `json:"cold_turns"`
+	ReuseRatio           float64        `json:"reuse_ratio"`
+	Stats                cacheobs.Stats `json:"stats"`
+	GeneratedAt          string         `json:"generated_at"`
 }
 
 func ParseLedger(content string) []Row {
@@ -63,24 +65,25 @@ func NewRow(sessionType, context string, stats cacheobs.Stats, now time.Time) Ro
 
 func NewSessionRow(sessionType, context, sessionID string, stats cacheobs.Stats, now time.Time) Row {
 	return Row{
-		Schema:       Schema,
-		Date:         now.UTC().Format("2006-01-02"),
-		SessionType:  sessionType,
-		Provider:     "fak",
-		Mechanism:    "kv_prefix_reuse",
-		Context:      context,
-		SessionID:    strings.TrimSpace(sessionID),
-		PID:          os.Getpid(),
-		UnixMillis:   now.UnixMilli(),
-		Turns:        stats.Turns,
-		PromptTokens: stats.PromptTokens,
-		ReusedTokens: stats.ReusedTokens,
-		FrozenTurns:  stats.FrozenTurns,
-		PartialTurns: stats.PartialTurns,
-		ColdTurns:    stats.ColdTurns,
-		ReuseRatio:   stats.ReuseRatio,
-		Stats:        stats,
-		GeneratedAt:  now.UTC().Format(time.RFC3339),
+		Schema:               Schema,
+		Date:                 now.UTC().Format("2006-01-02"),
+		SessionType:          sessionType,
+		Provider:             "fak",
+		Mechanism:            "kv_prefix_reuse",
+		Context:              context,
+		SessionID:            strings.TrimSpace(sessionID),
+		PID:                  os.Getpid(),
+		UnixMillis:           now.UnixMilli(),
+		Turns:                stats.Turns,
+		PromptTokens:         stats.PromptTokens,
+		ReusedTokens:         stats.ReusedTokens,
+		RejectedTierAccesses: stats.RejectedTierAccesses,
+		FrozenTurns:          stats.FrozenTurns,
+		PartialTurns:         stats.PartialTurns,
+		ColdTurns:            stats.ColdTurns,
+		ReuseRatio:           stats.ReuseRatio,
+		Stats:                stats,
+		GeneratedAt:          now.UTC().Format(time.RFC3339),
 	}
 }
 

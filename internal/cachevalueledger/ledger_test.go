@@ -1,6 +1,7 @@
 package cachevalueledger
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,48 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
+
+func TestRejectedTierAccessesIsTopLevelIndexed(t *testing.T) {
+	stats := cacheobs.Stats{RejectedTierAccesses: 7}
+	row := NewSessionRow("serve", "test", "session-7", stats, time.Unix(7, 0).UTC())
+	if row.RejectedTierAccesses != 7 || row.Stats.RejectedTierAccesses != 7 {
+		t.Fatalf("typed row lost rejected tier accesses: top=%d nested=%d", row.RejectedTierAccesses, row.Stats.RejectedTierAccesses)
+	}
+
+	line, err := AppendLedgerLine(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if string(doc["rejected_tier_accesses"]) != "7" {
+		t.Fatalf("top-level JSON rejected_tier_accesses=%s, want 7: %s", doc["rejected_tier_accesses"], line)
+	}
+	var nested map[string]json.RawMessage
+	if err := json.Unmarshal(doc["stats"], &nested); err != nil {
+		t.Fatal(err)
+	}
+	if string(nested["RejectedTierAccesses"]) != "7" {
+		t.Fatalf("nested Stats JSON rejected count=%s, want 7: %s", nested["RejectedTierAccesses"], line)
+	}
+
+	parsed := ParseLedger(line)
+	if len(parsed) != 1 || parsed[0].RejectedTierAccesses != 7 || parsed[0].Stats.RejectedTierAccesses != 7 {
+		t.Fatalf("parsed row lost rejected count: %+v", parsed)
+	}
+
+	delete(doc, "rejected_tier_accesses")
+	legacyJSON, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := ParseLedger(string(legacyJSON))
+	if len(legacy) != 1 || legacy[0].RejectedTierAccesses != 0 {
+		t.Fatalf("legacy row without top-level field must parse zero: %+v", legacy)
+	}
+}
 
 func TestParseLedger(t *testing.T) {
 	content := `{"schema":"fak-cache-value-ledger/1","date":"2026-06-27","session_type":"serve","context":"test","pid":12345,"unix_millis":1719494400000,"turns":10,"prompt_tokens":1000,"reused_tokens":800,"frozen_turns":5,"partial_turns":3,"cold_turns":2,"reuse_ratio":4.0}
