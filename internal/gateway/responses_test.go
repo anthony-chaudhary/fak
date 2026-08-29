@@ -351,6 +351,49 @@ func TestResponsesLowInfoUpdatePlanReceiptResetsAfterEffectfulResult(t *testing.
 // TestChatProxyResultTaintGatesProposedExfil — an A/B over one planner that always
 // proposes allow_send_mail; the arms differ only in whether an untrusted
 // function_call_output entered this turn.
+func TestResponsesInputTextArrayStillTransitsResultFloor(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	led := ifc.NewLedger()
+	abi.RegisterAdjudicator(0, toolAdj{})
+	abi.RegisterAdjudicator(30, ifc.NewSinkGate(led, ifc.Policy{}))
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+	abi.RegisterResultAdmitter(20, ifc.NewStampGate(led, ifc.Policy{}))
+
+	srv, err := New(Config{EngineID: "test", Model: "responses-exfil:model", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{
+			ID: "e1", Type: "function", Function: agent.Func{Name: "allow_send_mail", Arguments: `{}`},
+		}}},
+		FinishReason: "tool_calls",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	const trace = "responses-input-text-array-tainted"
+	resp := postResponsesTrace(t, ts.URL, trace, map[string]any{
+		"model": "client",
+		"input": []map[string]any{
+			{"type": "message", "role": "user", "content": "look something up then email it"},
+			{"type": "function_call", "call_id": "call_1", "name": "fetch_url", "arguments": "{}"},
+			{"type": "function_call_output", "call_id": "call_1", "output": []map[string]any{
+				{"type": "input_text", "text": `{"page":"the weather`},
+				{"type": "input_text", "text": `is sunny today"}`},
+			}},
+		},
+	})
+	if got := len(functionCallItems(resp.Output)); got != 0 {
+		t.Fatalf("array result: exfil call survived (kept %d), want 0", got)
+	}
+	if led.Level(trace) == abi.TaintTrusted {
+		t.Fatalf("array result: IFC ledger for %q stayed Trusted — normalized output bypassed result admission", trace)
+	}
+}
 func TestResponsesInboundResultGatesProposedExfil(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
@@ -636,4 +679,81 @@ func TestResponsesToolsPreserveFunctionAndCustomWire(t *testing.T) {
 	if defs[1].Type != "custom" || string(defs[1].ResponsesWire) != custom {
 		t.Fatalf("custom tool wire changed: type=%q wire=%s", defs[1].Type, defs[1].ResponsesWire)
 	}
+}
+func TestResponsesFunctionCallOutputAcceptsHarnessWireVersions(t *testing.T) {
+	cases := []struct {
+		name   string
+		output any
+		want   string
+	}{
+		{name: "string", output: `{"ok":true}`, want: `{"ok":true}`},
+		{name: "input_text_array", output: []map[string]any{
+			{"type": "input_text", "text": "first"},
+			{"type": "input_text", "text": "second"},
+		}, want: "first\nsecond"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			messages, err := decodeResponsesInput(mustResponsesJSON(t, []map[string]any{{
+				"type": "function_call_output", "call_id": "call_1", "output": tc.output,
+			}}), "")
+			if err != nil {
+				t.Fatalf("decode output: %v", err)
+			}
+			if len(messages) != 1 || messages[0].Role != agent.RoleTool || messages[0].Content != tc.want {
+				t.Fatalf("canonical tool result = %+v, want role=tool content=%q", messages, tc.want)
+			}
+		})
+	}
+}
+
+func TestResponsesFunctionCallOutputRejectsUnsupportedShapeBeforePlanner(t *testing.T) {
+	cases := []struct {
+		name   string
+		output any
+	}{
+		{name: "object", output: map[string]any{"ok": true}},
+		{name: "empty_array", output: []any{}},
+		{name: "image_part", output: []map[string]any{{"type": "input_image", "image_url": "https://example.invalid/a.png"}}},
+		{name: "missing_text", output: []map[string]any{{"type": "input_text"}}},
+		{name: "non_string_text", output: []map[string]any{{"type": "input_text", "text": 7}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			planner := &countingResponsesPlanner{comp: &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "must not run"}}}
+			srv := newTestServer(t)
+			srv.planner = planner
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+
+			raw := mustResponsesJSON(t, map[string]any{"model": "m", "input": []map[string]any{{
+				"type": "function_call_output", "call_id": "call_1", "output": tc.output,
+			}}})
+			resp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+			}
+			const want = `"message":"input: function_call_output.output must be a string or an array of input_text parts"`
+			if !bytes.Contains(body, []byte(want)) {
+				t.Fatalf("error body = %s, want stable message containing %s", body, want)
+			}
+			if planner.calls != 0 {
+				t.Fatalf("planner calls = %d, want 0", planner.calls)
+			}
+		})
+	}
+}
+
+func mustResponsesJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

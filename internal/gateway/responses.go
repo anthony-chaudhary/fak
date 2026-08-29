@@ -93,7 +93,7 @@ type responsesInputItem struct {
 	Arguments string `json:"arguments,omitempty"`
 	ID        string `json:"id,omitempty"`
 	// function_call_output field:
-	Output string `json:"output,omitempty"`
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // responsesResponse is the outbound POST /v1/responses body. The `fak` extension
@@ -508,12 +508,18 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 					}},
 				})
 			case "function_call_output":
-				// A tool RESULT the client executed — the bytes the result-side floor
-				// screens (poison quarantine, secret redaction) before the model sees them.
+				// A tool RESULT the client executed — normalize only the Responses wire's
+				// documented string|input_text union, then send the canonical bytes through
+				// the same result-side floor. Representation skew may degrade safely; policy
+				// and malformed content still fail closed.
+				output, err := responsesFunctionCallOutputText(it.Output)
+				if err != nil {
+					return nil, err
+				}
 				msgs = append(msgs, agent.Message{
 					Role:       agent.RoleTool,
 					ToolCallID: it.CallID,
-					Content:    it.Output,
+					Content:    output,
 				})
 			default:
 				// Unknown item type (reasoning, image, etc.) — skip rather than 400, so a
@@ -525,6 +531,48 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 		return nil, errInvalidInput
 	}
 }
+
+// responsesFunctionCallOutputText canonicalizes the two textual output shapes emitted
+// by Responses-compatible harness versions. It is deliberately strict: arbitrary JSON,
+// image/file parts, and malformed text parts are rejected rather than stringified, while
+// every accepted string is returned to the existing RoleTool result-admission path.
+func responsesFunctionCallOutputText(raw json.RawMessage) (string, error) {
+	b := trimLeadingWS(raw)
+	if len(b) == 0 {
+		return "", errInvalidFunctionCallOutput
+	}
+	if b[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return "", errInvalidFunctionCallOutput
+		}
+		return text, nil
+	}
+	if b[0] != '[' {
+		return "", errInvalidFunctionCallOutput
+	}
+	var parts []struct {
+		Type string          `json:"type"`
+		Text json.RawMessage `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil || len(parts) == 0 {
+		return "", errInvalidFunctionCallOutput
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != "input_text" || len(trimLeadingWS(part.Text)) == 0 {
+			return "", errInvalidFunctionCallOutput
+		}
+		var text string
+		if err := json.Unmarshal(part.Text, &text); err != nil {
+			return "", errInvalidFunctionCallOutput
+		}
+		texts = append(texts, text)
+	}
+	return strings.Join(texts, "\n"), nil
+}
+
+var errInvalidFunctionCallOutput = errInput("function_call_output.output must be a string or an array of input_text parts")
 
 // errInvalidInput is the 400 cause when `input` is neither a string nor an array.
 var errInvalidInput = errInput("input must be a string or an array of input items")
