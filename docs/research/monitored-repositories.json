@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-28T21:55:00Z",
+  "updated_at": "2026-08-29T15:40:00Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -1150,13 +1150,13 @@
       "url": "https://github.com/anthropics/claude-code",
       "status": "studied",
       "priority": 16,
-      "why": "Public plugin agents, coordinator workflows, advanced recovery recipes, release claims, and proprietary-license boundary were studied against fak's twelve-axis Ultracode orchestration contract. Public examples inspire composition, but do not replace fak leases, effect receipts, or independent witness.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "005c5dade90c2c59c88d819d8723e7b579addb5e",
-      "stars_at_check": 143015,
-      "last_push_at_check": "2026-08-25T22:31:52Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
-      "refresh_issue": "#8995",
+      "why": "Public plugin/workflow evidence and proprietary-license limits remain inventoried; the 2026-08-29 refresh adds mixed-version daemon, persisted-writer, alias, and update behavior as INSPIRE-ONLY compatibility evidence for the harness ABI study.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "f1af9b1f4b1fd4c776135381606edada82ef638e",
+      "stars_at_check": 143374,
+      "last_push_at_check": "2026-08-28T18:19:32Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/anthropics-claude-code.json",
@@ -1459,13 +1459,13 @@
       "url": "https://github.com/openai/codex",
       "status": "studied",
       "priority": 19,
-      "why": "Codex provider-clear behavior was revalidated at its typed thread-start seam against an exhaustive pinned tree and non-tree audit: /clear and /new both replace the thread, while only /clear reports ThreadStartSource::Clear. FAK keeps that distinction and rejects harness-specific TUI coupling.",
-      "last_checked": "2026-08-26",
-      "checked_revision": "2764e83626efe55f64e04d153fc99a157327f3c2",
-      "stars_at_check": 118185,
-      "last_push_at_check": "2026-08-26T01:23:02Z",
-      "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8998",
+      "why": "The exhaustive provider-session inventory remains intact; the 2026-08-29 compatibility refresh adds stable/experimental schema separation, bidirectional current/released executor tests, configuration migration, build provenance, and unresolved mixed-version failures.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "6478a751fde8884b2fdc76486fe23175a8e795d4",
+      "stars_at_check": 119758,
+      "last_push_at_check": "2026-08-29T10:54:29Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/openai-codex.json",
@@ -1535,13 +1535,13 @@
       "url": "https://github.com/google-gemini/gemini-cli",
       "status": "studied",
       "priority": 20,
-      "why": "Gemini CLI provider-clear behavior was studied at its typed lifecycle seam: clear, with new as an alias, ends the old session, mints a session id, and emits SessionStart(Clear). The provider session-reset guide records the integration consequence and exact upstream evidence.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
-      "stars_at_check": 106686,
-      "last_push_at_check": "2026-08-26T01:07:54Z",
-      "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8999",
+      "why": "The exhaustive provider-session inventory remains intact; the 2026-08-29 compatibility refresh adds stable hook DTO translators, extension update rollback, tolerant configuration behavior, and open event-spelling/unit-migration negative knowledge.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "0bd1d439751478771c45d3d0895a6a9760554bf4",
+      "stars_at_check": 106741,
+      "last_push_at_check": "2026-08-29T01:56:42Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/google-gemini-gemini-cli.json",
@@ -1602,6 +1602,81 @@
         "issue_refs": [
           "#8999",
           "#8220"
+        ]
+      }
+    },
+    {
+      "repository": "anomalyco/opencode",
+      "url": "https://github.com/anomalyco/opencode",
+      "status": "studied",
+      "priority": 20,
+      "why": "The 2026-08-29 compatibility study covers structural v1/v2 server probing, lazy compatibility adapters, configuration/storage migrations, plugin engine ranges checked before import, and open initialization/import failure reports.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "dc4449df0d52199704ea4989a5a993ebbc605612",
+      "stars_at_check": 202328,
+      "last_push_at_check": "2026-08-29T15:07:42Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
+      "inventory": {
+        "mode": "standard",
+        "source_classes": [
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "candidate_count": 4,
+        "filed_issue_count": 0,
+        "completeness_critic": "Targeted pinned implementation/test and release/issue study of compatibility seams, not an exhaustive repository inventory. README-only claims, external hosted behavior, release artifacts, and every subsystem/PR were excluded from positive claims; issue reports remain negative knowledge until merged code is rechecked.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "https://github.com/anomalyco/opencode/issues/46161",
+              "https://github.com/anomalyco/opencode/issues/46095",
+              "gh pr list --state all --repo anomalyco/opencode",
+              "gh api graphql repository discussions anomalyco/opencode",
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#negative-knowledge-shipped-versus-open"
+            ],
+            "note": "Open failures are refresh triggers, not shipped implementation evidence."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"harness ABI capability negotiation compatibility ranges schema digest\"",
+              "fak capabilities \"extension update rollback plugin version migration\"",
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#what-fak-already-proves"
+            ],
+            "note": "Capability queries plus exact tree/index fallback established the FAK status on each axis."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#candidate-matrix",
+              "fak study get study_d2e87854f7d555384500becb1b8328cea3f3c8de0376fedee4526d6580069429"
+            ],
+            "note": "Four OpenCode mechanisms are adjudicated within the cross-player matrix."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10020",
+              "https://github.com/anthony-chaudhary/fak/issues/6805"
+            ],
+            "note": "Existing issue owners cover surviving work; no duplicate issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#10020",
+          "#6805",
+          "#6456",
+          "#8200",
+          "#8913"
         ]
       }
     },
