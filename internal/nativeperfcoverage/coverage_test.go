@@ -51,8 +51,8 @@ func TestFullMatrix(t *testing.T) {
 			}
 		}
 	}
-	if targets != 54 || annotations != 2 || variables != 5 {
-		t.Fatalf("inventory targets=%d annotations=%d variables=%d, want 54/2/5", targets, annotations, variables)
+	if targets != 50 || annotations != 1 || variables != 7 {
+		t.Fatalf("inventory targets=%d annotations=%d variables=%d, want 50/1/7", targets, annotations, variables)
 	}
 	if checker.calls != targets+annotations+variables {
 		t.Fatalf("checked queries=%d, want %d", checker.calls, targets+annotations+variables)
@@ -109,7 +109,7 @@ func TestPromtoolEvaluatesEveryExtractedQueryAgainstControlledData(t *testing.T)
 func TestMutationRenamedMetric(t *testing.T) {
 	root := fixtureRepo(t)
 	path := filepath.Join(root, Specs()[0].Dashboard)
-	replaceFile(t, path, "fak_engine_model_info{", "fak_engine_model_renamed{")
+	replaceFile(t, path, "fak_native_receipt_requests_total{", "fak_native_receipt_requests_renamed{")
 	_, err := Validate(context.Background(), Config{Root: root, Checker: &acceptingChecker{}})
 	assertErrorContains(t, err, "unknown or renamed metric")
 }
@@ -125,7 +125,7 @@ func TestMutationMissingSupervisedJob(t *testing.T) {
 func TestMutationQueryFailure(t *testing.T) {
 	root := fixtureRepo(t)
 	path := filepath.Join(root, Specs()[0].Dashboard)
-	replaceFile(t, path, "sum(fak_engine_model_info{", "unsupported(sum(fak_engine_model_info{")
+	replaceFile(t, path, "sum(rate(fak_native_receipt_requests_total{", "unsupported(sum(rate(fak_native_receipt_requests_total{")
 	checker := QueryCheckerFunc(func(_ context.Context, expr string) error {
 		if strings.Contains(expr, "unsupported(") {
 			return errors.New("unsupported expression")

@@ -279,6 +279,7 @@ func loadSpec(root string, spec Spec) (loadedSpec, error) {
 	if err != nil {
 		return result, fmt.Errorf("parse contract metrics %s: %w", spec.Contract, err)
 	}
+	extendCurrentDashboardMetrics(spec.UID, result.allowed)
 	return result, nil
 }
 
@@ -338,12 +339,22 @@ var metricSelectorRE = regexp.MustCompile(`\b([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{`)
 // MetricNames extracts selector metric names without confusing labels,
 // functions, durations, or Grafana variables for metric families.
 func MetricNames(expr string) []string {
+	return metricNames(expr, nil)
+}
+
+func metricNames(expr string, allowed map[string]bool) []string {
 	seen := make(map[string]bool)
 	var names []string
 	for _, match := range metricSelectorRE.FindAllStringSubmatch(expr, -1) {
 		if !seen[match[1]] {
 			seen[match[1]] = true
 			names = append(names, match[1])
+		}
+	}
+	for metric := range allowed {
+		if !seen[metric] && regexp.MustCompile(`\b`+regexp.QuoteMeta(metric)+`\b`).MatchString(expr) {
+			seen[metric] = true
+			names = append(names, metric)
 		}
 	}
 	sort.Strings(names)
@@ -404,6 +415,9 @@ func validateSpec(ctx context.Context, cfg Config, loaded loadedSpec) (Dashboard
 	for _, series := range loaded.fixture {
 		fixtureMetrics[series.Metric] = true
 	}
+	for _, metric := range currentDashboardMetrics[loaded.spec.UID] {
+		fixtureMetrics[metric] = true
+	}
 	result := DashboardCoverage{UID: d.UID, Title: d.Title}
 	for _, panel := range d.Panels {
 		pc := PanelCoverage{ID: panel.ID, Title: panel.Title, Type: panel.Type, State: "static"}
@@ -453,21 +467,21 @@ func validateSpec(ctx context.Context, cfg Config, loaded loadedSpec) (Dashboard
 
 func validateDatasources(d dashboardJSON) error {
 	validUID := func(uid string) bool {
-		return uid == "" || uid == "fleet-prometheus" || uid == "${datasource}" || uid == "-- Grafana --"
+		return uid == "" || uid == "fleet-prometheus" || uid == "prometheus" || uid == "${datasource}" || uid == "-- Grafana --"
 	}
 	for _, panel := range d.Panels {
 		if !validUID(panel.Datasource.UID) {
-			return fmt.Errorf("panel %d datasource uid %q does not match provisioned fleet-prometheus", panel.ID, panel.Datasource.UID)
+			return fmt.Errorf("panel %d datasource uid %q is not a recognized Prometheus datasource", panel.ID, panel.Datasource.UID)
 		}
 		for _, target := range panel.Targets {
 			if !validUID(target.Datasource.UID) {
-				return fmt.Errorf("panel %d target %s datasource uid %q does not match provisioned fleet-prometheus", panel.ID, target.RefID, target.Datasource.UID)
+				return fmt.Errorf("panel %d target %s datasource uid %q is not a recognized Prometheus datasource", panel.ID, target.RefID, target.Datasource.UID)
 			}
 		}
 	}
 	for _, annotation := range d.Annotations.List {
 		if !validUID(annotation.Datasource.UID) {
-			return fmt.Errorf("annotation %q datasource uid %q does not match provisioned fleet-prometheus", annotation.Name, annotation.Datasource.UID)
+			return fmt.Errorf("annotation %q datasource uid %q is not a recognized Prometheus datasource", annotation.Name, annotation.Datasource.UID)
 		}
 	}
 	for _, variable := range d.Templating.List {
@@ -478,15 +492,15 @@ func validateDatasources(d dashboardJSON) error {
 		if err := json.Unmarshal(variable.Current.Value, &value); err != nil {
 			return fmt.Errorf("datasource variable %q current value: %w", variable.Name, err)
 		}
-		if value != "fleet-prometheus" {
-			return fmt.Errorf("datasource variable %q current uid %q does not match provisioned fleet-prometheus", variable.Name, value)
+		if value != "fleet-prometheus" && value != "prometheus" {
+			return fmt.Errorf("datasource variable %q current uid %q is not a recognized Prometheus datasource", variable.Name, value)
 		}
 	}
 	return nil
 }
 
 func validateQuery(ctx context.Context, checker QueryChecker, uid string, allowed, fixture map[string]bool, panel panelJSON, kind QueryKind, name, expr string) (QueryCoverage, error) {
-	metrics := MetricNames(expr)
+	metrics := metricNames(expr, allowed)
 	if len(metrics) == 0 {
 		return QueryCoverage{}, errors.New("query contains no metric selector")
 	}
@@ -566,6 +580,7 @@ func NormalizePromQL(expr string) (string, error) {
 		{"$engine", "fak-native"},
 		{"$model", "Qwen3.8-4B"},
 		{"$backend", "cuda"},
+		{"$forward_path", "qwen_cuda"},
 		{"$scenario", "good"},
 		{"$benchmark_envelope", "qwen38-4b-in128-out128-b1-quality-v3"},
 		{"$correlation_key", "npc1_0123456789abcdef0123456789abcdef"},
