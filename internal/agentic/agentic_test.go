@@ -102,12 +102,173 @@ func TestCompileNativePlanPreservesExactExecutionContract(t *testing.T) {
 	for _, unit := range plan.WorkUnits {
 		stageCounts[unit.Stage]++
 	}
-	if stageCounts["expand"] != 1 || stageCounts["experiment"] != 2 || stageCounts["contract"] != 1 {
+	if stageCounts["expand"] < 3 || stageCounts["expand"] > 6 || stageCounts["experiment"] != 2 || stageCounts["contract"] != 1 {
 		t.Fatalf("native stage counts = %v", stageCounts)
 	}
 	if plan.WorkUnits[len(plan.WorkUnits)-1].Witness.Class != "contract" {
 		t.Fatalf("native contract witness missing: %+v", plan.WorkUnits)
 	}
+}
+
+func TestCompileNativeTechnologyWithoutExecutionIntentStaysDevelopment(t *testing.T) {
+	tests := []string{
+		"Document Qwen3.8 configuration and receipt v2 fields",
+		"Add a CUDA model selector to the API client UI",
+		"Update GGUF configuration for Qwen3.8",
+		"Build dashboard for GPU performance metrics",
+		"Improve docs for Qwen3.8 performance settings",
+		"Document native model running configuration",
+		"API client fields for Qwen3.8 benchmark results",
+	}
+	for _, objective := range tests {
+		t.Run(objective, func(t *testing.T) {
+			plan, err := Compile(objective)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Inference.Domain != DomainDevelopment || !reflect.DeepEqual(plan.Inference.Domains, []string{DomainDevelopment}) || plan.Native != nil {
+				t.Fatalf("technology noun triggered native execution: inference=%+v native=%+v", plan.Inference, plan.Native)
+			}
+			for _, unit := range plan.WorkUnits {
+				if unit.Cohort == DomainNativeModel {
+					t.Fatalf("development objective emitted native unit: %+v", unit)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileDevelopmentSurfaceWithExecutionIntentBecomesMixed(t *testing.T) {
+	for _, objective := range []string{
+		"Build an API client UI that runs Qwen3.8 and benchmarks the model",
+		"Build a UI to benchmark Qwen3.8 throughput",
+		"Benchmark Qwen3.8 through the API client",
+	} {
+		plan, err := Compile(objective)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Inference.Domain != DomainMixed || !reflect.DeepEqual(plan.Inference.Domains, []string{DomainDevelopment, DomainNativeModel}) {
+			t.Fatalf("execution-bearing development surface %q = %+v", objective, plan.Inference)
+		}
+	}
+}
+
+func TestCompileMixedDogfoodPreservesCohortsDirectionsAndContracts(t *testing.T) {
+	objective := "Build 100x better agentic performance processes across development and native model running: smaller issue-sized work, concurrent experiments, expand-contract cycles, outcome learning, OSS research, trigger graphs, and typed effects."
+	plan, err := Compile(objective)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Inference.Domain != DomainMixed || !reflect.DeepEqual(plan.Inference.Domains, []string{DomainDevelopment, DomainNativeModel}) {
+		t.Fatalf("mixed inference = %+v", plan.Inference)
+	}
+	if len(plan.Cohorts) != 2 || plan.Cohorts[0].Domain != DomainDevelopment || plan.Cohorts[1].Domain != DomainNativeModel {
+		t.Fatalf("cohorts = %+v", plan.Cohorts)
+	}
+	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != nativeperf.ReceiptSchemaV2 {
+		t.Fatalf("native contract = %+v", plan.Native)
+	}
+
+	var directionIDs []string
+	candidates := map[string]bool{}
+	for _, unit := range plan.WorkUnits {
+		if unit.Stage != "expand" {
+			continue
+		}
+		directionIDs = append(directionIDs, unit.ID)
+		if unit.Direction == nil || unit.Direction.Candidate == "" || unit.Direction.Question == "" || unit.Direction.Decision != "pending" {
+			t.Fatalf("direction is not explicit: %+v", unit)
+		}
+		if candidates[unit.Direction.Candidate] {
+			t.Fatalf("duplicate candidate direction %q", unit.Direction.Candidate)
+		}
+		candidates[unit.Direction.Candidate] = true
+		if unit.Witness.SelectionEvidence == "" || unit.Witness.RejectionEvidence == "" {
+			t.Fatalf("direction omits decision evidence: %+v", unit.Witness)
+		}
+	}
+	if len(directionIDs) < 3 || len(directionIDs) > 6 || len(directionIDs) > plan.Bounds.MaxDirections {
+		t.Fatalf("candidate directions = %d bounds=%+v", len(directionIDs), plan.Bounds)
+	}
+
+	cohortExperiments := map[string]int{}
+	directionIDsByCohort := map[string][]string{}
+	for _, unit := range plan.WorkUnits {
+		if unit.Stage == "expand" {
+			directionIDsByCohort[unit.Cohort] = append(directionIDsByCohort[unit.Cohort], unit.ID)
+		}
+	}
+	for _, unit := range plan.WorkUnits {
+		switch unit.Stage {
+		case "experiment":
+			cohortExperiments[unit.Cohort]++
+			if !reflect.DeepEqual(unit.DependsOn, directionIDsByCohort[unit.Cohort]) {
+				t.Fatalf("experiment %s dependencies = %q, want cohort directions %q", unit.ID, unit.DependsOn, directionIDsByCohort[unit.Cohort])
+			}
+			if unit.Witness.SelectionEvidence == "" || unit.Witness.RejectionEvidence == "" {
+				t.Fatalf("experiment %s omits direction decision evidence: %+v", unit.ID, unit.Witness)
+			}
+			encoded, err := json.Marshal(unit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scopedControls := string(encoded)
+			if unit.Cohort == DomainDevelopment && containsAny(strings.ToLower(scopedControls), "qwen3.8", "fak-native", "receipt v2", "sanctioned hardware", "llama.cpp") {
+				t.Fatalf("native controls leaked into development unit %s: %s", unit.ID, encoded)
+			}
+			if unit.Cohort == DomainNativeModel {
+				for _, want := range []string{"fak-native", "Qwen3.8", "receipt v2"} {
+					if !strings.Contains(scopedControls, want) {
+						t.Fatalf("native unit %s missing %q: %s", unit.ID, want, scopedControls)
+					}
+				}
+			}
+		case "contract":
+			if unit.Cohort != "all" || unit.Witness.SelectionEvidence == "" || unit.Witness.RejectionEvidence == "" {
+				t.Fatalf("contract does not preserve direction decisions: %+v", unit)
+			}
+			wantDeps := append(append([]string{}, directionIDs...), experimentIDs(plan)...)
+			if !reflect.DeepEqual(unit.DependsOn, wantDeps) {
+				t.Fatalf("contract dependencies = %q, want direction and experiment evidence %q", unit.DependsOn, wantDeps)
+			}
+			for _, want := range []string{"development", "fak-native", "receipt v2", "matched-envelope", "net-true"} {
+				if !strings.Contains(unit.Witness.Evidence, want) {
+					t.Fatalf("contract evidence missing %q: %s", want, unit.Witness.Evidence)
+				}
+			}
+		}
+	}
+	if cohortExperiments[DomainDevelopment] == 0 || cohortExperiments[DomainNativeModel] == 0 {
+		t.Fatalf("mixed experiments = %v", cohortExperiments)
+	}
+	assertBoundedUnits(t, plan)
+
+	first, err := Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recompiled, err := Compile(objective)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Marshal(recompiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("dogfood JSON is not byte deterministic:\n%s\n%s", first, second)
+	}
+}
+
+func experimentIDs(plan Plan) []string {
+	var ids []string
+	for _, unit := range plan.WorkUnits {
+		if unit.Stage == "experiment" {
+			ids = append(ids, unit.ID)
+		}
+	}
+	return ids
 }
 
 func TestCompileAndMarshalAreByteDeterministic(t *testing.T) {
