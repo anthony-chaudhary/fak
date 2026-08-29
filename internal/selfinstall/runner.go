@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -54,11 +55,17 @@ func TrySingleFlight(dir string) (release func(), err error) {
 // windowgate.ConfigureBackgroundCommand sets HideWindow + CREATE_NO_WINDOW (a no-op off
 // Windows), so the whole self-update subprocess tree stays off the desktop.
 func RealRunner(ctx context.Context, dir, name string, args ...string) (string, bool) {
+	return runCommandWithEnv(ctx, dir, name, args, goRunnerEnv(name, os.Environ(), os.TempDir(), ""))
+}
+
+type commandEnvRunner func(ctx context.Context, dir, name string, args []string, env []string) (string, bool)
+
+func runCommandWithEnv(ctx context.Context, dir, name string, args []string, env []string) (string, bool) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	if env := goRunnerEnv(name, os.Environ(), os.TempDir()); env != nil {
+	if env != nil {
 		cmd.Env = env
 	}
 	windowgate.ConfigureBackgroundCommand(cmd)
@@ -67,21 +74,153 @@ func RealRunner(ctx context.Context, dir, name string, args ...string) (string, 
 }
 
 // goRunnerEnv keeps self-update's compiler work outside repo scratch that another session may
-// sweep. Non-Go children inherit the caller environment unchanged.
-func goRunnerEnv(name string, env []string, tempDir string) []string {
+// sweep. cacheDir, when non-empty, also isolates the compiler build cache from ambient `go
+// clean -cache` and developer cleanup. Non-Go children inherit the caller environment unchanged.
+func goRunnerEnv(name string, env []string, tempDir, cacheDir string) []string {
 	base := filepath.Base(name)
 	if !strings.EqualFold(base, "go") && !strings.EqualFold(base, "go.exe") {
 		return nil
 	}
-	out := make([]string, 0, len(env)+1)
+	out := make([]string, 0, len(env)+2)
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
-		if strings.EqualFold(key, "GOTMPDIR") {
+		if strings.EqualFold(key, "GOTMPDIR") || (cacheDir != "" && strings.EqualFold(key, "GOCACHE")) {
 			continue
 		}
 		out = append(out, entry)
 	}
-	return append(out, "GOTMPDIR="+tempDir)
+	out = append(out, "GOTMPDIR="+tempDir)
+	if cacheDir != "" {
+		out = append(out, "GOCACHE="+cacheDir)
+	}
+	return out
+}
+
+// NewSelfUpdateRunner returns one runner for the complete self-update build/vet transaction.
+// Its Go children share a stable fak-owned compiler cache, preserving warm builds without
+// depending on the ambient GOCACHE that developer cleanup tools commonly remove. If that
+// owned cache is itself removed while a Go command is running, the runner retries that command
+// exactly once in a fresh fixed recovery cache and uses that cache for the rest of the
+// transaction. cleanup removes recovery state; the stable cache remains warm and Go's own
+// age-based cache trimming reclaims old entries. Fixed paths ensure a killed attempt cannot
+// leak one cache directory per invocation.
+func NewSelfUpdateRunner() (Runner, func(), error) {
+	cacheBase, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheBase) == "" {
+		cacheBase = os.TempDir()
+	}
+	primary, recovery := selfUpdateGoCachePaths(cacheBase, os.TempDir())
+	return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv)
+}
+
+func selfUpdateGoCachePaths(cacheBase, tempDir string) (primary, recovery string) {
+	return filepath.Join(cacheBase, "fak", "self-update", "go-build-v1"),
+		filepath.Join(tempDir, "fak-self-update-go-build-recovery-v1")
+}
+
+type goCacheRunner struct {
+	mu           sync.Mutex
+	primary      string
+	recovery     string
+	tempDir      string
+	active       string
+	recoveryUsed bool
+	run          commandEnvRunner
+}
+
+func newGoCacheRunner(primary, recovery, tempDir string, run commandEnvRunner) (Runner, func(), error) {
+	primary = filepath.Clean(primary)
+	recovery = filepath.Clean(recovery)
+	if primary == "." || recovery == "." || primary == recovery {
+		return nil, func() {}, fmt.Errorf("selfinstall: invalid Go build-cache paths")
+	}
+	if err := os.MkdirAll(primary, 0o755); err != nil {
+		return nil, func() {}, fmt.Errorf("selfinstall: create update-owned Go build cache %s: %w", primary, err)
+	}
+	// A hard-killed prior attempt can leave the fixed recovery cache behind. Single-flight
+	// excludes a live peer, so startup is the safe point to reclaim that bounded residue.
+	if err := os.RemoveAll(recovery); err != nil {
+		return nil, func() {}, fmt.Errorf("selfinstall: clean stale Go build-cache recovery %s: %w", recovery, err)
+	}
+	r := &goCacheRunner{primary: primary, recovery: recovery, tempDir: tempDir, active: primary, run: run}
+	cleanup := func() { _ = os.RemoveAll(recovery) }
+	return r.runCommand, cleanup, nil
+}
+
+func (r *goCacheRunner) runCommand(ctx context.Context, dir, name string, args ...string) (string, bool) {
+	base := filepath.Base(name)
+	if !strings.EqualFold(base, "go") && !strings.EqualFold(base, "go.exe") {
+		return r.run(ctx, dir, name, args, nil)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := os.MkdirAll(r.active, 0o755); err != nil {
+		return fmt.Sprintf("self-update Go build cache %s is unavailable: %v; stop concurrent cache cleanup and rerun fak self-update", r.active, err), false
+	}
+	env := goRunnerEnv(name, os.Environ(), r.tempDir, r.active)
+	out, ok := r.run(ctx, dir, name, args, env)
+	if ok || !goCacheLifecycleFailure(out, r.active) {
+		return out, ok
+	}
+	if r.recoveryUsed {
+		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable after the one bounded recovery; stop concurrent cache cleanup and rerun fak self-update", r.active)), false
+	}
+
+	failedCache := r.active
+	r.recoveryUsed = true
+	if err := os.RemoveAll(r.recovery); err != nil {
+		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable and the one bounded recovery could not clean %s: %v; stop concurrent cache cleanup and rerun fak self-update", failedCache, r.recovery, err)), false
+	}
+	if err := os.MkdirAll(r.recovery, 0o755); err != nil {
+		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable and the one bounded recovery could not create %s: %v; stop concurrent cache cleanup and rerun fak self-update", failedCache, r.recovery, err)), false
+	}
+	r.active = r.recovery
+	retryEnv := goRunnerEnv(name, os.Environ(), r.tempDir, r.active)
+	retryOut, retryOK := r.run(ctx, dir, name, args, retryEnv)
+	if retryOK {
+		return retryOut, true
+	}
+	detail := fmt.Sprintf("Go build cache %s became unavailable; one recovery attempt used fresh cache %s, but the retried command failed and will not be retried", failedCache, r.recovery)
+	return appendGoCacheDiagnostic(retryOut, detail), false
+}
+
+func goCacheLifecycleFailure(out, cacheDir string) bool {
+	normalizedOut := normalizeCacheDiagnostic(out)
+	normalizedCache := normalizeCacheDiagnostic(filepath.Clean(cacheDir))
+	if normalizedCache == "" || normalizedCache == "." || !strings.Contains(normalizedOut, normalizedCache) {
+		return false
+	}
+	for _, signal := range []string{
+		"no such file or directory",
+		"cannot find the file",
+		"cannot find the path",
+		"file does not exist",
+		"not a directory",
+		"failed to initialize build cache",
+		"build cache is required",
+		"permission denied",
+		"access is denied",
+	} {
+		if strings.Contains(normalizedOut, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeCacheDiagnostic(value string) string {
+	// Go can report Windows paths even when a cross-platform unit test runs on Unix. Normalize
+	// both separator forms explicitly instead of relying only on the host-specific ToSlash.
+	return strings.ToLower(strings.ReplaceAll(filepath.ToSlash(value), `\`, "/"))
+}
+
+func appendGoCacheDiagnostic(out, diagnostic string) string {
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "self-update: " + diagnostic
+	}
+	return out + "\nself-update: " + diagnostic
 }
 
 // OSSwap atomically replaces dst with src. On unix os.Rename over an existing (even

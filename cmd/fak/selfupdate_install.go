@@ -98,11 +98,25 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	}
 	defer cleanup()
 
-	companionBinary, companionPaths, companionErr := prepareFakDevUpdate(ctx, buildDir, companionPaths, headRev)
+	buildRunner, cleanupBuildCache, cacheErr := selfinstall.NewSelfUpdateRunner()
+	if cacheErr != nil {
+		detail := "prepare update-owned Go build cache: " + cacheErr.Error()
+		fmt.Fprintln(os.Stderr, "self-update:", detail)
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
+		cleanup()
+		os.Exit(1)
+	}
+	defer cleanupBuildCache()
+	cleanupAttempt := func() {
+		cleanupBuildCache()
+		cleanup()
+	}
+
+	companionBinary, companionPaths, companionErr := prepareFakDevUpdate(ctx, buildRunner, buildDir, companionPaths, headRev)
 	if companionErr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", companionErr)
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, companionErr.Error())
-		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
+		cleanupAttempt() // os.Exit skips deferred functions; owned cache/source cleanup must run first.
 		os.Exit(1)
 	}
 	if companionBinary != "" {
@@ -124,7 +138,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 
 	fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
 	candidate := ""
-	res := selfinstall.Install(ctx, selfUpdateGateRunner, func(source, _ string) error {
+	res := selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
 		candidate = source
 		return nil
 	}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
@@ -134,7 +148,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 			detail = "swap: gated candidate was not captured"
 		}
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
-		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
+		cleanupAttempt() // os.Exit skips deferred functions; owned cache/source cleanup must run first.
 		os.Exit(1)
 	}
 	defer os.Remove(candidate)
@@ -175,7 +189,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
-		cleanup()
+		cleanupAttempt()
 		os.Exit(1)
 	case selfinstall.RollbackFailed:
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
@@ -185,7 +199,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
-		cleanup()
+		cleanupAttempt()
 		os.Exit(1)
 	default:
 		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, "unknown transaction result")
@@ -193,7 +207,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
-		cleanup()
+		cleanupAttempt()
 		os.Exit(1)
 	}
 	// Re-census and AUDIT: every configured hot copy is either converged above or named here with
