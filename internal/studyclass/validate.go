@@ -145,6 +145,9 @@ func validateDispositionCoherence(r Classification, es *[]error) {
 		if r.Source != "releases" && r.Source != "labels" && r.Source != "milestones" {
 			*es = append(*es, fmt.Errorf("%s metadata non-candidate has actionable source", r.Identity))
 		}
+	case DispositionRegressionBug, DispositionDuplicate, DispositionSupportQuestion, DispositionStaleSuperseded:
+		// These evidence-based dispositions are coherent for either open or
+		// closed records; their required typed evidence is validated separately.
 	}
 }
 

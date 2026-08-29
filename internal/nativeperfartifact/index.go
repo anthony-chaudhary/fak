@@ -119,6 +119,8 @@ func (i *Index) Resolve(correlationKey string, kind Kind, now time.Time) (Artifa
 	}
 	artifact := record.Artifacts[idx]
 	switch artifact.State {
+	case StateReady:
+		// Continue through expiry and locator validation below.
 	case StateBroken:
 		return Artifact{}, ErrBroken
 	case StateRedacted:

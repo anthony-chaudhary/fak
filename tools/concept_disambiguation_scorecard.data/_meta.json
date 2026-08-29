@@ -10947,6 +10947,11 @@
           "category": "incidental",
           "reason": "Issue #9842 refusal code string for an exact CPU-envelope mismatch; a specific runtime-capabilities refusal label inside the supported-envelope report, not a distinct support-maturity concept.",
           "token": "unsupported_cpu_envelope"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study-classification enum member for support-question records; it names a research disposition, not a distinct support-maturity capability or status contract.",
+          "token": "DispositionSupportQuestion"
         }
       ],
       "exclude": [
@@ -10977,6 +10982,7 @@
         "DefaultSetupParityPairs",
         "DefaultSetupParityReport",
         "DescriptionCoverage",
+        "DispositionSupportQuestion",
         "DomainCoverage",
         "ErrKVHostSnapshotUnsupported",
         "ErrQwen35GDNSequenceUnsupported",

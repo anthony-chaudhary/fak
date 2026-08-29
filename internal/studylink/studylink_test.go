@@ -50,6 +50,15 @@ func TestBuildCompleteCoverageUncoveredAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestBuildSeedJoinRejectsNonAffirmativeWitnessMode(t *testing.T) {
+	seed := witnessSeed{Issue: 7, Mode: Uncovered}
+	issues := map[int]ForgeRecord{7: {Number: 7, State: "open"}}
+	join, _ := buildSeedJoin(Join{}, seed, issues, t.TempDir(), "revision")
+	if join.Disposition != Conflict || !join.ManualReview || join.Confidence != "invalid-explicit-witness-mode" {
+		t.Fatalf("non-affirmative witness mode did not fail closed: %+v", join)
+	}
+}
+
 func TestValidatorRejectsBrokenIssueStatePathDuplicateAndMissingCoverage(t *testing.T) {
 	fx := writeFixture(t)
 	base, _, err := Build(fx.options())

@@ -84,6 +84,22 @@ func TestValidationCorruptionFailures(t *testing.T) {
 	}
 }
 
+func TestEvidenceBasedDispositionsAreStateIndependent(t *testing.T) {
+	var errs []error
+	record := Classification{}
+	record.Disposition = DispositionRegressionBug
+	validateDispositionCoherence(record, &errs)
+	record.Disposition = DispositionDuplicate
+	validateDispositionCoherence(record, &errs)
+	record.Disposition = DispositionSupportQuestion
+	validateDispositionCoherence(record, &errs)
+	record.Disposition = DispositionStaleSuperseded
+	validateDispositionCoherence(record, &errs)
+	if len(errs) != 0 {
+		t.Fatalf("evidence-based dispositions gained state-only errors: %v", errs)
+	}
+}
+
 func TestActionableClusterRequiresEvidence(t *testing.T) {
 	out, err := Classify(testCorpus(), testDigest)
 	if err != nil {
