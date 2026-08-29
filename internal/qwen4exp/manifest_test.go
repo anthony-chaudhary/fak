@@ -3,6 +3,7 @@ package qwen4exp
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -15,8 +16,37 @@ func TestCapturedFlashNextManifestIsCompleteAndBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Artifacts) != 144 || m.TensorInventory.Count != 1658 {
-		t.Fatalf("artifacts=%d tensors=%d", len(m.Artifacts), m.TensorInventory.Count)
+	shards := make(map[int]struct{})
+	shardTotal := 0
+	for _, artifact := range m.Artifacts {
+		if !strings.HasPrefix(artifact.Path, "model-") || !strings.HasSuffix(artifact.Path, ".safetensors") {
+			continue
+		}
+		var shard, total int
+		if _, err := fmt.Sscanf(artifact.Path, "model-%05d-of-%05d.safetensors", &shard, &total); err != nil {
+			t.Fatalf("malformed checkpoint shard %q: %v", artifact.Path, err)
+		}
+		if canonical := fmt.Sprintf("model-%05d-of-%05d.safetensors", shard, total); artifact.Path != canonical {
+			t.Fatalf("checkpoint shard %q is not canonical %q", artifact.Path, canonical)
+		}
+		if shardTotal == 0 {
+			shardTotal = total
+		}
+		if total != shardTotal {
+			t.Fatalf("checkpoint shard %q declares total %d, want %d", artifact.Path, total, shardTotal)
+		}
+		shards[shard] = struct{}{}
+	}
+	if shardTotal == 0 || len(shards) != shardTotal {
+		t.Fatalf("checkpoint shards=%d declared=%d", len(shards), shardTotal)
+	}
+	for shard := 1; shard <= shardTotal; shard++ {
+		if _, ok := shards[shard]; !ok {
+			t.Fatalf("checkpoint shard %d of %d is missing", shard, shardTotal)
+		}
+	}
+	if m.TensorInventory.Count != 1658 {
+		t.Fatalf("tensors=%d", m.TensorInventory.Count)
 	}
 	b, err := m.Binding("fak-native/qwen4exp")
 	if err != nil {
