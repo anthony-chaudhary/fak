@@ -113,6 +113,118 @@ func TestSelfInventoryIgnoresManifestAndWorktreeControlTrees(t *testing.T) {
 	}
 }
 
+func TestSelfInventoryMutationQAMatrix(t *testing.T) {
+	type wantDrift struct {
+		kind SelfInventoryDriftKind
+		path string
+	}
+	tests := []struct {
+		name            string
+		withoutManifest bool
+		mutate          func(*testing.T, string, *SelfInventory)
+		want            []wantDrift
+	}{
+		{
+			name: "empty default", withoutManifest: true,
+			want: []wantDrift{{SelfDriftManifestMissing, DefaultSelfInventoryPath}},
+		},
+		{
+			name: "add", mutate: func(t *testing.T, root string, _ *SelfInventory) {
+				writeSelfFixture(t, root, "b.go", "package b\n")
+			},
+			want: []wantDrift{{SelfDriftPathAdded, "b.go"}},
+		},
+		{
+			name: "delete", mutate: func(t *testing.T, root string, _ *SelfInventory) {
+				if err := os.Remove(filepath.Join(root, "a.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []wantDrift{{SelfDriftPathRemoved, "a.md"}},
+		},
+		{
+			name: "rename", mutate: func(t *testing.T, root string, _ *SelfInventory) {
+				if err := os.Rename(filepath.Join(root, "a.md"), filepath.Join(root, "z.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []wantDrift{{SelfDriftPathRemoved, "a.md"}, {SelfDriftPathAdded, "z.md"}},
+		},
+		{
+			name: "content change", mutate: func(t *testing.T, root string, _ *SelfInventory) {
+				writeSelfFixture(t, root, "a.md", "changed\n")
+			},
+			want: []wantDrift{{SelfDriftContentChanged, "a.md"}},
+		},
+		{
+			name: "reclassification", mutate: func(t *testing.T, root string, manifest *SelfInventory) {
+				manifest.Entries[0].Classification = "runtime_source"
+				writeSelfManifest(t, root, *manifest)
+			},
+			want: []wantDrift{{SelfDriftClassChanged, "a.md"}},
+		},
+		{
+			name: "unknown class", mutate: func(t *testing.T, root string, manifest *SelfInventory) {
+				manifest.Entries[0].Classification = "unknown_future_class"
+				writeSelfManifest(t, root, *manifest)
+			},
+			want: []wantDrift{{SelfDriftClassChanged, "a.md"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeSelfFixture(t, root, "a.md", "original\n")
+			manifest, err := BuildSelfInventory(root, "repo", DefaultSelfInventoryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tt.withoutManifest {
+				writeSelfManifest(t, root, manifest)
+			}
+			if tt.mutate != nil {
+				tt.mutate(t, root, &manifest)
+			}
+			got, err := VerifySelfInventory(root, DefaultSelfInventoryPath, "repo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.OK || len(got.Drift) != len(tt.want) {
+				t.Fatalf("verification = %+v, want drift %+v", got, tt.want)
+			}
+			for i, want := range tt.want {
+				if got.Drift[i].Kind != want.kind || got.Drift[i].Path != want.path {
+					t.Fatalf("drift[%d] = %+v, want kind=%s path=%s", i, got.Drift[i], want.kind, want.path)
+				}
+			}
+		})
+	}
+}
+
+func TestSelfInventoryDeterministicRerunBytes(t *testing.T) {
+	root := t.TempDir()
+	writeSelfFixture(t, root, "README.md", "stable\n")
+	writeSelfFixture(t, root, "cmd/tool/main.go", "package main\n")
+	one, err := BuildSelfInventory(root, "repo", DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := BuildSelfInventory(root, "repo", DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a, b bytes.Buffer
+	if err := WriteSelfInventory(&a, one); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSelfInventory(&b, two); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a.Bytes(), b.Bytes()) || one.ContentRoot != two.ContentRoot {
+		t.Fatalf("rerun differs: roots %s/%s", one.ContentRoot, two.ContentRoot)
+	}
+}
+
 func writeSelfFixture(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

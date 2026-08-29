@@ -82,6 +82,133 @@ func TestStudyInventoryCommittedMutationFailsThenRefreshPasses(t *testing.T) {
 	}
 }
 
+func TestStudyInventoryCommittedTreeMutationMatrix(t *testing.T) {
+	type expectedDrift struct {
+		kind studymonitor.SelfInventoryDriftKind
+		path string
+	}
+	tests := []struct {
+		name       string
+		noManifest bool
+		mutate     func(*testing.T, string, func(...string) ([]byte, error))
+		want       []expectedDrift
+	}{
+		{name: "default fresh"},
+		{name: "empty default", noManifest: true, want: []expectedDrift{{studymonitor.SelfDriftManifestMissing, studymonitor.DefaultSelfInventoryPath}}},
+		{
+			name: "add", mutate: func(t *testing.T, repo string, git func(...string) ([]byte, error)) {
+				writeStudySelfFile(t, repo, "b.go", "package b\n")
+				gitStudySelf(t, git, "add", "b.go")
+				gitStudySelf(t, git, "commit", "-qm", "add")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftPathAdded, "b.go"}},
+		},
+		{
+			name: "delete", mutate: func(t *testing.T, _ string, git func(...string) ([]byte, error)) {
+				gitStudySelf(t, git, "rm", "a.md")
+				gitStudySelf(t, git, "commit", "-qm", "delete")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftPathRemoved, "a.md"}},
+		},
+		{
+			name: "rename", mutate: func(t *testing.T, _ string, git func(...string) ([]byte, error)) {
+				gitStudySelf(t, git, "mv", "a.md", "z.md")
+				gitStudySelf(t, git, "commit", "-qm", "rename")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftPathRemoved, "a.md"}, {studymonitor.SelfDriftPathAdded, "z.md"}},
+		},
+		{
+			name: "content change", mutate: func(t *testing.T, repo string, git func(...string) ([]byte, error)) {
+				writeStudySelfFile(t, repo, "a.md", "changed\n")
+				gitStudySelf(t, git, "add", "a.md")
+				gitStudySelf(t, git, "commit", "-qm", "content")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftContentChanged, "a.md"}},
+		},
+		{
+			name: "reclassification", mutate: func(t *testing.T, repo string, git func(...string) ([]byte, error)) {
+				mutateStudySelfManifestClass(t, repo, "runtime_source")
+				gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+				gitStudySelf(t, git, "commit", "-qm", "reclassify")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftClassChanged, "a.md"}},
+		},
+		{
+			name: "unknown class", mutate: func(t *testing.T, repo string, git func(...string) ([]byte, error)) {
+				mutateStudySelfManifestClass(t, repo, "unknown_future_class")
+				gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+				gitStudySelf(t, git, "commit", "-qm", "unknown class")
+			},
+			want: []expectedDrift{{studymonitor.SelfDriftClassChanged, "a.md"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, git := seedStudySelfRepo(t)
+			writeStudySelfFile(t, repo, "a.md", "original\n")
+			gitStudySelf(t, git, "add", "a.md")
+			gitStudySelf(t, git, "commit", "-qm", "seed")
+			if !tt.noManifest {
+				var out, errOut bytes.Buffer
+				if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo, "--json"}); code != 0 {
+					t.Fatalf("refresh=%d stderr=%s", code, errOut.String())
+				}
+				gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+				gitStudySelf(t, git, "commit", "-qm", "manifest")
+			}
+			if tt.mutate != nil {
+				tt.mutate(t, repo, git)
+			}
+
+			var out, errOut bytes.Buffer
+			code := RunStudyInventory(&out, &errOut, []string{"--self", "--verify", "--root", repo, "--ref", "HEAD", "--json"})
+			var result studySelfInventoryOutput
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatalf("decode output: %v\nstdout=%s\nstderr=%s", err, out.String(), errOut.String())
+			}
+			wantCode := 0
+			if len(tt.want) > 0 {
+				wantCode = 1
+			}
+			if code != wantCode || result.Verification == nil || result.Verification.OK != (wantCode == 0) {
+				t.Fatalf("code=%d result=%+v stderr=%s", code, result, errOut.String())
+			}
+			if len(result.Verification.Drift) != len(tt.want) {
+				t.Fatalf("drift=%+v want=%+v", result.Verification.Drift, tt.want)
+			}
+			for i, want := range tt.want {
+				if result.Verification.Drift[i].Kind != want.kind || result.Verification.Drift[i].Path != want.path {
+					t.Fatalf("drift[%d]=%+v want kind=%s path=%s", i, result.Verification.Drift[i], want.kind, want.path)
+				}
+			}
+		})
+	}
+}
+
+func mutateStudySelfManifestClass(t *testing.T, repo, class string) {
+	t.Helper()
+	path := filepath.Join(repo, filepath.FromSlash(studymonitor.DefaultSelfInventoryPath))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest studymonitor.SelfInventory
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Entries) != 1 {
+		t.Fatalf("entries=%d, want 1", len(manifest.Entries))
+	}
+	manifest.Entries[0].Classification = class
+	var out bytes.Buffer
+	if err := studymonitor.WriteSelfInventory(&out, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedStudySelfRepo(t *testing.T) (string, func(...string) ([]byte, error)) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

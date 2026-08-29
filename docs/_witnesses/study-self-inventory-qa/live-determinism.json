@@ -1,0 +1,31 @@
+﻿{
+    "schema":  "fak-study-self-inventory-qa/1",
+    "observed_at":  "2026-08-29T21:02:00Z",
+    "binary_source_ref":  "59af6d4cb424bb2aaa82932067550c763cb22e6f",
+    "fixture":  {
+                    "kind":  "hermetic_committed_git_tree",
+                    "immutable_ref":  "19a79b23572620d299622fdc407db43fc3ce0443",
+                    "tracked_seed":  [
+                                         "README.md",
+                                         "docs/research/inventory/anthony-chaudhary-fak.json"
+                                     ]
+                },
+    "process_1":  {
+                      "exit_code":  0,
+                      "output_sha256":  "sha256:fe9949adc16c73de649fa1c5e4e6081be174ffe7aca7fed16980b12d0b03ee65",
+                      "content_root":  "sha256:701bf003653087c1c6190429a5ef650314b4d7594f7d1210bec233d490c7607e",
+                      "verification_ok":  true
+                  },
+    "process_2":  {
+                      "exit_code":  0,
+                      "output_sha256":  "sha256:fe9949adc16c73de649fa1c5e4e6081be174ffe7aca7fed16980b12d0b03ee65",
+                      "content_root":  "sha256:701bf003653087c1c6190429a5ef650314b4d7594f7d1210bec233d490c7607e",
+                      "verification_ok":  true
+                  },
+    "byte_identical":  true,
+    "content_root_identical":  true,
+    "full_repository_attempt":  {
+                                    "ref":  "59af6d4cb424bb2aaa82932067550c763cb22e6f",
+                                    "result":  "committed tree extraction timed out after 2m0s on Defender-constrained Windows host"
+                                }
+}
