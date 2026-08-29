@@ -72,6 +72,58 @@ func TestSelfUpdateAttemptPinsSelectionAcrossMovingOrigin(t *testing.T) {
 	var _ selfinstall.Options = opts
 }
 
+func TestSelfUpdateAttemptOptionsUsesCloneSharedCandidateCache(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for clone-shared candidate-cache acceptance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	cloneA := filepath.Join(root, "clone-a")
+	cloneB := filepath.Join(root, "clone-b")
+	mustSelfUpdateGit(t, ctx, root, "init", "--bare", remote)
+	mustSelfUpdateGit(t, ctx, root, "init", seed)
+	mustSelfUpdateGit(t, ctx, seed, "config", "user.email", "fak-test@example.invalid")
+	mustSelfUpdateGit(t, ctx, seed, "config", "user.name", "FAK Test")
+	mustSelfUpdateGit(t, ctx, seed, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(seed, "tracked.txt"), []byte("candidate cache\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSelfUpdateGit(t, ctx, seed, "add", "tracked.txt")
+	mustSelfUpdateGit(t, ctx, seed, "commit", "-m", "seed")
+	mustSelfUpdateGit(t, ctx, seed, "remote", "add", "origin", remote)
+	mustSelfUpdateGit(t, ctx, seed, "push", "-u", "origin", "main")
+	mustSelfUpdateGit(t, ctx, root, "clone", "--branch", "main", remote, cloneA)
+	mustSelfUpdateGit(t, ctx, root, "clone", "--branch", "main", remote, cloneB)
+
+	buildA := filepath.Join(root, "build-a")
+	buildASibling := filepath.Join(root, "build-a-sibling")
+	buildB := filepath.Join(root, "build-b")
+	mustSelfUpdateGit(t, ctx, cloneA, "worktree", "add", "--detach", buildA, "HEAD")
+	mustSelfUpdateGit(t, ctx, cloneA, "worktree", "add", "--detach", buildASibling, "HEAD")
+	mustSelfUpdateGit(t, ctx, cloneB, "worktree", "add", "--detach", buildB, "HEAD")
+
+	const selected = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cacheA := selfUpdateAttemptOptions(buildA, filepath.Join(root, "fak-a"), selected).CacheDir
+	cacheASibling := selfUpdateAttemptOptions(buildASibling, filepath.Join(root, "fak-a-sibling"), selected).CacheDir
+	cacheB := selfUpdateAttemptOptions(buildB, filepath.Join(root, "fak-b"), selected).CacheDir
+	wantA := selfinstall.CandidateCacheDir(discoverGitCommonDir(buildA))
+	if cacheA == "" || cacheA != wantA {
+		t.Fatalf("production candidate cache = %q, want clone-shared %q", cacheA, wantA)
+	}
+	if cacheASibling != cacheA {
+		t.Fatalf("same-clone linked worktrees resolved different candidate caches: %q / %q", cacheA, cacheASibling)
+	}
+	if cacheB == "" || cacheB == cacheA {
+		t.Fatalf("independent clones must not share candidate cache: clone A=%q clone B=%q", cacheA, cacheB)
+	}
+	if got := selfUpdateAttemptOptions(filepath.Join(root, "not-a-worktree"), filepath.Join(root, "fak-miss"), selected).CacheDir; got != "" {
+		t.Fatalf("unresolved Git common directory enabled candidate cache at %q", got)
+	}
+}
+
 func TestSelfUpdateAttemptRejectsUnpinnedSelection(t *testing.T) {
 	called := false
 	runner := func(context.Context, string, string, ...string) (string, bool) {
