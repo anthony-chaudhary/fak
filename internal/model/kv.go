@@ -425,6 +425,14 @@ type Session struct {
 	// mixedQKV is session-owned experimental dispatch state. It is initialized from the
 	// explicit selector once per session and zeroed by Close; no mutable package-global owner exists.
 	mixedQKV mixedQKVSession
+
+	// targetHidden keeps the exact residual stream immediately before final_norm for
+	// positions evaluated by the native f32 token path. It is deliberately session-owned:
+	// MTP consumers must never reconstruct this state from logits or embeddings.
+	captureTargetHidden bool
+	targetHiddenMu      sync.RWMutex
+	targetHidden        [][]float32
+	targetHiddenTokens  []int
 }
 
 // NewSession starts a fresh generation session.
@@ -569,10 +577,68 @@ func (s *Session) head(xf []float32) []float32 {
 	return logits
 }
 
+// rememberTargetHidden records the residual stream only after the target has
+// evaluated pos. Re-evaluating a position replaces it and deterministically
+// discards every later entry, matching a rewritten target history.
+func (s *Session) rememberTargetHidden(pos, token int, hidden []float32) {
+	if s == nil || !s.captureTargetHidden || pos < 0 {
+		return
+	}
+	s.targetHiddenMu.Lock()
+	defer s.targetHiddenMu.Unlock()
+	if pos < len(s.targetHidden) {
+		s.targetHidden = s.targetHidden[:pos]
+		s.targetHiddenTokens = s.targetHiddenTokens[:pos]
+	}
+	for len(s.targetHidden) < pos {
+		s.targetHidden = append(s.targetHidden, nil)
+		s.targetHiddenTokens = append(s.targetHiddenTokens, -1)
+	}
+	s.targetHidden = append(s.targetHidden, append([]float32(nil), hidden...))
+	s.targetHiddenTokens = append(s.targetHiddenTokens, token)
+}
+
+// TargetHiddenAt returns a defensive copy of the exact pre-final-norm hidden
+// vector captured when committed position pos was evaluated. A stale entry past
+// the current cache boundary is never exposed after speculative rollback.
+func (s *Session) TargetHiddenAt(pos int) ([]float32, error) {
+	if s == nil || !s.captureTargetHidden || s.Cache == nil || pos < 0 || pos >= s.Cache.Len() {
+		return nil, fmt.Errorf("model: target hidden position %d is unavailable", pos)
+	}
+	s.targetHiddenMu.RLock()
+	defer s.targetHiddenMu.RUnlock()
+	if pos >= len(s.targetHidden) || pos >= len(s.targetHiddenTokens) || len(s.targetHidden[pos]) == 0 ||
+		pos >= len(s.Cache.lineage.ids) || s.targetHiddenTokens[pos] < 0 ||
+		uint64(s.targetHiddenTokens[pos]) > uint64(^uint32(0)) ||
+		uint32(s.targetHiddenTokens[pos]) != s.Cache.lineage.ids[pos] {
+		return nil, fmt.Errorf("model: target hidden position %d is unavailable", pos)
+	}
+	return append([]float32(nil), s.targetHidden[pos]...), nil
+}
+
+// TokenEmbedding returns a defensive copy from this session's target model
+// embedding table.
+func (s *Session) TokenEmbedding(token int) ([]float32, error) {
+	if s == nil || s.M == nil || token < 0 || token >= s.M.Cfg.VocabSize {
+		return nil, fmt.Errorf("model: token embedding id %d is out of range", token)
+	}
+	h := s.M.Cfg.HiddenSize
+	if h <= 0 {
+		return nil, fmt.Errorf("model: token embedding id %d is unavailable", token)
+	}
+	embed := s.M.embedRows()
+	if token >= len(embed)/h {
+		return nil, fmt.Errorf("model: token embedding id %d is unavailable", token)
+	}
+	start := token * h
+	return append([]float32(nil), embed[start:start+h]...), nil
+}
+
 // tokenHidden runs one position (absolute index pos, embedding-looked-up hidden x)
 // through all layers against the cache, appending this position's K/V, and returns
-// the post-final-norm hidden vector (NOT yet projected to logits). This is the single
-// shared code path for prefill and decode; the head is applied by the caller.
+// the post-final-norm hidden vector (NOT yet projected to logits). Immediately before
+// finalNorm it captures the exact target residual required by Qwen3.8 MTP; the head
+// is applied by the caller.
 func (s *Session) tokenHidden(id, pos int) (out []float32) {
 	if s.Quant {
 		return s.tokenHiddenQ(id, pos)
@@ -599,6 +665,7 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 	if tap != nil {
 		tap.writeMeta(cfg, H, pos)
 	}
+	s.rememberTargetHidden(pos, id, x)
 	out = m.finalNorm(x)
 	return out
 }
@@ -806,7 +873,9 @@ func (s *Session) Prefill(ids []int) []float32 {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
 		}
-		return s.Backend.Read(result.Logits)
+		logits := s.Backend.Read(result.Logits)
+		s.retireRequestResources()
+		return logits
 	}
 	// Coordinated expert-parallel serve (#4835): announce this forward to the follower ranks
 	// and hold the group until it completes, so they replay it and reach the same per-layer
@@ -923,6 +992,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
 		}
+		s.retireRequestResources()
 		return
 	}
 	if s.M.Cfg.usesMLAMoELayout() {

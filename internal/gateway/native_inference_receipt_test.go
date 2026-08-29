@@ -75,11 +75,12 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 			t.Fatalf("%s_seconds=%v, want finite non-negative", name, seconds)
 		}
 	}
-	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
+	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Planner != "inkernel" || receipt.Owner != "fak" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
 	metrics := srv.renderMetrics()
 	for _, want := range []string{
+		`fak_native_runtime_info{engine="inkernel",backend="other",forward_path="other",model="synthetic",planner="inkernel",owner="fak"} 1`,
 		`fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other"} 1`,
 		`fak_native_receipt_signal_supported{signal="prefill"} 1`,
 		`fak_native_receipt_signal_supported{signal="decode"} 1`,

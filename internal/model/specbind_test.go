@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
@@ -104,4 +106,196 @@ func TestSpecDecodeGreedyResolvedRunsWhenEnabled(t *testing.T) {
 	if run.MeanAcceptanceLength <= 1.0 {
 		t.Fatalf("MeanAcceptanceLength=%v, want >1", run.MeanAcceptanceLength)
 	}
+}
+
+type sessionMTPForward struct {
+	vocab     int
+	failAtPos int
+	failErr   error
+	calls     []fakeQwen35MTPForwardCall
+	closes    int
+}
+
+func (f *sessionMTPForward) Forward(pos int, hidden, embedding []float32) ([]float32, error) {
+	f.calls = append(f.calls, fakeQwen35MTPForwardCall{
+		pos:       pos,
+		hidden:    append([]float32(nil), hidden...),
+		embedding: append([]float32(nil), embedding...),
+	})
+	if f.failErr != nil && pos == f.failAtPos {
+		return nil, f.failErr
+	}
+	logits := make([]float32, f.vocab)
+	logits[(pos+1)%f.vocab] = 1
+	return logits, nil
+}
+
+func (f *sessionMTPForward) Close() { f.closes++ }
+
+func TestSpecDecodeGreedyQwen35MTPOptInMatchesTargetGreedy(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	n := 8
+
+	wantSession := m.NewSession()
+	want := wantSession.Generate(prompt, n)
+	wantSession.Close()
+
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	run, err := SpecDecodeGreedyQwen35MTP(target, prompt, n, 1)
+	if err != nil {
+		t.Fatalf("opt-in Qwen3.8 MTP decode: %v", err)
+	}
+	if !reflect.DeepEqual(run.Output, want) {
+		t.Fatalf("MTP output = %v, want target-greedy %v", run.Output, want)
+	}
+	if target.Cache.Len() != 0 {
+		t.Fatalf("caller target cache length = %d, want untouched fresh session", target.Cache.Len())
+	}
+	if run.Rounds == 0 {
+		t.Fatal("opt-in Qwen3.8 MTP decode performed no speculative rounds")
+	}
+}
+
+func TestSpecDecodeGreedyQwen35MTPPassesPromptAndRefreshesEvaluatedHiddenHistory(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{2, 1}
+	var prefixes [][]int
+	var hidden [][]float32
+	var forwards []*sessionMTPForward
+
+	build := func(_ *Model, k int, targetHidden Qwen35MTPTargetHidden, embedding Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error) {
+		recordHidden := func(prefix []int) ([]float32, error) {
+			value, err := targetHidden(prefix)
+			if err == nil {
+				prefixes = append(prefixes, append([]int(nil), prefix...))
+				hidden = append(hidden, append([]float32(nil), value...))
+			}
+			return value, err
+		}
+		return newQwen35MTPDrafter(k, recordHidden, embedding, func() (qwen35MTPDraftForward, error) {
+			forward := &sessionMTPForward{vocab: m.Cfg.VocabSize, failAtPos: -1}
+			forwards = append(forwards, forward)
+			return forward, nil
+		})
+	}
+
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	run, err := specDecodeGreedyQwen35MTP(target, prompt, 6, 1, build)
+	if err != nil {
+		t.Fatalf("Qwen3.8 MTP decode with recording forward: %v", err)
+	}
+	if len(prefixes) < len(prompt)+1 {
+		t.Fatalf("target-hidden callback prefixes = %v, want prompt plus a subsequent-round extension", prefixes)
+	}
+	if !reflect.DeepEqual(prefixes[0], prompt[:1]) {
+		t.Fatalf("first speculative target prefix = %v, want real prompt prefix %v", prefixes[0], prompt[:1])
+	}
+	if !reflect.DeepEqual(prefixes[len(prompt)-1], prompt) {
+		t.Fatalf("first-round committed prefix = %v, want full real prompt %v", prefixes[len(prompt)-1], prompt)
+	}
+
+	greedyHistory := append(append([]int(nil), prompt...), run.Output...)
+	baseline := m.NewSession()
+	t.Cleanup(baseline.Close)
+	if err := evaluateQwen35MTPTargetPrefix(baseline, greedyHistory); err != nil {
+		t.Fatalf("evaluate target-greedy hidden baseline: %v", err)
+	}
+	for i, prefix := range prefixes {
+		if !tokenPrefix(prefix, greedyHistory) {
+			t.Fatalf("hidden callback prefix %v is not evaluated target-greedy history %v", prefix, greedyHistory)
+		}
+		pos := len(prefix) - 1
+		want, err := baseline.TargetHiddenAt(pos)
+		if err != nil {
+			t.Fatalf("baseline hidden at position %d: %v", pos, err)
+		}
+		assertFloat32BitsEqual(t, "subsequent-round target hidden", want, hidden[i])
+	}
+	if len(forwards) != 1 || forwards[0].closes != 1 {
+		t.Fatalf("MTP resource ownership = %d forwards, closes=%v; want one forward closed once", len(forwards), func() int {
+			if len(forwards) == 0 {
+				return 0
+			}
+			return forwards[0].closes
+		}())
+	}
+}
+
+func TestSpecDecodeGreedyQwen35MTPSurfacesRuntimeErrorAndCloses(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 2}
+	runtimeFailure := errors.New("injected native MTP forward failure")
+	var forward *sessionMTPForward
+	build := func(_ *Model, k int, targetHidden Qwen35MTPTargetHidden, embedding Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error) {
+		return newQwen35MTPDrafter(k, targetHidden, embedding, func() (qwen35MTPDraftForward, error) {
+			forward = &sessionMTPForward{vocab: m.Cfg.VocabSize, failAtPos: len(prompt) - 1, failErr: runtimeFailure}
+			return forward, nil
+		})
+	}
+
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	run, err := specDecodeGreedyQwen35MTP(target, prompt, 8, 1, build)
+	if !errors.Is(err, runtimeFailure) {
+		t.Fatalf("runtime error = %v, want injected MTP failure", err)
+	}
+	if len(run.Output) != 0 {
+		t.Fatalf("output after first-round MTP failure = %v, want no committed tokens", run.Output)
+	}
+	if forward == nil || forward.closes != 1 {
+		t.Fatalf("failed MTP forward close count = %v, want 1", func() int {
+			if forward == nil {
+				return 0
+			}
+			return forward.closes
+		}())
+	}
+}
+
+func TestSpecDecodeGreedyQwen35MTPRejectsIneligibleAndUnsafeTargets(t *testing.T) {
+	baseCfg := cfgV(8, 1, 2, 1, 4, 16)
+	baseCfg.ModelType = "qwen3_5_text"
+	baseCfg.MTPNumHiddenLayers = 1
+
+	t.Run("no retained MTP", func(t *testing.T) {
+		target := NewSynthetic(baseCfg).NewSession()
+		t.Cleanup(target.Close)
+		unsupported := assertQwen35MTPUnsupported(t, func() error {
+			_, err := SpecDecodeGreedyQwen35MTP(target, []int{1}, 2, 1)
+			return err
+		}())
+		if unsupported.Reason != "mtp-tensors-not-retained" {
+			t.Fatalf("unsupported reason = %q, want mtp-tensors-not-retained", unsupported.Reason)
+		}
+	})
+
+	t.Run("accelerated target has no exact hidden capture", func(t *testing.T) {
+		target := qwen35MTPEnabledSyntheticModel(t).NewSession()
+		target.Quant = true
+		t.Cleanup(target.Close)
+		assertQwen35MTPUnsupported(t, func() error {
+			_, err := SpecDecodeGreedyQwen35MTP(target, []int{1}, 2, 1)
+			return err
+		}())
+	})
+
+	t.Run("one layer cannot safely draft two tokens", func(t *testing.T) {
+		target := qwen35MTPEnabledSyntheticModel(t).NewSession()
+		t.Cleanup(target.Close)
+		assertQwen35MTPUnsupported(t, func() error {
+			_, err := SpecDecodeGreedyQwen35MTP(target, []int{1}, 2, 2)
+			return err
+		}())
+	})
+
+	t.Run("empty prompt", func(t *testing.T) {
+		target := qwen35MTPEnabledSyntheticModel(t).NewSession()
+		t.Cleanup(target.Close)
+		if _, err := SpecDecodeGreedyQwen35MTP(target, nil, 2, 1); !errors.Is(err, ErrQwen35MTPEmptyPrefix) {
+			t.Fatalf("empty-prompt error = %v, want ErrQwen35MTPEmptyPrefix", err)
+		}
+	})
 }

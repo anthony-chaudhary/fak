@@ -208,8 +208,16 @@ class NativeFallbackTest(unittest.TestCase):
         start = script.index("start_bg() {")
         end = script.index("\n}\n", start) + 3
         owner = "launchctl-argv-owner"
+        runtime_root = root / "tmp"
+        runtime_root.mkdir()
         env = os.environ.copy()
-        env.update({"RUN_DIR_UNDER_TEST": str(run_dir), "RUN_ID_UNDER_TEST": owner})
+        env.update(
+            {
+                "RUN_DIR_UNDER_TEST": str(run_dir),
+                "RUN_ID_UNDER_TEST": owner,
+                "TMPDIR": f"{runtime_root}/",
+            }
+        )
 
         subprocess.run(
             [
@@ -256,15 +264,69 @@ class NativeFallbackTest(unittest.TestCase):
         self.assertEqual(
             metadata["label"], self.launchd_label("launchctl_argv", owner)
         )
+        runtime = Path(metadata["runtime"])
+        self.assertEqual(runtime.parent, runtime_root)
+        self.assertTrue(runtime.name.startswith("fak-grafana-launchctl_argv."))
+
+    def test_down_rejects_runtime_outside_private_tmp_prefix(self) -> None:
+        root = self.make_fixture()
+        grafana = root / "tools" / "grafana"
+        run_dir = grafana / ".run"
+        fake_bin = root / "fake-bin"
+        runtime_root = root / "tmp"
+        unsafe_runtime = root / "must-survive"
+        run_dir.mkdir()
+        fake_bin.mkdir()
+        runtime_root.mkdir()
+        unsafe_runtime.mkdir()
+        (run_dir / "stack.mode").write_text("native\n", encoding="utf-8")
+
+        owner = "runtime-safety-owner"
+        label = self.launchd_label("unsafe", owner)
+        pid_file = run_dir / "unsafe.pid"
+        pid_file.write_text(
+            "pid=4242\n"
+            f"owner={owner}\n"
+            "supervisor=launchd\n"
+            f"label={label}\n"
+            f"runtime={unsafe_runtime}\n",
+            encoding="utf-8",
+        )
+        calls = root / "launchctl.calls"
+        (fake_bin / "uname").write_text(
+            "#!/usr/bin/env bash\nprintf 'Darwin\n'\n", encoding="utf-8"
+        )
+        (fake_bin / "ps").write_text(
+            f"#!/usr/bin/env bash\nprintf 'fak-grafana-owner={owner}\n'\n",
+            encoding="utf-8",
+        )
+        (fake_bin / "launchctl").write_text(
+            "#!/usr/bin/env bash\n"
+            'if [ "$1" = print ]; then printf "job\n"; exit 0; fi\n'
+            f'printf "%s\n" "$*" >>{calls!s}\n',
+            encoding="utf-8",
+        )
+        for command in ("uname", "ps", "launchctl"):
+            (fake_bin / command).chmod(0o755)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "TMPDIR": f"{runtime_root}/",
+            }
+        )
+
+        subprocess.run(["bash", str(grafana / "down.sh")], check=True, env=env)
+
+        self.assertTrue(unsafe_runtime.exists())
+        self.assertFalse(calls.exists(), "unsafe metadata must not remove a launchd job")
+        self.assertTrue(pid_file.exists(), "unverified metadata must remain for inspection")
 
     @unittest.skipUnless(sys.platform == "darwin", "requires real launchd")
     def test_real_up_down_launchd_lifecycle_and_adoption(self) -> None:
-        try:
-            with socket.socket() as probe:
-                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                probe.bind(("127.0.0.1", 8080))
-        except OSError as error:
-            self.skipTest(f"127.0.0.1:8080 is already in use: {error}")
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            gateway_port = probe.getsockname()[1]
 
         root = self.make_fixture()
         grafana = root / "tools" / "grafana"
@@ -328,10 +390,10 @@ exit 64
 
         curl = fake_bin / "curl"
         curl.write_text(
-            """#!/usr/bin/env bash
+            f"""#!/usr/bin/env bash
 for arg in "$@"; do
   case "$arg" in
-    http://127.0.0.1:8080/*|http://localhost:8080/*)
+    http://127.0.0.1:{gateway_port}/*|http://localhost:{gateway_port}/*)
       exec /usr/bin/curl "$@"
       ;;
   esac
@@ -351,15 +413,18 @@ exit 0
         self.addCleanup(self.remove_launchd_job, adopted_label)
 
         env = os.environ.copy()
+        runtime_root = root / "tmp"
+        runtime_root.mkdir()
         env.update(
             {
                 "FAK_DOGFOOD_MODEL": "fixture",
-                "FAK_GATEWAY_ADDR": "127.0.0.1:8080",
+                "FAK_GATEWAY_ADDR": f"127.0.0.1:{gateway_port}",
                 "FAK_GRAFANA_RUN_ID": owner,
                 "FAK_GRAFANA_TEST_TOKEN": token,
                 "FAK_MODEL_DIR": str(model_dir),
                 "FAK_TELEMETRY_SOURCES": "fak_gateway",
                 "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+                "TMPDIR": f"{runtime_root}/",
             }
         )
         subprocess.run(
@@ -380,9 +445,23 @@ exit 0
         self.assertEqual(metadata["owner"], owner)
         self.assertEqual(metadata["supervisor"], "launchd")
         self.assertEqual(metadata["label"], owned_label)
+        runtime = Path(metadata["runtime"])
+        self.assertEqual(runtime.parent, runtime_root)
+        self.assertTrue(runtime.name.startswith(f"fak-grafana-fak_gateway.{owner}."))
+        staged_fak = runtime / "fak"
+        self.assertTrue(staged_fak.is_file())
+        self.assertEqual(staged_fak.read_bytes(), fake_fak.read_bytes())
+        self.assertTrue((runtime / "fak_gateway.log").exists())
         self.assertLaunchdJobPresent(owned_label)
-        self.wait_for_http("http://127.0.0.1:8080/metrics")
+        self.wait_for_http(f"http://127.0.0.1:{gateway_port}/metrics")
         child_pid = self.wait_for_child(wrapper_pid)
+        child_cwd = Path(
+            subprocess.check_output(
+                ["lsof", "-a", "-p", str(child_pid), "-d", "cwd", "-Fn"],
+                text=True,
+            ).splitlines()[-1][1:]
+        )
+        self.assertEqual(child_cwd.resolve(), runtime.resolve())
         os.kill(wrapper_pid, 0)
         os.kill(child_pid, 0)
 
@@ -391,7 +470,7 @@ exit 0
         self.assertLaunchdJobPresent(owned_label)
         os.kill(wrapper_pid, 0)
         os.kill(child_pid, 0)
-        self.wait_for_http("http://127.0.0.1:8080/healthz")
+        self.wait_for_http(f"http://127.0.0.1:{gateway_port}/healthz")
 
         subprocess.run(
             ["bash", str(grafana / "down.sh")],
@@ -404,13 +483,14 @@ exit 0
         self.wait_for_pid_exit(child_pid)
         self.assertLaunchdJobAbsent(owned_label)
         self.assertFalse(pid_file.exists())
+        self.assertFalse(runtime.exists())
 
         adopted = subprocess.Popen(
             [
                 str(fake_fak),
                 "serve",
                 "--addr",
-                "127.0.0.1:8080",
+                f"127.0.0.1:{gateway_port}",
                 "--engine",
                 "fixture",
                 "--model",
@@ -419,7 +499,7 @@ exit 0
             env=env,
         )
         self.addCleanup(self.stop_process, adopted)
-        self.wait_for_http("http://127.0.0.1:8080/metrics")
+        self.wait_for_http(f"http://127.0.0.1:{gateway_port}/metrics")
 
         adopted_env = env.copy()
         adopted_env["FAK_GRAFANA_RUN_ID"] = adopted_owner
@@ -442,7 +522,7 @@ exit 0
             text=True,
         )
         self.assertIsNone(adopted.poll(), "down must not stop an adopted listener")
-        self.wait_for_http("http://127.0.0.1:8080/metrics")
+        self.wait_for_http(f"http://127.0.0.1:{gateway_port}/metrics")
 
     def test_down_stops_only_process_with_matching_owner(self) -> None:
         root = self.make_fixture()

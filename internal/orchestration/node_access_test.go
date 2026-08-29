@@ -14,7 +14,7 @@ func TestWorkflowPlanNodeAccessContract(t *testing.T) {
 		TaskID: "task-access",
 		Roles: []Role{
 			{ID: "observer", Purpose: "inspect", TaskID: "task-access", Access: ChildAccess{Mode: ChildAccessObserve, ReadSet: []string{"docs/z", `docs\\a`, "docs/a"}}},
-			{ID: "worker", Purpose: "edit", TaskID: "task-access", Access: ChildAccess{Mode: ChildAccessEffect, ReadSet: []string{"internal/b"}, WriteSet: []string{"internal/z", `internal\\a`, "internal/a"}}},
+			{ID: "worker", Purpose: "edit", TaskID: "task-access", Access: ChildAccess{Mode: ChildAccessEffect, ReadSet: []string{"internal/b"}, WriteSet: []string{`internal\\orchestration`, "internal/orchestration"}}},
 		},
 	}
 
@@ -22,7 +22,7 @@ func TestWorkflowPlanNodeAccessContract(t *testing.T) {
 		t.Fatalf("NormalizeWorkflowPlanAccess: %v", err)
 	}
 	wantReads := []string{"docs/a", "docs/z"}
-	wantWrites := []string{"internal/a", "internal/z"}
+	wantWrites := []string{"internal/orchestration"}
 	if !reflect.DeepEqual(plan.Roles[0].Access.ReadSet, wantReads) {
 		t.Fatalf("observer read_set = %#v, want %#v", plan.Roles[0].Access.ReadSet, wantReads)
 	}
@@ -57,6 +57,9 @@ func TestWorkflowPlanNodeAccessContract(t *testing.T) {
 		{name: "unknown mode", access: ChildAccess{Mode: "maybe", ReadSet: []string{"docs"}}, want: ErrUnknownChildAccessMode},
 		{name: "observer write set", access: ChildAccess{Mode: ChildAccessObserve, WriteSet: []string{"internal"}}, want: ErrObserverWriteSet},
 		{name: "effect unknown write scope", access: ChildAccess{Mode: ChildAccessEffect}, want: ErrEffectWriteSetRequired},
+		{name: "effect multiple regions", access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"internal/orchestration", "cmd/fak"}}, want: ErrEffectWriteSetRegions},
+		{name: "effect unbounded region", access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"../outside"}}, want: ErrEffectWriteSetRegions},
+		{name: "portable and legacy mixed", access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"internal/orchestration"}, Lane: "orchestration", WriteTree: "internal/orchestration/**"}, want: ErrEffectWriteSetRegions},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bad := WorkflowPlan{Roles: []Role{{ID: "node", Access: tc.access}}}
@@ -68,5 +71,13 @@ func TestWorkflowPlanNodeAccessContract(t *testing.T) {
 				t.Fatalf("error does not identify role: %v", err)
 			}
 		})
+	}
+
+	legacy := WorkflowPlan{Roles: []Role{{
+		ID:     "legacy",
+		Access: ChildAccess{Mode: ChildAccessEffect, Lane: "cmd", WriteTree: "cmd/fak/access/**", Tools: []string{"Write"}},
+	}}}
+	if err := NormalizeWorkflowPlanAccess(&legacy); err != nil {
+		t.Fatalf("legacy lane/write_tree plan rejected: %v", err)
 	}
 }

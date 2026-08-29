@@ -202,6 +202,9 @@ func EvaluateMatrixControlledPromQL(ctx context.Context, root, promtoolPath stri
 	// while measurement panels continue to gate on reason=none.
 	tests.WriteString("  - series: 'fak_native_backend_available{backend=\"cuda\",reason=\"driver_unavailable\"}'\n")
 	tests.WriteString("    values: '0x19 1'\n")
+	for _, sample := range currentProducerSamples() {
+		fmt.Fprintf(&tests, "  - series: %s\n    values: %q\n", promtoolSeries(sample), promtoolValues(sample))
+	}
 	tests.WriteString("  promql_expr_test:\n")
 	for _, query := range queries {
 		fmt.Fprintf(&tests, "  - expr: count(%s) > bool 0\n    eval_time: 10m\n    exp_samples:\n    - labels: '{}'\n      value: 1\n", query.record)
@@ -222,6 +225,35 @@ func EvaluateMatrixControlledPromQL(ctx context.Context, root, promtoolPath stri
 	return nil
 }
 
+func currentProducerSamples() []Series {
+	labels := map[string]string{"engine": "inkernel", "backend": "cuda", "forward_path": "qwen_cuda"}
+	samples := []Series{
+		{Metric: "fak_native_receipt_requests_total", Labels: labels, Value: 400},
+		{Metric: "fak_native_receipt_unsupported_total", Labels: map[string]string{"reason": "none"}, Value: 20},
+		{Metric: "fak_native_receipt_latest_age_seconds", Value: 10},
+		{Metric: "fak_native_receipt_latest_stale", Value: 0},
+
+		{Metric: "fak_gateway_inference_output_tokens_per_second", Labels: map[string]string{"engine": "fak-native", "backend": "cuda"}, Value: 48},
+		{Metric: "fak_gateway_inference_cached_prompt_hit_ratio", Labels: map[string]string{"engine": "fak-native", "backend": "cuda"}, Value: 0.75},
+		{Metric: "fak_native_slo_state", Labels: map[string]string{"engine": "fak-native", "backend": "cuda", "state": "regression"}, Value: 1},
+	}
+	for _, signal := range []string{"ttft", "tpot", "queue", "prefill", "decode", "kernel", "kv_reuse", "transfer"} {
+		samples = append(samples, Series{Metric: "fak_native_receipt_signal_supported", Labels: map[string]string{"signal": signal}, Value: 1})
+	}
+	for _, phase := range []string{"queue", "prefill", "decode", "kernel"} {
+		samples = append(samples, Series{Metric: "fak_native_receipt_phase_seconds_total", Labels: map[string]string{"engine": "inkernel", "backend": "cuda", "forward_path": "qwen_cuda", "phase": phase}, Value: 40})
+	}
+	for _, kind := range []string{"kv", "transfer"} {
+		samples = append(samples, Series{Metric: "fak_native_receipt_bytes_total", Labels: map[string]string{"engine": "inkernel", "backend": "cuda", "forward_path": "qwen_cuda", "kind": kind}, Value: 4096})
+	}
+	for _, metric := range []string{"fak_gateway_inference_ttft_seconds_bucket", "fak_gateway_inference_tpot_seconds_bucket"} {
+		for i, le := range []string{"0.1", "0.5", "1", "+Inf"} {
+			samples = append(samples, Series{Metric: metric, Labels: map[string]string{"engine": "fak-native", "backend": "cuda", "le": le}, Value: float64((i + 1) * 100)})
+		}
+	}
+	return samples
+}
+
 func promtoolSeries(sample Series) string {
 	var labels []string
 	for name, value := range sample.Labels {
@@ -236,7 +268,7 @@ func promtoolSeries(sample Series) string {
 
 func promtoolValues(sample Series) string {
 	// changes() must observe a transition inside its final one-minute range.
-	if sample.Metric == "fak_native_artifact_info" || sample.Metric == "fak_native_lifecycle_event_info" {
+	if sample.Metric == "fak_native_artifact_info" || sample.Metric == "fak_native_lifecycle_event_info" || (sample.Metric == "fak_native_slo_state" && sample.Labels["state"] == "regression") {
 		return "0x19 1"
 	}
 	if strings.HasSuffix(sample.Metric, "_total") || strings.HasSuffix(sample.Metric, "_bucket") {

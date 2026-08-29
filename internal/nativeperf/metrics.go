@@ -33,14 +33,17 @@ type receiptMetricTotals struct {
 }
 
 type receiptMetricLatest struct {
-	at        time.Time
-	supported [len(receiptMetricSignals)]bool
+	at          time.Time
+	supported   [len(receiptMetricSignals)]bool
+	identityKey receiptMetricKey
+	model       string
+	planner     string
+	owner       string
 }
 
 // ReceiptMetrics projects authoritative native inference receipts into a bounded
-// Prometheus surface. It deliberately excludes model, request, artifact, and
-// machine identity from labels; unrecognized execution identities collapse into
-// closed "other" buckets.
+// Prometheus surface. Request, artifact, raw model, and machine identity never
+// become labels; runtime identity is reduced to closed buckets.
 type ReceiptMetrics struct {
 	mu          sync.RWMutex
 	staleAfter  time.Duration
@@ -110,7 +113,14 @@ func (m *ReceiptMetrics) Observe(receipt *agent.NativeInferenceReceipt, observed
 		t.bytes[i] += byteTotals[i]
 	}
 	m.totals[key] = t
-	m.latest = receiptMetricLatest{at: observedAt, supported: supported}
+	m.latest = receiptMetricLatest{
+		at:          observedAt,
+		supported:   supported,
+		identityKey: key,
+		model:       boundedModel(receipt.Model),
+		planner:     boundedPlanner(receipt.Planner),
+		owner:       boundedOwner(receipt.Owner),
+	}
 	m.mu.Unlock()
 	return true
 }
@@ -209,6 +219,10 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 	})
 
 	var b strings.Builder
+	writeReceiptHelpType(&b, "fak_native_runtime_info", "Latest supported fak-native runtime identity reduced to bounded labels.", "gauge")
+	if !latest.at.IsZero() {
+		fmt.Fprintf(&b, "fak_native_runtime_info%s,model=%q,planner=%q,owner=%q} 1\n", strings.TrimSuffix(receiptLabels(latest.identityKey), "}"), latest.model, latest.planner, latest.owner)
+	}
 	writeReceiptHelpType(&b, "fak_native_receipt_requests_total", "Completed supported fak-native execution receipts.", "counter")
 	for _, k := range keys {
 		t := totals[k]
@@ -268,6 +282,40 @@ func writeReceiptHelpType(b *strings.Builder, name, help, metricType string) {
 
 func receiptLabels(k receiptMetricKey) string {
 	return fmt.Sprintf("{engine=%q,backend=%q,forward_path=%q}", k.engine, k.backend, k.forwardPath)
+}
+
+func boundedModel(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch {
+	case strings.Contains(v, "qwen3.8") || strings.Contains(v, "qwen38"):
+		return "qwen3.8"
+	case strings.Contains(v, "qwen3.5") || strings.Contains(v, "qwen35"):
+		return "qwen3.5"
+	case strings.Contains(v, "glm-4.7") || strings.Contains(v, "glm47"):
+		return "glm-4.7"
+	case strings.Contains(v, "synthetic"):
+		return "synthetic"
+	default:
+		return "other"
+	}
+}
+
+func boundedPlanner(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "inkernel":
+		return "inkernel"
+	default:
+		return "other"
+	}
+}
+
+func boundedOwner(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "fak":
+		return "fak"
+	default:
+		return "other"
+	}
 }
 
 func boundedEngine(v string) string {

@@ -83,19 +83,15 @@ func compileOrchestrationChildAccess(role orchestration.Role, parent policy.Runt
 	var err error
 	switch mode {
 	case orchestration.ChildAccessObserve:
-		if strings.TrimSpace(role.Access.Lane) != "" || strings.TrimSpace(role.Access.WriteTree) != "" {
+		if len(role.Access.WriteSet) != 0 || strings.TrimSpace(role.Access.Lane) != "" || strings.TrimSpace(role.Access.WriteTree) != "" {
 			return orchestrationCompiledChildAccess{}, fmt.Errorf("%s: observe child %q must have an empty write envelope", orchestrationChildAccessInvalid, role.ID)
 		}
 		manifest, err = compileObserveChildManifest(parent, role.Access.Tools)
 		base.ReadOnly = true
 	case orchestration.ChildAccessEffect:
-		lane := strings.TrimSpace(role.Access.Lane)
-		writeTree, treeErr := normalizeChildWriteTree(role.Access.WriteTree)
-		if treeErr != nil {
-			return orchestrationCompiledChildAccess{}, fmt.Errorf("%s: effect child %q: %w", orchestrationChildAccessInvalid, role.ID, treeErr)
-		}
-		if lane == "" || strings.Contains(lane, ",") {
-			return orchestrationCompiledChildAccess{}, fmt.Errorf("%s: effect child %q requires one valid lane", orchestrationChildAccessInvalid, role.ID)
+		lane, writeTree, envelopeErr := lowerOrchestrationEffectEnvelope(role.Access)
+		if envelopeErr != nil {
+			return orchestrationCompiledChildAccess{}, fmt.Errorf("%s: effect child %q: %w", orchestrationChildAccessInvalid, role.ID, envelopeErr)
 		}
 		manifest, err = compileEffectChildManifest(parent, role.Access.Tools, writeTree)
 		base.Lane = lane
@@ -117,6 +113,74 @@ func compileOrchestrationChildAccess(role orchestration.Role, parent policy.Runt
 	return orchestrationCompiledChildAccess{
 		Mode: mode, Policy: runtime, ManifestJSON: manifest.JSON(), Admission: base,
 	}, nil
+}
+
+func lowerOrchestrationEffectEnvelope(access orchestration.ChildAccess) (string, string, error) {
+	if len(access.WriteSet) == 0 {
+		lane := strings.TrimSpace(access.Lane)
+		writeTree, err := normalizeChildWriteTree(access.WriteTree)
+		if err != nil {
+			return "", "", err
+		}
+		if lane == "" || strings.Contains(lane, ",") {
+			return "", "", fmt.Errorf("one valid lane is required")
+		}
+		return lane, writeTree, nil
+	}
+	if strings.TrimSpace(access.Lane) != "" || strings.TrimSpace(access.WriteTree) != "" {
+		return "", "", fmt.Errorf("portable write_set cannot be combined with lane/write_tree")
+	}
+	if len(access.WriteSet) != 1 {
+		return "", "", fmt.Errorf("one representable write region is required")
+	}
+	region, err := normalizePortableChildWriteRegion(access.WriteSet[0])
+	if err != nil {
+		return "", "", err
+	}
+	writeTree := region
+	if !strings.HasSuffix(writeTree, "/**") {
+		writeTree += "/**"
+	}
+	tax, err := regionadmit.LoadTaxonomy(repoRoot())
+	if err != nil {
+		return "", "", fmt.Errorf("lane taxonomy: %w", err)
+	}
+	lane := regionadmit.LaneOf([]string{writeTree}, tax)
+	if lane == "" {
+		lane = portableChildLane(region)
+	}
+	if lane == "" {
+		return "", "", fmt.Errorf("write region %q cannot be represented by one lane", region)
+	}
+	return lane, writeTree, nil
+}
+
+func normalizePortableChildWriteRegion(raw string) (string, error) {
+	region := filepath.ToSlash(strings.TrimSpace(raw))
+	if region == "" || strings.Contains(region, ",") || filepath.IsAbs(region) || path.IsAbs(region) {
+		return "", fmt.Errorf("write region %q must be one bounded repo-relative region", raw)
+	}
+	base := strings.TrimSuffix(region, "/**")
+	if strings.ContainsAny(base, "*?[") {
+		return "", fmt.Errorf("write region %q cannot contain an unrepresentable glob", raw)
+	}
+	clean := path.Clean(base)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("write region %q must be one bounded repo-relative region", raw)
+	}
+	if strings.HasSuffix(region, "/**") {
+		return clean + "/**", nil
+	}
+	return clean, nil
+}
+
+func portableChildLane(region string) string {
+	region = strings.TrimSuffix(region, "/**")
+	parts := strings.Split(region, "/")
+	if len(parts) >= 2 && parts[0] == "internal" && parts[1] != "" {
+		return parts[1]
+	}
+	return ""
 }
 
 func compileObserveChildManifest(parent policy.Runtime, requested []string) (policy.Manifest, error) {

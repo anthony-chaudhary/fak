@@ -7,25 +7,25 @@
   "dashboards": [
     {
       "uid": "fak-native-kernel-performance",
-      "dashboard_sha256": "135d12c99017d0c67f4fe5faa7dc10d035e4cb8ff3c75e6d6f35f82c9c053b6c",
+      "dashboard_sha256": "57f0a3c15424cbe215244fdeca041d09d5d5168cce98f51df900409bd7ce4e30",
       "contract_sha256": "dfeb6dc4dfc728651a7a2f2db8ecea85cb24825dbd3ad1e2949d7a619ab698d6",
       "fixture_sha256": "b80324206b287d7fbf3f1f38aa939f2bf4eef9c030d7ee7bb0eb6fa32b642023"
     },
     {
       "uid": "fak-native-backends",
-      "dashboard_sha256": "00510ffd5ba378ec2aa0a88ee6a4c91c3975a88aa96f55c2a3809adc8606e574",
+      "dashboard_sha256": "43d59bc92020b3c81e77a30182a8d22a0fd68d29ba31e24aeb47b3307fbb9790",
       "contract_sha256": "0fd480641640c3f3093e9391a2c810ea3db462716fc1744b3010c345841dcdfb",
       "fixture_sha256": "34c10892fe9795d2bf56a4ef943fe459d24ff634c83435d54636dc4304f529b6"
     },
     {
       "uid": "fak-native-artifacts",
-      "dashboard_sha256": "095673b2e25db9c1537431341d07652e96ac7c07874b89de716a81c4c4d30c07",
+      "dashboard_sha256": "df3b6312e08013ceaa0b3e2384acebc0582991abeeda27769ceb5c080a626fcc",
       "contract_sha256": "827434e66f18c426235c8e8cb281457d060da6ee529da28bcf0153cc65573aae",
       "fixture_sha256": "d2b16f44dfc14224208c8588ddcab1ca079f98f07303603f8b86ef400faeb466"
     },
     {
       "uid": "fak-native-slo",
-      "dashboard_sha256": "1b6fa76cde9044e7d7daae5d8e5305fc04bd5786424a1fa92f861653e0925025",
+      "dashboard_sha256": "98b420e0a0044e8034742c91a4d0c83b59ae0db64f3d0eb9c821127c07e7c864",
       "contract_sha256": "8e925a8abd4418e11ced326abe1bb5a0fdf9fe07187397c3b251ca225a40f115",
       "fixture_sha256": "7c7037c67e7fe851ea38aed33547d5885c1a4ecc6209b773dbfafdb067e5aa16"
     }
@@ -34,17 +34,17 @@
     {
       "state": "populated",
       "path": "fak-native-panel-coverage-populated.png",
-      "sha256": "038c02af4e71eb92e10533dd99f136a3bfe5b64f628c57edc63edd39c47864d1",
+      "sha256": "6d474dc99efeef6a105115d6a2beb7d1b23a3736d5e534a8a04222ea1fcdb6bd",
       "width": 1600,
-      "height": 1568,
+      "height": 1528,
       "meaning": "Coverage index: every query-bearing panel produced a real fixture-derived series after removing any unavailable sentinel from the populated assertion; static panels remain explicitly static."
     },
     {
       "state": "explicit_unavailable",
       "path": "fak-native-panel-coverage-unavailable.png",
-      "sha256": "2fce701a2385a0485aef97f9844b7c6e042ea11ffb8ffdea4e12c66ca716d3a9",
+      "sha256": "c43025d5fe675fee753de5cbcfb9d30104e8d788895c0b1e254d80cbfb0cd5e1",
       "width": 1600,
-      "height": 1568,
+      "height": 1528,
       "meaning": "Coverage index: every query-bearing panel has a required unavailable path; dashboard-specific Grafana reason/state presentation remains in the detailed captures and contracts."
     }
   ],

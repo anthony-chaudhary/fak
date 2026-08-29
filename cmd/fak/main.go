@@ -81,6 +81,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 	switch name {
 	case "agent":
 		cmdAgent(args)
+	case "agentic":
+		cmdAgentic(args)
 	case "harness":
 		cmdHarnessCommand(args)
 	case "armbench":

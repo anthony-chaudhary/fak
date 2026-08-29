@@ -237,6 +237,7 @@ type Adjudicator struct {
 	// alongside the policy RWMutex; its zero value is a ready empty ledger, so New
 	// need not initialize it. Cleared at a task boundary via ResetRun.
 	authored    sync.Map
+	devEdit     atomic.Pointer[devEditAttestationState]
 	receiptRoot string
 }
 
@@ -409,7 +410,11 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// PROVABLE refusal. Bounded disclosure: the witness carries ONLY the offending
 	// glob, never the whole policy (deny channel is not a policy oracle).
 	if pr.runs(cl, rungSelfModify) && writeShapedLower(lowerTool) {
-		if g := matchGlob(targetPath(args), p.SelfModifyGlobs); g != "" {
+		target := targetPath(args)
+		if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
+			if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
+				return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}
+			}
 			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonSelfModify,

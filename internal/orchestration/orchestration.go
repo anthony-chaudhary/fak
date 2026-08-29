@@ -100,6 +100,7 @@ type TaskSpec struct {
 	Pins         FastPins              `json:"pins,omitempty"`
 	ClaudeSpeed  bool                  `json:"claude_speed,omitempty"`
 	WitnessFirst *witnessprocess.Block `json:"witness_first,omitempty"`
+	WorkerAccess []WorkerAccessSpec    `json:"worker_access,omitempty"`
 }
 
 type ChildAccessMode string
@@ -124,6 +125,13 @@ type ChildAccess struct {
 	Tools     []string `json:"tools,omitempty"`
 }
 
+// WorkerAccessSpec binds an explicit capability declaration to one
+// deterministically generated worker role. The lead is never addressable here.
+type WorkerAccessSpec struct {
+	RoleID string      `json:"role_id"`
+	Access ChildAccess `json:"access"`
+}
+
 type Role struct {
 	ID          string                      `json:"id"`
 	Purpose     string                      `json:"purpose"`
@@ -136,6 +144,9 @@ var (
 	ErrUnknownChildAccessMode = errors.New("unknown child access mode")
 	ErrObserverWriteSet       = errors.New("observe role must not declare a write set")
 	ErrEffectWriteSetRequired = errors.New("effect role requires a bounded write set")
+	ErrEffectWriteSetRegions  = errors.New("effect role requires exactly one representable write region")
+	ErrUnknownWorkerRole      = errors.New("worker access names an unknown role")
+	ErrDuplicateWorkerRole    = errors.New("worker access repeats a role")
 )
 
 // NormalizeWorkflowPlanAccess validates the closed observe/effect contract and
@@ -150,18 +161,41 @@ func NormalizeWorkflowPlanAccess(plan *WorkflowPlan) error {
 		role.Access.WriteSet = normalizeAccessSet(role.Access.WriteSet)
 		switch role.Access.Mode {
 		case ChildAccessObserve:
-			if len(role.Access.WriteSet) != 0 {
+			if len(role.Access.WriteSet) != 0 || strings.TrimSpace(role.Access.Lane) != "" || strings.TrimSpace(role.Access.WriteTree) != "" {
 				return fmt.Errorf("role %q: %w", role.ID, ErrObserverWriteSet)
 			}
 		case ChildAccessEffect:
-			if len(role.Access.WriteSet) == 0 {
+			hasPortable := len(role.Access.WriteSet) != 0
+			hasLegacy := strings.TrimSpace(role.Access.WriteTree) != ""
+			if !hasPortable && !hasLegacy {
 				return fmt.Errorf("role %q: %w", role.ID, ErrEffectWriteSetRequired)
+			}
+			if hasPortable {
+				if len(role.Access.WriteSet) != 1 || !boundedAccessRegion(role.Access.WriteSet[0]) {
+					return fmt.Errorf("role %q: %w", role.ID, ErrEffectWriteSetRegions)
+				}
+				if strings.TrimSpace(role.Access.Lane) != "" || hasLegacy {
+					return fmt.Errorf("role %q: %w: portable write_set cannot be combined with lane/write_tree", role.ID, ErrEffectWriteSetRegions)
+				}
 			}
 		default:
 			return fmt.Errorf("role %q: %w %q", role.ID, ErrUnknownChildAccessMode, role.Access.Mode)
 		}
 	}
 	return nil
+}
+
+func boundedAccessRegion(raw string) bool {
+	region := filepath.ToSlash(strings.TrimSpace(raw))
+	if region == "" || strings.Contains(region, ",") || filepath.IsAbs(region) {
+		return false
+	}
+	base := strings.TrimSuffix(region, "/**")
+	if strings.ContainsAny(base, "*?[") {
+		return false
+	}
+	clean := filepath.ToSlash(filepath.Clean(base))
+	return clean != "" && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
 func normalizeAccessSet(paths []string) []string {
@@ -513,6 +547,9 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 			dag = append(dag, Edge{id, "lead"})
 		}
 	}
+	if err := applyWorkerAccess(roles, task.WorkerAccess); err != nil {
+		return Resolution{}, err
+	}
 	engine := task.EngineRef
 	if engine == "" {
 		engine = "executionroute:auto"
@@ -523,6 +560,9 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		explain = append(explain, "degraded: "+d.Reason)
 	}
 	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, Degradations: deg, Explanation: explain, Width: width, Warnings: witnessWarnings}
+	if err := NormalizeWorkflowPlanAccess(&plan); err != nil {
+		return Resolution{}, err
+	}
 	if resolvedProfile == ProfileFast && task.FastIntent != nil {
 		fast, fastProv, err := resolveFast(task, caps, workers, tokens)
 		if err != nil {
@@ -532,6 +572,32 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		prov = append(prov, fastProv...)
 	}
 	return Resolution{SchemaVersion, req, plan, prov, deg}, nil
+}
+
+func applyWorkerAccess(roles []Role, declared []WorkerAccessSpec) error {
+	if len(declared) == 0 {
+		return nil
+	}
+	byID := make(map[string]int, len(roles))
+	for i := range roles {
+		if roles[i].ID != "lead" {
+			byID[roles[i].ID] = i
+		}
+	}
+	seen := make(map[string]bool, len(declared))
+	for _, spec := range declared {
+		roleID := strings.TrimSpace(spec.RoleID)
+		if seen[roleID] {
+			return fmt.Errorf("%w %q", ErrDuplicateWorkerRole, roleID)
+		}
+		seen[roleID] = true
+		index, ok := byID[roleID]
+		if !ok {
+			return fmt.Errorf("%w %q", ErrUnknownWorkerRole, roleID)
+		}
+		roles[index].Access = spec.Access
+	}
+	return nil
 }
 
 func resolveFast(task TaskSpec, caps HarnessCapabilities, workers int, tokens int64) (FastExecutionPlan, []Provenance, error) {

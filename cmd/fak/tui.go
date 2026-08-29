@@ -695,6 +695,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	permissionMode := fs.String("permission-mode", "bypassPermissions", "Claude --permission-mode for every spawned account session (default bypassPermissions so the guarded backend, not Claude's own prompt, mediates tools); pass \"\" to omit, or override it in the trailing `claude args`")
 	policyPath := fs.String("policy", "", "capability-floor manifest for the guard child (default: built-in guard floor)")
 	model := fs.String("model", "", "upstream Claude model override for the guard child")
+	effort := fs.String("effort", "", "Claude reasoning effort for the next launch: low|medium|high|xhigh|max (a trailing Claude --effort remains an escape hatch)")
 	sessionID := fs.String("session-id", "tui-agent", "trace/session id for the guard session")
 	contextBudget := fs.Int("context-budget-tokens", 0, "seed a context-token budget in the guard session")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "ask guard to relaunch Claude on context-budget exhaustion")
@@ -784,6 +785,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		Home:                *home,
 		Policy:              *policyPath,
 		Model:               *model,
+		Effort:              *effort,
 		SessionID:           *sessionID,
 		ContextBudgetTokens: *contextBudget,
 		RestartOnBudget:     *restartOnBudget,
@@ -1092,6 +1094,52 @@ func claudeArgsHavePermissionMode(args []string) bool {
 	return false
 }
 
+var tuiAgentEffortOptions = []string{"low", "medium", "high", "xhigh", "max"}
+
+func validTUIAgentEffort(value string) bool {
+	for _, option := range tuiAgentEffortOptions {
+		if value == option {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeArgValue finds an operator-owned option in the trailing raw Claude argv.
+// Raw arguments are intentionally not constrained by the console's finite picker:
+// they are the compatibility escape hatch for a newer Claude CLI vocabulary.
+// When aliases or repeated options are present, the last occurrence wins, matching
+// ordinary CLI precedence.
+func claudeArgValue(args []string, names ...string) (string, bool) {
+	var value string
+	found := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		matched := false
+		for _, name := range names {
+			if arg == name {
+				found = true
+				matched = true
+				if i+1 < len(args) {
+					value = args[i+1]
+					i++
+				}
+				break
+			}
+			if strings.HasPrefix(arg, name+"=") {
+				found = true
+				matched = true
+				value = strings.TrimPrefix(arg, name+"=")
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+	}
+	return value, found
+}
+
 func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, getenv func(string) string) (tuiAgentReport, error) {
 	backend := strings.ToLower(strings.TrimSpace(opt.Backend))
 	if backend == "" {
@@ -1114,6 +1162,12 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	if fakPath == "" {
 		fakPath = "fak"
 	}
+	if rawModel, ok := claudeArgValue(opt.CommandArgs, "--model", "-m"); ok {
+		// A raw Claude model is the final operator choice. Propagate it back through
+		// the guard/provider layer too, otherwise a saved guard --model could silently
+		// override the Claude argv on local launches or stale gateway model env vars.
+		opt.Model = strings.TrimSpace(rawModel)
+	}
 
 	// Every spawned account session defaults to Claude's --permission-mode
 	// bypassPermissions: the launch is already wrapped by `fak guard` (or pinned
@@ -1130,6 +1184,17 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	if permissionMode != "" {
 		command = append(command, "--permission-mode", permissionMode)
 	}
+	effort := strings.ToLower(strings.TrimSpace(opt.Effort))
+	if effort != "" && !validTUIAgentEffort(effort) {
+		return tuiAgentReport{}, fmt.Errorf("invalid --effort %q (want %s)", opt.Effort, strings.Join(tuiAgentEffortOptions, "|"))
+	}
+	if rawEffort, ok := claudeArgValue(opt.CommandArgs, "--effort"); ok {
+		// The trailing raw Claude option wins without duplication and remains free to
+		// use values introduced after this console build's finite picker.
+		effort = strings.TrimSpace(rawEffort)
+	} else if effort != "" {
+		command = append(command, "--effort", effort)
+	}
 	command = append(command, opt.CommandArgs...)
 	if strings.TrimSpace(opt.Prompt) != "" {
 		command = append(command, "-p", opt.Prompt)
@@ -1143,7 +1208,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 		notes = append(notes, fmt.Sprintf("permission-mode=%s: every spawned account session is launched with this Claude --permission-mode by default, so the guarded backend mediates tools instead of Claude's interactive prompt (override in the trailing claude args, or pass --permission-mode \"\" to omit)", permissionMode))
 	}
 	if strings.TrimSpace(opt.GatewayURL) != "" {
-		return buildTUIAgentGatewayReport(opt, at, backend, command, permissionMode, env, cfgDir, cfgSource, resolvedAccount, identity, notes, getenv)
+		return buildTUIAgentGatewayReport(opt, at, backend, command, permissionMode, effort, env, cfgDir, cfgSource, resolvedAccount, identity, notes, getenv)
 	}
 	guardArgs := []string{"guard", "--provider", "anthropic", "--session-id", sessionID}
 	auth := "claude-subscription-oauth"
@@ -1204,6 +1269,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 		PermissionMode:      permissionMode,
 		Policy:              strings.TrimSpace(opt.Policy),
 		Model:               strings.TrimSpace(opt.Model),
+		Effort:              effort,
 		ContextBudget:       opt.ContextBudgetTokens,
 		RestartOnBudget:     opt.RestartOnBudget,
 		RestartLimit:        opt.RestartLimit,
@@ -1217,7 +1283,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	}, nil
 }
 
-func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend string, command []string, permissionMode string, env []tuiAgentEnv, cfgDir, cfgSource, resolvedAccount, identity string, notes []string, getenv func(string) string) (tuiAgentReport, error) {
+func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend string, command []string, permissionMode, effort string, env []tuiAgentEnv, cfgDir, cfgSource, resolvedAccount, identity string, notes []string, getenv func(string) string) (tuiAgentReport, error) {
 	if strings.TrimSpace(opt.Policy) != "" || opt.ContextBudgetTokens > 0 || opt.RestartOnBudget || opt.RestartLimit > 0 || opt.Passthrough {
 		return tuiAgentReport{}, fmt.Errorf("--gateway-url launches an existing gateway; guard-only options (--policy, --context-budget-tokens, --restart-on-budget, --restart-limit, --passthrough) do not apply")
 	}
@@ -1292,6 +1358,7 @@ func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend strin
 		SessionID:       sessionID,
 		PermissionMode:  permissionMode,
 		Model:           model,
+		Effort:          effort,
 		Command:         command,
 		Launch:          command,
 		Env:             env,
