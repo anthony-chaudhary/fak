@@ -114,12 +114,21 @@ var loopTreeKill = procguard.KillPID
 
 var loopExecutable = os.Executable
 
-var loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+var loopNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return execLoopCommand{cmd: cmd}
 }
+
+const (
+	loopPerformanceRSIOutputEnv = "FAK_PERFORMANCE_RSI_OUTPUT"
+	loopIDEnv                   = "FAK_LOOP_ID"
+	loopRunIDEnv                = "FAK_LOOP_RUN_ID"
+	loopSandboxEnvAllow         = "FAK_SANDBOX_ENV_ALLOW"
+	loopPerformanceRSIMaxBytes  = 1 << 20
+)
 
 func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("loop append", flag.ContinueOnError)
@@ -323,6 +332,25 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		Command: filepath.Base(cmdArgs[0]),
 	})
 
+	performanceRSIInput := strings.TrimSpace(os.Getenv(perfrsiscore.LoopTurnInputEnv))
+	var performanceRSIOutput string
+	var performanceRSIPrepErr error
+	var childEnv []string
+	if performanceRSIInput == "" {
+		performanceRSIOutput, performanceRSIPrepErr = reserveLoopPerformanceRSIOutput(*ledger)
+		env := envMap(os.Environ())
+		env[loopIDEnv] = *loopID
+		env[loopRunIDEnv] = *runID
+		if performanceRSIOutput != "" {
+			env[loopPerformanceRSIOutputEnv] = performanceRSIOutput
+		} else {
+			delete(env, loopPerformanceRSIOutputEnv)
+		}
+		env[loopSandboxEnvAllow] = appendLoopEnvAllow(env[loopSandboxEnvAllow],
+			loopPerformanceRSIOutputEnv, loopIDEnv, loopRunIDEnv)
+		childEnv = envSliceFromMap(env)
+	}
+
 	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
 		ledger:    *ledger,
 		loopID:    *loopID,
@@ -331,6 +359,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		principal: *principal,
 		evidence:  baseEvidence,
 		metrics:   baseMetrics,
+		env:       childEnv,
 	})
 	if fatal != 0 {
 		return fatal
@@ -358,6 +387,9 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	// while missing/invalid independently produced input remains nonfatal so the
 	// dispatch's exit code and stdout report keep their existing meaning.
 	performanceRSIReceipt := perfrsiscore.ScoreLoopTurnFromEnvironment()
+	if performanceRSIInput == "" {
+		performanceRSIReceipt = scoreAutomaticLoopPerformanceRSI(performanceRSIOutput, *runID, performanceRSIPrepErr)
+	}
 	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
 
 	if *asJSON {
@@ -371,6 +403,77 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "loop run %s exit=%d ledger=%s\n", *runID, exitCode, *ledger)
 	}
 	return exitCode
+}
+
+// reserveLoopPerformanceRSIOutput allocates a unique name beside the selected loop ledger,
+// then removes the reservation before the child starts. The exact target is therefore absent
+// at admission and any regular file found there after Wait was created during this run.
+func reserveLoopPerformanceRSIOutput(ledger string) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(ledger), ".fak-performance-rsi-*.json")
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := os.Remove(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func appendLoopEnvAllow(current string, names ...string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range append(strings.Split(current, ","), names...) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return strings.Join(out, ",")
+}
+
+func scoreAutomaticLoopPerformanceRSI(input, runID string, prepErr error) perfrsiscore.LoopTurnReceipt {
+	unavailable := func(diagnostic string) perfrsiscore.LoopTurnReceipt {
+		return perfrsiscore.LoopTurnReceipt{
+			Schema:                perfrsiscore.LoopTurnSchema,
+			Status:                perfrsiscore.LoopTurnUnavailable,
+			Reason:                "SCORE_INPUT_UNAVAILABLE",
+			Input:                 input,
+			UnavailableDiagnostic: diagnostic,
+			InvocationOutcomes:    perfrsiscore.OutcomeCounts{Refusal: 1},
+		}
+	}
+	if prepErr != nil {
+		return unavailable("prepare run-scoped performance-RSI output: " + prepErr.Error())
+	}
+	info, err := os.Lstat(input)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return unavailable(loopPerformanceRSIOutputEnv + " was not produced for this run")
+		}
+		return unavailable("inspect run-scoped performance-RSI output: " + err.Error())
+	}
+	if !info.Mode().IsRegular() {
+		return unavailable(loopPerformanceRSIOutputEnv + " is not a regular file")
+	}
+	if info.Size() == 0 {
+		return unavailable(loopPerformanceRSIOutputEnv + " was unchanged for this run")
+	}
+	if info.Size() > loopPerformanceRSIMaxBytes {
+		return unavailable(fmt.Sprintf("%s exceeds %d bytes", loopPerformanceRSIOutputEnv, loopPerformanceRSIMaxBytes))
+	}
+
+	receipt := perfrsiscore.ScoreLoopTurn(input)
+	if receipt.Status == perfrsiscore.LoopTurnScored && receipt.Snapshot != runID {
+		return unavailable(fmt.Sprintf("performance-RSI snapshot %q does not match loop run %q", receipt.Snapshot, runID))
+	}
+	return receipt
 }
 
 // writeLoopRunReport emits one `fak loop run --json` report. Every report -- the containment
@@ -406,6 +509,7 @@ type loopRunChildCtx struct {
 	principal string
 	evidence  []loopmgr.EvidenceRef
 	metrics   map[string]int64
+	env       []string
 }
 
 // loopRunChild starts the child process, records its START and END loop events, and returns
@@ -415,7 +519,7 @@ type loopRunChildCtx struct {
 // event, or the end event on an otherwise-clean exit). A non-zero child exit with a failed
 // end-append still returns fatal 0 so the real exit code reaches the caller's report.
 func loopRunChild(stdout, stderr io.Writer, childArgv []string, rc loopRunChildCtx) (exitCode int, durationMS int64, fatal int) {
-	cmd := loopNewCommand(childArgv, stdout, stderr)
+	cmd := loopNewCommand(childArgv, rc.env, stdout, stderr)
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		m := cloneLoopMetrics(rc.metrics)
