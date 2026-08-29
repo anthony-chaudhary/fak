@@ -1231,5 +1231,5 @@
     }
   ],
   "raw_receipt": "internal/ultracodebench/testdata/issue8672-cache-receipts.log",
-  "raw_receipt_sha256": "69917c18c950f04a4273b6a3ed1dc5d970c540d9a08472e19d677a24503e324f"
+  "raw_receipt_sha256": "4ee98895bf0e5b9c51df2ffd6877b94545fd032f8e35b77f0bde978d766bf3f1"
 }
