@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:f44b97a51234c90e88a20e1eeb4355dfbc920d4d65b912cf6add519faabe303c",
-  "tracked_files": 18456,
-  "tracked_bytes": 420273334,
+  "content_root": "sha256:945a7557b163f6a5322bbae8b14c71eb159eed7091b5f14c461e9b13f9e19dab",
+  "tracked_files": 18457,
+  "tracked_bytes": 420280794,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -43058,6 +43058,15 @@
       "path": "docs/notes/CONCEPT-GO-BUILD-PATH-CACHE-2026-08-27.md",
       "content_sha256": "sha256:7d121f1fbbe71b52a1d04629e2e6cb35763337900392813ebdafcad594c05ee1",
       "bytes": 14816,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/notes/CONCEPT-GO-NATIVE-PERFORMANCE-SYSTEM-2026-08-29.md",
+      "content_sha256": "sha256:39d954cf5b10f8bf0884b9e61492a08b807539164ec874dad3f18a06aecd5e2c",
+      "bytes": 7460,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
