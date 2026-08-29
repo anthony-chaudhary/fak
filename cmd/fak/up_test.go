@@ -54,8 +54,18 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	cmd := exec.Command(bin, "up", "--addr", addr, "--engine", "mock", "--native")
+	// A parent harness may legitimately use FAK_SESSION_REGISTRY for the
+	// child-registration lineage. Keep this process witness hermetic by naming
+	// the descriptor registry explicitly, as a real co-located operator must.
+	childRegistry := filepath.Join(cacheRoot, "child-registrations.jsonl")
+	childRegistryBody := []byte("{\"schema\":\"fak-child-registration/1\"}\n")
+	if err := os.WriteFile(childRegistry, childRegistryBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	descriptorRegistry := filepath.Join(cacheRoot, "session-registry.json")
+	cmd := exec.Command(bin, "up", "--addr", addr, "--engine", "mock", "--native", "--session-registry", descriptorRegistry)
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "FAK_SESSION_REGISTRY="+childRegistry)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
@@ -114,6 +124,9 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 	}
 	if !seenEnd {
 		t.Fatalf("session.end not observed; process output:\n%s", output.String())
+	}
+	if got, err := os.ReadFile(childRegistry); err != nil || !bytes.Equal(got, childRegistryBody) {
+		t.Fatalf("child-registration lineage changed: got=%q err=%v", got, err)
 	}
 
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
