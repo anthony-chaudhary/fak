@@ -23,6 +23,7 @@ package cachevaluereport
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -144,6 +145,13 @@ func sortedPeriodKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+func saturatingAddUint64(total, next uint64) uint64 {
+	if next > math.MaxUint64-total {
+		return math.MaxUint64
+	}
+	return total + next
+}
+
 // Fold rolls a slice of ledger rows up into a weekly trend Report. It is pure: the
 // only time input is `now`, used solely to stamp GeneratedAt — bucketing comes from
 // each row's own Date. Rows with zero turns (no session activity) are skipped, the
@@ -175,7 +183,7 @@ func Fold(rows []cachevalueledger.Row, now time.Time) Report {
 			continue
 		}
 		r.TotalRows++
-		r.RejectedTierAccesses += row.RejectedTierAccesses
+		r.RejectedTierAccesses = saturatingAddUint64(r.RejectedTierAccesses, row.RejectedTierAccesses)
 		key := isoWeek(d)
 		a := byPeriod[key]
 		if a == nil {
@@ -193,7 +201,7 @@ func Fold(rows []cachevalueledger.Row, now time.Time) Report {
 		b.ColdTurns += row.ColdTurns
 		b.PromptTokens += row.PromptTokens
 		b.ReusedTokens += row.ReusedTokens
-		b.RejectedTierAccesses += row.RejectedTierAccesses
+		b.RejectedTierAccesses = saturatingAddUint64(b.RejectedTierAccesses, row.RejectedTierAccesses)
 		st := row.SessionType
 		if st == "" {
 			st = "unknown"

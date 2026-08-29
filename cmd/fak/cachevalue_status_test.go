@@ -243,6 +243,9 @@ func TestCachevalueStatusRejectedTierAccessesEdgeAndAdversarial(t *testing.T) {
 			return line(r) + "\n"
 		}, wantRejects: 7, wantHuman: true},
 		{name: "maximum counter remains exact", ledgerBody: func() string { return line(row(^uint64(0))) + "\n" }, wantRejects: ^uint64(0), wantHuman: true},
+		{name: "aggregate overflow saturates", ledgerBody: func() string {
+			return line(row(^uint64(0))) + "\n" + line(row(1)) + "\n"
+		}, wantRejects: ^uint64(0), wantHuman: true},
 		{name: "oversized prefix keeps tail witness", ledgerBody: func() string {
 			return strings.Repeat("not-json\n", 150000) + line(row(7)) + "\n"
 		}, wantRejects: 7, wantHuman: true},

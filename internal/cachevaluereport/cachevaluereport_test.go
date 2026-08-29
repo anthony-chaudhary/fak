@@ -2,6 +2,7 @@ package cachevaluereport
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,21 @@ func TestFold_SurfacesRejectedTierAccesses(t *testing.T) {
 		if got.Buckets[i].RealizedReuseRatio != baseline.Buckets[i].RealizedReuseRatio || got.Buckets[i].Trend != baseline.Buckets[i].Trend {
 			t.Fatalf("bucket %d reuse changed: got=%+v baseline=%+v", i, got.Buckets[i], baseline.Buckets[i])
 		}
+	}
+}
+
+func TestFold_RejectedTierAccessesSaturates(t *testing.T) {
+	rows := []cachevalueledger.Row{
+		{Date: weekAEarly, SessionType: "guard", Turns: 1, RejectedTierAccesses: math.MaxUint64},
+		{Date: weekALate, SessionType: "serve", Turns: 1, RejectedTierAccesses: 1},
+	}
+
+	got := Fold(rows, fixedNow)
+	if got.RejectedTierAccesses != math.MaxUint64 {
+		t.Fatalf("report rejected tier accesses=%d, want saturated %d", got.RejectedTierAccesses, uint64(math.MaxUint64))
+	}
+	if len(got.Buckets) != 1 || got.Buckets[0].RejectedTierAccesses != math.MaxUint64 {
+		t.Fatalf("bucket rejected tier accesses=%+v, want saturated %d", got.Buckets, uint64(math.MaxUint64))
 	}
 }
 
