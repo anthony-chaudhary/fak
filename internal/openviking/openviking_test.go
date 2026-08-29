@@ -88,6 +88,16 @@ func TestCapturedWireSpine(t *testing.T) {
 	}
 }
 
+func TestNewClientDefaultHTTPTimeoutIsBounded(t *testing.T) {
+	client, err := NewClient(Config{BaseURL: "https://example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.http.Timeout; got != defaultHTTPTimeout || got <= 0 {
+		t.Fatalf("default OpenViking client timeout = %s, want %s", got, defaultHTTPTimeout)
+	}
+}
+
 func TestErrorsRetainHTTPAndBusinessCodesWithoutSecrets(t *testing.T) {
 	t.Parallel()
 	const secret = "ov-secret-must-not-leak"

@@ -10,7 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestDefaultGGUFHTTPClientHasLongBoundedTimeout(t *testing.T) {
+	if got := defaultGGUFHTTPClient().Timeout; got != defaultGGUFDownloadTimeout || got < time.Hour {
+		t.Fatalf("default GGUF client timeout = %s, want long bounded timeout %s", got, defaultGGUFDownloadTimeout)
+	}
+}
 
 func TestGGUFAcquisitionPlanApplyAndOfflineReuse(t *testing.T) {
 	fixture, err := os.ReadFile("testdata/tiny.gguf")

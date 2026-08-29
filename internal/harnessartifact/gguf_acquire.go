@@ -13,9 +13,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const GGUFCacheReceiptSchema = "fak.harness.gguf-cache-receipt.v1"
+
+const defaultGGUFDownloadTimeout = 2 * time.Hour
 
 var (
 	ErrGGUFInvalidPlan    = errors.New("invalid GGUF acquisition plan")
@@ -94,7 +97,7 @@ func ApplyGGUFAcquisition(ctx context.Context, plan GGUFPlan, opts GGUFApplyOpti
 	defer os.Remove(tmpName)
 	client := opts.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultGGUFHTTPClient()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, plan.Source, nil)
 	if err != nil {
@@ -130,6 +133,13 @@ func ApplyGGUFAcquisition(ctx context.Context, plan GGUFPlan, opts GGUFApplyOpti
 		return GGUFCacheReceipt{}, err
 	}
 	return ggufReceipt(plan, false), nil
+}
+
+func defaultGGUFHTTPClient() *http.Client {
+	// GGUF downloads can legitimately run much longer than an API request, but
+	// the default must still terminate a stalled transfer when callers supply
+	// neither their own client nor a tighter context deadline.
+	return &http.Client{Timeout: defaultGGUFDownloadTimeout}
 }
 
 func verifyGGUF(path string, bytes int64, digest string) error {

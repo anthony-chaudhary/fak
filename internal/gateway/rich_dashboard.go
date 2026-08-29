@@ -20,11 +20,14 @@ import (
 const (
 	richDashboardDefaultUID         = "fak-gateway-observability"
 	richDashboardTimeout            = 90 * time.Second
+	richDashboardProbeTimeout       = 5 * time.Second
 	bundledGrafanaURL               = "http://localhost:3000"
 	bundledPrometheusConfigEnv      = "FAK_PROMETHEUS_CONFIG"
 	bundledPrometheusConfigMount    = "${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}"
 	bundledPrometheusTemplateTarget = "host.docker.internal:8080"
 )
+
+var richDashboardProbeClient = &http.Client{Timeout: richDashboardProbeTimeout}
 
 var dashboardDockerAvailable = func() bool {
 	_, err := exec.LookPath("docker")
@@ -422,7 +425,7 @@ func probeGrafana(ctx context.Context, base string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := richDashboardProbeClient.Do(req)
 	if err != nil {
 		return err
 	}
