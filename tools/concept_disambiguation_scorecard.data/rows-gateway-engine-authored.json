@@ -18,5 +18,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "gateway-engine-exec-via-kernel",
+      "canonical": "execViaKernel (agent-loop syscall adapter)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content.",
+      "distinction": "The per-call ADAPTER at the agent loop boundary — not the kernel coordinator itself and not an inference engine backend.",
+      "distinct_from": [
+        "kernel",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "execViaKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

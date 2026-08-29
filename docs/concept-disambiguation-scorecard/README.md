@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **960** crystal of 2674 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2795 / 2807** (99.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **961** crystal of 2675 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2796 / 2808** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **77** of 3794 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **77** of 3795 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2674 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2675 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 960
+  * crystal       ################............ 961
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -46,7 +46,7 @@ clarity mix by family (each cell = one concept):
   decision         *********************************ooooooooooooooooooooo (54 concept(s); 33 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
-  gateway-engine   **************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 38 crystal)
+  gateway-engine   ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 39 crystal)
   guard-gate       *******************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (440 concept(s); 199 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             *********************************************oooooooooooooooooooooooooooooooooooooo (83 concept(s); 45 crystal)
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   guard-gate       ############################ 497/500
   policy-capability ############################ 209/212
-  gateway-engine   ############################ 194/196
+  gateway-engine   ############################ 195/197
   session-runtime  ############################ 268/270
   support-maturity ###########################. 62/64
   cache            ############################ 299/300
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.6%  (2795/2807 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2796/2808 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3794 lookup name(s) -> 2674 concept(s), 77 ambiguous
+name index: 3795 lookup name(s) -> 2675 concept(s), 77 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1748 / 4739 |
+| Boundaries drawn (mutual / total) | 1752 / 4743 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3794 over 2674 concepts |
+| Lookup names indexed | 3795 over 2675 concepts |
 | Lookup names landing on several concepts | 77 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2674 |
+| Concepts carrying a contrast set | 2675 |
 
 ## The concepts (best verdict first)
 
@@ -379,6 +379,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | gateway-engine | **ExecutionEngine (campaign evidence)** - The campaign evidence field naming the runtime that actually executed model math (fak-native or llama.cpp), which the validator uses to decide whether a result is eligible for promotion. |
 | * | crystal | config | gateway-engine | **ExecutionEngine values (fak-native / llama.cpp)** - The closed qwen38 campaign values selecting either fak-native model math for promotion eligibility or the pinned llama.cpp comparison-only runtime. |
 | * | crystal | config | gateway-engine | **NativeEngine (model descriptor execution identity)** - The modeldescriptor field that pins an onboarding descriptor to fak-native execution before compatibility validation. |
+| * | crystal | symbol | gateway-engine | **execViaKernel (agent-loop syscall adapter)** - The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for engineresult** - `engineResult` is the gateway-engine symbol declared or used at `internal/agent/readengine.go:65` as `return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginespec** - `EngineSpec` is the gateway-engine symbol declared or used at `internal/quality/case.go:70` as `Engine EngineSpec `json:"engine"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginevllm** - `EngineVLLM` is the gateway-engine symbol declared or used at `internal/enginecache/compare.go:61` as `witnessed, err := (Client{Engine: EngineVLLM, BaseURL: server.URL}).Invalidate(context.Background(), dirs)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2947,8 +2948,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2991/4739 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2674 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2991/4743 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2675 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2956,7 +2957,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3794 lookup name(s) resolves - 77 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3795 lookup name(s) resolves - 77 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2965,7 +2966,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | guard-gate | 497 | 500 | 3 |
 | policy-capability | 209 | 212 | 3 |
-| gateway-engine | 194 | 196 | 2 |
+| gateway-engine | 195 | 197 | 2 |
 | session-runtime | 268 | 270 | 2 |
 | support-maturity | 62 | 64 | 2 |
 | cache | 299 | 300 | 1 |

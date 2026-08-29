@@ -2452,3 +2452,10 @@ newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of r
 The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract.
 
 **Distinct from:** An interoperability boundary only: it transports health, retrieval, session capture, and commit calls; it is not fak-native context storage, contextq materialization, ctxplan optimization, or recall persistence.
+
+
+### execViaKernel (agent-loop syscall adapter)
+
+The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content.
+
+**Distinct from:** The per-call ADAPTER at the agent loop boundary — not the kernel coordinator itself and not an inference engine backend.
