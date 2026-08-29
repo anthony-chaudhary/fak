@@ -35,7 +35,15 @@ func ScanTree(repoRoot string) ([]Offense, error) {
 	if err != nil {
 		return nil, err
 	}
-	return offensesAgainst(tracked, baselineSet()), nil
+	allowed := baselineSet()
+	trackedSet := make(map[string]bool, len(tracked))
+	for _, path := range tracked {
+		trackedSet[path] = true
+	}
+	for path := range admittedTestCompanions(repoRoot, trackedSet, allowed) {
+		allowed[path] = true
+	}
+	return offensesAgainst(tracked, allowed), nil
 }
 
 // offensesAgainst is the pure ratchet core, split out so it can be unit-tested on a
