@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/committedtree"
+	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -109,6 +110,15 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "disambiguation-generated", Detail: detail})
 	}
 
+	// The self-study inventory is default-on when the committed artifact exists. The check runs
+	// against the already-extracted tip, never against the shared working tree.
+	if detail, checked, ok := checkStudySelfInventory(dir); !checked {
+		res.Skipped = append(res.Skipped, "study-self-inventory")
+	} else if !ok {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "study-self-inventory", Detail: detail})
+	}
+
 	if checked, detail, werr := armbenchWitnessDrift(dir); werr != nil {
 		res.OK = false
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "armbench-witness", Detail: werr.Error()})
@@ -199,6 +209,32 @@ func checkDisambiguationGenerated(dir string) (detail string, checked, ok bool) 
 	return "", true, true
 }
 
+func checkStudySelfInventory(dir string) (detail string, checked, ok bool) {
+	artifact := filepath.Join(dir, filepath.FromSlash(studymonitor.DefaultSelfInventoryPath))
+	if _, err := os.Stat(artifact); errors.Is(err, os.ErrNotExist) {
+		return "", false, true
+	} else if err != nil {
+		return err.Error(), true, false
+	}
+	result, err := studymonitor.VerifySelfInventory(dir, studymonitor.DefaultSelfInventoryPath, "anthony-chaudhary/fak")
+	if err != nil {
+		return err.Error(), true, false
+	}
+	if result.OK {
+		return "", true, true
+	}
+	var lines []string
+	for _, drift := range result.Drift {
+		line := fmt.Sprintf("[%s] %s", drift.Kind, drift.Path)
+		if drift.Expected != "" || drift.Actual != "" {
+			line += fmt.Sprintf(" expected=%s actual=%s", drift.Expected, drift.Actual)
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "refresh explicitly with `fak study-inventory --self --refresh`")
+	return strings.Join(lines, "\n"), true, false
+}
+
 // goBuildAll runs `go build ./...` in dir. Returns (detail, ok); on failure detail is the trimmed
 // compiler output so an agent sees the exact `undefined: X` without re-running anything.
 func goBuildAll(dir string) (string, bool) {
@@ -239,6 +275,11 @@ func renderCIPreflight(w io.Writer, res ciPreflightResult) {
 			}
 		case "disambiguation-generated":
 			fmt.Fprintln(w, "  [disambiguation-generated] tracked index is stale (run `fak disambiguation generate`):")
+			for _, ln := range strings.Split(f.Detail, "\n") {
+				fmt.Fprintf(w, "    %s\n", ln)
+			}
+		case "study-self-inventory":
+			fmt.Fprintln(w, "  [study-self-inventory] committed self inventory is stale:")
 			for _, ln := range strings.Split(f.Detail, "\n") {
 				fmt.Fprintf(w, "    %s\n", ln)
 			}
