@@ -73,8 +73,10 @@ func gateScopes() []gateScopeRow {
 		{"SECRET_SHAPE", "gate_secretshape.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PROVENANCE_LABEL", "gate_provenance.go", SeamPreCommit, ClassLandsTree, ""},
 		{"HARDWARE_TELL", "gate_hardware.go", SeamPreCommit, ClassLandsTree, ""},
+		{"NATIVE_FIRST", "gate_nativefirst.go", SeamPreCommit, ClassLandsTree, ""},
 		{"E2E_OVER_MOCKS", "gate_e2eovermocks.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PRIOR_ART", "gate_priorart.go", SeamPreCommit, ClassLandsTree, ""},
+		{"MICROHARNESS_WITNESS", "gate_microharnesswitness.go", SeamPreCommit, ClassLandsTree, ""},
 		{"BARE_COMMIT_SWEEP", "gate_barecommitsweep.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PARALLEL_FABRIC_NUDGE", "gate_microcontext_nudge.go", SeamPreCommit, ClassLandsTree, ""},
 		// GIT_HYGIENE_BYPASS judges ADDED LINES only — it makes no fileProbe read at all — so the

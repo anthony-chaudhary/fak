@@ -21,7 +21,7 @@ Use `-json` for the deterministic `fak-disambiguation-demo/1` receipt. The demo 
 The only prerequisite is Go 1.26 or newer. With the toolchain and module cache
 already available, the selfcheck completes in a few seconds (1.9 seconds in the
 captured Windows run); a cold toolchain download or first compile can take longer.
-Success exits 0, and the fixed local index and query make the receipt deterministic.
+The command exits 0 on success. Its fixed local index and query keep the receipt deterministic.
 See the [captured selfcheck](EXAMPLE-OUTPUT.md) and the
 [full terminology index](../../docs/generated/disambiguation/INDEX.md).
 

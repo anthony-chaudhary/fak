@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
 | **Crystal-clear concepts (and climbing)** | **960** crystal of 2674 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2794 / 2806** (99.6% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2795 / 2807** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **77** of 3794 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -67,7 +67,7 @@ coverage by family (positioned / discovered):
   gateway-engine   ############################ 194/196
   session-runtime  ############################ 268/270
   support-maturity ###########################. 62/64
-  cache            ############################ 298/299
+  cache            ############################ 299/300
   witness-proof    ############################ 162/163
   attention        ############################ 85/85
   context-ctx      ############################ 237/237
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.6%  (2794/2806 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2795/2807 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -2968,7 +2968,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 194 | 196 | 2 |
 | session-runtime | 268 | 270 | 2 |
 | support-maturity | 62 | 64 | 2 |
-| cache | 298 | 299 | 1 |
+| cache | 299 | 300 | 1 |
 | witness-proof | 162 | 163 | 1 |
 | attention | 85 | 85 | 0 |
 | context-ctx | 237 | 237 | 0 |

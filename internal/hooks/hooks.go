@@ -9,7 +9,7 @@
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
 //
-// The registry has grown well past that Python-era set: PreCommitGates() registers all 21 gates
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 24 gates
 // today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.

@@ -3306,6 +3306,16 @@
           "category": "incidental",
           "reason": "Receipt field groups credential reference name and presence; it is data about one admission check, not a separate gate subsystem.",
           "token": "RemoteCredentialGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "A field on an ablation feature card that records environment-controlled activation; it describes the existing ablation switch and makes no admission or refusal decision.",
+          "token": "EnvGated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Check implementation for the registered MICROHARNESS_WITNESS advisory; it follows the established gate<Name> helper convention and is not a separate guard-gate concept.",
+          "token": "gateMicroharnessWitness"
         }
       ],
       "exclude": [
@@ -3343,6 +3353,7 @@
         "CorrectnessGate",
         "DELEGATE",
         "EmptyUsageGuard",
+        "EnvGated",
         "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
@@ -3448,6 +3459,7 @@
         "full_tree_gate_retry",
         "gateCommentQuality",
         "gateGitHygieneBypass",
+        "gateMicroharnessWitness",
         "gateProse",
         "gateSkew",
         "gateSourcePaths",
@@ -7020,6 +7032,16 @@
           "category": "incidental",
           "reason": "Concrete receipt field type whose semantics are defined by the effect receipt contract, not a second witness-proof root concept",
           "token": "EffectWitnessAuthority"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private gate implementation symbol; it checks for an existing staged test or microharness-witness receipt and does not define a distinct witness or proof mechanism.",
+          "token": "gateMicroharnessWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt marker consumed by the existing MICROHARNESS_WITNESS advisory; it labels evidence supplied by a bounded harness change rather than defining a new witness or proof mechanism.",
+          "token": "microharnessWitness"
         }
       ],
       "id": "witness-proof",
@@ -7136,6 +7158,7 @@
         "fak_witness",
         "formatGuardCompactionWitness",
         "freshWitnessRecords",
+        "gateMicroharnessWitness",
         "guardCompactionWitnessLedger",
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
@@ -7150,6 +7173,7 @@
         "mergeDispatchWitnessRecords",
         "microCacheWitness",
         "microCacheWitnessSchema",
+        "microharnessWitness",
         "motifDetectReproduceFixWitness",
         "named_witness",
         "natural-traffic",
