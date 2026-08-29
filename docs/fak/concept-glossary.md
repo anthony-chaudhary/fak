@@ -2529,3 +2529,10 @@ Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Meta
 InKernelPlannerConfig.QwenQ4KPrefillChunkTokens is the explicit 128..8192-token bound used to partition Qwen Q4_K native prefill calls before decode; operator flags populate it at planner construction.
 
 **Distinct from:** This is one bounded prefill tuning value, not the full InKernelPlannerConfig bundle and not InKernelPlanner, the runtime planner consuming that bundle. The former FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS ambient spelling is a retired alias, not a second authority.
+
+
+### performance-RSI loop-turn scorer
+
+ScoreLoopTurn evaluates one completed loop run's strict performance-RSI evidence and emits the nonfatal loop-turn receipt.
+
+**Distinct from:** Unlike loopscore, which grades loop durability across a corpus, this scorer evaluates one current run's performance evidence after its child exits.

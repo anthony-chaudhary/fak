@@ -2,6 +2,8 @@ package harnessserve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net"
@@ -49,7 +51,11 @@ func TestSupervisorLaunchReadinessOneTokenProbeAndGracefulStop(t *testing.T) {
 	if receipt.Ownership.PID <= 0 || len(receipt.Ownership.Token) < 32 || receipt.Ownership.StartIdentity == "" {
 		t.Fatalf("ownership receipt is not PID/start/token bound: %+v", receipt.Ownership)
 	}
-	if len(receipt.ArgvSHA256) != 64 || receipt.Probe.HTTPStatus != http.StatusOK || receipt.Probe.CompletionTokens != 1 {
+	argvDigest, err := hex.DecodeString(receipt.ArgvSHA256)
+	if err != nil || len(argvDigest) != sha256.Size || receipt.ArgvSHA256 != hex.EncodeToString(argvDigest) {
+		t.Fatalf("argv digest is not canonical SHA-256: %q err=%v", receipt.ArgvSHA256, err)
+	}
+	if receipt.Probe.HTTPStatus != http.StatusOK || receipt.Probe.CompletionTokens != 1 {
 		t.Fatalf("launch receipt = %+v", receipt)
 	}
 	endpoint, err := url.Parse(receipt.Endpoint)

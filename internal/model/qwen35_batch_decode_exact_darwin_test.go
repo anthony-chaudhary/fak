@@ -233,8 +233,20 @@ func newExactQwen38Fixture(t *testing.T, cfg Config, planned int64) *exactQwen38
 	f.m.q4kw["model.embed_tokens.weight"], f.m.q4khead = headQT, headQT
 	q4Table["model.embed_tokens.weight"] = headW
 
-	if len(q8Table) != 272 || len(f.q8Owners) != 6 || len(f.q4Owners) != 5 {
-		t.Fatalf("immutable owner inventory names=%d q8_shapes=%d q4_shapes=%d, want 272/6/5", len(q8Table), len(f.q8Owners), len(f.q4Owners))
+	runtimeNames, err := qwen38MetalQ8RuntimeNames(cfg)
+	if err != nil {
+		t.Fatalf("derive exact Qwen3.8 runtime inventory: %v", err)
+	}
+	if len(q8Table) != len(runtimeNames) {
+		t.Fatalf("immutable Q8 inventory names=%d, want canonical runtime inventory=%d", len(q8Table), len(runtimeNames))
+	}
+	for _, name := range runtimeNames {
+		if q8Table[name] == nil {
+			t.Fatalf("canonical Q8 runtime projection %q has no native owner", name)
+		}
+	}
+	if len(f.q8Owners) != len(f.q8) || len(f.q4Owners) != len(f.q4) {
+		t.Fatalf("immutable owner inventory q8_owners=%d q8_shapes=%d q4_owners=%d q4_shapes=%d", len(f.q8Owners), len(f.q8), len(f.q4Owners), len(f.q4))
 	}
 	assertExactQwen38ImmutableOwnerIDs(t, "Q8", len(f.q8Owners), func(i int) int { return f.q8Owners[i].ID() })
 	assertExactQwen38ImmutableOwnerIDs(t, "Q4_K", len(f.q4Owners), func(i int) int { return f.q4Owners[i].ID() })
@@ -595,7 +607,7 @@ func (f *exactQwen38Fixture) close(t *testing.T) {
 	if got := metalgemm.GDNLiveBufferCount(); got != f.baseGDN {
 		t.Errorf("GDN owner cleanup live buffers=%d want baseline %d", got, f.baseGDN)
 	}
-	if len(f.q8Owners) != 6 || len(f.q4Owners) != 5 {
-		t.Errorf("unexpected immutable owner inventory q8=%d q4=%d", len(f.q8Owners), len(f.q4Owners))
+	if len(f.q8Owners) != len(f.q8) || len(f.q4Owners) != len(f.q4) {
+		t.Errorf("immutable owner/shape mismatch after cleanup q8_owners=%d q8_shapes=%d q4_owners=%d q4_shapes=%d", len(f.q8Owners), len(f.q8), len(f.q4Owners), len(f.q4))
 	}
 }

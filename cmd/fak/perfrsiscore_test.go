@@ -239,7 +239,7 @@ func TestPerformanceRSIDogfoodJSONReportsPoorNamedLoopHealthDebt(t *testing.T) {
 	if report.DebtSummary.PerformanceRSIDebt != 9 || report.DebtSummary.Total != 9 ||
 		report.DebtSummary.DimensionsMeasured != 15 || report.DebtSummary.DimensionsTotal != 16 ||
 		report.DebtSummary.Behind != 8 || report.DebtSummary.Unknown != 1 ||
-		len(report.DebtSummary.Evidence) != 9 {
+		len(report.DebtSummary.Evidence) != report.DebtSummary.PerformanceRSIDebt {
 		t.Fatalf("debt summary=%+v", report.DebtSummary)
 	}
 	if got := report.DebtSummary.Evidence[0]; got.Dimension != "cycle_time" ||

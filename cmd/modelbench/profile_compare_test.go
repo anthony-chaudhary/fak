@@ -96,6 +96,61 @@ func TestNativeProfileComparisonSelectsSteadyDecode(t *testing.T) {
 	}
 }
 
+func TestNativeProfileComparisonM3DecodeHandoffRequiresExactRoutes(t *testing.T) {
+	writeCampaign := func(t *testing.T) []string {
+		paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{100, 102, 98})
+		setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 198}, []float64{150, 152, 151})
+		for i, path := range paths {
+			rewriteComparisonPair(t, path, func(p *nativeperf.ProfileBundle, r *nativeProfileReceipt) {
+				p.Execution.ForwardPath = model.Qwen35MetalGDNSequenceForwardPath
+				r.Controls[nativeProfileSequenceSelector] = nativeProfileSelectorOn
+				mode := model.Qwen35DecodeHandoffControl
+				handoff := model.Qwen35DecodeHandoffReceipt{Mode: mode, ResidentGDNAcceptedCalls: 48 * 64}
+				if i >= nativeProfileArmRuns {
+					mode = model.Qwen35DecodeHandoffMixer
+					handoff = model.Qwen35DecodeHandoffReceipt{Mode: mode, MixerAcceptedCalls: 48 * 64}
+				}
+				r.Controls[nativeProfileDecodeHandoffControl] = mode.String()
+				r.Qwen35DecodeHandoff = &handoff
+			})
+		}
+		return paths
+	}
+	paths := writeCampaign(t)
+
+	got := compareNativeProfileCampaignPhaseAxis(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode, profileComparisonAxisM3DecodeHandoff)
+	if got.Verdict != "KEEP" || got.Selector != nativeProfileDecodeHandoffControl ||
+		got.ControlSelector != model.Qwen35DecodeHandoffControl.String() || got.CandidateSelector != model.Qwen35DecodeHandoffMixer.String() {
+		t.Fatalf("M3 decode-handoff comparison = %+v, want typed KEEP", got)
+	}
+
+	tests := []struct {
+		name   string
+		pair   int
+		edit   func(*nativeProfileReceipt)
+		reason string
+	}{
+		{name: "sequence off", pair: 0, edit: func(r *nativeProfileReceipt) { r.Controls[nativeProfileSequenceSelector] = nativeProfileSelectorOff }, reason: "sequence"},
+		{name: "control mixer call", pair: 1, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.MixerAcceptedCalls = 1 }, reason: "handoff"},
+		{name: "mixer block call", pair: 3, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.BlockAcceptedCalls = 1 }, reason: "handoff"},
+		{name: "mixer missing calls", pair: 4, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.MixerAcceptedCalls = 0 }, reason: "handoff"},
+		{name: "wrong order", pair: 2, edit: func(r *nativeProfileReceipt) {
+			r.Controls[nativeProfileDecodeHandoffControl] = model.Qwen35DecodeHandoffMixer.String()
+			r.Qwen35DecodeHandoff = &model.Qwen35DecodeHandoffReceipt{Mode: model.Qwen35DecodeHandoffMixer, MixerAcceptedCalls: 1}
+		}, reason: "selector"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bad := writeCampaign(t)
+			rewriteComparisonPair(t, bad[test.pair], func(_ *nativeperf.ProfileBundle, r *nativeProfileReceipt) { test.edit(r) })
+			got := compareNativeProfileCampaignPhaseAxis(strings.Join(bad, ","), profileComparisonPhaseSteadyDecode, profileComparisonAxisM3DecodeHandoff)
+			if got.Verdict != "HOLD" || !strings.Contains(strings.ToLower(got.Reason), test.reason) {
+				t.Fatalf("M3 mismatch = %+v, want HOLD containing %q", got, test.reason)
+			}
+		})
+	}
+}
+
 func TestNativeProfileComparisonSelectsDecodeEndToEnd(t *testing.T) {
 	paths := writeComparisonCampaign(t, []float64{100, 101, 102}, []float64{80, 81, 82})
 	setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 204}, []float64{120, 121, 122})
@@ -159,6 +214,13 @@ func TestProfileComparisonDecodePhaseFlagIsTyped(t *testing.T) {
 	}
 	if err := phase.Set("position-3"); err == nil || phase != profileComparisonPhaseSteadyDecode {
 		t.Fatalf("invalid phase changed selection to %q, err=%v", phase, err)
+	}
+	axis := profileComparisonAxisSequence
+	if err := axis.Set("m3-decode-handoff"); err != nil || axis != profileComparisonAxisM3DecodeHandoff {
+		t.Fatalf("set M3 axis = %q, err=%v", axis, err)
+	}
+	if err := axis.Set("mixed"); err == nil || axis != profileComparisonAxisM3DecodeHandoff {
+		t.Fatalf("invalid axis changed selection to %q, err=%v", axis, err)
 	}
 }
 

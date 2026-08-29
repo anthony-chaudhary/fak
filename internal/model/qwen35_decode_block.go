@@ -23,7 +23,7 @@ type qwen35MetalDecodeBlock interface {
 // boundaries and therefore decline before submission. Layer taps remain valid:
 // blockStep applies their steer/dump once to the returned complete residual.
 func (s *Session) tryQwen35MetalDecodeBlock(layer int, x []float32) ([]float32, qwen35DecodeBlockReceipt, bool, error) {
-	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.tapActive != nil && s.tapActive.ops {
+	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.tapActive != nil && s.tapActive.ops || s.qwen35DecodeHandoffMode() != Qwen35DecodeHandoffAuto {
 		return nil, qwen35DecodeBlockReceipt{}, false, nil
 	}
 	block, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDecodeBlock)
@@ -34,6 +34,7 @@ func (s *Session) tryQwen35MetalDecodeBlock(layer int, x []float32) ([]float32, 
 	if !accepted {
 		return nil, receipt, false, err
 	}
+	s.recordQwen35DecodeBlockAccepted()
 	if err != nil {
 		return nil, receipt, true, s.failQwen35GDNSequence(layer, "resident decode block", err)
 	}

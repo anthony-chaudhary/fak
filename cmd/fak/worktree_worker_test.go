@@ -572,8 +572,9 @@ func TestWorktreeWorkerLifecycleInventoryDistinguishesSafeStates(t *testing.T) {
 			Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{},
 		},
 	}
+	paths := []string{malformed, dirty, cold, retained, ready}
 	rows := worktreeWorkerLifecycleInventory(root,
-		[]string{malformed, dirty, cold, retained, ready},
+		paths,
 		worktreeWorkerLifecycleProbes{
 			ReadOwner: func(path string) (workerworktree.OwnerStamp, error) {
 				if path == malformed {
@@ -587,8 +588,8 @@ func TestWorktreeWorkerLifecycleInventoryDistinguishesSafeStates(t *testing.T) {
 				return inspections[path], nil
 			},
 		})
-	if len(rows) != 5 {
-		t.Fatalf("rows = %d, want 5: %+v", len(rows), rows)
+	if len(rows) != len(paths) {
+		t.Fatalf("rows = %d, want one per path %d: %+v", len(rows), len(paths), rows)
 	}
 	byPath := map[string]worktreeWorkerLifecycleRow{}
 	for _, row := range rows {

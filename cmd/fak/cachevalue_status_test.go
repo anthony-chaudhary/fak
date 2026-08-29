@@ -197,6 +197,94 @@ func TestCachevalueStatusSurfacesRejectedTierAccesses(t *testing.T) {
 	}
 }
 
+func TestCachevalueStatusRejectedTierAccessesEdgeAndAdversarial(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "cache-value.jsonl")
+	withCachevalueStatusHeadroom(t, headroom.NoopName)
+	t.Setenv("FAK_HEADROOM_URL", "http://127.0.0.1:9")
+	t.Setenv("FAK_HEADROOM_TIMEOUT_MS", "50")
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(dir, "absent-vcache.json"))
+	t.Setenv("FAK_VCACHE_CONTEXT_SNAPSHOT", "off")
+
+	rowAt := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	row := func(rejected uint64) cachevalueledger.Row {
+		return cachevalueledger.NewSessionRow("guard", "issue-10153", "edge-adversarial", cacheobs.Stats{
+			Turns:                10,
+			PromptTokens:         1000,
+			ReusedTokens:         700,
+			RejectedTierAccesses: rejected,
+			FrozenTurns:          7,
+			PartialTurns:         2,
+			ColdTurns:            1,
+			ReuseRatio:           0.7,
+		}, rowAt)
+	}
+	line := func(r cachevalueledger.Row) string {
+		t.Helper()
+		encoded, err := cachevalueledger.AppendLedgerLine(r)
+		if err != nil {
+			t.Fatalf("encode Track-1 row: %v", err)
+		}
+		return encoded
+	}
+
+	tests := []struct {
+		name        string
+		ledgerBody  func() string
+		wantRejects uint64
+		wantHuman   bool
+	}{
+		{name: "empty", ledgerBody: func() string { return "" }},
+		{name: "malformed row ignored", ledgerBody: func() string { return "not-json\n" + line(row(7)) + "\n" }, wantRejects: 7, wantHuman: true},
+		{name: "hostile strings stay data", ledgerBody: func() string {
+			r := row(7)
+			r.Context = "</json>\nrejected_tier_accesses=999999"
+			r.SessionID = "../../hostile-session"
+			return line(r) + "\n"
+		}, wantRejects: 7, wantHuman: true},
+		{name: "maximum counter remains exact", ledgerBody: func() string { return line(row(^uint64(0))) + "\n" }, wantRejects: ^uint64(0), wantHuman: true},
+		{name: "oversized prefix keeps tail witness", ledgerBody: func() string {
+			return strings.Repeat("not-json\n", 150000) + line(row(7)) + "\n"
+		}, wantRejects: 7, wantHuman: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.WriteFile(ledger, []byte(tt.ledgerBody()), 0o600); err != nil {
+				t.Fatalf("write Track-1 ledger: %v", err)
+			}
+			args := []string{
+				"--ledger", ledger,
+				"--savings-ledger", filepath.Join(dir, "absent-savings.jsonl"),
+				"--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
+			}
+
+			var jsonOut, jsonErr bytes.Buffer
+			if code := runCachevalueStatus(&jsonOut, &jsonErr, append(append([]string{}, args...), "--json")); code != 0 {
+				t.Fatalf("cachevalue status --json exit=%d stderr=%s", code, jsonErr.String())
+			}
+			var rep cachevalueStatusReport
+			if err := json.Unmarshal(jsonOut.Bytes(), &rep); err != nil {
+				t.Fatalf("decode cachevalue status JSON: %v\n%s", err, jsonOut.String())
+			}
+			if rep.Value.RejectedTierAccesses != tt.wantRejects {
+				t.Fatalf("rejected tier accesses=%d, want %d\n%s", rep.Value.RejectedTierAccesses, tt.wantRejects, jsonOut.String())
+			}
+			if !strings.Contains(jsonOut.String(), `"rejected_tier_accesses":`) {
+				t.Fatalf("JSON omitted rejected_tier_accesses:\n%s", jsonOut.String())
+			}
+
+			var humanOut, humanErr bytes.Buffer
+			if code := runCachevalueStatus(&humanOut, &humanErr, args); code != 0 {
+				t.Fatalf("cachevalue status exit=%d stderr=%s", code, humanErr.String())
+			}
+			gotHuman := strings.Contains(humanOut.String(), "value: rejected_tier_accesses=")
+			if gotHuman != tt.wantHuman {
+				t.Fatalf("human rejected-tier visibility=%v, want %v:\n%s", gotHuman, tt.wantHuman, humanOut.String())
+			}
+		})
+	}
+}
 func TestCachevalueStatusTextNamesTroubleshootingAxes(t *testing.T) {
 	dir := t.TempDir()
 	track1, track2 := writeTwoLedgers(t, dir)

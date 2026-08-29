@@ -48,75 +48,7 @@ func cmdGuard(argv []string) {
 func cmdManageCommand(commandName string, argv []string) {
 	guardUsageStart = time.Now()
 	guardUsageOnce = new(sync.Once)
-	// `fak guard disable` is the deliberately loud, one-child break-glass path. Peel it
-	// before the wrap-a-command parser so the word "disable" can never fall through to
-	// exec.LookPath as though it were an agent binary. A real program named disable remains
-	// wrappable after the delimiter (`fak guard -- disable`).
-	if len(argv) > 0 && argv[0] == "disable" {
-		os.Exit(runGuardDisable(commandName, os.Stdin, os.Stdout, os.Stderr, argv[1:]))
-	}
-	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
-	// — add / --list / --remove / --from-journal — peeled off before the wrap-a-command
-	// flag parse. The wrap form always names the agent after `--`, so a bare leading
-	// `allow` is unambiguous and never a program to wrap. It maintains the overlay
-	// out-of-band from the agent (see guard_allow.go) and returns; it never binds a gateway.
-	if len(argv) > 0 && argv[0] == "allow" {
-		// The propose-only modes (#5182) are peeled FIRST: they are extra verbs on the
-		// same `allow` word, and cmdGuardAllow's flag.ExitOnError parse would reject
-		// --propose/--from-proposals as undefined flags before the mode could ever run.
-		// Returns (falls through) whenever no proposals flag is present.
-		guardAllowProposalsRoute(argv[1:])
-		cmdGuardAllow(argv[1:])
-		return
-	}
-	if len(argv) > 0 && argv[0] == "deny" {
-		cmdGuardDeny(argv[1:])
-		return
-	}
-	// The read-only `fak guard <verb>` report surfaces, peeled like `allow`/`deny` before the
-	// wrap-a-command flag parse. All three obey ONE argv contract — an exact-match bare leading
-	// verb (unambiguous because a real wrap always names the agent after `--`, so the wrapped
-	// program's own `policy`/`compile` argument can never sit here, and the flag spelling
-	// `--policy FILE` is untouched), the rest of argv handed to the handler, and the handler's
-	// code as the exit status without ever binding a gateway. One table so a verb added here
-	// cannot quietly acquire a different contract from its siblings. These rows are also the
-	// ONLY registration of these verbs: dropping a row makes it unreachable rather than
-	// reachable by some other path.
-	for _, peel := range []struct {
-		verb string
-		run  func(stdout, stderr io.Writer, argv []string) int
-	}{
-		// `policy` is the FLOOR REPORT surface (#5424, epic #5170 Track A): `explain` groups the
-		// effective floor by amendment class, `diff` reports the widen-drift from the shipped
-		// floor with a CI-gateable exit code (guard_policy.go holds the verb table).
-		{"policy", runGuardPolicy},
-		// `compile` performs one authoring-time model extraction and emits a review-only policy
-		// diff. Runtime policy enforcement remains model-free.
-		{"compile", runGuardCompile},
-		// `restart-audit` is the read-only restart-chain scanner (#3057): joins RESTART_HOP
-		// journal rows against carryover seed files and backfills the orphans.
-		{"restart-audit", runGuardRestartAudit},
-	} {
-		if len(argv) > 0 && argv[0] == peel.verb {
-			os.Exit(peel.run(os.Stdout, os.Stderr, argv[1:]))
-		}
-	}
-	// `fak guard sessions [id]` is the read-only registry browser. Peel it before the
-	// wrap-a-command parser so the handler is reachable from the public command tree.
-	if len(argv) > 0 && argv[0] == "sessions" {
-		cmdGuardSessions(argv[1:])
-		return
-	}
-	// `fak guard resume <id>` (and the issue's `fak guard --resume <id>` spelling) is the
-	// cache-safe resume PLANNER (#1206, epic #1193 C10): resolve the id against the C1 durable
-	// session registry, consult the C9 cache-resume posture rung, and emit the WARM-SPLICE/
-	// WARM/CUT/RESET path + the reconstructed cache-safe `fak guard ... -- <agent> --continue`
-	// relaunch. Peeled like `allow`/`restart-audit`/`sessions` — a bare leading verb, never a
-	// program to wrap — and returns without binding a gateway. `--resume` as argv[0] is
-	// unambiguous: a real wrap names the agent after `--`, so its own `--resume` sits after the
-	// `--`, never in the leading position.
-	if len(argv) > 0 && (argv[0] == "resume" || argv[0] == "--resume") {
-		cmdGuardResume(argv[1:])
+	if routeGuardOperatorSubcommand(commandName, argv) {
 		return
 	}
 	t0 := time.Now()
