@@ -3296,6 +3296,16 @@
           "category": "incidental",
           "reason": "Test seam for observing self-update gate progress; not a new guard or gate domain concept.",
           "token": "selfUpdateGateRunner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt data groups explicit remote admission checks; it is not a new guard or policy-gate subsystem.",
+          "token": "RemoteGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt field groups credential reference name and presence; it is data about one admission check, not a separate gate subsystem.",
+          "token": "RemoteCredentialGate"
         }
       ],
       "exclude": [
@@ -3374,6 +3384,8 @@
         "PonytailGateOptions",
         "PonytailGateReport",
         "PonytailGatesRevision",
+        "RemoteCredentialGate",
+        "RemoteGate",
         "ReportedGates",
         "RoleGate",
         "RunPonytailGates",
@@ -7666,6 +7678,21 @@
           "category": "incidental",
           "reason": "Receipt field describes the profiler duration denominator; it does not name or select a serving engine.",
           "token": "ProfiledKernelActiveTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable mirrors a user-supplied remote execution-engine label; it does not define a new local gateway or engine concept.",
+          "token": "remoteEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Runtime-capabilities receipt structure describes placement metadata; it is not a new gateway or engine implementation.",
+          "token": "RemotePlacement"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable names an operator-authorized target string and does not introduce a privileged provider or engine concept.",
+          "token": "remoteTarget"
         }
       ],
       "id": "gateway-engine",
@@ -7698,6 +7725,7 @@
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
         "RegisterEngines",
+        "RemotePlacement",
         "SessionAffinityGateway",
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
@@ -7761,6 +7789,8 @@
         "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
+        "remoteEngine",
+        "remoteTarget",
         "renderinkernelchatmlrequest",
         "resolveCallEngine",
         "resolveSpawnEngine",
@@ -13079,6 +13109,11 @@
           "category": "incidental",
           "reason": "Issue #9842 exported compute adapter over the existing host-memory fit refusal logic so runtimecap can reuse it before payload load; not a new plan concept.",
           "token": "RefuseMemoryPlanIfTooBigForReportedHost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt field records local fak ownership of the control plane; it is not a planning primitive or plan authority.",
+          "token": "ControlPlaneOwner"
         }
       ],
       "exclude": [
@@ -13107,6 +13142,7 @@
         "CandidateSamples",
         "CandidateTaskAccuracy",
         "Candidates",
+        "ControlPlaneOwner",
         "DecodeInterleavePlan",
         "EventPlanUpdated",
         "ExplainFilingPlan",

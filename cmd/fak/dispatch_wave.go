@@ -793,7 +793,19 @@ func dispatchWaveDependency[T any](timeout time.Duration, name string, run func(
 	return dispatchWaveDependencyRetry(timeout, name, 1, nil, run)
 }
 
+func waitDispatchWaveSnapshot(ctx context.Context, ch <-chan *runsSnapshot) (*runsSnapshot, error) {
+	select {
+	case snap, ok := <-ch:
+		if !ok {
+			return nil, io.EOF
+		}
+		return snap, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 func dispatchWaveDependencyRetry[T any](timeout time.Duration, name string, maxAttempts int, retry func(error) bool, run func() (T, error)) (T, error) {
+
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -923,14 +935,22 @@ func auditDispatchWaveExecutionPlanWithFallback(plan []dispatchWaveExecutionPlan
 	}
 }
 func auditDispatchWaveExecutionPlanBounded(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, timeout time.Duration) ([]dispatchWaveExecutionAudit, error) {
-	return dispatchWaveDependency(timeout, "prelaunch contract audit", func() ([]dispatchWaveExecutionAudit, error) {
-		return auditDispatchWaveExecutionPlan(root, maxWorkers, exclude, plan, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit), nil
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	out, err := auditDispatchWaveExecutionPlan(ctx, root, maxWorkers, exclude, plan, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit)
+	if err == nil {
+		return out, nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, &dispatchWaveDependencyError{Dependency: "prelaunch contract audit", Kind: "timeout", Attempts: 1, Retryable: true, Timeout: timeout, Err: context.DeadlineExceeded}
+	}
+	return nil, &dispatchWaveDependencyError{Dependency: "prelaunch contract audit", Kind: "upstream", Attempts: 1, Err: err}
 }
 
-func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) []dispatchWaveExecutionAudit {
+func auditDispatchWaveExecutionPlan(ctx context.Context, root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) ([]dispatchWaveExecutionAudit, error) {
 	if len(plan) == 0 {
-		return nil
+		return nil, nil
 	}
 	// Every prelaunch decider observes the same discovery source. The keyed registry opens
 	// one upstream watch for the wave and tears it down after the last decider drops.
@@ -938,7 +958,10 @@ func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []strin
 	defer closeDispatchDiscoverySubscriptions(subs)
 	out := make([]dispatchWaveExecutionAudit, 0, len(plan))
 	for i, row := range plan {
-		snapshot := <-subs[i].Snapshots
+		snapshot, err := waitDispatchWaveSnapshot(ctx, subs[i].Snapshots)
+		if err != nil {
+			return nil, err
+		}
 		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit, snapshot), io.Discard)
 		audit := dispatchWaveExecutionAudit{
 			Rank:    row.Rank,
@@ -961,9 +984,8 @@ func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []strin
 		audit.LaunchCommand = stringSlice(payload["launch_command"])
 		out = append(out, audit)
 	}
-	return out
+	return out, nil
 }
-
 func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, discovery ...*runsSnapshot) dispatchTickOptions {
 	acct := dispatchWaveAccountFromPlan(row.Account)
 	mem := dispatchtick.Membership{

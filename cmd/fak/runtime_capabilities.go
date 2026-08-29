@@ -23,6 +23,24 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 	goarch := fs.String("goarch", "", "diagnostic override for architecture")
 	hostTotalRAMBytes := fs.Int64("host-total-ram-bytes", -1, "diagnostic host total RAM override for pre-load CPU-envelope admission")
 	hostFreeRAMBytes := fs.Int64("host-free-ram-bytes", -1, "diagnostic host free RAM override for pre-load CPU-envelope admission")
+	placement := fs.String("placement", runtimecap.PlacementLocalOnly, "local_only, prefer_local, or remote_allowed")
+	remoteTarget := fs.String("remote-target", "", "exact named remote target; no connection is opened by this probe")
+	authorizedRemoteTarget := fs.String("authorize-remote-target", "", "exact remote target authorized by policy")
+	remoteProvider := fs.String("remote-provider", "", "declared remote provider name")
+	remoteEngine := fs.String("remote-engine", "", "declared remote execution engine")
+	remoteModel := fs.String("remote-model", "", "declared remote model")
+	remoteEndpointClass := fs.String("remote-endpoint-class", "", "declared endpoint class, such as managed_api or private_cluster")
+	remoteRegion := fs.String("remote-region", "", "declared remote region")
+	remoteStateBoundary := fs.String("remote-state-boundary", "", "comma-separated data classes that would cross the boundary")
+	remoteEgress := fs.String("remote-egress", "denied", "egress policy state: allowed or denied")
+	remoteCredentialName := fs.String("remote-credential-name", "", "credential reference name only; secret values are never accepted or reported")
+	remoteCredentialPresent := fs.Bool("remote-credential-present", false, "declare that the named credential is present in the approved secret store")
+	remoteTLS := fs.String("remote-tls", "unverified", "TLS state: verified or unverified")
+	remoteProxy := fs.String("remote-proxy", "none", "corporate proxy state: none, verified, or unverified")
+	remoteReachability := fs.String("remote-reachability", "unknown", "independently observed target state: reachable, unreachable, or unknown")
+	remoteTimeoutMS := fs.Int64("remote-timeout-ms", 0, "positive remote request timeout in milliseconds")
+	remoteRetryCeiling := fs.Int("remote-retry-ceiling", 0, "bounded retry ceiling; zero disables retries")
+	remoteBudgetMicroUSD := fs.Int64("remote-budget-microusd", 0, "positive request budget in millionths of a US dollar")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -37,17 +55,39 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak runtime-capabilities: --backend cannot be combined with --prefer-backend")
 		return 2
 	}
+	if *placement != runtimecap.PlacementLocalOnly && *placement != runtimecap.PlacementPreferLocal && *placement != runtimecap.PlacementRemoteAllowed {
+		fmt.Fprintf(stderr, "fak runtime-capabilities: unsupported --placement %q\n", *placement)
+		return 2
+	}
 	if *fallbackPolicy != runtimecap.FallbackPolicyPinOrRefuse && *fallbackPolicy != runtimecap.FallbackPolicyLocalCPUDegrade {
 		fmt.Fprintf(stderr, "fak runtime-capabilities: unsupported --fallback-policy %q\n", *fallbackPolicy)
 		return 2
 	}
 	opts := runtimecap.Options{
-		RequestedBackend:  *backend,
-		PreferredBackend:  *preferBackend,
-		CPUFallbackPolicy: *fallbackPolicy,
-		CPUEnvelope:       *cpuEnvelope,
-		GOOS:              *goos,
-		GOARCH:            *goarch,
+		RequestedBackend:          *backend,
+		PreferredBackend:          *preferBackend,
+		CPUFallbackPolicy:         *fallbackPolicy,
+		CPUEnvelope:               *cpuEnvelope,
+		GOOS:                      *goos,
+		GOARCH:                    *goarch,
+		PlacementMode:             *placement,
+		RemoteTarget:              *remoteTarget,
+		AuthorizedTarget:          *authorizedRemoteTarget,
+		RemoteProvider:            *remoteProvider,
+		RemoteEngine:              *remoteEngine,
+		RemoteModel:               *remoteModel,
+		RemoteEndpointClass:       *remoteEndpointClass,
+		RemoteRegion:              *remoteRegion,
+		RemoteStateBoundary:       splitNonEmptyCSV(*remoteStateBoundary),
+		RemoteEgress:              *remoteEgress,
+		RemoteCredentialName:      *remoteCredentialName,
+		RemoteCredentialPresent:   *remoteCredentialPresent,
+		RemoteTLS:                 *remoteTLS,
+		RemoteProxy:               *remoteProxy,
+		RemoteReachability:        *remoteReachability,
+		RemoteTimeoutMilliseconds: *remoteTimeoutMS,
+		RemoteRetryCeiling:        *remoteRetryCeiling,
+		RemoteBudgetMicroUSD:      *remoteBudgetMicroUSD,
 	}
 	if *hostTotalRAMBytes >= 0 || *hostFreeRAMBytes >= 0 {
 		opts.HostMemoryOverride = true
@@ -68,4 +108,14 @@ func runRuntimeCapabilities(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func splitNonEmptyCSV(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }

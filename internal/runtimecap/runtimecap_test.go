@@ -143,3 +143,103 @@ func TestProbeSeparatesNotCompiledUnavailableAndUnsupportedPlatforms(t *testing.
 		})
 	}
 }
+
+func remoteOptions() Options {
+	return Options{
+		PreferredBackend:          "vulkan",
+		PlacementMode:             PlacementRemoteAllowed,
+		RemoteTarget:              "research-west",
+		AuthorizedTarget:          "research-west",
+		RemoteProvider:            "acme-cloud",
+		RemoteEngine:              "acme-inference",
+		RemoteModel:               "qwen3.8-4b",
+		RemoteEndpointClass:       "managed_api",
+		RemoteRegion:              "us-west",
+		RemoteStateBoundary:       []string{"prompt", "tool_results"},
+		RemoteEgress:              "allowed",
+		RemoteCredentialName:      "acme-runtime-token",
+		RemoteCredentialPresent:   true,
+		RemoteTLS:                 "verified",
+		RemoteProxy:               "none",
+		RemoteReachability:        "reachable",
+		RemoteTimeoutMilliseconds: 30000,
+		RemoteRetryCeiling:        1,
+		RemoteBudgetMicroUSD:      250000,
+		GOOS:                      "windows",
+		GOARCH:                    "amd64",
+		BuildTags:                 []string{},
+		Backends:                  []compute.Backend{compute.Default()},
+	}
+}
+
+func TestProbeAdmitsExplicitAuthorizedRemotePlacement(t *testing.T) {
+	report := Probe(remoteOptions())
+	got := report.ModelExecution
+	if !got.Runnable || got.Mode != "remote" || got.Backend != "remote:research-west" || got.PayloadLoaded {
+		t.Fatalf("execution = %+v", got)
+	}
+	if got.RemotePlacement == nil || got.RemotePlacement.ControlPlaneOwner != "fak-local" || got.RemotePlacement.Provider != "acme-cloud" || got.RemotePlacement.LocalFailureTrigger == nil {
+		t.Fatalf("receipt = %+v", got.RemotePlacement)
+	}
+	if got.RemotePlacement.Credential.Name != "acme-runtime-token" || !got.RemotePlacement.Credential.Present {
+		t.Fatalf("credential gate = %+v", got.RemotePlacement.Credential)
+	}
+}
+
+func TestProbeLocalOnlyRefusesRemoteFallback(t *testing.T) {
+	opts := remoteOptions()
+	opts.PlacementMode = PlacementLocalOnly
+	report := Probe(opts)
+	if report.ModelExecution.Runnable || report.ModelExecution.RemotePlacement != nil || report.ModelExecution.Reason == nil {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+}
+
+func TestProbeExactBackendRefusesRemoteFallback(t *testing.T) {
+	opts := remoteOptions()
+	opts.RequestedBackend = opts.PreferredBackend
+	opts.PreferredBackend = ""
+	report := Probe(opts)
+	if report.ModelExecution.Runnable || report.ModelExecution.RemotePlacement != nil || report.ModelExecution.Reason == nil || report.ModelExecution.Reason.Code != "backend_not_compiled" {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+}
+
+func TestProbeRemotePlacementGateRefusals(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Options)
+		code   string
+	}{
+		{"unauthorized target", func(o *Options) { o.AuthorizedTarget = "other" }, "remote_target_unauthorized"},
+		{"missing credential", func(o *Options) { o.RemoteCredentialPresent = false }, "remote_credential_missing"},
+		{"egress denied", func(o *Options) { o.RemoteEgress = "denied" }, "remote_egress_denied"},
+		{"tls unverifiable", func(o *Options) { o.RemoteTLS = "unverified" }, "remote_tls_unverifiable"},
+		{"invalid timeout", func(o *Options) { o.RemoteTimeoutMilliseconds = 0 }, "remote_timeout_invalid"},
+		{"invalid retry", func(o *Options) { o.RemoteRetryCeiling = -1 }, "remote_retry_invalid"},
+		{"invalid budget", func(o *Options) { o.RemoteBudgetMicroUSD = 0 }, "remote_budget_invalid"},
+		{"unreachable", func(o *Options) { o.RemoteReachability = "unreachable" }, "remote_target_unreachable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := remoteOptions()
+			tt.mutate(&opts)
+			report := Probe(opts)
+			if report.ModelExecution.Runnable || report.ModelExecution.PayloadLoaded || report.ModelExecution.Reason == nil || report.ModelExecution.Reason.Code != tt.code {
+				t.Fatalf("execution = %+v", report.ModelExecution)
+			}
+		})
+	}
+}
+
+func TestProbeRemoteTargetIsProviderNeutral(t *testing.T) {
+	opts := remoteOptions()
+	opts.RemoteTarget = "future-fak-cloud"
+	opts.AuthorizedTarget = "future-fak-cloud"
+	opts.RemoteProvider = "fak-cloud"
+	opts.RemoteEngine = "fak-native-remote"
+	report := Probe(opts)
+	if !report.ModelExecution.Runnable || report.ModelExecution.RemotePlacement == nil || report.ModelExecution.RemotePlacement.Target != "future-fak-cloud" {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+}

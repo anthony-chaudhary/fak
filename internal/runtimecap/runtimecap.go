@@ -12,6 +12,12 @@ import (
 const Schema = "fak-runtime-capabilities/1"
 
 const (
+	PlacementLocalOnly     = "local_only"
+	PlacementPreferLocal   = "prefer_local"
+	PlacementRemoteAllowed = "remote_allowed"
+)
+
+const (
 	FallbackPolicyPinOrRefuse     = "pin_or_refuse"
 	FallbackPolicyLocalCPUDegrade = "local_cpu_degraded"
 
@@ -21,6 +27,7 @@ const (
 
 	executionModeStandard         = "standard"
 	executionModeLocalCPUDegraded = FallbackPolicyLocalCPUDegrade
+	executionModeRemote           = "remote"
 )
 
 type Reason struct {
@@ -90,6 +97,38 @@ type LocalCPUDegradedReceipt struct {
 	HostMemory         HostMemory `json:"host_memory"`
 }
 
+type RemoteGate struct {
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type RemoteCredentialGate struct {
+	Name    string `json:"name,omitempty"`
+	Present bool   `json:"present"`
+}
+
+type RemotePlacementReceipt struct {
+	Mode                  string               `json:"mode"`
+	ControlPlaneOwner     string               `json:"control_plane_owner"`
+	Target                string               `json:"target"`
+	AuthorizedTarget      string               `json:"authorized_target"`
+	Provider              string               `json:"provider"`
+	Engine                string               `json:"engine"`
+	Model                 string               `json:"model"`
+	EndpointClass         string               `json:"endpoint_class,omitempty"`
+	Region                string               `json:"region,omitempty"`
+	LocalFailureTrigger   *Reason              `json:"local_failure_trigger"`
+	StateCrossingBoundary []string             `json:"state_crossing_boundary"`
+	Egress                RemoteGate           `json:"egress"`
+	Credential            RemoteCredentialGate `json:"credential"`
+	TLS                   RemoteGate           `json:"tls"`
+	Proxy                 RemoteGate           `json:"proxy"`
+	Reachability          RemoteGate           `json:"reachability"`
+	TimeoutMilliseconds   int64                `json:"timeout_milliseconds"`
+	RetryCeiling          int                  `json:"retry_ceiling"`
+	BudgetMicroUSD        int64                `json:"budget_micro_usd"`
+}
+
 type Execution struct {
 	Runnable             bool                     `json:"runnable"`
 	Engine               string                   `json:"engine,omitempty"`
@@ -99,6 +138,7 @@ type Execution struct {
 	PayloadLoaded        bool                     `json:"payload_loaded"`
 	PayloadCompatibility string                   `json:"payload_compatibility"`
 	LocalCPUDegraded     *LocalCPUDegradedReceipt `json:"local_cpu_degraded,omitempty"`
+	RemotePlacement      *RemotePlacementReceipt  `json:"remote_placement,omitempty"`
 	Reason               *Reason                  `json:"reason,omitempty"`
 }
 
@@ -115,21 +155,40 @@ type Report struct {
 	RequestedBackend      *RequestedBackend `json:"requested_backend,omitempty"`
 	PreferredBackend      *RequestedBackend `json:"preferred_backend,omitempty"`
 	CPUFallbackPolicy     string            `json:"cpu_fallback_policy,omitempty"`
+	PlacementMode         string            `json:"placement_mode"`
 	SupportedCPUEnvelopes []CPUEnvelope     `json:"supported_cpu_envelopes,omitempty"`
 	ModelExecution        Execution         `json:"model_execution"`
 }
 
 type Options struct {
-	RequestedBackend   string
-	PreferredBackend   string
-	CPUFallbackPolicy  string
-	CPUEnvelope        string
-	GOOS               string
-	GOARCH             string
-	BuildTags          []string
-	Backends           []compute.Backend
-	HostMemory         HostMemory
-	HostMemoryOverride bool
+	RequestedBackend          string
+	PreferredBackend          string
+	CPUFallbackPolicy         string
+	CPUEnvelope               string
+	GOOS                      string
+	GOARCH                    string
+	BuildTags                 []string
+	Backends                  []compute.Backend
+	HostMemory                HostMemory
+	HostMemoryOverride        bool
+	PlacementMode             string
+	RemoteTarget              string
+	AuthorizedTarget          string
+	RemoteProvider            string
+	RemoteEngine              string
+	RemoteModel               string
+	RemoteEndpointClass       string
+	RemoteRegion              string
+	RemoteStateBoundary       []string
+	RemoteEgress              string
+	RemoteCredentialName      string
+	RemoteCredentialPresent   bool
+	RemoteTLS                 string
+	RemoteProxy               string
+	RemoteReachability        string
+	RemoteTimeoutMilliseconds int64
+	RemoteRetryCeiling        int
+	RemoteBudgetMicroUSD      int64
 }
 
 func Probe(opts Options) Report {
@@ -171,6 +230,7 @@ func Probe(opts Options) Report {
 	}
 	hostMemory := effectiveHostMemory(opts)
 	policy := normalizeFallbackPolicy(opts.CPUFallbackPolicy)
+	placement := normalizePlacementMode(opts.PlacementMode)
 	report := Report{
 		Schema:                Schema,
 		GOOS:                  goos,
@@ -182,6 +242,7 @@ func Probe(opts Options) Report {
 		PortableCPU:           cpu,
 		HostMemory:            hostMemory,
 		CPUFallbackPolicy:     policy,
+		PlacementMode:         placement,
 		SupportedCPUEnvelopes: supportedCPUEnvelopes(),
 		ModelExecution: Execution{
 			PayloadLoaded:        false,
@@ -233,6 +294,13 @@ func Probe(opts Options) Report {
 		}
 		reason := unavailableReason(preferred, goos, goarch, tags)
 		request.Status, request.Reason = reasonStatus(reason), &reason
+		if placement == PlacementRemoteAllowed {
+			report.ModelExecution = applyRemotePlacement(opts, reason)
+			if report.ModelExecution.Runnable {
+				request.Selected = "remote:" + strings.TrimSpace(opts.RemoteTarget)
+			}
+			return report
+		}
 		if policy != FallbackPolicyLocalCPUDegrade {
 			report.ModelExecution.Reason = &reason
 			return report
@@ -266,6 +334,80 @@ func Probe(opts Options) Report {
 		}
 	}
 	return report
+}
+
+func normalizePlacementMode(mode string) string {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return PlacementLocalOnly
+	}
+	return mode
+}
+
+func applyRemotePlacement(opts Options, localFailure Reason) Execution {
+	target := strings.TrimSpace(opts.RemoteTarget)
+	authorized := strings.TrimSpace(opts.AuthorizedTarget)
+	proxy := strings.TrimSpace(opts.RemoteProxy)
+	if proxy == "" {
+		proxy = "none"
+	}
+	receipt := &RemotePlacementReceipt{
+		Mode: PlacementRemoteAllowed, ControlPlaneOwner: "fak-local", Target: target, AuthorizedTarget: authorized,
+		Provider: strings.TrimSpace(opts.RemoteProvider), Engine: strings.TrimSpace(opts.RemoteEngine), Model: strings.TrimSpace(opts.RemoteModel),
+		EndpointClass: strings.TrimSpace(opts.RemoteEndpointClass), Region: strings.TrimSpace(opts.RemoteRegion), LocalFailureTrigger: &localFailure,
+		StateCrossingBoundary: append([]string(nil), opts.RemoteStateBoundary...),
+		Egress:                RemoteGate{State: strings.TrimSpace(opts.RemoteEgress)},
+		Credential:            RemoteCredentialGate{Name: strings.TrimSpace(opts.RemoteCredentialName), Present: opts.RemoteCredentialPresent},
+		TLS:                   RemoteGate{State: strings.TrimSpace(opts.RemoteTLS)}, Proxy: RemoteGate{State: proxy},
+		Reachability: RemoteGate{State: strings.TrimSpace(opts.RemoteReachability)}, TimeoutMilliseconds: opts.RemoteTimeoutMilliseconds,
+		RetryCeiling: opts.RemoteRetryCeiling, BudgetMicroUSD: opts.RemoteBudgetMicroUSD,
+	}
+	refuse := func(code, detail, remediation string) Execution {
+		return Execution{
+			PayloadLoaded: false, PayloadCompatibility: payloadCompatibilityRefused, RemotePlacement: receipt,
+			Reason: &Reason{Code: code, Detail: detail, Remediation: remediation},
+		}
+	}
+	if target == "" {
+		return refuse("remote_target_required", "remote_allowed placement requires an exact named remote target", "set --remote-target and authorize the identical name")
+	}
+	if authorized == "" || authorized != target {
+		return refuse("remote_target_unauthorized", "remote target "+target+" is not exactly authorized", "set --authorize-remote-target to the exact target name")
+	}
+	if receipt.Provider == "" || receipt.Engine == "" || receipt.Model == "" {
+		return refuse("remote_identity_incomplete", "remote provider, engine, and model must be named before placement", "set --remote-provider, --remote-engine, and --remote-model")
+	}
+	if receipt.Egress.State != "allowed" {
+		return refuse("remote_egress_denied", "remote egress is not explicitly allowed", "set --remote-egress allowed only under an approved data-egress policy")
+	}
+	if receipt.Credential.Name == "" || !receipt.Credential.Present {
+		return refuse("remote_credential_missing", "the named remote credential is absent", "provide a credential through the approved secret store; only its name and presence are reported")
+	}
+	if receipt.TLS.State != "verified" {
+		return refuse("remote_tls_unverifiable", "remote TLS state is not verified", "verify the target TLS chain before allowing placement")
+	}
+	if proxy != "none" && proxy != "verified" {
+		return refuse("remote_proxy_unverifiable", "remote proxy state is not verified", "use none or a verified corporate proxy")
+	}
+	if receipt.Reachability.State != "reachable" {
+		return refuse("remote_target_unreachable", "remote target reachability is not established", "supply an independently witnessed reachable state")
+	}
+	if receipt.TimeoutMilliseconds <= 0 {
+		return refuse("remote_timeout_invalid", "remote timeout must be greater than zero", "set a positive --remote-timeout-ms")
+	}
+	if receipt.RetryCeiling < 0 {
+		return refuse("remote_retry_invalid", "remote retry ceiling cannot be negative", "set --remote-retry-ceiling to zero or a bounded positive value")
+	}
+	if receipt.BudgetMicroUSD <= 0 {
+		return refuse("remote_budget_invalid", "remote budget must be greater than zero", "set a positive --remote-budget-microusd")
+	}
+	if len(receipt.StateCrossingBoundary) == 0 {
+		return refuse("remote_state_boundary_required", "state crossing the remote boundary must be declared", "set --remote-state-boundary to a comma-separated data-class list")
+	}
+	return Execution{
+		Runnable: true, Engine: receipt.Engine, Backend: "remote:" + target, Mode: executionModeRemote,
+		PayloadLoaded: false, PayloadCompatibility: payloadCompatibilitySupported, RemotePlacement: receipt,
+	}
 }
 
 func backendRecord(backend compute.Backend) Backend {
