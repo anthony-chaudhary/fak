@@ -1,6 +1,6 @@
 # Qwen3.8 paged-swap codec dogfood — 2026-08-29
 
-Issue: #9617  
+Issue: #9617
 Spine: `bc95ccc313b6c6d3c841f1b1e5bc0fe99aee70a7` (`internal/model`)
 
 ## Result
@@ -8,14 +8,14 @@ Spine: `bc95ccc313b6c6d3c841f1b1e5bc0fe99aee70a7` (`internal/model`)
 The production-sized Qwen3.8 paged-swap codec round-tripped repository-derived state exactly.
 
 ```text
-repo_files=18248
-repo_bytes=157215035
-repo_digest=0f04a1e0c4dbcf9e
+repo_files=18234
+repo_bytes=157160205
+repo_digest=891bdfe72c9a7291
 payload_bytes=158488532
 round_trip_exact=true
 ```
 
-The repository input is the content plus sorted manifest of regular files at or below 128 KiB in the live checkout, excluding `.git/`, `_scratch/`, `.goal-runs/`, and `.dispatch-runs/`. The witness hashes each file body, relative path, and size, then uses that digest to fill every serialized K, Kraw, V, convolution, and recurrent float plane. This binds the exercised production-shaped state to the repository's current live work without treating a static tensor fixture as dogfood.
+The repository input is the content plus sorted manifest of Git-tracked regular files at or below 128 KiB in the live checkout. The witness hashes each file body, relative path, and size, then uses that digest to fill every serialized K, Kraw, V, convolution, and recurrent float plane. This binds the exercised production-shaped state to the repository's current live work without treating a static tensor fixture as dogfood.
 
 ## Reproduce
 

@@ -1,10 +1,12 @@
 package model
 
 import (
+	"bytes"
 	"hash/fnv"
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -71,48 +73,54 @@ func qwen38PagedSwapDogfoodRepoRoot(t *testing.T) string {
 
 func qwen38PagedSwapDogfoodManifest(t *testing.T, repo string) ([]qwen38PagedSwapDogfoodFile, int64, uint64) {
 	t.Helper()
-	var files []qwen38PagedSwapDogfoodFile
+	gitDir := filepath.Join(repo, ".git")
+	if data, err := os.ReadFile(gitDir); err == nil && bytes.HasPrefix(data, []byte("gitdir: ")) {
+		gitDir = string(bytes.TrimSpace(bytes.TrimPrefix(data, []byte("gitdir: "))))
+		if len(gitDir) >= 3 && gitDir[1] == ':' && (gitDir[2] == '/' || gitDir[2] == '\\') {
+			drive := gitDir[0]
+			if drive >= 'A' && drive <= 'Z' {
+				drive += 'a' - 'A'
+			}
+			gitDir = "/mnt/" + string(drive) + "/" + filepath.ToSlash(gitDir[3:])
+		} else if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(repo, gitDir)
+		}
+	}
+	gitDir = filepath.Clean(filepath.FromSlash(gitDir))
+	cmd := exec.Command("git", "--git-dir="+gitDir, "--work-tree="+repo, "ls-files", "-z")
+	cmd.Dir = repo
+	listed, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list tracked repository files (git_dir=%q): %v", gitDir, err)
+	}
+	paths := bytes.Split(bytes.TrimSuffix(listed, []byte{0}), []byte{0})
+	files := make([]qwen38PagedSwapDogfoodFile, 0, len(paths))
 	var total int64
 	h := fnv.New64a()
-	err := filepath.WalkDir(repo, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(repo, path)
+	for _, rawPath := range paths {
+		rel := string(rawPath)
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		info, err := os.Stat(path)
 		if err != nil {
-			return err
+			t.Fatalf("stat tracked file %q: %v", rel, err)
 		}
-		if entry.IsDir() {
-			if rel == ".git" || rel == "_scratch" || rel == ".goal-runs" || rel == ".dispatch-runs" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Size() > 128<<10 {
-			return nil
+		if !info.Mode().IsRegular() || info.Size() > 128<<10 {
+			continue
 		}
 		file, err := os.Open(path)
 		if err != nil {
-			return err
+			t.Fatalf("open tracked file %q: %v", rel, err)
 		}
 		_, copyErr := io.Copy(h, file)
 		closeErr := file.Close()
 		if copyErr != nil {
-			return copyErr
+			t.Fatalf("hash tracked file %q: %v", rel, copyErr)
 		}
 		if closeErr != nil {
-			return closeErr
+			t.Fatalf("close tracked file %q: %v", rel, closeErr)
 		}
-		files = append(files, qwen38PagedSwapDogfoodFile{path: filepath.ToSlash(rel), size: int(info.Size())})
+		files = append(files, qwen38PagedSwapDogfoodFile{path: rel, size: int(info.Size())})
 		total += info.Size()
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("inventory repository: %v", err)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	for _, file := range files {
