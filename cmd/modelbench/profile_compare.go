@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
@@ -268,14 +269,14 @@ func median(xs []float64) float64 {
 }
 
 func writeProfileComparison(f *benchFlags, comparison profileComparison) error {
-	b, err := json.MarshalIndent(comparison, "", "  ")
+	if *f.out != "" {
+		return benchcli.WriteReport(*f.out, comparison)
+	}
+	b, err := benchcli.MarshalReport(comparison)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	if *f.out == "" {
-		_, err = os.Stdout.Write(b)
-		return err
-	}
-	return os.WriteFile(*f.out, b, 0o644)
+	_, err = os.Stdout.Write(b)
+	return err
 }

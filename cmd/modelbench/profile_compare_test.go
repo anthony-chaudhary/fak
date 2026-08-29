@@ -81,6 +81,62 @@ func TestNativeProfileCampaignKeepRejectAndDeterministicJSON(t *testing.T) {
 	}
 }
 
+func TestWriteProfileComparisonStampsCanonicalLineageReceipt(t *testing.T) {
+	t.Setenv("FAK_BENCH_UTC", "2026-08-29T12:34:56Z")
+	t.Setenv("FAK_BENCH_COMMIT", strings.Repeat("a", 40))
+	t.Setenv("FAK_BENCH_NODE", "modelbench-test-node")
+	t.Setenv("FAK_BENCH_RUN_ID", "profile-comparison-test")
+	t.Setenv("FAK_BENCH_HARNESS_NAME", "modelbench")
+	t.Setenv("FAK_BENCH_ARTIFACT", "")
+
+	out := filepath.Join(t.TempDir(), "profile-comparison.json")
+	f := testCompleteBenchFlags()
+	*f.out = out
+	want := compareProfiles([]float64{100, 102, 98}, []float64{80, 82, 81})
+	if err := writeProfileComparison(f, want); err != nil {
+		t.Fatalf("writeProfileComparison: %v", err)
+	}
+
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Schema  string `json:"schema"`
+		Verdict string `json:"verdict"`
+		Lineage struct {
+			Schema    string `json:"lineage_schema"`
+			Commit    string `json:"git_commit"`
+			Node      string `json:"node"`
+			Timestamp string `json:"utc"`
+		} `json:"lineage"`
+		Artifact struct {
+			Schema  string `json:"schema"`
+			RunID   string `json:"run_id"`
+			Lineage struct {
+				SourceArtifact string `json:"source_artifact"`
+			} `json:"lineage"`
+		} `json:"benchmark_artifact"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("decode stamped comparison: %v\n%s", err, b)
+	}
+	if got.Schema != profileComparisonSchema || got.Verdict != want.Verdict {
+		t.Fatalf("comparison payload changed: schema=%q verdict=%q", got.Schema, got.Verdict)
+	}
+	if got.Lineage.Schema != "fak-bench-lineage/1" ||
+		got.Lineage.Commit != strings.Repeat("a", 40) ||
+		got.Lineage.Node != "modelbench-test-node" ||
+		got.Lineage.Timestamp != "2026-08-29T12:34:56Z" {
+		t.Fatalf("lineage = %+v, want canonical fixed test stamp", got.Lineage)
+	}
+	if got.Artifact.Schema != "fak-benchmark-artifact/1" ||
+		got.Artifact.RunID != "profile-comparison-test" ||
+		got.Artifact.Lineage.SourceArtifact != filepath.ToSlash(out) {
+		t.Fatalf("benchmark artifact receipt = %+v, want source %q", got.Artifact, filepath.ToSlash(out))
+	}
+}
+
 func TestNativeProfileCampaignInvalidEvidenceHolds(t *testing.T) {
 	tests := []struct {
 		name   string
