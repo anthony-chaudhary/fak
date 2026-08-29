@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
@@ -131,7 +132,7 @@ func cmdSelfUpdate(argv []string) {
 		// declared hot copy holds origin/main, and --check is where an operator asks that.
 		audit := selfUpdateAudit(repoRoot, headRev)
 		printHotCopyAudit(audit)
-		emitSelfUpdateCheckOutcome(installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Converged)
+		emitSelfUpdateCheckOutcome(installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Partition())
 		return
 	}
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
@@ -396,37 +397,9 @@ func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
 	fmt.Fprintln(selfUpdateProgress, line)
 }
 
-// selfUpdateCheckStatus is the closed JSON status vocabulary for --check. The revision verdict
-// takes precedence because a normal update also re-censuses and converges writable hot copies.
-// Hot-copy divergence therefore describes the narrower case where the checked target itself is
-// current but at least one other declared copy is not.
-type selfUpdateCheckStatus string
-
-const (
-	selfUpdateCheckCurrent   selfUpdateCheckStatus = "current"
-	selfUpdateCheckStale     selfUpdateCheckStatus = "stale"
-	selfUpdateCheckDivergent selfUpdateCheckStatus = "divergent"
-)
-
-type selfUpdateCheckPosture struct {
-	Status      selfUpdateCheckStatus
-	NextCommand string
-}
-
-func classifySelfUpdateCheck(freshness binstamp.Freshness, hotCopiesConverged bool) selfUpdateCheckPosture {
-	switch {
-	case freshness != binstamp.Fresh:
-		return selfUpdateCheckPosture{Status: selfUpdateCheckStale, NextCommand: "fak self-update"}
-	case !hotCopiesConverged:
-		return selfUpdateCheckPosture{Status: selfUpdateCheckDivergent, NextCommand: "fak self-update --force"}
-	default:
-		return selfUpdateCheckPosture{Status: selfUpdateCheckCurrent, NextCommand: "fak version"}
-	}
-}
-
 // emitSelfUpdateCheckOutcome keeps the human outcome vocabulary stable while making the JSON
 // receipt stateful: "current" is reserved for a fresh target and a converged hot-copy audit.
-func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshness, hotCopiesConverged bool) {
+func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshness, audit selfinstall.AuditPartition) {
 	if selfUpdateJSON == nil {
 		emitSelfUpdateOutcome(outcomeCheckOnly, target, detail)
 		return
@@ -434,7 +407,7 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 	finishSelfUpdateProgress(outcomeCheckOnly)
 	timing := finishSelfUpdateTiming()
 	reportSelfUpdateTiming(timing)
-	posture := classifySelfUpdateCheck(freshness, hotCopiesConverged)
+	posture := selfupdate.ClassifyCheck(freshness, audit)
 	receipt := newSelfUpdateReceiptWithTiming(outcomeCheckOnly, target, detail, timing)
 	receipt.Status = string(posture.Status)
 	receipt.NextCommand = posture.NextCommand
@@ -788,10 +761,10 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 		// Comparing the two revisions keeps the JSON contract honest for operators and
 		// automation: a stale, non-mutating check must not claim the binary is current.
 		if oldRevision, newRevision := strings.TrimSpace(selfUpdateReceiptOldRevision), strings.TrimSpace(selfUpdateReceiptNewRevision); oldRevision != "" && newRevision != "" && oldRevision != newRevision {
-			status, nextCommand = string(selfUpdateCheckStale), "fak self-update"
+			status, nextCommand = string(selfupdate.StatusStale), "fak self-update"
 		}
 	case outcomeHotCopyDivergent:
-		status, nextCommand = string(selfUpdateCheckDivergent), "fak self-update --force"
+		status, nextCommand = string(selfupdate.StatusDivergent), "fak self-update"
 	case outcomeHandoffRefused:
 		status, nextCommand = "handoff_refused", "fak self-update --check"
 	case selfUpdateOutcome("restart_required"):

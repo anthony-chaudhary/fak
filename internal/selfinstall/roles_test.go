@@ -152,6 +152,49 @@ func TestAuditFlagsAnUnattestableCopy(t *testing.T) {
 	}
 }
 
+func TestAuditPartitionPreservesStrictVerdictAndRepairScope(t *testing.T) {
+	const head = "0c96937b61ac2e1e9d1f0b3c4d5e6f7a8b9c0d1e"
+	audit := AuditCopies([]HotCopy{
+		{Role: RoleGate, Path: "/repo/fak", Present: true, Attested: true, Dirty: true, Build: "111111111111"},
+		{Role: RoleWorker, Path: "/repo/tools/.bin/fak", Present: true, Attested: true, Build: "222222222222"},
+		{Role: RolePath, Path: "/home/bin/fak", Present: true, Attested: false},
+		{Role: RoleGoBin, Path: "/home/go/bin/fak", Present: true, Attested: true, Build: head},
+	}, head)
+	if audit.Converged {
+		t.Fatal("mixed unsafe roles must keep the strict all-role audit unconverged")
+	}
+	p := audit.Partition()
+	if got := roleList(p.AuditOnly.Dirty); got != "gate" {
+		t.Fatalf("audit-only dirty roles = %q, want gate", got)
+	}
+	if got := roleList(p.AuditOnly.Divergent); got != "gate" {
+		t.Fatalf("audit-only divergent roles = %q, want gate", got)
+	}
+	if got := roleList(p.Convergeable.Divergent); got != "worker" {
+		t.Fatalf("convergeable divergent roles = %q, want worker", got)
+	}
+	if got := roleList(p.Convergeable.Unattested); got != "path" {
+		t.Fatalf("convergeable unattested roles = %q, want path", got)
+	}
+	if !p.Convergeable.Present() || !p.AuditOnly.Present() {
+		t.Fatalf("partition lost drift: %+v", p)
+	}
+}
+
+func TestAuditPartitionTreatsMissingRolesAsReportedNotRepairable(t *testing.T) {
+	audit := AuditCopies([]HotCopy{
+		{Role: RoleGate, Path: "/repo/fak"},
+		{Role: RoleWorker, Path: "/repo/tools/.bin/fak"},
+	}, "abcdef012345")
+	if !audit.Converged {
+		t.Fatalf("missing-only audit changed the existing convergence contract: %+v", audit)
+	}
+	p := audit.Partition()
+	if p.Convergeable.Present() || p.AuditOnly.Present() {
+		t.Fatalf("missing roles became updater drift: %+v", p)
+	}
+}
+
 // TestAuditWithoutAReferenceUsesTheMajorityBuild — a caller with no git context can still ask
 // "do these agree with each other?", and the answer must not depend on map iteration order.
 func TestAuditWithoutAReferenceUsesTheMajorityBuild(t *testing.T) {
