@@ -3,15 +3,16 @@ package ultracodebench
 import "testing"
 
 func TestEvaluateAccessModeFrontierMapsCompleteMatrix(t *testing.T) {
-	report, err := EvaluateAccessModeFrontier(AccessModeFrontierFixture(), []int{1, 2, 4, 8})
+	fixture := AccessModeFrontierFixture()
+	report, err := EvaluateAccessModeFrontier(fixture, []int{1, 2, 4, 8})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Artifacts) != 2 {
+	if len(report.Artifacts) != len(fixture.Artifacts) {
 		t.Fatalf("artifacts=%d", len(report.Artifacts))
 	}
-	for _, artifact := range report.Artifacts {
-		if len(artifact.Cells) != 12 {
+	for i, artifact := range report.Artifacts {
+		if len(artifact.Cells) != len(fixture.Artifacts[i].Cells) {
 			t.Fatalf("%s cells=%d", artifact.EvidenceKind, len(artifact.Cells))
 		}
 	}

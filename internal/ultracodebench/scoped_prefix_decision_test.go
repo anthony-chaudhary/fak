@@ -113,10 +113,10 @@ func TestScopedPrefixRegressionCorpus(t *testing.T) {
 	if corpus.Schema != "fak.ultracode.scoped-prefix-regression-corpus.v1" || corpus.CampaignVersion == "" {
 		t.Fatalf("unversioned corpus: %+v", corpus)
 	}
-	if len(corpus.Rows) != 6 {
-		t.Fatalf("rows = %d, want six predeclared cases", len(corpus.Rows))
-	}
 	wantRows := map[string]bool{"observed-positive-qwen25-05b": true, "no-gain-control": true, "unequal-outcome": true, "missing-telemetry": true, "double-counted-savings": true, "cache-reset": true}
+	if len(corpus.Rows) != len(wantRows) {
+		t.Fatalf("rows = %d, want all %d predeclared cases", len(corpus.Rows), len(wantRows))
+	}
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	seen := map[string]bool{}
 	for _, row := range corpus.Rows {
