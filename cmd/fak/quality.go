@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/quality"
 )
@@ -23,7 +26,7 @@ import (
 // replay promise is exercised rather than asserted.
 func cmdQuality(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: fak quality <run|explain|replay> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: fak quality <run|explain|replay|probe> [flags]")
 		os.Exit(2)
 	}
 	switch argv[0] {
@@ -33,8 +36,10 @@ func cmdQuality(argv []string) {
 		os.Exit(runQualityExplain(os.Stdout, os.Stderr, argv[1:]))
 	case "replay":
 		os.Exit(runQualityReplay(os.Stdout, os.Stderr, os.Stdin, argv[1:]))
+	case "probe":
+		os.Exit(runQualityProbe(os.Stdout, os.Stderr, argv[1:]))
 	default:
-		fmt.Fprintf(os.Stderr, "fak quality: unknown subcommand %q (want run|explain|replay)\n", argv[0])
+		fmt.Fprintf(os.Stderr, "fak quality: unknown subcommand %q (want run|explain|replay|probe)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -229,4 +234,30 @@ func loadTrace(path string) (quality.Trace, error) {
 		return quality.Trace{}, fmt.Errorf("parse trace %s: %w", path, err)
 	}
 	return t, nil
+}
+
+// runQualityProbe emits endpoint capability evidence without judging accuracy.
+func runQualityProbe(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak quality probe", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	endpoint := fs.String("endpoint", "", "OpenAI-compatible endpoint base URL")
+	model := fs.String("model", "", "exact model identity returned by /v1/models")
+	timeout := fs.Duration("timeout", 15*time.Second, "overall HTTP timeout")
+	if !parseFlags(fs, argv) || *endpoint == "" || *model == "" {
+		if *endpoint == "" || *model == "" {
+			fmt.Fprintln(stderr, "fak quality probe: --endpoint and --model are required")
+		}
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	report := quality.ProbeEndpoint(ctx, &http.Client{Timeout: *timeout}, *endpoint, *model)
+	if err := json.NewEncoder(stdout).Encode(report); err != nil {
+		fmt.Fprintf(stderr, "fak quality probe: encode receipt: %v\n", err)
+		return 2
+	}
+	if report.HasInfrastructureError() {
+		return 2
+	}
+	return 0
 }

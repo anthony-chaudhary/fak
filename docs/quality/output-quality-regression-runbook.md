@@ -158,3 +158,23 @@ list so a regression is caught at the earliest tier that can see it.
 
 - [`regression_runbook_witness.py`](regression_runbook_witness.py) — the hermetic captured-proof harness.
 - Epic [#4509](https://github.com/anthony-chaudhary/fak/issues/4509) — the missing-middle validation ladder this runbook serves.
+
+## Preflight a live evaluation endpoint
+
+Run the bounded capability probe before downloading a corpus or starting a quality campaign:
+
+```bash
+fak quality probe --endpoint http://127.0.0.1:8080 --model exact-model-id
+```
+
+The command queries `/v1/models`, then sends separate one-token generation, completion echo/prompt-logprob, and `reasoning_effort` requests. Each arm is reported independently as `supported`, `unsupported`, or `infrastructure_error`.
+
+Interpret the receipt narrowly:
+
+- Generation may be `supported` while `prompt_logprobs` is `unsupported`; absent logprobs do not erase successful generation evidence.
+- Rejection of `reasoning_effort` changes only the reasoning arm.
+- An unreachable endpoint, invalid endpoint, or model absent from `/v1/models` is an infrastructure/configuration error, not unsupported model behavior and not a quality regression.
+- `native: true` requires explicit `engine: "fak-native"` evidence and `fallbacks: 0`. A generic compatible endpoint remains `openai-compatible`; any fallback prevents a native claim.
+- `accuracy_evaluated` is always false. This probe establishes readiness and capability only; it never reports accuracy or a quality pass.
+
+Exit `0` means all requests completed without infrastructure/configuration errors; individual capabilities may still be unsupported. Exit `2` means usage, endpoint, model, transport, or server infrastructure prevented a trustworthy preflight.
