@@ -262,6 +262,74 @@ func TestCIPreflightAcceptsFreshCommittedStudySelfInventory(t *testing.T) {
 	}
 }
 
+func TestCIPreflightStudySelfInventoryMutationDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+		want   []string
+	}{
+		{
+			name: "add", mutate: func(t *testing.T, root string) {
+				writeStudySelfFile(t, root, "b.go", "package b\n")
+			},
+			want: []string{"[path_added] b.go"},
+		},
+		{
+			name: "delete", mutate: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, "a.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []string{"[path_removed] a.md"},
+		},
+		{
+			name: "rename", mutate: func(t *testing.T, root string) {
+				if err := os.Rename(filepath.Join(root, "a.md"), filepath.Join(root, "z.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []string{"[path_removed] a.md", "[path_added] z.md"},
+		},
+		{
+			name: "reclassification", mutate: func(t *testing.T, root string) {
+				mutateStudySelfManifestClass(t, root, "runtime_source")
+			},
+			want: []string{"[classification_changed] a.md"},
+		},
+		{
+			name: "unknown class", mutate: func(t *testing.T, root string) {
+				mutateStudySelfManifestClass(t, root, "unknown_future_class")
+			},
+			want: []string{"[classification_changed] a.md"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeStudySelfFile(t, root, "a.md", "original\n")
+			manifest, err := studymonitor.BuildSelfInventory(root, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var data bytes.Buffer
+			if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+				t.Fatal(err)
+			}
+			writeStudySelfFile(t, root, studymonitor.DefaultSelfInventoryPath, data.String())
+			tt.mutate(t, root)
+			detail, checked, ok := checkStudySelfInventory(root)
+			if !checked || ok {
+				t.Fatalf("checked=%v ok=%v detail=%q", checked, ok, detail)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(detail, want) {
+					t.Fatalf("detail=%q missing %q", detail, want)
+				}
+			}
+		})
+	}
+}
+
 const disambiguationFixtureMain = `package main
 
 import (
