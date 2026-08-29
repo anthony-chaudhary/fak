@@ -1,0 +1,80 @@
+{
+  "schema": "fak-native-performance-receipt/v2",
+  "role": "candidate",
+  "envelope_id": "qwen38-apple-metal-serving",
+  "changed_lever_id": "shared.unified-memory-residency",
+  "revision": "3333333333333333333333333333333333333333",
+  "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "machine": {
+    "scrubbed_id": "apple-lab",
+    "platform": "darwin/arm64",
+    "backend": "metal"
+  },
+  "controls": {
+    "prompt_tokens": 64,
+    "decode_tokens": 32,
+    "batch": 1,
+    "context_tokens": 4096,
+    "temperature": 0,
+    "sampling": "greedy",
+    "cache_state": "warm",
+    "warmups": 1,
+    "repetitions": 2
+  },
+  "unchanged_controls": [
+    "artifact_sha256",
+    "machine",
+    "prompt_tokens",
+    "decode_tokens",
+    "batch",
+    "context_tokens",
+    "temperature",
+    "sampling",
+    "cache_state",
+    "warmups",
+    "repetitions",
+    "execution_identity"
+  ],
+  "changed_axes": [
+    "lever:shared.unified-memory-residency"
+  ],
+  "repetitions": [
+    {
+      "end_to_end_milliseconds": 100,
+      "tokens_per_second": 10
+    },
+    {
+      "end_to_end_milliseconds": 98,
+      "tokens_per_second": 10.2
+    }
+  ],
+  "memory": {
+    "peak_bytes": 1048576,
+    "resident_bytes": 786432
+  },
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "metal/qwen38/serving",
+    "fallback_count": 0
+  },
+  "quality": {
+    "name": "exact_match",
+    "score": 1,
+    "higher_is_better": true
+  },
+  "module_versions": [
+    {
+      "module": "internal/model",
+      "revision": "r1+gaaaaaaa"
+    }
+  ],
+  "commands": [
+    "fak nativeperf capture --scrubbed"
+  ],
+  "profiler_artifacts": [
+    {
+      "path": "profiles/apple-metal.profile.json",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ]
+}

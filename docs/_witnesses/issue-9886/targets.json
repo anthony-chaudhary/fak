@@ -1,0 +1,14 @@
+{
+  "schema": "fak.learning-mesh-input/1",
+  "mechanisms": [{
+    "id": "target-placeholder",
+    "mechanism": "target envelope carrier",
+    "source": {"id":"placeholder","hardware":"amd","backend":"vulkan","framework":"fak-native","engine":"fak-native"},
+    "provenance": {"artifacts":[{"kind":"repo-doc","id":"docs/_witnesses/issue-9886/targets.json","revision":"4444444444444444444444444444444444444444","path":"docs/_witnesses/issue-9886/targets.json","exact":true,"record_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}]}
+  }],
+  "targets": [
+    {"id":"amd-native-decode","hardware":"amd","backend":"vulkan","framework":"fak-native","engine":"fak-native","model":"qwen38","workload":"decode","role":"product"},
+    {"id":"nvidia-native-prefill","hardware":"nvidia","backend":"cuda","framework":"fak-native","engine":"fak-native","model":"qwen38","workload":"prefill","role":"product"},
+    {"id":"apple-native-serving","hardware":"apple","backend":"metal","framework":"fak-native","engine":"fak-native","model":"qwen38","workload":"serving","role":"product"}
+  ]
+}

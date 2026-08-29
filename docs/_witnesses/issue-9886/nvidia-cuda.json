@@ -1,0 +1,80 @@
+{
+  "schema": "fak-native-performance-receipt/v2",
+  "role": "candidate",
+  "envelope_id": "qwen38-nvidia-cuda-prefill",
+  "changed_lever_id": "shared.paged-prefill-scheduler",
+  "revision": "2222222222222222222222222222222222222222",
+  "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "machine": {
+    "scrubbed_id": "nvidia-lab",
+    "platform": "linux/amd64",
+    "backend": "cuda"
+  },
+  "controls": {
+    "prompt_tokens": 64,
+    "decode_tokens": 32,
+    "batch": 1,
+    "context_tokens": 4096,
+    "temperature": 0,
+    "sampling": "greedy",
+    "cache_state": "warm",
+    "warmups": 1,
+    "repetitions": 2
+  },
+  "unchanged_controls": [
+    "artifact_sha256",
+    "machine",
+    "prompt_tokens",
+    "decode_tokens",
+    "batch",
+    "context_tokens",
+    "temperature",
+    "sampling",
+    "cache_state",
+    "warmups",
+    "repetitions",
+    "execution_identity"
+  ],
+  "changed_axes": [
+    "lever:shared.paged-prefill-scheduler"
+  ],
+  "repetitions": [
+    {
+      "end_to_end_milliseconds": 100,
+      "tokens_per_second": 10
+    },
+    {
+      "end_to_end_milliseconds": 98,
+      "tokens_per_second": 10.2
+    }
+  ],
+  "memory": {
+    "peak_bytes": 1048576,
+    "resident_bytes": 786432
+  },
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "cuda/qwen38/prefill",
+    "fallback_count": 0
+  },
+  "quality": {
+    "name": "exact_match",
+    "score": 1,
+    "higher_is_better": true
+  },
+  "module_versions": [
+    {
+      "module": "internal/model",
+      "revision": "r1+gaaaaaaa"
+    }
+  ],
+  "commands": [
+    "fak nativeperf capture --scrubbed"
+  ],
+  "profiler_artifacts": [
+    {
+      "path": "profiles/nvidia-cuda.profile.json",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ]
+}
