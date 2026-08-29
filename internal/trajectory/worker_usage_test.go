@@ -104,6 +104,14 @@ func TestAssessQwenEmptyUsageWindowAndExclusions(t *testing.T) {
 			if got.Schema != QwenEmptyUsageAssessmentSchema || got.State != test.state || got.Reason != test.reason {
 				t.Fatalf("assessment = %+v, want %s/%s", got, test.state, test.reason)
 			}
+			if test.name == "completed turn is empty" {
+				if got.Usage != in.Usage {
+					t.Fatalf("completed-turn usage changed: got %+v, want %+v", got.Usage, in.Usage)
+				}
+				if got.Usage.UsageCovered || got.Usage.InputTokens != 0 || got.Usage.CachedInputTokens != 0 || got.Usage.OutputTokens != 0 || got.Usage.ProviderTokens != 0 {
+					t.Fatalf("completed empty turn invented provider usage: %+v", got.Usage)
+				}
+			}
 			if got.WindowEndsAt != started.Add(time.Minute) &&
 				got.Reason != QwenUsageReasonNotApplicable &&
 				got.Reason != QwenUsageReasonUsageNotExpected {
