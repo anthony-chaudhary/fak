@@ -181,3 +181,34 @@ func writeJournalAuditFixture(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestJournalAuditExcludesDuplicateUnboundStartupIdentity(t *testing.T) {
+	userRoot := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	const identity = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+	report := AuditRecentLaunches(JournalAuditOptions{
+		Now: now, Window: 24 * time.Hour, UserHome: userRoot, IdentityPath: filepath.Join(userRoot, "resume_identity.jsonl"),
+		Identities: []JournalLaunchIdentity{
+			{Identity: identity, Trace: "guard-trace-9849", LaunchAt: now.Add(-3 * time.Hour), Provider: "codex", Via: "guard-sessionstart", Source: "startup"},
+			{Identity: identity, Trace: "model-controlled-trace", LaunchAt: now.Add(-2 * time.Hour), Provider: "codex", Via: "guard-sessionstart", Source: "startup"},
+		},
+	})
+	if report.Verdict != JournalVerdictGreen || report.Counts.Identities != 1 || report.Counts.ExcludedSyntheticOrUnbound != 1 || report.Counts.MissingTranscript != 0 || len(report.Rows) != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.Rows[0].Status != JournalStatusSyntheticOrUnbound {
+		t.Fatalf("row=%+v", report.Rows[0])
+	}
+}
+
+func TestJournalAuditKeepsExactNonSyntheticLaunchMissingTranscriptRed(t *testing.T) {
+	userRoot := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	report := AuditRecentLaunches(JournalAuditOptions{
+		Now: now, Window: 24 * time.Hour, UserHome: userRoot, IdentityPath: filepath.Join(userRoot, "resume_identity.jsonl"),
+		Identities: []JournalLaunchIdentity{{Identity: "real-codex-thread", Trace: "trace-real", LaunchAt: now.Add(-time.Hour), Provider: "codex", Via: "guard-sessionstart", Source: "resume"}},
+	})
+	if report.Verdict != JournalVerdictRed || report.Counts.MissingTranscript != 1 || report.Counts.ExcludedSyntheticOrUnbound != 0 || report.Rows[0].Status != JournalStatusMissingTranscript {
+		t.Fatalf("report=%+v", report)
+	}
+}
