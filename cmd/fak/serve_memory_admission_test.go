@@ -18,8 +18,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 )
 
-func TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *testing.T) {
-	const holderEnv = "FAK_SERVE_METAL_LEASE_HOLDER_TEST"
+func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *testing.T) {
+	const holderEnv = "FAK_LOCAL_LAUNCHER_METAL_LEASE_HOLDER_TEST"
 	if path := os.Getenv(holderEnv); path != "" {
 		lease, err := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true})
 		if err != nil {
@@ -37,7 +37,7 @@ func TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *t
 	t.Setenv("FAK_GPU_LEASE", path)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe$")
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe$")
 	child.Env = append(os.Environ(), holderEnv+"="+path)
 	childIn, err := child.StdinPipe()
 	if err != nil {
@@ -70,7 +70,7 @@ func TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *t
 	}
 
 	loads := 0
-	release, err := loadServeModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+	release, err := loadLocalLauncherModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
 		loads++
 	})
 	if err == nil {
@@ -96,7 +96,7 @@ func TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *t
 		t.Fatalf("holder exit: %v; stderr=%s", err, childStderr.String())
 	}
 	waited = true
-	release, err = loadServeModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+	release, err = loadLocalLauncherModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
 		loads++
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestLoadServeModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *t
 	reacquired.Release()
 }
 
-func TestLoadServeModelWithMetalLeaseLeavesCPUAndEmptyModelUnserialized(t *testing.T) {
+func TestLoadLocalLauncherModelWithMetalLeaseLeavesCPUAndEmptyModelUnserialized(t *testing.T) {
 	tests := []struct {
 		name     string
 		metal    bool
@@ -136,7 +136,7 @@ func TestLoadServeModelWithMetalLeaseLeavesCPUAndEmptyModelUnserialized(t *testi
 			defer held.Release()
 
 			loads := 0
-			release, err := loadServeModelWithMetalLease(tc.metal, tc.ggufPath, gpulease.Options{Path: path}, func() { loads++ })
+			release, err := loadLocalLauncherModelWithMetalLease(tc.metal, tc.ggufPath, gpulease.Options{Path: path}, func() { loads++ })
 			if err != nil {
 				t.Fatalf("unserialized path: %v", err)
 			}
