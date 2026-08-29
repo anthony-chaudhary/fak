@@ -1417,6 +1417,7 @@ var chatEndpointRole = map[string]string{
 	"cachevalue":        "the off-path Qwen3.8 cache-value cold-arm benchmark runner against a declared OpenAI-compatible endpoint (not a live planner)",
 	"cavemanpairwise":   "the off-path pairwise benchmark judge client against a declared OpenAI-compatible endpoint (not a live planner)",
 	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
+	"quality":           "the off-path bounded pre-dataset capability probe (#10030/#10162): one-token generation/reasoning calls classify endpoint support, infrastructure, and provenance (not a live planner)",
 	"serveradapter":     "independent local llama-server adapter and readiness probe owned by the serveradapter leaf",
 }
 
