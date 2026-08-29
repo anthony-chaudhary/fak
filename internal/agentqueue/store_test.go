@@ -15,7 +15,8 @@ import (
 func persistedFixture() Snapshot {
 	return Snapshot{
 		Schema: Schema, Generation: "generation-7",
-		Pool:     PoolSpec{ID: "build", Min: 1, Desired: 2, Max: 3},
+		Pool: PoolSpec{ID: "build", Min: 1, Desired: 2, Max: 3},
+		//enumlint:exempt This persistence fixture deliberately pairs one active and one queued intent; terminal and held states do not change the round-trip contract under test.
 		Intents:  []Intent{{ID: "a", State: IntentRunning}, {ID: "b", State: IntentQueued}},
 		Attempts: []Attempt{{ID: "attempt-a", IntentID: "a", State: AttemptReserved}},
 	}
