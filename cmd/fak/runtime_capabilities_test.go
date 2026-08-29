@@ -78,3 +78,65 @@ func TestRunRuntimeCapabilitiesRejectsConflictingBackendFlags(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 }
+
+func remoteCLIArgs() []string {
+	return []string{
+		"--prefer-backend", "vulkan",
+		"--placement", "remote_allowed",
+		"--remote-target", "research-west",
+		"--authorize-remote-target", "research-west",
+		"--remote-provider", "acme-cloud",
+		"--remote-engine", "acme-inference",
+		"--remote-model", "qwen3.8-4b",
+		"--remote-endpoint-class", "managed_api",
+		"--remote-region", "us-west",
+		"--remote-state-boundary", "prompt,tool_results",
+		"--remote-egress", "allowed",
+		"--remote-credential-name", "acme-runtime-token",
+		"--remote-credential-present",
+		"--remote-tls", "verified",
+		"--remote-proxy", "none",
+		"--remote-reachability", "reachable",
+		"--remote-timeout-ms", "30000",
+		"--remote-retry-ceiling", "1",
+		"--remote-budget-microusd", "250000",
+		"--goos", "windows", "--goarch", "amd64",
+	}
+}
+
+func TestRunRuntimeCapabilitiesEmitsRemotePlacementReceipt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runRuntimeCapabilities(&stdout, &stderr, remoteCLIArgs()); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var report runtimecap.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.ModelExecution.Runnable || report.ModelExecution.Mode != "remote" || report.ModelExecution.PayloadLoaded || report.ModelExecution.RemotePlacement == nil {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+	if report.ModelExecution.RemotePlacement.ControlPlaneOwner != "fak-local" || report.ModelExecution.RemotePlacement.Target != "research-west" {
+		t.Fatalf("receipt = %+v", report.ModelExecution.RemotePlacement)
+	}
+}
+
+func TestRunRuntimeCapabilitiesRemotePlacementDenialIsMachineReadable(t *testing.T) {
+	args := remoteCLIArgs()
+	for i := range args {
+		if args[i] == "--remote-egress" {
+			args[i+1] = "denied"
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runRuntimeCapabilities(&stdout, &stderr, args); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var report runtimecap.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ModelExecution.Runnable || report.ModelExecution.PayloadLoaded || report.ModelExecution.Reason == nil || report.ModelExecution.Reason.Code != "remote_egress_denied" {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+}

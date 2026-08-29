@@ -1,0 +1,158 @@
+{
+  "schema": "fak-runtime-capabilities/1",
+  "goos": "windows",
+  "goarch": "amd64",
+  "binary_runnable": true,
+  "control_plane_runnable": true,
+  "build_tags": [],
+  "registered_backends": [
+    {
+      "name": "cpu-ref",
+      "registered": true,
+      "class": "reference",
+      "tier": "scalar"
+    }
+  ],
+  "portable_cpu_reference": {
+    "name": "cpu-ref",
+    "registered": true,
+    "class": "reference",
+    "tier": "scalar"
+  },
+  "host_memory": {
+    "known": true,
+    "total_bytes": 17179869184,
+    "free_bytes": 12884901888,
+    "free_known": true
+  },
+  "preferred_backend": {
+    "name": "vulkan",
+    "status": "unavailable",
+    "exact_match": false,
+    "selected": "remote:research-west",
+    "reason": {
+      "code": "backend_not_compiled",
+      "detail": "vulkan is not compiled into this binary",
+      "remediation": "use a Windows fak build produced with the vulkan tag and bundled Vulkan shim"
+    }
+  },
+  "cpu_fallback_policy": "pin_or_refuse",
+  "placement_mode": "remote_allowed",
+  "supported_cpu_envelopes": [
+    {
+      "id": "qwen25-1p5b-q8-windows-amd64",
+      "model": "Qwen2.5-1.5B-Instruct.Q8_0.gguf",
+      "quantization": "Q8_0",
+      "engine": "fak-native",
+      "backend": "cpu-ref",
+      "goos": "windows",
+      "goarch": "amd64",
+      "minimum_ram_bytes": 8589934592,
+      "minimum_disk_bytes": 2147483648,
+      "headroom_ratio": 0.15,
+      "expected_decode_tok_per_sec": 18.42750846670304,
+      "expected_prefill_p256_tok_per_sec": 193.50481437710533,
+      "performance_class": "local_cpu_degraded_small_q8",
+      "quality_equivalence": "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
+      "witness": "experiments/gpu/crossover-qwen2.5-1.5b-cpu-q8-20260619.json",
+      "demands": [
+        {
+          "class": "weights",
+          "bytes": 2147483648,
+          "detail": "qwen25-1.5b-q8 weights"
+        },
+        {
+          "class": "kv_cache",
+          "bytes": 268435456,
+          "detail": "decode kv window"
+        },
+        {
+          "class": "activation",
+          "bytes": 268435456,
+          "detail": "prefill/decode activation"
+        }
+      ]
+    },
+    {
+      "id": "qwen36-27b-q4k-linux-amd64",
+      "model": "Qwen3.6-27B-Q4_K_M.gguf",
+      "quantization": "Q4_K_M",
+      "engine": "fak-native",
+      "backend": "cpu-ref",
+      "goos": "linux",
+      "goarch": "amd64",
+      "minimum_ram_bytes": 271656681472,
+      "minimum_disk_bytes": 21474836480,
+      "headroom_ratio": 0.15,
+      "expected_decode_tok_per_sec": 1.05,
+      "expected_prefill_p256_tok_per_sec": 23,
+      "performance_class": "local_cpu_degraded_large_q4k",
+      "quality_equivalence": "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
+      "witness": "docs/notes/CPU-INFERENCE-SCALING-BOX873AF63B-2026-07-11.md",
+      "demands": [
+        {
+          "class": "weights",
+          "bytes": 25769803776,
+          "detail": "qwen36-27b-q4k resident weights"
+        },
+        {
+          "class": "kv_cache",
+          "bytes": 2147483648,
+          "detail": "decode kv window"
+        },
+        {
+          "class": "activation",
+          "bytes": 1073741824,
+          "detail": "prefill/decode activation"
+        }
+      ]
+    }
+  ],
+  "model_execution": {
+    "runnable": true,
+    "engine": "acme-inference",
+    "backend": "remote:research-west",
+    "mode": "remote",
+    "payload_loaded": false,
+    "payload_compatibility": "supported",
+    "remote_placement": {
+      "mode": "remote_allowed",
+      "control_plane_owner": "fak-local",
+      "target": "research-west",
+      "authorized_target": "research-west",
+      "provider": "acme-cloud",
+      "engine": "acme-inference",
+      "model": "qwen3.8-4b",
+      "endpoint_class": "managed_api",
+      "region": "us-west",
+      "local_failure_trigger": {
+        "code": "backend_not_compiled",
+        "detail": "vulkan is not compiled into this binary",
+        "remediation": "use a Windows fak build produced with the vulkan tag and bundled Vulkan shim"
+      },
+      "state_crossing_boundary": [
+        "prompt",
+        "tool_results"
+      ],
+      "egress": {
+        "state": "allowed"
+      },
+      "credential": {
+        "name": "acme-runtime-token",
+        "present": true
+      },
+      "tls": {
+        "state": "verified"
+      },
+      "proxy": {
+        "state": "none"
+      },
+      "reachability": {
+        "state": "reachable"
+      },
+      "timeout_milliseconds": 30000,
+      "retry_ceiling": 1,
+      "budget_micro_usd": 250000
+    }
+  }
+}

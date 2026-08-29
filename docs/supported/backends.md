@@ -33,6 +33,8 @@ fak runtime-capabilities --prefer-backend vulkan --fallback-policy local_cpu_deg
 ```
 
 A default build normally reports only `cpu-ref`. CUDA and Vulkan require their build tags and vendor/runtime prerequisites; Metal requires a cgo-enabled Darwin/arm64 build and a reachable Metal device. A missing exact backend request is a diagnostic result, not permission to switch engines. The only built-in degraded path is the explicit `--prefer-backend ... --fallback-policy local_cpu_degraded --cpu-envelope ...` flow: it keeps the requested accelerator reason, selects `cpu-ref` only for a supported envelope, and refuses unsupported or over-budget envelopes before payload load. The command never substitutes `llama.cpp` or another engine.
+
+Remote placement is a separate, pre-payload policy decision. `--placement local_only` (the default) and `prefer_local` never cross a network boundary. `remote_allowed` is considered only after a `--prefer-backend` local failure; an exact `--backend` pin always fails closed. Admission requires an identical `--remote-target` and `--authorize-remote-target`, named provider/engine/model, explicit allowed egress, credential reference name plus presence (never a secret value), verified TLS and proxy state, independently declared reachability, positive timeout and budget, a non-negative retry ceiling, and declared state classes crossing the boundary. The receipt retains local `fak` control-plane ownership while naming remote execution and every gate. The probe opens no network connection, and no provider—including a future fak cloud—has a privileged or automatic path.
 ## Choose by operating envelope
 
 | Choose | When it fits | Current support boundary | Continue with |

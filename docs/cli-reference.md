@@ -22,12 +22,14 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 ## `runtime-capabilities`: inspect the deployable runtime before payload load
 
 ```text
-fak runtime-capabilities [--backend NAME] [--prefer-backend NAME] [--fallback-policy pin_or_refuse|local_cpu_degraded] [--cpu-envelope ID]
+fak runtime-capabilities [--backend NAME] [--prefer-backend NAME] [--fallback-policy pin_or_refuse|local_cpu_degraded] [--cpu-envelope ID] [--placement local_only|prefer_local|remote_allowed] [remote gate flags]
 ```
 
 Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command performs no model-weight load and keeps three states separate: the executable runs, the governed control plane runs, and a fak-native model backend can execute for the requested policy. `--backend` remains an exact lookup: unknown, uncompiled, unavailable, or platform-unsupported backends return structured reasons and remediation without falling back to `cpu-ref` or another engine.
 
 `--prefer-backend` is the explicit degraded-mode seam. When the preferred backend is unavailable, `--fallback-policy local_cpu_degraded` may select `cpu-ref` only if an exact `--cpu-envelope` row from `supported_cpu_envelopes` matches the host and the pre-load host-RAM budget clears. Unsupported or over-budget CPU fallback requests refuse before payload load, and the report emits a `local_cpu_degraded` receipt naming the requested backend, the selected `cpu-ref` path, the supported envelope, and the accelerator refusal reason. The optional `--goos`, `--goarch`, `--host-total-ram-bytes`, and `--host-free-ram-bytes` flags are diagnostic overrides for witness capture.
+
+`--placement remote_allowed` adds an explicit remote admission path after an unavailable `--prefer-backend`; `local_only`, `prefer_local`, exact `--backend`, and pinned-native requests never use it. The caller must exactly match `--remote-target` with `--authorize-remote-target` and declare provider, engine, model, endpoint class/region when applicable, boundary state classes, egress, credential name/presence, TLS/proxy, reachability, timeout, retry ceiling, and budget. The machine-readable `remote_placement` receipt names local `fak` control-plane ownership and the remote execution trigger and gates. This command performs no outbound traffic and accepts no credential secret. It never silently chooses llama.cpp, Ollama, a provider, or a future fak cloud target.
 
 The report includes `goos`, `goarch`, build tags, host memory, registered backend names/classes/tiers, portable `cpu-ref` status, supported CPU envelopes, `engine: "fak-native"` when execution is available, and `payload_compatibility: "supported" | "refused" | "not_checked"` for explicit CPU-envelope admission. This is distinct from `fak preflight`, which adjudicates a tool call against policy and grammar.
 ## `native-performance`: query the raw-model hill climb
