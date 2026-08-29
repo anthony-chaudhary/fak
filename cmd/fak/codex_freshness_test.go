@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const codexFreshnessReexecHelperEnv = "GO_WANT_CODEX_FRESHNESS_REEXEC_HELPER"
@@ -370,16 +371,188 @@ func TestIsNotGitRepositoryUsesGitStderr(t *testing.T) {
 	}
 }
 
+func TestCodexFreshnessValidLeaseSkipsInspection(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t)
+	if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+		called = true
+		return codexFreshnessInspection{}
+	}
+	args, code, stop := runCodexFreshnessAdmission([]string{"--model", "x"})
+	if stop || code != 0 || called || !reflect.DeepEqual(args, []string{"--model", "x"}) {
+		t.Fatalf("args=%q code=%d stop=%v inspected=%v", args, code, stop, called)
+	}
+}
+
+func TestCodexFreshnessCheckNowBypassesLeaseAndIsStripped(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t)
+	if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+		called = true
+		return codexFreshnessInspection{Assessment: codexFreshnessAssessment{Verdict: codexFreshnessFresh}}
+	}
+	args, code, stop := runCodexFreshnessAdmission([]string{"--freshness-check-now", "--model", "x"})
+	if stop || code != 0 || !called || !reflect.DeepEqual(args, []string{"--model", "x"}) {
+		t.Fatalf("args=%q code=%d stop=%v inspected=%v", args, code, stop, called)
+	}
+}
+
+func TestCodexFreshnessLiveClaimUsesCurrentLauncherImmediately(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessBehind})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t)
+	claimed, err := codexFreshnessAcquireClaim(statePath+".lock", codexFreshnessNow())
+	if err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
+	called := false
+	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+		called = true
+		return codexFreshnessInspection{}
+	}
+	args, code, stop := runCodexFreshnessAdmission([]string{"--model", "x"})
+	if stop || code != 0 || called || !reflect.DeepEqual(args, []string{"--model", "x"}) {
+		t.Fatalf("args=%q code=%d stop=%v inspected=%v", args, code, stop, called)
+	}
+}
+
+func TestCodexFreshnessAcquireClaimDoesNotReapAlreadyClaimedStaleMarker(t *testing.T) {
+	path := t.TempDir() + string(os.PathSeparator) + "freshness.lock"
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(path, []byte("stale-owner\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := now.Add(-codexFreshnessClaimTTL - time.Minute)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tombstone := codexFreshnessStaleClaimPath(path, raw, info)
+	if err := os.Link(path, tombstone); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := codexFreshnessAcquireClaim(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("second stale reaper acquired claim")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != string(raw) {
+		t.Fatalf("second stale reaper changed live claim: got=%q err=%v", got, err)
+	}
+}
+func TestCodexFreshnessStaleClaimIsReaped(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t)
+	claimPath := statePath + ".lock"
+	if err := os.WriteFile(claimPath, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := codexFreshnessNow().Add(-codexFreshnessClaimTTL - time.Minute)
+	if err := os.Chtimes(claimPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+		called = true
+		return codexFreshnessInspection{Assessment: codexFreshnessAssessment{Verdict: codexFreshnessFresh}}
+	}
+	_, code, stop := runCodexFreshnessAdmission(nil)
+	if stop || code != 0 || !called {
+		t.Fatalf("code=%d stop=%v inspected=%v", code, stop, called)
+	}
+	if _, err := os.Stat(claimPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("claim remains after admission: %v", err)
+	}
+}
+
+func TestCodexFreshnessFreshInspectionWritesLease(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t)
+	_, code, stop := runCodexFreshnessAdmission(nil)
+	if stop || code != 0 {
+		t.Fatalf("code=%d stop=%v", code, stop)
+	}
+	if !codexFreshnessLeaseValid(statePath+".json", codexFreshnessNow()) {
+		t.Fatal("successful inspection did not persist a valid lease")
+	}
+}
+
+func TestCodexFreshnessInspectionErrorRemainsFailClosed(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{})
+	defer restore()
+	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+		return codexFreshnessInspection{Err: errors.New("inspect failed")}
+	}
+	args, code, stop := runCodexFreshnessAdmission(nil)
+	if !stop || code != 1 || args != nil {
+		t.Fatalf("args=%q code=%d stop=%v", args, code, stop)
+	}
+}
+
+func TestCodexFreshnessLeaseRenewsOnWindowsCompatiblePath(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	defer restore()
+	statePath := codexFreshnessTestStatePath(t) + ".json"
+	first := codexFreshnessNow().Add(-codexFreshnessLeaseTTL - time.Minute)
+	if err := codexFreshnessWriteLease(statePath, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := codexFreshnessWriteLease(statePath, codexFreshnessNow()); err != nil {
+		t.Fatalf("renew lease: %v", err)
+	}
+	if !codexFreshnessLeaseValid(statePath, codexFreshnessNow()) {
+		t.Fatal("renewed lease is not valid")
+	}
+}
+
+func codexFreshnessTestStatePath(t *testing.T) string {
+	t.Helper()
+	root, executable, err := codexFreshnessResolveCheckout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := codexFreshnessStatePath(root, executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func() {
 	t.Helper()
 	oldExecutable, oldGetwd := codexFreshnessExecutable, codexFreshnessGetwd
 	oldInspect, oldUpdate := codexFreshnessInspect, codexFreshnessUpdate
 	oldReexec, oldStatus := codexFreshnessReexec, codexFreshnessStatus
 	oldResolveContext, oldParentPID := codexFreshnessResolveCheckout, codexFreshnessParentPID
+	oldNow, oldCacheDir := codexFreshnessNow, codexFreshnessCacheDir
+	cacheDir := t.TempDir()
 	oldArgs := append([]string(nil), os.Args...)
 	codexFreshnessExecutable = func() (string, error) { return `C:\bin\fak.exe`, nil }
 	codexFreshnessGetwd = func() (string, error) { return `C:\work\fak`, nil }
 	codexFreshnessResolveCheckout = func() (string, string, error) { return `C:\work\fak`, `C:\bin\fak.exe`, nil }
+	codexFreshnessNow = func() time.Time { return time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC) }
+	codexFreshnessCacheDir = func() (string, error) { return cacheDir, nil }
 	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection { return codexFreshnessInspection{Assessment: assessment} }
 	codexFreshnessUpdate = func(_, _ string) (string, error) { return "", errors.New("unexpected update") }
 	codexFreshnessReexec = func(_ string, _ []string, _ string) error { return errors.New("unexpected reexec") }
@@ -392,6 +565,7 @@ func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func(
 		codexFreshnessReexec, codexFreshnessStatus = oldReexec, oldStatus
 		codexFreshnessResolveCheckout = oldResolveContext
 		codexFreshnessParentPID = oldParentPID
+		codexFreshnessNow, codexFreshnessCacheDir = oldNow, oldCacheDir
 		os.Args = oldArgs
 	}
 }

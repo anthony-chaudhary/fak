@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,12 +14,22 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 const codexFreshnessReexecEnv = "FAK_CODEX_FRESHNESS_REEXEC"
+
+const (
+	codexFreshnessLeaseTTL = 6 * time.Hour
+	codexFreshnessClaimTTL = 30 * time.Minute
+)
+
+type codexFreshnessLease struct {
+	CheckedAt time.Time `json:"checked_at"`
+}
 
 type codexFreshnessVerdict uint8
 
@@ -39,6 +52,8 @@ type codexFreshnessInspection struct {
 }
 
 var (
+	codexFreshnessNow        = time.Now
+	codexFreshnessCacheDir   = os.UserCacheDir
 	codexFreshnessExecutable = os.Executable
 	codexFreshnessGetwd      = os.Getwd
 	codexFreshnessInspect    = func(root, _ string) codexFreshnessInspection {
@@ -137,7 +152,12 @@ func (s *codexStartupStatus) Stop() {
 // runCodexFreshnessAdmission ensures a checkout-local launcher evaluates admission
 // from a current stamped binary before it starts an agent that can mutate the checkout.
 func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
-	filtered, enabled, err := parseCodexFreshnessMode(args)
+	filtered, checkNow, err := parseCodexFreshnessCheckNow(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak codex:", err)
+		return nil, 2, true
+	}
+	filtered, enabled, err := parseCodexFreshnessMode(filtered)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak codex:", err)
 		return nil, 2, true
@@ -148,7 +168,6 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 	status := codexFreshnessStatus()
 	status.Start("checking launcher")
 	defer status.Stop()
-
 	root, executable, err := codexFreshnessResolveCheckout()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
@@ -157,25 +176,40 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 	if root == "" {
 		return filtered, 0, false
 	}
-
+	statePath, err := codexFreshnessStatePath(root, executable)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
+		return nil, 1, true
+	}
+	if !checkNow && codexFreshnessLeaseValid(statePath+".json", codexFreshnessNow()) {
+		return filtered, 0, false
+	}
+	claimed, err := codexFreshnessAcquireClaim(statePath+".lock", codexFreshnessNow())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
+		return nil, 1, true
+	}
+	if !claimed {
+		status.Update("another launch is updating; using current launcher")
+		return filtered, 0, false
+	}
+	defer os.Remove(statePath + ".lock")
 	inspection := codexFreshnessInspect(root, executable)
 	if inspection.Err != nil {
 		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", inspection.Err)
 		return nil, 1, true
 	}
 	running, target := shortFreshnessID(inspection.Assessment.RunningCommit), shortFreshnessID(inspection.Assessment.TargetCommit)
-
 	switch inspection.Assessment.Verdict {
 	case codexFreshnessFresh:
 		consumeCodexFreshnessReexecMarker()
+		if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
+			return nil, 1, true
+		}
 		return filtered, 0, false
 	case codexFreshnessBehind:
 		if os.Getenv(codexFreshnessReexecEnv) != "" {
-			// The update attempt is linearized at the commit selected before its build.
-			// origin/main may legitimately advance while that attempt is in flight. Admit
-			// only the immediate child whose clean running stamp exactly matches that
-			// selected commit; the next ordinary launch has no marker and observes the new
-			// tip normally. A marker without an exact full commit never weakens admission.
 			if codexFreshnessMatchesReexecTarget(inspection.Assessment) {
 				consumeCodexFreshnessReexecMarker()
 				return filtered, 0, false
@@ -187,6 +221,10 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		installedCommit, err := codexFreshnessUpdate(root, executable)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
+			return nil, 1, true
+		}
+		if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
 			return nil, 1, true
 		}
 		status.Update(fmt.Sprintf("launching updated build %s from %s", shortFreshnessID(installedCommit), executable))
@@ -201,7 +239,6 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		return nil, 1, true
 	}
 }
-
 func codexFreshnessMatchesReexecTarget(assessment codexFreshnessAssessment) bool {
 	expected, parentPID, ok := parseCodexFreshnessReexecMarker(os.Getenv(codexFreshnessReexecEnv))
 	if !ok || parentPID != codexFreshnessParentPID() {
@@ -288,6 +325,114 @@ func isFullGitCommit(value string) bool {
 	return true
 }
 
+func parseCodexFreshnessCheckNow(args []string) ([]string, bool, error) {
+	filtered := make([]string, 0, len(args))
+	checkNow := false
+	for _, arg := range args {
+		if arg == "--freshness-check-now" {
+			checkNow = true
+		} else if strings.HasPrefix(arg, "--freshness-check-now=") {
+			return nil, false, fmt.Errorf("--freshness-check-now does not take a value")
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered, checkNow, nil
+}
+
+func codexFreshnessStatePath(root, executable string) (string, error) {
+	cacheDir, err := codexFreshnessCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve freshness cache: %w", err)
+	}
+	key := strings.ToLower(filepath.Clean(root)) + "\x00" + strings.ToLower(filepath.Clean(executable))
+	sum := sha256.Sum256([]byte(key))
+	dir := filepath.Join(cacheDir, "fak", "codex-freshness")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create freshness cache: %w", err)
+	}
+	return filepath.Join(dir, hex.EncodeToString(sum[:])), nil
+}
+func codexFreshnessLeaseValid(path string, now time.Time) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var lease codexFreshnessLease
+	if json.Unmarshal(raw, &lease) != nil || lease.CheckedAt.IsZero() || lease.CheckedAt.After(now) {
+		return false
+	}
+	return now.Sub(lease.CheckedAt) < codexFreshnessLeaseTTL
+}
+func codexFreshnessWriteLease(path string, now time.Time) error {
+	raw, err := json.Marshal(codexFreshnessLease{CheckedAt: now.UTC()})
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+func codexFreshnessAcquireClaim(path string, now time.Time) (bool, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, we := fmt.Fprintf(file, "%d\n", now.Unix())
+			ce := file.Close()
+			if we != nil {
+				_ = os.Remove(path)
+				return false, we
+			}
+			if ce != nil {
+				_ = os.Remove(path)
+				return false, ce
+			}
+			return true, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return false, fmt.Errorf("acquire freshness claim: %w", err)
+		}
+		raw, re := os.ReadFile(path)
+		if re != nil {
+			if errors.Is(re, os.ErrNotExist) {
+				continue
+			}
+			return false, fmt.Errorf("read freshness claim: %w", re)
+		}
+		info, se := os.Stat(path)
+		if se != nil {
+			if errors.Is(se, os.ErrNotExist) {
+				continue
+			}
+			return false, fmt.Errorf("inspect freshness claim: %w", se)
+		}
+		if info.ModTime().After(now) || now.Sub(info.ModTime()) < codexFreshnessClaimTTL {
+			return false, nil
+		}
+		tomb := codexFreshnessStaleClaimPath(path, raw, info)
+		if le := os.Link(path, tomb); le != nil {
+			if errors.Is(le, os.ErrExist) || errors.Is(le, os.ErrNotExist) {
+				return false, nil
+			}
+			return false, fmt.Errorf("claim stale freshness marker: %w", le)
+		}
+		li, le := os.Stat(tomb)
+		ci, ce := os.Stat(path)
+		if le != nil || ce != nil || !os.SameFile(li, ci) {
+			return false, nil
+		}
+		if de := os.Remove(path); de != nil && !errors.Is(de, os.ErrNotExist) {
+			return false, fmt.Errorf("reap stale freshness claim: %w", de)
+		}
+	}
+	return false, nil
+}
+func codexFreshnessStaleClaimPath(path string, raw []byte, info os.FileInfo) string {
+	identity := fmt.Sprintf("%x\x00%d\x00%d", raw, info.ModTime().UnixNano(), info.Size())
+	sum := sha256.Sum256([]byte(identity))
+	return path + ".stale-" + hex.EncodeToString(sum[:8])
+}
 func parseCodexFreshnessMode(args []string) ([]string, bool, error) {
 	enabled := true
 	filtered := make([]string, 0, len(args))
