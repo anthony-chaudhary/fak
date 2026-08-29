@@ -362,10 +362,11 @@ func TestExactQwen38SessionSelectsWholeDecodeBlockAndHooksOnce(t *testing.T) {
 		t.Skip("no Metal device available")
 	}
 	cfg := exactQwen38BlockTestCfg()
+	linearLayers := qwen35LinearLayerCount(cfg)
 	m := NewSynthetic(cfg)
 	m.Quantize()
 	m.q4kw = make(map[string]*q4kTensor, cfg.NumLayers*3)
-	m.kqw = make(map[string]*kQuantTensor, 48)
+	m.kqw = make(map[string]*kQuantTensor, linearLayers)
 	for layer := 0; layer < cfg.NumLayers; layer++ {
 		p := func(suffix string) string { return layerName(layer, suffix) }
 		for i, shape := range [][3]any{
@@ -405,7 +406,7 @@ func TestExactQwen38SessionSelectsWholeDecodeBlockAndHooksOnce(t *testing.T) {
 		t.Fatalf("initialize exact Qwen3.8 owners accepted=%v err=%v", accepted, err)
 	}
 	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	snapshots := make([]qwen35GDNLayerSnapshot, 0, 48)
+	snapshots := make([]qwen35GDNLayerSnapshot, 0, linearLayers)
 	for layer, state := range candidate.qwen35HAL.sequenceLayers {
 		if state.valid() {
 			snapshots = append(snapshots, qwen35GDNLayerSnapshot{
@@ -422,8 +423,8 @@ func TestExactQwen38SessionSelectsWholeDecodeBlockAndHooksOnce(t *testing.T) {
 	gotHidden := candidate.tokenHiddenQ(3, 0)
 	candidate.Close()
 	calls, receipts := backend.snapshot()
-	if calls != 48 || len(receipts) != 48 {
-		t.Fatalf("exact Qwen3.8 product path block calls=%d receipts=%d, want 48/48", calls, len(receipts))
+	if calls != linearLayers || len(receipts) != linearLayers {
+		t.Fatalf("exact Qwen3.8 product path block calls=%d receipts=%d, want one per %d linear layers", calls, len(receipts), linearLayers)
 	}
 	for i, receipt := range receipts {
 		if receipt.Encoders != 16 || receipt.ProjectionDispatches != 8 || receipt.InputUploads != 1 || receipt.ConstantUploads != 6 ||
@@ -435,8 +436,8 @@ func TestExactQwen38SessionSelectsWholeDecodeBlockAndHooksOnce(t *testing.T) {
 	metalQ4KMu.Lock()
 	q6Resolved := len(metalQ6KW[m])
 	metalQ4KMu.Unlock()
-	if q6Resolved != 48 {
-		t.Fatalf("exact Qwen3.8 Q6_K block-down handles=%d, want 48", q6Resolved)
+	if q6Resolved != linearLayers {
+		t.Fatalf("exact Qwen3.8 Q6_K block-down handles=%d, want one per %d linear layers", q6Resolved, linearLayers)
 	}
 	if hookCalls != cfg.NumLayers {
 		t.Fatalf("residual hook calls=%d, want one per layer=%d", hookCalls, cfg.NumLayers)
