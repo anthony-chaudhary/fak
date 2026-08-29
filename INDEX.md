@@ -284,6 +284,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Cross-layer sweeps: seven response surfaces, one evidence contract (2026-08-29)](docs/notes/CONCEPT-CROSS-LAYER-SWEEPS-2026-08-29.md) — maps kernel/host, native-model, serving, cache/context, routing/policy, agent-workload, and fleet/operations experiments; separates cleanup commands named sweep; and grounds the open #10189 evidence-contract spine in pinned MLCommons LoadGen validity lessons.
+
 - [Go-native performance system: compiler, runtime, concurrency, and placement (2026-08-29)](docs/notes/CONCEPT-GO-NATIVE-PERFORMANCE-SYSTEM-2026-08-29.md) — source-pinned Go 1.26+ field-borrow pass separating shipped fak usage from seven measured compiler/runtime/concurrency gaps under #10178, reconciling #9661/#1915/#5127/#2010/#2054, and excluding arenas plus style-only iterator/weak/unique migrations.
 
 - [The agent-kernel union: harness, runtime, memory, and the layers between (2026-08-29)](docs/notes/CONCEPT-AGENT-KERNEL-UNION-2026-08-29.md) — maps FAK's strongest compositional advantage as one causal identity spine across several typed lifecycles: harness intent, semantic memory, prompt/token representations, KV or recurrent state, tools, placement, quantization, trust, and witnessed outcomes. Includes the full pairwise signal matrix, agentic load profile, highly quantized/Qwen implications, PRESENT/PARTIAL/ABSENT self-query, source ledger, portfolio dispositions, failure falsifiers, and the shadow-only `TurnSnapshot -> CoordinationPlan -> causal receipt` spine tracked by #10177.
