@@ -407,13 +407,10 @@ func cmdManageCommand(commandName string, argv []string) {
 	// 1. Install the capability floor: an explicit --policy file wins; otherwise the embedded
 	//    guard floor, unioned with the operator allow overlay. With NO floor the kernel
 	//    default-denies every tool, so guard ALWAYS loads one, fail-loud. See guard_startup.go.
+	effectiveResponseProfile, effectiveWorkProfile := "full", "standard"
 	if responseProfileCapture != nil {
-		raw, err := marshalGuardProfileCapture(responseProfileCapture)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: RESPONSE_PROFILE_CAPTURE: %v\n", err)
-			os.Exit(2)
-		}
-		fmt.Fprintf(os.Stderr, "fak guard: response-profile %s\n", raw)
+		effectiveResponseProfile = responseProfileCapture.OutputProfile
+		effectiveWorkProfile = responseProfileCapture.WorkProfile
 	}
 
 	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath)
@@ -1364,6 +1361,8 @@ func cmdManageCommand(commandName string, argv []string) {
 		floorSource:          floorSource,
 		policyDigest:         policyDigest,
 		injected:             injected,
+		responseProfile:      effectiveResponseProfile,
+		workProfile:          effectiveWorkProfile,
 		logLabel:             logLabel,
 		auditLabel:           auditLabel,
 		refusalCarryForward:  refusalCarryForward,

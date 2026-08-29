@@ -30,6 +30,8 @@ type guardStartupView struct {
 	floorSource          string
 	policyDigest         string
 	injected             [][2]string
+	responseProfile      string
+	workProfile          string
 	logLabel             string
 	auditLabel           string
 	refusalCarryForward  []guardRefusalCarry
@@ -82,6 +84,15 @@ func renderGuardStartupReport(v guardStartupView) string {
 			localLabel = filepath.Base(v.ggufPath)
 		}
 		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), v.gwURL, v.up, v.resolvedBase, v.floorSource, formatGuardInjectedEnvForBanner(v.injected), v.logLabel, v.auditLabel, v.refusalCarryForward, v.remoteBase != "", v.localModel, localLabel, v.command)
+		responseProfile, workProfile := v.responseProfile, v.workProfile
+		if responseProfile == "" {
+			responseProfile = "full"
+		}
+		if workProfile == "" {
+			workProfile = "standard"
+		}
+		fmt.Fprintf(&startupReport, "  response profile : %s\n", responseProfile)
+		fmt.Fprintf(&startupReport, "  work profile     : %s\n", workProfile)
 		if v.policyDigest != "" {
 			fmt.Fprintf(&startupReport, "fak guard: active config digest %s\n", v.policyDigest)
 		}

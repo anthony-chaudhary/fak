@@ -151,3 +151,43 @@ func TestGuardStartupReportCarriesActiveConfigDigest(t *testing.T) {
 		t.Fatalf("startup report missing active config digest:\n%s", got)
 	}
 }
+
+func TestGuardStartupProfileRowsRenderForFullAndLaunchFailure(t *testing.T) {
+	view := guardStartupView{
+		gwURL:           "http://127.0.0.1:8080",
+		up:              "anthropic",
+		floorSource:     "built-in guard floor",
+		command:         []string{"claude"},
+		responseProfile: "caveman:native:medium",
+		workProfile:     "ponytail:native:medium",
+		bannerMode:      guardBannerFull,
+	}
+	report := renderGuardStartupReport(view)
+	for _, want := range []string{
+		"  response profile : caveman:native:medium\n",
+		"  work profile     : ponytail:native:medium\n",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("startup report missing human-readable profile row %q:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, `"schema": "fak.guard-profiles.v2"`) || strings.Contains(report, "response-profile {") {
+		t.Fatalf("startup report rendered raw profile JSON instead of rows:\n%s", report)
+	}
+
+	var full strings.Builder
+	writeGuardStartupBanner(&full, view, report, false, false, "", 80)
+	for _, want := range []string{"response profile : caveman:native:medium", "work profile     : ponytail:native:medium"} {
+		if !strings.Contains(full.String(), want) {
+			t.Fatalf("--banner full missing %q:\n%s", want, full.String())
+		}
+	}
+
+	var failed strings.Builder
+	guardWriteLaunchFailReport(&failed, report, true)
+	for _, want := range []string{"launch failed", "response profile : caveman:native:medium", "work profile     : ponytail:native:medium"} {
+		if !strings.Contains(failed.String(), want) {
+			t.Fatalf("launch-failure startup report missing %q:\n%s", want, failed.String())
+		}
+	}
+}
