@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:f784dff9f940dbbafb11202aa673a6d57f669cdda39a80098d7edb3f0d5c97b9",
-  "tracked_files": 18455,
-  "tracked_bytes": 420235711,
+  "content_root": "sha256:f44b97a51234c90e88a20e1eeb4355dfbc920d4d65b912cf6add519faabe303c",
+  "tracked_files": 18456,
+  "tracked_bytes": 420273334,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1862,8 +1862,8 @@
     },
     {
       "path": "INDEX.md",
-      "content_sha256": "sha256:94a13e2af6321760388d477d7cd2518d85fe5ac8f84438883b4ea4f850f876c0",
-      "bytes": 490694,
+      "content_sha256": "sha256:85cec7146b8f79b948a642309ddea8ad7c2503e6033c865e1b0acbfc61e34ec4",
+      "bytes": 491802,
       "classification": "documentation"
     },
     {
@@ -42905,6 +42905,15 @@
       "path": "docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md",
       "content_sha256": "sha256:8f8ebc3c0364f58b725cc2d89f30ff150c1e52f0d63eddcf4e020335e6f0c97f",
       "bytes": 11232,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/notes/CONCEPT-AGENT-KERNEL-UNION-2026-08-29.md",
+      "content_sha256": "sha256:20f5111828bf840bdfca81b53e798d188df4e2c43208283867403d8effcd4805",
+      "bytes": 36515,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
