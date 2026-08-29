@@ -83,7 +83,7 @@ func qwen38PagedSwapDogfoodManifest(t *testing.T, repo string) ([]qwen38PagedSwa
 			return err
 		}
 		if entry.IsDir() {
-			if rel == ".git" || rel == "_scratch" || rel == ".goal-runs" {
+			if rel == ".git" || rel == "_scratch" || rel == ".goal-runs" || rel == ".dispatch-runs" {
 				return filepath.SkipDir
 			}
 			return nil
