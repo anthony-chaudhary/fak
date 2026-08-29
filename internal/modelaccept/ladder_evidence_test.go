@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/qwen38ladder"
 )
 
 func TestBuildInventoryWithLadderEvidenceAdmission(t *testing.T) {
@@ -150,8 +152,14 @@ func assertCommittedLadderSemantics(t *testing.T, dir string) {
 		Results             []result `json:"results"`
 	}
 	decodeJSONFile(t, filepath.Join(dir, "evidence-complete.json"), &evidence)
-	if evidence.Schema != "fak.qwen38-ladder-evidence/1" || len(evidence.Results) != 6 {
+	if evidence.Schema != qwen38ladder.Schema || len(evidence.Results) != len(qwen38ladder.Stages) {
 		t.Fatalf("evidence identity = schema %q, results %d", evidence.Schema, len(evidence.Results))
+	}
+	for i, stage := range qwen38ladder.Stages {
+		result := evidence.Results[i]
+		if result.StageID != stage.ID || result.Model != stage.Model || result.Revision != stage.Revision {
+			t.Fatalf("evidence result[%d]=%+v, want stage %+v", i, result, stage)
+		}
 	}
 	target := evidence.Results[len(evidence.Results)-1]
 	if target.StageID != "target" || target.Model != "Qwen/Qwen3.8-27B" || target.Revision != "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0" || target.Trials != 3 || target.BaselinePassed != 3 || target.CandidatePassed != 3 || target.BaselineMetric != 3378.019733 || target.CandidateMetric != 376.181809 {
