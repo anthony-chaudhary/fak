@@ -94,3 +94,13 @@ listed machine and build, not a blanket support promise.
   and require a non-reference witness.
 - For production GPU serving, choose a dedicated GPU engine and connect fak over its
   supported wire.
+
+### Captured CPU-degraded governed turn
+
+The issue #9842 witness set includes a real CPU-only in-kernel turn at
+[`docs/_witnesses/issue-9842/runtime-capabilities-governed-turn.json`](../_witnesses/issue-9842/runtime-capabilities-governed-turn.json).
+The receipt joins the pre-load `local_cpu_degraded` admission to the loaded
+Qwen2.5-1.5B-Instruct Q8 artifact and the gateway's `backend=cpu-ref
+forward_path=cpu/reference` turn log. The request completed with HTTP 200 and
+an `OK` response. It names `engine: fak-native`; no llama.cpp runtime or engine
+substitution participated.
