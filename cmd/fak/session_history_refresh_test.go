@@ -6,10 +6,54 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionmine"
 )
+
+func TestSessionHistoryDefaultPathRefreshReadAndStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	codex := filepath.Join(home, ".codex", "sessions")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codex, "one.jsonl"), []byte(`{"type":"response_item","payload":{"type":"function_call","name":"view_image"}}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := runSessionHistory(&out, &errOut, []string{"refresh", "--once", "--claude-root", "", "--days", "0", "--min-support", "1"}); code != 0 {
+		t.Fatalf("refresh code=%d stderr=%s", code, errOut.String())
+	}
+	index := filepath.Join(home, ".fak", "session-history", "index.json")
+	if _, err := os.Stat(index); err != nil {
+		t.Fatalf("default index was not written at %s: %v", index, err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runSessionHistory(&out, &errOut, nil); code != 0 {
+		t.Fatalf("read code=%d stderr=%s", code, errOut.String())
+	}
+	var report sessionmine.HistoryReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics.Sessions != 1 || len(report.Sessions) != 1 {
+		t.Fatalf("default-path report=%+v", report)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runSessionHistory(&out, &errOut, []string{"status"}); code != 0 {
+		t.Fatalf("status code=%d stderr=%s", code, errOut.String())
+	}
+	if status := out.String(); !strings.Contains(status, "index: exists=true") || strings.Contains(status, "index_missing") {
+		t.Fatalf("default-path status did not inspect refreshed index:\n%s", status)
+	}
+}
 
 func TestRunSessionHistoryRefreshSpine(t *testing.T) {
 	root := t.TempDir()

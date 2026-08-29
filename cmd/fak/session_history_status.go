@@ -15,7 +15,7 @@ func runSessionIndexHealth(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("session-history status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home, _ := os.UserHomeDir()
-	index := fs.String("index", "", "path to fak-sessionmine-index/1")
+	index := fs.String("index", defaultHistoryIndexPath(), "path to fak-sessionmine-index/1")
 	codex := fs.String("codex-root", filepath.Join(home, ".codex", "sessions"), "Codex session JSONL root")
 	claude := fs.String("claude-root", filepath.Join(home, ".claude", "projects"), "Claude project JSONL root")
 	asJSON := fs.Bool("json", false, "emit fak-session-history-status/1 JSON")

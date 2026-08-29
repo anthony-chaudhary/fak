@@ -21,7 +21,7 @@ func runSessionHistory(stdout, stderr io.Writer, args []string) int {
 	}
 	fs := flag.NewFlagSet("session-history", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	index := fs.String("index", "", "path to fak-sessionmine-index/1")
+	index := fs.String("index", defaultHistoryIndexPath(), "path to fak-sessionmine-index/1")
 	provider := fs.String("provider", "", "filter by provider")
 	minErrors := fs.Int("min-errors", 0, "minimum tool errors")
 	limit := fs.Int("limit", 25, "maximum ranked sessions")
