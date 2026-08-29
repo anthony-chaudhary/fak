@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
 // serveBackendForwardPreflight is non-empty only when startup admitted a
@@ -23,6 +24,30 @@ type serveBackendForwardPreflight struct {
 // serveGGUFHeaderOpener is injectable so the startup boundary can be witnessed
 // against a header whose tensor payload reader is deliberately trapped.
 type serveGGUFHeaderOpener func(string) (*ggufload.WeightSource, error)
+
+// serveLocalRuntimeLauncher is the narrow handoff from pure admission to the
+// later harness-owned runtime lifecycle. It is invoked only for an admitted,
+// fully evidenced resource plan.
+type serveLocalRuntimeLauncher func(modelreg.LocalLaunchResourceReservation) error
+
+// preflightServeLocalRuntime is the declaration-aware admission seam adjacent
+// to the existing backend-forward preflight. Legacy fak-native serve startup
+// continues to use preflightServeBackendForward unchanged; a harness-owned
+// local-runtime launcher enters here and therefore cannot run before artifact,
+// runtime, device, and resource facts have admitted it.
+func preflightServeLocalRuntime(req modelreg.LocalAdmissionRequest, launch serveLocalRuntimeLauncher) (modelreg.LocalAdmissionDecision, error) {
+	decision := modelreg.EvaluateLocalAdmission(req)
+	if err := decision.RefusalError(); err != nil {
+		return decision, err
+	}
+	if launch == nil {
+		return decision, nil
+	}
+	if err := launch(*decision.Plan); err != nil {
+		return decision, fmt.Errorf("serve local runtime launch: %w", err)
+	}
+	return decision, nil
+}
 
 func preflightServeBackendForward(path string, be compute.Backend) (serveBackendForwardPreflight, error) {
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
