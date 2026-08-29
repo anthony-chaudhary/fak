@@ -1,6 +1,9 @@
 package capindex
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestQueryProductOutcomesPerformanceFirst(t *testing.T) {
 	tests := []struct {
@@ -59,6 +62,52 @@ func TestQueryProductOutcomesFindsFleetCommitHealthCheck(t *testing.T) {
 		card := got[0]
 		if len(card.Command) != 4 || card.Command[0] != "fak" || card.Command[1] != "fleet" || card.Command[2] != "health" || card.Command[3] != "--json" {
 			t.Fatalf("query %q command=%v", query, card.Command)
+		}
+	}
+}
+
+func TestQueryProductOutcomesFindsNativePerformanceStages(t *testing.T) {
+	tests := []struct {
+		query   string
+		wantID  string
+		command []string
+	}{
+		{"serve native model", "native-serve", []string{"fak", "serve", "--gguf", "<model.gguf>", "--metal"}},
+		{"benchmark native inference", "model-benchmark", []string{"fak", "benchmarks", "describe", "modelbench"}},
+		{"evaluate model quality", "model-quality", []string{"fak", "quality", "run", "--json"}},
+		{"profile native bottleneck", "native-profile", []string{"fak", "native-performance", "--profile-next", "profile.json"}},
+		{"performance receipt", "performance-receipt", []string{"fak", "native-performance", "--gate", "gate-request.json"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.wantID, func(t *testing.T) {
+			got := QueryProductOutcomes(tc.query, 1)
+			if len(got) != 1 || got[0].ID != tc.wantID {
+				t.Fatalf("QueryProductOutcomes(%q, 1) = %#v, want %q first", tc.query, got, tc.wantID)
+			}
+			if !reflect.DeepEqual(got[0].Command, tc.command) {
+				t.Fatalf("%s command = %#v, want %#v", tc.wantID, got[0].Command, tc.command)
+			}
+		})
+	}
+}
+
+func TestNativePerformanceStagesDoNotCaptureUnrelatedIntents(t *testing.T) {
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{"model routing", "model-routing"},
+		{"turn control", "turn-savings"},
+	}
+	for _, tc := range tests {
+		got := QueryProductOutcomes(tc.query, 1)
+		if len(got) != 1 || got[0].ID != tc.want {
+			t.Errorf("QueryProductOutcomes(%q, 1) = %#v, want %q first", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{"handle customer service requests", "update my account profile"} {
+		if got := QueryProductOutcomes(query, 1); len(got) != 0 {
+			t.Errorf("QueryProductOutcomes(%q, 1) = %#v, want no unrelated capability", query, got)
 		}
 	}
 }
