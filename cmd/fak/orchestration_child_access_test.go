@@ -113,6 +113,105 @@ func TestUltracodeChildAccessCompilation(t *testing.T) {
 	}
 }
 
+func TestUltracodeChildAccessLowersTypedWorkerEffectIntoLaunch(t *testing.T) {
+	parent, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxWorkers := 2
+	resolution, err := orchestration.Resolve(
+		orchestration.OrchestrationProfile{Name: orchestration.ProfileUltracode, MaxWorkers: &maxWorkers},
+		orchestration.TaskSpec{
+			Schema: "fak-orchestration-task/1",
+			ID:     "typed-worker-access",
+			WorkerAccess: []orchestration.WorkerAccessSpec{{
+				RoleID: "worker-1",
+				Access: orchestration.ChildAccess{
+					Mode:     orchestration.ChildAccessEffect,
+					ReadSet:  []string{"internal/orchestration"},
+					WriteSet: []string{"internal/orchestration"},
+					Tools:    []string{"Read", "Write"},
+				},
+			}},
+		},
+		orchestration.HarnessCapabilities{
+			Concurrency: orchestration.SupportNative, TaskMessaging: orchestration.SupportNative,
+			Cancellation: orchestration.SupportNative, Leases: orchestration.SupportNative,
+			IndependentWitness: orchestration.SupportNative, ClaudeSpeed: orchestration.SupportNative,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Resolved.Roles[0].ID != "lead" || resolution.Resolved.Roles[0].Access.Mode != orchestration.ChildAccessObserve {
+		t.Fatalf("lead access = %+v", resolution.Resolved.Roles[0].Access)
+	}
+
+	oldSnapshot := orchestrationChildAccessSnapshotLoader
+	orchestrationChildAccessSnapshotLoader = func(string) (orchestrationChildAccessSnapshot, error) {
+		return orchestrationChildAccessSnapshot{
+			Parent: parent,
+			Taxonomy: laneadmit.Taxonomy{
+				Loaded:    true,
+				Trees:     map[string][]string{"orchestration": {"internal/orchestration/**"}},
+				Exclusive: map[string]bool{},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { orchestrationChildAccessSnapshotLoader = oldSnapshot })
+
+	oldLauncher := orchestrationWorkerLauncher
+	var launched []orchestrationWorkerLaunchRequest
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		launched = append(launched, req)
+		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: 9901, Status: "started"}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = oldLauncher })
+
+	home := externalOrchestrationTestHome(t)
+	receipt, err := launchCodexOrchestrationWorkers(home, "session-typed-access", "ultracode", "native", "implement issue 9901", resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != "launched" || len(launched) != 1 {
+		t.Fatalf("receipt=%+v launched=%d", receipt, len(launched))
+	}
+	if len(receipt.Workers) != 1 || receipt.Workers[0].AccessMode != string(orchestration.ChildAccessEffect) ||
+		receipt.Workers[0].ReadOnly || receipt.Workers[0].WriteTree != "internal/orchestration/**" {
+		t.Fatalf("launch receipt lost typed effect: %+v", receipt.Workers)
+	}
+	worker := launched[0]
+	if worker.Role.ID != "worker-1" || worker.Access.Mode != orchestration.ChildAccessEffect ||
+		worker.Access.Admission.ReadOnly || worker.Access.Admission.Lane != "orchestration" ||
+		len(worker.Access.Admission.Tree) != 1 || worker.Access.Admission.Tree[0] != "internal/orchestration/**" {
+		t.Fatalf("lowered worker access = %+v", worker.Access)
+	}
+	mainBefore, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertChildAccessVerdict(t, worker.Access.Policy, "Write", `{"file_path":"internal/orchestration/new.go","content":"x"}`, abi.VerdictAllow)
+	assertChildAccessVerdict(t, worker.Access.Policy, "Write", `{"file_path":"cmd/fak/main.go","content":"x"}`, abi.VerdictDeny)
+	mainAfter, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(mainBefore) != string(mainAfter) {
+		t.Fatal("denied out-of-scope write changed cmd/fak/main.go")
+	}
+
+	args := strings.Join(orchestrationWorkerArgs(worker, filepath.Join(home, "worker.audit.jsonl")), " ")
+	if !strings.Contains(args, "--lease mode=enforce,lane=orchestration,tree=internal/orchestration/**") {
+		t.Fatalf("worker args lack exact enforced lease: %s", args)
+	}
+	prompt := orchestrationWorkerPrompt(worker)
+	for _, want := range []string{"compiled effect envelope", "lane orchestration", "write tree internal/orchestration/**", "tools Read,Write"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("effect prompt missing %q: %s", want, prompt)
+		}
+	}
+}
+
 func assertChildAccessVerdict(t *testing.T, runtime policy.Runtime, tool, args string, want abi.VerdictKind) {
 	t.Helper()
 	call := &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(args)}}

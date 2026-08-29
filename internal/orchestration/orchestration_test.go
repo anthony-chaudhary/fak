@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -26,6 +27,96 @@ func TestPrecedence(t *testing.T) {
 	}
 	if got := r.Overrides[len(r.Overrides)-1].Source; got != "operator" {
 		t.Fatalf("last source=%s", got)
+	}
+}
+
+func TestResolveWorkerAccessDefaultsObserveAndBindsOneWorker(t *testing.T) {
+	req := OrchestrationProfile{Name: ProfileUltracode, MaxWorkers: ptr(2)}
+	omitted, err := Resolve(req, TaskSpec{Schema: "fak-orchestration-task/1", ID: "omitted"}, nativeCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range omitted.Resolved.Roles {
+		if role.Access.Mode != ChildAccessObserve || len(role.Access.WriteSet) != 0 {
+			t.Fatalf("omitted worker_access granted authority to %+v", role)
+		}
+	}
+
+	task := TaskSpec{
+		Schema: "fak-orchestration-task/1",
+		ID:     "bounded",
+		WorkerAccess: []WorkerAccessSpec{{
+			RoleID: "worker-1",
+			Access: ChildAccess{
+				Mode:     ChildAccessEffect,
+				ReadSet:  []string{"internal/orchestration"},
+				WriteSet: []string{`internal\\orchestration`, "internal/orchestration"},
+				Tools:    []string{"Read", "Write"},
+			},
+		}},
+	}
+	got, err := Resolve(req, task, nativeCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Resolved.Roles[0].ID != "lead" || got.Resolved.Roles[0].Access.Mode != ChildAccessObserve {
+		t.Fatalf("lead authority changed: %+v", got.Resolved.Roles[0])
+	}
+	worker := got.Resolved.Roles[1]
+	if worker.ID != "worker-1" || worker.Access.Mode != ChildAccessEffect ||
+		!reflect.DeepEqual(worker.Access.WriteSet, []string{"internal/orchestration"}) {
+		t.Fatalf("worker access = %+v", worker.Access)
+	}
+}
+
+func TestResolveWorkerAccessRejectsInvalidBindings(t *testing.T) {
+	req := OrchestrationProfile{Name: ProfileUltracode, MaxWorkers: ptr(2)}
+	cases := []struct {
+		name string
+		all  []WorkerAccessSpec
+		want error
+	}{
+		{
+			name: "unknown role",
+			all:  []WorkerAccessSpec{{RoleID: "worker-2", Access: ChildAccess{Mode: ChildAccessObserve}}},
+			want: ErrUnknownWorkerRole,
+		},
+		{
+			name: "lead is not a worker authority target",
+			all:  []WorkerAccessSpec{{RoleID: "lead", Access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"internal/orchestration"}, Tools: []string{"Write"}}}},
+			want: ErrUnknownWorkerRole,
+		},
+		{
+			name: "duplicate role",
+			all: []WorkerAccessSpec{
+				{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessObserve}},
+				{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessObserve}},
+			},
+			want: ErrDuplicateWorkerRole,
+		},
+		{
+			name: "observe with write set",
+			all:  []WorkerAccessSpec{{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessObserve, WriteSet: []string{"internal/orchestration"}}}},
+			want: ErrObserverWriteSet,
+		},
+		{
+			name: "effect without write set",
+			all:  []WorkerAccessSpec{{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessEffect, Tools: []string{"Write"}}}},
+			want: ErrEffectWriteSetRequired,
+		},
+		{
+			name: "multi region effect",
+			all:  []WorkerAccessSpec{{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"internal/orchestration", "cmd/fak"}, Tools: []string{"Write"}}}},
+			want: ErrEffectWriteSetRegions,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Resolve(req, TaskSpec{Schema: "fak-orchestration-task/1", ID: "invalid", WorkerAccess: tc.all}, nativeCaps())
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
