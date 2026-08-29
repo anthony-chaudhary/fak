@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -261,6 +262,24 @@ func TestRunAdapterWritesNothingWhenProbeFails(t *testing.T) {
 func TestAdapterHelperProcess(t *testing.T) {
 	separator := slices.Index(os.Args, "--")
 	if separator < 0 || separator+1 >= len(os.Args) {
+		dir := t.TempDir()
+		marker := filepath.Join(dir, "marker")
+		observation := filepath.Join(dir, "observation.json")
+		want := []byte(`{"identity":{"runtime":"fak"}}`)
+		if err := os.WriteFile(observation, want, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(helperCommand("observation")[0], append(helperCommand("observation")[1:], marker, observation)...)
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("observation helper failed: %v", err)
+		}
+		if !slices.Equal(output, want) {
+			t.Fatalf("observation output = %q, want %q", output, want)
+		}
+		if markerRaw, err := os.ReadFile(marker); err != nil || string(markerRaw) != "called\n" {
+			t.Fatalf("observation marker = %q, %v", markerRaw, err)
+		}
 		return
 	}
 	args := os.Args[separator+1:]

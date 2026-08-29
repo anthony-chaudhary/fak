@@ -24,6 +24,11 @@ const (
 func TestSystemBaselineHelper(t *testing.T) {
 	mode := os.Getenv(systemBaselineHelperModeEnv)
 	if mode == "" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+		cmd.Env = systemBaselineHelperEnv("success")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("success helper failed: %v: %s", err, output)
+		}
 		return
 	}
 	switch mode {

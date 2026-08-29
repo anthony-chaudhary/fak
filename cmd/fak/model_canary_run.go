@@ -802,12 +802,6 @@ func validateModelCanaryEndpoints(name string, endpoints []string, port int) err
 	return nil
 }
 
-func validateModelCanarySample(sample modelCanarySample, expected modelCanaryProcessIdentity) error {
-	baseline := sample.SwapUsedBytes - sample.SwapGrowthBytes
-	_, err := validateModelCanarySampleAt(sample, expected, baseline, time.Time{}, time.Now().UTC(), 0)
-	return err
-}
-
 func validateModelCanarySampleAt(sample modelCanarySample, expected modelCanaryProcessIdentity, baselineSwap int64, previous, now time.Time, interval time.Duration) (time.Time, error) {
 	if !sample.Candidate.equal(expected) {
 		return time.Time{}, errors.New("sample candidate PID/start/argv identity does not match the launched candidate")

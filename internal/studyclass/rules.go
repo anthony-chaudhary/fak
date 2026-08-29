@@ -132,26 +132,6 @@ type dispositionMatch struct {
 	evidence   Evidence
 }
 
-func dispositionSignal(r studyforge.Record, labels, textSignals []string, rule string) (dispositionMatch, bool) {
-	labelSet := normalizedLabels(r.Labels)
-	for _, signal := range labels {
-		if labelSet[strings.ToLower(signal)] {
-			return dispositionMatch{ConfidenceHigh, Evidence{Rule: "disposition." + rule + ".label", Field: "labels", Signal: signal}}, true
-		}
-	}
-	for _, signal := range textSignals {
-		if containsSignal(r.Title, signal) {
-			return dispositionMatch{ConfidenceMedium, Evidence{Rule: "disposition." + rule + ".title", Field: "title", Signal: signal}}, true
-		}
-	}
-	for _, signal := range textSignals {
-		if containsSignal(r.Body, signal) {
-			return dispositionMatch{ConfidenceLow, Evidence{Rule: "disposition." + rule + ".body", Field: "body", Signal: signal}}, true
-		}
-	}
-	return dispositionMatch{}, false
-}
-
 func classifyMechanisms(r studyforge.Record, disposition Disposition) []MechanismMatch {
 	if disposition == DispositionReleaseMetadataNoncandidate {
 		return []MechanismMatch{{
