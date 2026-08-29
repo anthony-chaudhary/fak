@@ -386,7 +386,15 @@ func IsWorkerWorktree(path string) bool {
 }
 
 func samePath(a, b string) bool {
-	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	return strings.EqualFold(canonicalComparisonPath(a), canonicalComparisonPath(b))
+}
+
+func canonicalComparisonPath(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return clean
 }
 
 // --------------------------------------------------------------------------- //

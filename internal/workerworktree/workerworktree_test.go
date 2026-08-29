@@ -593,8 +593,7 @@ func TestLandDiffErrorFailsOpen(t *testing.T) {
 // TestLandDerivesMsgFromWorktreeTipWhenNoFile proves the witness-sweep call site
 // (which has no pre-written message file) borrows the worker's own commit subject.
 func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-o\n+n\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-o\n+n\n", "x\n").
 		reply("log", 0, "fix(x): resolve thing (#3168) (fak x)\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")

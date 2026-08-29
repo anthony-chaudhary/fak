@@ -274,6 +274,11 @@ func Inventory(root string, git GitRunner) ([]InventoryRow, error) {
 			rows = append(rows, row)
 			continue
 		}
+		// Git may enumerate the macOS /var symlink as /private/var. Preserve the
+		// coordinator-owned prepare path in receipts and ready-to-run argv after
+		// LoadIntent has proved both spellings identify the same worktree.
+		wt = in.Path
+		row.Path = wt
 		row.BaseSHA = in.BaseSHA
 		if code, out := run(git, wt, []string{"rev-parse", "HEAD"}); code == 0 {
 			row.HeadSHA = strings.TrimSpace(out)
