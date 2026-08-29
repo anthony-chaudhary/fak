@@ -1096,6 +1096,8 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		DecodeSeconds:              decodeS,
 		Model:                      p.modelID,
 		Engine:                     "inkernel",
+		Planner:                    "inkernel",
+		Owner:                      "fak",
 		Backend:                    backend,
 		ForwardPath:                forwardPath,
 		Q4K:                        p.q4k,

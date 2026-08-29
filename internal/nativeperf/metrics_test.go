@@ -18,6 +18,7 @@ func TestReceiptMetricsProjectsNativeReceipt(t *testing.T) {
 	}
 	out := m.Prometheus(now.Add(10 * time.Second))
 	for _, want := range []string{
+		`fak_native_runtime_info{engine="inkernel",backend="metal",forward_path="qwen_metal",model="qwen3.8",planner="inkernel",owner="fak"} 1`,
 		`fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal"} 1`,
 		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="queue"} 0.2`,
 		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="prefill"} 0.3`,
@@ -120,6 +121,8 @@ func fixtureNativeReceipt() *agent.NativeInferenceReceipt {
 		DecodeSeconds:  0.7,
 		Model:          "Qwen3.8-fixture",
 		Engine:         "inkernel",
+		Planner:        "inkernel",
+		Owner:          "fak",
 		Backend:        "metal",
 		ForwardPath:    "qwen35-metal-gdn-preprojected-sequence",
 		Q4K:            true,
