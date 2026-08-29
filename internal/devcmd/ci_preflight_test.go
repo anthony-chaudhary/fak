@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
+	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
 func TestCIPreflightGoArgsArePathPortable(t *testing.T) {
@@ -210,6 +211,51 @@ func TestCIPreflightAcceptsFreshCommittedDisambiguationArtifact(t *testing.T) {
 		"cmd/fak/main.go": disambiguationFixtureMain,
 		"docs/generated/disambiguation-index.json": "fresh\n",
 	})
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 0 || !res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+}
+
+func TestCIPreflightRejectsStaleCommittedStudySelfInventory(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "seed", map[string]string{"README.md": "one\n"})
+	manifest, err := studymonitor.BuildSelfInventory(repo, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data bytes.Buffer
+	if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, repo, git, "manifest", map[string]string{studymonitor.DefaultSelfInventoryPath: data.String()})
+	commitFiles(t, repo, git, "tracked mutation", map[string]string{"README.md": "two\n"})
+
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 1 || res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+	for _, failure := range res.Failures {
+		if failure.Step == "study-self-inventory" && strings.Contains(failure.Detail, "[content_changed] README.md") {
+			return
+		}
+	}
+	t.Fatalf("missing typed study-self-inventory failure: %+v", res.Failures)
+}
+
+func TestCIPreflightAcceptsFreshCommittedStudySelfInventory(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "seed", map[string]string{"README.md": "one\n"})
+	manifest, err := studymonitor.BuildSelfInventory(repo, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data bytes.Buffer
+	if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, repo, git, "manifest", map[string]string{studymonitor.DefaultSelfInventoryPath: data.String()})
+
 	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
 	if code != 0 || !res.OK {
 		t.Fatalf("code=%d result=%+v", code, res)
