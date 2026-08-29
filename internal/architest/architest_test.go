@@ -764,6 +764,7 @@ var tier = map[string]int{
 	"studyforge":                 1, // stdlib-only forge evidence collector; network and filesystem stay at its explicit boundary.
 	"studylink":                  1, // stdlib-only study evidence join and validation primitive.
 	"witnessprocess":             1, // stdlib-only process-witness classification contract.
+	"dockerprocess":              1, // static-literal Docker Compose launcher; stdlib-only, called only by off-path control flows.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
