@@ -615,7 +615,7 @@ func TestSessionRecoverUnifiedPreviewAndLiveWitness(t *testing.T) {
 	if err := json.Unmarshal(previewOut.Bytes(), &preview); err != nil {
 		t.Fatal(err)
 	}
-	if len(preview.Results) != 5 || preview.WitnessPath == "" {
+	if len(preview.Results) != len(base.Sessions) || preview.WitnessPath == "" {
 		t.Fatalf("preview=%+v", preview)
 	}
 	if _, err := os.Stat(preview.WitnessPath); err != nil {

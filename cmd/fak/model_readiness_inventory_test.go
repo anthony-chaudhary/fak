@@ -59,8 +59,35 @@ func TestRunModelReadinessInventoryExactLadderScopedHoldReadback(t *testing.T) {
 		t.Fatalf("inventory=%+v", got)
 	}
 	evidence := got.Rows[0].LadderEvidence
-	if evidence.Model != "Qwen/Qwen3.8-27B" || evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Correctness.Trials != 3 || evidence.Correctness.BaselinePassed != 3 || evidence.Correctness.CandidatePassed != 3 || evidence.P95.BaselineMetric != 3378.019733 || evidence.P95.CandidateMetric != 376.181809 || evidence.P95.Improvement != 88.86383624923602 || len(evidence.ArtifactHashes) != 6 {
+	if evidence.Model != "Qwen/Qwen3.8-27B" || evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Correctness.Trials != 3 || evidence.Correctness.BaselinePassed != 3 || evidence.Correctness.CandidatePassed != 3 || evidence.P95.BaselineMetric != 3378.019733 || evidence.P95.CandidateMetric != 376.181809 || evidence.P95.Improvement != 88.86383624923602 {
 		t.Fatalf("evidence=%+v", evidence)
+	}
+	manifestBody, err := os.ReadFile(filepath.Join(dir, "checksums.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest []struct {
+		File   string `json:"file"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	wantArtifacts := make(map[string]string, len(manifest))
+	for _, artifact := range manifest {
+		wantArtifacts[artifact.File] = artifact.SHA256
+	}
+	if len(evidence.ArtifactHashes) != len(wantArtifacts) {
+		t.Fatalf("artifact hashes=%+v want manifest=%+v", evidence.ArtifactHashes, wantArtifacts)
+	}
+	for _, artifact := range evidence.ArtifactHashes {
+		if want, ok := wantArtifacts[artifact.Path]; !ok || artifact.SHA256 != want {
+			t.Fatalf("artifact hash %+v not bound to manifest", artifact)
+		}
+		delete(wantArtifacts, artifact.Path)
+	}
+	if len(wantArtifacts) != 0 {
+		t.Fatalf("manifest artifacts omitted from evidence: %+v", wantArtifacts)
 	}
 	passCells := 0
 	for _, cell := range got.Rows[0].ReadinessCells {

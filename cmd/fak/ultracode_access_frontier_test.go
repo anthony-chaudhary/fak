@@ -12,6 +12,7 @@ import (
 )
 
 func TestUltracodeBenchAccessFrontierJSON(t *testing.T) {
+	fixture := ultracodebench.AccessModeFrontierFixture()
 	var out, errOut bytes.Buffer
 	code := runUltracodeBench(&out, &errOut, []string{"--scenario", "access-frontier", "--widths", "1,2,4,8", "--json"})
 	if code != 0 {
@@ -30,8 +31,13 @@ func TestUltracodeBenchAccessFrontierJSON(t *testing.T) {
 			t.Fatalf("missing exclusion %q in %q", excluded, joined)
 		}
 	}
-	if len(report.Artifacts) != 2 || len(report.Artifacts[0].Cells) != 12 || len(report.Artifacts[1].Cells) != 12 {
+	if len(report.Artifacts) != len(fixture.Artifacts) {
 		t.Fatalf("matrix shape = %+v", report.Artifacts)
+	}
+	for i, artifact := range report.Artifacts {
+		if artifact.EvidenceKind != fixture.Artifacts[i].EvidenceKind || artifact.SourceArtifact != fixture.Artifacts[i].SourceArtifact || len(artifact.Cells) != len(fixture.Artifacts[i].Cells) {
+			t.Fatalf("artifact[%d] not bound to fixture: got=%+v want=%+v", i, artifact, fixture.Artifacts[i])
+		}
 	}
 	if report.Artifacts[0].Cells[4].Verdict != "GAIN" || report.Artifacts[1].Cells[0].Verdict != "ABSTAIN" {
 		t.Fatalf("offline/live verdicts = %+v", report.Artifacts)

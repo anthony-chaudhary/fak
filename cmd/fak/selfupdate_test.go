@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,10 @@ func TestSelfUpdateAttemptPinsSelectionAcrossMovingOrigin(t *testing.T) {
 		case len(args) >= 1 && args[0] == "fetch":
 			fetches++
 			return "", true
-		case len(args) == 5 && args[0] == "worktree" && args[1] == "add":
+		case len(args) >= 2 && args[0] == "worktree" && args[1] == "add":
+			if want := []string{"--detach", buildDir, selected}; !slices.Equal(args[2:], want) {
+				return "unexpected worktree add arguments", false
+			}
 			addedRef = args[4]
 			if err := os.MkdirAll(args[3], 0o755); err != nil {
 				return err.Error(), false

@@ -268,7 +268,8 @@ func verifyModelCanaryDarwinCapture(c modelCanaryDarwinCapture) error {
 		fmt.Fprintf(&bundle, "%s\n", source.SourceSHA256)
 	}
 	for _, provenance := range c.Provenance {
-		if provenance.Path == "" || len(provenance.SHA256) != 64 {
+		digest, err := hex.DecodeString(provenance.SHA256)
+		if provenance.Path == "" || err != nil || len(digest) != sha256.Size || provenance.SHA256 != hex.EncodeToString(digest) {
 			return fmt.Errorf("capture provenance binding is incomplete")
 		}
 		fmt.Fprintf(&bundle, "%s\n%s\n", provenance.Path, provenance.SHA256)
