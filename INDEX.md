@@ -1,5 +1,8 @@
 # INDEX — the full map of the fak repo
 
+- [docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md](docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md) — production-sized, repository-derived Qwen3.8 paged-swap codec round-trip witness for issue #9617.
+
+
 - [`docs/notes/LONG-CONTEXT-MODEL-PRESETS-2026-08-28.md`](docs/notes/LONG-CONTEXT-MODEL-PRESETS-2026-08-28.md) — dated, source-pinned Qwen3.8-Flash-Next and GLM-5.3-Flash analytical presets for the generic long-context estimator.
 
 - [`docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md`](docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md) — pinned study of Endless's open-turn `wait_for_user_input` mechanism, fak seams, exclusions, and measured borrow portfolio.
