@@ -205,6 +205,10 @@ func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 		fmt.Fprintln(os.Stderr, "backend: -require-non-reference needs -backend to name a compute backend")
 		f.exit(2)
 	}
+	if (*f.vulkanQ4KProfile || *f.vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, *f.vulkanQ4KProfile, *f.vulkanStageQ4K) {
+		fmt.Fprintln(os.Stderr, "backend: -vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
+		f.exit(2)
+	}
 	return be, registeredBackends
 }
 
@@ -267,9 +271,11 @@ func runVerify(f *benchFlags, m *model.Model, vocab int) {
 		ids := lcgIDs(P, vocab)
 		sc := m.NewSession()
 		sc.Quant = true
+		sc.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 		lc := sc.Prefill(ids)
 		sg := m.NewSession()
 		sg.Metal = true
+		sg.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 		lg := sg.Prefill(ids)
 		var maxAbs float64
 		ac, ag := mathx.ArgmaxF32(lc), mathx.ArgmaxF32(lg)
@@ -349,6 +355,7 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 func applyLegacySessionFlags(s *model.Session, f *benchFlags) {
 	s.Quant = *f.quant
 	s.Q4K = *f.q4k
+	s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 	if *f.q4k {
 		s.MetalQ4K = *f.metal
 		return

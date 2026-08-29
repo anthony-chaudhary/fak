@@ -9,10 +9,26 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
+
+func TestNativeScoutPlannerUsesTypedConfigOverAmbientValues(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "4096")
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "0")
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	want := agent.InKernelPlannerConfig{
+		QwenQ4KPrefillChunkTokens: 1024,
+		Qwen35MetalGDNSequence:    true,
+		Q4KGateUpOutputSlab:       true,
+	}
+	p := newNativeScoutInKernelPlanner(model.NewSynthetic(model.Config{VocabSize: 8, HiddenSize: 4, NumLayers: 1}), nil, "typed-scout", false, nil, nativeControlConfig{Planner: want})
+	if got := p.RuntimeConfig(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("scout planner config = %+v, want %+v", got, want)
+	}
+}
 
 // stubScoutCompleter is a fixed-answer scoutCompleter: it returns a canned
 // completion so the classify+parse wiring is provable with no weights on disk.
@@ -131,7 +147,7 @@ func TestBindNativeScoutSmollm2Smoke(t *testing.T) {
 	if scoutSmollm2LocalPath() == "" {
 		t.Skip("smollm2 weights not cached locally (run `fak run smollm2 hi` to fetch); skipping native scout smoke")
 	}
-	classify := bindNativeScout("smollm2")
+	classify := bindNativeScout("smollm2", nativeControlConfig{})
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	subj := modelroute.Subject{

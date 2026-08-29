@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,12 +52,18 @@ func TestDecideGuardResourceAllowsHealthyTree(t *testing.T) {
 	}
 }
 
-func TestGuardResourcePolicyFromEnv(t *testing.T) {
-	t.Setenv("FAK_CHILD_MAX_COMMIT_MB", "123")
+func TestGuardResourcePolicyFromExplicitConfig(t *testing.T) {
+	old := guardResourceConfigured
+	t.Cleanup(func() { setGuardResourceConfig(old) })
 	t.Setenv("FAK_SYSTEM_COMMIT_HEADROOM_MB", "456")
-	t.Setenv("FAK_CHILD_RESOURCE_POLL", "250ms")
-	p := guardResourcePolicyFromEnv()
-	if p.MaxTreeBytes != 123<<20 || p.MinSystemHeadroom != 456<<20 || p.PollInterval != 250*time.Millisecond {
+	t.Setenv("FAK_CHILD_RESOURCE_POLL", "5s")
+	setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: 123, PollInterval: 250 * time.Millisecond})
+	p := guardResourcePolicyConfigured()
+	wantHeadroom := uint64(456 << 20)
+	if runtime.GOOS == "darwin" {
+		wantHeadroom = 0
+	}
+	if p.MaxTreeBytes != 123<<20 || p.MinSystemHeadroom != wantHeadroom || p.PollInterval != 250*time.Millisecond {
 		t.Fatalf("policy=%+v", p)
 	}
 	if runtime.GOOS == "darwin" && p.Metric != procguard.MemoryMetricRSS {
@@ -66,12 +71,15 @@ func TestGuardResourcePolicyFromEnv(t *testing.T) {
 	}
 }
 
-func TestGuardResourceGenericOverrideTakesPrecedence(t *testing.T) {
+func TestGuardResourceLegacyEnvironmentNoLongerOverridesConfig(t *testing.T) {
+	old := guardResourceConfigured
+	t.Cleanup(func() { setGuardResourceConfig(old) })
 	t.Setenv("FAK_CHILD_MAX_MEMORY_MB", "77")
 	t.Setenv("FAK_CHILD_MAX_RSS_MB", "88")
 	t.Setenv("FAK_CHILD_MAX_COMMIT_MB", "99")
-	if got := guardResourcePolicyFromEnv().MaxTreeBytes; got != 77<<20 {
-		t.Fatalf("generic override=%d want %d", got, uint64(77)<<20)
+	setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: 66})
+	if got := guardResourcePolicyConfigured().MaxTreeBytes; got != 66<<20 {
+		t.Fatalf("explicit override=%d want %d", got, uint64(66)<<20)
 	}
 }
 
@@ -184,7 +192,11 @@ func TestAppendGuardResourceReceipt(t *testing.T) {
 }
 
 func TestGuardResourceReceiptPathDefaultsDurably(t *testing.T) {
-	t.Setenv("FAK_CHILD_RESOURCE_JOURNAL", "")
+	old := guardResourceConfigured
+	t.Cleanup(func() { setGuardResourceConfig(old) })
+	setGuardResourceConfig(guardResourceConfig{})
+	legacy := filepath.Join(t.TempDir(), "legacy-resource.jsonl")
+	t.Setenv("FAK_CHILD_RESOURCE_JOURNAL", legacy)
 	base := t.TempDir()
 	wantBase := base
 	if runtime.GOOS == "windows" {
@@ -202,47 +214,40 @@ func TestGuardResourceReceiptPathDefaultsDurably(t *testing.T) {
 	if got != want {
 		t.Fatalf("default receipt path=%q want=%q", got, want)
 	}
+	if got == legacy {
+		t.Fatal("legacy resource journal unexpectedly controls the receipt path")
+	}
 }
 
 func TestGuardResourcePolicyEdgeAndAdversarialInputs(t *testing.T) {
-	const maxSafeMB = ^uint64(0) >> 20
-	for _, key := range []string{"FAK_CHILD_MAX_MEMORY_MB", "FAK_CHILD_MAX_COMMIT_MB", "FAK_CHILD_MAX_RSS_MB", "FAK_SYSTEM_COMMIT_HEADROOM_MB", "FAK_CHILD_RESOURCE_POLL"} {
-		t.Setenv(key, "")
-	}
-	defaults := guardResourcePolicyFromEnv()
+	old := guardResourceConfigured
+	t.Cleanup(func() { setGuardResourceConfig(old) })
+	setGuardResourceConfig(guardResourceConfig{})
+	defaults := guardResourcePolicyConfigured()
 	tests := []struct {
 		name       string
-		memory     string
-		headroom   string
-		poll       string
+		config     guardResourceConfig
 		wantMemory uint64
-		wantHead   uint64
 		wantPoll   time.Duration
-		override   bool
 	}{
-		{name: "empty"},
-		{name: "whitespace", memory: "  ", headroom: "\t", poll: "\n"},
-		{name: "malformed", memory: "twelve", headroom: "1GB", poll: "soon"},
-		{name: "hostile signs", memory: "-1", headroom: "+1", poll: "-1s"},
-		{name: "zero cannot disable containment", memory: "0", headroom: "0", poll: "0s"},
-		{name: "oversized memory cannot wrap", memory: "17592186044416", headroom: "17592186044416", poll: "999999999999999999999h"},
-		{name: "largest safe memory", memory: strconv.FormatUint(maxSafeMB, 10), headroom: strconv.FormatUint(maxSafeMB, 10), poll: "100ms", wantMemory: maxSafeMB << 20, wantHead: maxSafeMB << 20, wantPoll: 100 * time.Millisecond, override: true},
-		{name: "poll below floor", poll: "99ms"},
+		{name: "zero keeps containment defaults"},
+		{name: "poll below floor", config: guardResourceConfig{PollInterval: 99 * time.Millisecond}},
+		{name: "oversized memory cannot wrap", config: guardResourceConfig{MaxMemoryMB: ^uint64(0)}},
+		{name: "explicit values", config: guardResourceConfig{MaxMemoryMB: 512, PollInterval: 100 * time.Millisecond}, wantMemory: 512 << 20, wantPoll: 100 * time.Millisecond},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("FAK_CHILD_MAX_MEMORY_MB", tt.memory)
-			t.Setenv("FAK_CHILD_MAX_COMMIT_MB", "")
-			t.Setenv("FAK_CHILD_MAX_RSS_MB", "")
-			t.Setenv("FAK_SYSTEM_COMMIT_HEADROOM_MB", tt.headroom)
-			t.Setenv("FAK_CHILD_RESOURCE_POLL", tt.poll)
-			wantMemory, wantHead, wantPoll := defaults.MaxTreeBytes, defaults.MinSystemHeadroom, defaults.PollInterval
-			if tt.override {
-				wantMemory, wantHead, wantPoll = tt.wantMemory, tt.wantHead, tt.wantPoll
+			setGuardResourceConfig(tt.config)
+			wantMemory, wantPoll := defaults.MaxTreeBytes, defaults.PollInterval
+			if tt.wantMemory != 0 {
+				wantMemory = tt.wantMemory
 			}
-			got := guardResourcePolicyFromEnv()
-			if got.MaxTreeBytes != wantMemory || got.MinSystemHeadroom != wantHead || got.PollInterval != wantPoll {
-				t.Fatalf("policy=%+v, want memory=%d headroom=%d poll=%s", got, wantMemory, wantHead, wantPoll)
+			if tt.wantPoll != 0 {
+				wantPoll = tt.wantPoll
+			}
+			got := guardResourcePolicyConfigured()
+			if got.MaxTreeBytes != wantMemory || got.PollInterval != wantPoll {
+				t.Fatalf("policy=%+v, want memory=%d poll=%s", got, wantMemory, wantPoll)
 			}
 		})
 	}

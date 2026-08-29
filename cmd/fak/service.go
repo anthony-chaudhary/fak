@@ -264,8 +264,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	}
 	return 0
 }
-func runServiceLoopContext(ctx context.Context, stdout, stderr io.Writer, interval time.Duration) int {
-	notify, err := servicewatchdog.NewNotifierFromEnv(os.Getenv("FAK_SERVICE_NOTIFY") == "systemd")
+func runServiceLoopContext(ctx context.Context, stdout, stderr io.Writer, interval time.Duration, notifyModeOpt ...string) int {
+	notifyMode := "none"
+	if len(notifyModeOpt) > 0 {
+		notifyMode = notifyModeOpt[0]
+	}
+	notify, err := servicewatchdog.NewNotifierFromEnv(notifyMode == "systemd")
 	if err != nil {
 		fmt.Fprintln(stderr, "fak service run:", err)
 		return 1
@@ -297,7 +301,12 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 15*time.Second, "control-plane tick interval")
 	once := fs.Bool("once", false, "run one tick and exit")
+	notifyMode := fs.String("notify", "none", "service notification protocol: none or systemd")
 	if fs.Parse(args) != nil || fs.NArg() != 0 || *interval <= 0 {
+		return 2
+	}
+	if *notifyMode != "none" && *notifyMode != "systemd" {
+		fmt.Fprintln(stderr, "fak service run: --notify must be none or systemd")
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -305,10 +314,11 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	if *once {
 		return serviceTick(stdout, stderr)
 	}
-	return runServiceLoopContext(ctx, stdout, stderr, *interval)
+	return runServiceLoopContext(ctx, stdout, stderr, *interval, *notifyMode)
 }
 func serviceUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak service install|remove|start|stop|restart|status|run [--dry-run] [--json]")
+	fmt.Fprintln(w, "       fak service run [--interval D] [--once] [--notify none|systemd]")
 	fmt.Fprintln(w, "       fak service events [--json] [--ledger-dir D] [--service S]")
 	fmt.Fprintln(w, "       fak service events --ingest windows-xml|journald-json|launchd-ndjson --file F --node N --service S [--workload W] [--unit U] [--json]")
 	fmt.Fprintln(w, "       fak service status --ledger-dir D [--json]    (observed-event rollup; also picked when FAK_SERVICE_LEDGER_DIR is set)")

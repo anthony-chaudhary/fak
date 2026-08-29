@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -38,10 +39,10 @@ func TestSlackRefreshNewsAuditsWithoutPublishing(t *testing.T) {
 
 func TestSlackRefreshGitHubPayloadAppearsInDryRun(t *testing.T) {
 	clearSlackEnv(t)
-	t.Setenv("FAK_BACKLOG_CHANNEL", "C-BACKLOG")
+	t.Setenv("FAK_BACKLOG_CHANNEL", "C-LEGACY-MUST-NOT-WIN")
 	payload := []byte(`[{"number":8790,"title":"refresh blockers and backlog from GitHub","url":"https://github.com/anthony-chaudhary/fak/issues/8790","assignees":[],"labels":[{"name":"blocked"}]}]`)
 	var out, errb bytes.Buffer
-	code := runSlackRefreshWithGH(&out, &errb, []string{"--surface", "blockers,backlog"}, func(args ...string) ([]byte, error) {
+	code := runSlackRefreshWithGH(&out, &errb, []string{"--surface", "blockers,backlog", "--backlog-channel", "C-BACKLOG"}, func(args ...string) ([]byte, error) {
 		got := strings.Join(args, " ")
 		if !strings.Contains(got, "--limit 100") || !strings.Contains(got, "number,title,url,assignees,labels") {
 			t.Fatalf("unbounded or incomplete gh request: %s", got)
@@ -57,6 +58,25 @@ func TestSlackRefreshGitHubPayloadAppearsInDryRun(t *testing.T) {
 	}
 	if !strings.Contains(got, "== blockers: DRY-RUN ==") || !strings.Contains(got, "== backlog: DRY-RUN ==") {
 		t.Fatalf("both GitHub-backed surfaces did not execute:\n%s", got)
+	}
+}
+
+func TestSlackRefreshBacklogChannelReachesScoreboardCaller(t *testing.T) {
+	old := slackRefreshRunScoreboardPost
+	t.Cleanup(func() { slackRefreshRunScoreboardPost = old })
+	var got []string
+	slackRefreshRunScoreboardPost = func(_, _ io.Writer, argv []string) int {
+		got = append([]string(nil), argv...)
+		return 0
+	}
+	t.Setenv("FAK_BACKLOG_CHANNEL", "C-LEGACY")
+	action := slackRefreshActions()["backlog"]
+	if code := action.Run(io.Discard, io.Discard, true, slackRefreshOptions{BacklogIssues: `[]`, BacklogChannel: "C-EXPLICIT"}); code != 0 {
+		t.Fatalf("backlog refresh code=%d", code)
+	}
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--channel C-EXPLICIT") || strings.Contains(joined, "C-LEGACY") {
+		t.Fatalf("scoreboard argv=%q", joined)
 	}
 }
 

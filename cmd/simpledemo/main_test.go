@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestModelDownloadDerivesURL pins the filename→URL derivation that makes a missing
@@ -146,6 +148,13 @@ func TestGreedyNonDegenerate(t *testing.T) {
 		t.Fatalf("greedy not deterministic across reruns:\n  run1=%q\n  run2=%q", reply, reply2)
 	}
 	t.Logf("greedy reply (%d tok): %q", gen, reply)
+}
+
+func TestVulkanQ4KControlsRefuseWithoutVulkanBackend(t *testing.T) {
+	_, _, err := newSession(model.NewSynthetic(model.Config{VocabSize: 8, HiddenSize: 4, NumLayers: 1}), "", true, true)
+	if err == nil || !strings.Contains(err.Error(), "require -backend vulkan") {
+		t.Fatalf("CPU route with Vulkan controls error = %v, want explicit refusal", err)
+	}
 }
 
 // TestIncrementalBlocksMatchFullPrompt locks the assumption the multi-turn KV prefix reuse

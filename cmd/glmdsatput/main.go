@@ -218,6 +218,8 @@ func main() {
 	steps := flag.Int("decode-steps", 64, "decode steps to time")
 	reps := flag.Int("decode-reps", 5, "reps (median over per-token)")
 	backendName := flag.String("backend", "cuda", "compute backend name (cuda); empty/legacy = host")
+	vulkanQ4KProfile := flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
+	vulkanStageQ4K := flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
 	quant := flag.Bool("quant", true, "Q8_0 quantized weight path (required for the device Q8 kernels)")
 	emitJSON := flag.Bool("json", false, "emit one compact JSON record line (machine-readable) in addition to the human report")
 	outDir := flag.String("out", "", "if set, write the WITNESSED benchmark artifact into this directory: manifest.json (benchcli lineage + benchmark_artifact envelope wrapping the glm-throughput/1 body verbatim, so scope survives), result.json (the raw record), and RESULTS.md. This is what lands the pure-fak decode number in the ledger so it is discoverable by benchcli.BuildLineageIndex and bindable by `dos verify`. Canonical dir: experiments/benchmark/runs/by-machine/<node>/<UTC>-glm52-native-decode/")
@@ -270,6 +272,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "backend %q not registered (registered: %v) — build with -tags cuda on a CUDA node\n", *backendName, compute.Registered())
 			os.Exit(2)
 		}
+	}
+	if (*vulkanQ4KProfile || *vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, *vulkanQ4KProfile, *vulkanStageQ4K) {
+		fmt.Fprintln(os.Stderr, "-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
+		os.Exit(2)
 	}
 
 	tm := runDecodeBenchmark(cfg, be, *quant, *vocab, *prompt, *reps, *steps)

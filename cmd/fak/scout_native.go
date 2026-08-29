@@ -23,10 +23,13 @@ import (
 	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // scoutCompleter is the narrow chat-completion capability the native scout needs —
@@ -123,7 +126,7 @@ func classifyWithNativeScout(ctx context.Context, c scoutCompleter, s modelroute
 // agent.NewInKernelPlanner. It returns an error instead of exiting the process
 // (buildRunPlanner's os.Exit is wrong inside a reusable Classifier), so a caller
 // can surface a load failure as a classify error.
-func loadNativeScoutPlanner(ctx context.Context, modelRef string) (*agent.InKernelPlanner, error) {
+func loadNativeScoutPlanner(ctx context.Context, modelRef string, nativeConfig nativeControlConfig) (*agent.InKernelPlanner, error) {
 	ref, _ := modelreg.Resolve(modelRef)
 	ref = pathutil.ExpandTilde(ref)
 	if hfhub.IsURI(ref) {
@@ -140,6 +143,9 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string) (*agent.InKern
 	if err != nil {
 		return nil, fmt.Errorf("scout: backend: %w", err)
 	}
+	if err := applyNativeControls(backend, nativeConfig); err != nil {
+		return nil, fmt.Errorf("scout: native controls: %w", err)
+	}
 	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil, 1)
 	if model == nil {
 		return nil, fmt.Errorf("scout: failed to load %q into the in-kernel engine", ref)
@@ -150,7 +156,11 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string) (*agent.InKern
 	}
 	// metal=false: this first cut targets the CPU reference path (the preferred device
 	// at this size class per the survey) and the cuda HAL, exactly like `fak run`.
-	return agent.NewInKernelPlanner(model, tok, modelRef, q4k, backend, false), nil
+	return newNativeScoutInKernelPlanner(model, tok, modelRef, q4k, backend, nativeConfig), nil
+}
+
+func newNativeScoutInKernelPlanner(model *model.Model, tok *tokenizer.Tokenizer, modelRef string, q4k bool, backend compute.Backend, nativeConfig nativeControlConfig) *agent.InKernelPlanner {
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelRef, q4k, backend, false, nativeConfig.Planner)
 }
 
 // bindNativeScout returns a modelroute.ClassifierFunc backed by an in-process model.
@@ -158,14 +168,14 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string) (*agent.InKern
 // subsequent classification — the "load once, classify many" contract the survey
 // note calls for. A load failure is returned from every Classify call rather than
 // panicking, so the spine's fail-closed ScoutRoute surfaces it cleanly.
-func bindNativeScout(modelRef string) modelroute.ClassifierFunc {
+func bindNativeScout(modelRef string, nativeConfig nativeControlConfig) modelroute.ClassifierFunc {
 	var (
 		once    sync.Once
 		planner *agent.InKernelPlanner
 		loadErr error
 	)
 	return modelroute.ClassifierFunc(func(ctx context.Context, s modelroute.Subject) (modelroute.ScoutLabel, error) {
-		once.Do(func() { planner, loadErr = loadNativeScoutPlanner(ctx, modelRef) })
+		once.Do(func() { planner, loadErr = loadNativeScoutPlanner(ctx, modelRef, nativeConfig) })
 		if loadErr != nil {
 			return modelroute.ScoutLabel{}, loadErr
 		}

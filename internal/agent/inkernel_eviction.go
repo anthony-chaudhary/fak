@@ -316,6 +316,7 @@ func (p *InKernelPlanner) lowerSegments(messages []Message, throughIdx int, tool
 func (p *InKernelPlanner) newSegmentBridge(segs []kvSegment) (*model.Session, *kvmmu.Context, bool) {
 	sess := p.m.NewSession()
 	sess.Quant, sess.Q4K = p.quant, p.q4k
+	sess.Q4KGateUpOutputSlab = p.q4kGateUpOutputSlab
 	if sess.Cache.CanEvict() != nil {
 		return nil, nil, false
 	}
@@ -355,6 +356,7 @@ func (p *InKernelPlanner) refLogitsExact(cache *model.Session, refIDs []int) boo
 	}
 	ref := p.m.NewSession()
 	ref.Quant, ref.Q4K = p.quant, p.q4k
+	ref.Q4KGateUpOutputSlab = p.q4kGateUpOutputSlab
 	ref.Prefill(refIDs)
 	last := refIDs[len(refIDs)-1]
 	return logitsClose(cache.Step(last), ref.Step(last))

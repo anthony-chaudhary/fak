@@ -70,12 +70,13 @@ const maxPromptTokens = 64
 
 // Engine is the in-kernel-model EngineDriver. The model is constructed lazily.
 type Engine struct {
-	once      sync.Once
-	m         *model.Model
-	cfg       model.Config
-	q4k       bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
-	schedOnce sync.Once
-	sched     *NativeScheduler
+	once                sync.Once
+	m                   *model.Model
+	cfg                 model.Config
+	q4k                 bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
+	q4kGateUpOutputSlab bool
+	schedOnce           sync.Once
+	sched               *NativeScheduler
 
 	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
 	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
@@ -154,6 +155,18 @@ func (e *Engine) PreloadQ4K(m *model.Model) {
 // PreloadQ4K installs preloaded resident-Q4_K weights on the registered Default engine.
 func PreloadQ4K(m *model.Model) { Default.PreloadQ4K(m) }
 
+// SetQ4KGateUpOutputSlab explicitly selects the session-owned Q4_K gate/up
+// output slab for every subsequent native scheduler session.
+func (e *Engine) SetQ4KGateUpOutputSlab(enabled bool) {
+	if e == nil {
+		return
+	}
+	e.q4kGateUpOutputSlab = enabled
+}
+
+// SetQ4KGateUpOutputSlab configures the registered Default engine.
+func SetQ4KGateUpOutputSlab(enabled bool) { Default.SetQ4KGateUpOutputSlab(enabled) }
+
 // SetTokenizer arms the in-kernel engine with a real NL tokenizer so the dispatch
 // path NL-tokenizes a call's arguments (instead of byte-tokenizing them) and
 // detokenizes the generated ids back to TEXT in the result payload. Call it at boot,
@@ -218,6 +231,7 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 				q4k:    e.q4k,
 			}
 		})
+		sched.SetQ4KGateUpOutputSlab(e.q4kGateUpOutputSlab)
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
 		if p := nativePreemptionPolicyFromEnv(); p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)

@@ -22,5 +22,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "issue10046-guard-gate-q4k-gateup-output-slab",
+      "canonical": "Q4_K gate/up output slab (session-owned Metal buffer)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Metal output buffer across eligible Q4_K gate and up MLP projections within that session.",
+      "distinction": "This is a session-owned output-buffer reuse mechanism for two FFN projections, not gate_up_proj, the fused model weight, and not an adjudication or policy gate.",
+      "distinct_from": [
+        "gate-up-proj",
+        "issue10046-plan-inkernelplannerconfig"
+      ],
+      "aliases": [],
+      "grounding": "Q4KGateUpOutputSlab",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

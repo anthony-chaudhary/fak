@@ -97,6 +97,8 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
+		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
@@ -107,7 +109,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
-		"debug-stats", "resource-stats", "dojo",
+		"debug-stats", "resource-stats", "child-max-memory-mb", "child-resource-poll", "child-resource-journal", "dojo",
 	}},
 	{"Diagnostics & replay", []string{
 		"probe", "replay-trace", "replay-wire",

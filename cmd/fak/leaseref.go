@@ -176,7 +176,7 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       'fak leaseref release ID', not the reaper. Reaps NOTHING — verdict ACTION
       is the signal to act. This is the member 'fak garden' folds.
 
-  fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR]
+  fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
       Fresh -> generation 1; reaping an EXPIRED holder -> generation bumps (a
       transition); the SAME holder reacquiring a live lease -> a renew (generation
@@ -197,11 +197,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       you were paused/dormant — halt and reacquire, never resume:
         fak leaseref fence --id L --holder $ME --generation $G || reacquire
 
-  fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR]
+  fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
       Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation. A
       lease taken over by a peer is refused STALE_LEASE; a lapsed/absent lease NO_LEASE.
 
-  fak leaseref release --id ID --holder H [--generation N] [--force] [--dir DIR]
+  fak leaseref release --id ID --holder H [--generation N] [--force] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
       The release twin of 'acquire': delete YOUR lease the moment the work is
       done instead of waiting out the TTL (a finished exclusive-lane lease stops
       stalling the fleet). Holder-checked and CAS-deleted: a live lease held by
@@ -782,6 +782,9 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	holder := fs.String("holder", "", "holder identity (machine/session); required to fence a write")
 	session := fs.String("session", "", "owning session id (the descriptor at refs/fak/locks/session-<id>) for liveness classification")
 	ttl := fs.Int64("ttl", 0, "lease lifetime in seconds (0 = no expiry)")
+	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
+	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
+	announceRepo := fs.String("announce-repo", "", "owner/repo for --announce=on")
 	var trees repeatedString
 	fs.Var(&trees, "tree", "repo-relative tree glob this lease covers (repeatable)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -814,7 +817,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
-		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceAcquire, rec)
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceAcquire, rec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "acquire")
 }
@@ -846,6 +849,9 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	id := fs.String("id", "", "lease id to renew")
 	holder := fs.String("holder", "", "the holder identity that owns the lease")
 	ttl := fs.Int64("ttl", 0, "new lifetime in seconds (0 = keep the lease's existing TTL)")
+	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
+	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
+	announceRepo := fs.String("announce-repo", "", "owner/repo for --announce=on")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -863,7 +869,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
-		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRenew, rec)
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRenew, rec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "renew")
 }

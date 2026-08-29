@@ -1,12 +1,52 @@
 package main
 
 import (
+	"flag"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
+
+func TestRunNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "4096")
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "0")
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	t.Setenv("FAK_PREFIX_PROFILE", "ambient.jsonl")
+	t.Setenv("FAK_VULKAN_Q4K_PROFILE", "0")
+	t.Setenv("FAK_VULKAN_STAGE_Q4K", "0")
+
+	fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
+	flags := registerRunNativeControlFlags(fs)
+	if err := fs.Parse([]string{
+		"--native-qwen-q4k-prefill-chunk-tokens=8192",
+		"--native-qwen35-metal-gdn-sequence",
+		"--native-q4k-gateup-slab",
+		"--native-prefix-profile=explicit.jsonl",
+		"--vulkan-q4k-profile",
+		"--vulkan-stage-q4k",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeQwenQ4KPrefillChunk(*flags.prefillChunk); err != nil {
+		t.Fatalf("run rejected the established explicit 8192 contract: %v", err)
+	}
+	want := nativeControlConfig{
+		Planner: agent.InKernelPlannerConfig{
+			QwenQ4KPrefillChunkTokens: 8192,
+			Qwen35MetalGDNSequence:    true,
+			Q4KGateUpOutputSlab:       true,
+		},
+		PrefixProfile:    "explicit.jsonl",
+		VulkanQ4KProfile: true,
+		VulkanStageQ4K:   true,
+	}
+	if got := flags.config(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("run native config = %+v, want %+v", got, want)
+	}
+}
 
 // TestRunDispatchRule pins the argv[0] split that keeps `fak run --trace` (trace mode)
 // and `fak run <model>` (chat mode) on separate parsers: a leading '-' is trace mode,

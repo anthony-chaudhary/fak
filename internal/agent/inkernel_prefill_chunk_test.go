@@ -13,28 +13,26 @@ import (
 )
 
 func TestInKernelQwenQ4KPrefillChunkConfig(t *testing.T) {
-	accepted := []int{512, 1024, 2048, 4096, 8192}
+	accepted := []int{128, 512, 768, 1024, 2048, 4096, 8192}
 	for _, want := range accepted {
-		raw := fmt.Sprint(want)
-		got, err := resolveInKernelQwenQ4KPrefillChunkTokens(raw)
+		got, err := resolveInKernelQwenQ4KPrefillChunkTokens(want)
 		if err != nil || got != want {
-			t.Errorf("resolve(%q) = (%d, %v), want (%d, nil)", raw, got, err, want)
+			t.Errorf("resolve(%d) = (%d, %v), want (%d, nil)", want, got, err, want)
 		}
 	}
-	if got, err := resolveInKernelQwenQ4KPrefillChunkTokens(""); err != nil || got != inKernelQwenQ4KPrefillChunkTokens {
+	if got, err := resolveInKernelQwenQ4KPrefillChunkTokens(0); err != nil || got != inKernelQwenQ4KPrefillChunkTokens {
 		t.Fatalf("unset resolve = (%d, %v), want default (%d, nil)", got, err, inKernelQwenQ4KPrefillChunkTokens)
 	}
-	for _, raw := range []string{"malformed", "0", "-512", "768", "16384", " 512", "512 "} {
+	for _, raw := range []int{-512, 127, 8193, 16384} {
 		got, err := resolveInKernelQwenQ4KPrefillChunkTokens(raw)
 		var typed *model.InKernelQwenQ4KPrefillChunkConfigError
-		if got != 0 || !errors.As(err, &typed) || typed.Value != raw {
-			t.Errorf("resolve(%q) = (%d, %T %v), want (0, typed error retaining value)", raw, got, err, err)
+		if got != 0 || !errors.As(err, &typed) || typed.Value != fmt.Sprint(raw) {
+			t.Errorf("resolve(%d) = (%d, %T %v), want (0, typed error retaining value)", raw, got, err, err)
 		}
 	}
 
-	t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "2048")
-	p := NewInKernelPlanner(qwenHybridPrefillModel(), nil, "qwen-config-once", true, nil, false)
 	t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "4096")
+	p := NewInKernelPlannerWithConfig(qwenHybridPrefillModel(), nil, "qwen-config-once", true, nil, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: 2048})
 	if got := p.effectiveQwenQ4KPrefillChunkTokens(); got != 2048 {
 		t.Fatalf("planner reread env after construction: width = %d, want 2048", got)
 	}

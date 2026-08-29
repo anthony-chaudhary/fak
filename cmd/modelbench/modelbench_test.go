@@ -44,7 +44,7 @@ func testCompleteBenchFlags() *benchFlags {
 		name: testString(""), out: testString(""), prefillSizesCSV: testString("16"),
 		prefillReps: testInt(1), decodeReps: testInt(1), decodeSteps: testInt(1), decodePrompt: testInt(1),
 		quant: testBool(false), metal: testBool(false), verify: testBool(false),
-		backendName: testString("legacy"), requireNonReference: testBool(false),
+		backendName: testString("legacy"), q4kGateUpSlab: testBool(false), vulkanQ4KProfile: testBool(false), vulkanStageQ4K: testBool(false), requireNonReference: testBool(false),
 		workloadPath: testString(""), workloadPrefillCap: testInt(0), loadOnly: testBool(false),
 		loadProfile: testBool(false), loadProfileTrace: testBool(false), loadProfileTraceEvery: testInt(25),
 		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
@@ -55,7 +55,7 @@ func testCompleteBenchFlags() *benchFlags {
 }
 
 func testBenchFlags(q4k, quant, metal bool) *benchFlags {
-	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal)}
+	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal), q4kGateUpSlab: testBool(false)}
 }
 
 func TestStreamQ4KValidation(t *testing.T) {
@@ -571,6 +571,17 @@ func TestQ4KMetalSessionFlagsUseMetalQ4K(t *testing.T) {
 	}
 	if s.Quant {
 		t.Fatalf("-q4k -metal must not force the separate Q8_0 session flag")
+	}
+}
+
+func TestQ4KSlabExplicitFlagReachesModelbenchSession(t *testing.T) {
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	f := testBenchFlags(true, false, false)
+	*f.q4kGateUpSlab = true
+	s := &model.Session{}
+	applyLegacySessionFlags(s, f)
+	if !s.Q4KGateUpOutputSlab {
+		t.Fatal("explicit modelbench Q4_K slab setting did not reach session")
 	}
 }
 

@@ -15,30 +15,18 @@ import (
 
 func enableAmbientAnnounce(t *testing.T) string {
 	t.Helper()
-	t.Setenv("FAK_LEASEREF_ANNOUNCE", "on")
-	t.Setenv("FAK_LEASEREF_ANNOUNCE_ISSUE", "8947")
-	t.Setenv("FAK_LEASEREF_ANNOUNCE_REPO", "owner/repo")
+	t.Setenv("FAK_LEASEREF_ANNOUNCE", "offline")
+	t.Setenv("FAK_LEASEREF_ANNOUNCE_ISSUE", "1")
+	t.Setenv("FAK_LEASEREF_ANNOUNCE_REPO", "legacy/ignored")
+	oldConfig := ambientLeaserefDefaultConfig
+	ambientLeaserefDefaultConfig = ambientLeaserefConfig{Mode: "on", Issue: 8947, Repo: "owner/repo"}
+	t.Cleanup(func() { ambientLeaserefDefaultConfig = oldConfig })
 	key := filepath.Join(t.TempDir(), "private-key")
 	if err := os.WriteFile(key, []byte("private shared key\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("FAK_LEASEREF_ANNOUNCE_KEY_FILE", key)
 	return key
-}
-
-func unsetAmbientEnv(t *testing.T, name string) {
-	t.Helper()
-	old, present := os.LookupEnv(name)
-	if err := os.Unsetenv(name); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if present {
-			_ = os.Setenv(name, old)
-		} else {
-			_ = os.Unsetenv(name)
-		}
-	})
 }
 
 func requireLeaserefJSON(t *testing.T, code int, stdout, stderr *bytes.Buffer) {
@@ -212,8 +200,12 @@ func TestAmbientLeaserefAnnounceTwoNodesRealCommandsFoldEmpty(t *testing.T) {
 
 	call := func(fn func(*bytes.Buffer, *bytes.Buffer) int) {
 		t.Helper()
+		before := len(bodies)
 		var out, errb bytes.Buffer
 		requireLeaserefJSON(t, fn(&out, &errb), &out, &errb)
+		if len(bodies) != before+1 {
+			t.Fatalf("successful lifecycle transition posted %d announcements, want exactly one", len(bodies)-before)
+		}
 	}
 	call(func(out, errb *bytes.Buffer) int {
 		return runLeaserefAcquire(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session"})
@@ -230,9 +222,6 @@ func TestAmbientLeaserefAnnounceTwoNodesRealCommandsFoldEmpty(t *testing.T) {
 	call(func(out, errb *bytes.Buffer) int {
 		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session"})
 	})
-	if len(bodies) != 5 {
-		t.Fatalf("posts=%d, want 5", len(bodies))
-	}
 	if held := leaseref.FoldAnnouncements(bodies); len(held) != 0 {
 		t.Fatalf("two-node lifecycle did not fold empty: %+v", held)
 	}
@@ -244,12 +233,10 @@ func TestAmbientLeaserefAnnounceOutcomeLedger(t *testing.T) {
 	if err := os.WriteFile(keyFile, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for name, value := range map[string]string{
-		"FAK_LEASEREF_ANNOUNCE": "on", "FAK_LEASEREF_ANNOUNCE_REPO": "owner/repo",
-		"FAK_LEASEREF_ANNOUNCE_ISSUE": "9597", "FAK_LEASEREF_ANNOUNCE_KEY_FILE": keyFile,
-	} {
-		t.Setenv(name, value)
-	}
+	oldConfig := ambientLeaserefDefaultConfig
+	ambientLeaserefDefaultConfig = ambientLeaserefConfig{Mode: "on", Issue: 9597, Repo: "owner/repo"}
+	t.Cleanup(func() { ambientLeaserefDefaultConfig = oldConfig })
+	t.Setenv("FAK_LEASEREF_ANNOUNCE_KEY_FILE", keyFile)
 
 	oldPost := ambientLeaserefAnnouncePost
 	t.Cleanup(func() { ambientLeaserefAnnouncePost = oldPost })
@@ -264,13 +251,9 @@ func TestAmbientLeaserefAnnounceOutcomeLedger(t *testing.T) {
 	rec := leaseref.Record{ID: "private-record-id", TreeGlobs: []string{"private/tree/**"}, Holder: "private-holder", SessionID: "private-session"}
 	var stderr bytes.Buffer
 	ambientLeaserefAnnounce(&stderr, t.TempDir(), "acquire", rec)
-	if err := os.Setenv("FAK_LEASEREF_ANNOUNCE", "offline"); err != nil {
-		t.Fatal(err)
-	}
+	ambientLeaserefDefaultConfig.Mode = "offline"
 	ambientLeaserefAnnounce(&stderr, t.TempDir(), "renew", rec)
-	if err := os.Setenv("FAK_LEASEREF_ANNOUNCE", "on"); err != nil {
-		t.Fatal(err)
-	}
+	ambientLeaserefDefaultConfig.Mode = "on"
 	ambientLeaserefAnnounce(&stderr, t.TempDir(), "release", rec)
 
 	const marker = "ambient-announcement-outcomes"
@@ -327,25 +310,26 @@ func TestAmbientLeaserefAnnounceConfigurationIsFailOpenAndPrivate(t *testing.T) 
 	}
 
 	cases := []struct {
-		name, mode, issue, repo, key, want string
-		unsetMode                          bool
+		name, mode, repo, key, want string
+		issue                       int
+		unsetMode                   bool
 	}{
-		{name: "default-unset-disabled", issue: "8947", repo: "secret-owner/secret-repo", key: keyPath, want: "disabled", unsetMode: true},
-		{name: "unreadable-key", mode: "on", issue: "8947", repo: "secret-owner/secret-repo", key: unreadablePath, want: "unavailable or empty"},
-		{name: "empty-key", mode: "on", issue: "8947", repo: "secret-owner/secret-repo", key: keyPath, want: "unavailable or empty"},
-		{name: "invalid-issue", mode: "on", issue: "secret-invalid-issue", repo: "secret-owner/secret-repo", key: keyPath, want: "ISSUE is missing or invalid"},
-		{name: "missing-repo", mode: "on", issue: "8947", repo: "", key: keyPath, want: "REPO is missing"},
-		{name: "unrecognized-mode", mode: "secret-unrecognized-mode", issue: "8947", repo: "secret-owner/secret-repo", key: keyPath, want: "unrecognized"},
+		{name: "default-unset-disabled", issue: 8947, repo: "secret-owner/secret-repo", key: keyPath, want: "disabled", unsetMode: true},
+		{name: "unreadable-key", mode: "on", issue: 8947, repo: "secret-owner/secret-repo", key: unreadablePath, want: "unavailable or empty"},
+		{name: "empty-key", mode: "on", issue: 8947, repo: "secret-owner/secret-repo", key: keyPath, want: "unavailable or empty"},
+		{name: "invalid-issue", mode: "on", issue: 0, repo: "secret-owner/secret-repo", key: keyPath, want: "--announce-issue is missing or invalid"},
+		{name: "missing-repo", mode: "on", issue: 8947, repo: "", key: keyPath, want: "--announce-repo is missing"},
+		{name: "unrecognized-mode", mode: "secret-unrecognized-mode", issue: 8947, repo: "secret-owner/secret-repo", key: keyPath, want: "unrecognized"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			mode := tc.mode
 			if tc.unsetMode {
-				unsetAmbientEnv(t, "FAK_LEASEREF_ANNOUNCE")
-			} else {
-				t.Setenv("FAK_LEASEREF_ANNOUNCE", tc.mode)
+				mode = ""
 			}
-			t.Setenv("FAK_LEASEREF_ANNOUNCE_ISSUE", tc.issue)
-			t.Setenv("FAK_LEASEREF_ANNOUNCE_REPO", tc.repo)
+			oldConfig := ambientLeaserefDefaultConfig
+			ambientLeaserefDefaultConfig = ambientLeaserefConfig{Mode: mode, Issue: tc.issue, Repo: tc.repo}
+			t.Cleanup(func() { ambientLeaserefDefaultConfig = oldConfig })
 			t.Setenv("FAK_LEASEREF_ANNOUNCE_KEY_FILE", tc.key)
 			var out, errb bytes.Buffer
 			code := runLeaserefAcquire(&out, &errb, []string{"--dir", dir, "--id", "private-" + tc.name, "--holder", "private-holder", "--tree", "private/tree/**"})
@@ -354,7 +338,7 @@ func TestAmbientLeaserefAnnounceConfigurationIsFailOpenAndPrivate(t *testing.T) 
 			if !strings.Contains(warning, tc.want) {
 				t.Fatalf("stderr=%q, want %q", warning, tc.want)
 			}
-			for _, secret := range []string{keyPath, unreadablePath, tc.key, tc.repo, tc.issue, "private-" + tc.name, "private-holder", "private/tree"} {
+			for _, secret := range []string{keyPath, unreadablePath, tc.key, tc.repo, "private-" + tc.name, "private-holder", "private/tree"} {
 				if secret != "" && strings.Contains(warning, secret) {
 					t.Fatalf("diagnostic leaked %q: %q", secret, warning)
 				}

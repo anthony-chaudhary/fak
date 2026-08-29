@@ -49,7 +49,8 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	srv := nativeReceiptServer(t)
 	messages := []agent.Message{{Role: agent.RoleUser, Content: "measure"}}
 	zero := 0.0
-	body, _ := json.Marshal(ChatRequest{Model: "synthetic-live", Messages: messages, MaxTokens: 64, Temperature: &zero, Fak: &FakRequestExt{NativeInferenceReceipt: true}})
+	const requestedTokens = 64
+	body, _ := json.Marshal(ChatRequest{Model: "synthetic-live", Messages: messages, MaxTokens: requestedTokens, Temperature: &zero, Fak: &FakRequestExt{NativeInferenceReceipt: true}})
 	rr := postNativeReceipt(t, srv, string(body))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
@@ -62,8 +63,8 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 		t.Fatalf("opt-in response missing fak.native_inference_receipt: %s", rr.Body.String())
 	}
 	receipt := resp.Fak.NativeInferenceReceipt
-	if len(receipt.TokenIDs) != 64 || len(receipt.TokenLogprobs) != len(receipt.TokenIDs) || resp.Usage.CompletionTokens != len(receipt.TokenIDs) {
-		t.Fatalf("token ids/logprobs/usage = %d/%d/%d, want 64 equal entries", len(receipt.TokenIDs), len(receipt.TokenLogprobs), resp.Usage.CompletionTokens)
+	if len(receipt.TokenIDs) != requestedTokens || len(receipt.TokenLogprobs) != len(receipt.TokenIDs) || resp.Usage.CompletionTokens != len(receipt.TokenIDs) {
+		t.Fatalf("token ids/logprobs/usage = %d/%d/%d, want request-bound equal entries", len(receipt.TokenIDs), len(receipt.TokenLogprobs), resp.Usage.CompletionTokens)
 	}
 	for i, lp := range receipt.TokenLogprobs {
 		if math.IsNaN(lp) || math.IsInf(lp, 0) || lp > 0 {
@@ -292,7 +293,7 @@ func gatewayQwen35MetalReceiptConfig() model.Config {
 func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
-	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "on")
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "1")
 	cfg := gatewayQwen35MetalReceiptConfig()
 	m := model.NewSynthetic(cfg)
@@ -300,6 +301,7 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 	srv, err := New(Config{
 		InKernelModel: m, Tokenizer: newByteLevelTokenizer(t), Model: "qwen38-metal-receipt",
 		InKernelQ4K: true, Metal: true,
+		InKernelPlanner: agent.InKernelPlannerConfig{Qwen35MetalGDNSequence: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +343,7 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 func TestNativeInferenceReceiptBackendNilQ4KMetalControlAndTypedAbsence(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
-	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "off")
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "on")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "1")
 	cfg := gatewayQwen35MetalReceiptConfig()
 	m := model.NewSynthetic(cfg)
@@ -349,6 +351,7 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalControlAndTypedAbsence(t *testi
 	srv, err := New(Config{
 		InKernelModel: m, Tokenizer: newByteLevelTokenizer(t), Model: "qwen38-metal-control-receipt",
 		InKernelQ4K: true, Metal: true,
+		InKernelPlanner: agent.InKernelPlannerConfig{Qwen35MetalGDNSequence: false},
 	})
 	if err != nil {
 		t.Fatal(err)

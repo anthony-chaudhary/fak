@@ -2487,3 +2487,45 @@ guardJSON is the repeatable cmd/fak flag binding that carries operator-supplied 
 sessionsJSON is the cmd/fak flag binding that carries an operator-supplied SessionListResponse snapshot path into the standalone sessions view or the overview sessions card.
 
 **Distinct from:** The INPUT FILE PATH selecting a read-only session snapshot, not loadTUISessions (the adapter that reads it or calls the live gateway), tuiSessionReport (the derived render model), or tuiSessionsSchema (the output schema tag).
+
+
+### InKernelPlannerConfig (native planner construction settings)
+
+agent.InKernelPlannerConfig is the typed bundle of native planner and session settings fixed at construction, including Qwen Q4_K prefill chunking, Qwen3.5 Metal GDN sequencing, CPU expert offload, and the Q4_K gate/up output slab.
+
+**Distinct from:** This is configuration supplied to a native planner, not InKernelPlanner, the runtime planner that owns request state, and not NewInKernelPlannerWithConfig, the constructor that consumes the configuration.
+
+
+### NewInKernelPlannerWithConfig (typed native planner constructor)
+
+agent.NewInKernelPlannerWithConfig constructs the local in-kernel planner from a loaded model plus an explicit InKernelPlannerConfig, fixing operator-selected native behavior before any request session is created.
+
+**Distinct from:** This is the constructor that consumes explicit typed settings; unlike NewInKernelPlanner it is not the compatibility constructor with only CPU-offload input, and unlike InKernelPlannerConfig it performs construction rather than representing settings.
+
+
+### Gateway in-kernel planner configuration binding
+
+The serveNativePlannerConfig production seam binds explicit serve flags into agent.InKernelPlannerConfig and then into gateway.Config.InKernelPlanner before the gateway constructs its native planner.
+
+**Distinct from:** This is the CLI-to-gateway binding for typed native settings, not agent.InKernelPlannerConfig, the reusable settings type, and not InKernelPlanner, the runtime request planner.
+
+
+### Gateway configured in-kernel planner construction
+
+newInKernelChatPlanner carries gateway.Config.InKernelPlanner into agent.NewInKernelPlannerWithConfig when the gateway selects its in-process native chat planner.
+
+**Distinct from:** This is the gateway factory boundary that invokes the typed constructor; it is not NewInKernelPlannerWithConfig itself and not the resulting InKernelPlanner runtime.
+
+
+### Q4_K gate/up output slab (session-owned Metal buffer)
+
+Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Metal output buffer across eligible Q4_K gate and up MLP projections within that session.
+
+**Distinct from:** This is a session-owned output-buffer reuse mechanism for two FFN projections, not gate_up_proj, the fused model weight, and not an adjudication or policy gate.
+
+
+### Qwen Q4_K native prefill chunk setting
+
+InKernelPlannerConfig.QwenQ4KPrefillChunkTokens is the explicit 128..8192-token bound used to partition Qwen Q4_K native prefill calls before decode; operator flags populate it at planner construction.
+
+**Distinct from:** This is one bounded prefill tuning value, not the full InKernelPlannerConfig bundle and not InKernelPlanner, the runtime planner consuming that bundle. The former FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS ambient spelling is a retired alias, not a second authority.

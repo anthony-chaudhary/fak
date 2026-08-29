@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -359,6 +360,9 @@ type Config struct {
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs
 	// Session.Q4K (the SDOT int8 GEMV path, FAK_Q4K at boot).
 	InKernelQ4K bool
+	// InKernelPlanner carries native execution settings from the operator-facing serve
+	// flags into the planner. Zero values preserve the native defaults.
+	InKernelPlanner agent.InKernelPlannerConfig
 	// LocalModelID names the model id a client asks for to reach the in-kernel model
 	// when it is served ALONGSIDE a live upstream proxy — BaseURL set AND
 	// InKernelModel+Tokenizer loaded, the dual planner (dual_planner.go). Empty

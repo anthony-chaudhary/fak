@@ -246,6 +246,24 @@ var admittedPostFreeze = []string{
 	// Relocates to: an explicit registry path passed into every goalregistry.Store caller.
 	"FAK_GOAL_REGISTRY",
 
+	// internal/servicewatchdog/systemd.go — systemd injects these three variables as the
+	// inherited sd_notify/watchdog process protocol. They are not fak behavioral settings:
+	// NOTIFY_SOCKET is the manager-owned datagram endpoint, WATCHDOG_USEC is the negotiated
+	// heartbeat interval, and WATCHDOG_PID scopes that lease to this process. Copying them to a
+	// fak flag/config file would sever the manager handshake and create a second authority.
+	// Owner: internal/servicewatchdog. Sunset: remove together if fak retires sd_notify support
+	// or systemd replaces this inherited protocol; review whenever that protocol integration changes.
+	"NOTIFY_SOCKET",
+	"WATCHDOG_PID",
+	"WATCHDOG_USEC",
+
+	// cmd/fak/release_status_ci.go shares this workflow filename contract with
+	// tools/release_context.py and tools/release_decide.py. Keeping the same inherited override
+	// in all three consumers preserves atomic release selection until the Python release pipeline
+	// itself gains a typed config input. Owner: release pipeline. Sunset: remove from all three
+	// consumers together when release context/decision accepts an explicit workflow argument.
+	"FAK_RELEASE_FAST_CI_WORKFLOW",
+
 	// cmd/fak/serve_load_helpers.go — opts into the experimental bounded Metal Q4_K loader.
 	// This changes model-loading strategy rather than carrying a credential.
 	// Relocates to: a typed fak serve setting passed into the GGUF load helpers.

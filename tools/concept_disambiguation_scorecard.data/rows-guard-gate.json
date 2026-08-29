@@ -279,7 +279,7 @@
       "kind": "symbol",
       "definition": "The FUSED gate+up projection (mlp.gate_up_proj.weight): gate_proj and up_proj concatenated into one tensor the loader splits.",
       "distinction": "A NEURAL-NET fused FFN gate+up weight the loader splits into gate_proj and up_proj - NOT an adjudication gate and NOT the standalone mlp.gate_proj.",
-      "distinct_from": ["mlp-gate-proj", "ffn-gate", "stampgate"],
+      "distinct_from": ["mlp-gate-proj", "ffn-gate", "stampgate", "issue10046-guard-gate-q4k-gateup-output-slab"],
       "aliases": ["suffixGateUpProj"],
       "grounding": "gate_up_proj",
       "grounding_kind": "symbol",

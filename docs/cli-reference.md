@@ -759,19 +759,19 @@ spellings. Omit `--public-safe-key-file` only for a coordination issue whose rea
 the raw holder and tree values.
 
 Successful `acquire`, `renew`, and `release` operations can post this public-safe record
-ambiently. This is opt-in and configured only through environment/configuration (never a
-secret command-line value):
+as an explicit lifecycle option. The non-secret destination and mode travel as flags; only
+the key-file locator remains in the secret-bearing environment:
 
 ```sh
-export FAK_LEASEREF_ANNOUNCE=on
-export FAK_LEASEREF_ANNOUNCE_ISSUE=123
-export FAK_LEASEREF_ANNOUNCE_REPO=OWNER/REPO
 export FAK_LEASEREF_ANNOUNCE_KEY_FILE=~/.config/fak/lease-announce.key
+fak leaseref acquire --id L --holder "$ME" --tree 'docs/**' \
+  --announce on --announce-issue 123 --announce-repo OWNER/REPO
+# renew and release accept the same three --announce* flags
 ```
 
 The key-file variable names a file; the key itself must not be placed in argv, environment,
 JSON, logs, issue comments, or the repository. The default/unset state is explicitly
-**disabled**. Set `FAK_LEASEREF_ANNOUNCE=offline` to explicitly suppress the network edge;
+**disabled**. Pass `--announce offline` to explicitly suppress the network edge;
 a missing/unreadable/empty key is reported explicitly and no comment is attempted. A `gh`
 post failure emits only a sanitized warning and can never reverse, mask, or change the exit
 status of the already-successful local lease operation. Comments expose transition timing,
@@ -1326,13 +1326,13 @@ for supported PowerShell/POSIX startup files. Uninstall removes only that block.
 
 The managed `fak-launch` target remains runnable while `fak self-update` replaces the
 deployed binary. During that bounded transaction it defaults to `prior`, immediately
-running the last known-good executable. Set `FAK_UPDATE_LAUNCH_POLICY=wait` to wait (at
-most 10 seconds by default) and then run the new executable, or set it to `fail` for a
-strict, actionable failure. `FAK_UPDATE_LAUNCH_WAIT=30s` changes the bounded wait (capped
-at five minutes). The equivalent launch-config keys are
+running the last known-good executable. Pass `--update-launch-policy=wait` to wait (at
+most 10 seconds by default) and then run the new executable, or pass
+`--update-launch-policy=fail` for a strict, actionable failure.
+`--update-launch-wait=30s` changes the bounded wait (capped at five minutes).
+The equivalent launch-config keys are
 `"update_launch_policy": "prior|wait|fail"` and `"update_launch_wait_ms": N`.
-A managed launcher also accepts leading
-`--update-launch-policy=prior|wait|fail` and `--update-launch-wait=DURATION` flags.
+A managed launcher accepts those flags only when they precede the provider command.
 Flags after the provider or `--` remain provider arguments. These paths are
 non-interactive and preserve argv boundaries, stdin, stdout, stderr, and exit status.
 

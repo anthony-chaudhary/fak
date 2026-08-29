@@ -2133,24 +2133,6 @@
       "gaps": []
     },
     {
-      "id": "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
-      "canonical": "gateway-engine implementation surface for fakinkernelqwenq4kprefillchunktokens",
-      "family": "gateway-engine",
-      "kind": "symbol",
-      "definition": "`fakinkernelqwenq4kprefillchunktokens` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `fakinkernelqwenq4kprefillchunktokens` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
-      "distinct_from": [
-        "x2-gateway-engine-enginecallsavoided"
-      ],
-      "aliases": [],
-      "grounding": "fakinkernelqwenq4kprefillchunktokens",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
       "id": "coverage-9678-gateway-engine-inkernelmodelbutchatismock",
       "canonical": "gateway-engine implementation surface for inkernelmodelbutchatismock",
       "family": "gateway-engine",
@@ -2796,6 +2778,28 @@
       "grounding": "renderlocked",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+      "canonical": "Qwen Q4_K native prefill chunk setting",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "InKernelPlannerConfig.QwenQ4KPrefillChunkTokens is the explicit 128..8192-token bound used to partition Qwen Q4_K native prefill calls before decode; operator flags populate it at planner construction.",
+      "distinction": "This is one bounded prefill tuning value, not the full InKernelPlannerConfig bundle and not InKernelPlanner, the runtime planner consuming that bundle. The former FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS ambient spelling is a retired alias, not a second authority.",
+      "distinct_from": [
+        "issue10046-gateway-inkernelplannerconfig-binding",
+        "x-gateway-engine-inkernelplanner"
+      ],
+      "aliases": [
+        "fakinkernelqwenq4kprefillchunktokens"
+      ],
+      "grounding": "QwenQ4KPrefillChunkTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
       "verdict": "crystal",
       "gaps": []

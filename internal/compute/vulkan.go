@@ -55,10 +55,15 @@ func init() {
 		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
-		q4kProfile:              os.Getenv("FAK_VULKAN_Q4K_PROFILE") == "1",
-		q4kStage:                os.Getenv("FAK_VULKAN_STAGE_Q4K") == "1",
 	}
 	Register(vulkanDev)
+}
+
+func (v *vulkanBackend) configureVulkanQ4K(profile, stage bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.q4kProfile = profile
+	v.q4kStage = stage
 }
 
 // vulkanBudgetBytes resolves FAK_GPU_BUDGET_MB — the device-local weight budget in MiB — against

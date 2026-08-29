@@ -42,6 +42,8 @@ func main() {
 	backendName := flag.String("backend", "cuda", "device backend name")
 	n := flag.Int("n", 12, "greedy tokens to compare")
 	lean := flag.Bool("lean", false, "memory-lean Q8 load (sharded dir); reference is the CPU Q8 path (use for 2.5-3B that won't fit f32)")
+	vulkanQ4KProfile := flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
+	vulkanStageQ4K := flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*hf = pathutil.ExpandTilde(*hf)
@@ -58,6 +60,10 @@ func main() {
 	if !ok {
 		fmt.Fprintf(os.Stderr, "backend %q not registered (have %v)\n", *backendName, compute.Registered())
 		os.Exit(1)
+	}
+	if (*vulkanQ4KProfile || *vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, *vulkanQ4KProfile, *vulkanStageQ4K) {
+		fmt.Fprintln(os.Stderr, "-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
+		os.Exit(2)
 	}
 	// A fixed, arbitrary prompt; correctness of the forward pass is token-value-independent,
 	// so deterministic ids exercise the identical arithmetic a real prompt would.

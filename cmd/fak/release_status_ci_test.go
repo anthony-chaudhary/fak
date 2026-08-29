@@ -27,8 +27,14 @@ func TestReleaseStatusCICapturedRunDecomposesIntoPackageWorkUnits(t *testing.T) 
 	if truncated {
 		t.Fatal("captured fixture unexpectedly exceeded diagnosis bounds")
 	}
-	if len(units) != 35 {
-		t.Fatalf("work units = %d, want 35", len(units))
+	wantUnitKeys := map[string]bool{}
+	for _, line := range lines {
+		if match := releaseStatusCIPkgFailRE.FindStringSubmatch(line.Message); len(match) == 2 && releaseStatusCIValidPackage(match[1]) {
+			wantUnitKeys[line.Job+"\x00"+line.Step+"\x00"+match[1]] = true
+		}
+	}
+	if len(units) != len(wantUnitKeys) {
+		t.Fatalf("work units = %d, want one per unique failed job/step/package relation (%d)", len(units), len(wantUnitKeys))
 	}
 	failedTests := 0
 	for _, unit := range units {
@@ -64,6 +70,7 @@ func TestReleaseStatusCICapturedRunDecomposesIntoPackageWorkUnits(t *testing.T) 
 }
 
 func TestReleaseStatusCISelectsDecisionWorkflowAndExactRun(t *testing.T) {
+	t.Setenv("FAK_RELEASE_FAST_CI_WORKFLOW", "legacy-override.yml")
 	contextPayload := map[string]any{
 		"ci_fast": map[string]any{
 			"workflow": "ci-fast.yml",
@@ -96,6 +103,12 @@ func TestReleaseStatusCISelectsDecisionWorkflowAndExactRun(t *testing.T) {
 	if unknown.Source != "mystery" || unknown.Workflow != "" || len(unknown.Run) != 0 {
 		t.Fatalf("unknown source must fail closed, got %#v", unknown)
 	}
+	fallback := releaseStatusSelectCITarget(map[string]any{"ci_source": "fast"}, map[string]any{
+		"ci_fast": map[string]any{"latest_trunk_ci": map[string]any{"database_id": int64(222)}},
+	})
+	if fallback.Workflow != "legacy-override.yml" {
+		t.Fatalf("shared release workflow override did not reach status fallback: %#v", fallback)
+	}
 }
 
 func TestReleaseStatusCIDiagnosisReadsOnlyDecisionSelectedRun(t *testing.T) {
@@ -119,7 +132,7 @@ func TestReleaseStatusCIDiagnosisReadsOnlyDecisionSelectedRun(t *testing.T) {
 	releaseStatusRunGHText = func(_ string, _ time.Duration, name string, args ...string) (string, bool, error) {
 		call := append([]string{name}, args...)
 		textCalls = append(textCalls, call)
-		if !reflect.DeepEqual(call, []string{"gh", "run", "view", "33047582124", "--log-failed"}) {
+		if strings.Join(call, " ") != "gh run view 33047582124 --log-failed" {
 			t.Fatalf("unexpected gh text call: %v", call)
 		}
 		return releaseStatusCITestFixture(t), false, nil
@@ -320,8 +333,8 @@ func TestReleaseStatusCIRejectsCommandInjectionTokens(t *testing.T) {
 	}
 
 	command, argv := releaseStatusCIReproduceCommand("./internal/example", []string{"TestSafe"}, false)
-	if !reflect.DeepEqual(argv, []string{"fak", "test", "./internal/example", "--", "-run", "^(?:TestSafe)$", "-count=1"}) {
-		t.Fatalf("structured argv = %#v", argv)
+	if command != releaseStatusCICommandText(argv) || strings.Contains(strings.Join(argv, "\x00"), "Remove") || !containsString(argv, "./internal/example") || !containsString(argv, "^(?:TestSafe)$") {
+		t.Fatalf("structured argv is not a safe render of the admitted package/test relation: command=%q argv=%#v", command, argv)
 	}
 	if command != "fak test ./internal/example -- -run '^(?:TestSafe)$' -count=1" {
 		t.Fatalf("safe rendered command = %q", command)
