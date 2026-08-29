@@ -32,7 +32,9 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 	home := externalOrchestrationTestHome(t)
 	t.Setenv("CODEX_THREAD_ID", "session-launch")
 	old := orchestrationWorkerLauncher
+	var launchedRequests []orchestrationWorkerLaunchRequest
 	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		launchedRequests = append(launchedRequests, req)
 		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: 100 + len(req.Role.ID), Status: "started", LogPath: filepath.Join(req.RunDir, req.Role.ID+".jsonl")}, nil
 	}
 	t.Cleanup(func() { orchestrationWorkerLauncher = old })
@@ -54,6 +56,19 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 	for _, worker := range receipt.Workers {
 		if worker.Model != "gpt-5.6-sol" || worker.Mode != "ultra" || worker.Effort != "high" {
 			t.Fatalf("grind worker route = %s/%s/%s, want gpt-5.6-sol/ultra/high: %+v", worker.Model, worker.Mode, worker.Effort, worker)
+		}
+	}
+	if len(launchedRequests) != 3 {
+		t.Fatalf("launched requests=%d, want 3", len(launchedRequests))
+	}
+	for _, req := range launchedRequests {
+		if req.Access.Mode != orchestration.ChildAccessObserve || !req.Access.Admission.ReadOnly ||
+			len(req.Access.Admission.Tree) != 0 {
+			t.Fatalf("--task-text inferred write authority for %+v", req)
+		}
+		prompt := orchestrationWorkerPrompt(req)
+		if !strings.Contains(prompt, "Work read-only") || !strings.Contains(prompt, "Do not edit files") {
+			t.Fatalf("observe-only prompt = %q", prompt)
 		}
 	}
 }

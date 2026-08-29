@@ -469,6 +469,8 @@ type NativeInferenceReceipt struct {
 	DecodeSeconds      float64   `json:"decode_seconds"`
 	Model              string    `json:"model"`
 	Engine             string    `json:"engine"`
+	Planner            string    `json:"planner"`
+	Owner              string    `json:"owner"`
 	Backend            string    `json:"backend"`
 	ForwardPath        string    `json:"forward_path"`
 	Q4K                bool      `json:"q4k"`
