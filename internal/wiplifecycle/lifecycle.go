@@ -45,6 +45,13 @@ func NewID(now time.Time) (string, error) {
 }
 
 func Begin(root, kind, id string, now time.Time) (Receipt, error) {
+	return BeginWithRunner(root, kind, id, now, wipinventory.GitRunner{})
+}
+
+// BeginWithRunner captures the before inventory through the caller's git
+// runner. Bounded operational callers use this seam to keep lifecycle evidence
+// inside the same wall-clock contract as the mutation it brackets.
+func BeginWithRunner(root, kind, id string, now time.Time, runner wipinventory.Runner) (Receipt, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Receipt{}, err
@@ -62,7 +69,7 @@ func Begin(root, kind, id string, now time.Time) (Receipt, error) {
 	if !validID(id) {
 		return Receipt{}, fmt.Errorf("invalid lifecycle operation id %q", id)
 	}
-	dir, err := operationDir(root, id)
+	dir, err := operationDir(root, id, runner)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -73,7 +80,7 @@ func Begin(root, kind, id string, now time.Time) (Receipt, error) {
 		Schema: Schema, OperationID: id, Kind: kind, Repository: filepath.ToSlash(root),
 		StartedAt: now.UTC().Format(time.RFC3339Nano), ReceiptPath: filepath.ToSlash(filepath.Join(dir, "receipt.json")),
 	}
-	receipt.Before = capture(root, filepath.Join(dir, "before.json"), now)
+	receipt.Before = capture(root, filepath.Join(dir, "before.json"), now, runner)
 	if err := writeReceipt(receipt); err != nil {
 		return receipt, err
 	}
@@ -81,7 +88,13 @@ func Begin(root, kind, id string, now time.Time) (Receipt, error) {
 }
 
 func Finish(root, id string, now time.Time) (Receipt, error) {
-	dir, err := operationDir(root, id)
+	return FinishWithRunner(root, id, now, wipinventory.GitRunner{})
+}
+
+// FinishWithRunner captures the after inventory through the same runner used
+// for BeginWithRunner.
+func FinishWithRunner(root, id string, now time.Time, runner wipinventory.Runner) (Receipt, error) {
+	dir, err := operationDir(root, id, runner)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -89,7 +102,7 @@ func Finish(root, id string, now time.Time) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	receipt.After = capture(root, filepath.Join(dir, "after.json"), now)
+	receipt.After = capture(root, filepath.Join(dir, "after.json"), now, runner)
 	receipt.FinishedAt = now.UTC().Format(time.RFC3339Nano)
 	if err := writeReceipt(receipt); err != nil {
 		return receipt, err
@@ -116,7 +129,7 @@ func Read(path string) (Receipt, error) {
 // under the Git directory, so this remains available after the refs or worktrees whose
 // transition they witnessed have disappeared.
 func List(root string) ([]Receipt, error) {
-	store, err := storeDir(root)
+	store, err := storeDir(root, wipinventory.GitRunner{})
 	if err != nil {
 		return nil, err
 	}
@@ -155,8 +168,8 @@ func List(root string) ([]Receipt, error) {
 	return receipts, nil
 }
 
-func capture(root, path string, now time.Time) Capture {
-	rep := wipinventory.Collect(root, now, wipinventory.GitRunner{})
+func capture(root, path string, now time.Time, runner wipinventory.Runner) Capture {
+	rep := wipinventory.Collect(root, now, runner)
 	b, err := rep.JSON()
 	if err == nil {
 		err = atomicWrite(path, append(b, '\n'))
@@ -203,19 +216,19 @@ func atomicWrite(path string, body []byte) error {
 	return os.Rename(name, path)
 }
 
-func operationDir(root, id string) (string, error) {
+func operationDir(root, id string, runner wipinventory.Runner) (string, error) {
 	if !validID(id) {
 		return "", fmt.Errorf("invalid lifecycle operation id %q", id)
 	}
-	store, err := storeDir(root)
+	store, err := storeDir(root, runner)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(store, id), nil
 }
 
-func storeDir(root string) (string, error) {
-	gitPath, err := wipinventory.GitRunner{}.Run(root, "rev-parse", "--git-path", "fak-wip-lifecycle")
+func storeDir(root string, runner wipinventory.Runner) (string, error) {
+	gitPath, err := runner.Run(root, "rev-parse", "--git-path", "fak-wip-lifecycle")
 	if err != nil {
 		return "", err
 	}

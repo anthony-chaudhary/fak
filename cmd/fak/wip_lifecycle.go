@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
@@ -101,12 +103,32 @@ func emitWIPLifecycle(stdout, stderr io.Writer, receipt wiplifecycle.Receipt) in
 }
 
 func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
+	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, wipinventory.GitRunner{})
+}
+
+type boundedLifecycleGitRunner struct {
+	run workerworktree.GitRunner
+}
+
+func (r boundedLifecycleGitRunner) Run(root string, args ...string) ([]byte, error) {
+	rc, out := r.run(root, args)
+	if rc != 0 {
+		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(out))
+	}
+	return []byte(out), nil
+}
+
+func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git workerworktree.GitRunner) func() {
+	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, boundedLifecycleGitRunner{run: git})
+}
+
+func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) func() {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}
 	}
-	receipt, err := wiplifecycle.Begin(root, kind, "", time.Now())
+	receipt, err := wiplifecycle.BeginWithRunner(root, kind, "", time.Now(), runner)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}
@@ -115,7 +137,7 @@ func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			finished, finishErr := wiplifecycle.Finish(root, receipt.OperationID, time.Now())
+			finished, finishErr := wiplifecycle.FinishWithRunner(root, receipt.OperationID, time.Now(), runner)
 			if finishErr != nil {
 				fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=after kind=%s operation=%s error=%v\n", kind, receipt.OperationID, finishErr)
 				return

@@ -319,9 +319,6 @@ func worktreeWorkerReap(argv []string) {
 		worktreeWorkerReapAllCold(repoRoot, effectiveApply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
-	finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
-	defer finishLifecycle()
-
 	if strings.TrimSpace(*worktree) == "" {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
 		os.Exit(2)
@@ -336,7 +333,10 @@ func worktreeWorkerReap(argv []string) {
 	fmt.Fprintf(os.Stderr, "REAP_PROGRESS code=REAP_STARTED max_wait=%s\n", maxWait.String())
 	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
 	defer cancel()
-	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), workerworktree.BoundedGitRunner(ctx))
+	git := workerworktree.BoundedGitRunner(ctx)
+	finishLifecycle := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, git)
+	defer finishLifecycle()
+	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), git)
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)
