@@ -93,8 +93,9 @@ func FromClaimTag(t ClaimTag) Rung {
 }
 
 // Feature is one rostered non-model feature scored on the ladder. ClaimAnchor is a unique
-// substring of the CLAIMS.md capability line that witnesses the feature; an empty anchor
-// means no register witness exists yet (the feature floors to M0None — see FeatureRung).
+// substring of a capability line in the CLAIMS.md document set that witnesses the feature;
+// an empty anchor means no register witness exists yet (the feature floors to M0None — see
+// FeatureRung).
 // The rung is never stored on the Feature: it is always re-read from the live ledger, so
 // it cannot drift from the witness.
 type Feature struct {
@@ -106,7 +107,8 @@ type Feature struct {
 
 // FeatureRoster is the closed roster of non-model features scored on the ladder, seeded
 // from the concept-disambiguation-scorecard families. Each ClaimAnchor is a verified-unique
-// substring of a real CLAIMS.md capability line (the witness test pins presence + uniqueness).
+// substring of a real capability line in the CLAIMS.md document set (the witness test pins
+// presence + uniqueness).
 var FeatureRoster = []Feature{
 	// Cache residency tiers.
 	{ID: "cache-residency-tiers", Name: "Hardware-aware cache residency tiers (CXL/NUMA-far)", Family: FamilyCache, ClaimAnchor: "Hardware-aware cache placement & lifecycle"},

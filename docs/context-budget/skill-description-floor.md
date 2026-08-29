@@ -36,35 +36,35 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 64 skill(s); resident floor = 47234 bytes (~11808 tokens);
-  description floor = 47234 B; name-only floor = 866 B; at-rest card floor = 15312 bytes
-  at-rest intent slice (#5560): 11325 B (~2831 tokens) across 64 skill(s)
+skill footprint [interactive]: 66 skill(s); resident floor = 31724 bytes (~7931 tokens);
+  description floor = 31724 B; name-only floor = 894 B; at-rest card floor = 15679 bytes
+  at-rest intent slice (#5560): 11567 B (~2891 tokens) across 66 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
 
 | rank | bytes | skill |
 |-----:|------:|-------|
-| 1 | 1629 | scout-loop |
-| 2 | 1599 | resume-watchdog-audit |
-| 3 | 1270 | trajectory-control |
-| 4 | 1231 | disambiguation-score |
-| 5 | 1223 | stability-score |
-| 6 | 1220 | industry-score |
-| 7 | 1190 | milestone-score |
-| 8 | 1183 | operator-heaviness-score |
+| 1 | 686 | field-borrow |
+| 2 | 680 | refresh-readme |
+| 3 | 660 | disambiguate-section |
+| 4 | 657 | study-repo |
+| 5 | 652 | refresh-cachedoc-numbers |
+| 6 | 648 | milestone-score |
+| 7 | 647 | modularize |
+| 8 | 640 | token-defaults-score |
 
-The full 64-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 66-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 866 B` is the size of the headroom: **46.4 kB of the 47.2 kB
+`name-only floor = 894 B` is the size of the headroom: **30.8 kB of the 31.7 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 48109 → 47234 B (-875, 64 skills)** — #8404 replaced the
-1155-byte `trajectory-audit` description with a 265-byte description (-890 B), while
-other catalog changes netted +15 B. The gate banks that explained corpus reduction; future
-growth retains the same narrow ratchet band.
+**Last re-pin: 47234 → 31724 B (-15510, 66 skills)** — the live `SkillResolver`
+measurement proves the description reduction while retaining two additional skills. The
+gate banks that measured corpus reduction; future growth retains the same narrow ratchet
+band.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -72,7 +72,7 @@ This floor is denominated in **bytes of frontmatter `description` text**, as par
 by `internal/capindex`'s `SkillResolver`. Two things follow, and neither may be
 quietly dropped when the number is quoted:
 
-- **The `~12027 tokens` figure is an ESTIMATE**, at the house ~4 bytes/token divisor
+- **The `~7931 tokens` figure is an ESTIMATE**, at the house ~4 bytes/token divisor
   (`skillfootprint.BytesPerTokenEstimate`, the same walk as
   `EstimateAnthropicTokens`). It is not a provider-billed count and must never be
   compared against one.
@@ -80,7 +80,7 @@ quietly dropped when the number is quoted:
   #3234 defined — not a witnessed on-the-wire measurement. Harness skill listings
   have been observed rendering project skills **name-only** while built-in skills
   carry their full descriptions, which would put the on-the-wire project-skill cost
-  nearer the 787 B name floor than the 47.2 kB description floor. Confirming what a
+  nearer the 894 B name floor than the 31.7 kB description floor. Confirming what a
   given harness build actually ships is open follow-on work; the ratchet is worth
   holding either way, because it is fak's own committed scorecard and because
   pinning today's floor is what turns a later trim into a bankable win instead of
@@ -94,7 +94,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **47234**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **31724**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
@@ -181,7 +181,7 @@ that field. `TestEverySkillStaysInvocableByName` pins the other half: name
 addressability survives even with *no* trigger at all, because `scoreCard` weights a
 name match above a trigger match.
 
-**This is why `SkillDescriptionBudgetBytes` is unchanged at 47,236.** The gated
+**This is why #5560 left `SkillDescriptionBudgetBytes` unchanged at 47,236.** The gated
 `DescFloor` is the sum of the frontmatter `description` fields — the prose a harness
 renders into the always-on skill listing, and the thing #5444 exists to refuse the
 growth of. The card split moved where fak *serializes* that prose; it did not delete a
@@ -192,7 +192,7 @@ doubles in its tail — the exact growth it was built to catch.
 ## What is still NOT done
 
 - **The userland description migration** — #3234's undelivered item 3, and the only
-  lever that moves the 47,236 B number: shortening the frontmatter `description`
+  lever that moves the description floor: shortening the frontmatter `description`
   fields themselves. `score-2x` carries the **worked example** of the migration — one
   `intent:` line added, its `description` untouched, so the gated floor is byte-identical
   and only the at-rest card shrank. The 5 skills whose leading sentence still overruns
@@ -208,7 +208,7 @@ doubles in its tail — the exact growth it was built to catch.
 
 - **#3229** — epic: shrink the always-sent context budget.
 - **#3234** — the measurement this ratchet defends (`fak skill footprint`).
-- **#3612** — the `headless` name-only profile (the 787 B floor above).
+- **#3612** — the `headless` name-only profile (the 894 B floor above).
 - **#5560** — the `capindex` residency split above (`Intent` vs `Trigger`).
 - [MCP tool-schema floor](mcp-tool-floor.md) — the systemic sibling, with the
   `FLOOR_BUDGET_*` / `DESC_BUDGET_*` ratchets this one is modelled on.
