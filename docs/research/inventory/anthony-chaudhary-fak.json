@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:0142309f74a5162328f295c70542d417b4ecbcb968f7cb31b0b15c1edf2b1915",
-  "tracked_files": 18449,
-  "tracked_bytes": 420184067,
+  "content_root": "sha256:a278c7b4e8643610f8c2b5289ebeba6323d6d67a3e8ec4250c16ffe3487fbda9",
+  "tracked_files": 18454,
+  "tracked_bytes": 420213831,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -7027,6 +7027,24 @@
       ]
     },
     {
+      "path": "cmd/fak/dispatch_progress_admission.go",
+      "content_sha256": "sha256:eaefadab89f43625bfc3634027fe5d4c800e1088918048492b1fe403ca7182fa",
+      "bytes": 8832,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "cmd/fak/dispatch_progress_admission_test.go",
+      "content_sha256": "sha256:6a9e361569c83d37790548b076662915ac80fd0e1c03be1ff1eb063aef73ef7a",
+      "bytes": 5033,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "cmd/fak/dispatch_progress_aging_cooling_test.go",
       "content_sha256": "sha256:d59204a2b770339991811304b62683c5ffa3958f92e1c6ae98fe76814375412e",
       "bytes": 3916,
@@ -8101,8 +8119,8 @@
     },
     {
       "path": "cmd/fak/dispatch_wave.go",
-      "content_sha256": "sha256:49b0af0c8dbbc932af3e038f0079bd6de35c0459f4a45485761a9948c092acd2",
-      "bytes": 49026,
+      "content_sha256": "sha256:264fb0e437b7af8b54578978a0407c58e203bde59474a507691ad48f131fa441",
+      "bytes": 49496,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -8191,8 +8209,8 @@
     },
     {
       "path": "cmd/fak/dispatch_wave_result.go",
-      "content_sha256": "sha256:83635e66b9be0b475075b452c81d6087c0813bb0375a8bd329c9bea08475f55f",
-      "bytes": 7773,
+      "content_sha256": "sha256:cec04821b123209f15b781e942a430c77d115b726fda07dec3620a428c6b7918",
+      "bytes": 8308,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -8209,8 +8227,8 @@
     },
     {
       "path": "cmd/fak/dispatch_wave_wip_cap_test.go",
-      "content_sha256": "sha256:28ed28951b27fef4702b9ca06dffdf111e3575e62a4923950a92000ed2ebb6d3",
-      "bytes": 2678,
+      "content_sha256": "sha256:acc4a1bd0b3baa6b41ce63112c9c11820373654d70703ed4da1b8c488509b6a0",
+      "bytes": 3773,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -151514,6 +151532,24 @@
       ]
     },
     {
+      "path": "scripts/local-qwen38-metal-observe.sh",
+      "content_sha256": "sha256:f66a2b5f65bdb6e8d639d2deb4712047d8e37f6df81db61b75ae171b95b562bc",
+      "bytes": 9923,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts/local-qwen38-metal-observe_test.sh",
+      "content_sha256": "sha256:e0d7f3c8407e4e5b71685511d01cb676eb47aff2e4a7d14106a2a522be7b8255",
+      "bytes": 2162,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "scripts/logvault-restore-drill.sh",
       "content_sha256": "sha256:22e83d0bb735fb95007425b0a91b402edc2c572f79026c2dd05caadeb25016a9",
       "bytes": 2915,
@@ -157662,6 +157698,15 @@
       "content_sha256": "sha256:eadbe0034f7a296d447da7579c64d1d8700d7f9f101f0b2c2cbfd0556aa037eb",
       "bytes": 204958,
       "classification": "artifact"
+    },
+    {
+      "path": "tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json",
+      "content_sha256": "sha256:ad52e0641e45b96360bd15b74ea59cb71b1c2156cead107266dd248bebef0dd4",
+      "bytes": 1714,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
     },
     {
       "path": "tools/grafana/up.sh",
