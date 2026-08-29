@@ -17,12 +17,14 @@ func cmdWorkDelivery(args []string) { os.Exit(runWorkDelivery(os.Stdout, os.Stde
 
 func runWorkDelivery(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak work-delivery status|transition|diagnose|stages [flags]")
+		fmt.Fprintln(stderr, "usage: fak work-delivery status|inspect|transition|diagnose|stages [flags]")
 		return 2
 	}
 	switch args[0] {
 	case "status":
 		return runWorkDeliveryStatus(stdout, stderr, args[1:])
+	case "inspect":
+		return runWorkDeliveryInspect(stdout, stderr, args[1:])
 	case "transition":
 		return runWorkDeliveryTransition(stdout, stderr, args[1:])
 	case "diagnose":
@@ -33,6 +35,40 @@ func runWorkDelivery(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak work-delivery: unknown mode %q\n", args[0])
 		return 2
 	}
+}
+
+func runWorkDeliveryInspect(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("work-delivery inspect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	file := fs.String("file", "", "work-unit JSON")
+	asJSON := fs.Bool("json", false, "JSON output")
+	if fs.Parse(args) != nil || *file == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "inspect requires --file")
+		return 2
+	}
+	var unit workdelivery.WorkUnit
+	if err := readWorkDeliveryJSON(*file, &unit); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := unit.Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	next := "no final-mile receipt is missing"
+	if displayActivation(unit.Axes.Activation) == string(workdelivery.ActivationInactive) {
+		next = "capture an activation receipt"
+	} else if displayAcceptance(unit.Axes.Acceptance) == string(workdelivery.AcceptanceUnaccepted) {
+		next = "capture an operator acceptance receipt"
+	}
+	if *asJSON {
+		return writeWorkDeliveryJSON(stdout, struct {
+			Unit workdelivery.WorkUnit `json:"unit"`
+			Next string                `json:"next_action"`
+		}{Unit: unit, Next: next})
+	}
+	fmt.Fprintf(stdout, "unit %s\n  release: %s (observed)\n  activation: %s (observed)\n  operator acceptance: %s (observed)\n  next: %s\n", unit.ID, unit.Axes.Release, displayActivation(unit.Axes.Activation), displayAcceptance(unit.Axes.Acceptance), next)
+	return 0
 }
 
 func runWorkDeliveryStatus(stdout, stderr io.Writer, args []string) int {

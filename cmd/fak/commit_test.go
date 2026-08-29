@@ -162,7 +162,7 @@ func TestRunCommitPreviewReportsUpstreamWithoutFetch(t *testing.T) {
 		"--dir", t.TempDir(),
 		"--trunk", "main",
 		"--path", "cmd/fak/commit.go",
-		"-m", "feat(commit): surface remote divergence before local commits accumulate (fak commit)\n\nCloses #8777",
+		"-m", "feat(commit): surface remote divergence before local commits accumulate (fak cmd)\n\nCloses #8777",
 	})
 	if code != 0 {
 		t.Fatalf("preview code = %d, want 0; stdout=%q stderr=%q", code, out.String(), errOut.String())

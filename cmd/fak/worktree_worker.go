@@ -319,6 +319,8 @@ func worktreeWorkerReap(argv []string) {
 		worktreeWorkerReapAllCold(repoRoot, effectiveApply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
+	finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
+	defer finishLifecycle()
 
 	if strings.TrimSpace(*worktree) == "" {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
