@@ -138,8 +138,9 @@ func TestSpecDecodeGreedyQwen35MTPOptInMatchesTargetGreedy(t *testing.T) {
 	n := 8
 
 	wantSession := m.NewSession()
+	wantSession.captureTargetHidden = true
 	want := wantSession.Generate(prompt, n)
-	wantSession.Close()
+	t.Cleanup(wantSession.Close)
 
 	target := m.NewSession()
 	t.Cleanup(target.Close)
@@ -150,11 +151,91 @@ func TestSpecDecodeGreedyQwen35MTPOptInMatchesTargetGreedy(t *testing.T) {
 	if !reflect.DeepEqual(run.Output, want) {
 		t.Fatalf("MTP output = %v, want target-greedy %v", run.Output, want)
 	}
-	if target.Cache.Len() != 0 {
-		t.Fatalf("caller target cache length = %d, want untouched fresh session", target.Cache.Len())
-	}
+	assertQwen35MTPTargetStateEqual(t, target, wantSession)
 	if run.Rounds == 0 {
 		t.Fatal("opt-in Qwen3.8 MTP decode performed no speculative rounds")
+	}
+}
+
+func TestQwen35MTPSpeculativeTargetTransaction(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	seed := m.NewSession()
+	seed.captureTargetHidden = true
+	logits := seed.Prefill(prompt)
+	draft := make([]int, 2)
+	for i := range draft {
+		draft[i] = argmaxF32(logits)
+		logits = seed.Step(draft[i])
+	}
+	seed.Close()
+
+	for _, tc := range []struct {
+		name      string
+		accepted  int
+		abort     bool
+		verifyErr bool
+	}{
+		{name: "zero acceptance", accepted: 0},
+		{name: "partial acceptance", accepted: 1},
+		{name: "full acceptance", accepted: 2},
+		{name: "verifier error", abort: true, verifyErr: true},
+		{name: "cancellation", abort: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := m.NewSession()
+			target.captureTargetHidden = true
+			t.Cleanup(target.Close)
+			before := target.Prefill(prompt)
+			tx, err := beginQwen35MTPTargetTransaction(target, before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.verifyErr {
+				tx.verify = func([]int) [][]float32 { panic("injected verifier failure") }
+			}
+			_, verifyErr := tx.Verify(draft)
+			if tc.verifyErr && verifyErr == nil {
+				t.Fatal("injected verifier failure was not surfaced")
+			}
+			if !tc.verifyErr && verifyErr != nil {
+				t.Fatal(verifyErr)
+			}
+			if tc.abort {
+				if err := tx.Abort(); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Abort(); err != nil {
+					t.Fatalf("idempotent abort: %v", err)
+				}
+			} else if _, err := tx.Commit(tc.accepted); err != nil {
+				t.Fatal(err)
+			}
+			if !tx.closed || tx.snapshot != nil || tx.closeCount != 1 {
+				t.Fatalf("transaction ownership = closed:%v snapshot:%p closes:%d, want closed/nil/1", tx.closed, tx.snapshot, tx.closeCount)
+			}
+
+			want := m.NewSession()
+			want.captureTargetHidden = true
+			t.Cleanup(want.Close)
+			want.Prefill(prompt)
+			if !tc.abort {
+				for _, token := range draft[:tc.accepted] {
+					want.Step(token)
+				}
+			}
+			assertQwen35MTPTargetStateEqual(t, target, want)
+		})
+	}
+}
+
+func assertQwen35MTPTargetStateEqual(t *testing.T, got, want *Session) {
+	t.Helper()
+	if got.captureTargetHidden != want.captureTargetHidden ||
+		!reflect.DeepEqual(got.Cache, want.Cache) ||
+		!reflect.DeepEqual(got.targetHidden, want.targetHidden) ||
+		!reflect.DeepEqual(got.targetHiddenTokens, want.targetHiddenTokens) {
+		t.Fatalf("target state differs: cache len %d/%d hidden %d/%d hidden tokens %v/%v", got.Cache.Len(), want.Cache.Len(), len(got.targetHidden), len(want.targetHidden), got.targetHiddenTokens, want.targetHiddenTokens)
 	}
 }
 
@@ -253,6 +334,11 @@ func TestSpecDecodeGreedyQwen35MTPSurfacesRuntimeErrorAndCloses(t *testing.T) {
 			return forward.closes
 		}())
 	}
+	want := m.NewSession()
+	want.captureTargetHidden = true
+	t.Cleanup(want.Close)
+	want.Prefill(prompt)
+	assertQwen35MTPTargetStateEqual(t, target, want)
 }
 
 func TestSpecDecodeGreedyQwen35MTPRejectsIneligibleAndUnsafeTargets(t *testing.T) {
