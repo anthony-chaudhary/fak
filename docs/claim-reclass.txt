@@ -53,3 +53,9 @@ commit: dd21623ca3fbb04e1098e216ece890da3726668a
 type: docs
 witness: docs/_witnesses/issue-9238-q6k-mm.json
 reason: The landed subject says test(metalgemm), but the diff adds only an immutable JSON adjudication witness and changes no test source. The artifact deterministically records the issue ordering-guard decision from an already committed exact-artifact hardware receipt; the evidence supports a documentation/data claim, not a test-code claim.
+
+commit: 3db96ba86c977967a2110ab83cafc03ea2969297
+type: docs
+witness: docs/_witnesses/issue-9842/runtime-capabilities-governed-turn.json
+witness: docs/supported/backends.md
+reason: The landed subject says test(runtimecap), but the diff adds only an immutable real-run JSON witness and its documentation link; it changes no test source. The artifact records an already executed fak-native CPU governed turn and therefore supports a documentation/evidence claim, not a test-code claim.
