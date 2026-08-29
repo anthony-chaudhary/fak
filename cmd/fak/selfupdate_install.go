@@ -256,6 +256,7 @@ func selfUpdateAttemptOptions(buildDir, installTarget, expectedCommit string) se
 	return selfinstall.Options{
 		RepoRoot:       buildDir,
 		Target:         installTarget,
+		CacheDir:       selfinstall.CandidateCacheDir(discoverGitCommonDir(buildDir)),
 		ExpectedCommit: strings.TrimSpace(expectedCommit),
 	}
 }

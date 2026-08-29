@@ -13181,6 +13181,11 @@
           "category": "incidental",
           "reason": "Package-local adapter function that assembles the positioned InKernelPlannerConfig from serve flags; the helper name is not a distinct planning concept.",
           "token": "servenativeplannerconfig"
+        },
+        {
+          "category": "incidental",
+          "reason": "CandidateCacheDir is the existing path-derivation helper for the verified candidate-artifact cache, not a separate planning concept.",
+          "token": "candidatecachedir"
         }
       ],
       "exclude": [
@@ -13309,6 +13314,7 @@
         "candidate_evaluations",
         "candidate_mean_tokens_per_second",
         "candidate_requires_auth_relevance",
+        "candidatecachedir",
         "candidatemean",
         "candidates",
         "clonePlan",
