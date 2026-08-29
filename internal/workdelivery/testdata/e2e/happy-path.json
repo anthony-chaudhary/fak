@@ -4,11 +4,16 @@
     "schema": "fak.work-delivery/v1",
     "id": "issue-7106",
     "artifacts": [{"path":"fixture/active.go","kind":"go-source"}],
-    "axes": {"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready"}
+    "axes": {"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready","activation":"inactive","operator_acceptance":"unaccepted"}
   },
   "compile_set": {
+    "schema": "fak.work-delivery/v1",
     "admitted": ["fixture/active.go"],
-    "excluded": ["fixture/recorded_broken.go"]
+    "excluded": ["fixture/recorded_broken.go"],
+    "receipts": [
+      {"schema":"fak.work-delivery/v1","unit_id":"recorded-excluded","transition":{"axis":"compile_admission","from":"undeclared","to":"excluded"},"gate":"go.compile-set","evidence":[{"kind":"delivery-record","reference":"recorded-excluded","witnessed":true}],"observed_at":"2026-08-17T18:30:00Z"},
+      {"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"compile_admission","from":"undeclared","to":"admitted"},"gate":"go.compile-set","evidence":[{"kind":"delivery-record","reference":"issue-7106","witnessed":true}],"observed_at":"2026-08-17T18:30:00Z"}
+    ]
   },
   "receipts": [
     {"schema":"fak.work-delivery-adapter/v1","adapter":"commit","unit_id":"issue-7106","stage":"recording","receipt":{"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"authoring","from":"draft","to":"recorded"},"gate":"commit","evidence":[{"kind":"commit","reference":"abc123","witnessed":true}],"owner":"fak commit","observed_at":"2026-08-17T18:30:00Z"},"evidence":[{"kind":"commit","reference":"abc123","witnessed":true}],"next_action":"declare compile admission separately"},
