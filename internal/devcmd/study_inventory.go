@@ -15,6 +15,9 @@ import (
 )
 
 func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
+	if hasStudySelfFlag(args) {
+		return runStudySelfInventory(stdout, stderr, args)
+	}
 	fs := flag.NewFlagSet("study-inventory", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "local checkout root to inventory")
@@ -83,6 +86,15 @@ func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "wrote study inventory map for %s to %s\n", report.Repository, *outPath)
 	return 0
+}
+
+func hasStudySelfFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-self" || arg == "--self" || strings.HasPrefix(arg, "-self=") || strings.HasPrefix(arg, "--self=") {
+			return true
+		}
+	}
+	return false
 }
 
 func gitHeadRevision(root string) (string, error) {

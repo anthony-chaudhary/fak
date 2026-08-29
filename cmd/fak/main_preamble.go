@@ -81,11 +81,12 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 
 var executeExactDevHandoff = runDevHandoff
 
-// runExactDevHandoff preserves `fak build` as a useful top-level product spelling
-// while keeping its implementation in fak-dev. Other moved developer commands keep
-// the explicit `fak dev ...` compatibility route and DEV_COMMAND_MOVED guidance.
+// runExactDevHandoff preserves useful top-level spellings for build and committed-tree
+// inventory while keeping their implementations in fak-dev. Other moved developer
+// commands keep the explicit `fak dev ...` compatibility route and DEV_COMMAND_MOVED
+// guidance.
 func runExactDevHandoff(stdin io.Reader, stdout, stderr io.Writer, verb string, argv []string) (int, bool) {
-	if verb != "build" {
+	if verb != "build" && verb != "study-inventory" {
 		return 0, false
 	}
 	childArgv := make([]string, 1, len(argv)+1)
