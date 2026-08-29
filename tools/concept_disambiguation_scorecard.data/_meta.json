@@ -5714,7 +5714,15 @@
           "category": "incidental",
           "reason": "Package-local coordinator name for authenticated event wakes and cohort jitter; not a distinct operator-facing runtime concept.",
           "token": "EventScheduler"
+        },
+        {
+          "category": "false-positive",
+          "reason": "This symbol is a launch-time guard hook installation receipt positioned in guard-gate, not a live session runtime object.",
+          "token": "guardsessionstartinstall"
         }
+      ],
+      "exclude": [
+        "guardsessionstartinstall"
       ],
       "id": "session-runtime",
       "ignore": [

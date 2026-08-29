@@ -71,7 +71,7 @@
       "kind": "symbol",
       "definition": "tuiSessionReport is the TUI overview-sessions report struct built by buildTUISessionReport from a gateway SessionListResponse, carrying the rows, counts, and lanes the TUI sessions view renders.",
       "distinction": "The TUI REPORT aggregate (the whole overview payload) - not tuiSessionReport's member tuiSessionRow (one rendered session) and not the base catalog's SessionRow (the sidecar census join).",
-      "distinct_from": ["x-session-runtime-sessionrow"],
+      "distinct_from": ["x-session-runtime-sessionrow", "issue10049-load-tui-sessions", "issue10049-tui-sessions-json-input"],
       "aliases": ["buildTUISessionReport"],
       "grounding": "tuiSessionReport",
       "grounding_kind": "symbol",

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **961** crystal of 2675 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2796 / 2808** (99.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **13** (clarity 2 + coverage 11) |
+| **Crystal-clear concepts (and climbing)** | **965** crystal of 2679 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2800 / 2811** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **77** of 3795 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **77** of 3799 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2675 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2679 concepts - score 98.6/100 (grade A) - disambiguation-debt 13
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 961
+  * crystal       ################............ 965
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
   gateway-engine   ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 39 crystal)
-  guard-gate       *******************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (440 concept(s); 199 crystal)
+  guard-gate       *********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (442 concept(s); 201 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             *********************************************oooooooooooooooooooooooooooooooooooooo (83 concept(s); 45 crystal)
   plan             *********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (345 concept(s); 105 crystal)
@@ -55,19 +55,19 @@ clarity mix by family (each cell = one concept):
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
   score-debt       **************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (78 concept(s); 14 crystal)
-  session-runtime  *****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 77 crystal)
+  session-runtime  *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (241 concept(s); 79 crystal)
   support-maturity *********************************oooooooooooooooooooooo (55 concept(s); 33 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 75 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ############################ 497/500
   policy-capability ############################ 209/212
   gateway-engine   ############################ 195/197
-  session-runtime  ############################ 268/270
+  guard-gate       ############################ 499/501
   support-maturity ###########################. 62/64
   cache            ############################ 299/300
+  session-runtime  ############################ 270/271
   witness-proof    ############################ 162/163
   attention        ############################ 85/85
   context-ctx      ############################ 237/237
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.6%  (2796/2808 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2800/2811 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3795 lookup name(s) -> 2675 concept(s), 77 ambiguous
+name index: 3799 lookup name(s) -> 2679 concept(s), 77 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1752 / 4743 |
+| Boundaries drawn (mutual / total) | 1768 / 4759 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3795 over 2675 concepts |
+| Lookup names indexed | 3799 over 2679 concepts |
 | Lookup names landing on several concepts | 77 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2675 |
+| Concepts carrying a contrast set | 2679 |
 
 ## The concepts (best verdict first)
 
@@ -565,6 +565,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **FilingGate** - The RECORD GateFiling returns and the idea-scout run result carries as filing_gate: the cap in force, the untriaged stock it was measured against, whether filing is paused, and a reason plus an operator-actionable detail. It is what makes a run that filed nothing because of the backlog distinguishable from one that simply found nothing new. |
 | * | crystal | symbol | guard-gate | **GateUntriagedCap** - The FilingGate.Reason a paused idea-scout run carries when the scout's OWN untriaged open filings outnumber the declared untriaged_cap. It is a self-releasing brake: the same run files again as soon as the stock is triaged or closed back under the cap, so re-enablement needs no code change and no operator memory. |
 | * | crystal | symbol | guard-gate | **GateIndexUnclassified** - The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog. |
+| * | crystal | symbol | guard-gate | **guardSessionStartInstall (guard SessionStart hook install receipt)** - guardSessionStartInstall is the typed receipt returned while fak guard installs a provider-native SessionStart affordance hook; it records whether the hook was applied, how it is managed, and which settings/state paths own it. |
+| * | crystal | config | guard-gate | **guardJSON (--guard-json TUI artifact inputs)** - guardJSON is the repeatable cmd/fak flag binding that carries operator-supplied guard artifact JSON paths into the standalone guard pane or the overview guard card. |
 | * | crystal | symbol | guard-gate | **checkAndEmitReportGate (checked-report emitter)** - checkAndEmitReportGate evaluates a typed report with its leaf-specific check function, attaches the resulting exit code and message through WithGate, then emits the same gated report as JSON or human text. |
 | * | crystal | symbol | guard-gate | **dispatchWavePrelaunchGate (audited wave admission)** - prelaunchGate is the dispatchWavePrelaunchGate derived from the audited execution plan; it records LAUNCH or HOLD, target counts, ready/refused/error counts, and the refusal set used to admit or reprice a worker wave. |
 | * | crystal | symbol | guard-gate | **guardLaunchPlan (semantic/executable launch identity)** - guardLaunchPlan carries the semantic agent arguments used for receipts and policy identity separately from the executable arguments passed to the child, together with the resolved harness profile and provider. |
@@ -915,6 +917,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionharnessobservation** - `sessionharnessobservation` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionlistfunc** - `sessionlistfunc` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **handleFakAgentSessions (gateway route)** - Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258, epic #3256): POST a goal and it runs ONE kernel-governed owned-loop agent session (agent.RunGovernedArm over the server's planner) and streams the session back as NDJSON events — session.start, per-call adjudicated call rows, session.end with the ArmMetrics witness. |
+| * | crystal | symbol | session-runtime | **loadTUISessions (TUI session-list loader)** - loadTUISessions is the cmd/fak input adapter that loads a gateway SessionListResponse either from an operator-provided JSON snapshot or from the live /v1/fak/sessions endpoint for TUI rendering and control selection. |
+| * | crystal | config | session-runtime | **sessionsJSON (--sessions-json TUI snapshot input)** - sessionsJSON is the cmd/fak flag binding that carries an operator-supplied SessionListResponse snapshot path into the standalone sessions view or the overview sessions card. |
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
 | * | crystal | symbol | session-runtime | **claudeSessionUUID** - The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set. |
 | * | crystal | symbol | session-runtime | **session_fatigue** - The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence. |
@@ -2948,8 +2952,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2991/4743 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2675 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2991/4759 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2679 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2957,19 +2961,19 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3795 lookup name(s) resolves - 77 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3799 lookup name(s) resolves - 77 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 497 | 500 | 3 |
 | policy-capability | 209 | 212 | 3 |
 | gateway-engine | 195 | 197 | 2 |
-| session-runtime | 268 | 270 | 2 |
+| guard-gate | 499 | 501 | 2 |
 | support-maturity | 62 | 64 | 2 |
 | cache | 299 | 300 | 1 |
+| session-runtime | 270 | 271 | 1 |
 | witness-proof | 162 | 163 | 1 |
 | attention | 85 | 85 | 0 |
 | context-ctx | 237 | 237 | 0 |

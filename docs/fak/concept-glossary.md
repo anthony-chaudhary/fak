@@ -2459,3 +2459,31 @@ The optional typed HTTP client that lets fak operators call an external OpenViki
 The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content.
 
 **Distinct from:** The per-call ADAPTER at the agent loop boundary — not the kernel coordinator itself and not an inference engine backend.
+
+
+### guardSessionStartInstall (guard SessionStart hook install receipt)
+
+guardSessionStartInstall is the typed receipt returned while fak guard installs a provider-native SessionStart affordance hook; it records whether the hook was applied, how it is managed, and which settings/state paths own it.
+
+**Distinct from:** The INSTALL RECEIPT describing one launch-time hook mutation, not guardsessionstart (the hook command that later emits the first-turn hint) and not a running session record.
+
+
+### loadTUISessions (TUI session-list loader)
+
+loadTUISessions is the cmd/fak input adapter that loads a gateway SessionListResponse either from an operator-provided JSON snapshot or from the live /v1/fak/sessions endpoint for TUI rendering and control selection.
+
+**Distinct from:** The INPUT LOADER for the TUI session view, not tuiSessionReport (the derived render model), tuiSessionsSchema (its JSON schema tag), or the gateway session runtime itself.
+
+
+### guardJSON (--guard-json TUI artifact inputs)
+
+guardJSON is the repeatable cmd/fak flag binding that carries operator-supplied guard artifact JSON paths into the standalone guard pane or the overview guard card.
+
+**Distinct from:** The INPUT PATH LIST for TUI rendering, not tuiGuardReport (the parsed pane model), tuiGuardSchema (its payload schema), or a live guard gate.
+
+
+### sessionsJSON (--sessions-json TUI snapshot input)
+
+sessionsJSON is the cmd/fak flag binding that carries an operator-supplied SessionListResponse snapshot path into the standalone sessions view or the overview sessions card.
+
+**Distinct from:** The INPUT FILE PATH selecting a read-only session snapshot, not loadTUISessions (the adapter that reads it or calls the live gateway), tuiSessionReport (the derived render model), or tuiSessionsSchema (the output schema tag).
