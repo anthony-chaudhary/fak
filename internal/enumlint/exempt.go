@@ -47,6 +47,7 @@ var exemptions = map[string]string{
 	"literal|internal/nativebench|contracts.Alternatives":     "Each benchmark declares only applicable comparison classes; a first-class integration arm does not exist for every capability.",
 	"literal|internal/fp4meta|allCapabilities.ScaleFormats":   "ScaleNone is deliberately excluded: the fixture describes FP4 hardware that requires explicit scaling.",
 	"literal|internal/kvquantmeta|testSupport.Precisions":     "FP16 and BF16 are unquantized controls, deliberately outside the quantized-support fixture.",
+	"literal|internal/devindex|DevOnlyPackages":               "The boundary registry intentionally lists only development-owned and shared packages; runtime ownership is the default complement checked by graph reachability, not an entry in this exception set.",
 }
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is

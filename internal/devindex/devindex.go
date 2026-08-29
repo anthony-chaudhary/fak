@@ -430,11 +430,13 @@ func (c *Catalog) parseClaims(text string) {
 		if m == nil {
 			continue
 		}
+		claimText := m[2]
+		laneText := claimText + "\n" + c.linkedClaimText(claimText)
 		c.Claims = append(c.Claims, Claim{
 			Tag:     m[1],
 			Section: section,
-			Lanes:   c.lanesInText(m[2]),
-			Text:    strings.TrimSpace(m[2]),
+			Lanes:   c.lanesInText(laneText),
+			Text:    strings.TrimSpace(claimText),
 		})
 	}
 
@@ -458,6 +460,31 @@ func (c *Catalog) parseClaims(text string) {
 			}
 		}
 	}
+}
+
+// linkedClaimText follows only the generated claim-page links in the compact
+// CLAIMS.md document set. The index line preserves the maturity tag while the
+// page owns the package-bound witness prose; joining both keeps lane rollups
+// authoritative after the ledger was split into addressable pages.
+func (c *Catalog) linkedClaimText(claimText string) string {
+	var joined strings.Builder
+	for _, raw := range markdownInlinePaths(claimText) {
+		clean := strings.TrimSpace(raw)
+		if i := strings.IndexAny(clean, "#?"); i >= 0 {
+			clean = clean[:i]
+		}
+		clean = filepath.ToSlash(filepath.Clean(clean))
+		if !strings.HasPrefix(clean, "docs/claims/") || !strings.HasSuffix(clean, ".md") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(clean)))
+		if err != nil {
+			continue
+		}
+		joined.Write(b)
+		joined.WriteByte('\n')
+	}
+	return joined.String()
 }
 
 // lanesInText resolves every package-path reference in a claim line to its lane,
