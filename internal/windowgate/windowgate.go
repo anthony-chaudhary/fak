@@ -24,16 +24,17 @@ const (
 // ---- PowerShell scheduled-task installer rules ---------------------------- //
 
 var (
-	reCreatesTask    = regexp.MustCompile(`(?i)Register-ScheduledTask\b|schtasks(\.exe)?\b[^\n]*/Create\b`)
-	reRegisterTask   = regexp.MustCompile(`(?i)Register-ScheduledTask\b`)
-	reSchtasksCreate = regexp.MustCompile(`(?i)schtasks(\.exe)?\b[^\n]*/Create\b`)
-	reOffDesktop     = regexp.MustCompile(`(?i)-LogonType\s+(S4U|Password|ServiceAccount)\b|-UserId\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)|/RU\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)`)
-	reHeadless       = regexp.MustCompile(`(?i)--headless`)
-	reInteractive    = regexp.MustCompile(`(?i)-LogonType\s+Interactive\b|\s/IT\b`)
-	reITflag         = regexp.MustCompile(`(?i)\s/IT\b`)
-	reSetsPrincipal  = regexp.MustCompile(`(?i)New-ScheduledTaskPrincipal\b|-Principal\b|/RU\b`)
-	reStartProcess   = regexp.MustCompile(`(?i)\bStart-Process\b`)
-	rePSWindowless   = regexp.MustCompile(`(?i)-WindowStyle\s+Hidden\b|-NoNewWindow\b`)
+	reCreatesTask           = regexp.MustCompile(`(?i)Register-ScheduledTask\b|schtasks(\.exe)?\b[^\n]*/Create\b`)
+	reRegisterTaskStatement = regexp.MustCompile(`(?i)(^|[;\r\n])\s*Register-ScheduledTask\b`)
+	reRegisterTask          = regexp.MustCompile(`(?i)Register-ScheduledTask\b`)
+	reSchtasksCreate        = regexp.MustCompile(`(?i)schtasks(\.exe)?\b[^\n]*/Create\b`)
+	reOffDesktop            = regexp.MustCompile(`(?i)-LogonType\s+(S4U|Password|ServiceAccount)\b|-UserId\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)|/RU\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)`)
+	reHeadless              = regexp.MustCompile(`(?i)--headless`)
+	reInteractive           = regexp.MustCompile(`(?i)-LogonType\s+Interactive\b|\s/IT\b`)
+	reITflag                = regexp.MustCompile(`(?i)\s/IT\b`)
+	reSetsPrincipal         = regexp.MustCompile(`(?i)New-ScheduledTaskPrincipal\b|-Principal\b|/RU\b`)
+	reStartProcess          = regexp.MustCompile(`(?i)\bStart-Process\b`)
+	rePSWindowless          = regexp.MustCompile(`(?i)-WindowStyle\s+Hidden\b|-NoNewWindow\b`)
 )
 
 // LiveScheduledTask is one action from the local Task Scheduler read-back.
@@ -753,6 +754,31 @@ func psCodeMatch(re *regexp.Regexp, src string) bool {
 	return false
 }
 
+func psCodeMatchCount(re *regexp.Regexp, src string) int {
+	n := 0
+	for _, m := range re.FindAllStringIndex(src, -1) {
+		if psCodeOffset(src, m[0]) {
+			n++
+		}
+	}
+	return n
+}
+
+func psCodeContains(src, fragment string) bool {
+	for off := 0; off < len(src); {
+		i := strings.Index(src[off:], fragment)
+		if i < 0 {
+			return false
+		}
+		i += off
+		if psCodeOffset(src, i) {
+			return true
+		}
+		off = i + len(fragment)
+	}
+	return false
+}
+
 // psCodeOffset reports whether byte offset off in a PowerShell source sits in code
 // rather than inside a `<# … #>` block comment (which nests) or a `#` line comment.
 // Quoted strings count as code — the command line an installer registers lives in
@@ -855,15 +881,57 @@ func psSkipString(src string, i int) int {
 	return len(src)
 }
 
+// hostRelaunchDesktopAdapter reports the one interactive scheduled task the tree
+// owns intentionally. FakHostRelaunchBroker exists only to enter the logged-on
+// user's desktop and activate wt.exe after a host crash; S4U would move it to
+// session 0 and make that purpose impossible. This classification fails closed:
+// it is bound to the exact installer path, its two-task shape, its sole
+// Interactive principal, its current-user/Limited form, and every install
+// read-back that prevents action or provenance drift.
+func hostRelaunchDesktopAdapter(rel, src string) bool {
+	if filepath.ToSlash(rel) != "tools/fak_stall_monitor.ps1" ||
+		psCodeMatchCount(reRegisterTaskStatement, src) != 2 ||
+		psCodeMatchCount(reInteractive, src) != 1 {
+		return false
+	}
+	required := []string{
+		"$brokerSpool = Join-Path (Split-Path -Parent $Log) 'relaunch'",
+		"New-Item -ItemType Directory -Force -Path $brokerSpool -ErrorAction Stop",
+		"$brokerArgs = \"host-relaunch-broker --dir `\"$brokerSpool`\"\"",
+		"$brokerAction = New-ScheduledTaskAction -Execute $fak -Argument $brokerArgs",
+		"$brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited",
+		"$brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME",
+		"$brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)",
+		"Register-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Action $brokerAction -Principal $brokerPrincipal -Trigger $brokerTrigger -Settings $brokerSettings -Force -ErrorAction Stop",
+		"$broker = Get-ScheduledTask -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop",
+		"if ($broker.Principal.LogonType -ne 'InteractiveToken')",
+		"if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -ne $brokerArgs)",
+		"Test-Path -LiteralPath $broker.Actions.Execute -PathType Leaf",
+		"Test-Path -LiteralPath $brokerSpool -PathType Container",
+		"$brokerInfo = Get-ScheduledTaskInfo -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop",
+		"[uint32]$brokerInfo.LastTaskResult -eq 0x80070002",
+	}
+	for _, fragment := range required {
+		if !psCodeContains(src, fragment) {
+			return false
+		}
+	}
+	return true
+}
+
 // PSInstallerViolation returns a one-line violation for a background task
 // installer that lacks an off-desktop principal. Action-level hiding is defense
 // in depth, not a principal boundary: descendants can allocate a console and a
-// later action edit can remove the wrapper while retaining desktop access.
+// later action edit can remove the wrapper while retaining desktop access. The
+// exact host-relaunch desktop adapter above is the sole intentional exception.
 func PSInstallerViolation(rel, src string) (string, bool) {
 	if !psCodeMatch(reCreatesTask, src) {
 		return "", false
 	}
 	if psCodeMatch(reOffDesktop, src) && !psCodeMatch(reInteractive, src) {
+		return "", false
+	}
+	if hostRelaunchDesktopAdapter(rel, src) {
 		return "", false
 	}
 	return fmt.Sprintf("%s: background scheduled-task installer lacks a non-interactive principal; "+

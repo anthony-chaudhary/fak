@@ -10,10 +10,13 @@
 // task's own and every child it spawns — ON THE DESKTOP. -WindowStyle Hidden does
 // NOT suppress the conhost flash (the maintainers learned this the hard way; see
 // tools/register_worktree_doctor.ps1 / tools/register_runaway_reaper.ps1). The fix
-// every repo installer already uses is an OFF-DESKTOP principal — S4U / a service
-// account — OR a fully headless launcher
-// (conhost.exe --headless ..., the FleetResumeWatchdog pattern). ScanTree FAILS any
-// task-creating .ps1 that is neither.
+// every background installer already uses is an OFF-DESKTOP principal — S4U / a
+// service account — OR a fully headless launcher (conhost.exe --headless ..., the
+// FleetResumeWatchdog pattern). ScanTree FAILS any task-creating .ps1 that is
+// neither. The sole interactive classification is the exact, fail-closed
+// FakHostRelaunchBroker adapter contract: it must enter the current user's desktop
+// to activate wt.exe, and its path, principal, action, trigger, limits, and
+// read-backs are all pinned here.
 //
 // 2. CODE LEVEL (Python helper completeness). A windowless parent (pythonw, or any
 // task whose own window is hidden) that spawns a CONSOLE child (git, gh, taskkill,
