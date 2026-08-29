@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:28ee76c0fbbda59ea018564bef51d1b64b6566aafab86c9437c8204a0e2ee321",
+  "content_root": "sha256:a7ee35e93221e42e41f5b3b00ba66d169f7aad77350e8b6dfb32b87b9258a94c",
   "tracked_files": 18467,
-  "tracked_bytes": 421261797,
+  "tracked_bytes": 421261813,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -69325,8 +69325,8 @@
     },
     {
       "path": "internal/architest/architest_test.go",
-      "content_sha256": "sha256:9cf39f2e3abca8d5ed38f6561b8366ba1e444275e476e9511e515f6470ad1f4d",
-      "bytes": 263281,
+      "content_sha256": "sha256:35c50152d497b5a8d0663659f38e22e8233435c0d8ac4aa2d7a9a6add7604a7b",
+      "bytes": 263297,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
