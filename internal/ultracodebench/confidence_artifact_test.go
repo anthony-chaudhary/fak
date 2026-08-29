@@ -1,11 +1,13 @@
 package ultracodebench
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +23,11 @@ func TestIssue8672ConfidenceArtifact(t *testing.T) {
 	if err := json.Unmarshal(raw, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	receiptRaw, err := os.ReadFile("testdata/issue8672-cache-receipts.log")
+	receiptPath := filepath.Clean(filepath.FromSlash(receipt.RawReceipt))
+	if receipt.RawReceipt == "" || filepath.IsAbs(receiptPath) || receiptPath == ".." || strings.HasPrefix(receiptPath, ".."+string(filepath.Separator)) {
+		t.Fatalf("raw_receipt must be a repository-relative path, got %q", receipt.RawReceipt)
+	}
+	receiptRaw, err := os.ReadFile(filepath.Join("..", "..", receiptPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,14 +38,23 @@ func TestIssue8672ConfidenceArtifact(t *testing.T) {
 	if err := json.Unmarshal(raw, &campaign); err != nil {
 		t.Fatal(err)
 	}
-	got, err := EvaluateConfidenceCampaign(campaign, []int{1, 2, 4, 8})
+	first, err := EvaluateConfidenceCampaign(campaign, []int{1, 2, 4, 8})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Widths) != 4 {
-		t.Fatalf("widths=%d", len(got.Widths))
+	second, err := EvaluateConfidenceCampaign(campaign, []int{1, 2, 4, 8})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, w := range got.Widths {
+	firstRaw := renderConfidenceReport(t, first)
+	secondRaw := renderConfidenceReport(t, second)
+	if !bytes.Equal(firstRaw, secondRaw) {
+		t.Fatalf("identical campaign replays were not byte-stable:\nfirst:\n%s\nsecond:\n%s", firstRaw, secondRaw)
+	}
+	if len(first.Widths) != 4 {
+		t.Fatalf("widths=%d", len(first.Widths))
+	}
+	for _, w := range first.Widths {
 		if w.AcceptedRuns < 5 || w.OutcomeAbstentions != 0 {
 			t.Fatalf("width %d runs=%d abstentions=%d", w.Width, w.AcceptedRuns, w.OutcomeAbstentions)
 		}
@@ -54,17 +69,21 @@ func TestIssue8672ConfidenceArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want ConfidenceReport
-	if err := json.Unmarshal(reportRaw, &want); err != nil {
-		t.Fatal(err)
+	if !bytes.Equal(firstRaw, reportRaw) {
+		t.Fatalf("replayed report differs byte-for-byte from the checked artifact:\n%s", firstRaw)
 	}
-	if !reflect.DeepEqual(got, want) {
-		b, _ := json.MarshalIndent(got, "", "  ")
-		t.Fatalf("replayed report differs:\n%s", b)
-	}
-	if got.PromotionEvidence == "" || got.DemotionEvidence == "" || got.InvalidatingAssumption == "" || got.ReplayCommand == "" {
+	if first.PromotionEvidence == "" || first.DemotionEvidence == "" || first.InvalidatingAssumption == "" || first.ReplayCommand == "" {
 		t.Fatal("generation evidence incomplete")
 	}
+}
+
+func renderConfidenceReport(t *testing.T, report ConfidenceReport) []byte {
+	t.Helper()
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(raw, '\n')
 }
 
 func TestConfidenceCampaignAbstainsSeparatelyFromNoise(t *testing.T) {
