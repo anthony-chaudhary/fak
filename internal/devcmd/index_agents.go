@@ -29,7 +29,43 @@ import (
 // residentClaudeFile is the doc whose marker-bounded region holds the resident TOC.
 const residentClaudeFile = "CLAUDE.md"
 
-func indexAgents(stdout, stderr io.Writer, rootDir string, args []string, asJSON bool, section string, full, writeResident bool) int {
+func indexAgents(stdout, stderr io.Writer, rootDir string, args []string, asJSON bool, section string, full, writeResident bool,
+	forTarget string, fallbacks []string, maxBytes int64, trusted bool,
+) int {
+	if forTarget != "" {
+		if len(args) != 0 || section != "" || full || writeResident {
+			fmt.Fprintln(stderr, "fak index agents --for: incompatible with query, --section, --full, and --write-resident")
+			return 2
+		}
+		result := agentsindex.ResolveEffective(rootDir, forTarget, agentsindex.ResolveOptions{
+			Fallbacks: fallbacks,
+			MaxBytes:  maxBytes,
+			Trusted:   trusted,
+		})
+		if asJSON {
+			if rc := encodeJSONOrFail(stdout, stderr, result, "fak index agents --for"); rc != 0 {
+				return rc
+			}
+		} else {
+			if result.Status == agentsindex.StatusComplete {
+				if _, err := io.WriteString(stdout, result.Instructions); err != nil {
+					fmt.Fprintf(stderr, "fak index agents --for: %v\n", err)
+					return 1
+				}
+			} else {
+				fmt.Fprintf(stdout, "status=%s target=%s sources=%d bytes=%d/%d\n",
+					result.Status, result.Target, len(result.Sources), result.Bytes, result.MaxBytes)
+			}
+		}
+		if result.Status != agentsindex.StatusComplete {
+			return 1
+		}
+		return 0
+	}
+	if len(fallbacks) != 0 || maxBytes != 0 || trusted {
+		fmt.Fprintln(stderr, "fak index agents: --fallback, --max-bytes, and --trust require --for")
+		return 2
+	}
 	doc, err := agentsindex.Load(rootDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak index agents: %v\n", err)

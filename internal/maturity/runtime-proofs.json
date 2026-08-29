@@ -22,11 +22,6 @@
       "command": "fak blockers post --severity status --title slackmeta --detail runtime-dogfood-witness --source maturity --dry-run"
     },
     {
-      "output_contains": "slackoutbox",
-      "lane": "slackoutbox",
-      "command": "fak slack outbox status"
-    },
-    {
       "output_contains": "slackwire",
       "lane": "slackwire",
       "command": "fak slack send --channel runtime-proof --text slackwire --dry-run"
