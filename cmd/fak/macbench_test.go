@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -302,4 +304,213 @@ func hasMacBenchRecoveryAction(plan macbench.RecoveryPlan, id string) bool {
 		}
 	}
 	return false
+}
+
+func TestMacBenchValidateComparisonPublishesOnlyExactMatchedPacket(t *testing.T) {
+	packet := validCLIComparisonPacket()
+	dir := t.TempDir()
+	writeCLIComparisonEvidence(t, dir, &packet)
+	path := dir + "/packet.json"
+	b, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-comparison", "--input", path, "--json"})
+	if code != 0 {
+		t.Fatalf("valid packet code=%d stderr=%s", code, stderr.String())
+	}
+	var result struct {
+		Schema       string `json:"schema"`
+		Valid        bool   `json:"valid"`
+		PacketSHA256 string `json:"packet_sha256"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode validation: %v\n%s", err, stdout.String())
+	}
+	if result.Schema != "fak.macbench.comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 64 {
+		t.Fatalf("validation = %+v", result)
+	}
+
+	packet.Arms[0].FallbackCount = 1
+	b, _ = json.Marshal(packet)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-comparison", "--input", path, "--json"})
+	if code == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "fallback_count") {
+		t.Fatalf("invalid packet code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestMacBenchValidateComparisonRejectsUnknownFields(t *testing.T) {
+	packet := validCLIComparisonPacket()
+	b, _ := json.Marshal(packet)
+	b = append(b[:len(b)-1], []byte(`,"invented_performance_claim":42}`)...)
+	path := t.TempDir() + "/packet.json"
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-comparison", "--input", path})
+	if code == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown field") {
+		t.Fatalf("unknown-field packet code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestMacBenchValidateComparisonRejectsTamperedEvidenceFile(t *testing.T) {
+	packet := validCLIComparisonPacket()
+	dir := t.TempDir()
+	writeCLIComparisonEvidence(t, dir, &packet)
+	b, _ := json.Marshal(packet)
+	path := dir + "/packet.json"
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/"+packet.Arms[0].RawResult.Path, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-comparison", "--input", path})
+	if code == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "sha256 mismatch") {
+		t.Fatalf("tampered evidence code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestMacBenchValidateComparisonRejectsContradictoryHashedRawResult(t *testing.T) {
+	packet := validCLIComparisonPacket()
+	dir := t.TempDir()
+	writeCLIComparisonEvidence(t, dir, &packet)
+	rawFile := macbench.ComparisonRawSamplesFile{
+		Schema: macbench.ComparisonRawSamplesSchema, Arm: packet.Arms[0].Name,
+		CampaignID: packet.CampaignID, RunID: packet.Arms[0].RunID, HostID: packet.Arms[0].HostID,
+		StartedAt: packet.Arms[0].StartedAt, FinishedAt: packet.Arms[0].FinishedAt,
+		Samples: append([]macbench.ComparisonSample(nil), packet.Arms[0].Samples...),
+	}
+	rawFile.Samples[0].Engine = "llama.cpp"
+	raw, _ := json.Marshal(rawFile)
+	if err := os.WriteFile(dir+"/"+packet.Arms[0].RawResult.Path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	packet.Arms[0].RawResult.SHA256 = fmt.Sprintf("%x", sha256.Sum256(raw))
+	b, _ := json.Marshal(packet)
+	path := dir + "/packet.json"
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-comparison", "--input", path})
+	if code == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "content does not match packet samples") {
+		t.Fatalf("contradictory raw code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func validCLIComparisonPacket() macbench.ComparisonPacket {
+	hardware := macbench.ComparisonHardware{Model: "Mac15,7", Chip: "Apple M3 Pro", MemoryBytes: 36 << 30}
+	osInfo := macbench.ComparisonOS{Name: "macOS", Version: "26.6.2", Build: "25G83"}
+	promptDigest := strings.Repeat("a", 64)
+	packet := macbench.ComparisonPacket{
+		Schema:      macbench.ComparisonSchema,
+		GeneratedAt: "2026-08-30T05:00:00Z",
+		CampaignID:  "issue-2723-qwen38-three-way-v1",
+		HostID:      strings.Repeat("f", 64),
+		Model: macbench.ComparisonModel{
+			Family:                 "Qwen3.8",
+			ID:                     "Qwen3.8-27B",
+			SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+			CanonicalWeightsSHA256: strings.Repeat("9", 64),
+			Quant:                  "Q4_K_M",
+		},
+		Hardware:      hardware,
+		OS:            osInfo,
+		PromptSet:     macbench.ComparisonPromptSet{ID: "issue-2723-v1", SHA256: promptDigest, Prompts: []macbench.ComparisonPrompt{{ID: "p1", SHA256: strings.Repeat("b", 64)}}},
+		ContextTokens: 128,
+		OutputTokens:  64,
+		QualityPolicy: macbench.ComparisonQualityPolicy{ID: "strict-token-parity", Version: "1", SHA256: strings.Repeat("8", 64), MinimumScore: 1},
+	}
+	for index, name := range []string{"fak-native", "llama.cpp", "mlx"} {
+		runtime := "reference"
+		if name == "fak-native" {
+			runtime = "inkernel"
+		}
+		arm := macbench.ComparisonArm{
+			Name: name, EvidenceKind: "observed", RunID: "issue-2723-" + name,
+			StartedAt: "2026-08-30T04:00:00Z", FinishedAt: "2026-08-30T04:30:00Z", HostID: packet.HostID,
+			Engine: name, Runtime: runtime, RuntimeRevision: "runtime-revision-" + name, Fallback: "none", ModelID: packet.Model.ID,
+			Artifact: macbench.ComparisonArtifact{
+				Identity: "hf://example/" + name, SHA256: strings.Repeat(fmt.Sprintf("%x", index+1), 64), Format: "exact",
+				SourceRevision: packet.Model.SourceRevision, CanonicalWeightsSHA256: packet.Model.CanonicalWeightsSHA256, Quant: packet.Model.Quant,
+			},
+			Hardware: hardware, OS: osInfo, PromptSetSHA256: promptDigest,
+			ContextTokens: packet.ContextTokens, OutputTokens: packet.OutputTokens,
+			Quality: macbench.ComparisonQualityResult{
+				PolicyRef: packet.QualityPolicy.ID, PolicyVersion: packet.QualityPolicy.Version, PolicySHA256: packet.QualityPolicy.SHA256, Passed: true, Score: 1,
+				ResultPath: name + "-quality.json", ResultSHA256: strings.Repeat("c", 64),
+			},
+			RawResult: macbench.ComparisonRawResult{Path: name + "-raw.json", SHA256: strings.Repeat("d", 64)},
+			Repro:     []string{"run", name},
+		}
+		for sample := 1; sample <= macbench.MinimumComparisonSamples; sample++ {
+			value := float64(sample)
+			prefillMS := 50 + value
+			decodeMS := 100 + value
+			arm.Samples = append(arm.Samples, macbench.ComparisonSample{
+				ID: fmt.Sprintf("p1#%d", sample), PromptID: "p1", PromptSHA256: packet.PromptSet.Prompts[0].SHA256, Ordinal: sample,
+				InputTokens: packet.ContextTokens, OutputTokens: packet.OutputTokens, Engine: arm.Engine, Runtime: arm.Runtime,
+				RuntimeRevision: arm.RuntimeRevision,
+				Fallback:        "none", ArtifactSHA256: arm.Artifact.SHA256,
+				TTFTMS: 30 + prefillMS, ITLMS: decodeMS / float64(packet.OutputTokens-1),
+				PrefillTokPerS: float64(packet.ContextTokens) * 1000 / prefillMS,
+				DecodeTokPerS:  float64(packet.OutputTokens-1) * 1000 / decodeMS,
+				Boundary:       macbench.ComparisonRequestBoundary{TotalMS: 50 + prefillMS + decodeMS, QueueMS: 10, SetupMS: 20, PrefillMS: prefillMS, DecodeMS: decodeMS, VerificationMS: 10, OtherMS: 10},
+			})
+		}
+		arm.Metrics = macbench.SummarizeComparisonSamples(arm.Samples)
+		packet.Arms = append(packet.Arms, arm)
+	}
+	return packet
+}
+
+func writeCLIComparisonEvidence(t *testing.T, dir string, packet *macbench.ComparisonPacket) {
+	t.Helper()
+	for i := range packet.Arms {
+		arm := &packet.Arms[i]
+		raw, err := json.Marshal(macbench.ComparisonRawSamplesFile{
+			Schema:     macbench.ComparisonRawSamplesSchema,
+			Arm:        arm.Name,
+			CampaignID: packet.CampaignID,
+			RunID:      arm.RunID,
+			HostID:     arm.HostID,
+			StartedAt:  arm.StartedAt,
+			FinishedAt: arm.FinishedAt,
+			Samples:    arm.Samples,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		quality, err := json.Marshal(macbench.ComparisonQualityEvidenceFile{
+			Schema: macbench.ComparisonQualityEvidenceSchema, Arm: arm.Name, RunID: arm.RunID,
+			PolicyRef: arm.Quality.PolicyRef, PolicyVersion: arm.Quality.PolicyVersion,
+			PolicySHA256: arm.Quality.PolicySHA256,
+			Passed:       arm.Quality.Passed, Score: arm.Quality.Score,
+			ArtifactSHA256: arm.Artifact.SHA256, PromptSetSHA256: arm.PromptSetSHA256,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dir+"/"+arm.RawResult.Path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dir+"/"+arm.Quality.ResultPath, quality, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		arm.RawResult.SHA256 = fmt.Sprintf("%x", sha256.Sum256(raw))
+		arm.Quality.ResultSHA256 = fmt.Sprintf("%x", sha256.Sum256(quality))
+	}
 }

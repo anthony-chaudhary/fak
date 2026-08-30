@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +21,9 @@ import (
 func cmdMacBench(argv []string) { os.Exit(runMacBench(os.Stdout, os.Stderr, argv)) }
 
 func runMacBench(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "validate-comparison" {
+		return runMacBenchValidateComparison(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "watch-status" {
 		return runMacBenchWatchStatus(stdout, stderr, argv[1:])
 	}
@@ -93,6 +99,169 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runMacBenchValidateComparison(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench validate-comparison", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "", "three-way comparison packet JSON")
+	asJSON := fs.Bool("json", false, "emit machine-readable validation result")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*input) == "" {
+		fmt.Fprintln(stderr, "fak macbench validate-comparison: --input is required")
+		return 2
+	}
+	raw, err := os.ReadFile(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-comparison: read --input: %v\n", err)
+		return 1
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var packet macbench.ComparisonPacket
+	if err := dec.Decode(&packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		fmt.Fprintf(stderr, "fak macbench validate-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	if err := macbench.ValidateComparisonPacket(packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-comparison: %v\n", err)
+		return 1
+	}
+	if err := verifyMacBenchComparisonEvidenceFiles(packet, *input); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-comparison: %v\n", err)
+		return 1
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	result := struct {
+		Schema       string `json:"schema"`
+		Valid        bool   `json:"valid"`
+		PacketSHA256 string `json:"packet_sha256"`
+	}{
+		Schema:       "fak.macbench.comparison.validation.v1",
+		Valid:        true,
+		PacketSHA256: digest,
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "VALID packet_sha256=%s\n", result.PacketSHA256)
+	}
+	return 0
+}
+
+func verifyMacBenchComparisonEvidenceFiles(packet macbench.ComparisonPacket, packetPath string) error {
+	base, err := filepath.Abs(filepath.Dir(packetPath))
+	if err != nil {
+		return fmt.Errorf("resolve packet directory: %w", err)
+	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		return fmt.Errorf("resolve packet directory symlinks: %w", err)
+	}
+	for _, arm := range packet.Arms {
+		raw, err := verifyMacBenchComparisonEvidenceFile(base, arm.RawResult.Path, arm.RawResult.SHA256)
+		if err != nil {
+			return fmt.Errorf("arm %s raw_result: %w", arm.Name, err)
+		}
+		var rawFile macbench.ComparisonRawSamplesFile
+		if err := decodeStrictMacBenchComparisonJSON(raw, &rawFile); err != nil {
+			return fmt.Errorf("arm %s raw_result: decode: %w", arm.Name, err)
+		}
+		wantRaw := macbench.ComparisonRawSamplesFile{
+			Schema: macbench.ComparisonRawSamplesSchema, Arm: arm.Name,
+			CampaignID: packet.CampaignID, RunID: arm.RunID, HostID: arm.HostID,
+			StartedAt: arm.StartedAt, FinishedAt: arm.FinishedAt, Samples: arm.Samples,
+		}
+		if !reflect.DeepEqual(rawFile, wantRaw) {
+			return fmt.Errorf("arm %s raw_result: content does not match packet samples", arm.Name)
+		}
+
+		quality, err := verifyMacBenchComparisonEvidenceFile(base, arm.Quality.ResultPath, arm.Quality.ResultSHA256)
+		if err != nil {
+			return fmt.Errorf("arm %s quality: %w", arm.Name, err)
+		}
+		var qualityFile macbench.ComparisonQualityEvidenceFile
+		if err := decodeStrictMacBenchComparisonJSON(quality, &qualityFile); err != nil {
+			return fmt.Errorf("arm %s quality: decode: %w", arm.Name, err)
+		}
+		wantQuality := macbench.ComparisonQualityEvidenceFile{
+			Schema: macbench.ComparisonQualityEvidenceSchema, Arm: arm.Name, RunID: arm.RunID,
+			PolicyRef: arm.Quality.PolicyRef, PolicyVersion: arm.Quality.PolicyVersion,
+			PolicySHA256: arm.Quality.PolicySHA256,
+			Passed:       arm.Quality.Passed, Score: arm.Quality.Score,
+			ArtifactSHA256: arm.Artifact.SHA256, PromptSetSHA256: arm.PromptSetSHA256,
+		}
+		if qualityFile != wantQuality {
+			return fmt.Errorf("arm %s quality: content does not match packet quality result", arm.Name)
+		}
+	}
+	return nil
+}
+
+func verifyMacBenchComparisonEvidenceFile(base, relative, wantDigest string) ([]byte, error) {
+	relative = strings.TrimSpace(relative)
+	if relative == "" || filepath.IsAbs(relative) {
+		return nil, fmt.Errorf("path must be relative to the packet")
+	}
+	clean := filepath.Clean(relative)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path escapes the packet directory")
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(base, clean))
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q: %w", relative, err)
+	}
+	inside, err := filepath.Rel(base, resolved)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path escapes the packet directory")
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("open %q: %w", relative, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", relative, err)
+	}
+	if info.Size() > 64<<20 {
+		return nil, fmt.Errorf("%q exceeds 64 MiB evidence limit", relative)
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", relative, err)
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256(raw))
+	if got != wantDigest {
+		return nil, fmt.Errorf("sha256 mismatch for %q", relative)
+	}
+	return raw, nil
+}
+
+func decodeStrictMacBenchComparisonJSON(raw []byte, out any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values")
+		}
+		return err
+	}
+	return nil
 }
 
 func runMacBenchWatch(stdout, stderr io.Writer, argv []string) int {
