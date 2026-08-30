@@ -13,7 +13,7 @@ func gateRequest(t *testing.T) GateRequest {
 	c := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
 	a.Revision = "goodsha"
 	c.Revision = "badsha"
-	a.Quality = QualityMetric{"exact_match", 1, true}
+	a.Quality = QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
 	c.Quality = a.Quality
 	a.ModuleVersions = []ModuleRevision{{"internal/model", "r10+ggood"}, {"internal/metalgemm", "r20+ggood"}}
 	c.ModuleVersions = []ModuleRevision{{"internal/model", "r11+gbad"}, {"internal/metalgemm", "r20+ggood"}}

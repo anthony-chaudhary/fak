@@ -18,6 +18,14 @@ func validReceipt(t *testing.T, role, lever string) ExperimentReceipt {
 	r.Role, r.Revision, r.Machine.ScrubbedID = role, "rev-123", "lab-node-class-a"
 	r.Memory = MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
 	r.Quality = QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+	criterion, err := ResolveComparisonCriterion(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Comparison, err = comparisonIdentity(criterion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	r.ModuleVersions = []ModuleRevision{{Module: "internal/model", Revision: "r10+gaaaaaaa"}}
 	r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
 	r.ProfilerArtifacts = []ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}

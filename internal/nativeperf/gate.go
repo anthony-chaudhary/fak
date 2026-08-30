@@ -88,6 +88,7 @@ type BisectPacket struct {
 type GateVerdict struct {
 	Schema                  string              `json:"schema"`
 	EnvelopeID              string              `json:"envelope_id"`
+	CriterionDigest         string              `json:"criterion_digest"`
 	Classification          string              `json:"classification"`
 	AcceptedRevision        string              `json:"accepted_revision"`
 	CandidateRevision       string              `json:"candidate_revision"`
@@ -109,6 +110,14 @@ func Gate(r GateRequest) (GateVerdict, error) {
 		return GateVerdict{}, fmt.Errorf("gate request schema must be %q or %q", GateRequestSchemaV1, GateRequestSchemaV2)
 	}
 	p := r.Policy
+	a, c := r.LastAccepted, r.Candidate
+	criterion, err := ResolveComparisonCriterion(a)
+	if err != nil {
+		return GateVerdict{}, fmt.Errorf("last accepted comparison criterion: %w", err)
+	}
+	if err := validatePolicyCriterion(p, criterion); err != nil {
+		return GateVerdict{}, err
+	}
 	if err := validateGatePolicy(p); err != nil {
 		return GateVerdict{}, err
 	}
@@ -116,7 +125,6 @@ func Gate(r GateRequest) (GateVerdict, error) {
 		return GateVerdict{}, fmt.Errorf("v1 gate requests require a v1 gate policy")
 	}
 	g := ActiveGraph()
-	a, c := r.LastAccepted, r.Candidate
 	acceptedEvidence := a
 	if p.RequireSystemBaseline {
 		// Ambient evidence has its own investigate classification below; do not
@@ -132,6 +140,7 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	candidateEvidence.Execution.Engine = "fak-native"
 	candidateEvidence.Execution.ForwardPath = a.Execution.ForwardPath
 	candidateEvidence.Execution.FallbackCount = 0
+	candidateEvidence.Comparison = a.Comparison
 	if p.RequireSystemBaseline {
 		candidateEvidence = withoutSystemBaselineEvidence(candidateEvidence)
 	}
@@ -150,7 +159,7 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	if a.ChangedLeverID != p.ChangedLeverID || c.ChangedLeverID != p.ChangedLeverID {
 		return GateVerdict{}, fmt.Errorf("policy and receipts must use exact lever %q", p.ChangedLeverID)
 	}
-	if a.ArtifactSHA256 != c.ArtifactSHA256 || a.Machine != c.Machine || a.Controls != c.Controls || a.ChangedLeverID != c.ChangedLeverID || !sameStrings(a.UnchangedControls, c.UnchangedControls) {
+	if a.ArtifactSHA256 != c.ArtifactSHA256 || a.Machine != c.Machine || a.Controls != c.Controls || a.ChangedLeverID != c.ChangedLeverID || a.Comparison != c.Comparison || !sameStrings(a.UnchangedControls, c.UnchangedControls) {
 		return GateVerdict{}, fmt.Errorf("receipts are incomparable: an envelope control axis drifted")
 	}
 	if len(a.Repetitions) < p.MinimumRepetitions || len(c.Repetitions) < p.MinimumRepetitions {
@@ -216,7 +225,7 @@ func Gate(r GateRequest) (GateVerdict, error) {
 		class = GateInvestigate
 	}
 	suspects := changedModules(a.ModuleVersions, c.ModuleVersions)
-	v := GateVerdict{Schema: GateVerdictSchema, EnvelopeID: p.EnvelopeID, Classification: class, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, AcceptedMeanTokensPerS: am, CandidateMeanTokensPerS: cm, ThroughputDeltaPercent: -drop, AcceptedNoisePercent: an, CandidateNoisePercent: cn, AcceptedSamples: acceptedSamples, CandidateSamples: candidateSamples, Checks: checks}
+	v := GateVerdict{Schema: GateVerdictSchema, EnvelopeID: p.EnvelopeID, CriterionDigest: a.Comparison.CriterionDigest, Classification: class, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, AcceptedMeanTokensPerS: am, CandidateMeanTokensPerS: cm, ThroughputDeltaPercent: -drop, AcceptedNoisePercent: an, CandidateNoisePercent: cn, AcceptedSamples: acceptedSamples, CandidateSamples: candidateSamples, Checks: checks}
 	if class != GatePass && (ambStatus != "investigate" || class == GateRegression) {
 		v.SuspectModules = suspects
 		v.Bisect = &BisectPacket{BisectPacketSchema, p.EnvelopeID, a.Revision, c.Revision, suspects, []string{fmt.Sprintf("dos arbitrate --lane native-performance --paths %s", suspectPaths(suspects)), "fak native-performance --gate gate-request.json"}, "first revision classified regression under the exact envelope, quality, identity, memory, and throughput policy"}
