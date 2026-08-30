@@ -106,6 +106,21 @@ func retryableStatus(code int) bool {
 	return false
 }
 
+// transientTargetStatus reports upstream failures that can be isolated to the
+// current target/account. Unlike 408 and 429, these statuses get one immediate
+// same-target probe before a configured alternate is tried.
+func transientTargetStatus(code int) bool {
+	switch code {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		statusOverloaded:
+		return true
+	}
+	return false
+}
+
 // plannerMaxAttempts is the TOTAL number of upstream tries (first attempt + retries)
 // Complete makes on a transient failure. The default of 8 (raised from 4) trades a
 // longer worst-case stall for far better resilience to the long rate-limit/overload

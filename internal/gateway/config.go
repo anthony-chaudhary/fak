@@ -288,6 +288,10 @@ type Config struct {
 	// remedy label, never a raw upstream body. nil keeps the terminal-on-account-403 behavior
 	// unchanged.
 	AccountFailoverFunc func(reason string) (newCred string, ok bool)
+	// TransientTargetFunc supplies a distinct replacement credential after a temporary
+	// upstream 5xx/529 survives one same-target probe. It must not permanently wall the
+	// current account; nil preserves same-target retry behavior.
+	TransientTargetFunc func(status int) (newCred string, ok bool)
 	// ExtraHeaders are trusted host-supplied headers added to every upstream provider
 	// request in proxy mode. They carry account-routing metadata that is not a generic
 	// provider credential, such as ChatGPT-Account-Id for Codex ChatGPT subscription

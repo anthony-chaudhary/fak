@@ -67,6 +67,9 @@ type guardUpstreamPosture struct {
 	// OAuth disabled / region / billing). It also stickily advances the config dir apiKeyFunc
 	// reads from, so a walled session heals onto a working account and stays there.
 	accountFailoverFunc func(reason string) (string, bool)
+	// transientTargetFunc supplies a sibling for temporary 5xx/529 failover without
+	// adding the current account to the permanent walled set.
+	transientTargetFunc func(status int) (string, bool)
 	// activeAccountDir/walledAccounts feed the live accounts+nodes status
 	// area (guard_endpoints.go): the config dir of the seat currently serving turns
 	// (it follows a failover) and the seats an account-scoped 403 walled this session.
@@ -180,6 +183,7 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 		if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
 			af = newAccountFailover(homeRoot, us.claudeConfigDir, nil)
 			p.accountFailoverFunc = af.failover
+			p.transientTargetFunc = af.transientTarget
 			p.accountRehome = af.forceRehome
 		}
 		// Feed the live accounts+nodes status area: the ACTIVE seat follows a failover
@@ -268,6 +272,7 @@ func installCodexAccountRefresh(p *guardUpstreamPosture, explicitHome, homeRoot 
 	if strings.TrimSpace(homeRoot) != "" {
 		af := newCodexAccountFailover(homeRoot, filepath.Dir(cred.Source))
 		p.accountFailoverFunc = af.failover
+		p.transientTargetFunc = af.transientTarget
 		p.activeAccountDir = af.currentConfigDir
 		p.walledAccounts = af.walledKeys
 		p.apiKeyFunc, p.extraHeadersFunc = newCodexFailoverRefreshers(af, cred)

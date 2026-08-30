@@ -120,6 +120,8 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// cooldown and must not enter the hours-away cap wait path.
 	triedAccountFailover := false
 	accountFailoverPending := false
+	triedTransientRetry := false
+	triedTransientTarget := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -181,11 +183,26 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				// burst, and no 502 costume over a 400.
 				return newUpstreamStatusError(refusalStatus, refusalFrame, r.Header, 400)
 			}
-			// Transient in-band refusal: note it as the triggering status (so the backoff, the
-			// RetryNotify line, and the exhausted error all read the same as the HTTP-status
-			// path) and re-send.
-			rs.noteRetryableStatus(refusalStatus, refusalFrame, r.Header, 400)
-			continue
+			// Project an in-band pre-start refusal into the shared rejected-response policy so
+			// Anthropic's HTTP-200 overload envelope gets the same quick retry and transient
+			// target failover as an HTTP 529.
+			rejected := &http.Response{StatusCode: refusalStatus, Header: r.Header}
+			retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, rejected, refusalFrame, attempt, rejectedResponseRetry{
+				triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
+				triedRehome: &triedRehome, rehomePending: &rehomePending,
+				triedFailover: &triedAccountFailover, failoverPending: &accountFailoverPending,
+				triedTransientRetry: &triedTransientRetry, triedTransientTarget: &triedTransientTarget,
+				bodyCap: 400,
+			})
+			if statusErr != nil {
+				return statusErr
+			}
+			if rewind {
+				attempt--
+			}
+			if retry {
+				continue
+			}
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
@@ -193,6 +210,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 			triedRehome: &triedRehome, rehomePending: &rehomePending,
 			triedFailover: &triedAccountFailover, failoverPending: &accountFailoverPending,
+			triedTransientRetry: &triedTransientRetry, triedTransientTarget: &triedTransientTarget,
 			bodyCap: 400,
 		})
 		if statusErr != nil {

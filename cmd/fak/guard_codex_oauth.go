@@ -227,6 +227,32 @@ func (a *codexAccountFailover) failover(_ string) (string, bool) {
 	return "", false
 }
 
+// transientTarget adopts a live sibling for a temporary 5xx/529 without adding
+// the current account to the permanent wall or operator-moved sets.
+func (a *codexAccountFailover) transientTarget(_ int) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	currentDir := filepath.Clean(a.currentDir)
+	currentKey := codexAccountKeyForDir(a.currentDir)
+	for _, h := range a.homesLocked() {
+		key := h.Identity.AccountKey()
+		if filepath.Clean(h.Dir) == currentDir || key == "" || key == currentKey || a.walled[key] || a.moved[key] {
+			continue
+		}
+		cred, err := readCodexSubscriptionCredential(filepath.Join(h.Dir, codexAuthFileName))
+		if err != nil || strings.TrimSpace(cred.AccessToken) == "" || strings.TrimSpace(cred.AccountID) == "" {
+			continue
+		}
+		a.currentDir = filepath.Clean(h.Dir)
+		return cred.AccessToken, true
+	}
+	return "", false
+}
+
 func (a *codexAccountFailover) homesLocked() []accounts.Home {
 	profile, ok := harnessprofile.Lookup("codex")
 	if !ok {

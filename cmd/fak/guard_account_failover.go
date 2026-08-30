@@ -122,6 +122,32 @@ func (a *accountFailover) failover(reason string) (string, bool) {
 	return token, ok
 }
 
+// transientTarget selects and adopts a live sibling without marking the current account
+// walled. A transient 5xx/529 proves only that this target is unhealthy now, not that the
+// account is permanently unusable.
+func (a *accountFailover) transientTarget(_ int) (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	homes, err := accounts.Discover(a.homeRoot)
+	if err != nil {
+		a.lastNoTarget = FailoverNoSiblings
+		return "", false
+	}
+	excluded := a.excludedLocked()
+	if current := accountKeyForDir(a.currentDir); current != "" {
+		excluded[current] = true
+	}
+	dir, tok, noTarget, ok := pickFailoverAccount(homes, excluded, a.now())
+	if !ok {
+		a.lastNoTarget = noTarget
+		return "", false
+	}
+	a.lastNoTarget = FailoverFoundTarget
+	a.currentDir = dir
+	return tok, true
+}
+
 // failoverLocked is failover's mutex-held core: it walls the current account in-memory, picks a
 // permitted sibling, and advances the sticky dir. It returns the adopted token, the account KEY it
 // just walled (so the caller can persist a cooldown off the lock), and ok. walledKey is "" when the

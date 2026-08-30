@@ -712,6 +712,11 @@ type HTTPPlanner struct {
 	// byte-for-byte unchanged.
 	AccountFailoverFunc func(reason string) (newCred string, ok bool)
 
+	// TransientTargetFunc supplies a distinct replacement credential after a transient
+	// upstream 5xx/529 survives one quick same-target retry. Unlike AccountFailoverFunc,
+	// it MUST NOT mark the current account permanently walled.
+	TransientTargetFunc func(status int) (newCred string, ok bool)
+
 	// AccountFailoverNotify, when non-nil, is called when the account-failover arm resolves —
 	// separately from the other three notify hooks so an org/region/billing failover is never
 	// conflated with a 429/5xx backoff, a 401 token rotation, or a transient-403 flap (four
@@ -1008,6 +1013,8 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// its seat and rides the short backoff.
 	triedRehome := false
 	rehomePending := false
+	triedTransientRetry := false
+	triedTransientTarget := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Write-ahead durable checkpoint (#1363): record how far this turn has gotten
@@ -1055,6 +1062,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 				triedRehome: &triedRehome, rehomePending: &rehomePending,
 				triedFailover: &triedFailover, failoverPending: &failoverPending,
+				triedTransientRetry: &triedTransientRetry, triedTransientTarget: &triedTransientTarget,
 				recordRefreshState: true, bodyCap: 200,
 			})
 			if statusErr != nil {

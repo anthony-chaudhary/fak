@@ -562,6 +562,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	keychainAPIKey, credPath := posture.keychainAPIKey, posture.credPath
 	apiKeyFunc, extraHeaders, extraHeadersFunc := posture.apiKeyFunc, posture.extraHeaders, posture.extraHeadersFunc
 	accountFailoverFunc := posture.accountFailoverFunc
+	transientTargetFunc := posture.transientTargetFunc
 	guardActiveAccountDir, guardWalledAccounts := posture.activeAccountDir, posture.walledAccounts
 	guardAccountRehome := posture.accountRehome
 
@@ -903,6 +904,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		// every non-pinned path (and when the home root is unresolvable), preserving the
 		// historical terminal-on-account-403 behavior exactly.
 		AccountFailoverFunc: accountFailoverFunc,
+		TransientTargetFunc: transientTargetFunc,
 		// LOCAL in-kernel model (--gguf): a loaded model + tokenizer with an EMPTY BaseURL
 		// makes the gateway serve BOTH /v1/messages (claude) and /v1/chat/completions (codex)
 		// from fak's own engine — no upstream call. With --alongside (BaseURL ALSO set) the

@@ -58,14 +58,16 @@ func (s *retryState) noteImmediateRetry(status int, raw []byte, hdr http.Header,
 }
 
 type rejectedResponseRetry struct {
-	triedAuthRefresh   *bool
-	forbidden          *forbiddenRetryState
-	triedRehome        *bool
-	rehomePending      *bool
-	triedFailover      *bool
-	failoverPending    *bool
-	recordRefreshState bool
-	bodyCap            int
+	triedAuthRefresh     *bool
+	forbidden            *forbiddenRetryState
+	triedRehome          *bool
+	rehomePending        *bool
+	triedFailover        *bool
+	failoverPending      *bool
+	triedTransientRetry  *bool
+	triedTransientTarget *bool
+	recordRefreshState   bool
+	bodyCap              int
 }
 
 // handleRejectedResponse is the shared pre-first-byte recovery policy for the
@@ -75,6 +77,22 @@ type rejectedResponseRetry struct {
 // error returned in err.
 func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanner, s *retryState, resp *http.Response, raw []byte, attempt int, ctl rejectedResponseRetry) (retry, rewind bool, err error) {
 	status := resp.StatusCode
+	if transientTargetStatus(status) && ctl.triedTransientRetry != nil && ctl.triedTransientTarget != nil {
+		if !*ctl.triedTransientRetry {
+			*ctl.triedTransientRetry = true
+			s.noteImmediateRetry(status, raw, resp.Header, ctl.bodyCap)
+			notifyImmediateStatusRetry(p, attempt, status)
+			return true, true, nil
+		}
+		if !*ctl.triedTransientTarget {
+			*ctl.triedTransientTarget = true
+			if c.failoverTransientTarget(p, status) {
+				s.noteImmediateRetry(status, raw, resp.Header, ctl.bodyCap)
+				notifyImmediateStatusRetry(p, attempt, status)
+				return true, true, nil
+			}
+		}
+	}
 	if retryableStatus(status) {
 		action := c.noteRetryableCapMaybeRehome(p, s, status, raw, resp.Header, ctl.bodyCap, false, ctl.triedRehome, ctl.rehomePending, attempt)
 		return true, action == capRehomeResend, nil
@@ -108,6 +126,12 @@ func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanne
 		notifyAccountFailover(p, AccountFailoverExhausted, attempt)
 	}
 	return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
+}
+
+func notifyImmediateStatusRetry(p *HTTPPlanner, attempt, status int) {
+	if p != nil && p.RetryNotify != nil {
+		p.RetryNotify(attempt, status, 0)
+	}
 }
 
 // noteTransportGlitch records a transient transport error: no HTTP status, no

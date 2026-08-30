@@ -683,6 +683,7 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	}
 	p.APIKeyFunc = cfg.APIKeyFunc
 	p.AccountFailoverFunc = cfg.AccountFailoverFunc
+	p.TransientTargetFunc = cfg.TransientTargetFunc
 	p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 	p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 	p.ForceResponsesStream = cfg.ForceResponsesStream
