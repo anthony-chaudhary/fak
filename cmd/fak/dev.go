@@ -6,6 +6,7 @@ package main
 // packages.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 var (
@@ -84,14 +86,100 @@ func resolveFakSourceCheckout() (string, error) {
 // process streams. Returning the child's exit code preserves CLI behavior while
 // keeping the runtime dependency graph free of development packages.
 func runDevHandoff(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "availability" {
+		return runDevAvailability(stdout, stderr, argv[1:])
+	}
 	path, err := findFakDev()
 	if err != nil {
 		fmt.Fprintln(stderr, "fak dev: repository-development commands are provided by the separate 'fak-dev' executable")
-		fmt.Fprintln(stderr, "  install or build fak-dev, then run: fak-dev <command> [args...]")
+		fmt.Fprintln(stderr, "  source checkout: go install ./cmd/fak-dev")
+		fmt.Fprintln(stderr, "  released version: go install github.com/anthony-chaudhary/fak/cmd/fak-dev@latest")
+		fmt.Fprintln(stderr, "  then run: fak-dev <command> [args...]")
 		fmt.Fprintf(stderr, "  lookup: %v\n", err)
 		return 2
 	}
-	return runDevChild(stdin, stdout, stderr, "", path, argv)
+	cmd := exec.Command(path, argv...)
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		fmt.Fprintf(stderr, "fak dev: launch %s: %v\n", path, err)
+		return 2
+	}
+	return 0
+}
+
+type devAvailability struct {
+	Schema    string `json:"schema"`
+	Available bool   `json:"available"`
+	Source    string `json:"source"`
+	Path      string `json:"path,omitempty"`
+	Recovery  string `json:"recovery,omitempty"`
+}
+
+// runDevAvailability reports the companion contract without requiring fak-dev
+// to exist. Keeping this probe in runtime fak makes a missing companion
+// inspectable rather than turning discovery into another failed handoff.
+func runDevAvailability(stdout, stderr io.Writer, argv []string) int {
+	jsonOutput := len(argv) == 1 && argv[0] == "--json"
+	if len(argv) > 0 && !jsonOutput {
+		fmt.Fprintln(stderr, "usage: fak dev availability [--json]")
+		return 2
+	}
+
+	path, err := findFakDev()
+	result := devAvailability{Schema: "fak-dev-availability/1"}
+	if err != nil {
+		result.Source = "missing"
+		result.Recovery = "go install ./cmd/fak-dev"
+	} else {
+		result.Available = true
+		result.Path = path
+		result.Source = fakDevSource(path)
+	}
+	if jsonOutput {
+		if err := json.NewEncoder(stdout).Encode(result); err != nil {
+			fmt.Fprintf(stderr, "fak dev availability: encode: %v\n", err)
+			return 2
+		}
+		return 0
+	}
+	if result.Available {
+		fmt.Fprintf(stdout, "fak-dev: available (%s) %s\n", result.Source, result.Path)
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak-dev: missing; recover with: %s\n", result.Recovery)
+	return 1
+}
+
+func fakDevSource(path string) string {
+	if exe, err := os.Executable(); err == nil {
+		name := "fak-dev"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		sibling := filepath.Join(filepath.Dir(exe), name)
+		if sameDevPath(path, sibling) {
+			return "sibling"
+		}
+	}
+	return "path"
+}
+
+func sameDevPath(a, b string) bool {
+	a, errA := filepath.Abs(a)
+	b, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // resolveFakDev prefers a sibling artifact so side-by-side installs are

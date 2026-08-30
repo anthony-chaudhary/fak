@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8 Mac native-performance top-ten plan"
+description: "Execution plan for the next ten fak-native Qwen3.8 performance items on Mac, with issue state, ordering, witnesses, and reconciliation notes."
+---
+
 # Plan: #9430 - next ten fak-native Qwen Mac performance items
 
 - Owner: Codex coordinator, 2026-08-27

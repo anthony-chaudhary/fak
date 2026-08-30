@@ -1,3 +1,8 @@
+---
+title: "Native performance artifact index"
+description: "Index of scrubbed fak-native performance evidence, mapping opaque correlation identifiers to bounded artifacts for dashboard investigation."
+---
+
 # Native performance artifact index
 
 The native artifact index is the bounded drill-down surface from a Grafana point to the exact

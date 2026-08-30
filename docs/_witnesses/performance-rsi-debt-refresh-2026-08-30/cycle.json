@@ -1,0 +1,11 @@
+{
+  "schema": "fak-performance-rsi-cycle/1",
+  "engine": "fak-native/qwen3.8",
+  "idea_at": "2026-08-30T11:28:02.7938953-07:00",
+  "queue_at": "2026-08-30T11:28:03.9092134-07:00",
+  "execution_at": "2026-08-30T11:28:05.0262582-07:00",
+  "evaluation_at": "2026-08-30T11:28:06.1631082-07:00",
+  "landing_at": "2026-08-30T11:28:07.3045364-07:00",
+  "learning_at": "2026-08-30T11:28:08.4237562-07:00",
+  "operator_active_seconds": 1
+}

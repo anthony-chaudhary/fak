@@ -1,0 +1,387 @@
+{
+  "schema": "fak-performance-rsi-scorecard/1",
+  "snapshot": "issue-10358-performance-rsi-debt-refresh-2026-08-30",
+  "target_multiplier": 100,
+  "dimensions": [
+    {
+      "id": "cycle_time",
+      "source": "cycle:fak-performance-rsi-cycle/1",
+      "evidence_kind": "cycle_ledger",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 0.00156385025,
+      "target": 0.02,
+      "unit": "hours",
+      "normalized_ratio": 12.788948302434969,
+      "next_action": "shorten the end-to-end learning cycle"
+    },
+    {
+      "id": "improvement_yield",
+      "source": "improvement:fak-performance-rsi-improvement/1",
+      "evidence_kind": "improvement_receipt",
+      "engine": "fak-native/qwen3.8",
+      "status": "BEHIND",
+      "current": 20,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 0.2,
+      "next_action": "raise yield"
+    },
+    {
+      "id": "evaluation_latency",
+      "source": "cycle:fak-performance-rsi-cycle/1",
+      "evidence_kind": "cycle_ledger",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 0.00031579166666666664,
+      "target": 0.005,
+      "unit": "hours",
+      "normalized_ratio": 15.833223380393193,
+      "next_action": "reduce evaluation latency"
+    },
+    {
+      "id": "receipt_coverage",
+      "source": "improvement:fak-performance-rsi-improvement/1",
+      "evidence_kind": "improvement_receipt",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "capture receipts"
+    },
+    {
+      "id": "quality_gate_coverage",
+      "source": "improvement:fak-performance-rsi-improvement/1",
+      "evidence_kind": "improvement_receipt",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "add quality gates"
+    },
+    {
+      "id": "experiment_throughput",
+      "source": "cycle:fak-performance-rsi-cycle/1",
+      "evidence_kind": "cycle_ledger",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 15346.737962921961,
+      "target": 1200,
+      "unit": "experiments/day",
+      "normalized_ratio": 12.788948302434967,
+      "next_action": "increase completed cycles"
+    },
+    {
+      "id": "hypothesis_calibration",
+      "source": "learning:fak-performance-rsi-learning/1",
+      "evidence_kind": "performance_rsi_learning_receipt",
+      "engine": "fak-native",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "calibrate ranking"
+    },
+    {
+      "id": "discovery_freshness",
+      "source": "provenance:fak-performance-rsi-provenance/1",
+      "evidence_kind": "research_transfer_receipt",
+      "engine": "fak-native",
+      "status": "BEHIND",
+      "current": 16.051666666666666,
+      "target": 1,
+      "unit": "hours",
+      "normalized_ratio": 0.06229882670543038,
+      "next_action": "refresh discovery"
+    },
+    {
+      "id": "adaptation_speed",
+      "source": "provenance:fak-performance-rsi-provenance/1",
+      "evidence_kind": "research_transfer_receipt",
+      "engine": "fak-native",
+      "status": "MET",
+      "current": 0.8580555555555556,
+      "target": 1,
+      "unit": "hours",
+      "normalized_ratio": 1.165425704111363,
+      "next_action": "adapt faster"
+    },
+    {
+      "id": "reuse_ratio",
+      "source": "provenance:fak-performance-rsi-provenance/1",
+      "evidence_kind": "research_transfer_receipt",
+      "engine": "fak-native",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "reuse mechanisms"
+    },
+    {
+      "id": "learning_retention",
+      "source": "learning:fak-performance-rsi-learning/1",
+      "evidence_kind": "performance_rsi_learning_receipt",
+      "engine": "fak-native",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "retain learning"
+    },
+    {
+      "id": "production_transfer",
+      "source": "provenance:fak-performance-rsi-provenance/1",
+      "evidence_kind": "research_transfer_receipt",
+      "engine": "fak-native",
+      "status": "BEHIND",
+      "current": 82.59222222222222,
+      "target": 100,
+      "unit": "hours",
+      "normalized_ratio": 0.8259222222222222,
+      "next_action": "transfer experiments"
+    },
+    {
+      "id": "hardware_utilization",
+      "source": "fixture/hardware",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "use hardware"
+    },
+    {
+      "id": "attribution_quality",
+      "source": "improvement:fak-performance-rsi-improvement/1",
+      "evidence_kind": "improvement_receipt",
+      "engine": "fak-native/qwen3.8",
+      "status": "MET",
+      "current": 100,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 1,
+      "next_action": "improve attribution"
+    },
+    {
+      "id": "automation_coverage",
+      "source": "cycle:fak-performance-rsi-cycle/1",
+      "evidence_kind": "cycle_ledger",
+      "engine": "fak-native/qwen3.8",
+      "status": "BEHIND",
+      "current": 82.23757180217366,
+      "target": 99,
+      "unit": "percent",
+      "normalized_ratio": 0.8306825434562997,
+      "next_action": "reduce operator-active time"
+    },
+    {
+      "id": "compounding_rate",
+      "source": "learning:fak-performance-rsi-learning/1",
+      "evidence_kind": "performance_rsi_learning_receipt",
+      "engine": "fak-native",
+      "status": "BEHIND",
+      "current": 98.7276253438114,
+      "target": 100,
+      "unit": "percent",
+      "normalized_ratio": 0.987276253438114,
+      "next_action": "compound learning"
+    }
+  ],
+  "dominant_bottleneck": "discovery_freshness",
+  "unknown_debt": 1,
+  "loop_health": {
+    "score": 80.7,
+    "grade": "B",
+    "clean": false,
+    "interpretation": "grade describes performance-RSI loop health; it does not prove the explicit target multiplier was achieved"
+  },
+  "debt_summary": {
+    "performance_rsi_debt": 6,
+    "total": 6,
+    "dimensions_measured": 15,
+    "dimensions_total": 16,
+    "behind": 5,
+    "unknown": 1,
+    "evidence": [
+      {
+        "dimension": "improvement_yield",
+        "status": "BEHIND",
+        "normalized_ratio": 0.2,
+        "source": "improvement:fak-performance-rsi-improvement/1",
+        "evidence_kind": "improvement_receipt",
+        "engine": "fak-native/qwen3.8",
+        "next_action": "raise yield"
+      },
+      {
+        "dimension": "discovery_freshness",
+        "status": "BEHIND",
+        "normalized_ratio": 0.06229882670543038,
+        "source": "provenance:fak-performance-rsi-provenance/1",
+        "evidence_kind": "research_transfer_receipt",
+        "engine": "fak-native",
+        "next_action": "refresh discovery"
+      },
+      {
+        "dimension": "production_transfer",
+        "status": "BEHIND",
+        "normalized_ratio": 0.8259222222222222,
+        "source": "provenance:fak-performance-rsi-provenance/1",
+        "evidence_kind": "research_transfer_receipt",
+        "engine": "fak-native",
+        "next_action": "transfer experiments"
+      },
+      {
+        "dimension": "hardware_utilization",
+        "status": "UNKNOWN",
+        "normalized_ratio": null,
+        "source": "fixture/hardware",
+        "next_action": "use hardware"
+      },
+      {
+        "dimension": "automation_coverage",
+        "status": "BEHIND",
+        "normalized_ratio": 0.8306825434562997,
+        "source": "cycle:fak-performance-rsi-cycle/1",
+        "evidence_kind": "cycle_ledger",
+        "engine": "fak-native/qwen3.8",
+        "next_action": "reduce operator-active time"
+      },
+      {
+        "dimension": "compounding_rate",
+        "status": "BEHIND",
+        "normalized_ratio": 0.987276253438114,
+        "source": "learning:fak-performance-rsi-learning/1",
+        "evidence_kind": "performance_rsi_learning_receipt",
+        "engine": "fak-native",
+        "next_action": "compound learning"
+      }
+    ]
+  },
+  "invocation_outcomes": {
+    "success": 1,
+    "refusal": 0,
+    "error": 0
+  },
+  "comparison": {
+    "prior_snapshot": "issue-9768-live-repository-dogfood-2026-08-28",
+    "deltas": [
+      {
+        "id": "cycle_time",
+        "prior_status": "BEHIND",
+        "current_status": "MET",
+        "prior_ratio": 0.01,
+        "current_ratio": 12.788948302434969
+      },
+      {
+        "id": "improvement_yield",
+        "prior_status": "BEHIND",
+        "current_status": "BEHIND",
+        "prior_ratio": 0.2,
+        "current_ratio": 0.2
+      },
+      {
+        "id": "evaluation_latency",
+        "prior_status": "BEHIND",
+        "current_status": "MET",
+        "prior_ratio": 0.16666666666666666,
+        "current_ratio": 15.833223380393193
+      },
+      {
+        "id": "receipt_coverage",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "quality_gate_coverage",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "experiment_throughput",
+        "prior_status": "BEHIND",
+        "current_status": "MET",
+        "prior_ratio": 0.01,
+        "current_ratio": 12.788948302434967
+      },
+      {
+        "id": "hypothesis_calibration",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "discovery_freshness",
+        "prior_status": "BEHIND",
+        "current_status": "BEHIND",
+        "prior_ratio": 0.06229882670543038,
+        "current_ratio": 0.06229882670543038
+      },
+      {
+        "id": "adaptation_speed",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1.165425704111363,
+        "current_ratio": 1.165425704111363
+      },
+      {
+        "id": "reuse_ratio",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "learning_retention",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "production_transfer",
+        "prior_status": "BEHIND",
+        "current_status": "BEHIND",
+        "prior_ratio": 0.8259222222222222,
+        "current_ratio": 0.8259222222222222
+      },
+      {
+        "id": "hardware_utilization",
+        "prior_status": "UNKNOWN",
+        "current_status": "UNKNOWN"
+      },
+      {
+        "id": "attribution_quality",
+        "prior_status": "MET",
+        "current_status": "MET",
+        "prior_ratio": 1,
+        "current_ratio": 1
+      },
+      {
+        "id": "automation_coverage",
+        "prior_status": "BEHIND",
+        "current_status": "BEHIND",
+        "prior_ratio": 0.7575757575757576,
+        "current_ratio": 0.8306825434562997
+      },
+      {
+        "id": "compounding_rate",
+        "prior_status": "BEHIND",
+        "current_status": "BEHIND",
+        "prior_ratio": 0.987276253438114,
+        "current_ratio": 0.987276253438114
+      }
+    ]
+  }
+}

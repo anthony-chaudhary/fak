@@ -31,17 +31,22 @@ type admissionRecord struct {
 
 // admissionLedger keys result admission to content, per trace. A zero value is ready
 // to use; it carries its own mutex so it can be a plain Server field.
+type admissionKey struct {
+	callID string
+	digest string
+}
+
 type admissionLedger struct {
 	mu      sync.Mutex
-	byTrace map[string]map[string]*admissionRecord
+	byTrace map[string]map[admissionKey]*admissionRecord
 }
 
 // traceLocked returns the per-trace record map, creating it and bounding the ledger to
 // maxResetHealthSessions traces (the same reaper convention as turnSafety/resetHealth).
 // The caller must hold l.mu. The trace being fetched is never the one evicted.
-func (l *admissionLedger) traceLocked(trace string) map[string]*admissionRecord {
+func (l *admissionLedger) traceLocked(trace string) map[admissionKey]*admissionRecord {
 	if l.byTrace == nil {
-		l.byTrace = map[string]map[string]*admissionRecord{}
+		l.byTrace = map[string]map[admissionKey]*admissionRecord{}
 	}
 	if _, ok := l.byTrace[trace]; !ok && len(l.byTrace) >= maxResetHealthSessions {
 		for k := range l.byTrace {
@@ -54,7 +59,7 @@ func (l *admissionLedger) traceLocked(trace string) map[string]*admissionRecord 
 	}
 	seen := l.byTrace[trace]
 	if seen == nil {
-		seen = map[string]*admissionRecord{}
+		seen = map[admissionKey]*admissionRecord{}
 		l.byTrace[trace] = seen
 	}
 	return seen
@@ -71,13 +76,14 @@ func (l *admissionLedger) traceLocked(trace string) map[string]*admissionRecord 
 // A single request is single-threaded over its transcript, so the dominant replay path
 // never races; a rare concurrent same-trace turn may screen twice, which is idempotent
 // (same content → same verdict) and no worse than the pre-ledger re-screen-every-turn.
-func (l *admissionLedger) admit(trace, digest string, screen func() (WireVerdict, string, bool)) (*admissionRecord, bool) {
+func (l *admissionLedger) admit(trace, callID, digest string, screen func() (WireVerdict, string, bool)) (*admissionRecord, bool) {
+	key := admissionKey{callID: callID, digest: digest}
 	if l == nil || trace == "" {
 		v, c, rw := screen()
 		return &admissionRecord{screened: true, verdict: v, content: c, rewrote: rw}, true
 	}
 	l.mu.Lock()
-	if rec := l.traceLocked(trace)[digest]; rec != nil && rec.screened {
+	if rec := l.traceLocked(trace)[key]; rec != nil && rec.screened {
 		l.mu.Unlock()
 		return rec, false
 	}
@@ -88,15 +94,18 @@ func (l *admissionLedger) admit(trace, digest string, screen func() (WireVerdict
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	seen := l.traceLocked(trace)
-	if rec := seen[digest]; rec != nil && rec.screened {
-		// A peer screened the same content while we were unlocked. Keep the first
+	if rec := seen[key]; rec != nil && rec.screened {
+		// A peer screened the same call result while we were unlocked. Keep the first
 		// record and treat ours as a replay so we do not double the eviction/reset.
 		return rec, false
 	}
-	rec := seen[digest]
+	rec := seen[key]
 	if rec == nil {
 		rec = &admissionRecord{}
-		seen[digest] = rec
+		if note := seen[admissionKey{digest: digest}]; note != nil {
+			rec.failNote = note.failNote
+		}
+		seen[key] = rec
 	}
 	rec.screened, rec.verdict, rec.content, rec.rewrote = true, v, c, rw
 	return rec, true
@@ -114,10 +123,11 @@ func (l *admissionLedger) failNoteFirst(trace, digest string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	seen := l.traceLocked(trace)
-	rec := seen[digest]
+	key := admissionKey{digest: digest}
+	rec := seen[key]
 	if rec == nil {
 		rec = &admissionRecord{}
-		seen[digest] = rec
+		seen[key] = rec
 	}
 	if rec.failNote {
 		return false

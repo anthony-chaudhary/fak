@@ -27,6 +27,96 @@ import (
 
 var vulkanMu sync.Mutex
 
+type vulkanQ4KHomeKey struct {
+	src   unsafe.Pointer
+	bytes int
+}
+
+type vulkanQ4KHome struct {
+	ptr   unsafe.Pointer
+	bytes int64
+}
+
+func (v *vulkanBackend) homeCapLocked() int64 {
+	if v.budgetBytes <= 0 {
+		return 0
+	}
+	capBytes := v.budgetBytes / 4
+	const maxHomeCap = int64(512 << 20)
+	if capBytes > maxHomeCap {
+		capBytes = maxHomeCap
+	}
+	return capBytes
+}
+
+func (v *vulkanBackend) freeHomesLocked() {
+	if len(v.homes) == 0 {
+		v.homes = nil
+		v.homeBytes = 0
+		return
+	}
+	C.fvk_batch_flush()
+	for _, home := range v.homes {
+		if home.ptr != nil {
+			C.fvk_free(home.ptr)
+		}
+	}
+	v.dlUsed -= v.homeBytes
+	if v.dlUsed < 0 {
+		v.dlUsed = 0
+	}
+	v.homes = nil
+	v.homeBytes = 0
+}
+
+func (v *vulkanBackend) q4kHomeLocked(wb *vulkanBuf) (unsafe.Pointer, bool) {
+	if wb == nil || wb.ptr == nil || wb.n <= 0 {
+		v.homeBypasses++
+		return nil, false
+	}
+	key := vulkanQ4KHomeKey{src: wb.ptr, bytes: wb.n}
+	if home, ok := v.homes[key]; ok && home.ptr != nil {
+		v.homeHits++
+		return home.ptr, true
+	}
+	capBytes := v.homeCapLocked()
+	remaining := capBytes - v.homeBytes
+	if capBytes == 0 || int64(wb.n) > remaining || v.dlUsed+int64(wb.n)+v.q4kStageBytes > v.budgetBytes {
+		v.homeBypasses++
+		return nil, false
+	}
+	wasBatch := C.fvk_batch_active()
+	if wasBatch {
+		C.fvk_batch_flush()
+	}
+	ptr := C.fvk_malloc(C.size_t(wb.n))
+	if ptr != nil && !v.debugBufferDeviceLocal(&vulkanBuf{ptr: unsafe.Pointer(ptr), n: wb.n}) {
+		C.fvk_free(ptr)
+		ptr = nil
+	}
+	if ptr == nil {
+		if wasBatch {
+			C.fvk_batch_begin()
+		}
+		v.homeBypasses++
+		return nil, false
+	}
+	C.fvk_d2d(ptr, wb.ptr, C.size_t(wb.n))
+	C.fvk_batch_flush()
+	if wasBatch {
+		C.fvk_batch_begin()
+	}
+	if v.homes == nil {
+		v.homes = make(map[vulkanQ4KHomeKey]vulkanQ4KHome)
+	}
+	home := vulkanQ4KHome{ptr: ptr, bytes: int64(wb.n)}
+	v.homes[key] = home
+	v.dlUsed += home.bytes
+	v.homeBytes += home.bytes
+	v.homeCopied += home.bytes
+	v.homeMisses++
+	return ptr, true
+}
 func init() {
 	spirv := os.Getenv("FAK_VULKAN_SPIRV")
 	if spirv == "" {
@@ -249,6 +339,12 @@ type vulkanBackend struct {
 	q4kStagedCalls            int64
 	q4kStagedBytes            int64
 	q4kStageFallbacks         int64
+	homes                     map[vulkanQ4KHomeKey]vulkanQ4KHome
+	homeHits                  int64
+	homeMisses                int64
+	homeBypasses              int64
+	homeBytes                 int64
+	homeCopied                int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -364,6 +460,7 @@ func (v *vulkanBackend) TeardownResources() error {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	C.fvk_batch_flush()
+	v.freeHomesLocked()
 	if v.q4kStagePtr != nil {
 		C.fvk_free(v.q4kStagePtr)
 		v.dlUsed -= v.q4kStageBytes
@@ -870,6 +967,7 @@ func (v *vulkanBackend) VulkanDebugResetQ4KStage() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	C.fvk_batch_flush()
+	v.freeHomesLocked()
 	if v.q4kStagePtr != nil {
 		C.fvk_free(v.q4kStagePtr)
 		v.dlUsed -= v.q4kStageBytes
@@ -879,6 +977,16 @@ func (v *vulkanBackend) VulkanDebugResetQ4KStage() {
 	v.q4kStagedCalls = 0
 	v.q4kStagedBytes = 0
 	v.q4kStageFallbacks = 0
+	v.homeHits = 0
+	v.homeMisses = 0
+	v.homeBypasses = 0
+	v.homeCopied = 0
+}
+
+func (v *vulkanBackend) VulkanDebugQ4KTensorHomeSnapshot() (hits, misses, bypasses int64, entries int, residentBytes, copiedBytes int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.homeHits, v.homeMisses, v.homeBypasses, len(v.homes), v.homeBytes, v.homeCopied
 }
 
 func (v *vulkanBackend) ensureQ4KStageLocked(bytes int) unsafe.Pointer {
@@ -928,7 +1036,9 @@ func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
 	}
 	weight := wb.ptr
 	if v.q4kStage && wb.hostVisibleWeight {
-		if stage := v.ensureQ4KStageLocked(wb.n); stage != nil {
+		if home, ok := v.q4kHomeLocked(wb); ok {
+			weight = home
+		} else if stage := v.ensureQ4KStageLocked(wb.n); stage != nil {
 			C.fvk_d2d(stage, wb.ptr, C.size_t(wb.n))
 			weight = stage
 			v.q4kStagedCalls++

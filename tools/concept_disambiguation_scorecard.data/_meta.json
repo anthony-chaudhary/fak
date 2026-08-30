@@ -7187,6 +7187,7 @@
         },
         {
           "category": "incidental",
+
           "reason": "Private gate implementation symbol; it checks for an existing staged test or microharness-witness receipt and does not define a distinct witness or proof mechanism.",
           "token": "gateMicroharnessWitness"
         },
@@ -7194,6 +7195,43 @@
           "category": "incidental",
           "reason": "Receipt marker consumed by the existing MICROHARNESS_WITNESS advisory; it labels evidence supplied by a bounded harness change rather than defining a new witness or proof mechanism.",
           "token": "microharnessWitness"
+
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed health enum label; it does not introduce a separate witness or proof mechanism.",
+          "token": "ExecutionHealthUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed evidence-state label used to mark missing certification explicitly; not a new proof primitive.",
+          "token": "EvidenceUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Schema record grouping witness metadata already defined by the receipt contract; not an independent witness mechanism.",
+          "token": "ExecutionModeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt field that carries an existing prerequisite evidence value; not a new proof system.",
+          "token": "PrerequisiteWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Structured validation reason for absent model identity evidence; not a witness primitive.",
+          "token": "model_identity_unwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Structured validation reason for absent provider evidence; not a witness primitive.",
+          "token": "remote_provider_unwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Structured validation reason for absent backend evidence; not a witness primitive.",
+          "token": "local_backend_unwitnessed"
+
         }
       ],
       "id": "witness-proof",
@@ -7205,6 +7243,9 @@
         "DebtWitnessRecord",
         "DebtWitnesses",
         "EffectWitnessAuthority",
+        "EvidenceUnwitnessed",
+        "ExecutionHealthUnwitnessed",
+        "ExecutionModeWitness",
         "FAK_WITNESS_REF",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
@@ -7223,6 +7264,7 @@
         "POPULATION_LIFT_UNWITNESSED",
         "PROFILE_REQUIRES_WITNESS",
         "ParseWitness",
+        "PrerequisiteWitness",
         "PriorWitnessKey",
         "ProviderWitness",
         "QualityWitness",
@@ -7320,12 +7362,17 @@
         "latestGuardCompactionWitness",
         "liveTreeWitness",
         "loadDebtWitnesses",
+        "local_backend_unwitnessed",
         "maturityBaselineRunWitness",
         "maxWitnessFileBytes",
         "mergeDispatchWitnessRecords",
         "microCacheWitness",
         "microCacheWitnessSchema",
+
         "microharnessWitness",
+
+        "model_identity_unwitnessed",
+
         "motifDetectReproduceFixWitness",
         "named_witness",
         "natural-traffic",
@@ -7346,6 +7393,7 @@
         "refuted",
         "refutes",
         "refutil",
+        "remote_provider_unwitnessed",
         "renderCheckpointWitness",
         "replaceMicroCacheWitness",
         "revocation_reason",
@@ -7869,6 +7917,11 @@
           "category": "incidental",
           "reason": "CLI flag variable names an operator-authorized target string and does not introduce a privileged provider or engine concept.",
           "token": "remoteTarget"
+        },
+        {
+          "category": "incidental",
+          "reason": "Structured refusal reason enforcing the existing fak-native engine invariant; not a new engine concept.",
+          "token": "native_engine_substitution"
         }
       ],
       "id": "gateway-engine",
@@ -7961,6 +8014,7 @@
         "microcache",
         "microcachedemo",
         "nativeReasonMessageRoleUnsupported",
+        "native_engine_substitution",
         "newInKernelPrefixPressureBridge",
         "pgKernel32",
         "publicGatewayURL",
@@ -8962,8 +9016,16 @@
         },
         {
           "category": "incidental",
+
           "reason": "Local boolean recording whether an already-selected policy document decoded or its referenced file exists; it adds no policy type, capability, or adjudication posture.",
           "token": "policyOK"
+
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic fixture transition trigger label; not a new policy or capability mechanism.",
+          "token": "policy_or_capability_refusal"
+
         }
       ],
       "exclude": [
@@ -9118,6 +9180,7 @@
         "policyScore",
         "policy_admission",
         "policy_changed",
+        "policy_or_capability_refusal",
         "policyblocks",
         "policylabel",
         "policysourceresolution",

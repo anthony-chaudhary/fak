@@ -1,3 +1,8 @@
+---
+title: "DOS decision kind - vocabulary:dos-decision-kind identity"
+description: "A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state. Scope: vocabulary:dos-decision-kind. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # DOS decision kind
 
 **Meaning:** A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.

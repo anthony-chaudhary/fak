@@ -127,7 +127,7 @@ var (
 		required: []string{"alternatives", "evidence", "id", "required"},
 	}
 	alternativeShape      = objectShape{allowed: []string{"capabilities", "id", "operational"}, required: []string{"id"}}
-	modelRequirementShape = objectShape{allowed: []string{"minimum_input_tokens", "modalities", "structured_output", "tool_calling", "tool_protocol"}}
+	modelRequirementShape = objectShape{allowed: []string{"family", "minimum_input_tokens", "modalities", "quantization", "structured_output", "tool_calling", "tool_protocol"}}
 	operationalShape      = objectShape{allowed: []string{"accelerators", "license_allowlist", "locality", "max_memory_bytes", "platforms", "privacy", "runtime", "serving_protocol"}}
 	preferenceShape       = objectShape{allowed: []string{"mode"}, required: []string{"mode"}}
 	evidenceShape         = objectShape{allowed: []string{"max_age_hours", "required_kinds"}, required: []string{"max_age_hours"}}

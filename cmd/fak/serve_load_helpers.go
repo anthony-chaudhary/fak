@@ -29,6 +29,23 @@ func serveDeviceResidentQ4K(backend compute.Backend) bool {
 	// explicit rollback to the legacy Q8 staging path.
 	return os.Getenv("FAK_Q4K") != "0"
 }
+
+// serveArtifactResidentQ4K gates the runtime load path on both device capability and
+// the encodings in the artifact itself. Backend capability alone must never relabel a
+// Q8_0 checkpoint as resident Q4_K.
+func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
+	return artifact.Q4KResident && serveDeviceResidentQ4K(backend)
+}
+
+func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {
+	resident, session := "Q8_0", "Q8_0"
+	if residentQ4K {
+		resident, session = "Q4_K", "Q4_K"
+	}
+	return serveStartupMessage("quant-provenance", "info", fmt.Sprintf(
+		"artifact_quant=%s artifact_inventory=%s resident_quant=%s session_quant=%s",
+		artifact.Name, artifact.Inventory, resident, session))
+}
 func serveStartupMessage(kind, level, text string) gateway.StartupMessage {
 	return newServeStartupMessage("model-load", kind, level, text)
 }
@@ -70,6 +87,12 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		return m, false, profile, gateway.StartupPhase{Name: "model-load", Dur: loadDur}
 	}
 	ggufPath := modelPath
+	artifactQuant, err := ggufload.ClassifyArtifactQuant(ggufPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory:", err)
+		must(err)
+	}
+	residentQ4K := serveArtifactResidentQ4K(backend, artifactQuant)
 	var loadMessages []gateway.StartupMessage
 	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
 	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
@@ -84,7 +107,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
-		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K()))
+		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K() && artifactQuant.Q4KResident))
 	}
 	// How many ranks this process's WEIGHTS are actually split across. A rank is sharded only when
 	// it was handed a band: expertRanks alone must never select a per-rank plan, or an unsharded
@@ -102,7 +125,8 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		loadMessages = append(loadMessages, serveStartupMessage("slow-load-path", "warning", w))
 	}
 	switch {
-	case backend != nil && cpuOffloadExperts:
+	case backend != nil && cpuOffloadExperts && artifactQuant.Q4KResident:
+		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
 		if !backend.Caps().UploadDtype {
 			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
 		}
@@ -129,7 +153,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
-	case serveDeviceResidentQ4K(backend):
+	case residentQ4K:
 		// Standard-arch device serve: hold raw Q4_K matmul tensors RESIDENT on the
 		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
 		// legacy Q8 rollback below. The resident path loads ~0.56 B/param instead of Q8's
@@ -149,6 +173,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(err)
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 	case backend != nil:
+		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, false))
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
 			// the f32 resident path. The served planner runs Session.Quant=true, so this
@@ -182,7 +207,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			Bottleneck: "f32-load",
 		}), memPlan, backend), loadMessages...)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
-	case os.Getenv("FAK_Q4K") != "":
+	case os.Getenv("FAK_Q4K") != "" && artifactQuant.Q4KResident:
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
 		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
 		// device path's fit plan). Fail-open where host RAM is not probeable.

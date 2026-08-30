@@ -1,3 +1,8 @@
+---
+title: "capability maturity rung - capability:maturity identity"
+description: "A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung. Scope: capability:maturity. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # capability maturity rung
 
 **Meaning:** A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.

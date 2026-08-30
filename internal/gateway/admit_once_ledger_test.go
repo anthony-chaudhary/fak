@@ -196,7 +196,7 @@ func TestAdmitOnceLedger(t *testing.T) {
 }
 
 // TestAdmissionLedgerFailNoteDoesNotPreemptScreening pins the ledger's most dangerous
-// seam: failNoteFirst and admit share ONE record per (trace, digest), and failNoteFirst
+// seam: failNoteFirst and admit share fail-note state per (trace, digest), while admit binds
 // creates that record before the kernel has ever seen the bytes.
 //
 // The record it creates is deliberately UNSCREENED — only failNote is live. If a bare
@@ -207,6 +207,40 @@ func TestAdmitOnceLedger(t *testing.T) {
 // separately from the replay count. This asserts the three halves of that contract —
 // the fail-note dedups on its own, it does NOT stand in for a screening, and screening
 // afterwards does not un-surface the note.
+
+func TestAdmissionLedgerBindsAllowedResultToOriginCallID(t *testing.T) {
+	var l admissionLedger
+	const (
+		trace   = "trace-call-id"
+		digest  = "same-result-digest"
+		allowed = "{\"ok\":true}"
+	)
+	screens := 0
+	screen := func() (WireVerdict, string, bool) {
+		screens++
+		return WireVerdict{Kind: "ALLOW"}, allowed, false
+	}
+
+	first, fresh := l.admit(trace, "call-1", digest, screen)
+	if !fresh || first.content != allowed || screens != 1 {
+		t.Fatalf("first admission = (%+v, fresh=%v, screens=%d), want exact allowed bytes and one screen", first, fresh, screens)
+	}
+	if replay, fresh := l.admit(trace, "call-1", digest, screen); fresh || replay != first || screens != 1 {
+		t.Fatalf("same-call replay = (%+v, fresh=%v, screens=%d), want original record without rescreen", replay, fresh, screens)
+	}
+
+	mismatch, fresh := l.admit(trace, "call-2", digest, screen)
+	if !fresh || mismatch == first || mismatch.content != allowed || screens != 2 {
+		t.Fatalf("mismatched call = (%+v, fresh=%v, screens=%d), want independent admission with exact bytes", mismatch, fresh, screens)
+	}
+	if replay, fresh := l.admit(trace, "call-2", digest, screen); fresh || replay != mismatch || screens != 2 {
+		t.Fatalf("second-call replay = (%+v, fresh=%v, screens=%d), want its own admit-once record", replay, fresh, screens)
+	}
+	if got := l.records(trace); got != 2 {
+		t.Fatalf("records = %d, want 2 call-bound admissions", got)
+	}
+}
+
 func TestAdmissionLedgerFailNoteDoesNotPreemptScreening(t *testing.T) {
 	l := &admissionLedger{}
 	const (
@@ -232,7 +266,7 @@ func TestAdmissionLedgerFailNoteDoesNotPreemptScreening(t *testing.T) {
 		return WireVerdict{Kind: "QUARANTINE", Reason: "SECRET_EXFIL", By: "ctxmmu"}, "[held]", true
 	}
 	// First real arrival: the kernel MUST still run even though a record already exists.
-	rec, fresh := l.admit(trace, digest, screen)
+	rec, fresh := l.admit(trace, "call-1", digest, screen)
 	if !fresh || screens != 1 {
 		t.Fatalf("admit after failNoteFirst: fresh=%v screens=%d, want true/1 — the fail-note record must not consume the screening", fresh, screens)
 	}
@@ -250,7 +284,7 @@ func TestAdmissionLedgerFailNoteDoesNotPreemptScreening(t *testing.T) {
 	if n := l.records(trace); n != 1 {
 		t.Fatalf("records = %d after screening, want 1", n)
 	}
-	if rec2, fresh := l.admit(trace, digest, screen); fresh || screens != 1 || rec2 != rec {
+	if rec2, fresh := l.admit(trace, "call-1", digest, screen); fresh || screens != 1 || rec2 != rec {
 		t.Fatalf("replay after screening: fresh=%v screens=%d, want false/1 with the recorded verdict", fresh, screens)
 	}
 }
@@ -276,7 +310,7 @@ func TestAdmissionLedgerBoundsTracesAndKeepsTheLiveOne(t *testing.T) {
 	const overfill = 64
 	for i := 0; i < maxResetHealthSessions+overfill; i++ {
 		trace := "trace-" + strconv.Itoa(i)
-		l.admit(trace, "d", screen)
+		l.admit(trace, "call-1", "d", screen)
 		if n := l.records(trace); n != 1 {
 			t.Fatalf("trace %d: records = %d immediately after its own admit, want 1 — the reaper evicted the live trace", i, n)
 		}

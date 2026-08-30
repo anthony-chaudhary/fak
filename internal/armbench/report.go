@@ -84,6 +84,7 @@ type Report struct {
 	ExecutedCount int `json:"executed"`
 	ResumedCount  int `json:"resumed"`
 	FailureCount  int `json:"failures"`
+	MaxParallel   int `json:"max_parallel,omitempty"`
 }
 
 // Summarize folds a raw run into per-arm rollups. It re-checks the evidence
@@ -152,6 +153,7 @@ func Summarize(r *Run) (*Report, error) {
 		ExecutedCount:    r.Executed,
 		ResumedCount:     r.ResumedCount,
 		FailureCount:     failures,
+		MaxParallel:      r.MaxParallel,
 	}, nil
 }
 
@@ -160,6 +162,13 @@ func Summarize(r *Run) (*Report, error) {
 // duplicated, dropped, attributed to the wrong arm, or had its resume counters
 // rewritten after execution.
 func validateRunLedger(r *Run) error {
+	maxParallel := effectiveRunMaxParallel(r)
+	if maxParallel < 1 {
+		return refuse(ReasonManifestInvalid, "run max_parallel is %d, want >= 1", r.MaxParallel)
+	}
+	if err := validateParallelAssignments(r.Manifest, maxParallel); err != nil {
+		return err
+	}
 	expectedPerArm := r.Manifest.Corpus.TaskCount * r.Manifest.Trials.Count
 	expectedTotal := expectedPerArm * len(r.Manifest.Arms)
 	if len(r.Trials) != expectedTotal {
@@ -179,6 +188,29 @@ func validateRunLedger(r *Run) error {
 		}
 		if t.Trial < 0 || t.Trial >= r.Manifest.Trials.Count || t.Position < 0 || t.Position >= len(r.Manifest.Arms) {
 			return refuse(ReasonManifestInvalid, "trial %s has trial/position outside the manifest plan", t.Key())
+		}
+		if t.Launch == nil {
+			if r.MaxParallel != 0 && !t.Resumed {
+				return refuse(ReasonManifestInvalid, "trial %s has no launch receipt", t.Key())
+			}
+		} else {
+			if err := validateLaunchReceipt(*t.Launch); err != nil {
+				return fmt.Errorf("trial %s: %w", t.Key(), err)
+			}
+			wantWave := t.Position/maxParallel + 1
+			if t.Launch.Wave != wantWave {
+				return refuse(ReasonManifestInvalid, "trial %s records wave %d, want %d for position %d at max_parallel %d", t.Key(), t.Launch.Wave, wantWave, t.Position, maxParallel)
+			}
+			if !sameInt(t.Launch.GPUIndex, arm.GPUIndex) {
+				return refuse(ReasonManifestInvalid, "trial %s launch gpu_index does not match its arm assignment", t.Key())
+			}
+			wantCUDA := ""
+			if arm.GPUIndex != nil {
+				wantCUDA = fmt.Sprint(*arm.GPUIndex)
+			}
+			if t.Launch.CUDAVisibleDevices != wantCUDA {
+				return refuse(ReasonManifestInvalid, "trial %s records CUDA_VISIBLE_DEVICES=%q, want %q", t.Key(), t.Launch.CUDAVisibleDevices, wantCUDA)
+			}
 		}
 		key := t.Key()
 		if seen[key] {
@@ -209,6 +241,13 @@ func validateRunLedger(r *Run) error {
 		return refuse(ReasonManifestInvalid, "run counters disagree with rows: executed=%d resumed=%d row_resumed=%d total=%d", r.Executed, r.ResumedCount, resumed, len(r.Trials))
 	}
 	return nil
+}
+
+func sameInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func accumulate(s *ArmSummary, t TrialResult) {
@@ -306,8 +345,12 @@ func Human(rep *Report) string {
 		rep.Model.Sampling.Temperature, rep.Model.Sampling.TopP, rep.Model.MaxTokens)
 	fmt.Fprintf(&b, "  corpus       %s (%d tasks) %s\n", rep.Corpus.ID, rep.Corpus.TaskCount, rep.Corpus.Hash)
 	fmt.Fprintf(&b, "  judge        %s %s\n", rep.Judge.ID, rep.Judge.Hash)
-	fmt.Fprintf(&b, "  trials       %d per task, order=%s seed=%d concurrency=%d\n",
+	fmt.Fprintf(&b, "  trials       %d per task, order=%s seed=%d concurrency=%d",
 		rep.Trials.Count, rep.Trials.Order, rep.Trials.Seed, rep.Trials.Concurrency)
+	if rep.MaxParallel > 0 {
+		fmt.Fprintf(&b, " max_parallel=%d", rep.MaxParallel)
+	}
+	b.WriteByte('\n')
 	fmt.Fprintf(&b, "  pricing date %s   env %s/%s %s\n",
 		rep.Environment.PricingDate, rep.Environment.OS, rep.Environment.Arch, rep.Environment.FakVersion)
 	for _, s := range rep.Sources {

@@ -1,3 +1,8 @@
+---
+title: "package capability token - disambiguation:capability-token identity"
+description: "A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict. Scope: disambiguation:capability-token. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # package capability token
 
 **Meaning:** A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.

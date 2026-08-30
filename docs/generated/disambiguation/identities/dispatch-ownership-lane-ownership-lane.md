@@ -1,3 +1,8 @@
+---
+title: "dispatch ownership lane - ownership:lane identity"
+description: "A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name. Scope: ownership:lane. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # dispatch ownership lane
 
 **Meaning:** A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.

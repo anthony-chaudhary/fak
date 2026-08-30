@@ -1,3 +1,8 @@
+---
+title: "Performance RSI dogfood scorecard for issue 9768"
+description: "Captured issue 9768 repository-dogfood scorecard, including the explicit improvement target, measured bottleneck, evidence, and follow-up actions."
+---
+
 # Performance RSI — issue-9768-live-repository-dogfood-2026-08-28
 
 - Explicit target: **100x** (unsaturated)

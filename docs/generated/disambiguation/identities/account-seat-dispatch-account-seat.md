@@ -1,3 +1,8 @@
+---
+title: "account seat - dispatch:account-seat identity"
+description: "A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs. Scope: dispatch:account-seat. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # account seat
 
 **Meaning:** A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs.

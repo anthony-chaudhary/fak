@@ -1,3 +1,8 @@
+---
+title: "fak commit stamp - ownership:commit-stamp identity"
+description: "The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version. Scope: ownership:commit-stamp. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # fak commit stamp
 
 **Meaning:** The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.

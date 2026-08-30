@@ -1,3 +1,8 @@
+---
+title: "runtime - runtime:worker-execution identity"
+description: "The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet. Scope: runtime:worker-execution. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # runtime
 
 **Meaning:** The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet.

@@ -1,6 +1,8 @@
 package nativeperf
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +93,15 @@ type ArtifactRef struct {
 	SHA256 string `json:"sha256"`
 }
 
+// PortableReceipt binds a structurally valid fak-native receipt to the exact
+// bytes that were decoded. ReceiptSHA256 identifies the receipt record; the
+// model artifact identity remains in Receipt.ArtifactSHA256.
+type PortableReceipt struct {
+	Receipt             ExperimentReceipt
+	ReceiptSHA256       string
+	ModelArtifactSHA256 string
+}
+
 type Comparison struct {
 	Schema                  string  `json:"schema"`
 	EnvelopeID              string  `json:"envelope_id"`
@@ -146,6 +157,32 @@ func DecodeReceipt(data []byte) (ExperimentReceipt, error) {
 
 // AttachSystemBaseline appends the next aggregate attestation without allowing
 // callers to skip or overfill the receipt's one-per-repetition sequence.
+// DecodePortableReceipt validates a receipt without consulting ActiveGraph.
+// It applies every graph-independent receipt invariant and additionally
+// requires a fak-native execution with no fallback runtime.
+func DecodePortableReceipt(data []byte) (PortableReceipt, error) {
+	r, err := DecodeReceipt(data)
+	if err != nil {
+		return PortableReceipt{}, err
+	}
+	problems := receiptValidationProblems(r)
+	if r.Execution.Engine != "fak-native" {
+		problems = append(problems, `execution engine must be exactly "fak-native"`)
+	}
+	if r.Execution.FallbackCount != 0 {
+		problems = append(problems, "fallback count must be zero")
+	}
+	if err := receiptValidationError(problems); err != nil {
+		return PortableReceipt{}, err
+	}
+	digest := sha256.Sum256(data)
+	return PortableReceipt{
+		Receipt:             r,
+		ReceiptSHA256:       hex.EncodeToString(digest[:]),
+		ModelArtifactSHA256: r.ArtifactSHA256,
+	}, nil
+}
+
 func AttachSystemBaseline(graph Graph, receipt ExperimentReceipt, attestation systembaseline.Report) (ExperimentReceipt, error) {
 	if len(receipt.AmbientEvidence) > 0 {
 		return ExperimentReceipt{}, errors.New("receipt already carries legacy ambient evidence")
@@ -174,6 +211,25 @@ func AttachSystemBaseline(graph Graph, receipt ExperimentReceipt, attestation sy
 }
 
 func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
+	f := receiptValidationProblems(r)
+	lever, env, err := findLeverEnvelope(graph, r.ChangedLeverID)
+	if err != nil {
+		f = append(f, err.Error())
+	} else {
+		if r.EnvelopeID != env.ID {
+			f = append(f, "changed lever does not belong to receipt envelope")
+		}
+		if r.Machine.Platform != lever.Applicability.Platform || r.Machine.Backend != env.Backend {
+			f = append(f, "machine platform/backend does not match envelope")
+		}
+		if r.ArtifactSHA256 != env.ArtifactSHA256 {
+			f = append(f, "artifact hash does not match envelope")
+		}
+	}
+	return receiptValidationError(f)
+}
+
+func receiptValidationProblems(r ExperimentReceipt) []string {
 	var f []string
 	if r.Schema != ReceiptSchemaV1 && r.Schema != ReceiptSchemaV2 {
 		f = append(f, fmt.Sprintf("schema must be %q or %q", ReceiptSchemaV1, ReceiptSchemaV2))
@@ -191,20 +247,6 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	if r.Role != RoleBaseline && r.Role != RoleCandidate {
 		f = append(f, "role must be baseline or candidate")
 	}
-	lever, env, err := findLeverEnvelope(graph, r.ChangedLeverID)
-	if err != nil {
-		f = append(f, err.Error())
-	} else {
-		if r.EnvelopeID != env.ID {
-			f = append(f, "changed lever does not belong to receipt envelope")
-		}
-		if r.Machine.Platform != lever.Applicability.Platform || r.Machine.Backend != env.Backend {
-			f = append(f, "machine platform/backend does not match envelope")
-		}
-		if r.ArtifactSHA256 != env.ArtifactSHA256 {
-			f = append(f, "artifact hash does not match envelope")
-		}
-	}
 	if strings.TrimSpace(r.Revision) == "" || strings.HasPrefix(r.Revision, "FILL_") {
 		f = append(f, "revision is missing")
 	}
@@ -219,8 +261,10 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	if r.Execution.FallbackCount != 0 {
 		f = append(f, "fallback count must be zero")
 	}
-	if err := validateComparisonIdentity(r); err != nil {
-		f = append(f, err.Error())
+	if r.Schema != ReceiptSchemaV1 || r.Comparison != (ComparisonIdentity{}) {
+		if err := validateComparisonIdentity(r); err != nil {
+			f = append(f, err.Error())
+		}
 	}
 	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
 		f = append(f, "quality metric must be captured and finite")
@@ -310,15 +354,19 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 		f = append(f, "at least one profiler artifact is required")
 	}
 	for _, a := range r.ProfilerArtifacts {
-		if private(a.Path) || strings.HasPrefix(a.Path, "FILL_") || !sha256(a.SHA256) {
+		if private(a.Path) || strings.HasPrefix(a.Path, "FILL_") || !validSHA256(a.SHA256) {
 			f = append(f, "profiler artifact must use a relative scrubbed path and SHA-256")
 		}
 	}
-	if len(f) > 0 {
-		sort.Strings(f)
-		return fmt.Errorf("invalid native-performance receipt: %s", strings.Join(f, "; "))
+	return f
+}
+
+func receiptValidationError(problems []string) error {
+	if len(problems) == 0 {
+		return nil
 	}
-	return nil
+	sort.Strings(problems)
+	return fmt.Errorf("invalid native-performance receipt: %s", strings.Join(problems, "; "))
 }
 
 func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Comparison, error) {
@@ -362,7 +410,7 @@ func meanTPS(rs []Repetition) float64 {
 	}
 	return n / float64(len(rs))
 }
-func sha256(s string) bool {
+func validSHA256(s string) bool {
 	if len(s) != 64 {
 		return false
 	}

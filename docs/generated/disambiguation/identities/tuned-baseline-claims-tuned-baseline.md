@@ -1,3 +1,8 @@
+---
+title: "tuned baseline - claims:tuned-baseline identity"
+description: "The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline. Scope: claims:tuned-baseline. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # tuned baseline
 
 **Meaning:** The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.

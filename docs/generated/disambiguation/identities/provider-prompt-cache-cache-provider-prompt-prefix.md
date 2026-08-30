@@ -1,3 +1,8 @@
+---
+title: "provider prompt cache - cache:provider-prompt-prefix identity"
+description: "An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. Scope: cache:provider-prompt-prefix. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # provider prompt cache
 
 **Meaning:** An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules.

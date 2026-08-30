@@ -1,3 +1,8 @@
+---
+title: "tool-result cache - cache:tool-results identity"
+description: "A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. Scope: cache:tool-results. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # tool-result cache
 
 **Meaning:** A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs.

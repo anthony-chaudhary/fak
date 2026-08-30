@@ -814,27 +814,6 @@ func vllmCacheEventSourceID(batch VLLMKVEventBatch, worker string) string {
 	return sourceID
 }
 
-// recordPerBlock records one cache event per block digest, stamping each digest
-// onto base. A vLLM block-lifecycle event names a whole SET of block hashes that
-// moved together, but the recorder's unit is a single span — so one reported event
-// lowers to one recorded event per hash, all sharing the identity the caller wrote
-// into base. The stored and removed branches disagree only about direction and
-// which tier the blocks moved between; everything they agree on (model, tokenizer,
-// prefix-aligned position mode, owning worker, transfer outcome) is stated once at
-// the call site instead of twice inside a loop. A nil recorder records nothing,
-// which is how this lowering stays usable as a residency-index-only pass.
-func recordPerBlock(rec *CacheEventRecorder, digests []string, base CacheEvent) []CacheEventResult {
-	if rec == nil {
-		return nil
-	}
-	out := make([]CacheEventResult, 0, len(digests))
-	for _, h := range digests {
-		base.SpanDigest = h
-		out = append(out, rec.Record(base))
-	}
-	return out
-}
-
 func (ev VLLMKVEvent) residencyRecords(worker, model, tokenizer string, at time.Time) []PrefixResidency {
 	hashes := ev.hashDigests()
 	out := make([]PrefixResidency, 0, len(hashes))

@@ -1,0 +1,99 @@
+{
+  "schema": "fak-execution-mode-receipt/1",
+  "mode": "local_cpu_degraded",
+  "health": "degraded",
+  "control_plane_owner": "fak-local",
+  "binary": {
+    "goos": "windows",
+    "goarch": "amd64",
+    "runnable": true,
+    "build_tags": null
+  },
+  "status": {
+    "mode": "local_cpu_degraded",
+    "health": "degraded",
+    "evidence": "unwitnessed"
+  },
+  "audit": {
+    "mode": "local_cpu_degraded",
+    "health": "degraded",
+    "evidence": "unwitnessed"
+  },
+  "model_backed": true,
+  "native_performance": true,
+  "identity": {
+    "engine": "fak-native",
+    "backend": "cpu-ref",
+    "device": "unknown",
+    "provider": "unknown",
+    "model": "Qwen2.5-1.5B-Instruct.Q8_0.gguf"
+  },
+  "fallback_reason": {
+    "code": "backend_not_compiled",
+    "detail": "vulkan is not compiled into this binary",
+    "remediation": "use a Windows fak build produced with the vulkan tag and bundled Vulkan shim"
+  },
+  "offline": "unknown",
+  "egress": "unknown",
+  "operating_envelope": "qwen25-1p5b-q8-windows-amd64",
+  "prerequisite_witness": "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
+  "witness": {
+    "status": "observed",
+    "source": "runtime-capabilities",
+    "certification": "pre-payload-observation"
+  },
+  "transitions": [
+    {
+      "from": [
+        "control_only",
+        "offline_control_mock"
+      ],
+      "to": "local_accelerator",
+      "trigger": "local_accelerator_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator"
+      ],
+      "to": "local_cpu_degraded",
+      "trigger": "explicit_cpu_fallback_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator",
+        "local_cpu_degraded"
+      ],
+      "to": "remote_backed",
+      "trigger": "explicit_remote_fallback_admitted"
+    },
+    {
+      "from": [
+        "control_only"
+      ],
+      "to": "offline_control_mock",
+      "trigger": "offline_mock_selected"
+    },
+    {
+      "from": [
+        "control_only",
+        "offline_control_mock"
+      ],
+      "to": "offline_model_backed",
+      "trigger": "offline_model_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator",
+        "local_cpu_degraded",
+        "remote_backed",
+        "offline_control_mock",
+        "offline_model_backed",
+        "control_only"
+      ],
+      "to": "refused",
+      "trigger": "policy_or_capability_refusal"
+    }
+  ],
+  "valid": true,
+  "validation_reason": null
+}

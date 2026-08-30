@@ -508,8 +508,10 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 					}},
 				})
 			case "function_call_output":
-				// A tool RESULT the client executed — the bytes the result-side floor
-				// screens (poison quarantine, secret redaction) before the model sees them.
+				// A tool RESULT the client executed — normalize the Responses wire's
+				// documented string|input_text union, then send the canonical bytes through
+				// the same result-side floor. Representation skew may degrade safely; policy
+				// and malformed content still fail closed.
 				output, err := decodeResponsesFunctionCallOutput(it.Output)
 				if err != nil {
 					return nil, err
@@ -575,6 +577,9 @@ func decodeResponsesFunctionCallOutput(raw json.RawMessage) (string, error) {
 		var parts []responsesFunctionOutputPart
 		if err := json.Unmarshal(raw, &parts); err != nil {
 			return "", errInput("function_call_output.output content array is malformed: " + err.Error())
+		}
+		if len(parts) == 0 {
+			return "", errInput("function_call_output.output content array must not be empty")
 		}
 		if len(parts) > maxResponsesFunctionOutputParts {
 			return "", errInput(fmt.Sprintf("function_call_output.output has too many content parts (maximum %d)", maxResponsesFunctionOutputParts))

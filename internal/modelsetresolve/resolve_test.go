@@ -18,6 +18,8 @@ var evaluationTime = time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
 
 type candidateSpec struct {
 	id              string
+	family          string
+	quantization    string
 	local           bool
 	available       bool
 	runtime         string
@@ -39,6 +41,8 @@ type candidateSpec struct {
 func compatibleSpec(id string) candidateSpec {
 	return candidateSpec{
 		id:              id,
+		family:          "qwen3.8",
+		quantization:    "q4_k_m",
 		available:       true,
 		runtime:         "vllm",
 		servingProtocol: "openai-compatible",
@@ -119,6 +123,55 @@ func TestResolveExactMatch(t *testing.T) {
 	}
 	if got := resolution.Rejections(); len(got) != 0 {
 		t.Fatalf("exact candidate rejected: %+v", got)
+	}
+}
+
+func TestResolveComposesFamilyAndQuantizationConstraints(t *testing.T) {
+	preferred := compatibleSpec("preferred")
+	preferred.family = "Qwen3.8"
+	preferred.quantization = "Q4_K_M"
+	otherFamily := compatibleSpec("other-family")
+	otherFamily.family = "llama"
+	otherQuant := compatibleSpec("other-quant")
+	otherQuant.quantization = "q8_0"
+
+	alternative := exactAlternative("composed")
+	alternative.Capabilities.Family = "qwen3.8"
+	alternative.Capabilities.Quantization = "q4_k_m"
+	intent := harnessmodelset.Intent{Schema: harnessmodelset.SchemaV1, Roles: []harnessmodelset.Role{role("executor", true, alternative)}}
+	resolution, err := modelsetresolve.Resolve(intent, normalize(t, otherFamily, otherQuant, preferred), evaluationTime)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := resolution.Roles[0].Selection.CandidateID; got != "preferred" {
+		t.Fatalf("selected %q, want preferred", got)
+	}
+	if !hasCode(resolution.Rejections(), modelsetresolve.CodeFamily) || !hasCode(resolution.Rejections(), modelsetresolve.CodeQuantization) {
+		t.Fatalf("rejections = %+v, want family and quantization mismatches", resolution.Rejections())
+	}
+}
+
+func TestResolveFamilyAndQuantizationFactsFailClosed(t *testing.T) {
+	alternative := exactAlternative("composed")
+	alternative.Capabilities.Family = "qwen3.8"
+	alternative.Capabilities.Quantization = "q4_k_m"
+	intent := harnessmodelset.Intent{Schema: harnessmodelset.SchemaV1, Roles: []harnessmodelset.Role{role("executor", true, alternative)}}
+
+	missing := compatibleSpec("missing")
+	missingEvidence := evidenceFor(missing)
+	missingEvidence.Capabilities = missingEvidence.Capabilities[2:]
+	wrongType := compatibleSpec("wrong-type")
+	wrongEvidence := evidenceFor(wrongType)
+	wrongEvidence.Capabilities[0].Value = modelinventory.Bool(true)
+	wrongEvidence.Capabilities[1].Value = modelinventory.Integer(4)
+	inventory := normalizeEvidence(t, missing, missingEvidence, wrongType, wrongEvidence)
+
+	resolution, err := modelsetresolve.Resolve(intent, inventory, evaluationTime)
+	if err == nil {
+		t.Fatal("Resolve succeeded, want required role unresolved")
+	}
+	if !hasCode(resolution.Rejections(), modelsetresolve.CodeFactUnknown) || !hasCode(resolution.Rejections(), modelsetresolve.CodeFactType) {
+		t.Fatalf("rejections = %+v, want missing and wrong-type facts", resolution.Rejections())
 	}
 }
 
@@ -325,6 +378,27 @@ func normalize(t *testing.T, specs ...candidateSpec) modelinventory.Inventory {
 	return inventory
 }
 
+func normalizeEvidence(t *testing.T, specsAndEvidence ...any) modelinventory.Inventory {
+	t.Helper()
+	observations := modelinventory.Observations{}
+	for index := 0; index < len(specsAndEvidence); index += 2 {
+		spec := specsAndEvidence[index].(candidateSpec)
+		evidence := specsAndEvidence[index+1].(modelinventory.EvidenceSet)
+		identityWitness := witness(modelinventory.EvidenceProbe, "identity://"+spec.id, spec.observedAt)
+		digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(spec.id)))
+		revision := fmt.Sprintf("%x", sha256.Sum256([]byte("revision:"+spec.id)))[:40]
+		observations.Providers = append(observations.Providers, modelinventory.ProviderObservation{
+			ID: spec.id, Provider: "example", Repository: "models/" + spec.id, Revision: revision, Digest: digest, Format: "safetensors",
+			IdentityEvidence: []modelinventory.Witness{identityWitness}, Evidence: evidence,
+		})
+	}
+	inventory, diagnostics := modelinventory.Normalize(observations, evaluationTime)
+	if len(diagnostics) != 0 {
+		t.Fatalf("Normalize diagnostics:\n%s", diagnostics)
+	}
+	return inventory
+}
+
 func evidenceFor(spec candidateSpec) modelinventory.EvidenceSet {
 	probe := func(name string, value modelinventory.Value) modelinventory.Fact {
 		return fact(name, value, modelinventory.EvidenceProbe, spec.id+"/"+name, spec.observedAt)
@@ -350,6 +424,8 @@ func evidenceFor(spec candidateSpec) modelinventory.EvidenceSet {
 			attest("license", modelinventory.Text(spec.license)),
 		},
 		Capabilities: []modelinventory.Fact{
+			probe("model.family", modelinventory.Text(spec.family)),
+			probe("weights.quantization", modelinventory.Text(spec.quantization)),
 			probe("tool_calling", modelinventory.Bool(spec.toolCalling)),
 			probe("structured_json", modelinventory.Bool(spec.structuredJSON)),
 			probe("tool_protocol", modelinventory.Text(spec.toolProtocol)),

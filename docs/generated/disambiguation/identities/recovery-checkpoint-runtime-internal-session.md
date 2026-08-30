@@ -1,3 +1,8 @@
+---
+title: "recovery checkpoint - runtime:internal/session identity"
+description: "A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested. Scope: runtime:internal/session. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # recovery checkpoint
 
 **Meaning:** A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.
