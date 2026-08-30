@@ -414,7 +414,15 @@ func directChildOf(path, root string) bool {
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	return strings.EqualFold(filepath.Dir(pathAbs), rootAbs)
+	// Resolve the parent rather than the candidate itself: dangling Git admin records
+	// intentionally point at a missing leaf, but their existing temp parent can still be
+	// canonicalized (for example macOS /var -> /private/var) without weakening the boundary.
+	pathParent, err1 := filepath.EvalSymlinks(filepath.Dir(pathAbs))
+	rootCanonical, err2 := filepath.EvalSymlinks(rootAbs)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.EqualFold(pathParent, rootCanonical)
 }
 
 func buildProcessCommandLineActive(path string) (bool, error) {

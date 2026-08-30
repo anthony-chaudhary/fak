@@ -439,3 +439,59 @@ func TestBuildDirNameRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectChildOfCanonicalizesTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	worktree := filepath.Join(canonicalRoot, BuildDirName(3000))
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if !directChildOf(worktree, aliasRoot) {
+		t.Fatalf("canonical worktree %q not recognized below alias root %q", worktree, aliasRoot)
+	}
+	if directChildOf(filepath.Join(worktree, "nested"), aliasRoot) {
+		t.Fatal("canonicalization weakened the exact direct-child boundary")
+	}
+}
+
+func TestStaleBuildGCPlansCanonicalWorktreeBelowTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	now := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
+	wt := makeBuildWorktree(t, canonicalRoot, 3000, now.Add(-2*time.Hour), true)
+	r := &buildGCRunner{
+		list:      porcelain(wt),
+		status:    map[string]string{},
+		heads:     map[string]string{filepath.Clean(wt): "safe-head"},
+		ancestors: map[string]bool{"safe-head": true},
+	}
+
+	report := GarbageCollectStaleBuilds(context.Background(), r.run, "/repo", buildGCOptions(now, aliasRoot))
+	if report.WouldReap != 1 || len(report.Worktrees) != 1 || !report.Worktrees[0].Eligible {
+		t.Fatalf("canonical alias candidate = %+v, want one eligible plan row", report)
+	}
+}
+
+func TestDirectChildOfCanonicalizesMissingWorktreeBelowTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	missing := filepath.Join(canonicalRoot, BuildDirName(3001))
+
+	if !directChildOf(missing, aliasRoot) {
+		t.Fatalf("missing canonical worktree %q not recognized below alias root %q", missing, aliasRoot)
+	}
+}
