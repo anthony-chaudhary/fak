@@ -54,6 +54,32 @@ func TestProductOutcomesDefaultKeepsSecuritySupporting(t *testing.T) {
 	}
 }
 
+func TestQueryProductOutcomesRanksWIPAdministrationFirst(t *testing.T) {
+	for _, query := range []string{"WIP", "worktree", "unlanded work"} {
+		t.Run(query, func(t *testing.T) {
+			got := QueryProductOutcomes(query, 3)
+			if len(got) == 0 || got[0].ID != "wip-administration" {
+				t.Fatalf("QueryProductOutcomes(%q, 3) = %#v, want wip-administration first", query, got)
+			}
+			wantCommand := []string{"fak", "wip", "queue", "--json"}
+			if !reflect.DeepEqual(got[0].Command, wantCommand) {
+				t.Fatalf("wip-administration command = %#v, want %#v", got[0].Command, wantCommand)
+			}
+			for _, want := range []string{
+				"fak wip inventory --json",
+				"fak-wip-inventory/1",
+				"fak worktree worker list --json",
+				"fak-worker-worktree-lifecycle/1",
+				"fak-wip-action-queue/1",
+			} {
+				if !strings.Contains(got[0].Detail, want) {
+					t.Errorf("wip-administration detail %q missing %q", got[0].Detail, want)
+				}
+			}
+		})
+	}
+}
+
 func TestQueryProductOutcomesFindsFleetCommitHealthCheck(t *testing.T) {
 	for _, query := range []string{"commit throughput", "commits per 10 minutes", "fleet self blocking", "zero commits"} {
 		got := QueryProductOutcomes(query, 3)
