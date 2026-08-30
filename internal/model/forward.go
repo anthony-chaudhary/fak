@@ -16,18 +16,27 @@ import (
 // Call names a direct callee; Reference names a function used as data and is not
 // rewritten as a call.
 type GraphInlineInstruction struct {
-	Operation string  `json:"operation"`
-	Value     float32 `json:"value,omitempty"`
-	Call      string  `json:"call,omitempty"`
-	Reference string  `json:"reference,omitempty"`
+	Operation string   `json:"operation"`
+	Value     float32  `json:"value,omitempty"`
+	Call      string   `json:"call,omitempty"`
+	Reference string   `json:"reference,omitempty"`
+	Arguments []string `json:"arguments,omitempty"`
+	Results   []string `json:"results,omitempty"`
 }
 
 // GraphInlineFunction is a callable model-graph function.
 type GraphInlineFunction struct {
-	Name         string                   `json:"name"`
-	Instructions []GraphInlineInstruction `json:"instructions"`
-	AlwaysInline bool                     `json:"always_inline,omitempty"`
-	NeverInline  bool                     `json:"never_inline,omitempty"`
+	Name                string                   `json:"name"`
+	Instructions        []GraphInlineInstruction `json:"instructions"`
+	Arguments           []string                 `json:"arguments,omitempty"`
+	Results             []string                 `json:"results,omitempty"`
+	ReturnValues        []string                 `json:"return_values,omitempty"`
+	Exported            bool                     `json:"exported,omitempty"`
+	External            bool                     `json:"external,omitempty"`
+	IndirectCallable    bool                     `json:"indirect_callable,omitempty"`
+	CachedResultIndexes []int                    `json:"cached_result_indexes,omitempty"`
+	AlwaysInline        bool                     `json:"always_inline,omitempty"`
+	NeverInline         bool                     `json:"never_inline,omitempty"`
 }
 
 // GraphInlineProgram owns the callable functions rooted at Entry.
@@ -49,6 +58,231 @@ type GraphInlineDecision struct {
 type GraphInlineReceipt struct {
 	Decisions []GraphInlineDecision `json:"decisions"`
 	Digest    string                `json:"digest"`
+}
+
+// GraphDeadArgumentDecision records the ABI positions removed from a function.
+// Fence is non-empty when the function signature is preserved as an ABI boundary.
+type GraphDeadArgumentDecision struct {
+	Function       string `json:"function"`
+	RemovedArgs    []int  `json:"removed_args,omitempty"`
+	RemovedResults []int  `json:"removed_results,omitempty"`
+	Fence          string `json:"fence,omitempty"`
+}
+
+// GraphDeadArgumentReceipt is the deterministic witness for dead graph-call ABI elimination.
+type GraphDeadArgumentReceipt struct {
+	Decisions []GraphDeadArgumentDecision `json:"decisions"`
+	Digest    string                      `json:"digest"`
+}
+
+// EliminateDeadGraphArguments clones program and removes unused argument and
+// result positions from eligible direct callees and every direct callsite.
+// Entry, exported, external, indirect-callable, and address-taken functions are
+// ABI fences. CachedResultIndexes preserves result positions used by callers
+// outside this program. The supported envelope is a direct-call graph whose
+// call operands/results exactly match the callee signature.
+func EliminateDeadGraphArguments(program GraphInlineProgram) (GraphInlineProgram, GraphDeadArgumentReceipt, error) {
+	functions := make(map[string]GraphInlineFunction, len(program.Functions))
+	referenced := make(map[string]bool)
+	for _, original := range program.Functions {
+		if original.Name == "" {
+			return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function name is empty")
+		}
+		if _, exists := functions[original.Name]; exists {
+			return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("duplicate function %q", original.Name)
+		}
+		fn := cloneGraphInlineFunction(original)
+		if len(fn.ReturnValues) == 0 && len(fn.Results) != 0 {
+			fn.ReturnValues = append([]string(nil), fn.Results...)
+		}
+		if len(fn.ReturnValues) != len(fn.Results) {
+			return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function %q has %d results but %d return values", fn.Name, len(fn.Results), len(fn.ReturnValues))
+		}
+		for _, index := range fn.CachedResultIndexes {
+			if index < 0 || index >= len(fn.Results) {
+				return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function %q cached result index %d is out of range", fn.Name, index)
+			}
+		}
+		functions[fn.Name] = fn
+	}
+	if _, ok := functions[program.Entry]; !ok {
+		return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("entry function %q is missing", program.Entry)
+	}
+	for callerName, fn := range functions {
+		for _, instruction := range fn.Instructions {
+			if instruction.Reference != "" {
+				if _, ok := functions[instruction.Reference]; !ok {
+					return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function %q references missing function %q", callerName, instruction.Reference)
+				}
+				referenced[instruction.Reference] = true
+			}
+			if instruction.Call == "" {
+				continue
+			}
+			callee, ok := functions[instruction.Call]
+			if !ok {
+				return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function %q calls missing function %q", callerName, instruction.Call)
+			}
+			if len(instruction.Arguments) != len(callee.Arguments) || len(instruction.Results) != len(callee.Results) {
+				return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, fmt.Errorf("function %q call to %q has %d arguments/%d results; want %d/%d", callerName, callee.Name, len(instruction.Arguments), len(instruction.Results), len(callee.Arguments), len(callee.Results))
+			}
+		}
+	}
+
+	liveArgs := make(map[string][]bool, len(functions))
+	liveResults := make(map[string][]bool, len(functions))
+	fences := make(map[string]string, len(functions))
+	for name, fn := range functions {
+		liveArgs[name] = make([]bool, len(fn.Arguments))
+		liveResults[name] = make([]bool, len(fn.Results))
+		fence := graphABIFence(program.Entry, fn, referenced[name])
+		fences[name] = fence
+		if fence != "" {
+			fillBools(liveArgs[name])
+			fillBools(liveResults[name])
+		}
+		for _, index := range fn.CachedResultIndexes {
+			// A separately cached caller addresses results by position. Keep the
+			// prefix through that position so compaction cannot renumber it.
+			for i := 0; i <= index; i++ {
+				liveResults[name][i] = true
+			}
+		}
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for name, fn := range functions {
+			used := make(map[string]bool)
+			for i, value := range fn.ReturnValues {
+				if liveResults[name][i] {
+					used[value] = true
+				}
+			}
+			for _, instruction := range fn.Instructions {
+				if instruction.Call == "" {
+					for _, value := range instruction.Arguments {
+						used[value] = true
+					}
+					continue
+				}
+				for i, value := range instruction.Arguments {
+					if liveArgs[instruction.Call][i] {
+						used[value] = true
+					}
+				}
+			}
+			for i, argument := range fn.Arguments {
+				if used[argument] && !liveArgs[name][i] {
+					liveArgs[name][i] = true
+					changed = true
+				}
+			}
+			for _, instruction := range fn.Instructions {
+				if instruction.Call == "" {
+					continue
+				}
+				for i, value := range instruction.Results {
+					if used[value] && !liveResults[instruction.Call][i] {
+						liveResults[instruction.Call][i] = true
+						changed = true
+					}
+				}
+			}
+		}
+	}
+
+	names := make([]string, 0, len(functions))
+	for name := range functions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	decisions := make([]GraphDeadArgumentDecision, 0, len(names))
+	for _, name := range names {
+		fn := functions[name]
+		decision := GraphDeadArgumentDecision{Function: name, Fence: fences[name]}
+		fn.Arguments, decision.RemovedArgs = filterStrings(fn.Arguments, liveArgs[name])
+		fn.Results, decision.RemovedResults = filterStrings(fn.Results, liveResults[name])
+		fn.ReturnValues, _ = filterStrings(fn.ReturnValues, liveResults[name])
+		functions[name] = fn
+		decisions = append(decisions, decision)
+	}
+	for name, fn := range functions {
+		for i := range fn.Instructions {
+			instruction := &fn.Instructions[i]
+			if instruction.Call == "" {
+				continue
+			}
+			instruction.Arguments, _ = filterStrings(instruction.Arguments, liveArgs[instruction.Call])
+			instruction.Results, _ = filterStrings(instruction.Results, liveResults[instruction.Call])
+		}
+		functions[name] = fn
+	}
+
+	out := GraphInlineProgram{Entry: program.Entry, Functions: make([]GraphInlineFunction, 0, len(program.Functions))}
+	for _, original := range program.Functions {
+		out.Functions = append(out.Functions, functions[original.Name])
+	}
+	receipt := GraphDeadArgumentReceipt{Decisions: decisions}
+	encoded, err := json.Marshal(struct {
+		Program   GraphInlineProgram          `json:"program"`
+		Decisions []GraphDeadArgumentDecision `json:"decisions"`
+	}{out, decisions})
+	if err != nil {
+		return GraphInlineProgram{}, GraphDeadArgumentReceipt{}, err
+	}
+	digest := sha256.Sum256(encoded)
+	receipt.Digest = "sha256:" + hex.EncodeToString(digest[:])
+	return out, receipt, nil
+}
+
+func cloneGraphInlineFunction(fn GraphInlineFunction) GraphInlineFunction {
+	fn.Arguments = append([]string(nil), fn.Arguments...)
+	fn.Results = append([]string(nil), fn.Results...)
+	fn.ReturnValues = append([]string(nil), fn.ReturnValues...)
+	fn.CachedResultIndexes = append([]int(nil), fn.CachedResultIndexes...)
+	fn.Instructions = append([]GraphInlineInstruction(nil), fn.Instructions...)
+	for i := range fn.Instructions {
+		fn.Instructions[i].Arguments = append([]string(nil), fn.Instructions[i].Arguments...)
+		fn.Instructions[i].Results = append([]string(nil), fn.Instructions[i].Results...)
+	}
+	return fn
+}
+
+func graphABIFence(entry string, fn GraphInlineFunction, referenced bool) string {
+	switch {
+	case fn.Name == entry:
+		return "entry-abi"
+	case fn.Exported:
+		return "exported-abi"
+	case fn.External:
+		return "external-abi"
+	case fn.IndirectCallable:
+		return "indirect-call"
+	case referenced:
+		return "symbol-reference"
+	default:
+		return ""
+	}
+}
+
+func fillBools(values []bool) {
+	for i := range values {
+		values[i] = true
+	}
+}
+
+func filterStrings(values []string, keep []bool) ([]string, []int) {
+	var out []string
+	var removed []int
+	for i, value := range values {
+		if keep[i] {
+			out = append(out, value)
+		} else {
+			removed = append(removed, i)
+		}
+	}
+	return out, removed
 }
 
 // InlineGraphFunctions clones program, safely replaces eligible direct calls,
