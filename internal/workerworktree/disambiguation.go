@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"os/exec"
@@ -105,6 +106,11 @@ func disambiguationRelevant(paths []string) bool {
 
 type boundedReader func(context.Context, string, string, func(string)) DisambiguationWitness
 
+type disambiguationArchiveStream struct {
+	Reader io.ReadCloser
+	Wait   func() error
+}
+
 var (
 	readDisambiguation = boundedReader(readDisambiguationWitness)
 
@@ -112,14 +118,33 @@ var (
 		return context.WithTimeout(context.Background(), timeout)
 	}
 
-	// Injectable command seam for deterministic cancellation tests. Production
-	// always uses CommandContext so an expired land deadline terminates git archive
-	// instead of leaving the expensive witness process detached.
-	runDisambiguationArchive = func(ctx context.Context, repo, tree string) ([]byte, error) {
+	// Injectable command seam for deterministic cancellation and producer-join
+	// tests. Production exposes stdout directly to the extractor and always uses
+	// CommandContext so an expired land deadline terminates git archive.
+	runDisambiguationArchive = func(ctx context.Context, repo, tree string) (disambiguationArchiveStream, error) {
 		cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", tree)
 		cmd.Dir = repo
 		windowgate.ConfigureBackgroundCommand(cmd)
-		return cmd.Output()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return disambiguationArchiveStream{}, err
+		}
+		if err := cmd.Start(); err != nil {
+			_ = stdout.Close()
+			return disambiguationArchiveStream{}, err
+		}
+		return disambiguationArchiveStream{
+			Reader: stdout,
+			Wait: func() error {
+				err := cmd.Wait()
+				if err != nil && stderr.Len() > 0 {
+					return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+				}
+				return err
+			},
+		}, nil
 	}
 	runAnalyzer = func(ctx context.Context, root, generated string) ([]byte, error) {
 		python := "python3"
@@ -306,24 +331,30 @@ func coverageFamilyRegressed(before, after map[string]float64) bool {
 
 func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubphase func(string)) DisambiguationWitness {
 	w := DisambiguationWitness{Tree: tree}
-	setSubphase("git-archive")
-	archive, err := runDisambiguationArchive(ctx, repo, tree)
+	setSubphase("scratch-tree")
+	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
 	if err != nil {
 		w.Detail = err.Error()
 		return w
 	}
+	defer os.RemoveAll(tmp)
+	root := filepath.Join(tmp, "tree")
 
-	key := disambiguationCacheKey(archive)
+	key, err := materializeDisambiguationArchive(ctx, repo, tree, root, setSubphase)
+	if err != nil {
+		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
+		return w
+	}
 	w.CacheIdentity = key
 	cacheRoot, cacheErr := disambiguationCacheRoot(repo)
 	if cacheErr != nil {
 		w.CacheState, w.CacheReason = "bypass", "git-common-dir-unavailable"
-		result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+		result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
 		return result
 	}
 	if err := os.MkdirAll(cacheRoot, 0755); err != nil {
 		w.CacheState, w.CacheReason = "bypass", "cache-root-unavailable"
-		result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+		result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
 		return result
 	}
 
@@ -334,7 +365,7 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 			break
 		} else if !errors.Is(err, os.ErrExist) {
 			w.CacheState, w.CacheReason = "bypass", "cache-lock-unavailable"
-			result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+			result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
 			return result
 		}
 		select {
@@ -356,12 +387,61 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 		w.CacheState, w.CacheReason = "miss", reason
 	}
 
-	w, complete := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+	w, complete := computeDisambiguationWitness(ctx, w, root, setSubphase)
 	if complete {
 		setSubphase("cache-write")
 		_ = writeCachedDisambiguation(cachePath, key, w)
 	}
 	return w
+}
+
+// materializeDisambiguationArchive extracts and hashes one git-archive stream
+// without retaining the archive in memory. The producer is always joined before
+// success or failure is returned, and the cache identity is published only when
+// extraction, the trailing-byte drain, and the producer itself all complete.
+func materializeDisambiguationArchive(ctx context.Context, repo, tree, dst string, setSubphase func(string)) (string, error) {
+	setSubphase("git-archive")
+	stream, err := runDisambiguationArchive(ctx, repo, tree)
+	if err != nil {
+		return "", err
+	}
+	if stream.Reader == nil || stream.Wait == nil {
+		if stream.Reader != nil {
+			_ = stream.Reader.Close()
+		}
+		if stream.Wait != nil {
+			_ = stream.Wait()
+		}
+		return "", errors.New("git archive returned an incomplete stream")
+	}
+
+	h := newDisambiguationCacheHash()
+	tee := io.TeeReader(stream.Reader, h)
+	setSubphase("extract-archive")
+	extractErr := extractTarReaderBounded(ctx, tee, dst)
+
+	var drainErr error
+	if extractErr == nil {
+		// tar.Reader stops at the end marker, but #9461 keys the cache over every
+		// byte emitted by git archive. Drain padding and trailing bytes through
+		// the same hash to preserve the existing content-addressed identity.
+		setSubphase("git-archive")
+		_, drainErr = copyBounded(ctx, io.Discard, tee)
+	}
+	closeErr := stream.Reader.Close()
+	waitErr := stream.Wait()
+	if extractErr != nil {
+		// Preserve the failing subphase even though joining the producer is
+		// mandatory before returning.
+		setSubphase("extract-archive")
+	}
+	if err := errors.Join(extractErr, drainErr, closeErr, waitErr); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 type disambiguationCacheEntry struct {
@@ -371,6 +451,12 @@ type disambiguationCacheEntry struct {
 }
 
 func disambiguationCacheKey(archive []byte) string {
+	h := newDisambiguationCacheHash()
+	h.Write(archive)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func newDisambiguationCacheHash() hash.Hash {
 	h := sha256.New()
 	io.WriteString(h, disambiguationCacheSchema)
 	h.Write([]byte{0})
@@ -378,8 +464,7 @@ func disambiguationCacheKey(archive []byte) string {
 	h.Write([]byte{0})
 	io.WriteString(h, disambiguationAnalyzerVersion)
 	h.Write([]byte{0})
-	h.Write(archive)
-	return fmt.Sprintf("%x", h.Sum(nil))
+	return h
 }
 
 func readCachedDisambiguation(path, key string) (DisambiguationWitness, string, bool) {
@@ -426,22 +511,9 @@ func writeCachedDisambiguation(path, key string, witness DisambiguationWitness) 
 	return os.Rename(name, path)
 }
 
-func computeDisambiguationWitness(ctx context.Context, w DisambiguationWitness, archive []byte, setSubphase func(string)) (DisambiguationWitness, bool) {
-	setSubphase("scratch-tree")
-	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
-	if err != nil {
-		w.Detail = err.Error()
-		return w, false
-	}
-	defer os.RemoveAll(tmp)
-	out := filepath.Join(tmp, "tree")
-	setSubphase("extract-archive")
-	if err = extractTarBounded(ctx, archive, out); err != nil {
-		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
-		return w, false
-	}
+func computeDisambiguationWitness(ctx context.Context, w DisambiguationWitness, root string, setSubphase func(string)) (DisambiguationWitness, bool) {
 	setSubphase("concept-invariant")
-	inv, err := checkInvariantBounded(ctx, out, setSubphase)
+	inv, err := checkInvariantBounded(ctx, root, setSubphase)
 	if err != nil {
 		w.Detail = err.Error()
 		return w, false
@@ -565,10 +637,14 @@ func extractTar(archive []byte, dst string) error {
 }
 
 func extractTarBounded(ctx context.Context, archive []byte, dst string) error {
+	return extractTarReaderBounded(ctx, bytes.NewReader(archive), dst)
+}
+
+func extractTarReaderBounded(ctx context.Context, archive io.Reader, dst string) error {
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
-	tr := tar.NewReader(bytes.NewReader(archive))
+	tr := tar.NewReader(archive)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

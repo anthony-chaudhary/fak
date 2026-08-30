@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +23,46 @@ func stubDisambiguationReader(fn func(repo, tree string) DisambiguationWitness) 
 		return fn(repo, tree)
 	}
 }
+
+func archiveStreamFromBytes(body []byte, waitErr error) disambiguationArchiveStream {
+	return disambiguationArchiveStream{
+		Reader: io.NopCloser(bytes.NewReader(body)),
+		Wait:   func() error { return waitErr },
+	}
+}
+
+type gatedArchiveReader struct {
+	prefix  *bytes.Reader
+	suffix  *bytes.Reader
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *gatedArchiveReader) Read(p []byte) (int, error) {
+	if r.prefix.Len() > 0 {
+		return r.prefix.Read(p)
+	}
+	r.once.Do(func() { close(r.reached) })
+	<-r.release
+	return r.suffix.Read(p)
+}
+
+func (*gatedArchiveReader) Close() error { return nil }
+
+type contextBlockingArchiveReader struct {
+	ctx     context.Context
+	started chan struct{}
+	once    sync.Once
+}
+
+func (r *contextBlockingArchiveReader) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+
+func (*contextBlockingArchiveReader) Close() error { return nil }
 
 type manualDeadlineContext struct {
 	done chan struct{}
@@ -320,8 +362,8 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 		requestedDeadline = timeout
 		return manual, func() {}
 	}
-	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
-		return make([]byte, 1024), nil // empty but valid tar stream
+	runDisambiguationArchive = func(context.Context, string, string) (disambiguationArchiveStream, error) {
+		return archiveStreamFromBytes(make([]byte, 1024), nil), nil // empty but valid tar stream
 	}
 	scorecardStarted := make(chan struct{})
 	scorecardCanceled := make(chan error, 1)
@@ -455,6 +497,145 @@ func TestLandIsolatedInvalidDisambiguationTimeoutRefusesTypedAndPreCAS(t *testin
 	}
 }
 
+func TestDisambiguationArchiveStreamsExtractionBeforeProducerCompletion(t *testing.T) {
+	oldArchive := runDisambiguationArchive
+	defer func() { runDisambiguationArchive = oldArchive }()
+
+	fixture := t.TempDir()
+	writeDisambiguationFixture(t, fixture, "first.txt", "first body\n")
+	writeDisambiguationFixture(t, fixture, "second.txt", "second body\n")
+	archive := tarDisambiguationFixture(t, fixture)
+	secondHeader := bytes.Index(archive, []byte("second.txt"))
+	if secondHeader <= 0 {
+		t.Fatal("second tar header not found")
+	}
+	split := secondHeader - secondHeader%512
+	reader := &gatedArchiveReader{
+		prefix:  bytes.NewReader(archive[:split]),
+		suffix:  bytes.NewReader(archive[split:]),
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	waited := false
+	runDisambiguationArchive = func(context.Context, string, string) (disambiguationArchiveStream, error) {
+		return disambiguationArchiveStream{
+			Reader: reader,
+			Wait: func() error {
+				waited = true
+				return nil
+			},
+		}, nil
+	}
+
+	dst := t.TempDir()
+	type result struct {
+		key string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		key, err := materializeDisambiguationArchive(context.Background(), "/repo", "HEAD", dst, func(string) {})
+		done <- result{key: key, err: err}
+	}()
+
+	select {
+	case <-reader.reached:
+	case <-time.After(time.Second):
+		t.Fatal("archive extractor did not reach the gated second header")
+	}
+	first, err := os.ReadFile(filepath.Join(dst, "first.txt"))
+	if err != nil || string(first) != "first body\n" {
+		t.Fatalf("first file was not materialized while producer remained open: body=%q err=%v", first, err)
+	}
+	close(reader.release)
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.key != disambiguationCacheKey(archive) {
+			t.Fatalf("streamed cache key = %q, want %q", got.key, disambiguationCacheKey(archive))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("archive materialization did not finish after producer release")
+	}
+	if !waited {
+		t.Fatal("archive producer was not joined")
+	}
+	second, err := os.ReadFile(filepath.Join(dst, "second.txt"))
+	if err != nil || string(second) != "second body\n" {
+		t.Fatalf("second file differs after streamed extraction: body=%q err=%v", second, err)
+	}
+}
+
+func TestDisambiguationArchiveCancellationJoinsProducerWithoutPartialWitness(t *testing.T) {
+	oldArchive := runDisambiguationArchive
+	oldAnalyzer := runAnalyzer
+	defer func() {
+		runDisambiguationArchive = oldArchive
+		runAnalyzer = oldAnalyzer
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	joined := make(chan struct{})
+	runDisambiguationArchive = func(got context.Context, _, _ string) (disambiguationArchiveStream, error) {
+		if got != ctx {
+			t.Fatalf("archive context was not propagated")
+		}
+		return disambiguationArchiveStream{
+			Reader: &contextBlockingArchiveReader{ctx: got, started: started},
+			Wait: func() error {
+				close(joined)
+				return got.Err()
+			},
+		}, nil
+	}
+	analyzerCalls := 0
+	runAnalyzer = func(context.Context, string, string) ([]byte, error) {
+		analyzerCalls++
+		return nil, nil
+	}
+
+	type outcome struct {
+		w      DisambiguationWitness
+		phases []string
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		var phases []string
+		w := readDisambiguationWitness(ctx, "/repo", "HEAD", func(phase string) {
+			phases = append(phases, phase)
+		})
+		result <- outcome{w: w, phases: phases}
+	}()
+	<-started
+	cancel()
+
+	var got outcome
+	select {
+	case got = <-result:
+	case <-time.After(time.Second):
+		t.Fatal("canceled archive stream did not return")
+	}
+	select {
+	case <-joined:
+	default:
+		t.Fatal("archive producer was not joined before witness return")
+	}
+	if analyzerCalls != 0 {
+		t.Fatalf("canceled archive published work to analyzer: calls=%d", analyzerCalls)
+	}
+	if got.w.CacheIdentity != "" || got.w.CacheState != "" || got.w.Fresh || got.w.SemanticValid ||
+		got.w.CriticalClean || got.w.Coverage != 0 || got.w.CoverageDebt != 0 || got.w.FamilyCoverage != nil {
+		t.Fatalf("canceled archive published a partial witness: %+v", got.w)
+	}
+	if !strings.Contains(got.w.Detail, context.Canceled.Error()) || got.phases[len(got.phases)-1] != "extract-archive" {
+		t.Fatalf("cancellation detail/phases = %q/%v", got.w.Detail, got.phases)
+	}
+}
+
 func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 	oldArchive := runDisambiguationArchive
 	oldAnalyzer := runAnalyzer
@@ -473,6 +654,7 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 	writeDisambiguationFixture(t, fixture, conceptcatalog.GeneratedReadme, "readme\n")
 	writeDisambiguationFixture(t, fixture, conceptcatalog.GeneratedIndex, "index\n")
 	writeDisambiguationFixture(t, fixture, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[]}`)
+	writeDisambiguationFixture(t, fixture, "docs/extraction-equivalence.txt", "streamed corpus bytes\n")
 	archive := tarDisambiguationFixture(t, fixture)
 	changedArchive := append([]byte(nil), archive...)
 	changedArchive = append(changedArchive, 0)
@@ -481,17 +663,21 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 
 	var mu sync.Mutex
 	analyzerCalls := 0
-	runAnalyzer = func(_ context.Context, _ string, generated string) ([]byte, error) {
+	runAnalyzer = func(_ context.Context, root, generated string) ([]byte, error) {
 		mu.Lock()
 		analyzerCalls++
 		mu.Unlock()
+		got, err := os.ReadFile(filepath.Join(root, "docs", "extraction-equivalence.txt"))
+		if err != nil || string(got) != "streamed corpus bytes\n" {
+			return nil, errors.New("streamed extraction differs from archive")
+		}
 		writeDisambiguationFixture(t, generated, "README.md", "readme\n")
 		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
 		return []byte(`{"ok":true,"corpus":{"coverage_debt":1,"clarity_defects":0,"coverage":{"coverage_pct":87.5,"per_family":[{"family":"loop","discovered":4,"covered":3}]}}}`), nil
 	}
 	currentArchive := archive
-	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
-		return append([]byte(nil), currentArchive...), nil
+	runDisambiguationArchive = func(context.Context, string, string) (disambiguationArchiveStream, error) {
+		return archiveStreamFromBytes(append([]byte(nil), currentArchive...), nil), nil
 	}
 	read := func(repo, tree string) DisambiguationWitness {
 		return readDisambiguationWitness(context.Background(), repo, tree, func(string) {})
@@ -506,7 +692,7 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 	}
 
 	oracle := read("/repo-a", "tree-a")
-	if oracle.CacheState != "miss" || analyzerCalls != 1 {
+	if oracle.CacheState != "miss" || oracle.CacheIdentity != disambiguationCacheKey(archive) || analyzerCalls != 1 {
 		t.Fatalf("oracle state/calls = %q/%d, want miss/1 (%+v)", oracle.CacheState, analyzerCalls, oracle)
 	}
 	hit := read("/disjoint-exact-path-worker", "same-content")
