@@ -1,7 +1,7 @@
 {
   "schema": "fak-trajectory-assurance-report/1",
   "corpus_version": "2026-08-25.v1",
-  "corpus_sha256": "sha256:c7affa42a1df434ffb1ab5fe1dbc91f19d4f87c2214991471e94628b6f26c085",
+  "corpus_sha256": "sha256:1da455410c032c5f9372ede3464fb5c71e9a7f4bd68185651f99a503c168896a",
   "blind_protocol": {
     "deterministic_authoritative": true,
     "pair_order": "sha256(case,trial) pair-order randomization",
