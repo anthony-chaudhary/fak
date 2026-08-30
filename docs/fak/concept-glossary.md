@@ -2543,3 +2543,24 @@ ScoreLoopTurn evaluates one completed loop run's strict performance-RSI evidence
 routeGuardOperatorSubcommand is the cmd/fak control-flow seam that recognizes guard allow, deny, disable, resume, and sessions before the wrapped-agent FlagSet is constructed, then reports whether it consumed the invocation.
 
 **Distinct from:** The OPERATOR-SUBCOMMAND DISPATCHER before guarded launch parsing, not cmdGuard (the guarded-agent launcher) and not guardSessionStartInstall (the launch-time SessionStart hook mutation receipt).
+
+
+### inkernel_expert_spill.go (served graded expert-spill seam)
+
+inkernel_expert_spill.go is the agent planner seam that resolves a loaded model’s graded MoE expert-spill placement once from operator intent and measured device budget, then applies that placement to each request session.
+
+**Distinct from:** The SERVE-SIDE LIFECYCLE BRIDGE for graded expert spill, not InKernelPlanner (the whole native request planner) and not its Qwen prefill-chunk control.
+
+
+### InKernelQwenQ4KPrefillChunkConfigError (deferred native-prefill bounds error)
+
+InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an explicit resident-Qwen Q4_K prefill chunk size lies outside 128..8192; a targeted request returns it before tokenization or model execution.
+
+**Distinct from:** The FAIL-CLOSED ERROR VALUE for an invalid bound, not QwenQ4KPrefillChunkTokens (the requested planner setting) and not InKernelPlanner (the planner retaining it).
+
+
+### kvSpanEvict (planner KV-quarantine bridge gate)
+
+kvSpanEvict is the planner-scoped enablement bit set only when FAK_INKERNEL_KVMMU opts in on the CPU model path; guarded eviction code checks it before rebuilding a session and evicting a quarantined tool-result K/V span.
+
+**Distinct from:** The ENABLEMENT GATE for the live planner bridge, not KVSpanEvictor (the public quarantine-bridge interface) and not KVCache.Evict (the model cache mutation it eventually invokes).

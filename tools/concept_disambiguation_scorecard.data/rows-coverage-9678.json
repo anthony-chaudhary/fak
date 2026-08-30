@@ -2792,7 +2792,9 @@
       "distinction": "This is one bounded prefill tuning value, not the full InKernelPlannerConfig bundle and not InKernelPlanner, the runtime planner consuming that bundle. The former FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS ambient spelling is a retired alias, not a second authority.",
       "distinct_from": [
         "issue10046-gateway-inkernelplannerconfig-binding",
-        "x-gateway-engine-inkernelplanner"
+        "x-gateway-engine-inkernelplanner",
+        "issue10229-inkernel-expert-spill",
+        "issue10229-inkernel-qwen-q4k-prefill-chunk-config-error"
       ],
       "aliases": [
         "fakinkernelqwenq4kprefillchunktokens"

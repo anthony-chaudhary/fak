@@ -247,7 +247,9 @@
         "modelengine",
         "issue10046-gateway-inkernelplannerconfig-binding",
         "issue10046-gateway-configured-inkernelplanner-construction",
-        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens"
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+        "issue10229-inkernel-expert-spill",
+        "issue10229-inkernel-qwen-q4k-prefill-chunk-config-error"
       ],
       "aliases": [],
       "grounding": "inkernelplanner",
