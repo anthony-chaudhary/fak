@@ -573,7 +573,7 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
             "next_action": "fix the read (run from repo ROOT), then re-run",
             "workspace": workspace, "corpus": {}, "kpis": [],
         }
-    kpis = [_attach_debt_categories(k) for k in kpis]
+    kpis = [_attach_debt_categories(k.copy()) for k in kpis]
     by_name = {k["kpi"]: k for k in kpis}
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"]
                 for name in KPI_WEIGHTS if name in by_name)
@@ -1186,6 +1186,12 @@ def render(payload: dict[str, Any]) -> str:
     ]
     for b in c.get("breakdown", []):
         lines.append(f"  {b['score']:>5} {b['debt']:>4}  {b['kpi']:<14} {b['detail']}")
+    lines.append("")
+    lines.append("structural debt categories:")
+    categories = c.get("debt_categories") or {}
+    counts = c.get("debt_by_category") or {}
+    for category, definition in categories.items():
+        lines.append(f"  {category}: {counts.get(category, 0)} — {definition}")
     lines.append("")
     lines.append("code-debt work-list:")
     any_defect = False
