@@ -5,11 +5,90 @@ package compute
 import (
 	"errors"
 	"math"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
-// metal_test.go — the on-box witness that the Metal backend runs a real forward pass on the
+func TestMetalMatMulTraceEventHostTiming(t *testing.T) {
+	started := time.Date(2026, time.August, 30, 12, 0, 0, 123, time.FixedZone("test", -7*60*60))
+	w := Tensor{Dtype: F16, Shape: []int{3, 4}}
+	x := Tensor{Dtype: BF16, Shape: []int{4}}
+	y := Tensor{Dtype: I8, Shape: []int{3}}
+
+	e := metalMatMulTraceEvent(started, metalCommandReceipt{WaitMilliseconds: 1.25}, w, x, y, 3, 4, 1)
+	if e.Operation != "matmul" || e.Phase != "kernel" || e.Backend != "metal" || e.Device != "metal:0" || e.Kernel != "mps_f32_matmul" || e.Route != "device" {
+		t.Fatalf("trace identity = operation=%q phase=%q backend=%q device=%q kernel=%q route=%q", e.Operation, e.Phase, e.Backend, e.Device, e.Kernel, e.Route)
+	}
+	if e.StartedAt != started.UTC() || e.DurationNS != 1_250_000 || e.DeviceDurationNS != 0 || e.TimerDomain != "host_monotonic" {
+		t.Fatalf("trace timing = started=%v duration=%d device_duration=%d domain=%q", e.StartedAt, e.DurationNS, e.DeviceDurationNS, e.TimerDomain)
+	}
+	if e.WeightDType != "f16" || e.InputDType != "bf16" || e.OutputDType != "i8" {
+		t.Fatalf("trace dtypes = weight=%q input=%q output=%q", e.WeightDType, e.InputDType, e.OutputDType)
+	}
+	if e.BytesRead != 32 || e.BytesWritten != 3 {
+		t.Fatalf("trace bytes = read=%d written=%d, want 32/3", e.BytesRead, e.BytesWritten)
+	}
+	if e.EstimatedFLOPs != 24 || !reflect.DeepEqual(e.Shapes, [][]int{{3, 4}, {4}}) {
+		t.Fatalf("trace work = flops=%d shapes=%v", e.EstimatedFLOPs, e.Shapes)
+	}
+	if e.ProvenanceDigest != computetrace.Digest("metal", "mps_f32_matmul") {
+		t.Fatalf("trace provenance = %q", e.ProvenanceDigest)
+	}
+}
+
+func TestMetalMatMulTraceEventDeviceTiming(t *testing.T) {
+	e := metalMatMulTraceEvent(time.Time{}, metalCommandReceipt{
+		WaitMilliseconds: 2.5,
+		TimingAvailable:  true,
+		GPUMilliseconds:  0.75,
+	}, Tensor{Dtype: F32, Shape: []int{2, 2}}, Tensor{Dtype: F32, Shape: []int{2}}, Tensor{Dtype: F32, Shape: []int{2}}, 2, 2, 1)
+	if e.DurationNS != 2_500_000 || e.DeviceDurationNS != 750_000 || e.TimerDomain != "metal_command_buffer" {
+		t.Fatalf("trace timing = duration=%d device_duration=%d domain=%q", e.DurationNS, e.DeviceDurationNS, e.TimerDomain)
+	}
+}
+
+func TestMetalMatMulRejectsEitherNonF32OperandBeforeDeviceUse(t *testing.T) {
+	backend := &metalBackend{}
+	for _, tc := range []struct {
+		name string
+		call func()
+		want string
+	}{
+		{
+			name: "matmul weight",
+			call: func() { backend.MatMul(Tensor{Dtype: F16}, Tensor{Dtype: F32}) },
+			want: "metal MatMul supports only F32 inputs today (weight=f16 input=f32)",
+		},
+		{
+			name: "matmul input",
+			call: func() { backend.MatMul(Tensor{Dtype: F32}, Tensor{Dtype: BF16}) },
+			want: "metal MatMul supports only F32 inputs today (weight=f32 input=bf16)",
+		},
+		{
+			name: "batched input",
+			call: func() { backend.BatchedMatMul(Tensor{Dtype: F32}, Tensor{Dtype: I8}, 2) },
+			want: "metal BatchedMatMul supports only F32 inputs today (weight=f32 input=i8)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				got := recover()
+				message, ok := got.(string)
+				if !ok || !strings.Contains(message, tc.want) {
+					t.Fatalf("panic = %v, want text %q", got, tc.want)
+				}
+			}()
+			tc.call()
+		})
+	}
+}
+
+// metal_test.go ΓÇö the on-box witness that the Metal backend runs a real forward pass on the
 // Apple-Silicon GPU and matches the cpuref Reference within the Approx gate (argmax-exact +
 // logit-cosine >= threshold), NOT bit-identity (RequireReference keeps the device off the
 // exact rungs). Compiled by default on Apple Silicon when cgo is enabled; skips cleanly if no Metal
@@ -53,7 +132,7 @@ func (c mtlSynthCfg) grp() int       { return c.nH / c.nKV }
 func (c mtlSynthCfg) scale() float32 { return float32(1.0 / math.Sqrt(float64(c.hd))) }
 
 // mtlSynthModel holds one backend's resident weights + a live KV cache, and steps tokens
-// through the exact Llama-decode op chain the model's tokenHidden uses — but expressed
+// through the exact Llama-decode op chain the model's tokenHidden uses ΓÇö but expressed
 // entirely through the Backend interface, so cpuref and metal run the SAME chain.
 type mtlSynthModel struct {
 	be  Backend
@@ -148,7 +227,7 @@ func mtlSynthHostWeights(cfg mtlSynthCfg) map[string][]float32 {
 	return h
 }
 
-// TestMetalMatMulApproxMatchesRef — op-level first light: a single device MPS SGEMM vs the
+// TestMetalMatMulApproxMatchesRef ΓÇö op-level first light: a single device MPS SGEMM vs the
 // cpuref fdot matmul on the same random W,x. Approx (MPS reduction order differs), so the
 // gate is cosine, not equality.
 func TestMetalMatMulApproxMatchesRef(t *testing.T) {
@@ -261,7 +340,7 @@ func TestMetalDeviceMemoryInfoReportsWorkingSet(t *testing.T) {
 	}
 }
 
-// TestMetalForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
+// TestMetalForwardMatchesRef ΓÇö the headline: a full multi-layer Llama decode forward,
 // greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate: every
 // step's argmax must be EXACT (same next token) and the logit cosine >= 0.999.
 func TestMetalForwardMatchesRef(t *testing.T) {
