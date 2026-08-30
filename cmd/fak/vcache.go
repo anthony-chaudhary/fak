@@ -30,6 +30,10 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
+	case "inspect":
+		return runVCacheInspect(stdout, stderr, argv[1:])
+	case "put":
+		return runVCacheFixturePut(stdout, stderr, argv[1:])
 	case "status":
 		return runVCacheStatus(stdout, stderr, argv[1:])
 	case "prove":
@@ -84,6 +88,11 @@ func flagWasSet(fs *flag.FlagSet, name string) bool {
 
 func vcacheUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
+  fak vcache inspect --dir DIR --digest SHA256 [--json]
+                   [--show-payload --fixture-mode test]
+  fak vcache put --dir DIR (--payload TEXT|--payload-file FILE)
+                   --fixture-mode offline|test [--tool NAME] [--args JSON]
+                   [--witness VALUE] [--json]
   fak vcache status [--json] [--sessions] [--session-days N] [--session-max N]
                    [--session-ns-prefix PREFIX | --session-all]
                    [--session-action-gate high|medium|none]
@@ -133,6 +142,14 @@ func vcacheUsage(w io.Writer) {
                    [--true-warm N --false-warm N --true-cold N --false-cold N]
                    [--recall-prefix-tokens N --recall-unit-tokens N --recall-siblings N --recall-read-mult F]
 
+inspect reads one caller-scoped on-disk vDSO fixture entry by its SHA-256
+digest. It validates the fixture ledger and content digest before reporting
+metadata. Payload bytes are hidden by default; --show-payload is refused unless
+--fixture-mode test is explicit.
+put is a fixture-only seed path. It submits an eligible read completion through
+the normal vDSO event path, then records the emitted fill under --dir. It is
+refused unless --fixture-mode offline or test is explicit; it is not a runtime
+cache mutation interface.
 status reports what is actually up: the M5 governor is a local, off-path policy
 engine; the M4 chains & recall engine is off-path and gated OFF by default;
 provider calibration/warming remain tracked by #716-#718, and Codex/OpenAI cached-
