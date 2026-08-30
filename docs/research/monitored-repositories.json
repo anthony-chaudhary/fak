@@ -2301,7 +2301,9 @@
         "source_evidence": [
           {
             "class": "paper_source",
-            "evidence": ["https://arxiv.org/abs/2608.07915v1"],
+            "evidence": [
+              "https://arxiv.org/abs/2608.07915v1"
+            ],
             "note": "Version 1 source and PDF read; method, tables, appendices, calibration/evaluation envelope, and claim boundaries reconciled."
           },
           {
@@ -2321,7 +2323,9 @@
           },
           {
             "class": "candidate_matrix",
-            "evidence": ["docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md#candidate-matrix"]
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md#candidate-matrix"
+            ]
           },
           {
             "class": "issue_tracking",
@@ -2332,7 +2336,13 @@
             ]
           }
         ],
-        "issue_refs": ["#9785", "#9789", "#9141", "#9161", "#2236"],
+        "issue_refs": [
+          "#9785",
+          "#9789",
+          "#9141",
+          "#9161",
+          "#2236"
+        ],
         "completeness_critic": "Paper source/PDF, all load-bearing code, README/demos/eval/bench/plot surfaces, all assets, exact tree, both commits, GitHub metadata and collaboration surfaces, license, FAK self-query, candidate dispositions, dedupe, and issue contract were covered; Projects v2 token scope, dependency repos, and the noncanonical fork are the declared exclusions."
       }
     },
@@ -3681,6 +3691,96 @@
           "#10314"
         ],
         "completeness_critic": "Covered the committed tree, runtime/config/collector/storage/API lifecycle, operator UI and Grafana surfaces, tracked tests and fixtures, complete local history and tags, releases, pull requests, issues and discussions, provenance and license searches, current FAK overlap, candidate dispositions, deduplication, and delegated reads independently rechecked by the coordinator. Untracked target files, dependency-by-dependency license audit, external production deployments, and private runtime logs are outside the decision denominator."
+      }
+    },
+    {
+      "repository": "anthony-chaudhary/Benchmark",
+      "url": "https://github.com/anthony-chaudhary/Benchmark",
+      "status": "studied",
+      "priority": 74,
+      "why": "Pinned clean-room study of benchmark orchestration and evidence mechanisms. FAK already covers typed metrics, sinks, raw integrity, preflight, publication admission, and execution/export separation; watcher-safe snapshots, correlation receipts, and parser-completeness receipts survive as bounded follow-ons. Refresh if licensing, methodology, or the pinned mechanisms materially change.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "b60f2f05e23ec38ae4f50ca19717c2f615ed419a",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-08-19T00:33:36Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md",
+      "refresh_issue": "#10263",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthony-chaudhary-benchmark.json",
+        "indexed_revision": "b60f2f05e23ec38ae4f50ca19717c2f615ed419a",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 44,
+        "candidate_count": 9,
+        "filed_issue_count": 3,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "GitHub repository metadata at 2026-08-29",
+              "842 commits",
+              "309 tags",
+              "14 closed and zero open issues",
+              "zero pull requests",
+              "discussions disabled",
+              "zero stars and zero forks",
+              "last push 2026-08-19T00:33:36Z"
+            ],
+            "note": "Forge census was captured separately from the mechanical local-tree inventory."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "internal/cacheobs/metricspec.go:77-169",
+              "internal/findingsink/findingsink.go:137-168",
+              "internal/auditreceipt/auditreceipt.go:59-243",
+              "internal/benchmarkartifact",
+              "internal/armbench/manifest.go",
+              "internal/benchcatalog/ingest.go:168-314",
+              "internal/benchauthority/validate.go:23-178",
+              "internal/bench/ctxadmission.go:341-490",
+              "internal/bench/setupparity.go:510-517"
+            ],
+            "note": "Exact FAK seams decided PRESENT/PARTIAL dispositions and prevented duplicate abstractions."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md#candidate-dispositions",
+              "study_36e9161928991db39b7aebd463809d8ca37e9ac9d66ba074888c4bd45edd6882"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10263",
+              "https://github.com/anthony-chaudhary/fak/issues/10302",
+              "https://github.com/anthony-chaudhary/fak/issues/10303",
+              "https://github.com/anthony-chaudhary/fak/issues/10304"
+            ],
+            "note": "The parent and three bounded follow-ons carry pinned clean-room provenance and the durable receipt."
+          }
+        ],
+        "issue_refs": [
+          "#10263",
+          "#10302",
+          "#10303",
+          "#10304"
+        ],
+        "completeness_critic": "Covered the committed tree, architecture and runtime flow, tests and fixtures, local history and tags, forge issues/PRs/discussions metadata, provenance and license evidence, current FAK overlap, candidate dispositions, deduplication, issue filing, and durable receipt read-back. Inventory totals are a mechanical local-tree denominator that includes broad environment material, not project-owned source totals. Private deployments, external runtime logs, dependency-by-dependency license review, producer authentication, and comparative effectiveness remain outside the denominator."
       }
     }
   ]
