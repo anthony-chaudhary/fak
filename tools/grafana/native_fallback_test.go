@@ -250,6 +250,62 @@ func waitPIDExit(pid int, timeout time.Duration) bool {
 	return false
 }
 
+func waitForOwnerMarker(owner string, attempts int, interval time.Duration, probe func() (string, error)) (string, error) {
+	marker := "fak-grafana-owner=" + owner
+	var last string
+	for attempt := 0; attempt < attempts; attempt++ {
+		command, err := probe()
+		if err != nil {
+			return last, fmt.Errorf("owned supervisor exited before publishing %q: %w", marker, err)
+		}
+		last = command
+		if strings.Contains(command, marker) {
+			return command, nil
+		}
+		if attempt+1 < attempts {
+			time.Sleep(interval)
+		}
+	}
+	return last, fmt.Errorf("owner marker %q absent after %d probe(s); last command: %s", marker, attempts, strings.TrimSpace(last))
+}
+
+func TestWaitForOwnerMarker(t *testing.T) {
+	t.Run("delayed nohup exec", func(t *testing.T) {
+		observations := []string{"[nohup]\n", "bash -c supervisor fak-grafana-owner=fixture\n"}
+		calls := 0
+		got, err := waitForOwnerMarker("fixture", len(observations), 0, func() (string, error) {
+			observation := observations[calls]
+			calls++
+			return observation, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if calls != 2 || !strings.Contains(got, "fak-grafana-owner=fixture") {
+			t.Fatalf("calls=%d command=%q", calls, got)
+		}
+	})
+
+	t.Run("never ready", func(t *testing.T) {
+		got, err := waitForOwnerMarker("fixture", 2, 0, func() (string, error) {
+			return "[nohup]\n", nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "absent after 2 probe(s)") || got != "[nohup]\n" {
+			t.Fatalf("command=%q err=%v", got, err)
+		}
+	})
+
+	t.Run("supervisor exits", func(t *testing.T) {
+		probeErr := fmt.Errorf("exit status 1")
+		got, err := waitForOwnerMarker("fixture", 2, 0, func() (string, error) {
+			return "", probeErr
+		})
+		if err == nil || !strings.Contains(err.Error(), "exited before publishing") || got != "" {
+			t.Fatalf("command=%q err=%v", got, err)
+		}
+	})
+}
+
 func waitForChild(t *testing.T, parent int, timeout time.Duration) int {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -305,9 +361,12 @@ func TestNonMacOwnedProcessSurvivesLauncherExitAndDownStopsIt(t *testing.T) {
 	if m["owner"] != owner {
 		t.Fatalf("owner=%q", m["owner"])
 	}
-	stdout, _ := command(t, nil, "ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	if !strings.Contains(stdout, "fak-grafana-owner="+owner) {
-		t.Fatalf("owner marker absent: %s", stdout)
+	stdout, err := waitForOwnerMarker(owner, 100, 20*time.Millisecond, func() (string, error) {
+		out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").CombinedOutput()
+		return string(out), err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
 		t.Fatal(err)
