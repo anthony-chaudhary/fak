@@ -10,6 +10,6 @@ The block below is the complete deterministic stdout capture consumed by the pac
 
 <!-- BEGIN SELFCHECK OUTPUT -->
 ```text
-HARNESS_WEB_SELFCHECK ok protocol=fak.harness.run/v1 normal=8 resumed=2 approval=4 failure=3 skins=2 runs=3 goals=1 dashboards=8 html_sha256=95f60d757293b5b16d9d8e688c1a95f72af0eaba8039f5c865d1e1f1373563ef
+HARNESS_WEB_SELFCHECK ok protocol=fak.harness.run/v1 normal=8 resumed=2 approval=4 failure=3 skins=2 runs=3 goals=1 dashboards=8 html_sha256=fa6f87a175d81b4e7aa98dfc2202e8d0077179ccf7dd9f9ababc79a7d2b2e9ba
 ```
 <!-- END SELFCHECK OUTPUT -->

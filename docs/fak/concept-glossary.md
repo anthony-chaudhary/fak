@@ -2536,3 +2536,10 @@ InKernelPlannerConfig.QwenQ4KPrefillChunkTokens is the explicit 128..8192-token 
 ScoreLoopTurn evaluates one completed loop run's strict performance-RSI evidence and emits the nonfatal loop-turn receipt.
 
 **Distinct from:** Unlike loopscore, which grades loop durability across a corpus, this scorer evaluates one current run's performance evidence after its child exits.
+
+
+### routeGuardOperatorSubcommand (guard operator-command dispatcher)
+
+routeGuardOperatorSubcommand is the cmd/fak control-flow seam that recognizes guard allow, deny, disable, resume, and sessions before the wrapped-agent FlagSet is constructed, then reports whether it consumed the invocation.
+
+**Distinct from:** The OPERATOR-SUBCOMMAND DISPATCHER before guarded launch parsing, not cmdGuard (the guarded-agent launcher) and not guardSessionStartInstall (the launch-time SessionStart hook mutation receipt).

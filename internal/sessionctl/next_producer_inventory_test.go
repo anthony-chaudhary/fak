@@ -80,8 +80,8 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 	}
 	witnessed := []producerWitness{
 		{
-			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "toolTerminalPayload"},
-			Authorities: []callAuthority{{File: "internal/agent/loop.go", Call: "RecordToolTerminalWakeNext"}},
+			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleUser", Payload: "toolTerminalPayload"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordToolTerminalWakeNext"}},
 		},
 		{
 			Producer:    syntheticProducer{File: "internal/agent/loop_directives.go", Role: "RoleUser", Payload: "steer"},
@@ -106,8 +106,8 @@ func TestModelFacingSyntheticProducersHaveNextWitnesses(t *testing.T) {
 			Authorities: []callAuthority{{File: "internal/agent/loop_directives.go", Call: "RecordContextAdvisoryNext"}},
 		},
 		{
-			Producer:    syntheticProducer{File: "internal/agent/loop.go", Role: "RoleUser", Payload: "continuation"},
-			Authorities: []callAuthority{{File: "internal/agent/loop.go", Call: "RecordStopWitnessNext"}},
+			Producer:    syntheticProducer{File: "internal/agent/loop_turn.go", Role: "RoleUser", Payload: "continuation"},
+			Authorities: []callAuthority{{File: "internal/agent/loop_turn.go", Call: "RecordStopWitnessNext"}},
 		},
 		{
 			Producer:    syntheticProducer{File: "internal/gateway/messages.go", Role: "agent.RoleUser", Payload: "prompt"},

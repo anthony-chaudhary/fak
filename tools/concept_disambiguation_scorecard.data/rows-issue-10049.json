@@ -8,7 +8,8 @@
       "definition": "guardSessionStartInstall is the typed receipt returned while fak guard installs a provider-native SessionStart affordance hook; it records whether the hook was applied, how it is managed, and which settings/state paths own it.",
       "distinction": "The INSTALL RECEIPT describing one launch-time hook mutation, not guardsessionstart (the hook command that later emits the first-turn hint) and not a running session record.",
       "distinct_from": [
-        "guardsessionstart"
+        "guardsessionstart",
+        "issue10225-route-guard-operator-subcommand"
       ],
       "aliases": [],
       "grounding": "guardSessionStartInstall",

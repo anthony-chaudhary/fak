@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "issue10225-route-guard-operator-subcommand",
+      "canonical": "routeGuardOperatorSubcommand (guard operator-command dispatcher)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "routeGuardOperatorSubcommand is the cmd/fak control-flow seam that recognizes guard allow, deny, disable, resume, and sessions before the wrapped-agent FlagSet is constructed, then reports whether it consumed the invocation.",
+      "distinction": "The OPERATOR-SUBCOMMAND DISPATCHER before guarded launch parsing, not cmdGuard (the guarded-agent launcher) and not guardSessionStartInstall (the launch-time SessionStart hook mutation receipt).",
+      "distinct_from": [
+        "x2-guard-gate-cmdguard",
+        "issue10049-guard-session-start-install"
+      ],
+      "aliases": [],
+      "grounding": "routeGuardOperatorSubcommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

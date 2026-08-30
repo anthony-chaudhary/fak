@@ -176,6 +176,7 @@ reds, and a row naming no live reason reds.
 
 | Entry | Default severity | Fail mode | Note |
 |---|---|---|---|
+| BUILD_CACHE_CLEAN_RACE | deny | fail-closed | ambient Go build-cache deletion is blocked while peer builds may consume it |
 | FOREGROUND_NETWORK_LOOP | warn | fail-open | hint returned, call proceeds |
 | FOREGROUND_POWERSHELL_INVENTORY | warn | fail-open | hint returned, call proceeds |
 | FOREGROUND_SLEEP | warn | fail-open | hint returned, call proceeds |
@@ -217,6 +218,7 @@ above.
 | BLOCKED_BY_KNOWN_BAD | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BLOCKED_BY_OPEN_PREREQ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BROADCAST_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| BUILD_CACHE_CLEAN_RACE | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | DEPTH_NOT_CARRIED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |

@@ -658,7 +658,8 @@ var tier = map[string]int{
 	"managedocs":            1,
 	"humanctl":              1,
 	"frontmatter":           1, // stdlib-only flat YAML scalar decoder shared by skill metadata readers.
-	"toolcatalog":           1,
+	"toolcatalog":           2, // typed tool declarations and runtime adapters composed over the frontmatter primitive.
+	"harnessserve":          2, // bounded local-runtime supervisor composed over the processalive primitive.
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
 	"quantobs":              1, // stdlib-only bounded quantization telemetry schema and encoder.

@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **971** crystal of 2685 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2804 / 2816** (99.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **972** crystal of 2686 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2805 / 2817** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **79** of 3809 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **79** of 3810 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2685 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2686 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 971
+  * crystal       ################............ 972
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
   gateway-engine   *****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 41 crystal)
-  guard-gate       **********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (443 concept(s); 202 crystal)
+  guard-gate       ***********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (444 concept(s); 203 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
   plan             ***********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (347 concept(s); 107 crystal)
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   policy-capability ############################ 209/212
   gateway-engine   ############################ 196/198
-  guard-gate       ############################ 500/502
+  guard-gate       ############################ 501/503
   support-maturity ###########################. 62/64
   cache            ############################ 299/300
   plan             ############################ 407/408
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.6%  (2804/2816 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2805/2817 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3809 lookup name(s) -> 2685 concept(s), 79 ambiguous
+name index: 3810 lookup name(s) -> 2686 concept(s), 79 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1792 / 4782 |
+| Boundaries drawn (mutual / total) | 1796 / 4786 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3809 over 2685 concepts |
+| Lookup names indexed | 3810 over 2686 concepts |
 | Lookup names landing on several concepts | 79 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2685 |
+| Concepts carrying a contrast set | 2686 |
 
 ## The concepts (best verdict first)
 
@@ -570,6 +570,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **GateIndexUnclassified** - The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog. |
 | * | crystal | symbol | guard-gate | **guardSessionStartInstall (guard SessionStart hook install receipt)** - guardSessionStartInstall is the typed receipt returned while fak guard installs a provider-native SessionStart affordance hook; it records whether the hook was applied, how it is managed, and which settings/state paths own it. |
 | * | crystal | config | guard-gate | **guardJSON (--guard-json TUI artifact inputs)** - guardJSON is the repeatable cmd/fak flag binding that carries operator-supplied guard artifact JSON paths into the standalone guard pane or the overview guard card. |
+| * | crystal | symbol | guard-gate | **routeGuardOperatorSubcommand (guard operator-command dispatcher)** - routeGuardOperatorSubcommand is the cmd/fak control-flow seam that recognizes guard allow, deny, disable, resume, and sessions before the wrapped-agent FlagSet is constructed, then reports whether it consumed the invocation. |
 | * | crystal | symbol | guard-gate | **checkAndEmitReportGate (checked-report emitter)** - checkAndEmitReportGate evaluates a typed report with its leaf-specific check function, attaches the resulting exit code and message through WithGate, then emits the same gated report as JSON or human text. |
 | * | crystal | symbol | guard-gate | **dispatchWavePrelaunchGate (audited wave admission)** - prelaunchGate is the dispatchWavePrelaunchGate derived from the audited execution plan; it records LAUNCH or HOLD, target counts, ready/refused/error counts, and the refusal set used to admit or reprice a worker wave. |
 | * | crystal | symbol | guard-gate | **guardLaunchPlan (semantic/executable launch identity)** - guardLaunchPlan carries the semantic agent arguments used for receipts and policy identity separately from the executable arguments passed to the child, together with the resolved harness profile and provider. |
@@ -2958,8 +2959,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2990/4782 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2685 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2990/4786 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2686 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2967,7 +2968,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3809 lookup name(s) resolves - 79 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3810 lookup name(s) resolves - 79 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2976,7 +2977,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | policy-capability | 209 | 212 | 3 |
 | gateway-engine | 196 | 198 | 2 |
-| guard-gate | 500 | 502 | 2 |
+| guard-gate | 501 | 503 | 2 |
 | support-maturity | 62 | 64 | 2 |
 | cache | 299 | 300 | 1 |
 | plan | 407 | 408 | 1 |
