@@ -6,7 +6,7 @@
 //
 //	tier 1  pure registry   — the result is a pure function of args; gated on
 //	                          readOnlyHint+idempotentHint, re-checked not trusted.
-//	tier 2  content cache    — keyed on (tool, args-sha256, world-version); filled
+//	tier 2  content cache    — keyed on (tool, args/tool identity, world-version); filled
 //	                          from EvComplete events; a world bump invalidates it.
 //	tier 3  static table     — canned answers for static tools.
 //
@@ -61,6 +61,15 @@ const (
 // MetaResultReplication is the tier-2 Lookup metadata key that reports the
 // stored result's replication status.
 const MetaResultReplication = "result_replication"
+
+// Tool-dependent adapters declare that their output changes with the executing
+// binary or toolchain. Both identities are then mandatory tier-2 key dimensions;
+// an absent identity makes the call ineligible rather than sharing an ambiguous hit.
+const (
+	MetaToolchainDependent = "toolchain_dependent"
+	MetaBinaryIdentity     = "binary_identity"
+	MetaToolchainIdentity  = "toolchain_identity"
+)
 
 // ResultStore is the optional durable delegate behind the vDSO's resident result
 // store. Store must persist the supplied Ref without replacing its content identity.
@@ -239,8 +248,8 @@ type VDSO struct {
 // The closed vocabulary of vDSO miss reasons (the WHY behind ok=false):
 //   - MissDestructive:      the tool is write-shaped/destructive, so it is never
 //     fast-path eligible (a cached read of it would be unsound).
-//   - MissMissingHints:     the call lacks readOnlyHint/idempotentHint, so the
-//     soundness gate cannot prove it is cacheable.
+//   - MissMissingHints:     the call lacks readOnlyHint/idempotentHint or a declared
+//     tool-dependent identity, so the soundness gate cannot prove it is cacheable.
 //   - MissResourceMisnamed: a read that cannot name its entity (no fine-grained
 //     write could invalidate it) — refused to the engine for soundness.
 //   - MissWitnessRevoked:   a cached entry was admitted under a now-refuted
@@ -285,6 +294,8 @@ func (v *VDSO) gateMiss(c *abi.ToolCall) (*abi.Result, bool) {
 	case destructive(c):
 		return v.missed(c, MissDestructive)
 	case !metaTrue(c, "readOnlyHint") || !metaTrue(c, "idempotentHint"):
+		return v.missed(c, MissMissingHints)
+	case !toolCacheIdentityKnown(c):
 		return v.missed(c, MissMissingHints)
 	default:
 		return v.missed(c, MissNotCached)
@@ -560,6 +571,9 @@ func servedTaint(c *abi.ToolCall) abi.TaintLabel {
 // tries tier 1, then tier 3, then tier 2; a miss returns ok=false.
 func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
 	atomic.AddInt64(&v.lookups, 1)
+	if !toolCacheIdentityKnown(c) {
+		return v.missed(c, MissMissingHints)
+	}
 
 	// tier 1: pure registry, gated on read-only+idempotent and not destructive.
 	if metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint") && !destructive(c) {
@@ -672,6 +686,7 @@ func (v *VDSO) keyLocked(c *abi.ToolCall, args []byte) string {
 	if p := principalOf(c); p != "" && !v.shareable[c.Tool] {
 		h = scopeHash(p, h)
 	}
+	h = toolCacheIdentityHash(c, h)
 	base := c.Tool + ":" + h
 	if v.GranularityOf() == Global {
 		return base + ":" + atou(atomic.LoadUint64(&v.worldVer))
@@ -728,6 +743,9 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 	if !(metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint")) {
 		return ResultStoreReceipt{}, nil
 	}
+	if !toolCacheIdentityKnown(c) {
+		return ResultStoreReceipt{}, nil
+	}
 	// already served by the vDSO? don't re-store.
 	if r.Meta != nil && r.Meta["served_by"] == "vdso" {
 		return ResultStoreReceipt{}, nil
@@ -778,7 +796,7 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 // RestoreResult reopens a cached result from a previously persisted store receipt.
 // The diagnostic receipt is revalidated and canonicalized before the entry becomes visible.
 func (v *VDSO) RestoreResult(ctx context.Context, c *abi.ToolCall, receipt ResultStoreReceipt) error {
-	if c == nil || !receipt.Resident {
+	if c == nil || !receipt.Resident || !toolCacheIdentityKnown(c) {
 		return nil
 	}
 	diagnostics, err := canonicalProducerDiagnostics(receipt.ProducerDiagnostics)
@@ -791,6 +809,30 @@ func (v *VDSO) RestoreResult(ctx context.Context, c *abi.ToolCall, receipt Resul
 		v.setResultReplication(v.keyFor(c, args), receipt.Ref, receipt.Replication)
 	}
 	return nil
+}
+
+func toolCacheIdentityKnown(c *abi.ToolCall) bool {
+	if !metaTrue(c, MetaToolchainDependent) {
+		return true
+	}
+	return metaValue(c.Meta, MetaBinaryIdentity) != "" && metaValue(c.Meta, MetaToolchainIdentity) != ""
+}
+
+// toolCacheIdentityHash binds a declared adapter's executable and compiler
+// witnesses into the fixed-width args hash. Length framing keeps arbitrary
+// identity strings injective before hashing; undeclared tools retain old keys.
+func toolCacheIdentityHash(c *abi.ToolCall, base string) string {
+	if !metaTrue(c, MetaToolchainDependent) {
+		return base
+	}
+	var framed strings.Builder
+	for _, part := range []string{metaValue(c.Meta, MetaBinaryIdentity), metaValue(c.Meta, MetaToolchainIdentity), base} {
+		framed.WriteString(strconv.Itoa(len(part)))
+		framed.WriteByte(':')
+		framed.WriteString(part)
+	}
+	sum := sha256.Sum256([]byte(framed.String()))
+	return hex.EncodeToString(sum[:])[:24]
 }
 
 func metaValue(meta map[string]string, key string) string {
@@ -829,6 +871,9 @@ func writeThroughResult(ctx context.Context, ref abi.Ref, current residentResult
 }
 
 func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, witness, producerDiagnostics string) (string, bool) {
+	if !toolCacheIdentityKnown(c) {
+		return "", false
+	}
 	// The fill + LRU-evict run under v.mu. Cachemeta jobs cross the lock boundary
 	// because an observer may re-enter the vDSO.
 	var key string
