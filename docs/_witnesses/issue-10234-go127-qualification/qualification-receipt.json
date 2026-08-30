@@ -1,0 +1,740 @@
+{
+  "schema": "fak/go-toolchain-qualification-receipt/1",
+  "issue": {
+    "number": 10234,
+    "title": "build(go): qualify Go 1.27 on identical FAK source before the toolchain bump",
+    "url": "https://github.com/anthony-chaudhary/fak/issues/10234",
+    "body_sha256": "d0fda804af0e4ae2cb4b60c4e7205c201dea7b41031cb138440630b58da67d57",
+    "inspected_via": "gh api and gh issue view on 2026-08-30"
+  },
+  "receipt": {
+    "authored_by": "qualification worker in isolated worktree",
+    "created_at_utc": "2026-08-30T12:34:02Z",
+    "qualification_status": "qualified_with_shared_test_blocker",
+    "promotion_decision": "not made",
+    "claim_boundary": "build, compatibility, offline smoke, and direct-process RSS qualification only; not an inference-performance claim"
+  },
+  "source": {
+    "commit": "53d8ec8afd7195af22e519427e91da75f966077f",
+    "tree": "9f3be0003b7e29b928f82152102e33a1937f5a7e",
+    "version": "0.45.0",
+    "identical_source_for_both_arms": true,
+    "tracked_source_changed_during_run": false,
+    "go_mod": {
+      "go_directive": "1.26",
+      "toolchain_directive": "go1.26.6",
+      "sha256": "0f79bab38417919bd313e99a8b40d0a7b310e05aff4edc0e6827d005d6011982",
+      "bytes": 922
+    },
+    "seams": [
+      {
+        "path": "scripts/build.sh",
+        "sha256": "3bd5c029e35004e28b8f0a3111d9d94ae41e0d206ae233cbdfd8d1ab47625a15",
+        "bytes": 5090
+      },
+      {
+        "path": "internal/devcmd/build.go",
+        "sha256": "d0e7fec6690b3eb6b2c98d2481fc4c3cab1e03ada76bb9ef323389b8c880c8ab",
+        "bytes": 20780
+      },
+      {
+        "path": "VERSION",
+        "sha256": "fd0ffde4149bd15f8b246e0625bad7ae9dee486ce63e9b87632f1457bae2c781",
+        "bytes": 7
+      },
+      {
+        "path": "examples/customer-support-readonly-policy.json",
+        "sha256": "0640b6d492ed0bccdf7d1bd6aa7a260feae1c8ff38838ed171be9b62990a1c96",
+        "bytes": 1143
+      }
+    ]
+  },
+  "host": {
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "architecture": "amd64",
+    "powershell": "7.6.5",
+    "host_identifier_omitted": "machine name omitted as non-portable local identifier"
+  },
+  "authored_run": {
+    "raw_scratch_receipt_sha256": "194161758d4a5e723b6a3000452167ebad227e4dd13cd02b2b9ad7ccedee94f4",
+    "raw_scratch_artifacts_committed": false,
+    "arm_order": [
+      "go1.26.6",
+      "go1.27.0"
+    ],
+    "toolchain_acquisition_timing": {
+      "go126_identity_ms": 97,
+      "go127_identity_ms": 15891,
+      "go127_download_occurred_before_clean_build_stopwatch": true
+    },
+    "arms": [
+      {
+        "name": "go1.26.6",
+        "selector": "go1.26.6",
+        "identity": {
+          "go_version": "go version go1.26.6 windows/amd64",
+          "go_command_sha256": "5abae0d3856b884d6db69855d3ec10d0016ea7b848e5945dfba735107db06103",
+          "go_command_bytes": 15820800,
+          "toolchain_download_observed": false,
+          "identity_command": {
+            "command": [
+              "go",
+              "version"
+            ],
+            "exit_code": 0,
+            "duration_ms": 97,
+            "stdout_sha256": "8db6f6cedf32da051585eafe377b7f5e0ce336c5ffc95c8b40853db7fcff6236",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "environment": {
+          "values": {
+            "GOOS": "windows",
+            "GOARCH": "amd64",
+            "CGO_ENABLED": "0",
+            "GOFLAGS": "",
+            "GOEXPERIMENT": "",
+            "GOTOOLCHAIN": "go1.26.6",
+            "GOVERSION": "go1.26.6",
+            "GOWORK": "off",
+            "GOCACHE_scope": "fresh arm-local allocated scratch cache",
+            "GOROOT_scope": "downloaded Go toolchain cache; absolute user path intentionally omitted",
+            "PATH_scope": "host PATH included in digest but omitted from receipt to avoid user-specific data"
+          },
+          "digest_algorithm": "sha256 of the raw run canonical environment JSON, which included exact GOROOT, GOCACHE, GOMOD, and PATH",
+          "sha256": "0495fdb86704397f623b302ead366f9aa8a3c3880f30e00633385ab5d254c2fe"
+        },
+        "build": {
+          "profile": "release",
+          "pgo": "off",
+          "flags": [
+            "-pgo",
+            "off",
+            "-trimpath",
+            "-ldflags",
+            "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0"
+          ],
+          "package": "./cmd/fak",
+          "clean": {
+            "command": [
+              "go",
+              "build",
+              "-pgo",
+              "off",
+              "-trimpath",
+              "-ldflags",
+              "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0",
+              "-o",
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "./cmd/fak"
+            ],
+            "exit_code": 0,
+            "duration_ms": 20556,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "warm": {
+            "command": [
+              "go",
+              "build",
+              "-pgo",
+              "off",
+              "-trimpath",
+              "-ldflags",
+              "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0",
+              "-o",
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "./cmd/fak"
+            ],
+            "exit_code": 0,
+            "duration_ms": 544,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "artifact": {
+            "bytes": 70935552,
+            "sha256": "df83eed07dd4ce27739db2780d739c04a1d2416e8848113daec7592128d02222",
+            "clean_sha256": "df83eed07dd4ce27739db2780d739c04a1d2416e8848113daec7592128d02222",
+            "warm_sha256": "df83eed07dd4ce27739db2780d739c04a1d2416e8848113daec7592128d02222",
+            "identical_clean_and_warm": true
+          }
+        },
+        "vet": {
+          "default": {
+            "command": [
+              "go",
+              "vet",
+              "./..."
+            ],
+            "exit_code": 0,
+            "duration_ms": 29340,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdversion": {
+            "command": [
+              "go",
+              "vet",
+              "-stdversion",
+              "./..."
+            ],
+            "exit_code": 0,
+            "duration_ms": 15065,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdversion_findings": [],
+          "interpretation": "exit 0 with empty stdout and stderr; module remained at go 1.26 semantics"
+        },
+        "tests": {
+          "scope": [
+            "./internal/agent",
+            "./internal/agentqueue"
+          ],
+          "selection_reason": "zero source diff, so no affected packages existed; representative JSON/provider/durable-state packages matched the issue-comment scope",
+          "result": {
+            "command": [
+              "go",
+              "test",
+              "./internal/agent",
+              "./internal/agentqueue"
+            ],
+            "exit_code": 1,
+            "duration_ms": 93763,
+            "stdout_sha256": "aea225b6d42f511a67054ad5b42ae8b3bbb8f34508ca31f6abdb49c99b180cb7",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "failure": {
+            "classification": "shared_runtime_external_model_witness_failure",
+            "test": "TestInKernelForwardEmitsLiftableToolCall",
+            "message": "real in-kernel forward emitted no liftable tool call; FinishReason=\"stop\"; both toolchains failed with the same emitted content",
+            "go126_package_result": "internal/agent failed; internal/agentqueue passed",
+            "not_attributed_to_toolchain_delta": true
+          }
+        },
+        "smokes": {
+          "version": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "version"
+            ],
+            "exit_code": 0,
+            "duration_ms": 71,
+            "stdout_sha256": "ae5c0afab9710d1293b0cda0f69d5698f7fb1cb0f83832299108ec2d7ec2fc53",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "peak_rss_bytes": 27860992,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "observed_lines": [
+              "0.45.0",
+              "build: (no VCS stamp \u00e2\u20ac\u201d built without module/VCS provenance; cannot confirm the commit)",
+              "go: go1.26.6  windows/amd64"
+            ],
+            "vcs_stamp_behavior": "no VCS stamp reported"
+          },
+          "preflight_refund_payment": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "preflight",
+              "--policy",
+              "examples/customer-support-readonly-policy.json",
+              "--tool",
+              "refund_payment",
+              "--args",
+              "{}"
+            ],
+            "exit_code": 0,
+            "duration_ms": 73,
+            "stdout_sha256": "7363f2586e31754b1bf1568b048d248bcdf7e7b4b041e8fccb08dcff84bfac83",
+            "stderr_sha256": "d5b1c30d2b97ffcd97073d3c5ad1b22fca352bf37ddecdb76962e4447729b87e",
+            "peak_rss_bytes": 13930496,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "expected": "DENY POLICY_BLOCK",
+            "observed": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+            "pass": true
+          },
+          "preflight_search_kb": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "preflight",
+              "--policy",
+              "examples/customer-support-readonly-policy.json",
+              "--tool",
+              "search_kb",
+              "--args",
+              "{}"
+            ],
+            "exit_code": 0,
+            "duration_ms": 74,
+            "stdout_sha256": "3b3f9f86e781a05839b37403dd5bdd67a281ecb2bb57e3b77fab9592a362c08b",
+            "stderr_sha256": "d5b1c30d2b97ffcd97073d3c5ad1b22fca352bf37ddecdb76962e4447729b87e",
+            "peak_rss_bytes": 17608704,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "expected": "ALLOW",
+            "observed": "verdict=ALLOW reason=NONE by=monitor",
+            "pass": true
+          },
+          "agent_offline": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.26.6/fak.exe",
+              "agent",
+              "--offline"
+            ],
+            "exit_code": 0,
+            "duration_ms": 72,
+            "stdout_sha256": "ba5f736b3c89a555ca0f1dd502ca3a171a9f257294b0a61a79f6d9e6060e03b1",
+            "stderr_sha256": "d9aa3e8bedb6a0dad601e7ee030521cb58a022beba9d2a7ef27f8bf91e6bd1d9",
+            "peak_rss_bytes": 18477056,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "pass": true,
+            "observed": [
+              "injection in context: base YES, fak no",
+              "destructive op executed: base YES, fak no",
+              "task completed (booked): base YES, fak YES"
+            ],
+            "note": "--out used only in the five-sample RSS reruns; the initial smoke emitted agent-report.json in repository root, which was immediately moved to allocated untracked scratch"
+          }
+        },
+        "response_file": {
+          "command": {
+            "command": [
+              "go",
+              "tool",
+              "compile",
+              "@<scratch>/go1.26.6/response-probe.rsp"
+            ],
+            "exit_code": 2,
+            "duration_ms": 116,
+            "stdout_sha256": "d3f8bbdc25a24f66ef54c96251e161cc55b90813993496d0a55c374686ad8ef7",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "response_content": "-p responseprobe -o \"<scratch>/response-probe.o\" \"<scratch>/response-probe.go\"",
+          "response_sha256": "4a19bba301cec21ba6bbffe5bdb7417dbb495145ebcb222dbdf98d3641e7ec58",
+          "object_exists": false,
+          "object_bytes": null,
+          "object_sha256": null,
+          "behavior": "unsupported for this GCC-style whitespace response file; exit 2 with compiler internal-error diagnostic; no object"
+        }
+      },
+      {
+        "name": "go1.27.0",
+        "selector": "go1.27.0",
+        "identity": {
+          "go_version": "go version go1.27.0 windows/amd64",
+          "go_command_sha256": "7d828191ba32519a9c9361789ab647486236ed45c660889196c7770a8ff1985c",
+          "go_command_bytes": 17508352,
+          "toolchain_download_observed": true,
+          "identity_command": {
+            "command": [
+              "go",
+              "version"
+            ],
+            "exit_code": 0,
+            "duration_ms": 15891,
+            "stdout_sha256": "72a5dff490c0eccf85cc7495e937655d8d9fb44915c13a270d2119a7126427d9",
+            "stderr_sha256": "dab6b43e655a7efaea0522756cc748661f3c2372ddd61d505a9840848312b5ba"
+          }
+        },
+        "environment": {
+          "values": {
+            "GOOS": "windows",
+            "GOARCH": "amd64",
+            "CGO_ENABLED": "0",
+            "GOFLAGS": "",
+            "GOEXPERIMENT": "",
+            "GOTOOLCHAIN": "go1.27.0",
+            "GOVERSION": "go1.27.0",
+            "GOWORK": "off",
+            "GOCACHE_scope": "fresh arm-local allocated scratch cache",
+            "GOROOT_scope": "downloaded Go toolchain cache; absolute user path intentionally omitted",
+            "PATH_scope": "host PATH included in digest but omitted from receipt to avoid user-specific data"
+          },
+          "digest_algorithm": "sha256 of the raw run canonical environment JSON, which included exact GOROOT, GOCACHE, GOMOD, and PATH",
+          "sha256": "e036eff40273796327715dbe6fee5356b8e026e6d0800a4855c3df33f2de20aa"
+        },
+        "build": {
+          "profile": "release",
+          "pgo": "off",
+          "flags": [
+            "-pgo",
+            "off",
+            "-trimpath",
+            "-ldflags",
+            "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0"
+          ],
+          "package": "./cmd/fak",
+          "clean": {
+            "command": [
+              "go",
+              "build",
+              "-pgo",
+              "off",
+              "-trimpath",
+              "-ldflags",
+              "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0",
+              "-o",
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "./cmd/fak"
+            ],
+            "exit_code": 0,
+            "duration_ms": 21955,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "warm": {
+            "command": [
+              "go",
+              "build",
+              "-pgo",
+              "off",
+              "-trimpath",
+              "-ldflags",
+              "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.45.0",
+              "-o",
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "./cmd/fak"
+            ],
+            "exit_code": 0,
+            "duration_ms": 1017,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "artifact": {
+            "bytes": 69788672,
+            "sha256": "5687a8c982e2423675eb850a8ef183e0b95e4a502a0a18acd5922d90a1153a94",
+            "clean_sha256": "5687a8c982e2423675eb850a8ef183e0b95e4a502a0a18acd5922d90a1153a94",
+            "warm_sha256": "5687a8c982e2423675eb850a8ef183e0b95e4a502a0a18acd5922d90a1153a94",
+            "identical_clean_and_warm": true
+          }
+        },
+        "vet": {
+          "default": {
+            "command": [
+              "go",
+              "vet",
+              "./..."
+            ],
+            "exit_code": 0,
+            "duration_ms": 30995,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdversion": {
+            "command": [
+              "go",
+              "vet",
+              "-stdversion",
+              "./..."
+            ],
+            "exit_code": 0,
+            "duration_ms": 14790,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdversion_findings": [],
+          "interpretation": "exit 0 with empty stdout and stderr; module remained at go 1.26 semantics"
+        },
+        "tests": {
+          "scope": [
+            "./internal/agent",
+            "./internal/agentqueue"
+          ],
+          "selection_reason": "zero source diff, so no affected packages existed; representative JSON/provider/durable-state packages matched the issue-comment scope",
+          "result": {
+            "command": [
+              "go",
+              "test",
+              "./internal/agent",
+              "./internal/agentqueue"
+            ],
+            "exit_code": 1,
+            "duration_ms": 92456,
+            "stdout_sha256": "6c21f720f4b3bcb669408b30a884b712a73f1fa0aea367146e845e44d5b11849",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "failure": {
+            "classification": "shared_runtime_external_model_witness_failure",
+            "test": "TestInKernelForwardEmitsLiftableToolCall",
+            "message": "real in-kernel forward emitted no liftable tool call; FinishReason=\"stop\"; both toolchains failed with the same emitted content",
+            "go126_package_result": "internal/agent failed; internal/agentqueue passed",
+            "not_attributed_to_toolchain_delta": true
+          }
+        },
+        "smokes": {
+          "version": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "version"
+            ],
+            "exit_code": 0,
+            "duration_ms": 76,
+            "stdout_sha256": "919f3f5321b81dd99e5c5cf7c1cd312eed6b2ba5066d957bcb414d789de19b9e",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "peak_rss_bytes": 15585280,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "observed_lines": [
+              "0.45.0",
+              "build: 53d8ec8afd71  (committed 2026-08-30T12:14:00Z)",
+              "go: go1.27.0  windows/amd64"
+            ],
+            "vcs_stamp_behavior": "commit 53d8ec8afd71 reported"
+          },
+          "preflight_refund_payment": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "preflight",
+              "--policy",
+              "examples/customer-support-readonly-policy.json",
+              "--tool",
+              "refund_payment",
+              "--args",
+              "{}"
+            ],
+            "exit_code": 0,
+            "duration_ms": 44,
+            "stdout_sha256": "7363f2586e31754b1bf1568b048d248bcdf7e7b4b041e8fccb08dcff84bfac83",
+            "stderr_sha256": "d5b1c30d2b97ffcd97073d3c5ad1b22fca352bf37ddecdb76962e4447729b87e",
+            "peak_rss_bytes": 17727488,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "expected": "DENY POLICY_BLOCK",
+            "observed": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+            "pass": true
+          },
+          "preflight_search_kb": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "preflight",
+              "--policy",
+              "examples/customer-support-readonly-policy.json",
+              "--tool",
+              "search_kb",
+              "--args",
+              "{}"
+            ],
+            "exit_code": 0,
+            "duration_ms": 371,
+            "stdout_sha256": "3b3f9f86e781a05839b37403dd5bdd67a281ecb2bb57e3b77fab9592a362c08b",
+            "stderr_sha256": "d5b1c30d2b97ffcd97073d3c5ad1b22fca352bf37ddecdb76962e4447729b87e",
+            "peak_rss_bytes": 15933440,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "expected": "ALLOW",
+            "observed": "verdict=ALLOW reason=NONE by=monitor",
+            "pass": true
+          },
+          "agent_offline": {
+            "command": [
+              "_scratch/issue-10234-go127-qualification/current-run/go1.27.0/fak.exe",
+              "agent",
+              "--offline"
+            ],
+            "exit_code": 0,
+            "duration_ms": 96,
+            "stdout_sha256": "ba5f736b3c89a555ca0f1dd502ca3a171a9f257294b0a61a79f6d9e6060e03b1",
+            "stderr_sha256": "d9aa3e8bedb6a0dad601e7ee030521cb58a022beba9d2a7ef27f8bf91e6bd1d9",
+            "peak_rss_bytes": 31047680,
+            "peak_rss_method": "Windows System.Diagnostics.Process sampled every 5 ms; maximum of WorkingSet64 and PeakWorkingSet64 for the direct fak.exe process only",
+            "pass": true,
+            "observed": [
+              "injection in context: base YES, fak no",
+              "destructive op executed: base YES, fak no",
+              "task completed (booked): base YES, fak YES"
+            ],
+            "note": "--out used only in the five-sample RSS reruns; the initial smoke emitted agent-report.json in repository root, which was immediately moved to allocated untracked scratch"
+          }
+        },
+        "response_file": {
+          "command": {
+            "command": [
+              "go",
+              "tool",
+              "compile",
+              "@<scratch>/go1.27.0/response-probe.rsp"
+            ],
+            "exit_code": 0,
+            "duration_ms": 151,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "response_content": "-p responseprobe -o \"<scratch>/response-probe.o\" \"<scratch>/response-probe.go\"",
+          "response_sha256": "228b0dbf67ca8a39c7d0babc6c55f53310cf96ef3868d3b1cc0482d54dfa9ae1",
+          "object_exists": true,
+          "object_bytes": 2228,
+          "object_sha256": "e4f7a09a3d6b285ac6a410948a2855dac00b68266c849035183795dfbb6044a7",
+          "behavior": "supported; exit 0 and object produced"
+        }
+      }
+    ],
+    "comparison": {
+      "clean_build_delta_ms": 1399,
+      "clean_build_delta_percent": 6.81,
+      "warm_build_delta_ms": 473,
+      "warm_build_delta_percent": 86.95,
+      "artifact_bytes_delta": -1146880,
+      "artifact_bytes_delta_percent": -1.62,
+      "vet_delta": "both exit 0, empty output",
+      "stdversion_delta": "both exit 0, no findings",
+      "test_delta": "both fail only the same live in-kernel tool-call witness; agentqueue passes",
+      "response_file_delta": "Go 1.27 succeeds and creates object; Go 1.26 exits 2 without object",
+      "version_output_delta": "Go 1.27 reports VCS commit; Go 1.26 reports no VCS stamp"
+    }
+  },
+  "peak_rss": {
+    "workload": "fak agent --offline",
+    "iterations_per_arm": 5,
+    "measurement": "Windows System.Diagnostics.Process sampled every 1 ms; direct fak.exe process only; max(WorkingSet64, PeakWorkingSet64); separate sequential runs",
+    "raw_run_sha256": "9fd207e1b57668fa8d87ab66088b24be9ce95eb18361453d18a92bdb2f923d24",
+    "arms": {
+      "go1.26.6": {
+        "samples": [
+          {
+            "iteration": 1,
+            "exit_code": 0,
+            "duration_ms": 75,
+            "peak_rss_bytes": 20627456,
+            "stdout_sha256": "ba2e75d9a625fc4ba9dd3a377aadb7932d84295081ddd176d868c1e558c60320",
+            "stderr_sha256": "eea8bdcf1417e185f3340bcf42149c41c8efb872a3e1a7966ea6d6f3f070a376",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 2,
+            "exit_code": 0,
+            "duration_ms": 47,
+            "peak_rss_bytes": 29884416,
+            "stdout_sha256": "56213838e2a81a522010eff3820d8b83be8bdbcfda9f374c0ca3735db2d07b2e",
+            "stderr_sha256": "3cb17ca4e9904fa05f3cfafd36790ae7152a1014f74dd90f8cfcb030203bf3ad",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 3,
+            "exit_code": 0,
+            "duration_ms": 72,
+            "peak_rss_bytes": 17047552,
+            "stdout_sha256": "902aa118cc1e3a2cc27a82308926d71862cd5b47ef32f9417797cafaa3ce75ea",
+            "stderr_sha256": "d665372557a76ed6ed3eb075412823fcecafe06ac7ffbc4c8ad983709a1c11cf",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 4,
+            "exit_code": 0,
+            "duration_ms": 45,
+            "peak_rss_bytes": 27664384,
+            "stdout_sha256": "e6327b4bf4991d3682908499e407698cdbefd5df940b4610b4185d0013e4c3a6",
+            "stderr_sha256": "ca5bfb62467936b9e2622c4f14e4d52cb55dae959e6b8cb3263cda9140d80390",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 5,
+            "exit_code": 0,
+            "duration_ms": 44,
+            "peak_rss_bytes": 26894336,
+            "stdout_sha256": "65a50559f2cf6fd7d7972af8de7be56e7113c7aaa30c6b277b300b825efe3e43",
+            "stderr_sha256": "b646a7c9c5ffa5f6f48e03167aa40d53fdefd9024bfd8c32989257001ffe07ac",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          }
+        ],
+        "minimum_bytes": 17047552,
+        "median_bytes": 26894336,
+        "maximum_bytes": 29884416,
+        "mean_bytes": 24423629.0
+      },
+      "go1.27.0": {
+        "samples": [
+          {
+            "iteration": 1,
+            "exit_code": 0,
+            "duration_ms": 45,
+            "peak_rss_bytes": 25825280,
+            "stdout_sha256": "4ddbe834f491e52d6f71de0e95c0907f0c67cde0b3b720d72c20615c434b4b27",
+            "stderr_sha256": "df558aba49c654fd8c5b67d1b6af8488e63084693d8315baef4497c3fa0b94ad",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 2,
+            "exit_code": 0,
+            "duration_ms": 69,
+            "peak_rss_bytes": 15515648,
+            "stdout_sha256": "d8999c353af63e3f8cf7639cd55914b0130da78ac72ee8ff785f4fc4e006b26c",
+            "stderr_sha256": "df174ddb365b08816f7d5164431daba455d84f64849c3d691fbf38d506762f71",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 3,
+            "exit_code": 0,
+            "duration_ms": 44,
+            "peak_rss_bytes": 30990336,
+            "stdout_sha256": "5b688ecb4870545c871733b693f12886a7ffc9e1a4e2189db05d5ab5f0a0f5e1",
+            "stderr_sha256": "260df5b6fdf5ba803a0f006ebf672f6154b0e662f6a8f31e8f7ef0d01c4eee6a",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 4,
+            "exit_code": 0,
+            "duration_ms": 44,
+            "peak_rss_bytes": 29958144,
+            "stdout_sha256": "a0adbeaea6c09d7227042ec3287a342a39b1aa3f2cf0805bc39075c578794b3c",
+            "stderr_sha256": "9ad03c588fb504df47648e3466018257472c55c1757934ca04e3e8dca965e182",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          },
+          {
+            "iteration": 5,
+            "exit_code": 0,
+            "duration_ms": 67,
+            "peak_rss_bytes": 14721024,
+            "stdout_sha256": "109a7b890adbcaf35d98217d2e4133d3023d65319be16faae8c5898a2f6339b9",
+            "stderr_sha256": "e5074335a122e1681965c749a8ce10f59f6068bc71578b011746f9951e21b09f",
+            "report_sha256": "92f56de7f3265cb4cf2b7882c6b6fed950b83d778bd9900aae3cf555c3059313"
+          }
+        ],
+        "minimum_bytes": 14721024,
+        "median_bytes": 25825280,
+        "maximum_bytes": 30990336,
+        "mean_bytes": 23402086.0
+      }
+    }
+  },
+  "observed_prior_evidence": {
+    "provenance": "observed, not authored by this receipt worker",
+    "source_type": "GitHub issue comment",
+    "source_url": "https://github.com/anthony-chaudhary/fak/issues/10234#issuecomment-5465874577",
+    "comment_id": 5465874577,
+    "author": "anthony-chaudhary",
+    "created_at_utc": "2026-08-30T00:59:33Z",
+    "body_sha256": "93914d410c382e02fbef8975fc6a453b1fa332df6f0b4b8cdec048083389c2c8",
+    "source_commit": "16ae56a28ed626b21487717806eda7d95f9dc59e",
+    "reported_scratch_receipt_path": "_scratch/issue-10234-go127-qualification/qualification-receipt.json",
+    "reported_scratch_receipt_sha256": "3118a0494c5af633d1cf26a082d2b1fb6020839ec96cb0ced292d9d3ef073647",
+    "scratch_receipt_available_to_this_worker": false,
+    "preservation_note": "The comment measurements are retained only as attributed observations. The missing scratch receipt was not reconstructed or invented.",
+    "reported_measurements": {
+      "go126_clean_build_ms": 51565,
+      "go127_clean_build_ms": 55053,
+      "go126_warm_build_ms": 932,
+      "go127_warm_build_ms": 1515,
+      "go126_artifact_bytes": 69928448,
+      "go127_artifact_bytes": 68822016,
+      "go126_artifact_sha256": "a2246d875a3d13b2557cf066f242d578d1f321b622f6b9b19e31cece58ff7ddc",
+      "go127_artifact_sha256": "111dd8fa719165c1a96a229fc00c7390ff58c2935722be95110b688edd14ebfd",
+      "peak_rss": null,
+      "peak_rss_reason": "The issue comment did not report peak RSS, and its referenced scratch receipt is unavailable."
+    }
+  },
+  "acceptance": {
+    "identity_environment_artifacts_timings": "met by authored current-commit run",
+    "build_vet": "met",
+    "affected_tests": "zero-diff qualification had no affected packages; representative packages ran but shared live in-kernel witness failed identically under both toolchains",
+    "offline_smokes": "met",
+    "stdversion": "met, no findings",
+    "response_file": "met, behavior delta recorded",
+    "runtime_and_binary_size": "binary size met; offline runtime latency and direct-process RSS measured",
+    "peak_rss": "met by independent five-run paired direct-process measurement",
+    "promotion": "out of scope and intentionally not performed"
+  },
+  "limitations": [
+    "Single clean-build and warm-build timing sample per toolchain; timings are descriptive, not a stable performance claim.",
+    "Build, vet, and tests ran sequentially by arm on a shared Windows control-point host; OS load and antivirus can affect timings.",
+    "Peak RSS covers the direct fak.exe offline-smoke process, not descendants or full system commit; short-lived processes make samples noisy, so all five samples plus median/min/max/mean are recorded.",
+    "Representative tests depend on a live in-kernel model witness and failed identically under both toolchains; this blocks an all-green test claim but does not isolate a Go 1.27 regression.",
+    "The Go 1.27 toolchain download occurred during identity capture and is excluded from clean-build timing.",
+    "Absolute user-specific cache and toolchain paths are omitted; hashes, selectors, scoped path descriptions, and exact command arguments are retained.",
+    "No source, go.mod, dependency, language directive, branch, commit, or push operation was performed."
+  ]
+}
