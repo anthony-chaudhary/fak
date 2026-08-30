@@ -1,0 +1,257 @@
+{
+  "schema": "fak.build10x.windows-amd64.v1",
+  "issue": 9673,
+  "parent_issue": 9661,
+  "observed_at_utc": "2026-08-30T20:50:52Z",
+  "verdict": {
+    "status": "NOT_COMPLETE",
+    "threshold_proven": false,
+    "threshold_ms": 6555,
+    "reason": "The authorized private-control checkout and dgxbridge client were present, but bridge preflight reported that both the bot credential and control-channel configuration were absent. No sanctioned Windows session could therefore be discovered or driven, and no 5+5 comparator/candidate samples were fabricated from the Mac coordinator or substituted from the existing 3+3 Windows exploratory matrix.",
+    "parent_issue_disposition": "KEEP_OPEN",
+    "dominant_observed_residual": "The nearest valid Windows evidence remains the explicitly non-completing 3+3 local matrix: its current-source p=32/GOMAXPROCS=32 cold median was 42928.300 ms versus a 6555 ms target, while the matched warm median was 2200.902 ms with zero compile actions. This isolates cold compile/cache population, not link or warm rebuild work, as the dominant observed residual; the 42928.300 ms value is contextual only because that exploratory matrix used commit 092f3daf and Go 1.26.7 rather than this receipt's still-unrun frozen envelope."
+  },
+  "source": {
+    "repository": "github.com/anthony-chaudhary/fak",
+    "candidate_commit": "7050e02c9bc396e903e163547cb181c3cbeaad2a",
+    "candidate_tree": "be9cbe46d7e1204b9bd923c05c9e15f3dc134152",
+    "candidate_is_ancestor_of_observed_origin_main": true,
+    "observed_origin_main": "36f322732faedd9c76202860cc39102c69572316",
+    "pushed_identity_disposition": "The candidate commit was already contained by origin/main at coordinator readback. The benchmark worktree was detached at that pushed commit; this benchmark-only receipt commit is intentionally not pushed or landed by the worker.",
+    "target": "./cmd/fak",
+    "historical_baseline": {
+      "path": "docs/baselines/fak-runtime-dev-split-windows-amd64.json",
+      "commit": "292200125e9b0d380e7eab21fb9daf0018ce552a",
+      "go_version": "go1.26.5 windows/amd64",
+      "elapsed_ms": 65555,
+      "binary_bytes": 73350656,
+      "package_count": 699,
+      "cache_state_limit": "The committed baseline does not explicitly prove cache initialization, so it is a threshold reference and not one arm of the unrun matched matrix."
+    }
+  },
+  "sanitized_execution_route": {
+    "control_point": "macOS coordinator",
+    "execution_target": "authorized native Windows/amd64 node selected from the private control-channel node map",
+    "transport": "dgxbridge operator client using the authorized fak-private runbook",
+    "windows_mode_constraint": "pipe mode only; no PTY or tmux profile",
+    "privacy": "No hostname, channel identifier, session identifier, credential, private filesystem path, SSH detail, or raw private transcript is recorded in this public receipt.",
+    "local_hardware_substitution": false
+  },
+  "bridge_preflight": {
+    "client_installed": true,
+    "authorized_private_runbook_present": true,
+    "doctor_command": "dgxbridge --json doctor",
+    "doctor_exit_code": 1,
+    "checks": [
+      {
+        "name": "slack_token",
+        "ok": false,
+        "detail": "missing; configure through the authorized private runbook"
+      },
+      {
+        "name": "control_channel",
+        "ok": false,
+        "detail": "missing; configure through the authorized private runbook"
+      }
+    ],
+    "probe_and_session_discovery_run": false,
+    "probe_and_session_discovery_reason": "The base doctor failed before any live probe or session discovery could be authorized.",
+    "classification": "CONTROL_ROUTE_CONFIGURATION_MISSING_NOT_LOCAL_HARDWARE_BLOCKAGE"
+  },
+  "required_matched_envelope": {
+    "source": "one archive of candidate_commit extracted once on the selected Windows node",
+    "toolchain": {
+      "go_version": null,
+      "go_version_status": "must be recorded from the selected Windows node before the first sample and held fixed",
+      "goos": "windows",
+      "goarch": "amd64",
+      "goamd64": "v1",
+      "cgo_enabled": "0",
+      "gotoolchain": "local",
+      "gowork": "off",
+      "goflags": "",
+      "makeflags": ""
+    },
+    "host": {
+      "cpu": null,
+      "logical_processors": null,
+      "ram_bytes": null,
+      "status": "not observed because the sanctioned session was unavailable; final values must be scrubbed to model/count/capacity without hostname or device serials"
+    },
+    "flags_and_target": "identical across comparator and candidate except for the declared scheduling controls",
+    "gomodcache": "one pre-initialized read-only dependency-download cache; initialization must complete before timing and no timed sample may download modules",
+    "cold_cache": "new empty unique GOCACHE and GOTMPDIR for every cold sample",
+    "warm_cache": "immediate no-source-change repeat using the exact populated GOCACHE from its paired cold sample and a fresh GOTMPDIR",
+    "sample_order": "five paired rounds, alternating comparator-first and candidate-first; no source, toolchain, flags, module cache, security, power, priority, or affinity changes between samples",
+    "artifact_validation": "every build exits zero; record SHA-256 and bytes; require byte-identical outputs within an arm or explain any difference; run '<artifact> version' after every sample",
+    "action_accounting": "capture go build -x stderr for every sample and count package list cardinality plus compile, link, asm, and cgo tool invocations"
+  },
+  "matrix_contract": {
+    "comparator": {
+      "name": "serial_scheduling",
+      "environment": {
+        "GOMAXPROCS": "1"
+      },
+      "argv": [
+        "go",
+        "build",
+        "-buildvcs=false",
+        "-x",
+        "-p",
+        "1",
+        "-o",
+        "<isolated-output>\\comparator-<round>-<cold|warm>-fak.exe",
+        "./cmd/fak"
+      ]
+    },
+    "candidate": {
+      "name": "host_capacity_scheduling",
+      "environment": {
+        "GOMAXPROCS": "<verified-logical-processor-count>"
+      },
+      "argv": [
+        "go",
+        "build",
+        "-buildvcs=false",
+        "-x",
+        "-p",
+        "<verified-logical-processor-count>",
+        "-o",
+        "<isolated-output>\\candidate-<round>-<cold|warm>-fak.exe",
+        "./cmd/fak"
+      ]
+    },
+    "cells": [
+      {
+        "arm": "comparator",
+        "cache_state": "cold",
+        "required_samples": 5,
+        "observed_samples": 0,
+        "raw_elapsed_ms": []
+      },
+      {
+        "arm": "comparator",
+        "cache_state": "warm",
+        "required_samples": 5,
+        "observed_samples": 0,
+        "raw_elapsed_ms": []
+      },
+      {
+        "arm": "candidate",
+        "cache_state": "cold",
+        "required_samples": 5,
+        "observed_samples": 0,
+        "raw_elapsed_ms": []
+      },
+      {
+        "arm": "candidate",
+        "cache_state": "warm",
+        "required_samples": 5,
+        "observed_samples": 0,
+        "raw_elapsed_ms": []
+      }
+    ],
+    "statistics": {
+      "comparator_cold": null,
+      "comparator_warm": null,
+      "candidate_cold": null,
+      "candidate_warm": null,
+      "speedup_formula": "comparator median milliseconds / candidate median milliseconds",
+      "threshold_formula": "candidate cold median milliseconds <= 6555",
+      "status": "uncomputed because no sanctioned samples were available"
+    },
+    "package_compile_link_counts": null,
+    "binary_digest_and_size": null,
+    "smoke_output": null
+  },
+  "operator_ready_route": {
+    "authority_boundary": "Run only after an authorized operator restores the private token/channel configuration and follows the current private node-selection rules; do not infer identifiers from public notes.",
+    "commands": [
+      "cd <authorized-private-control-client-directory>",
+      "dgxbridge --json doctor",
+      "dgxbridge --json -probe doctor",
+      "dgxbridge --json sessions",
+      "git -C <fak-checkout> archive --format=tar 7050e02c9bc396e903e163547cb181c3cbeaad2a > <allocated-local-scratch>/fak-7050e02c9bc396e903e163547cb181c3cbeaad2a.tar",
+      "dgxbridge -session-id <authorized-windows-session-from-private-discovery> push <allocated-local-scratch>/fak-7050e02c9bc396e903e163547cb181c3cbeaad2a.tar <authorized-windows-scratch>/source.tar",
+      "dgxbridge -session-id <authorized-windows-session-from-private-discovery> push <reviewed-collector.ps1> <authorized-windows-scratch>/collect-9673.ps1",
+      "dgxbridge -session-id <authorized-windows-session-from-private-discovery> -timeout 2h run \"pwsh -NoLogo -NoProfile -File <authorized-windows-scratch>/collect-9673.ps1 -SourceArchive <authorized-windows-scratch>/source.tar -ExpectedCommit 7050e02c9bc396e903e163547cb181c3cbeaad2a -Rounds 5 -ThresholdMs 6555 -OutFile <authorized-windows-scratch>/windows-amd64-5x5-private.json\"",
+      "dgxbridge -session-id <authorized-windows-session-from-private-discovery> pull <authorized-windows-scratch>/windows-amd64-5x5-private.json <allocated-local-scratch>/windows-amd64-5x5-private.json",
+      "jq empty <allocated-local-scratch>/windows-amd64-5x5-private.json"
+    ],
+    "collector_acceptance": [
+      "Refuse unless go version, GOOS, GOARCH, source commit/tree, flags, target, and module-cache identity remain constant for all 20 builds.",
+      "Refuse any cold sample whose GOCACHE was not empty at start or any warm sample not immediately paired to its cold cache.",
+      "Refuse fewer than five successful samples in any cell.",
+      "Refuse module downloads, prebuilt output reuse, source edits, security-control changes, or missing action logs.",
+      "Emit private raw host/transcript data only in private scratch; transform to this public schema with hostnames, credentials, private paths, session/channel IDs, and internal logs removed before commit."
+    ]
+  },
+  "exploratory_evidence_not_accepted_as_completion": {
+    "path": "docs/_witnesses/build10x/windows-local-matrix-2026-08-30.json",
+    "schema": "fak-build10x-windows-local-matrix/1",
+    "source_commit": "092f3dafe4fb26c9867b3db7361aef16657b6bc8",
+    "go_version": "go1.26.7",
+    "goos": "windows",
+    "goarch": "amd64",
+    "host": {
+      "physical_cores": 16,
+      "logical_processors": 32,
+      "ram_bytes": 272252637184
+    },
+    "candidate_arm": {
+      "p": 32,
+      "gomaxprocs": 32
+    },
+    "cold": {
+      "raw_elapsed_ms": [
+        42572.526,
+        42928.3,
+        43947.52
+      ],
+      "median_ms": 42928.3,
+      "range_ms": [
+        42572.526,
+        43947.52
+      ],
+      "compile_action_peak": 31,
+      "link_action_peak": 1,
+      "threshold_ratio": 6.549
+    },
+    "warm": {
+      "raw_elapsed_ms": [
+        2183.999,
+        2200.902,
+        2251.248
+      ],
+      "median_ms": 2200.902,
+      "range_ms": [
+        2183.999,
+        2251.248
+      ],
+      "compile_action_peak": 0,
+      "link_action_peak": 1
+    },
+    "package_count": 858,
+    "artifact": {
+      "sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "bytes": 94729216,
+      "smoke_stdout": [
+        "dev",
+        "build: (no VCS stamp - built without module/VCS provenance; cannot confirm the commit)",
+        "go: go1.26.7 windows/amd64"
+      ]
+    },
+    "rejection_reasons": [
+      "three samples per cache state rather than five",
+      "not a frozen comparator/candidate 5+5 completion run",
+      "different source and toolchain from the candidate receipt envelope",
+      "explicitly labeled exploratory by its source receipt"
+    ]
+  },
+  "validation": {
+    "json_parser": "PASS: python3 -m json.tool",
+    "jq_parser": "PASS: jq empty",
+    "privacy_scan": "PASS: case-sensitive scan found no concrete tokens, channel/session IDs, user-home/private paths, webhook URLs, SSH targets, or embedded hostnames",
+    "git_diff_check": "PASS: git diff --check"
+  }
+}
