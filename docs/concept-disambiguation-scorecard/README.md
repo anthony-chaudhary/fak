@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **4** (clarity 2 + coverage 2) |
+| **Disambiguation-debt (drive to 0)** | **10** (clarity 2 + coverage 8) |
 | **Crystal-clear concepts (and climbing)** | **991** crystal of 2705 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2824 / 2826** (99.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2824 / 2832** (99.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 209 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **81** of 3831 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 99.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.1/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2705 concepts - score 99.3/100 (grade A) - disambiguation-debt 4
+concept-disambiguation chart - 2705 concepts - score 99.1/100 (grade A) - disambiguation-debt 10
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 991
@@ -62,8 +62,11 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 76 crystal)
 
 coverage by family (positioned / discovered):
+  loop             ###########################. 94/97
+  guard-gate       ############################ 502/504
+  plan             ############################ 408/410
   cache            ############################ 304/305
-  plan             ############################ 408/409
+  policy-capability ############################ 212/213
   attention        ############################ 85/85
   context-ctx      ############################ 237/237
   cross-cluster    ............................ 0/0
@@ -71,10 +74,7 @@ coverage by family (positioned / discovered):
   dev-tier         ............................ 0/0
   evict            ############################ 55/55
   gateway-engine   ############################ 200/200
-  guard-gate       ############################ 502/502
   layout           ############################ 19/19
-  loop             ############################ 94/94
-  policy-capability ############################ 212/212
   pool             ############################ 40/40
   render-materialize ############################ 209/209
   score-debt       ############################ 93/93
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 163/163
 
-namespace coverage  [################################] 99.9%  (2824/2826 confusable tokens positioned)
+namespace coverage  [################################] 99.7%  (2824/2832 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 209
@@ -2994,8 +2994,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| loop | 94 | 97 | 3 |
+| guard-gate | 502 | 504 | 2 |
+| plan | 408 | 410 | 2 |
 | cache | 304 | 305 | 1 |
-| plan | 408 | 409 | 1 |
+| policy-capability | 212 | 213 | 1 |
 | attention | 85 | 85 | 0 |
 | context-ctx | 237 | 237 | 0 |
 | cross-cluster | 0 | 0 | 0 |
@@ -3003,10 +3006,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | dev-tier | 0 | 0 | 0 |
 | evict | 55 | 55 | 0 |
 | gateway-engine | 200 | 200 | 0 |
-| guard-gate | 502 | 502 | 0 |
 | layout | 19 | 19 | 0 |
-| loop | 94 | 94 | 0 |
-| policy-capability | 212 | 212 | 0 |
 | pool | 40 | 40 | 0 |
 | render-materialize | 209 | 209 | 0 |
 | score-debt | 93 | 93 | 0 |
