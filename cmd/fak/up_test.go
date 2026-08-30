@@ -148,3 +148,62 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 		t.Fatalf("up did not stop after interrupt\n%s", output.String())
 	}
 }
+
+func TestLocalNativeLauncherLifetimeOwnershipConformance(t *testing.T) {
+	type launcher struct {
+		name           string
+		file           string
+		metalAvailable bool
+		owner          string
+		marker         string
+	}
+	const sharedOwner = "loadLocalLauncherModelWithMetalLease"
+	launchers := []launcher{
+		{name: "serve", file: "serve.go", metalAvailable: true, owner: sharedOwner, marker: "loadLocalLauncherModelWithMetalLease("},
+		{name: "up", file: "up.go", metalAvailable: true, owner: sharedOwner, marker: "cmdServe(argv)"},
+		{name: "guard", file: "guard_local.go", metalAvailable: false, marker: "guardDetectLocalBackend"},
+		// model-canary has a distinct lifetime owner because it replaces an
+		// incumbent process, runs a candidate, restores the incumbent, and only
+		// then releases. Its shared OS lease is acquired by the Darwin adapter.
+		{name: "model-canary", file: "model_canary_run_darwin.go", metalAvailable: true, owner: "modelCanaryLease", marker: "gpulease.Acquire(gpulease.Options{Path: cfg.Path"},
+		{name: "run", file: "run_model.go", metalAvailable: false, marker: "metal=false"},
+		{name: "scout", file: "scout_native.go", metalAvailable: false, marker: "metal=false"},
+	}
+
+	for _, tc := range launchers {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := os.ReadFile(tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(raw)
+			if !strings.Contains(source, tc.marker) {
+				t.Fatalf("%s no longer carries conformance marker %q", tc.file, tc.marker)
+			}
+			if tc.metalAvailable && tc.owner == "" {
+				t.Fatalf("Metal launcher %s has no lifetime owner", tc.name)
+			}
+			if !tc.metalAvailable && strings.Contains(source, sharedOwner) {
+				t.Fatalf("Metal-unavailable launcher %s acquired local launcher residency", tc.name)
+			}
+		})
+	}
+
+	serveSource, err := os.ReadFile("serve.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(serveSource), "loadLocalLauncherModelWithMetalLease("); got != 1 {
+		t.Fatalf("serve ownership acquisitions=%d, want 1", got)
+	}
+	upSource, err := os.ReadFile("up.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(upSource), "cmdServe(argv)"); got != 1 {
+		t.Fatalf("up direct serve delegations=%d, want 1", got)
+	}
+	if strings.Contains(string(upSource), sharedOwner) {
+		t.Fatal("up must reuse serve's owner, not acquire a second launcher lease")
+	}
+}

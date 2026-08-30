@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -272,6 +274,154 @@ func TestRepairLaunchShimsRefreshesStableTarget(t *testing.T) {
 	}
 }
 
+func writeInstalledProviderFixture(t *testing.T, path string) {
+	t.Helper()
+	body := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		body = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestLaunchInstalledLifecycleManagedCodexShim(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	binDir := filepath.Join(dir, "bin")
+	configPath := filepath.Join(dir, "config", "launch.json")
+	providerDir := filepath.Join(dir, "provider")
+	providerName := "codex"
+	providerPath := filepath.Join(providerDir, providerName)
+	if runtime.GOOS == "windows" {
+		providerPath += ".cmd"
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(providerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeInstalledProviderFixture(t, providerPath)
+	t.Setenv("FAK_LAUNCH_CONFIG", configPath)
+	t.Setenv("FAK_LAUNCH_BIN", binDir)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("FAK_TEST_LAUNCH_CHILD", "")
+	originalPath := os.Getenv("PATH")
+	t.Setenv("PATH", providerDir+string(os.PathListSeparator)+originalPath)
+
+	oldExecutable := osExecutableForLaunch
+	oldRunner := launchChildRunner
+	oldResolve := stableLaunchResolve
+	t.Cleanup(func() {
+		osExecutableForLaunch = oldExecutable
+		launchChildRunner = oldRunner
+		stableLaunchResolve = oldResolve
+	})
+	osExecutableForLaunch = func() (string, error) { return mustExecutable(t), nil }
+
+	var out, errOut bytes.Buffer
+	if code := runLaunch(&out, &errOut, []string{"install", "--provider", "codex", "--default", "codex", "--no-path"}); code != 0 {
+		t.Fatalf("install code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+originalPath)
+	stable := stableLaunchTarget(binDir, mustExecutable(t))
+	if _, err := os.Stat(stable); err != nil {
+		t.Fatalf("stable target: %v", err)
+	}
+	shimPath := filepath.Join(binDir, shimName("codex"))
+	if _, err := os.Stat(shimPath); err != nil {
+		t.Fatalf("shim: %v", err)
+	}
+	cfg, err := launchshim.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Default != "codex" {
+		t.Fatalf("default=%q", cfg.Default)
+	}
+	if got := cfg.Providers["codex"].Command; got != providerPath {
+		t.Fatalf("provider command=%q want %q", got, providerPath)
+	}
+
+	shimBody, err := os.ReadFile(shimPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shimBody), stable) {
+		t.Fatalf("shim=%q stable=%q", shimBody, stable)
+	}
+
+	statusOut, statusErr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runLaunch(statusOut, statusErr, []string{"status"}); code != 0 {
+		t.Fatalf("status code=%d stdout=%s stderr=%s", code, statusOut.String(), statusErr.String())
+	}
+	for _, want := range []string{"default: codex", "interception: active", "codex: " + providerPath} {
+		if !strings.Contains(statusOut.String(), want) {
+			t.Fatalf("status missing %q: %s", want, statusOut.String())
+		}
+	}
+
+	doctorOut, doctorErr := &bytes.Buffer{}, &bytes.Buffer{}
+	doctorCode := runLaunchDoctor(doctorOut, doctorErr, []string{})
+	if doctorCode != 0 && doctorCode != 1 {
+		t.Fatalf("doctor code=%d stdout=%s stderr=%s", doctorCode, doctorOut.String(), doctorErr.String())
+	}
+	for _, want := range []string{"LAUNCH DOCTOR", "default=codex", "codex  READY", "role=canonical    ready=true  reason=READY"} {
+		if !strings.Contains(doctorOut.String(), want) {
+			t.Fatalf("doctor missing %q: %s", want, doctorOut.String())
+		}
+	}
+
+	stableLaunchResolve = func(target, policy string, wait time.Duration) (string, error) {
+		if target != stable || policy != launchshim.UpdatePolicyPrior {
+			t.Fatalf("resolve target=%q policy=%q", target, policy)
+		}
+		return stable, nil
+	}
+	childCalls := 0
+	var childCommand string
+	var childArgs []string
+	launchChildRunner = func(_ io.Reader, stdout, _ io.Writer, command string, args []string) int {
+		childCalls++
+		childCommand = command
+		childArgs = append([]string(nil), args...)
+		fmt.Fprintln(stdout, "codex fixture 1.0")
+		return 0
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunch(&out, &errOut, []string{"codex", "--version"}); code != 0 {
+		t.Fatalf("child code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if childCalls != 1 || !samePath(childCommand, mustExecutable(t)) {
+		t.Fatalf("child calls=%d command=%q want deployed fak %q", childCalls, childCommand, mustExecutable(t))
+	}
+	wantArgs := []string{"guard", "--banner=animate", "--", providerPath, "--version"}
+	if !reflect.DeepEqual(childArgs, wantArgs) {
+		t.Fatalf("child args=%q want %q", childArgs, wantArgs)
+	}
+	if samePath(childCommand, shimPath) || !strings.Contains(out.String(), "codex fixture 1.0") {
+		t.Fatalf("recursive or missing fixture command=%q shim=%q stdout=%q", childCommand, shimPath, out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunch(&out, &errOut, []string{"uninstall", "--provider", "codex"}); code != 0 {
+		t.Fatalf("uninstall code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(shimPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("shim still present err=%v", err)
+	}
+	cfg, err = launchshim.Load()
+	if err != nil {
+		t.Fatalf("load post-uninstall config: %v", err)
+	}
+	if len(cfg.Providers) != 0 || cfg.Default != "" {
+		t.Fatalf("provider state remains after uninstall: %+v", cfg)
+	}
+}
+
 func mustExecutable(t *testing.T) string {
 	t.Helper()
 	path, err := os.Executable()
@@ -521,4 +671,273 @@ func TestStableLaunchUpdatePoliciesPreserveProcessContract(t *testing.T) {
 			t.Fatalf("code=%d argv=%q want %q stderr=%q", code, gotArgs, wantArgs, stderr.String())
 		}
 	})
+}
+
+func TestInstalledLaunchTopologyWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows launch topology")
+	}
+
+	root := t.TempDir()
+	nodeSource := filepath.Join(os.Getenv("WINDIR"), "System32", "whoami.exe")
+	nodeBytes, err := os.ReadFile(nodeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeDir := filepath.Join(root, "node runtime")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(nodeDir, "node.exe")
+	if err := os.WriteFile(node, nodeBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const provider = "codex"
+	entrypointRel := filepath.Join("node_modules", "@openai", "codex", "bin", "codex.js")
+	makeInstall := func(name string, entrypoint bool) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, provider+".cmd"), []byte("@echo off\r\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if entrypoint {
+			path := filepath.Join(dir, entrypointRel)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("// hermetic fixture\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	managed := makeInstall("managed wrapper", false)
+	npm := makeInstall("npm provider", true)
+	npmSpaces := makeInstall("npm provider with spaces", true)
+	missing := makeInstall("npm missing entrypoint", false)
+	first := makeInstall("npm first", true)
+	second := makeInstall("npm second", true)
+
+	tests := []struct {
+		name       string
+		path       []string
+		wantDir    string
+		wantDirect bool
+	}{
+		{name: "managed wrapper directory precedes npm provider", path: []string{managed, npm}, wantDir: npm, wantDirect: true},
+		{name: "npm provider precedes managed", path: []string{npm, managed}, wantDir: npm, wantDirect: true},
+		{name: "provider path contains spaces", path: []string{npmSpaces}, wantDir: npmSpaces, wantDirect: true},
+		{name: "provider cmd missing Node entrypoint", path: []string{missing}, wantDirect: false},
+		{name: "two provider installations choose first non-managed", path: []string{managed, first, second}, wantDir: first, wantDirect: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pathEnv := strings.Join(tt.path, string(os.PathListSeparator))
+			original := []string{provider, "--version"}
+			resolved := resolveNodeBatchCommandFromPath(original, entrypointRel, node, pathEnv)
+			if !tt.wantDirect {
+				if !reflect.DeepEqual(resolved, original) {
+					t.Fatalf("resolved=%q want unresolved %q", resolved, original)
+				}
+				return // Resolution failed before any spawn attempt.
+			}
+
+			wantEntrypoint := filepath.Join(tt.wantDir, entrypointRel)
+			want := []string{node, wantEntrypoint, "--version"}
+			if !reflect.DeepEqual(resolved, want) {
+				t.Fatalf("resolved=%q want %q", resolved, want)
+			}
+
+			t.Setenv("PATH", pathEnv+string(os.PathListSeparator)+nodeDir)
+			cmd := newResolvedExecCommand(original)
+			if !strings.EqualFold(filepath.Base(cmd.Path), "node.exe") {
+				t.Fatalf("command path=%q want node.exe", cmd.Path)
+			}
+			if strings.EqualFold(filepath.Base(cmd.Path), "cmd.exe") {
+				t.Fatalf("command unexpectedly uses cmd.exe: %q", cmd.Path)
+			}
+			if len(cmd.Args) < 2 || !strings.EqualFold(cmd.Args[0], node) || cmd.Args[1] != wantEntrypoint {
+				t.Fatalf("command argv=%q want node and direct entrypoint %q", cmd.Args, wantEntrypoint)
+			}
+			if err := cmd.Run(); err == nil {
+				return
+			} else if _, ok := err.(*os.PathError); ok {
+				t.Fatalf("node.exe was not spawned: %v", err)
+			}
+		})
+	}
+}
+
+func TestInstalledLaunchTopologyUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix launch topology test is not supported on Windows")
+	}
+
+	type row struct {
+		name            string
+		pathOrder       func(managedDir, providerDir string) []string
+		prepareManaged  func(t *testing.T, managedDir, providerPath, capturePath, expectedMarker string) string
+		prepareProvider func(t *testing.T, providerPath string)
+		expectSelected  func(managedPath, providerPath string) string
+		expectCapture   string
+		expectStartErr  bool
+	}
+
+	writeScript := func(t *testing.T, path, body string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), mode); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	makeProvider := func(t *testing.T, providerDir, capturePath, marker string) string {
+		t.Helper()
+		providerPath := filepath.Join(providerDir, "codex")
+		script := "#!/bin/sh\n" +
+			"printf '%s\\n' '" + marker + "' >> '" + capturePath + "'\n" +
+			"exit 0\n"
+		writeScript(t, providerPath, script, 0o755)
+		return providerPath
+	}
+
+	makeManagedSymlinkOrForwarder := func(t *testing.T, managedDir, providerPath, capturePath, marker string) string {
+		t.Helper()
+		managedPath := filepath.Join(managedDir, "codex")
+		if err := os.Symlink(providerPath, managedPath); err == nil {
+			return managedPath
+		} else if !strings.Contains(strings.ToLower(err.Error()), "not supported") && !strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Fatalf("create managed symlink: %v", err)
+		}
+		forwarder := "#!/bin/sh\n" +
+			"printf '%s\\n' '" + marker + "' >> '" + capturePath + "'\n" +
+			"exec '" + providerPath + "' \"$@\"\n"
+		writeScript(t, managedPath, forwarder, 0o755)
+		return managedPath
+	}
+
+	rows := []row{
+		{
+			name:      "managed-script-first",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{managedDir, providerDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				return makeManagedSymlinkOrForwarder(t, managedDir, providerPath, capturePath, "managed")
+			},
+			expectSelected: func(managedPath, providerPath string) string { return managedPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "provider-first",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{providerDir, managedDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				return makeManagedSymlinkOrForwarder(t, managedDir, providerPath, capturePath, "managed")
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "broken-managed-symlink",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{managedDir, providerDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				managedPath := filepath.Join(managedDir, "codex")
+				if err := os.Symlink(filepath.Join(managedDir, "missing-codex"), managedPath); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "not supported") || strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+						t.Skip("symlink creation unsupported on this platform")
+					}
+					t.Fatalf("create broken managed symlink: %v", err)
+				}
+				return managedPath
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "non-executable-provider",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{providerDir, managedDir} },
+			prepareProvider: func(t *testing.T, providerPath string) {
+				if err := os.Chmod(providerPath, 0o600); err != nil {
+					t.Fatalf("chmod provider non-executable: %v", err)
+				}
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectStartErr: true,
+		},
+	}
+
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			managedDir := filepath.Join(root, "managed")
+			providerDir := filepath.Join(root, "provider")
+			if err := os.MkdirAll(managedDir, 0o755); err != nil {
+				t.Fatalf("mkdir managed: %v", err)
+			}
+			if err := os.MkdirAll(providerDir, 0o755); err != nil {
+				t.Fatalf("mkdir provider: %v", err)
+			}
+
+			capturePath := filepath.Join(root, "capture.txt")
+			providerPath := makeProvider(t, providerDir, capturePath, "provider")
+			if tc.prepareProvider != nil {
+				tc.prepareProvider(t, providerPath)
+			}
+			managedPath := ""
+			if tc.prepareManaged != nil {
+				managedPath = tc.prepareManaged(t, managedDir, providerPath, capturePath, tc.name)
+			}
+
+			t.Setenv("PATH", strings.Join(tc.pathOrder(managedDir, providerDir), string(os.PathListSeparator)))
+			selected, err := exec.LookPath("codex")
+			if tc.expectStartErr {
+				if !errors.Is(err, exec.ErrNotFound) {
+					t.Fatalf("LookPath(codex) error = %v, want exec.ErrNotFound before spawn", err)
+				}
+				selected = providerPath
+			} else if err != nil {
+				t.Fatalf("LookPath(codex): %v", err)
+			}
+
+			expectedSelected := tc.expectSelected(managedPath, providerPath)
+			if selected != expectedSelected {
+				t.Fatalf("selected path = %q, want %q", selected, expectedSelected)
+			}
+
+			cmd := exec.Command(providerPath)
+			startErr := cmd.Start()
+			if tc.expectStartErr {
+				if startErr == nil {
+					_ = cmd.Wait()
+					t.Fatal("Start() succeeded, want pre-spawn error")
+				}
+				if data, readErr := os.ReadFile(capturePath); readErr == nil && len(data) > 0 {
+					t.Fatalf("capture = %q, want empty", string(data))
+				} else if readErr != nil && !os.IsNotExist(readErr) {
+					t.Fatalf("read capture: %v", readErr)
+				}
+				return
+			}
+			if startErr != nil {
+				t.Fatalf("Start() failed: %v", startErr)
+			}
+			if err := cmd.Wait(); err != nil {
+				t.Fatalf("Wait() failed: %v", err)
+			}
+
+			data, err := os.ReadFile(capturePath)
+			if err != nil {
+				t.Fatalf("read capture: %v", err)
+			}
+			got := strings.TrimSpace(string(data))
+			if got != tc.expectCapture {
+				t.Fatalf("capture = %q, want %q", got, tc.expectCapture)
+			}
+			if strings.Contains(got, "codex") {
+				t.Fatalf("unexpected bare-command fallback marker in capture: %q", got)
+			}
+		})
+	}
 }

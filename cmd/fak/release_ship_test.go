@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
@@ -2212,5 +2215,30 @@ func TestReleaseShipExecuteRefusesReadyStateWithoutWitnessedReceipt(t *testing.T
 	code := runReleaseShip(&out, &errb, []string{"--execute", "--readiness", path})
 	if code != 1 || called || !strings.Contains(errb.String(), "RELEASE_READINESS_REQUIRED") {
 		t.Fatalf("code=%d called=%v stderr=%q", code, called, errb.String())
+	}
+}
+
+func TestReleaseReadinessConsumesInstalledLaunchQualification(t *testing.T) {
+	unit := workdelivery.WorkUnit{Schema: workdelivery.Schema, ID: "release-unit", Axes: workdelivery.Axes{Authoring: workdelivery.AuthoringRecorded, Admission: workdelivery.AdmissionAdmitted, Verification: workdelivery.VerificationPassed, Integration: workdelivery.IntegrationIntegrated, Release: workdelivery.ReleaseReady}}
+	receipt := workdelivery.Receipt{Schema: workdelivery.Schema, UnitID: "release-unit", Transition: workdelivery.Transition{Axis: "release", From: "not_ready", To: "ready"}, Gate: "release-admission"}
+	write := func(t *testing.T, qualification installedLaunchQualificationReceipt) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "readiness.json")
+		data, err := json.Marshal(map[string]any{"unit": unit, "receipt": receipt, "installed_launch_qualification": qualification})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	ready := installedLaunchQualificationReceipt{Schema: installedLaunchQualificationSchema, Qualified: true}
+	if _, _, err := readReleaseReadiness(write(t, ready)); err != nil {
+		t.Fatalf("ready qualification rejected: %v", err)
+	}
+	failed := installedLaunchQualificationReceipt{Schema: installedLaunchQualificationSchema, Qualified: false, Providers: []installedLaunchQualificationProvider{{Provider: "codex", Failure: "UNDERLYING_MISSING"}}}
+	if _, _, err := readReleaseReadiness(write(t, failed)); err == nil || !strings.Contains(err.Error(), "not ready") {
+		t.Fatalf("failed qualification error = %v, want typed not-ready refusal", err)
 	}
 }
