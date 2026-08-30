@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -402,5 +403,168 @@ func TestRecoverHeadFallsBackWhenTailWindowHoldsNoRow(t *testing.T) {
 	}
 	if n, err := Verify(path); err != nil || n != 2 {
 		t.Errorf("Verify after oversized-row recovery: n=%d err=%v, want n=2 err=nil", n, err)
+	}
+}
+
+func TestDiagnosticSinkLazinessRedactionAndTypedJSON(t *testing.T) {
+	var output bytes.Buffer
+	sink, err := NewDiagnosticSink(&output, DiagnosticInfo, "token")
+	if err != nil {
+		t.Fatalf("NewDiagnosticSink: %v", err)
+	}
+
+	var filteredCalls int
+	if err := sink.Emit(DiagnosticDebug, "kernel.filtered",
+		"secret", LazyValue(func() any {
+			filteredCalls++
+			return "must-not-exist"
+		}),
+	); err != nil {
+		t.Fatalf("filtered Emit: %v", err)
+	}
+	if filteredCalls != 0 || output.Len() != 0 {
+		t.Fatalf("filtered diagnostic: calls=%d bytes=%d, want both zero", filteredCalls, output.Len())
+	}
+
+	var enabledCalls, redactedCalls int
+	if err := sink.Emit(DiagnosticInfo, "kernel.step",
+		"attempt", LazyValue(func() any {
+			enabledCalls++
+			return int64(3)
+		}),
+		"cached", false,
+		"ratio", 0.5,
+		"result", nil,
+		"token", LazyValue(func() any {
+			redactedCalls++
+			return "super-secret"
+		}),
+	); err != nil {
+		t.Fatalf("enabled Emit: %v", err)
+	}
+	if enabledCalls != 1 {
+		t.Fatalf("enabled lazy calls = %d, want 1", enabledCalls)
+	}
+	if redactedCalls != 0 {
+		t.Fatalf("redacted lazy calls = %d, want 0 (redact before evaluation)", redactedCalls)
+	}
+
+	const want = "{\"schema\":\"fak-kernel-diagnostic/1\",\"level\":\"info\",\"event\":\"kernel.step\",\"fields\":{\"attempt\":3,\"cached\":false,\"ratio\":0.5,\"result\":null,\"token\":\"[REDACTED]\"}}\n"
+	if got := output.String(); got != want {
+		t.Fatalf("captured diagnostic:\n got %q\nwant %q", got, want)
+	}
+
+	var decoded struct {
+		Schema string         `json:"schema"`
+		Level  string         `json:"level"`
+		Event  string         `json:"event"`
+		Fields map[string]any `json:"fields"`
+	}
+	dec := json.NewDecoder(strings.NewReader(output.String()))
+	dec.UseNumber()
+	if err := dec.Decode(&decoded); err != nil {
+		t.Fatalf("decode captured diagnostic: %v", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		t.Fatalf("trailing JSON decode = %v, want EOF", err)
+	}
+	if decoded.Schema != DiagnosticSchemaV1 || decoded.Level != "info" || decoded.Event != "kernel.step" {
+		t.Fatalf("decoded envelope = %+v", decoded)
+	}
+	if len(decoded.Fields) != 5 {
+		t.Fatalf("decoded fields = %#v", decoded.Fields)
+	}
+	if n, ok := decoded.Fields["attempt"].(json.Number); !ok || n.String() != "3" {
+		t.Fatalf("attempt = %#v (%T), want json.Number(3)", decoded.Fields["attempt"], decoded.Fields["attempt"])
+	}
+	if v, ok := decoded.Fields["cached"].(bool); !ok || v {
+		t.Fatalf("cached = %#v (%T), want bool(false)", decoded.Fields["cached"], decoded.Fields["cached"])
+	}
+	if n, ok := decoded.Fields["ratio"].(json.Number); !ok || n.String() != "0.5" {
+		t.Fatalf("ratio = %#v (%T), want json.Number(0.5)", decoded.Fields["ratio"], decoded.Fields["ratio"])
+	}
+	if decoded.Fields["result"] != nil {
+		t.Fatalf("result = %#v, want nil", decoded.Fields["result"])
+	}
+	if v, ok := decoded.Fields["token"].(string); !ok || v != "[REDACTED]" {
+		t.Fatalf("token = %#v (%T), want redacted string", decoded.Fields["token"], decoded.Fields["token"])
+	}
+}
+
+func TestDiagnosticSinkDisabledDoesNotEvaluate(t *testing.T) {
+	sink, err := NewDiagnosticSink(nil, DiagnosticDebug)
+	if err != nil {
+		t.Fatalf("NewDiagnosticSink: %v", err)
+	}
+	var calls int
+	if err := sink.Emit(DiagnosticError, "kernel.disabled", "secret", LazyValue(func() any {
+		calls++
+		return "must-not-exist"
+	})); err != nil {
+		t.Fatalf("disabled Emit: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("disabled lazy calls = %d, want 0", calls)
+	}
+}
+
+func TestDiagnosticSinkFailsClosed(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		level DiagnosticLevel
+		kv    []any
+	}{
+		{name: "invalid level", event: "kernel.step", level: DiagnosticLevel(99), kv: []any{"key", "value"}},
+		{name: "empty event", event: "", level: DiagnosticInfo, kv: []any{"key", "value"}},
+		{name: "odd pair count", event: "kernel.step", level: DiagnosticInfo, kv: []any{"key"}},
+		{name: "non-string key", event: "kernel.step", level: DiagnosticInfo, kv: []any{7, "value"}},
+		{name: "empty key", event: "kernel.step", level: DiagnosticInfo, kv: []any{"", "value"}},
+		{name: "duplicate key", event: "kernel.step", level: DiagnosticInfo, kv: []any{"key", 1, "key", 2}},
+		{name: "unsupported direct value", event: "kernel.step", level: DiagnosticInfo, kv: []any{"key", []string{"value"}}},
+		{name: "unsupported lazy value", event: "kernel.step", level: DiagnosticInfo, kv: []any{"key", LazyValue(func() any { return map[string]string{"secret": "value"} })}},
+		{name: "panicking lazy value", event: "kernel.step", level: DiagnosticInfo, kv: []any{"key", LazyValue(func() any { panic("secret") })}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			sink, err := NewDiagnosticSink(&output, DiagnosticDebug)
+			if err != nil {
+				t.Fatalf("NewDiagnosticSink: %v", err)
+			}
+			if err := sink.Emit(tt.level, tt.event, tt.kv...); err == nil {
+				t.Fatal("Emit accepted malformed or unsupported input")
+			}
+			if output.Len() != 0 {
+				t.Fatalf("Emit wrote %d bytes before rejecting input: %q", output.Len(), output.String())
+			}
+		})
+	}
+
+	if _, err := NewDiagnosticSink(io.Discard, DiagnosticLevel(99)); err == nil {
+		t.Fatal("NewDiagnosticSink accepted an invalid minimum level")
+	}
+	if _, err := NewDiagnosticSink(io.Discard, DiagnosticInfo, ""); err == nil {
+		t.Fatal("NewDiagnosticSink accepted an empty sensitive key")
+	}
+
+	var output bytes.Buffer
+	sink, err := NewDiagnosticSink(&output, DiagnosticDebug)
+	if err != nil {
+		t.Fatalf("NewDiagnosticSink: %v", err)
+	}
+	var malformedCalls int
+	err = sink.Emit(DiagnosticInfo, "kernel.step",
+		"key", LazyValue(func() any {
+			malformedCalls++
+			return "secret"
+		}),
+		"key", "duplicate",
+	)
+	if err == nil {
+		t.Fatal("Emit accepted duplicate keys")
+	}
+	if malformedCalls != 0 || output.Len() != 0 {
+		t.Fatalf("malformed diagnostic: calls=%d bytes=%d, want both zero", malformedCalls, output.Len())
 	}
 }
