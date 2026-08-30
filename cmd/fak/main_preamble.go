@@ -79,7 +79,10 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 	return false
 }
 
-var executeExactDevHandoff = runDevHandoff
+var (
+	executeExactDevHandoff   = runDevHandoff
+	executeExactBuildHandoff = runBuildHandoff
+)
 
 // runExactDevHandoff preserves useful top-level spellings for build and committed-tree
 // inventory while keeping their implementations in fak-dev. Other moved developer
@@ -89,8 +92,9 @@ func runExactDevHandoff(stdin io.Reader, stdout, stderr io.Writer, verb string, 
 	if verb != "build" && verb != "study-inventory" {
 		return 0, false
 	}
-	childArgv := make([]string, 1, len(argv)+1)
-	childArgv[0] = verb
-	childArgv = append(childArgv, argv...)
+	if verb == "build" {
+		return executeExactBuildHandoff(stdin, stdout, stderr, argv), true
+	}
+	childArgv := append([]string{verb}, argv...)
 	return executeExactDevHandoff(stdin, stdout, stderr, childArgv), true
 }

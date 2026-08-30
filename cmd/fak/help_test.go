@@ -59,7 +59,7 @@ func TestUsageCompactLeadsWithBaselineWorkflows(t *testing.T) {
 	start := strings.Index(got, "start here")
 	next := strings.Index(got, "save tokens + turns")
 	baseline := got[start:next]
-	commands := []string{"manage", "serve", "agent", "run", "codex"}
+	commands := []string{"manage", "serve", "agent", "run", "codex", "build"}
 	last = -1
 	for _, command := range commands {
 		pos := strings.Index(baseline, "  "+command)

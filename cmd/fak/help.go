@@ -52,6 +52,7 @@ var overviewGroups = []struct {
 		{"ultracode", "plan, launch, and observe a bounded concurrent coding-agent fleet"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
+		{"build", "build fak from source; bootstraps fak-dev when needed"},
 	}},
 	{"save tokens + turns", []overviewEntry{
 		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
