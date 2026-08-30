@@ -1,8 +1,97 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-29T22:24:03Z",
+  "updated_at": "2026-08-30T02:20:00Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+    {
+      "repository": "anthony-chaudhary/cama-complete",
+      "url": "https://github.com/anthony-chaudhary/cama-complete",
+      "status": "studied",
+      "priority": 1,
+      "why": "Private disaggregated KV-cache reference with concrete Go server, Python clients, SGLang/vLLM integration, RDMA, readiness, pressure, prewarm, deployment, and operations mechanisms. The study retains only clean-room control-loop effects that strengthen FAK-owned native execution and excludes an external-engine fallback.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "179c3db7696a77aa94e9e6441b73f6778f82763f",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-05-29T02:40:52Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-CAMA-COMPLETE-2026-08-29.md",
+      "refresh_issue": "#10261",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthony-chaudhary-cama-complete.json",
+        "forge_receipt_path": "docs/research/inventory/anthony-chaudhary-cama-complete-forge-receipt.json",
+        "indexed_revision": "179c3db7696a77aa94e9e6441b73f6778f82763f",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 16,
+        "filed_issue_count": 5,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "docs/research/inventory/anthony-chaudhary-cama-complete-forge-receipt.json",
+              "fak study-forge capture --repository anthony-chaudhary/cama-complete --cutoff 2026-08-30T01:37:23Z",
+              "gh api --paginate repos/anthony-chaudhary/cama-complete/issues?state=all&per_page=100",
+              "gh api --paginate repos/anthony-chaudhary/cama-complete/pulls?state=all&per_page=100",
+              "gh api --paginate repos/anthony-chaudhary/cama-complete/discussions?per_page=100"
+            ],
+            "note": "Complete six-surface census through 2026-08-30T01:37:23Z: zero issues, zero pull requests, discussions unavailable with HTTP 410, 103 releases, nine labels, and zero milestones. The receipt records exact endpoint pages, checksums, timestamps, and the accepted zero-delta issue/PR cross-check."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities queries for event-anchored cache readiness, pressure admission, remote-cache breakers, adaptive existence checks, claimable prewarm, and per-item KV batch receipts",
+              "fak dev index docs/leaves queries for external cache, readiness, topology, and transfer owners",
+              "internal/radixkv/remote_l3.go",
+              "internal/radixkv/admission.go",
+              "internal/compute/prewarm_admit.go",
+              "internal/abi/kvbackend.go",
+              "internal/l3kv/warmresume.go"
+            ],
+            "note": "Broad capability cards were treated only as navigation. Exact FAK code and open/closed issue read-back decided all 16 PRESENT/PARTIAL/ABSENT rows and removed duplicate topology, RDMA, admission, readiness, and telemetry tickets."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-CAMA-COMPLETE-2026-08-29.md#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10261",
+              "https://github.com/anthony-chaudhary/fak/issues/10273",
+              "https://github.com/anthony-chaudhary/fak/issues/10274",
+              "https://github.com/anthony-chaudhary/fak/issues/10275",
+              "https://github.com/anthony-chaudhary/fak/issues/10276",
+              "https://github.com/anthony-chaudhary/fak/issues/10277"
+            ],
+            "note": "Parent #10261 tracks the pass. Five contract-clean, independently shippable child effects survived deduplication and each carries the durable study receipt ID plus pinned source and current FAK seams."
+          }
+        ],
+        "issue_refs": [
+          "#10261",
+          "#10273",
+          "#10274",
+          "#10275",
+          "#10276",
+          "#10277"
+        ],
+        "completeness_critic": "Exhaustive committed-tree inventory, full CAMA-owned server/client/connectors/deploy/docs/plans/tests/install surface, targeted vendored-SGLang touchpoints, tags and selected history, complete six-surface forge census, FAK self-query, exact issue-owner deduplication, 16-row disposition matrix, three disjoint delegated reads with coordinator source verification, and live child-issue read-back are covered. Generated XHTML, binaries, local untracked files, external hardware artifacts, raw private logs, dependency-by-dependency license audit, every release body, and general vendored-SGLang internals are deliberately outside the decision denominator."
+      }
+    },
     {
       "repository": "modular/modular",
       "url": "https://github.com/modular/modular",
@@ -280,20 +369,20 @@
     },
     {
       "repository": "local/tensor-build",
-      "url": "file:///C:/work/tb/tensor-build-main",
+      "url": "local://tensor-build-main",
       "status": "studied",
       "priority": 6,
-      "why": "Local TensorBuild snapshot deeply studied for transferable identity, evidence-tier, artifact-reachability, operator-surface, disambiguation, and work-cost mechanisms; surviving gaps filed as #6874-#6876. Revision history and license remain unavailable, so concepts only were borrowed.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+      "why": "Whole-tree TensorBuild recheck extracted evidence, measurement, and native-runtime contracts, ablated TensorRT-specific mechanisms, reconciled seven existing fak owners, and filed 13 bounded leaves. Source history, forge state, and license remain unavailable, so every borrow is concepts-only.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d",
       "stars_at_check": 0,
       "last_push_at_check": "",
-      "study_note": "docs/notes/tensor-build-local-study-2026-08-15.md",
+      "study_note": "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md",
       "refresh_issue": "#8985",
       "inventory": {
         "mode": "exhaustive",
-        "map_path": "docs/research/inventory/local-tensor-build.json",
-        "indexed_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+        "map_path": "docs/research/inventory/local-tensor-build-2026-08-29.json",
+        "indexed_revision": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d",
         "source_classes": [
           "readme_docs",
           "architecture_design",
@@ -308,37 +397,43 @@
           "completeness_critic",
           "issue_tracking"
         ],
-        "subsystem_count": 18,
-        "candidate_count": 11,
-        "filed_issue_count": 3,
-        "completeness_critic": "exhaustive local snapshot map with raw-versus-indexed denominator; generated trees internal/build and internal/conn/web/dist are named; changelog, roadmap/TODO, license/provenance, unavailable forge/history surfaces, fak self-query, candidate dispositions, and issue tracking are explicit; no source license or attributable Git/forge history is available, so concepts only",
+        "subsystem_count": 16,
+        "candidate_count": 26,
+        "filed_issue_count": 16,
+        "completeness_critic": "exhaustive local snapshot map with raw-versus-indexed denominator; generated trees internal/build and internal/conn/web/dist are named; worldview, runtime, tests, results, changelog, roadmap/TODO, license/provenance, unavailable forge/history surfaces, 32/32 source-hash read-back, fak self-query, candidate dispositions, and issue tracking are explicit; no source license or attributable Git/forge history is available, so concepts only",
         "source_evidence": [
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "docs/notes/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25",
-              "C:/work/tb/tensor-build-main/.github/ISSUE_TEMPLATE/general-ticket.md",
-              "C:/work/tb/tensor-build-main/.github/PULL_REQUEST_TEMPLATE.md",
-              "docs/notes/tensor-build-local-study-2026-08-15.md#issues-prs-and-discussions"
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#provenance-and-license-fence",
+              "source:.github/ISSUE_TEMPLATE/general-ticket.md",
+              "source:.github/PULL_REQUEST_TEMPLATE.md",
+              "gh issue list --repo anthony-saronic/tensor-build --state all",
+              "gh pr list --repo anthony-saronic/tensor-build --state all",
+              "gh api graphql --raw-field query=repository-discussions",
+              "gh repo view anthony-saronic/tensor-build",
+              "git ls-remote https://github.com/anthony-saronic/tensor-build.git"
             ],
             "note": "Templates prove local workflow shape only. Issues, pull requests, discussions, and releases cannot be enumerated and are explicitly unavailable."
           },
           {
             "class": "fak_selfquery_witness",
             "evidence": [
-              "fak capabilities \"engine identity backend implementation benchmark receipt evidence artifact reachability experiment results\"",
-              "fak capabilities \"agent human control parity work class token spend attribution\"",
-              "fak capabilities \"failed experiment ledger negative result candidate borrow issue tracking\""
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#candidate-matrix",
+              "fak study search --limit 20 tensor-build",
+              "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4",
+              "candidate-specific current-tree searches and open-and-closed GitHub issue searches"
             ],
-            "note": "Candidate-specific self-query was replayed; combined artifact and negative-ledger axes had no direct match, while work-cost/control/cache/routing surfaces matched. Dedupe remains anchored to current issue states."
+            "note": "Candidate-specific source and issue queries were replayed. Every new leaf had no exact open or closed owner; seven candidates retained existing owners and four off-axis mechanisms were excluded or watched."
           },
           {
             "class": "candidate_matrix",
             "evidence": [
-              "docs/research/inventory/local-tensor-build.json#non_tree_study.candidate_matrix",
-              "docs/notes/tensor-build-local-study-2026-08-15.md#candidate-matrix-and-current-fak-witnesses"
+              "docs/research/inventory/local-tensor-build-2026-08-29.json#non_tree_study",
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#candidate-matrix",
+              "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4"
             ],
-            "note": "Eleven candidates were re-adjudicated; the refresh corrected the #6874-#6876 association and found no novel unowned borrow."
+            "note": "Twenty-six candidates were adjudicated: 13 new leaves, seven exact existing owners, two present no-issue mechanisms, and four watch/exclude decisions."
           },
           {
             "class": "issue_tracking",
@@ -346,16 +441,47 @@
               "https://github.com/anthony-chaudhary/fak/issues/8985",
               "https://github.com/anthony-chaudhary/fak/issues/6874",
               "https://github.com/anthony-chaudhary/fak/issues/6875",
-              "https://github.com/anthony-chaudhary/fak/issues/6876"
+              "https://github.com/anthony-chaudhary/fak/issues/6876",
+              "https://github.com/anthony-chaudhary/fak/issues/10268",
+              "https://github.com/anthony-chaudhary/fak/issues/10269",
+              "https://github.com/anthony-chaudhary/fak/issues/10270",
+              "https://github.com/anthony-chaudhary/fak/issues/10271",
+              "https://github.com/anthony-chaudhary/fak/issues/10278",
+              "https://github.com/anthony-chaudhary/fak/issues/10279",
+              "https://github.com/anthony-chaudhary/fak/issues/10280",
+              "https://github.com/anthony-chaudhary/fak/issues/10281",
+              "https://github.com/anthony-chaudhary/fak/issues/10282",
+              "https://github.com/anthony-chaudhary/fak/issues/10283",
+              "https://github.com/anthony-chaudhary/fak/issues/10284",
+              "https://github.com/anthony-chaudhary/fak/issues/10285",
+              "https://github.com/anthony-chaudhary/fak/issues/10286"
             ],
-            "note": "#6874 is closed; #6875 and #6876 remain open. This refresh produced no new issue."
+            "note": "The recheck retained prior owners #6874-#6876, linked exact current owners #3978, #4032, #5645, and #8635, and filed 13 new bounded leaves."
           }
         ],
         "issue_refs": [
           "#8985",
           "#6874",
           "#6875",
-          "#6876"
+          "#6876",
+          "#3978",
+          "#4032",
+          "#5601",
+          "#5645",
+          "#8635",
+          "#10268",
+          "#10269",
+          "#10270",
+          "#10271",
+          "#10278",
+          "#10279",
+          "#10280",
+          "#10281",
+          "#10282",
+          "#10283",
+          "#10284",
+          "#10285",
+          "#10286"
         ]
       }
     },

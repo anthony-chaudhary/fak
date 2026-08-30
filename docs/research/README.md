@@ -132,8 +132,11 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 
 - [`tensor-build-local-study-2026-08-15.md`](../notes/tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
 
+- [`CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md`](../notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md) — current whole-tree, snapshot-pinned TensorBuild recheck: 26 evidence/measurement/native-runtime candidates, exact FAK witnesses, explicit TensorRT ablations, and 13 bounded leaves (#10268-#10271, #10278-#10286).
+
 ## Architecture and kernel studies
 
+- [AI-Ops storage qualification study (2026-08-29)](ai-ops-storage-qualification-study-2026-08-29.md) — artifact-first SSD qualification architecture, license gate, and trace-to-storage-envelope borrow filed as #10267.
 - [Agent-serving composition architecture (2026-08-26)](agent-serving-composition-architecture-study-2026-08-26.md) — evidence-backed composition study and follow-on map.
 - [NVIDIA KVTC study](nvidia-kvtc-study.md) — upstream KV-transfer mechanism study and fak relevance map.
 

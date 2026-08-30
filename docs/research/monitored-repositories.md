@@ -4,7 +4,7 @@ description: "Checked: 2026-08-28 Machine source: monitored-repositories.json Re
 ---
 # Monitored related repositories
 
-**Checked:** 2026-08-28
+**Checked:** 2026-08-29
 **Machine source:** [`monitored-repositories.json`](monitored-repositories.json)
 **Refresh view:** `fak study-monitor --due-days 14` (add `--json` for automation)
 **Inventory gate:** `fak study-monitor --inventory-check --json`
@@ -22,7 +22,7 @@ This is the durable discovery queue for external harness, model-serving, and age
 | 3 | [`langchain-ai/open-swe`](https://github.com/langchain-ai/open-swe) | An asynchronous coding-agent harness with sandbox, task lifecycle, desktop, evaluation, and session seams. | 10,553 stars; 80 commits in the seven-day window; pushed 2026-08-14. |
 | 4 | [`EveryInc/compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin) | A cross-harness Codex/Claude/Cursor plugin whose plan-review-work-compound loop is directly comparable to fak's skill and evidence workflows. | 24,259 stars; 20 commits in the seven-day window; pushed 2026-08-14. |
 | 5 | [`obra/superpowers`](https://github.com/obra/superpowers) | The strongest adoption signal for a portable skills, hooks, planning, testing, and subagent-development methodology not already tracked by exact repository name. | 272,168 stars; release activity at pinned revision; pushed 2026-08-13. |
-| 6 | [`local/tensor-build`](../notes/tensor-build-local-study-2026-08-15.md) | Deep local-snapshot study of typed engine identity, result evidence, artifact reachability, agent/human control parity, disambiguation, and token-spend attribution. Three independently witnessed gaps became #6874-#6876. | Snapshot SHA-256 `bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288`; 6,358 files; source history and license unavailable, so concepts only. |
+| 6 | [`local/tensor-build`](../notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md) | Whole-tree recheck of evidence, measurement, and native-runtime contracts. It retained seven exact fak owners, excluded or watched four TensorRT-shaped mechanisms, and filed 13 bounded leaves (#10268-#10271, #10278-#10286). | Snapshot SHA-256 `64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d`; 6,012 raw / 5,972 indexed files; 32/32 source hashes read back; source history and license unavailable, so concepts only. |
 
 The GitHub API's 100-item page cap means “at least 100” is deliberate. Stars are only a discovery signal. A deep study still has to pin source, inspect implementation seams, check the license, query fak first, and independently witness any claimed gap.
 
@@ -42,6 +42,7 @@ This list intentionally does not claim that these repositories contain a borrowa
 
 | Repository | Result | Pinned evidence |
 |---|---|---|
+| `anthony-chaudhary/cama-complete` | Exhaustive private-source study retained five clean-room effects around remote KV: bounded fault recovery, adaptive dedup economics, claimable prewarm, ordered per-item batch truth, and pre-model-load backend preflight (#10273-#10277). Existing FAK admission, readiness, topology, transport, and telemetry owners absorbed the rest. | `179c3db7696a77aa94e9e6441b73f6778f82763f`; [study note](../notes/CONCEPT-STUDY-CAMA-COMPLETE-2026-08-29.md), [inventory](inventory/anthony-chaudhary-cama-complete.json), and [forge receipt](inventory/anthony-chaudhary-cama-complete-forge-receipt.json). |
 | [`modular/modular`](https://github.com/modular/modular) | Full-tree, full-history, compiler/runtime/serving/model/kernel study produced 87 witnessed candidates: 68 contract-clean issues (#9910-#9977) and 19 recorded-only dispositions under #9900. FAK retains native execution ownership; no Modular runtime fallback was proposed. | `1c9fd2e03331f77d3a1034127cb3700b7fa43c02`; [study note](../notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md), [inventory](inventory/modular-modular.json), and [forge receipt](inventory/modular-modular-forge-receipt.json). |
 | [`SemiAnalysisAI/InferenceX`](https://github.com/SemiAnalysisAI/InferenceX) | AgentX lifecycle/interactivity, scope-versioned measured-power, and reuse integrity yielded #8773-#8775; lineage reuse otherwise converged with fak. | `0b0138fd7de0a6f927f9769b19d594d01f586107`; [study note](../notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md). |
 | [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage) | Deep study retained one borrow: a strict pre-effect drift contract for mutable external inputs on resume/replay. Typed backend capabilities and transactional workspaces map to stronger existing fak seams/issues; a universal VFS is a bounded optional integration, not the default. | [`mirage-study-2026-08-17.md`](../notes/mirage-study-2026-08-17.md), revision `e0a4f51109cbe6b8a239700d8348f0cbebd70b26`; 3,499 stars and last push `2026-08-17T23:41:51Z` at check time. |

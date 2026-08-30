@@ -1,0 +1,252 @@
+{
+  "schema": "fak-studyforge-receipt/1",
+  "repository": "anthony-chaudhary/cama-complete",
+  "revision": "179c3db7696a77aa94e9e6441b73f6778f82763f",
+  "cutoff": "2026-08-30T01:37:23Z",
+  "api_base": "https://api.github.com",
+  "started_at": "2026-08-30T01:37:51.7088527Z",
+  "completed_at": "2026-08-30T01:37:53.9346369Z",
+  "status": "complete",
+  "sources": [
+    {
+      "name": "issues",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/issues?state=all&sort=created&direction=asc&per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:52.2767719Z",
+      "crawl_ended_at": "2026-08-30T01:37:52.5156387Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/issues?state=all&sort=created&direction=asc&per_page=100&page=1",
+          "item_count": 0,
+          "checksum": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "fetched_at": "2026-08-30T01:37:52.5156387Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC7455:DDE97F:6A938971",
+          "etag": "\"98c85bf5b520f0c49958ca21f10f2b7ae22c0d0c5325182de15e35c3bda18fe9\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4906,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 0,
+      "normalized_count": 0,
+      "unique_count": 0,
+      "classified_pull_checksum": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "page_checksum": "sha256:7d2f5d83d212aee2213ea4e78df295e28a6ed653cb9240dcc1060fab3581dfe9",
+      "checksum": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "pulls",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/pulls?state=all&sort=created&direction=asc&per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:52.5192753Z",
+      "crawl_ended_at": "2026-08-30T01:37:52.6622698Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/pulls?state=all&sort=created&direction=asc&per_page=100&page=1",
+          "item_count": 0,
+          "checksum": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "fetched_at": "2026-08-30T01:37:52.6622698Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC746F:DDE9A5:6A938971",
+          "etag": "\"98c85bf5b520f0c49958ca21f10f2b7ae22c0d0c5325182de15e35c3bda18fe9\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4905,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 0,
+      "normalized_count": 0,
+      "unique_count": 0,
+      "page_checksum": "sha256:d485035ace6d938e5f1d425db9a88daf5b0dd180cc3053063d4885c005dbea67",
+      "checksum": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "discussions",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/discussions?direction=asc&per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:52.6649272Z",
+      "crawl_ended_at": "2026-08-30T01:37:52.7972277Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/discussions?direction=asc&per_page=100&page=1",
+          "item_count": 0,
+          "checksum": "sha256:e6353afc2a49be0b07c17e7d6f875215197515c888195afbf5c5ffaf233871ff",
+          "fetched_at": "2026-08-30T01:37:52.7972277Z",
+          "status_code": 410,
+          "request_id": "C634:241F16:AC747F:DDE9B5:6A938971",
+          "rate_limit": 5000,
+          "rate_remaining": 4904,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 0,
+      "normalized_count": 0,
+      "unique_count": 0,
+      "page_checksum": "sha256:2b7b5dd8f04aaad553fa4d17266b6c4918493d3b10e7289021876442032999c5",
+      "checksum": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "releases",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/releases?per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:52.7977506Z",
+      "crawl_ended_at": "2026-08-30T01:37:53.558452Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/releases?per_page=100&page=1",
+          "item_count": 100,
+          "checksum": "sha256:bedfed36c7597ee13ec6a05e504f1e3f778c5632fdbd5a7d0ab690f140ef7bf9",
+          "next": "https://api.github.com/repositories/1167133493/releases?per_page=100&page=2",
+          "fetched_at": "2026-08-30T01:37:53.2082138Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC748B:DDE9C7:6A938971",
+          "etag": "W/\"3c69100a2557c77cd6c36f0bcc0a754a6f6844284a73359e9e9ed66d8f63d323\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4903,
+          "rate_reset": 1788056168
+        },
+        {
+          "number": 2,
+          "url": "https://api.github.com/repositories/1167133493/releases?per_page=100&page=2",
+          "item_count": 3,
+          "checksum": "sha256:fd46d8e592ccff1ca665ff3b52fe1ed4f537f0fbb83e2ab3feae69bf87ebb7b6",
+          "fetched_at": "2026-08-30T01:37:53.5570777Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC74C5:DDEA04:6A938971",
+          "etag": "W/\"8727f3d68299898b5939f8809864c124abe3565257c76d53ddbffddd8465081a\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4902,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 103,
+      "normalized_count": 103,
+      "unique_count": 103,
+      "page_checksum": "sha256:5b680ed516a549e4659c2f40426f7fa960dff4a69674cde7efce60179f2edcf4",
+      "checksum": "sha256:f941f205d1a2dd64cf4ee30c964e87088027e9da828a6bc46bb797c5eb469b26"
+    },
+    {
+      "name": "labels",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/labels?per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:53.570804Z",
+      "crawl_ended_at": "2026-08-30T01:37:53.7187372Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/labels?per_page=100&page=1",
+          "item_count": 9,
+          "checksum": "sha256:fa6e604b17cdf779c686b63beb20d2d1918e24dd6a2aec03da6cb9dd9095f966",
+          "fetched_at": "2026-08-30T01:37:53.7187372Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC74E1:DDEA24:6A938972",
+          "etag": "W/\"9ed6c94e4356f47f09c8e9a985586fb69c89592dc1f0659383dcd65b6e929e7b\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4901,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 9,
+      "normalized_count": 9,
+      "unique_count": 9,
+      "page_checksum": "sha256:c004bd7dc4db6e218e7a26ea221bfe86079281ce8876b826f36e4f50f108742f",
+      "checksum": "sha256:7f124bd162981a6fcdf8205e3a12a6ac3aaf1c95e2c56eb2e501084bb499b33f"
+    },
+    {
+      "name": "milestones",
+      "endpoint": "https://api.github.com/repos/anthony-chaudhary/cama-complete/milestones?state=all&sort=due_on&direction=asc&per_page=100&page=1",
+      "status": "complete",
+      "crawl_started_at": "2026-08-30T01:37:53.7298632Z",
+      "crawl_ended_at": "2026-08-30T01:37:53.9188458Z",
+      "pages": [
+        {
+          "number": 1,
+          "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/milestones?state=all&sort=due_on&direction=asc&per_page=100&page=1",
+          "item_count": 0,
+          "checksum": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "fetched_at": "2026-08-30T01:37:53.9188458Z",
+          "status_code": 200,
+          "request_id": "C634:241F16:AC74EC:DDEA3D:6A938972",
+          "etag": "\"98c85bf5b520f0c49958ca21f10f2b7ae22c0d0c5325182de15e35c3bda18fe9\"",
+          "rate_limit": 5000,
+          "rate_remaining": 4900,
+          "rate_reset": 1788056168
+        }
+      ],
+      "fetched_count": 0,
+      "normalized_count": 0,
+      "unique_count": 0,
+      "page_checksum": "sha256:36f7cd9f24f1a79f6d4d09184a9235744d8f194f054a6d572e92552a50858513",
+      "checksum": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    }
+  ],
+  "non_atomic_delta": {
+    "type": "non_atomic_delta",
+    "mixed_source": "issues",
+    "dedicated_source": "pulls",
+    "evidence_mode": "exact_identity",
+    "identity_basis": "captured_endpoint_rows",
+    "mixed_evidence": "exact_identities",
+    "dedicated_evidence": "exact_identities",
+    "relation_evidence": "exact_identities",
+    "mixed_crawl": {
+      "started_at": "2026-08-30T01:37:52.2767719Z",
+      "ended_at": "2026-08-30T01:37:52.5156387Z"
+    },
+    "dedicated_crawl": {
+      "started_at": "2026-08-30T01:37:52.5192753Z",
+      "ended_at": "2026-08-30T01:37:52.6622698Z"
+    },
+    "mixed_count": 0,
+    "dedicated_count": 0,
+    "overlap_count": 0,
+    "only_in_mixed_count": 0,
+    "only_in_dedicated_count": 0,
+    "overlap": [],
+    "only_in_mixed": [],
+    "only_in_dedicated": [],
+    "symmetric_difference_lower_bound": 0,
+    "symmetric_difference_upper_bound": 0,
+    "policy": {
+      "type": "bounded_identity_delta",
+      "metric": "exact_identity_symmetric_difference",
+      "max_only_in_mixed": 0,
+      "max_only_in_dedicated": 0,
+      "max_total": 0
+    },
+    "verdict": "accepted",
+    "accepted": true
+  },
+  "index_checksum": "sha256:1e10412b4f9ac0284dd0b7d2c13e602aa0dfc182411a0bf8cef9e717853791ed",
+  "api": [
+    {
+      "purpose": "repository",
+      "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete",
+      "fetched_at": "2026-08-30T01:37:52.0690556Z",
+      "status_code": 200,
+      "checksum": "sha256:21b886529a144d2300910607b05d7e43ae805076b1345024a369f232974cac05",
+      "request_id": "C634:241F16:AC7424:DDE945:6A938970",
+      "etag": "W/\"4218e6675078b431f304ae87bd58bc00d831c50af5ebd8d9c485a8587fcf596e\"",
+      "rate_limit": 5000,
+      "rate_remaining": 4908,
+      "rate_reset": 1788056168
+    },
+    {
+      "purpose": "revision",
+      "url": "https://api.github.com/repos/anthony-chaudhary/cama-complete/commits?per_page=1&sha=main&until=2026-08-30T01%3A37%3A23Z",
+      "fetched_at": "2026-08-30T01:37:52.2767719Z",
+      "status_code": 200,
+      "checksum": "sha256:f2e8e783657314e32891d1c463e3c83a17b3b60fb0f6dd07c1fee98d40ac5a18",
+      "request_id": "C634:241F16:AC743D:DDE968:6A938970",
+      "etag": "W/\"94492780434abc108f35cbebb6350b7c3c0115e459503508476b3bff0e305311\"",
+      "rate_limit": 5000,
+      "rate_remaining": 4907,
+      "rate_reset": 1788056168
+    }
+  ]
+}

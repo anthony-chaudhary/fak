@@ -1,0 +1,585 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "anthony-chaudhary/cama-complete",
+  "url": "https://github.com/anthony-chaudhary/cama-complete",
+  "indexed_revision": "179c3db7696a77aa94e9e6441b73f6778f82763f",
+  "observed_at": "2026-08-30T01:37:23Z",
+  "totals": {
+    "files": 3668,
+    "directories": 573,
+    "bytes": 41771717,
+    "runtime_files": 2386,
+    "test_files": 764,
+    "docs_files": 301,
+    "text_lines": 988104
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "cama-client/README.md",
+        "cama-connector/README.md",
+        "cama-vllm-connector/README.md",
+        "deploy/systemd/README.md",
+        "docs/cachegen-integration-plan.md",
+        "docs/cama-vs-mooncake-read-write-tradeoffs.md",
+        "docs/double_sparse_hicache_plan.md",
+        "docs/end-to-end-bottleneck-guide.md",
+        "docs/glossary.md",
+        "docs/hicache-prefetch-write-policies.md",
+        "docs/hicache_llama4_scout_analysis.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "cama-client/docs/architecture.md",
+        "cama-connector/docs/02_ARCHITECTURE_DEEP_DIVE.md",
+        "cama-connector/docs/06_DESIGN_DECISIONS.md",
+        "cama-connector/docs/warmup-design.md",
+        "cama-server/docs/diagrams/shard-architecture.md",
+        "cama-server/docs/diagrams/system-architecture.md",
+        "cama-server/docs/mooncake-transfer-architecture.md",
+        "cama-server/docs/storage-architecture.md",
+        "sglang-with-cama-connector/docs/advanced_features/hicache_design.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "cama-client/bench.py",
+        "cama-client/bench_worker.py",
+        "cama-client/cama_client/__init__.py",
+        "cama-client/cama_client/_version.py",
+        "cama-client/cama_client/client.py",
+        "cama-client/cama_client/csrc/cxl_transport.cpp",
+        "cama-client/cama_client/csrc/rdma_transport.cpp",
+        "cama-client/cama_client/cxl/__init__.py",
+        "cama-client/cama_client/cxl/_client.py",
+        "cama-client/cama_client/cxl/_constants.py",
+        "cama-client/cama_client/cxl/_pool.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "cama-client/tests/conftest.py",
+        "cama-client/tests/test_bench_barrier.py",
+        "cama-client/tests/test_bench_helpers.py",
+        "cama-client/tests/test_bench_worker.py",
+        "cama-client/tests/test_close_races.py",
+        "cama-client/tests/test_debug_mode.py",
+        "cama-client/tests/test_errors.py",
+        "cama-client/tests/test_gil_release.py",
+        "cama-client/tests/test_integration_gil_scaling.py",
+        "cama-client/tests/test_integration_rdma.py",
+        "cama-client/tests/test_integration_tcp.py",
+        "cama-client/tests/test_nic_stripe.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".claude/commands/release.md",
+        "CHANGELOG.md",
+        "cama-client/tests/test_gil_release.py",
+        "cama-connector/CHANGELOG-archive.md",
+        "cama-connector/CHANGELOG.md",
+        "cama-connector/release.sh",
+        "cama-server/CHANGELOG.md",
+        "cama-vllm-connector/CHANGELOG.md",
+        "sglang-with-cama-connector/.github/workflows/nightly-release-gateway.yml",
+        "sglang-with-cama-connector/.github/workflows/release-branch-cut.yml",
+        "sglang-with-cama-connector/.github/workflows/release-docker-amd-nightly.yml",
+        "sglang-with-cama-connector/.github/workflows/release-docker-amd.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "note": "requires forge API or exported issue/PR/discussion data; local tree scan cannot prove it"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "cama-client/pyproject.toml",
+        "cama-server/go.mod",
+        "cama-vllm-connector/pyproject.toml",
+        "sglang-with-cama-connector/LICENSE",
+        "sglang-with-cama-connector/python/pyproject.toml",
+        "sglang-with-cama-connector/sgl-kernel/LICENSE",
+        "sglang-with-cama-connector/sgl-kernel/pyproject.toml",
+        "sglang-with-cama-connector/sgl-model-gateway/Cargo.toml",
+        "sglang-with-cama-connector/sgl-model-gateway/LICENSE",
+        "sglang-with-cama-connector/sgl-model-gateway/bindings/golang/Cargo.toml",
+        "sglang-with-cama-connector/sgl-model-gateway/bindings/python/Cargo.toml",
+        "sglang-with-cama-connector/sgl-model-gateway/bindings/python/pyproject.toml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "sglang-with-cama-connector",
+      "files": 3313,
+      "directories": 504,
+      "bytes": 36649255,
+      "runtime_files": 2239,
+      "test_files": 697,
+      "docs_files": 177,
+      "text_lines": 859497,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 1890
+        },
+        {
+          "language": "Config",
+          "files": 513
+        },
+        {
+          "language": "Rust",
+          "files": 359
+        },
+        {
+          "language": "Docs",
+          "files": 177
+        },
+        {
+          "language": "Shell",
+          "files": 50
+        },
+        {
+          "language": "C++",
+          "files": 45
+        },
+        {
+          "language": "C",
+          "files": 41
+        },
+        {
+          "language": "Go",
+          "files": 22
+        }
+      ],
+      "example_paths": [
+        "sglang-with-cama-connector/.devcontainer/Dockerfile",
+        "sglang-with-cama-connector/.devcontainer/devcontainer.json",
+        "sglang-with-cama-connector/.github/CI_PERMISSIONS.json",
+        "sglang-with-cama-connector/.github/FOLDER_README.md",
+        "sglang-with-cama-connector/.github/ISSUE_TEMPLATE/1-bug-report.yml",
+        "sglang-with-cama-connector/.github/ISSUE_TEMPLATE/2-feature-request.yml",
+        "sglang-with-cama-connector/.github/MAINTAINER.md",
+        "sglang-with-cama-connector/.github/labeler.yml"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cama-server",
+      "files": 160,
+      "directories": 31,
+      "bytes": 2163798,
+      "runtime_files": 79,
+      "test_files": 33,
+      "docs_files": 44,
+      "text_lines": 58021,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 110
+        },
+        {
+          "language": "Docs",
+          "files": 44
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "cama-server/CHANGELOG.md",
+        "cama-server/DOCUMENTATION.md",
+        "cama-server/Makefile",
+        "cama-server/cama.toml",
+        "cama-server/cmd/bench/bench.go",
+        "cama-server/cmd/server/server.go",
+        "cama-server/docs/1gb-hugepage-performance-impact.md",
+        "cama-server/docs/allocator-tradeoffs.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cama-client",
+      "files": 62,
+      "directories": 6,
+      "bytes": 666423,
+      "runtime_files": 27,
+      "test_files": 16,
+      "docs_files": 18,
+      "text_lines": 16863,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 40
+        },
+        {
+          "language": "Docs",
+          "files": 18
+        },
+        {
+          "language": "C++",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "cama-client/README.md",
+        "cama-client/bench.py",
+        "cama-client/bench_worker.py",
+        "cama-client/cama_client/__init__.py",
+        "cama-client/cama_client/_version.py",
+        "cama-client/cama_client/client.py",
+        "cama-client/cama_client/csrc/cxl_transport.cpp",
+        "cama-client/cama_client/csrc/rdma_transport.cpp"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cama-connector",
+      "files": 56,
+      "directories": 9,
+      "bytes": 1188401,
+      "runtime_files": 22,
+      "test_files": 6,
+      "docs_files": 24,
+      "text_lines": 26330,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 26
+        },
+        {
+          "language": "Docs",
+          "files": 24
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "cama-connector/.claude/skills/install/SKILL.md",
+        "cama-connector/.claude/skills/release/SKILL.md",
+        "cama-connector/CHANGELIST.md",
+        "cama-connector/CHANGELOG-archive.md",
+        "cama-connector/CHANGELOG.md",
+        "cama-connector/DIFF_STANDALONE_VS_SGLANG.md",
+        "cama-connector/FolderOverview.md",
+        "cama-connector/INSTALL.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cama-vllm-connector",
+      "files": 26,
+      "directories": 5,
+      "bytes": 105257,
+      "runtime_files": 11,
+      "test_files": 12,
+      "docs_files": 2,
+      "text_lines": 2972,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 22
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "cama-vllm-connector/CHANGELOG.md",
+        "cama-vllm-connector/README.md",
+        "cama-vllm-connector/pyproject.toml",
+        "cama-vllm-connector/src/cama_vllm/__init__.py",
+        "cama-vllm-connector/src/cama_vllm/circuit_breaker.py",
+        "cama-vllm-connector/src/cama_vllm/codec.py",
+        "cama-vllm-connector/src/cama_vllm/config.py",
+        "cama-vllm-connector/src/cama_vllm/connector.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 22,
+      "directories": 0,
+      "bytes": 344907,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 22,
+      "text_lines": 7491,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 22
+        }
+      ],
+      "example_paths": [
+        "docs/cachegen-integration-plan.md",
+        "docs/cama-vs-mooncake-read-write-tradeoffs.md",
+        "docs/double_sparse_hicache_plan.md",
+        "docs/end-to-end-bottleneck-guide.md",
+        "docs/glossary.md",
+        "docs/hicache-prefetch-write-policies.md",
+        "docs/hicache_llama4_scout_analysis.md",
+        "docs/hiradix-reconnect-crash-fix.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 10,
+      "directories": 11,
+      "bytes": 196069,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 3676,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "BACKLOG.md",
+        "CHANGELOG.md",
+        "CI.md",
+        "GETTING_STARTED.md",
+        "README.md",
+        "install.py",
+        "iops-improvement-plan.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "grafana",
+      "files": 9,
+      "directories": 4,
+      "bytes": 382582,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 11818,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "grafana/PROFILING.md",
+        "grafana/README.md",
+        "grafana/dashboards/cama-overview.json",
+        "grafana/docker-compose.yml",
+        "grafana/prometheus-alerts.yml",
+        "grafana/prometheus.yml",
+        "grafana/provisioning/dashboards/dashboards.yml",
+        "grafana/provisioning/datasources/datasource.yml"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "deploy",
+      "files": 4,
+      "directories": 1,
+      "bytes": 16014,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 285,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "deploy/systemd/README.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "plans",
+      "files": 3,
+      "directories": 0,
+      "bytes": 34099,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 3,
+      "text_lines": 644,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "plans/README.md",
+        "plans/compression-alternatives.md",
+        "plans/contiguity-coalescing.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".claude",
+      "files": 2,
+      "directories": 1,
+      "bytes": 21131,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 398,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".claude/commands/audit-observability.md",
+        ".claude/commands/release.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 1,
+      "directories": 1,
+      "bytes": 3781,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 109,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/workflows/ci.yml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking"
+}
