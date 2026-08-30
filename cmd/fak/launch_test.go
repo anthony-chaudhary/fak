@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -269,6 +270,154 @@ func TestRepairLaunchShimsRefreshesStableTarget(t *testing.T) {
 	}
 	if !strings.Contains(string(shim), target) {
 		t.Fatalf("shim=%q target=%q", shim, target)
+	}
+}
+
+func writeInstalledProviderFixture(t *testing.T, path string) {
+	t.Helper()
+	body := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		body = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestLaunchInstalledLifecycleManagedCodexShim(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	binDir := filepath.Join(dir, "bin")
+	configPath := filepath.Join(dir, "config", "launch.json")
+	providerDir := filepath.Join(dir, "provider")
+	providerName := "codex"
+	providerPath := filepath.Join(providerDir, providerName)
+	if runtime.GOOS == "windows" {
+		providerPath += ".cmd"
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(providerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeInstalledProviderFixture(t, providerPath)
+	t.Setenv("FAK_LAUNCH_CONFIG", configPath)
+	t.Setenv("FAK_LAUNCH_BIN", binDir)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("FAK_TEST_LAUNCH_CHILD", "")
+	originalPath := os.Getenv("PATH")
+	t.Setenv("PATH", providerDir+string(os.PathListSeparator)+originalPath)
+
+	oldExecutable := osExecutableForLaunch
+	oldRunner := launchChildRunner
+	oldResolve := stableLaunchResolve
+	t.Cleanup(func() {
+		osExecutableForLaunch = oldExecutable
+		launchChildRunner = oldRunner
+		stableLaunchResolve = oldResolve
+	})
+	osExecutableForLaunch = func() (string, error) { return mustExecutable(t), nil }
+
+	var out, errOut bytes.Buffer
+	if code := runLaunch(&out, &errOut, []string{"install", "--provider", "codex", "--default", "codex", "--no-path"}); code != 0 {
+		t.Fatalf("install code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+originalPath)
+	stable := stableLaunchTarget(binDir, mustExecutable(t))
+	if _, err := os.Stat(stable); err != nil {
+		t.Fatalf("stable target: %v", err)
+	}
+	shimPath := filepath.Join(binDir, shimName("codex"))
+	if _, err := os.Stat(shimPath); err != nil {
+		t.Fatalf("shim: %v", err)
+	}
+	cfg, err := launchshim.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Default != "codex" {
+		t.Fatalf("default=%q", cfg.Default)
+	}
+	if got := cfg.Providers["codex"].Command; got != providerPath {
+		t.Fatalf("provider command=%q want %q", got, providerPath)
+	}
+
+	shimBody, err := os.ReadFile(shimPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shimBody), stable) {
+		t.Fatalf("shim=%q stable=%q", shimBody, stable)
+	}
+
+	statusOut, statusErr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runLaunch(statusOut, statusErr, []string{"status"}); code != 0 {
+		t.Fatalf("status code=%d stdout=%s stderr=%s", code, statusOut.String(), statusErr.String())
+	}
+	for _, want := range []string{"default: codex", "interception: active", "codex: " + providerPath} {
+		if !strings.Contains(statusOut.String(), want) {
+			t.Fatalf("status missing %q: %s", want, statusOut.String())
+		}
+	}
+
+	doctorOut, doctorErr := &bytes.Buffer{}, &bytes.Buffer{}
+	doctorCode := runLaunchDoctor(doctorOut, doctorErr, []string{})
+	if doctorCode != 0 && doctorCode != 1 {
+		t.Fatalf("doctor code=%d stdout=%s stderr=%s", doctorCode, doctorOut.String(), doctorErr.String())
+	}
+	for _, want := range []string{"LAUNCH DOCTOR", "default=codex", "codex  READY", "role=canonical    ready=true  reason=READY"} {
+		if !strings.Contains(doctorOut.String(), want) {
+			t.Fatalf("doctor missing %q: %s", want, doctorOut.String())
+		}
+	}
+
+	stableLaunchResolve = func(target, policy string, wait time.Duration) (string, error) {
+		if target != stable || policy != launchshim.UpdatePolicyPrior {
+			t.Fatalf("resolve target=%q policy=%q", target, policy)
+		}
+		return stable, nil
+	}
+	childCalls := 0
+	var childCommand string
+	var childArgs []string
+	launchChildRunner = func(_ io.Reader, stdout, _ io.Writer, command string, args []string) int {
+		childCalls++
+		childCommand = command
+		childArgs = append([]string(nil), args...)
+		fmt.Fprintln(stdout, "codex fixture 1.0")
+		return 0
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunch(&out, &errOut, []string{"codex", "--version"}); code != 0 {
+		t.Fatalf("child code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if childCalls != 1 || !samePath(childCommand, mustExecutable(t)) {
+		t.Fatalf("child calls=%d command=%q want deployed fak %q", childCalls, childCommand, mustExecutable(t))
+	}
+	wantArgs := []string{"guard", "--banner=animate", "--", providerPath, "--version"}
+	if !reflect.DeepEqual(childArgs, wantArgs) {
+		t.Fatalf("child args=%q want %q", childArgs, wantArgs)
+	}
+	if samePath(childCommand, shimPath) || !strings.Contains(out.String(), "codex fixture 1.0") {
+		t.Fatalf("recursive or missing fixture command=%q shim=%q stdout=%q", childCommand, shimPath, out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runLaunch(&out, &errOut, []string{"uninstall", "--provider", "codex"}); code != 0 {
+		t.Fatalf("uninstall code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(shimPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("shim still present err=%v", err)
+	}
+	cfg, err = launchshim.Load()
+	if err != nil {
+		t.Fatalf("load post-uninstall config: %v", err)
+	}
+	if len(cfg.Providers) != 0 || cfg.Default != "" {
+		t.Fatalf("provider state remains after uninstall: %+v", cfg)
 	}
 }
 
