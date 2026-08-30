@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,10 +14,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/codexresume"
 )
 
 type codexResumeThreads []string
+
+type codexResumeAccountPlan struct {
+	Account          string
+	TargetHome       string
+	SourceHome       string
+	ThreadID         string
+	RolloutPath      string
+	CheckRolloutPath string
+	Transition       codexresume.RehomeClass
+	Binding          codexresume.ThreadBinding
+	Store            codexresume.BindingStore
+}
+
+var codexResumeRecover = codexresume.Recover
 
 func (t *codexResumeThreads) String() string { return strings.Join(*t, ",") }
 func (t *codexResumeThreads) Set(value string) error {
@@ -44,6 +60,13 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	rollout := fs.String("rollout", "", "existing rollout JSONL for one resumed thread (otherwise discovered under CODEX_HOME/sessions)")
 	codexHome := fs.String("codex-home", "", "Codex state home (default CODEX_HOME or ~/.codex)")
+	account := fs.String("account", "", "exact discovered Codex account name (never rotates or falls back)")
+	defaultHome, _ := os.UserHomeDir()
+	defaultRegistry := os.Getenv("FAK_ACCOUNTS_REGISTRY")
+	if defaultRegistry == "" && defaultHome != "" {
+		defaultRegistry = filepath.Join(defaultHome, ".claude-accounts", "registry.json")
+	}
+	registryPath := fs.String("registry", defaultRegistry, "account registry path used to exclude persisted Claude-name collisions")
 	codexExe := fs.String("codex", "codex", "Codex executable")
 	cwd := fs.String("cwd", "", "child working directory (default current directory)")
 	deadline := fs.Duration("deadline", 10*time.Minute, "maximum time before pre-terminal stall")
@@ -71,6 +94,18 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	}
 	if len(threadFlags) > 0 && fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak codex-resume: positional arguments cannot be combined with --thread")
+		return 2
+	}
+	if *account != "" && len(threadIDs) != 1 {
+		fmt.Fprintln(stderr, "fak codex-resume: --account supports exactly one candidate")
+		return 2
+	}
+	if *account != "" && *rollout != "" {
+		fmt.Fprintln(stderr, "fak codex-resume: --rollout cannot be combined with --account")
+		return 2
+	}
+	if *account != "" && *codexHome != "" {
+		fmt.Fprintln(stderr, "fak codex-resume: --codex-home cannot be combined with --account")
 		return 2
 	}
 	if *rollout != "" && len(threadIDs) != 1 {
@@ -111,13 +146,40 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 		prompt = fs.Arg(1)
 	}
 
+	var accountPlan *codexResumeAccountPlan
+	if *account != "" {
+		reg, err := loadOrDiscover(*registryPath, defaultHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak codex-resume: load account registry: %v\n", err)
+			return 1
+		}
+		stateRoot := codexResumeBindingRoot(*registryPath, defaultHome)
+		plan, err := planCodexResumeAccount(reg, discoveredCodexHomes(), stateRoot, *account, threadIDs[0], !*checkOnly)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak codex-resume: account %q: %v\n", *account, err)
+			return 1
+		}
+		accountPlan = &plan
+	}
+
 	results := make([]codexresume.Result, 0, len(threadIDs))
 	exitCode := 0
 	for _, threadID := range threadIDs {
+		checkRollout := absRollout
+		checkHome := *codexHome
+		launchThreadID := threadID
+		launchEnv := os.Environ()
+		if accountPlan != nil {
+			launchThreadID = accountPlan.ThreadID
+			threadID = accountPlan.ThreadID
+			checkRollout = accountPlan.CheckRolloutPath
+			checkHome = accountPlan.TargetHome
+			launchEnv = launchCodexEnv(launchEnv, accountPlan.TargetHome)
+		}
 		checkConfig := codexresume.CheckConfig{
 			ThreadID:                       threadID,
-			RolloutPath:                    absRollout,
-			CodexHome:                      *codexHome,
+			RolloutPath:                    checkRollout,
+			CodexHome:                      checkHome,
 			TargetProvider:                 *targetProvider,
 			TargetWire:                     *targetWire,
 			RequiredFunctionCallItemPrefix: *requiredCallPrefix,
@@ -132,16 +194,19 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 				result.Outcome = codexresume.OutcomeRefused
 			}
 		} else {
-			cmd := []string{*codexExe, "exec", "resume", "--json", "--skip-git-repo-check", threadID, prompt}
+			cmd, commandEnv := buildCodexResumeLaunch(*codexExe, launchThreadID, prompt, launchEnv, "")
+			if accountPlan != nil {
+				cmd, commandEnv = buildCodexResumeLaunch(*codexExe, launchThreadID, prompt, os.Environ(), accountPlan.TargetHome)
+			}
 			var captured io.Writer = io.Discard
 			if !*asJSON {
 				captured = stderr
 			}
 			var err error
-			result, err = codexresume.Recover(context.Background(), checkConfig, codexresume.Config{
+			result, err = codexResumeRecover(context.Background(), checkConfig, codexresume.Config{
 				Command:      cmd,
 				Dir:          dir,
-				Env:          os.Environ(),
+				Env:          commandEnv,
 				Deadline:     *deadline,
 				Drain:        *drain,
 				Stdout:       captured,
@@ -154,6 +219,12 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 				if result.Outcome == "" {
 					result.Outcome = codexresume.OutcomeExited
 				}
+			}
+		}
+		if accountPlan != nil {
+			if err := saveCodexResumeBindingOnSuccess(accountPlan.Store, accountPlan.Binding, result.Outcome); err != nil {
+				fmt.Fprintf(stderr, "fak codex-resume %s: save account binding: %v\n", threadID, err)
+				return 1
 			}
 		}
 		results = append(results, result)
@@ -191,6 +262,208 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	return exitCode
+}
+
+func buildCodexResumeLaunch(codexExe, threadID, prompt string, baseEnv []string, targetHome string) ([]string, []string) {
+	env := baseEnv
+	if targetHome != "" {
+		env = launchCodexEnv(baseEnv, targetHome)
+	}
+	return []string{codexExe, "exec", "resume", "--json", "--skip-git-repo-check", threadID, prompt}, env
+}
+
+func canonicalCodexResumeHome(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
+		abs = resolved
+	}
+	return filepath.Clean(abs), nil
+}
+
+func codexResumeFilesEqual(left, right string) (bool, error) {
+	a, err := os.ReadFile(left)
+	if err != nil {
+		return false, err
+	}
+	b, err := os.ReadFile(right)
+	if err != nil {
+		return false, err
+	}
+	return string(a) == string(b), nil
+}
+
+func saveCodexResumeBindingOnSuccess(store codexresume.BindingStore, binding codexresume.ThreadBinding, outcome codexresume.Outcome) error {
+	if outcome != codexresume.OutcomeCompleted && outcome != codexresume.OutcomeCompletedReclaimed {
+		return nil
+	}
+	return store.Save(binding)
+}
+
+func codexResumeBindingRoot(registryPath, home string) string {
+	if strings.TrimSpace(registryPath) != "" {
+		return filepath.Join(filepath.Dir(registryPath), "codex-resume-bindings")
+	}
+	return filepath.Join(home, ".fak", "codex-resume-bindings")
+}
+
+func eligibleCodexResumeHomes(reg accounts.Registry, discovered []accounts.Home) []accounts.Home {
+	persisted := make(map[string]struct{}, len(reg.Homes))
+	for _, home := range reg.Homes {
+		persisted[home.Name] = struct{}{}
+	}
+	out := make([]accounts.Home, 0, len(discovered))
+	for _, home := range discovered {
+		if _, collision := persisted[home.Name]; collision {
+			continue
+		}
+		out = append(out, home)
+	}
+	return out
+}
+
+func planCodexResumeAccount(reg accounts.Registry, discovered []accounts.Home, stateRoot, account, query string, copyRollout bool) (codexResumeAccountPlan, error) {
+	homes := eligibleCodexResumeHomes(reg, discovered)
+	var target *accounts.Home
+	for i := range homes {
+		if homes[i].Name != account {
+			continue
+		}
+		if target != nil {
+			return codexResumeAccountPlan{}, errors.New("discovered Codex account name is ambiguous")
+		}
+		target = &homes[i]
+	}
+	if target == nil {
+		return codexResumeAccountPlan{}, errors.New("not an exact discovered Codex account (or its name collides with the persisted registry)")
+	}
+	if !target.CanServe() {
+		return codexResumeAccountPlan{}, errors.New("discovered Codex account is not ready to serve")
+	}
+	if strings.TrimSpace(target.Dir) == "" {
+		return codexResumeAccountPlan{}, errors.New("discovered Codex account has no usable home")
+	}
+	info, err := os.Stat(target.Dir)
+	if err != nil || !info.IsDir() {
+		return codexResumeAccountPlan{}, errors.New("discovered Codex account home is unavailable")
+	}
+	identity, err := accounts.ReadCodexHomeIdentity(target.Dir)
+	if err != nil {
+		return codexResumeAccountPlan{}, fmt.Errorf("read target identity: %w", err)
+	}
+	if !identity.AuthPresent || identity.AccountDigest == "" {
+		return codexResumeAccountPlan{}, errors.New("discovered Codex account has no recognized OAuth identity")
+	}
+
+	type ownedMatch struct {
+		home  accounts.Home
+		match codexresume.RolloutMatch
+	}
+	var matches []ownedMatch
+	for _, home := range homes {
+		match, findErr := codexresume.FindRollout(home.Dir, query)
+		if errors.Is(findErr, codexresume.ErrRolloutNotFound) {
+			continue
+		}
+		if findErr != nil {
+			return codexResumeAccountPlan{}, fmt.Errorf("locate rollout in %q: %w", home.Name, findErr)
+		}
+		matches = append(matches, ownedMatch{home: home, match: match})
+	}
+	if len(matches) == 0 {
+		return codexResumeAccountPlan{}, codexresume.ErrRolloutNotFound
+	}
+	threadID := matches[0].match.ThreadID
+	for _, candidate := range matches[1:] {
+		if candidate.match.ThreadID != threadID {
+			return codexResumeAccountPlan{}, codexresume.ErrRolloutAmbiguous
+		}
+	}
+
+	store := codexresume.BindingStore{Root: stateRoot}
+	var binding *codexresume.ThreadBinding
+	loaded, loadErr := store.Load(threadID)
+	if loadErr == nil {
+		binding = &loaded
+	} else if !errors.Is(loadErr, codexresume.ErrBindingNotFound) {
+		return codexResumeAccountPlan{}, fmt.Errorf("load thread binding: %w", loadErr)
+	}
+	selected := -1
+	if len(matches) == 1 {
+		selected = 0
+	} else if binding != nil {
+		for i := range matches {
+			canonical, absErr := canonicalCodexResumeHome(matches[i].home.Dir)
+			if absErr == nil && filepath.Clean(canonical) == filepath.Clean(binding.CanonicalHome) {
+				if selected != -1 {
+					return codexResumeAccountPlan{}, codexresume.ErrRolloutAmbiguous
+				}
+				selected = i
+			}
+		}
+	} else {
+		// A failed first launch may leave an identical idempotent destination copy but no
+		// authoritative binding. Treat that selected target copy as a destination only when
+		// exactly one other home owns byte-identical history; multiple non-target owners refuse.
+		targetCanonical, _ := canonicalCodexResumeHome(target.Dir)
+		targetMatch := -1
+		nonTarget := -1
+		for i := range matches {
+			homeCanonical, _ := canonicalCodexResumeHome(matches[i].home.Dir)
+			if filepath.Clean(homeCanonical) == filepath.Clean(targetCanonical) {
+				targetMatch = i
+				continue
+			}
+			if nonTarget != -1 {
+				nonTarget = -2
+				break
+			}
+			nonTarget = i
+		}
+		if targetMatch >= 0 && nonTarget >= 0 {
+			equal, equalErr := codexResumeFilesEqual(matches[targetMatch].match.Path, matches[nonTarget].match.Path)
+			if equalErr != nil {
+				return codexResumeAccountPlan{}, fmt.Errorf("compare target rollout copy: %w", equalErr)
+			}
+			if equal {
+				selected = nonTarget
+			}
+		}
+	}
+	if selected == -1 {
+		return codexResumeAccountPlan{}, errors.New("rollout source ownership is ambiguous")
+	}
+	source := matches[selected]
+	transition := codexresume.ClassifyRehome(binding, target.Dir, identity.AccountDigest, false)
+	if transition == codexresume.RehomeUnknown || transition == codexresume.RehomeAmbiguous {
+		return codexResumeAccountPlan{}, fmt.Errorf("cannot safely classify rehome transition %q", transition)
+	}
+	checkRolloutPath := source.match.Path
+	rolloutPath := source.match.Path
+	sourceCanonical, _ := canonicalCodexResumeHome(source.home.Dir)
+	targetCanonical, _ := canonicalCodexResumeHome(target.Dir)
+	if filepath.Clean(sourceCanonical) != filepath.Clean(targetCanonical) {
+		rolloutPath = filepath.Join(target.Dir, filepath.FromSlash(source.match.RelativePath))
+		if copyRollout {
+			copied, copyErr := codexresume.CopyRollout(source.home.Dir, target.Dir, source.match.Path)
+			if copyErr != nil {
+				return codexResumeAccountPlan{}, fmt.Errorf("copy selected rollout: %w", copyErr)
+			}
+			rolloutPath = copied.Path
+			checkRolloutPath = copied.Path
+		}
+	}
+	newBinding, err := codexresume.NewThreadBinding(threadID, target.Dir, identity.AccountDigest, rolloutPath, time.Now().UTC())
+	if err != nil {
+		return codexResumeAccountPlan{}, fmt.Errorf("prepare thread binding: %w", err)
+	}
+	return codexResumeAccountPlan{
+		Account: account, TargetHome: target.Dir, SourceHome: source.home.Dir,
+		ThreadID: threadID, RolloutPath: rolloutPath, CheckRolloutPath: checkRolloutPath, Transition: transition,
+		Binding: newBinding, Store: store,
+	}, nil
 }
 
 func writeCodexResumeResult(path string, result codexresume.Result) error {
