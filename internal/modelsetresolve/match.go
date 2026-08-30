@@ -43,6 +43,14 @@ func evaluateInventoryEntry(role harnessmodelset.Role, alternative harnessmodels
 		"make the candidate available and refresh its availability witness")
 
 	capabilities := alternative.Capabilities
+	if capabilities.Family != "" {
+		m.requireNamedText(candidate.Evidence.Capabilities, "model.family", domainModelBehavior,
+			"capabilities.family", capabilities.Family, CodeFamily, "use a candidate from the declared model family")
+	}
+	if capabilities.Quantization != "" {
+		m.requireNamedText(candidate.Evidence.Capabilities, "weights.quantization", domainModelBehavior,
+			"capabilities.quantization", capabilities.Quantization, CodeQuantization, "use a candidate with the declared quantization scheme")
+	}
 	if capabilities.ToolCalling != nil {
 		m.requireNamedBool(candidate.Evidence.Capabilities, "tool_calling", domainModelBehavior,
 			"capabilities.tool_calling", true, CodeToolCalling, "supply a candidate with witnessed tool calling")

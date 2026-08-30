@@ -37,6 +37,8 @@ type Alternative struct {
 // distinguish an omitted constraint from an explicit false, which is rejected
 // as ambiguous for this positive-requirement schema.
 type ModelRequirements struct {
+	Family             string       `json:"family,omitempty"`
+	Quantization       string       `json:"quantization,omitempty"`
 	ToolCalling        *bool        `json:"tool_calling,omitempty"`
 	StructuredOutput   *bool        `json:"structured_output,omitempty"`
 	ToolProtocol       ToolProtocol `json:"tool_protocol,omitempty"`
