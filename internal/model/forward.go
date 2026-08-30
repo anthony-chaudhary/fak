@@ -1,6 +1,187 @@
 package model
 
-import "math"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math"
+	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/codegraph"
+)
+
+// GraphInlineInstruction is one operation in the small callable model graph IR.
+// Call names a direct callee; Reference names a function used as data and is not
+// rewritten as a call.
+type GraphInlineInstruction struct {
+	Operation string  `json:"operation"`
+	Value     float32 `json:"value,omitempty"`
+	Call      string  `json:"call,omitempty"`
+	Reference string  `json:"reference,omitempty"`
+}
+
+// GraphInlineFunction is a callable model-graph function.
+type GraphInlineFunction struct {
+	Name         string                   `json:"name"`
+	Instructions []GraphInlineInstruction `json:"instructions"`
+	AlwaysInline bool                     `json:"always_inline,omitempty"`
+	NeverInline  bool                     `json:"never_inline,omitempty"`
+}
+
+// GraphInlineProgram owns the callable functions rooted at Entry.
+type GraphInlineProgram struct {
+	Entry     string                `json:"entry"`
+	Functions []GraphInlineFunction `json:"functions"`
+}
+
+// GraphInlineDecision records why a function was inlined or kept. Retained is
+// true when its symbol must survive even after all direct calls are rewritten.
+type GraphInlineDecision struct {
+	Function string `json:"function"`
+	Action   string `json:"action"`
+	Reason   string `json:"reason"`
+	Retained bool   `json:"retained,omitempty"`
+}
+
+// GraphInlineReceipt is the deterministic witness for one inlining pass.
+type GraphInlineReceipt struct {
+	Decisions []GraphInlineDecision `json:"decisions"`
+	Digest    string                `json:"digest"`
+}
+
+// InlineGraphFunctions clones program, safely replaces eligible direct calls,
+// removes dead callee symbols, and returns a deterministic decision receipt.
+// Recursive SCCs fail closed; non-call references keep their target symbol.
+func InlineGraphFunctions(program GraphInlineProgram, maxInstructions int) (GraphInlineProgram, GraphInlineReceipt, error) {
+	if maxInstructions <= 0 {
+		return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("max instructions must be positive")
+	}
+	functions := make(map[string]GraphInlineFunction, len(program.Functions))
+	for _, fn := range program.Functions {
+		if fn.Name == "" {
+			return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("function name is empty")
+		}
+		if _, exists := functions[fn.Name]; exists {
+			return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("duplicate function %q", fn.Name)
+		}
+		fn.Instructions = append([]GraphInlineInstruction(nil), fn.Instructions...)
+		functions[fn.Name] = fn
+	}
+	if _, ok := functions[program.Entry]; !ok {
+		return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("entry function %q is missing", program.Entry)
+	}
+
+	calls := codegraph.NewGraph()
+	referenced := make(map[string]bool)
+	selfCall := make(map[string]bool)
+	for name, fn := range functions {
+		calls.AddNode(codegraph.NodeID(name), "model-graph-function")
+		for _, instruction := range fn.Instructions {
+			if instruction.Call != "" {
+				if _, ok := functions[instruction.Call]; !ok {
+					return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("function %q calls missing function %q", name, instruction.Call)
+				}
+				calls.AddEdge(codegraph.NodeID(name), codegraph.NodeID(instruction.Call), "calls")
+				selfCall[instruction.Call] = selfCall[instruction.Call] || instruction.Call == name
+			}
+			if instruction.Reference != "" {
+				if _, ok := functions[instruction.Reference]; !ok {
+					return GraphInlineProgram{}, GraphInlineReceipt{}, fmt.Errorf("function %q references missing function %q", name, instruction.Reference)
+				}
+				referenced[instruction.Reference] = true
+			}
+		}
+	}
+	recursive := make(map[string]bool)
+	for _, component := range calls.StronglyConnectedComponents("calls") {
+		if len(component) > 1 {
+			for _, id := range component {
+				recursive[string(id)] = true
+			}
+		} else if selfCall[string(component[0])] {
+			recursive[string(component[0])] = true
+		}
+	}
+
+	names := make([]string, 0, len(functions))
+	for name := range functions {
+		if name != program.Entry {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	decisions := make([]GraphInlineDecision, 0, len(names))
+	inline := make(map[string]bool, len(names))
+	for _, name := range names {
+		fn := functions[name]
+		decision := GraphInlineDecision{Function: name, Action: "keep", Retained: referenced[name]}
+		switch {
+		case recursive[name]:
+			decision.Reason = "recursive-scc"
+		case fn.NeverInline:
+			decision.Reason = "never-inline"
+		case fn.AlwaysInline:
+			decision.Action, decision.Reason, inline[name] = "inline", "always-inline", true
+		case instructionCost(fn.Instructions) > maxInstructions:
+			decision.Reason = "over-threshold"
+		default:
+			decision.Action, decision.Reason, inline[name] = "inline", "within-threshold", true
+		}
+		decisions = append(decisions, decision)
+	}
+
+	ordered := append([]string{program.Entry}, names...)
+	for changed := true; changed; {
+		changed = false
+		for _, name := range ordered {
+			fn := functions[name]
+			out := make([]GraphInlineInstruction, 0, len(fn.Instructions))
+			for _, instruction := range fn.Instructions {
+				callee, ok := functions[instruction.Call]
+				if instruction.Call == "" || !ok || !inline[instruction.Call] {
+					if instruction.Operation != "noop" {
+						out = append(out, instruction)
+					}
+					continue
+				}
+				out = append(out, callee.Instructions...)
+				changed = true
+			}
+			fn.Instructions = out
+			functions[name] = fn
+		}
+	}
+
+	out := GraphInlineProgram{Entry: program.Entry}
+	for _, name := range append([]string{program.Entry}, names...) {
+		if name != program.Entry && inline[name] && !referenced[name] {
+			continue
+		}
+		out.Functions = append(out.Functions, functions[name])
+	}
+	receipt := GraphInlineReceipt{Decisions: decisions}
+	encoded, err := json.Marshal(struct {
+		Program   GraphInlineProgram    `json:"program"`
+		Decisions []GraphInlineDecision `json:"decisions"`
+	}{out, decisions})
+	if err != nil {
+		return GraphInlineProgram{}, GraphInlineReceipt{}, err
+	}
+	digest := sha256.Sum256(encoded)
+	receipt.Digest = "sha256:" + hex.EncodeToString(digest[:])
+	return out, receipt, nil
+}
+
+func instructionCost(instructions []GraphInlineInstruction) int {
+	cost := 0
+	for _, instruction := range instructions {
+		if instruction.Operation != "noop" && instruction.Reference == "" {
+			cost++
+		}
+	}
+	return cost
+}
 
 // Activations is the full-prefill intermediate state the oracle test compares
 // against HF. Hidden[l] is the hidden state AFTER layer l-1 (Hidden[0] is the
