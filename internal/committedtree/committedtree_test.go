@@ -17,7 +17,10 @@ import (
 	"time"
 )
 
-const representativeFileCount = 17_742
+const (
+	representativeFileCount = 17_742
+	testGitBatchWindow      = 256
+)
 
 func TestExtractPreservesRawBlobsModesAndIgnoresLinks(t *testing.T) {
 	repo := newRepository(t)
@@ -70,6 +73,25 @@ func TestExtractUsesOneTreeListingAndOneCatFileBatch(t *testing.T) {
 	}
 	if got := strings.Join(calls[1], " "); got != "cat-file --batch" {
 		t.Fatalf("second git call = %q, want cat-file --batch", got)
+	}
+}
+
+func TestExtractPipelinesBoundedBlobRequests(t *testing.T) {
+	command := func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "ls-tree" {
+			return processTreeHelperCommandWithCount("cat-block", testGitBatchWindow)(ctx, "", "ls-tree")
+		}
+		return processTreeHelperCommand("require-pipeline", "")(ctx, "", "cat-file")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	if err := extractWithGit(ctx, "unused", "unused", dir, command); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "file-255")); err != nil || string(got) != "x" {
+		t.Fatalf("last pipelined blob = %q, %v; want x", got, err)
 	}
 }
 
@@ -189,10 +211,31 @@ func TestCommittedTreeProcessTreeHelper(t *testing.T) {
 	}
 	switch mode {
 	case "ls-cat-block":
-		_, _ = fmt.Fprintf(os.Stdout, "100644 blob %s\tfile.bin%c", strings.Repeat("a", 40), byte(0))
+		if count, _ := strconv.Atoi(os.Getenv("GO_WANT_COMMITTEDTREE_LS_COUNT")); count > 0 {
+			for i := 0; i < count; i++ {
+				_, _ = fmt.Fprintf(os.Stdout, "100644 blob %040x\tfile-%03d%c", i+1, i, byte(0))
+			}
+		} else {
+			_, _ = fmt.Fprintf(os.Stdout, "100644 blob %s\tfile.bin%c", strings.Repeat("a", 40), byte(0))
+		}
 	case "cat-cat-block":
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		spawnStdoutHoldingDescendant()
+	case "cat-require-pipeline":
+		scanner := bufio.NewScanner(os.Stdin)
+		oids := make([]string, 0, testGitBatchWindow)
+		for scanner.Scan() {
+			oids = append(oids, scanner.Text())
+			if len(oids) == testGitBatchWindow {
+				break
+			}
+		}
+		if len(oids) != testGitBatchWindow {
+			os.Exit(3)
+		}
+		for _, oid := range oids {
+			_, _ = fmt.Fprintf(os.Stdout, "%s blob 1\nx\n", oid)
+		}
 	case "ls-ls-traversal":
 		spawnStdoutHoldingDescendant()
 		_, _ = fmt.Fprintf(os.Stdout, "100644 blob %s\t../escape%c", strings.Repeat("a", 40), byte(0))
@@ -368,6 +411,14 @@ func (c *triggeredDeadline) Err() error {
 		return context.DeadlineExceeded
 	default:
 		return nil
+	}
+}
+
+func processTreeHelperCommandWithCount(scenario string, count int) commandFactory {
+	return func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		cmd := processTreeHelperCommand(scenario, "")(ctx, "", args...)
+		cmd.Env = append(cmd.Env, "GO_WANT_COMMITTEDTREE_LS_COUNT="+strconv.Itoa(count))
+		return cmd
 	}
 }
 

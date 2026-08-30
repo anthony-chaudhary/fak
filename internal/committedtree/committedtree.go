@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	defaultTimeout     = 2 * time.Minute
-	gitPipeBufferSize  = 64 * 1024
-	maxGitRecordSize   = gitPipeBufferSize
-	maxGitStderrBytes  = 64 * 1024
+	defaultTimeout    = 2 * time.Minute
+	gitPipeBufferSize = 64 * 1024
+	maxGitRecordSize  = gitPipeBufferSize
+	maxGitStderrBytes = 64 * 1024
+	// 256 SHA-256 object requests remain well below the 64 KiB pipe buffer.
+	gitBatchWindow     = 256
 	regularFileMode    = "100644"
 	executableFileMode = "100755"
 	symlinkMode        = "120000"
@@ -178,8 +180,8 @@ func extract(ctx context.Context, repo, object, dir string) error {
 }
 
 // extractWithGit streams one tree listing into one long-lived cat-file batch.
-// It deliberately never accumulates the listing or a blob in memory: the
-// largest resident inputs are one bounded tree record and the pipe buffers.
+// It keeps only a bounded request window in memory, removing a pipe round trip
+// per blob while retaining the raw-object, path-safety, and cleanup contracts.
 func extractWithGit(ctx context.Context, repo, object, dir string, command commandFactory) (retErr error) {
 	lsCmd := command(ctx, repo, "ls-tree", "-r", "-z", "--full-tree", object)
 	lsOut, err := lsCmd.StdoutPipe()
@@ -221,6 +223,16 @@ func extractWithGit(ctx context.Context, repo, object, dir string, command comma
 
 	treeReader := bufio.NewReaderSize(lsOut, gitPipeBufferSize)
 	objectReader := bufio.NewReaderSize(catOut, gitPipeBufferSize)
+	pending := make([]treeEntry, 0, gitBatchWindow)
+	flushPending := func() error {
+		for _, entry := range pending {
+			if err := writeBlobFile(objectReader, dir, entry); err != nil {
+				return commandError(ctx, "read git cat-file", err)
+			}
+		}
+		pending = pending[:0]
+		return nil
+	}
 	for {
 		record, readErr := treeReader.ReadSlice(0)
 		if readErr == io.EOF && len(record) == 0 {
@@ -246,9 +258,15 @@ func extractWithGit(ctx context.Context, repo, object, dir string, command comma
 		if _, err := io.WriteString(catIn, entry.oid+"\n"); err != nil {
 			return commandError(ctx, "write git cat-file request", err)
 		}
-		if err := writeBlobFile(objectReader, dir, entry); err != nil {
-			return commandError(ctx, "read git cat-file", err)
+		pending = append(pending, entry)
+		if len(pending) == cap(pending) {
+			if err := flushPending(); err != nil {
+				return err
+			}
 		}
+	}
+	if err := flushPending(); err != nil {
+		return err
 	}
 
 	lsWaitErr := lsProcess.wait()
