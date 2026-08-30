@@ -1,0 +1,39 @@
+{
+  "schema": "fak-apple-memory-current-provider/1",
+  "issue": 9427,
+  "captured_at": "2026-08-30T19:00:00Z",
+  "provider": "apple-powermetrics",
+  "provider_version": "macOS 26.6.2 (25G83)",
+  "platform": {
+    "architecture": "arm64",
+    "hardware": "Apple Silicon (scrubbed)",
+    "operating_system": "macOS 26.6.2",
+    "build": "25G83"
+  },
+  "probe": {
+    "command": ["/usr/bin/powermetrics", "--help"],
+    "exit_status": 0,
+    "advertised_samplers": ["ane_power", "battery", "cpu_power", "disk", "gpu_power", "interrupts", "network", "sfi", "tasks", "thermal"]
+  },
+  "result": {
+    "status": "unavailable",
+    "unavailable_reason": "unsupported",
+    "detail": "powermetrics exposes no documented package/system unified-memory read/write byte-rate or monotonic-byte-counter sampler",
+    "scope": {"kind": "system"},
+    "interval_ns": 0,
+    "rate_or_delta": "unavailable",
+    "reset_semantics": "unavailable; no byte counter was accepted",
+    "raw_fields": [],
+    "raw_units": []
+  },
+  "negative_evidence": {
+    "one_shot_gpu_power_probe": {
+      "command": ["/usr/bin/powermetrics", "--samplers", "gpu_power", "-n", "1", "-i", "100", "-f", "plist"],
+      "status": "unavailable",
+      "unavailable_reason": "permission-denied",
+      "stderr": "powermetrics must be invoked as the superuser"
+    },
+    "excluded_inputs": ["capacity", "pressure", "residency", "process/storage I/O", "power", "utilization", "GPU occupancy", "theoretical rooflines"]
+  },
+  "scrubbing": "No hostname, serial number, user name, private path, credential, process list, or raw internal log is retained."
+}
