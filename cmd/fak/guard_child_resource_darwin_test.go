@@ -670,6 +670,35 @@ func TestGuardChildResourceMonitorDarwinReapsOwnedTreeAndReceipts(t *testing.T) 
 	}
 }
 
+func TestGuardChildResourceMonitorDarwinVanishedRootDefersToChildWait(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+	called := make(chan struct{}, 1)
+	resource := startGuardChildResourceMonitorWithCollector(1234, "trace-darwin-exit", "codex", guardResourcePolicy{
+		PollInterval: 10 * time.Millisecond,
+		Metric:       procguard.MemoryMetricRSS,
+		MaxTreeBytes: 1,
+		Stop:         stop,
+	}, func(pid int) (procguard.MemorySnapshot, bool, string) {
+		if pid != 1234 {
+			t.Fatalf("collector pid=%d", pid)
+		}
+		called <- struct{}{}
+		return procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS}, true, ""
+	})
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("resource collector was not polled")
+	}
+	select {
+	case event := <-resource:
+		t.Fatalf("vanished root emitted false resource event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestGuardChildResourceMonitorDarwinSurfacesCollectorError(t *testing.T) {
 	stop := make(chan struct{})
 	resource := startGuardChildResourceMonitor(-1, "trace-darwin-error", "codex", guardResourcePolicy{

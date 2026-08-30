@@ -229,6 +229,10 @@ func scrubGuardResourceDetail(detail string) string {
 }
 
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
+	return startGuardChildResourceMonitorWithCollector(rootPID, traceID, agent, policy, procguard.CollectMemorySnapshot)
+}
+
+func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
 	out := make(chan guardChildWaitEvent, 1)
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
@@ -239,7 +243,13 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 				return
 			case <-ticker.C:
 			}
-			snapshot, supported, detail := procguard.CollectMemorySnapshot(rootPID)
+			snapshot, supported, detail := collect(rootPID)
+			if runtime.GOOS == "darwin" && snapshot.RootPID == 0 {
+				// The root exited during Darwin's independent relation/RSS census.
+				// Leave its exit to the normal child wait/crash path; there is no
+				// resource violation to receipt or reap.
+				return
+			}
 			if !supported {
 				if runtime.GOOS == "windows" {
 					out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_UNAVAILABLE", detail)
