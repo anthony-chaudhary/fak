@@ -672,3 +672,103 @@ func TestStableLaunchUpdatePoliciesPreserveProcessContract(t *testing.T) {
 		}
 	})
 }
+
+func TestInstalledLaunchTopologyWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows launch topology")
+	}
+
+	root := t.TempDir()
+	nodeSource := filepath.Join(os.Getenv("WINDIR"), "System32", "whoami.exe")
+	nodeBytes, err := os.ReadFile(nodeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeDir := filepath.Join(root, "node runtime")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(nodeDir, "node.exe")
+	if err := os.WriteFile(node, nodeBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const provider = "codex"
+	entrypointRel := filepath.Join("node_modules", "@openai", "codex", "bin", "codex.js")
+	makeInstall := func(name string, entrypoint bool) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, provider+".cmd"), []byte("@echo off\r\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if entrypoint {
+			path := filepath.Join(dir, entrypointRel)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("// hermetic fixture\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	managed := makeInstall("managed wrapper", false)
+	npm := makeInstall("npm provider", true)
+	npmSpaces := makeInstall("npm provider with spaces", true)
+	missing := makeInstall("npm missing entrypoint", false)
+	first := makeInstall("npm first", true)
+	second := makeInstall("npm second", true)
+
+	tests := []struct {
+		name       string
+		path       []string
+		wantDir    string
+		wantDirect bool
+	}{
+		{name: "managed wrapper directory precedes npm provider", path: []string{managed, npm}, wantDir: npm, wantDirect: true},
+		{name: "npm provider precedes managed", path: []string{npm, managed}, wantDir: npm, wantDirect: true},
+		{name: "provider path contains spaces", path: []string{npmSpaces}, wantDir: npmSpaces, wantDirect: true},
+		{name: "provider cmd missing Node entrypoint", path: []string{missing}, wantDirect: false},
+		{name: "two provider installations choose first non-managed", path: []string{managed, first, second}, wantDir: first, wantDirect: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pathEnv := strings.Join(tt.path, string(os.PathListSeparator))
+			original := []string{provider, "--version"}
+			resolved := resolveNodeBatchCommandFromPath(original, entrypointRel, node, pathEnv)
+			if !tt.wantDirect {
+				if !reflect.DeepEqual(resolved, original) {
+					t.Fatalf("resolved=%q want unresolved %q", resolved, original)
+				}
+				return // Resolution failed before any spawn attempt.
+			}
+
+			wantEntrypoint := filepath.Join(tt.wantDir, entrypointRel)
+			want := []string{node, wantEntrypoint, "--version"}
+			if !reflect.DeepEqual(resolved, want) {
+				t.Fatalf("resolved=%q want %q", resolved, want)
+			}
+
+			t.Setenv("PATH", pathEnv+string(os.PathListSeparator)+nodeDir)
+			cmd := newResolvedExecCommand(original)
+			if !strings.EqualFold(filepath.Base(cmd.Path), "node.exe") {
+				t.Fatalf("command path=%q want node.exe", cmd.Path)
+			}
+			if strings.EqualFold(filepath.Base(cmd.Path), "cmd.exe") {
+				t.Fatalf("command unexpectedly uses cmd.exe: %q", cmd.Path)
+			}
+			if len(cmd.Args) < 2 || !strings.EqualFold(cmd.Args[0], node) || cmd.Args[1] != wantEntrypoint {
+				t.Fatalf("command argv=%q want node and direct entrypoint %q", cmd.Args, wantEntrypoint)
+			}
+			if err := cmd.Run(); err == nil {
+				return
+			} else if _, ok := err.(*os.PathError); ok {
+				t.Fatalf("node.exe was not spawned: %v", err)
+			}
+		})
+	}
+}
