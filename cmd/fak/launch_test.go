@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -767,6 +768,170 @@ func TestInstalledLaunchTopologyWindows(t *testing.T) {
 				return
 			} else if _, ok := err.(*os.PathError); ok {
 				t.Fatalf("node.exe was not spawned: %v", err)
+			}
+		})
+	}
+}
+
+func TestInstalledLaunchTopologyUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix launch topology test is not supported on Windows")
+	}
+
+	type row struct {
+		name            string
+		pathOrder       func(managedDir, providerDir string) []string
+		prepareManaged  func(t *testing.T, managedDir, providerPath, capturePath, expectedMarker string) string
+		prepareProvider func(t *testing.T, providerPath string)
+		expectSelected  func(managedPath, providerPath string) string
+		expectCapture   string
+		expectStartErr  bool
+	}
+
+	writeScript := func(t *testing.T, path, body string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), mode); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	makeProvider := func(t *testing.T, providerDir, capturePath, marker string) string {
+		t.Helper()
+		providerPath := filepath.Join(providerDir, "codex")
+		script := "#!/bin/sh\n" +
+			"printf '%s\\n' '" + marker + "' >> '" + capturePath + "'\n" +
+			"exit 0\n"
+		writeScript(t, providerPath, script, 0o755)
+		return providerPath
+	}
+
+	makeManagedSymlinkOrForwarder := func(t *testing.T, managedDir, providerPath, capturePath, marker string) string {
+		t.Helper()
+		managedPath := filepath.Join(managedDir, "codex")
+		if err := os.Symlink(providerPath, managedPath); err == nil {
+			return managedPath
+		} else if !strings.Contains(strings.ToLower(err.Error()), "not supported") && !strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Fatalf("create managed symlink: %v", err)
+		}
+		forwarder := "#!/bin/sh\n" +
+			"printf '%s\\n' '" + marker + "' >> '" + capturePath + "'\n" +
+			"exec '" + providerPath + "' \"$@\"\n"
+		writeScript(t, managedPath, forwarder, 0o755)
+		return managedPath
+	}
+
+	rows := []row{
+		{
+			name:      "managed-script-first",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{managedDir, providerDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				return makeManagedSymlinkOrForwarder(t, managedDir, providerPath, capturePath, "managed")
+			},
+			expectSelected: func(managedPath, providerPath string) string { return managedPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "provider-first",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{providerDir, managedDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				return makeManagedSymlinkOrForwarder(t, managedDir, providerPath, capturePath, "managed")
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "broken-managed-symlink",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{managedDir, providerDir} },
+			prepareManaged: func(t *testing.T, managedDir, providerPath, capturePath, _ string) string {
+				managedPath := filepath.Join(managedDir, "codex")
+				if err := os.Symlink(filepath.Join(managedDir, "missing-codex"), managedPath); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "not supported") || strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+						t.Skip("symlink creation unsupported on this platform")
+					}
+					t.Fatalf("create broken managed symlink: %v", err)
+				}
+				return managedPath
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectCapture:  "provider",
+		},
+		{
+			name:      "non-executable-provider",
+			pathOrder: func(managedDir, providerDir string) []string { return []string{providerDir, managedDir} },
+			prepareProvider: func(t *testing.T, providerPath string) {
+				if err := os.Chmod(providerPath, 0o600); err != nil {
+					t.Fatalf("chmod provider non-executable: %v", err)
+				}
+			},
+			expectSelected: func(managedPath, providerPath string) string { return providerPath },
+			expectStartErr: true,
+		},
+	}
+
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			managedDir := filepath.Join(root, "managed")
+			providerDir := filepath.Join(root, "provider")
+			if err := os.MkdirAll(managedDir, 0o755); err != nil {
+				t.Fatalf("mkdir managed: %v", err)
+			}
+			if err := os.MkdirAll(providerDir, 0o755); err != nil {
+				t.Fatalf("mkdir provider: %v", err)
+			}
+
+			capturePath := filepath.Join(root, "capture.txt")
+			providerPath := makeProvider(t, providerDir, capturePath, "provider")
+			if tc.prepareProvider != nil {
+				tc.prepareProvider(t, providerPath)
+			}
+			managedPath := ""
+			if tc.prepareManaged != nil {
+				managedPath = tc.prepareManaged(t, managedDir, providerPath, capturePath, tc.name)
+			}
+
+			t.Setenv("PATH", strings.Join(tc.pathOrder(managedDir, providerDir), string(os.PathListSeparator)))
+			selected, err := exec.LookPath("codex")
+			if err != nil {
+				t.Fatalf("LookPath(codex): %v", err)
+			}
+
+			expectedSelected := tc.expectSelected(managedPath, providerPath)
+			if selected != expectedSelected {
+				t.Fatalf("selected path = %q, want %q", selected, expectedSelected)
+			}
+
+			cmd := exec.Command(providerPath)
+			startErr := cmd.Start()
+			if tc.expectStartErr {
+				if startErr == nil {
+					_ = cmd.Wait()
+					t.Fatal("Start() succeeded, want pre-spawn error")
+				}
+				if data, readErr := os.ReadFile(capturePath); readErr == nil && len(data) > 0 {
+					t.Fatalf("capture = %q, want empty", string(data))
+				} else if readErr != nil && !os.IsNotExist(readErr) {
+					t.Fatalf("read capture: %v", readErr)
+				}
+				return
+			}
+			if startErr != nil {
+				t.Fatalf("Start() failed: %v", startErr)
+			}
+			if err := cmd.Wait(); err != nil {
+				t.Fatalf("Wait() failed: %v", err)
+			}
+
+			data, err := os.ReadFile(capturePath)
+			if err != nil {
+				t.Fatalf("read capture: %v", err)
+			}
+			got := strings.TrimSpace(string(data))
+			if got != tc.expectCapture {
+				t.Fatalf("capture = %q, want %q", got, tc.expectCapture)
+			}
+			if strings.Contains(got, "codex") {
+				t.Fatalf("unexpected bare-command fallback marker in capture: %q", got)
 			}
 		})
 	}
