@@ -110,20 +110,28 @@ Run #9513's final same-artifact fak-native versus pinned llama.cpp Mac campaign;
 
 ## Current state
 
-- M1 mechanism #9073 landed at `58fc89e29`, but the exact #9482/#8325 campaign is HOLD, not KEEP or REJECT: control arm 01 exited 137 after 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms. Open blocker #9714 now owns restoration and an ownership-only drill for the managed incumbent before any exact model arm; restart also requires a durable clean source witness, stricter pressure gates, and fresh quiescence checks.
-- M2's invalid #9444 child remains rejected. Corrected mechanism #9456 landed at `8a423b8a5`; #9525 now owns the typed receipt instrumentation and exact six-arm P32 A/B under #9230, with a hard dependency after #8325 establishes a recovered safe envelope. M2 remains `0 KEEP`.
-- M3 mechanism #9486 landed at `46fdd8a52fd70b3e29345cd311be3cc89443e8fc` with one P=1 Qwen GDN mixer command buffer. The M4 block mechanism landed at `99ea660ae222dd6a75dd661c54778f470904f9e7`; live #9488 closed at 2026-08-28T12:52:12Z as a mechanism-only leaf. Its completion reconciliation assigns the still-missing exact-artifact performance receipt to #8324/#9430. Neither mechanism advances KEEP.
-- M1-M4 remain the memory/submission spine and are ordered by current dependencies, not by issue age. M1 then M2 are same-Mac measurement packets; later source work may run only when paths and device receipts are disjoint.
-- M5 is not runnable on the 36 GiB host until the startup envelope is reduced or a sanctioned >=64 GiB Apple-Silicon node is available.
-- The old M5 receipt leaf #8972 was manually closed without meeting its acceptance gate. #9430 must create or reconcile a replacement ship-alone receipt leaf after M1-M4; closure is not evidence.
-- The closed #8848 no longer owns the still-open measurement loop. #9495 owns the real Metal profile after M1, #9497 owns the independently runnable real CUDA profile, and #9498 owns returned-receipt workflow consumption after both bundles validate.
-- M6 correctness substrate #9076 remains synthetic-only. #9492 owns the exact same-binary NativeScheduler Metal paged-swap OFF/ON implementation plus live receipt; it is blocked by accepted M1-M4 receipts and the `composition-9280-full` modelengine lease.
-- M7 mechanism child #9499 is open but blocked by #9492 and overlapping M8 paths; M7-M8 have no accepted isolated Mac arm under this plan.
-- M9 linear-attention B=2..8 substrate #9515 remains validly shipped at `14dd0d1e405273e4b37da742ed2529053dc0f243`, enabling-only. The repaired and reviewed four-path exact-Qwen3.8 full-attention substrate #9516 is validly shipped at `a50f903efc503da8d6df6ae2c9b63f36ff8eac4b` (`internal/metalgemm@r63+ga50f903ef`), also enabling-only. #9074/#9075 remain open for integration and an exact receipt; neither substrate advances KEEP.
-- Umbrella #9430 was incorrectly closed from plan-document-only commit `a6fa45cd25e047865c763384beaf27ee9a2a2149` and has been reopened: both this plan and the issue body remain `0 / 10 KEEP` with ten unchecked tasks.
-- M10 is now owned by open #9513. Closed #8697 and #8972 remain historical evidence and do not satisfy the close-out receipt.
-- Rejected/default-off #9093, #9192, and #8833 experiments are excluded from KEEP credit.
-- Managed worker inventory contains overlapping stale Metal/model worktrees; harvest against git truth before dispatching any overlapping phase.
+Issue #10317 applies the canonical three-axis model in [`docs/progress-state-defaults.md`](../progress-state-defaults.md) to the completed #10193 cross-backend top-10 pass. Historical `HOLD`, demotion, and acceptance outcomes remain evidence history. They do not erase delivered scope and do not create unsupported performance credit. Only row 3 reached its stated full acceptance; every native-performance claim remains subject to the unchanged strict fak-native gate.
+
+| Rank / issues | Product | Evidence | Queue | Next movement |
+|---:|---|---|---|---|
+| 1 / #8821 | `SPINE_SHIPPED` | `RUNTIME_READY`; historical `HOLD_NO_QUALIFYING_CUDA_EVIDENCE` remains the receipt outcome | `READY_TO_RUN / EXTERNAL_BLOCK` | Dispatch the exact quality-valid CUDA profiling packet when the sanctioned device/receipt route is restored; select no kernel lever before real counters exist. |
+| 2 / #9525, #9230, #9257 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`BOUNDED_ACCEPTANCE`: validator and receipt contract only) | `DEPENDENCY_ADVANCING` | Remove the safe-runtime dependency, then run the exact six-arm P32 sequence-prefill packet. |
+| 3 / #9982, #9979 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED`; stated speculative verify/accept and atomic rollback scope fully accepted | `COMPLETE` | No further work for the accepted scope; open a separate issue for any broader performance campaign. |
+| 4 / #8820 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for the delivered prefill mechanism; no new qualifying performance receipt | `PARKED_LOW_VALUE` | Reactivate when row 1's profile or a fresh TTFT receipt shows panel prefill is again the highest-value lever. |
+| 5 / #9216 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for the resident handoff spine; runtime performance remains unqualified | `QUEUED_BEHIND #8325` | Run the ordered exact Metal receipt after #8325 establishes a safe matched envelope. |
+| 6 / #8324 | `SPINE_SHIPPED` | `RUNTIME_READY`; no qualifying coarse-graph runtime receipt | `CAPACITY_BLOCKED` | Keep the exact packet dispatchable and run it on sanctioned capacity that meets the declared memory/claim envelope. |
+| 7 / #8822, #9513 | `NOT_STARTED` for the matched reconvergence campaign | `NO_EVIDENCE` beyond prerequisite receipts | `DEPENDENCY_ADVANCING` | Close the named backend receipt dependencies, then reconverge quality, latency, throughput, fallback, and accounting checkpoints. |
+| 8 / #2723 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`BOUNDED_ACCEPTANCE`: fail-closed exact Qwen3.8 three-arm validator only) | `READY_TO_RUN` | Execute the pinned fak-native, llama.cpp, and MLX comparison packet; keep llama.cpp/MLX reference-only and award no fak performance credit without the full gate. |
+| 9 / #8395 → #9499 → #1912 → #9074/#9075 | `SPINE_SHIPPED` for the first enabling slice | `CONTRACT_VALIDATED` for shipped substrate only; exact integrated runtime remains missing | `DEPENDENCY_ADVANCING: 1/N` | Advance one dependency edge at a time: paged state, exact-prefix ownership, chunked prefill, then resident co-batching. |
+| 10 / #9987 → #8657 → #8658 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for bounded prerequisite behavior; resident speculative runtime evidence remains missing | `ACTIVE_PROBE / DEPENDENCY_ADVANCING` | Run the smallest fak-native residency probe that can retire the next dependency, then preserve the pinned campaign receipt. |
+
+Additional plan state:
+
+- Delivery credit is recorded for witnessed validators, correctness, implementations, prepared packets, and removed dependencies. Performance credit remains separate and fail-closed.
+- The exact Qwen3.8-27B Q4_K_M artifact remains pinned by SHA-256 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`.
+- llama.cpp and MLX remain explicit comparison/reference arms only; neither is a fak product fallback.
+- Historical row evidence remains authoritative: rows 1, 4-7, 9, and 10 retained typed hold/demotion outcomes; rows 2 and 8 shipped bounded validator/correctness spines without runtime qualification; row 3 alone reached full acceptance.
+- This current-state overlay does not rewrite the older M1-M10 execution history below. It makes the completed #10193 ranking actionable under issue #10317.
 
 ## Prior-art route
 
@@ -135,6 +143,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 
 ## Execution log
 
+- 2026-08-30: issue #10317 made the three-axis progress vocabulary canonical, preserved prior `HOLD`/`REJECT` outcomes as evidence history, separated delivery from performance credit, and reframed all ten rows with an actionable next movement; the strict fak-native gate and `0 / 10` performance-qualified result are unchanged.
 - 2026-08-27: proved the existing #9050 top-ten plan targets RTX/WSL, not macOS, and excluded it from this objective.
 - 2026-08-27: read the authoritative eight-lever Metal graph and selected only two measured prerequisites to form the ten-item execution queue.
 - 2026-08-27: opened umbrella #9430 with all ten task-list items and full completion contract.
