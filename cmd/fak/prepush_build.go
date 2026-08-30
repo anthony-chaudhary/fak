@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -83,6 +84,7 @@ var (
 	prepushChangedFiles         = gitChangedGoFilesRange
 	prepushExtractTip           = prepushArchiveTip
 	prepushListGraph            = goListGraph
+	prepushListTestOnly         = listTestOnlyPackages
 	prepushBuild                = goBuildPackages
 	prepushNow                  = time.Now
 	prepushCommitPathsCoveredFn = prepushCommitPathsCovered
@@ -687,9 +689,12 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 
 	res.ChangedPackages = affectedtests.ChangedPackages(fileToPkg, changed)
 	res.SelectedPackages = affectedtests.Select(edges, res.ChangedPackages)
+	res.SelectedPackages = packagesWithProductionFiles(res.SelectedPackages, prepushListTestOnly(dir, res.SelectedPackages))
 	if len(res.SelectedPackages) == 0 {
-		// Changed .go files map to no package in the pushed tip (e.g. an only-deletion or a
-		// non-package file) → nothing to build. See the honest-limit note in the file header.
+		// Changed .go files map to no buildable production package in the pushed tip (e.g. an
+		// only-deletion, a non-package file, or a package made entirely of tests) → nothing to
+		// build. Test-only packages remain valid `go test` targets, but `go build` rejects them
+		// before it reaches any real compile admission.
 		res.OK, res.Verdict = true, "NOOP"
 		return res, 0
 	}
@@ -715,6 +720,50 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 	}
 	res.Verdict = "OK"
 	return res, 0
+}
+
+// listTestOnlyPackages positively identifies selected packages that have tests but no
+// production Go source for the current platform. These are valid `go test` targets, while
+// passing them to `go build` produces "no non-test Go files" and masks the rest of the compile
+// cone. A package is omitted only when its archived-tip metadata proves that exact shape;
+// command failures, malformed output, and packages absent from the output remain in the build.
+func listTestOnlyPackages(root string, packages []string) map[string]bool {
+	testOnly := make(map[string]bool)
+	if len(packages) == 0 {
+		return testOnly
+	}
+
+	args := append([]string{"list", "-e", "-json"}, packages...)
+	cmd := exec.Command("go", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	_ = cmd.Run() // Decode any complete objects; unreported packages stay selected fail-safe.
+
+	dec := json.NewDecoder(&out)
+	for {
+		var p goPkg
+		if err := dec.Decode(&p); err != nil {
+			break
+		}
+		if p.ImportPath != "" && len(p.GoFiles) == 0 && len(p.CgoFiles) == 0 &&
+			(len(p.TestGoFiles) > 0 || len(p.XTestGoFiles) > 0) {
+			testOnly[p.ImportPath] = true
+		}
+	}
+	return testOnly
+}
+
+func packagesWithProductionFiles(packages []string, testOnly map[string]bool) []string {
+	buildable := make([]string, 0, len(packages))
+	for _, pkg := range packages {
+		if !testOnly[pkg] {
+			buildable = append(buildable, pkg)
+		}
+	}
+	return buildable
 }
 
 // resolveTipBuildFailure attributes a tip-cone build failure to either this push or a peer (#3618),
