@@ -670,6 +670,8 @@ artifact SHA-256 and slot ID, `VERSION`/linker provenance owns app version, and 
 owns the monotonic metadata generation. A digest-equal candidate refreshes selected-source
 metadata but does not copy, swap, activate, or change app version. Persisted rollback state
 selects a verified artifact slot by digest, never by an ambiguous app-version string.
+
+Self-update also emits a deterministic per-component plan. Every `targets[]` row names the desired and installed artifact digests, acquisition (`reuse` or `transfer_or_build`), activation (`no_op` or `activate`), compatibility group, and rollback action. Already-current components are excluded from activation; compatibility-coupled stale components remain one staged transaction, so an activation failure restores every component moved by that transaction.
 `--manifest-url` opts into conditional selection before any git fetch, build, or install. The
 server returns a canonical JSON payload signed by the public Ed25519 key pinned in the binary.
 The signature is verified before schema, manifest ID, channel, cohort, OS, architecture,

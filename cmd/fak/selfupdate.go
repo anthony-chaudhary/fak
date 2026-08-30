@@ -474,8 +474,14 @@ type selfUpdateReceipt struct {
 }
 
 type selfUpdateReceiptTarget struct {
-	Role string `json:"role"`
-	Path string `json:"path"`
+	Role                    string `json:"role"`
+	Path                    string `json:"path"`
+	CompatibilityGroup      string `json:"compatibility_group,omitempty"`
+	DesiredArtifactDigest   string `json:"desired_artifact_digest,omitempty"`
+	InstalledArtifactDigest string `json:"installed_artifact_digest,omitempty"`
+	Acquisition             string `json:"acquisition,omitempty"`
+	Activation              string `json:"activation,omitempty"`
+	Rollback                string `json:"rollback,omitempty"`
 }
 
 type selfUpdateBuildProvenance struct {

@@ -13203,6 +13203,16 @@
           "category": "incidental",
           "reason": "Unexported windowgate executable-name catalog reused by popup scanners; candidate describes membership in a console-tool set, not a planner Candidate or execution plan.",
           "token": "candidateConsoleTools"
+        },
+        {
+          "category": "incidental",
+          "reason": "local variable holding the self-update component decision rows; not a durable planning concept",
+          "token": "componentPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go helper deriving component convergence rows; not a project plan primitive",
+          "token": "PlanComponents"
         }
       ],
       "exclude": [
@@ -13264,6 +13274,7 @@
         "PLAN_CONTRACT_INCOMPATIBLE",
         "PLAN_SCHEMA_INCOMPATIBLE",
         "PlanClassifyMany",
+        "PlanComponents",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanGoTmp",
@@ -13337,6 +13348,7 @@
         "candidates",
         "clonePlan",
         "compareCandidate",
+        "componentPlan",
         "dedupCandidate",
         "defaultsCheckPlanner",
         "dispatchWaveExecutionPlanWithSize",

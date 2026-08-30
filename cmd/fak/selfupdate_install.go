@@ -176,29 +176,36 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		os.Exit(1)
 	}
 
-	copies := make([]selfinstall.Copy, 0, 1+len(staleSiblings)+len(companionPaths))
-	copies = append(copies, selfinstall.Copy{Source: candidate, Target: installTarget})
+	components := make([]selfinstall.Component, 0, 1+len(staleSiblings)+len(companionPaths))
+	components = append(components, selfinstall.Component{Name: "primary", Source: candidate, Target: installTarget, CompatibilityGroup: "launcher", Acquisition: selfinstall.ComponentTransferOrBuild})
 	for _, target := range staleSiblings {
-		copies = append(copies, selfinstall.Copy{Source: candidate, Target: target})
+		components = append(components, selfinstall.Component{Name: "hot_copy", Source: candidate, Target: target, CompatibilityGroup: "launcher", Acquisition: selfinstall.ComponentReuse})
 	}
 	for _, target := range companionPaths {
-		copies = append(copies, selfinstall.Copy{Source: companionBinary, Target: target})
+		components = append(components, selfinstall.Component{Name: "companion", Source: companionBinary, Target: target, CompatibilityGroup: "launcher", Acquisition: selfinstall.ComponentTransferOrBuild})
 	}
-
-	selfUpdateReceiptTargets = make([]selfUpdateReceiptTarget, 0, len(copies))
-	for i, copy := range copies {
-		role := "hot_copy"
-		switch {
-		case i == 0:
-			role = "primary"
-		case i > len(staleSiblings):
-			role = "companion"
-		}
-		selfUpdateReceiptTargets = append(selfUpdateReceiptTargets, selfUpdateReceiptTarget{Role: role, Path: filepath.Clean(copy.Target)})
+	componentPlan, planErr := selfinstall.PlanComponents(components)
+	if planErr != nil {
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, "component plan: "+planErr.Error())
+		cleanupAttempt()
+		os.Exit(1)
 	}
-	selfUpdateReceiptAttempted = len(copies)
+	copies := selfinstall.CopiesForActivation(components, componentPlan)
+	selfUpdateReceiptTargets = make([]selfUpdateReceiptTarget, 0, len(componentPlan))
+	for _, plan := range componentPlan {
+		selfUpdateReceiptTargets = append(selfUpdateReceiptTargets, selfUpdateReceiptTarget{
+			Role: plan.Name, Path: filepath.Clean(plan.Target), CompatibilityGroup: plan.CompatibilityGroup,
+			DesiredArtifactDigest: plan.DesiredArtifactDigest, InstalledArtifactDigest: plan.InstalledArtifactDigest,
+			Acquisition: string(plan.Acquisition), Activation: string(plan.Activation), Rollback: plan.Rollback,
+		})
+	}
+	selfUpdateReceiptAttempted = len(componentPlan)
 	stopHeartbeat = startSelfUpdateHeartbeat(82, "installing verified binaries")
-	transaction := selfinstall.RunLaunchTransaction(copies, installTarget, selfinstall.OSSwap)
+	transactionLaunchTarget := installTarget
+	if len(copies) > 0 && primaryEqual {
+		transactionLaunchTarget = copies[0].Target
+	}
+	transaction := selfinstall.RunLaunchTransaction(copies, transactionLaunchTarget, selfinstall.OSSwap)
 	stopHeartbeat()
 	switch result := transaction.(type) {
 	case selfinstall.Updated:
