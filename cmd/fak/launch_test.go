@@ -893,7 +893,12 @@ func TestInstalledLaunchTopologyUnix(t *testing.T) {
 
 			t.Setenv("PATH", strings.Join(tc.pathOrder(managedDir, providerDir), string(os.PathListSeparator)))
 			selected, err := exec.LookPath("codex")
-			if err != nil {
+			if tc.expectStartErr {
+				if !errors.Is(err, exec.ErrNotFound) {
+					t.Fatalf("LookPath(codex) error = %v, want exec.ErrNotFound before spawn", err)
+				}
+				selected = providerPath
+			} else if err != nil {
 				t.Fatalf("LookPath(codex): %v", err)
 			}
 
