@@ -76,6 +76,9 @@ type ResultStoreReceipt struct {
 	Resident    bool
 	Durable     bool
 	Replication ResultReplicationStatus
+	// ProducerDiagnostics is a canonical, versioned receipt. Its zero value keeps
+	// receipts produced before diagnostic replay source-compatible.
+	ProducerDiagnostics string
 }
 
 // PartialReplicationError reports that the resident insertion succeeded but the
@@ -301,11 +304,12 @@ func (v *VDSO) MissReasons() map[string]uint64 {
 }
 
 type entry struct {
-	key         string
-	ref         abi.Ref
-	witness     string                  // external world-state witness this entry was admitted under ("" = none)
-	filledAt    time.Time               // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
-	replication ResultReplicationStatus // resident-only by default; upgraded only after durable acknowledgement
+	key                 string
+	ref                 abi.Ref
+	witness             string                  // external world-state witness this entry was admitted under ("" = none)
+	filledAt            time.Time               // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
+	replication         ResultReplicationStatus // resident-only by default; upgraded only after durable acknowledgement
+	producerDiagnostics string                  // canonical replay-safe producer diagnostic receipt
 }
 
 // clock reads the vDSO's time source (injectable for tests; time.Now in production).
@@ -612,6 +616,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			hk, href, hwit := e.key, e.ref, e.witness
 			filledAt := e.filledAt
 			replication := e.replication
+			producerDiagnostics := e.producerDiagnostics
 			v.mu.Unlock()
 			atomic.AddInt64(&v.hits, 1)
 			// §2.5 consumer tracking: a HIT names the agent/turn that reused the entry
@@ -624,10 +629,13 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			if ageMs < 0 {
 				ageMs = 0
 			}
-			return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK,
-				Meta: map[string]string{"served_by": "vdso", "tier": "2",
-					"age_ms":              strconv.FormatInt(ageMs, 10),
-					MetaResultReplication: string(replication)}}, true
+			meta := map[string]string{"served_by": "vdso", "tier": "2",
+				"age_ms":              strconv.FormatInt(ageMs, 10),
+				MetaResultReplication: string(replication)}
+			if producerDiagnostics != "" {
+				meta[MetaProducerDiagnostics] = producerDiagnostics
+			}
+			return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK, Meta: meta}, true
 		}
 		v.mu.Unlock()
 	}
@@ -737,6 +745,10 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 		return ResultStoreReceipt{}, nil
 	}
 	wit := v.resolveWitness(c, r)
+	producerDiagnostics, err := canonicalProducerDiagnostics(metaValue(r.Meta, MetaProducerDiagnostics))
+	if err != nil {
+		return ResultStoreReceipt{}, err
+	}
 
 	v.regMu.RLock()
 	durable := v.resultStore
@@ -745,9 +757,10 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 	var key string
 	receipt, err := writeThroughResult(ctx, r.Payload, func(_ context.Context, ref abi.Ref) (bool, error) {
 		var stored bool
-		key, stored = v.storeResidentResult(c, args, ref, wit)
+		key, stored = v.storeResidentResult(c, args, ref, wit, producerDiagnostics)
 		return stored, nil
 	}, durable)
+	receipt.ProducerDiagnostics = producerDiagnostics
 	if !receipt.Resident {
 		if status, ok := v.resultReplication(key, r.Payload); ok {
 			receipt.Resident = true
@@ -760,6 +773,37 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 		v.setResultReplication(key, r.Payload, receipt.Replication)
 	}
 	return receipt, err
+}
+
+// RestoreResult reopens a cached result from a previously persisted store receipt.
+// The diagnostic receipt is revalidated and canonicalized before the entry becomes visible.
+func (v *VDSO) RestoreResult(ctx context.Context, c *abi.ToolCall, receipt ResultStoreReceipt) error {
+	if c == nil || !receipt.Resident {
+		return nil
+	}
+	diagnostics, err := canonicalProducerDiagnostics(receipt.ProducerDiagnostics)
+	if err != nil {
+		return err
+	}
+	args := v.bytes(ctx, c.Args)
+	_, stored := v.storeResidentResult(c, args, receipt.Ref, v.resolveWitness(c, nil), diagnostics)
+	if stored && receipt.Replication != "" {
+		v.setResultReplication(v.keyFor(c, args), receipt.Ref, receipt.Replication)
+	}
+	return nil
+}
+
+func metaValue(meta map[string]string, key string) string {
+	if meta == nil {
+		return ""
+	}
+	return meta[key]
+}
+
+func (v *VDSO) keyFor(c *abi.ToolCall, args []byte) string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.keyLocked(c, args)
 }
 
 type residentResultStore func(context.Context, abi.Ref) (bool, error)
@@ -784,7 +828,7 @@ func writeThroughResult(ctx context.Context, ref abi.Ref, current residentResult
 	return receipt, nil
 }
 
-func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, witness string) (string, bool) {
+func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, witness, producerDiagnostics string) (string, bool) {
 	// The fill + LRU-evict run under v.mu. Cachemeta jobs cross the lock boundary
 	// because an observer may re-enter the vDSO.
 	var key string
@@ -802,11 +846,12 @@ func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, wi
 			return nil, nil
 		}
 		el := v.lru.PushFront(&entry{
-			key:         key,
-			ref:         ref,
-			witness:     witness,
-			filledAt:    v.clock(),
-			replication: ResultResidentOnly,
+			key:                 key,
+			ref:                 ref,
+			witness:             witness,
+			filledAt:            v.clock(),
+			replication:         ResultResidentOnly,
+			producerDiagnostics: producerDiagnostics,
 		})
 		v.cache[key] = el
 		atomic.AddInt64(&v.fills, 1)
