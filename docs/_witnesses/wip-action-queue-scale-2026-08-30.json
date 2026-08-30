@@ -1,0 +1,106 @@
+{
+  "schema": "fak-wip-action-queue-scale-witness/1",
+  "observed_at": "2026-08-30",
+  "issue": 10363,
+  "base_sha": "bb1ab10cdc5c36551cd94dd3284d2bdc9dd8c724",
+  "source_state": "base_sha plus the four issue-scoped working-tree paths",
+  "surface": "fak wip queue [--json] [-C DIR]",
+  "commands": {
+    "build": "go build -o <unique-temp>/fak ./cmd/fak",
+    "json_run_1": "/usr/bin/time -p <unique-temp>/fak wip queue --json",
+    "json_run_2": "/usr/bin/time -p <unique-temp>/fak wip queue --json",
+    "text_run": "/usr/bin/time -p <unique-temp>/fak wip queue",
+    "explicit_root": "/usr/bin/time -p <unique-temp>/fak wip queue -C <repo> --json",
+    "focused_tests": "go test ./cmd/fak -run 'WIPQueue|Wip.*Queue|WipDispatch' -count=1",
+    "independent_lifecycle": "<unique-temp>/fak worktree worker list --json",
+    "independent_checkpoints": "git for-each-ref --format='%(refname)%00%(objectname)' refs/fak/wip"
+  },
+  "runtime_seconds": {
+    "json_run_1": 40.40,
+    "json_run_2": 39.63,
+    "text_run": 38.98,
+    "explicit_root_run": 38.84
+  },
+  "result": {
+    "schema": "fak-wip-action-queue/1",
+    "rows": 206,
+    "unique_units": 206,
+    "duplicate_units": 0,
+    "errors": 0,
+    "priority_counts": {
+      "1": 161,
+      "2": 7,
+      "3": 36,
+      "4": 2,
+      "5": 0
+    },
+    "kind_counts": {
+      "WORKTREE": 170,
+      "CHECKPOINT": 36
+    },
+    "state_counts": {
+      "DIRTY": 161,
+      "COLD": 8,
+      "READY": 1,
+      "KNOWN": 36
+    },
+    "reason_counts": {
+      "DIRTY_DEAD_OR_UNKNOWN_PROTECTION": 161,
+      "CLEAN_UNLANDED_COMMITS": 7,
+      "LOCAL_ONLY_CHECKPOINT": 36,
+      "LANDED_COLD_REAP_CANDIDATE": 2,
+      "HEALTHY_OWNED_WIP": 0
+    },
+    "provenance_counts": {
+      "WORKTREE_LIFECYCLE": 170,
+      "WIP_CHECKPOINT": 36
+    }
+  },
+  "accounting": {
+    "independent_lifecycle_rows": 170,
+    "independent_checkpoint_refs": 36,
+    "concrete_sha_associations": 0,
+    "expected_queue_rows": 206,
+    "actual_queue_rows": 206,
+    "equation": "170 lifecycle + 36 checkpoint - 0 concrete SHA associations = 206",
+    "verdict": "PASS: every independently enumerated worktree and checkpoint is represented exactly once"
+  },
+  "determinism": {
+    "normalization": "remove observed_at and set each age.seconds to zero; preserve all identities, classifications, commands, owners, and provenance",
+    "run_1_sha256": "ce2a4250e5d57e3986584cc15774ff3589c649e09d8a28c9ccf0057ee3dd9026",
+    "run_2_sha256": "ce2a4250e5d57e3986584cc15774ff3589c649e09d8a28c9ccf0057ee3dd9026",
+    "membership_equal": true,
+    "non_age_changed_rows": 0,
+    "stable_priority_path_order": true,
+    "verdict": "PASS"
+  },
+  "exact_command_witness": {
+    "checkpoint_command_shape": "fak wip restore -C <repo> <session>",
+    "executed_without_apply": true,
+    "exit_code": 0,
+    "stdout_bytes": 802,
+    "stderr": "",
+    "verdict": "PASS: emitted checkpoint command is accepted and remains read-only by default"
+  },
+  "text_contract": {
+    "rows": 206,
+    "owner_lines": 206,
+    "provenance_lines": 206,
+    "next_command_lines": 206,
+    "verdict": "PASS: text and JSON expose reason, risk, state/age, owner, provenance, and exact next command"
+  },
+  "read_only": {
+    "state_inputs": "git status --porcelain=v1 -uall; refs/fak/wip names+SHAs; git worktree list --porcelain",
+    "before_sha256": "69116d6a9dacc233d2ceb7cbe502b3f750fde7de49e33fb7ce1f8ecd6b599e94",
+    "after_sha256": "69116d6a9dacc233d2ceb7cbe502b3f750fde7de49e33fb7ce1f8ecd6b599e94",
+    "commands_executed_automatically": 0,
+    "verdict": "PASS"
+  },
+  "tests": {
+    "focused": "PASS",
+    "focused_output": "ok github.com/anthony-chaudhary/fak/cmd/fak 2.350s",
+    "git_diff_check": "PASS",
+    "build": "PASS"
+  },
+  "interpretation": "This is a bounded live-fleet census and prioritization witness, not a performance speedup claim for the queue alone. It turns 206 otherwise distributed work units into one typed, deterministic, conservative action queue; prior issues #10360 and #10362 supply the separately witnessed fleet-inventory and lifecycle latency improvements for the broader worktree-administration objective."
+}

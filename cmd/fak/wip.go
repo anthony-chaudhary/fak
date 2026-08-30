@@ -73,6 +73,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipBlocked(stdout, stderr, argv[1:])
 	case "inventory":
 		return runWIPInventory(argv[1:], stdout, stderr)
+	case "queue":
+		return runWIPQueue(argv[1:], stdout, stderr)
 	case "lifecycle":
 		return runWIPLifecycle(argv[1:], stdout, stderr)
 	case "reconcile":
@@ -221,6 +223,10 @@ func wipUsage(w io.Writer) {
 
   fak wip inventory [--json] [--root DIR] [--max-untracked-age DURATION]
       Read-only census of main WIP, ignored files, worktrees, stale residue, and checkpoints.
+
+  fak wip queue [--json] [-C DIR]
+      Prioritize every sanctioned worktree and local-only checkpoint into one
+      deterministic, read-only action queue with the exact next command.
 
   fak wip reconcile [-C <repo>] [--json] [--reclaim] [--file-ticket] [--dry-run]
       For every checkpoint whose owning session no longer holds a live lease
