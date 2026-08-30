@@ -55,7 +55,7 @@
       "kind": "subsystem",
       "definition": "The tool vDSO: a local fast path (pure registry, content-addressed cache, static table) that answers a tool call with zero engine round-trip.",
       "distinction": "The local FAST PATH that bypasses the engine - NOT the kernel (which dispatches all calls) and NOT the gateway (the wire).",
-      "distinct_from": ["kernel", "gateway", "engine"],
+      "distinct_from": ["kernel", "gateway", "engine", "issue9909-output-tokens-per-second"],
       "aliases": ["tool vDSO", "fast path"],
       "grounding": "vdso",
       "grounding_kind": "path",

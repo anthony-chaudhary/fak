@@ -366,7 +366,8 @@
    "definition": "internal/worktreewitness runs an arbitrary command inside a transient, self-reaping detached git worktree pinned at the resolved origin/main SHA, so the verdict reflects the trunk tip and is never contaminated by a peer's dirty uncommitted WIP in the shared working tree.",
    "distinction": "A general detached-worktree command RUNNER for any caller-supplied command, not buildwitness's narrower single-purpose `go build ./cmd/fak` compile proof.",
    "distinct_from": [
-    "witness-proof-buildwitness"
+     "witness-proof-buildwitness",
+     "issue9909-disambiguation-witnesses"
    ],
    "aliases": [
     "worktreewitness"

@@ -23,7 +23,7 @@
       "kind": "config",
       "definition": "The versioned JSON structure an operator edits to configure the capability floor, mapping 1:1 to adjudicator.Policy with deny reasons validated against the closed vocabulary.",
       "distinction": "The on-disk JSON REPRESENTATION - NOT the capability floor (the abstract intent) and NOT Policy (the compiled in-memory form).",
-      "distinct_from": ["capability-floor", "policy-loaded", "policy-manifest-xc", "fleetaccounts-policy-exclusion", "cmd-check-policy-file"],
+      "distinct_from": ["capability-floor", "policy-loaded", "policy-manifest-xc", "fleetaccounts-policy-exclusion", "cmd-check-policy-file", "issue9909-runtimecap-fallback-policy", "issue9909-attestation-policy-ref"],
       "aliases": [],
       "grounding": "policy",
       "grounding_kind": "path",

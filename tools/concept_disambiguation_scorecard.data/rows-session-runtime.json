@@ -7,7 +7,7 @@
       "kind": "subsystem",
       "definition": "The full drive record for one served run (run-state, budget, priority, pace), keyed by TraceID and persisting across turns.",
       "distinction": "The persistent RECORD across turns - NOT a Turn (one round-trip within it) and NOT a Slot (the free/busy signal).",
-      "distinct_from": ["turn", "slot", "cov5303-wt-session", "session-id", "x-session-runtime-bysession"],
+      "distinct_from": ["turn", "slot", "cov5303-wt-session", "session-id", "x-session-runtime-bysession", "issue9909-release-weight-session"],
       "aliases": [],
       "grounding": "session",
       "grounding_kind": "path",

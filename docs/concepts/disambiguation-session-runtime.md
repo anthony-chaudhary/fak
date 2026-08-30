@@ -44,3 +44,10 @@ This map positions the current `session-runtime` coverage backlog. Each entry na
 - **`tagservedsessionadmit`** — the exact `session-runtime` symbol `tagservedsessionadmit`; use this spelling for that operation rather than the undifferentiated family name.
 - **`targetsession`** — the exact `session-runtime` symbol `targetsession`; use this spelling for that operation rather than the undifferentiated family name.
 - **`validsessionid`** — the exact `session-runtime` symbol `validsessionid`; use this spelling for that operation rather than the undifferentiated family name.
+
+
+### releaseWeightSession (model-weight hold release)
+
+releaseWeightSession decrements the model weight-closer session hold after a native inference path finishes and completes deferred weight teardown when the last active holder leaves after CloseWeights begins.
+
+**Distinct from:** It releases one model-weight lifetime hold; it is not the served Session record that persists run state across turns and it does not schedule or end an agent session.

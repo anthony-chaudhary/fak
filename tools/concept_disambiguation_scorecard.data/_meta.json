@@ -3337,6 +3337,11 @@
           "category": "incidental",
           "reason": "Setter spelling used to propagate the positioned Q4KGateUpOutputSlab setting into engines and schedulers; it names no separate concept.",
           "token": "setq4kgateupoutputslab"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local accounts gate-write target-directory variable and parameter; it carries the directory being checked but is not a reusable guard, gate, or admission mechanism.",
+          "token": "gateDir"
         }
       ],
       "exclude": [
@@ -3479,6 +3484,7 @@
         "fullAggregates",
         "full_tree_gate_retry",
         "gateCommentQuality",
+        "gateDir",
         "gateGitHygieneBypass",
         "gateMicroharnessWitness",
         "gateProse",
@@ -8839,6 +8845,11 @@
           "category": "incidental",
           "reason": "Issue #9842 local parser and normalizer for the explicit fallback-policy option; implementation helper, not a standalone policy-capability concept.",
           "token": "normalizeFallbackPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local boolean recording whether an already-selected policy document decoded or its referenced file exists; it adds no policy type, capability, or adjudication posture.",
+          "token": "policyOK"
         }
       ],
       "exclude": [
@@ -8988,6 +8999,7 @@
         "policyErr",
         "policyLabels",
         "policyLocked",
+        "policyOK",
         "policyOf",
         "policyScore",
         "policy_admission",
@@ -13186,6 +13198,11 @@
           "category": "incidental",
           "reason": "CandidateCacheDir is the existing path-derivation helper for the verified candidate-artifact cache, not a separate planning concept.",
           "token": "candidatecachedir"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported windowgate executable-name catalog reused by popup scanners; candidate describes membership in a console-tool set, not a planner Candidate or execution plan.",
+          "token": "candidateConsoleTools"
         }
       ],
       "exclude": [
@@ -13303,6 +13320,7 @@
         "buildMainPlan",
         "buildreconciledissueplan",
         "bytes_per_candidate",
+        "candidateConsoleTools",
         "candidateData",
         "candidateFingerprint",
         "candidateID",

@@ -1736,42 +1736,6 @@
       "gaps": []
     },
     {
-      "id": "coverage-9678-guard-gate-breathgate",
-      "canonical": "guard-gate implementation surface for breathgate",
-      "family": "guard-gate",
-      "kind": "symbol",
-      "definition": "`breathgate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `breathgate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
-      "distinct_from": [
-        "insufficientaggregatehbm"
-      ],
-      "aliases": [],
-      "grounding": "breathgate",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
-      "id": "coverage-9678-guard-gate-qwen38gate",
-      "canonical": "guard-gate implementation surface for qwen38gate",
-      "family": "guard-gate",
-      "kind": "symbol",
-      "definition": "`qwen38gate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `qwen38gate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
-      "distinct_from": [
-        "insufficientaggregatehbm"
-      ],
-      "aliases": [],
-      "grounding": "qwen38gate",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
       "id": "coverage-9678-context-ctx-turncontext",
       "canonical": "context-ctx implementation surface for turncontext",
       "family": "context-ctx",
@@ -2781,8 +2745,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
       "canonical": "Qwen Q4_K native prefill chunk setting",

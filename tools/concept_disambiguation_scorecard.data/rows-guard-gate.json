@@ -391,7 +391,7 @@
       "kind": "concept",
       "definition": "A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons.",
       "distinction": "A SAFETY CONCEPT (the WHY) - NOT the kernel guard (the implementation) and NOT a specific gate (a decision point) - guardrails are the policy intent, gates are the enforcement mechanism.",
-      "distinct_from": ["guard-kernel", "gate", "sinkgate", "x2-guard-gate-guardrsi"],
+      "distinct_from": ["guard-kernel", "gate", "sinkgate", "x2-guard-gate-guardrsi", "issue9909-guardrail-clusters"],
       "aliases": [],
       "grounding": "guardrail",
       "grounding_kind": "symbol",
