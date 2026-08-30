@@ -185,6 +185,159 @@ func TestStudyInventoryCommittedTreeMutationMatrix(t *testing.T) {
 	}
 }
 
+func TestStudyInventoryVerificationCachePersistsByteEquivalentResult(t *testing.T) {
+	repo, git := seedStudySelfRepo(t)
+	writeStudySelfFile(t, repo, "README.md", "committed\n")
+	gitStudySelf(t, git, "add", "README.md")
+	gitStudySelf(t, git, "commit", "-qm", "seed")
+	var out, errOut bytes.Buffer
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo, "--json"}); code != 0 {
+		t.Fatalf("refresh=%d stderr=%s", code, errOut.String())
+	}
+	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+	gitStudySelf(t, git, "commit", "-qm", "manifest")
+
+	extracts := installStudySelfInventoryExtractCounter(t)
+	out.Reset()
+	errOut.Reset()
+	args := []string{"--self", "--verify", "--root", repo, "--json"}
+	firstCode := RunStudyInventory(&out, &errOut, args)
+	firstOut := append([]byte(nil), out.Bytes()...)
+	firstErr := append([]byte(nil), errOut.Bytes()...)
+	if firstCode != 0 || extracts() != 1 {
+		t.Fatalf("miss code=%d extracts=%d stdout=%s stderr=%s", firstCode, extracts(), firstOut, firstErr)
+	}
+
+	// The cache has no process-local result map: a fresh invocation must rediscover the
+	// persisted entry from disk and avoid materializing another committed tree.
+	out.Reset()
+	errOut.Reset()
+	secondCode := RunStudyInventory(&out, &errOut, args)
+	if secondCode != firstCode || extracts() != 1 {
+		t.Fatalf("hit code=%d extracts=%d stdout=%s stderr=%s", secondCode, extracts(), out.String(), errOut.String())
+	}
+	if !bytes.Equal(out.Bytes(), firstOut) || !bytes.Equal(errOut.Bytes(), firstErr) {
+		t.Fatalf("cache hit changed output\nfirst stdout=%q stderr=%q\nsecond stdout=%q stderr=%q", firstOut, firstErr, out.Bytes(), errOut.Bytes())
+	}
+}
+
+func TestStudyInventoryVerificationCacheInvalidatesByKey(t *testing.T) {
+	repo, git := seedStudySelfRepo(t)
+	writeStudySelfFile(t, repo, "README.md", "one\n")
+	gitStudySelf(t, git, "add", "README.md")
+	gitStudySelf(t, git, "commit", "-qm", "seed")
+	var out, errOut bytes.Buffer
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
+		t.Fatalf("refresh=%d stderr=%s", code, errOut.String())
+	}
+	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+	gitStudySelf(t, git, "commit", "-qm", "manifest")
+
+	extracts := installStudySelfInventoryExtractCounter(t)
+	run := func(args ...string) int {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		return RunStudyInventory(&out, &errOut, append([]string{"--self", "--verify", "--root", repo, "--json"}, args...))
+	}
+	if code := run(); code != 0 || extracts() != 1 {
+		t.Fatalf("initial code=%d extracts=%d stderr=%s", code, extracts(), errOut.String())
+	}
+	if code := run(); code != 0 || extracts() != 1 {
+		t.Fatalf("initial hit code=%d extracts=%d stderr=%s", code, extracts(), errOut.String())
+	}
+
+	writeStudySelfFile(t, repo, "README.md", "two\n")
+	gitStudySelf(t, git, "add", "README.md")
+	gitStudySelf(t, git, "commit", "-qm", "new-ref")
+	if code := run(); code != 1 || extracts() != 2 {
+		t.Fatalf("ref invalidation code=%d extracts=%d stdout=%s stderr=%s", code, extracts(), out.String(), errOut.String())
+	}
+	if code := run("--repository", "example.invalid/fork"); code != 1 || extracts() != 3 {
+		t.Fatalf("repository invalidation code=%d extracts=%d stdout=%s stderr=%s", code, extracts(), out.String(), errOut.String())
+	}
+	if code := run("--manifest", "docs/research/inventory/alternate.json"); code != 1 || extracts() != 4 {
+		t.Fatalf("path invalidation code=%d extracts=%d stdout=%s stderr=%s", code, extracts(), out.String(), errOut.String())
+	}
+}
+
+func TestStudyInventoryVerificationCacheCorruptEntryRecomputesFailure(t *testing.T) {
+	repo, git := seedStudySelfRepo(t)
+	writeStudySelfFile(t, repo, "README.md", "one\n")
+	gitStudySelf(t, git, "add", "README.md")
+	gitStudySelf(t, git, "commit", "-qm", "seed")
+	var out, errOut bytes.Buffer
+	if code := RunStudyInventory(&out, &errOut, []string{"--self", "--refresh", "--root", repo}); code != 0 {
+		t.Fatalf("refresh=%d stderr=%s", code, errOut.String())
+	}
+	gitStudySelf(t, git, "add", studymonitor.DefaultSelfInventoryPath)
+	gitStudySelf(t, git, "commit", "-qm", "manifest")
+	writeStudySelfFile(t, repo, "README.md", "two\n")
+	gitStudySelf(t, git, "add", "README.md")
+	gitStudySelf(t, git, "commit", "-qm", "stale")
+
+	extracts := installStudySelfInventoryExtractCounter(t)
+	args := []string{"--self", "--verify", "--root", repo, "--json"}
+	out.Reset()
+	errOut.Reset()
+	firstCode := RunStudyInventory(&out, &errOut, args)
+	firstOut := append([]byte(nil), out.Bytes()...)
+	firstErr := append([]byte(nil), errOut.Bytes()...)
+	if firstCode != 1 || extracts() != 1 {
+		t.Fatalf("initial stale code=%d extracts=%d stdout=%s stderr=%s", firstCode, extracts(), firstOut, firstErr)
+	}
+	out.Reset()
+	errOut.Reset()
+	if hitCode := RunStudyInventory(&out, &errOut, args); hitCode != 1 || extracts() != 1 {
+		t.Fatalf("cached stale code=%d extracts=%d stdout=%s stderr=%s", hitCode, extracts(), out.String(), errOut.String())
+	}
+	if !bytes.Equal(out.Bytes(), firstOut) || !bytes.Equal(errOut.Bytes(), firstErr) {
+		t.Fatalf("cached stale result changed output\nfirst stdout=%q stderr=%q\nhit stdout=%q stderr=%q", firstOut, firstErr, out.Bytes(), errOut.Bytes())
+	}
+
+	tipBytes, err := git("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := studySelfInventoryCacheKey{
+		CacheSchema:     studySelfInventoryCacheSchema,
+		InventorySchema: studymonitor.SelfInventorySchema,
+		Tip:             string(bytes.TrimSpace(tipBytes)),
+		RepositoryRoot:  repo,
+		Repository:      "anthony-chaudhary/fak",
+		ManifestPath:    studymonitor.DefaultSelfInventoryPath,
+	}
+	cachePath, err := studySelfInventoryCachePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, []byte("not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	secondCode := RunStudyInventory(&out, &errOut, args)
+	if secondCode != 1 || extracts() != 2 {
+		t.Fatalf("corrupt recompute code=%d extracts=%d stdout=%s stderr=%s", secondCode, extracts(), out.String(), errOut.String())
+	}
+	if !bytes.Equal(out.Bytes(), firstOut) || !bytes.Equal(errOut.Bytes(), firstErr) {
+		t.Fatalf("corrupt cache changed stale result\nfirst stdout=%q stderr=%q\nsecond stdout=%q stderr=%q", firstOut, firstErr, out.Bytes(), errOut.Bytes())
+	}
+}
+
+func installStudySelfInventoryExtractCounter(t *testing.T) func() int {
+	t.Helper()
+	original := studySelfInventoryExtract
+	count := 0
+	studySelfInventoryExtract = func(root, ref string) (string, error) {
+		count++
+		return original(root, ref)
+	}
+	t.Cleanup(func() { studySelfInventoryExtract = original })
+	return func() int { return count }
+}
+
 func mutateStudySelfManifestClass(t *testing.T, repo, class string) {
 	t.Helper()
 	path := filepath.Join(repo, filepath.FromSlash(studymonitor.DefaultSelfInventoryPath))
@@ -211,6 +364,10 @@ func mutateStudySelfManifestClass(t *testing.T, repo, class string) {
 
 func seedStudySelfRepo(t *testing.T) (string, func(...string) ([]byte, error)) {
 	t.Helper()
+	originalCacheDir := studySelfInventoryUserCacheDir
+	cacheDir := t.TempDir()
+	studySelfInventoryUserCacheDir = func() (string, error) { return cacheDir, nil }
+	t.Cleanup(func() { studySelfInventoryUserCacheDir = originalCacheDir })
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}

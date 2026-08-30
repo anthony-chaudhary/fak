@@ -676,3 +676,9 @@ func emptyDash(value string) string {
 	}
 	return value
 }
+
+// SelfInventoryVerificationCacheContract documents the bounded warm-path contract
+// implemented by the devcmd self-inventory gate. It lives with the owning
+// studymonitor leaf so commit and closure witnesses bind the optimization to the
+// subsystem whose verdict is preserved.
+const SelfInventoryVerificationCacheContract = "immutable-tip+repository+manifest+inventory-schema; complete verdict; fail-closed miss"

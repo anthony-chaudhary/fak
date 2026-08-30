@@ -2,6 +2,8 @@ package devcmd
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,6 +17,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
+const studySelfInventoryCacheSchema = "fak-study-self-inventory-verification-cache/1"
+
+var (
+	studySelfInventoryUserCacheDir = os.UserCacheDir
+	studySelfInventoryExtract      = committedtree.Extract
+)
+
 type studySelfInventoryOutput struct {
 	Operation    string                                  `json:"operation"`
 	Tip          string                                  `json:"tip"`
@@ -22,6 +31,20 @@ type studySelfInventoryOutput struct {
 	ContentRoot  string                                  `json:"content_root"`
 	TrackedFiles int                                     `json:"tracked_files"`
 	Verification *studymonitor.SelfInventoryVerification `json:"verification,omitempty"`
+}
+
+type studySelfInventoryCacheKey struct {
+	CacheSchema     string `json:"cache_schema"`
+	InventorySchema string `json:"inventory_schema"`
+	Tip             string `json:"tip"`
+	RepositoryRoot  string `json:"repository_root"`
+	Repository      string `json:"repository"`
+	ManifestPath    string `json:"manifest_path"`
+}
+
+type studySelfInventoryCacheEntry struct {
+	Key          studySelfInventoryCacheKey             `json:"key"`
+	Verification studymonitor.SelfInventoryVerification `json:"verification"`
 }
 
 // runStudySelfInventory resolves and extracts one Git object before inspecting
@@ -54,7 +77,21 @@ func runStudySelfInventory(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "study-inventory: resolve %q: %v\n", *ref, err)
 		return 1
 	}
-	committedRoot, err := committedtree.Extract(repoRoot, tip)
+	cacheKey := studySelfInventoryCacheKey{
+		CacheSchema:     studySelfInventoryCacheSchema,
+		InventorySchema: studymonitor.SelfInventorySchema,
+		Tip:             tip,
+		RepositoryRoot:  repoRoot,
+		Repository:      strings.TrimSpace(*repository),
+		ManifestPath:    filepath.ToSlash(filepath.Clean(*manifestPath)),
+	}
+	if *verify {
+		if verification, ok := readStudySelfInventoryCache(cacheKey); ok {
+			return renderStudySelfInventoryVerification(stdout, tip, *manifestPath, verification, *asJSON)
+		}
+	}
+
+	committedRoot, err := studySelfInventoryExtract(repoRoot, tip)
 	if err != nil {
 		fmt.Fprintf(stderr, "study-inventory: extract committed tree %s: %v\n", short(tip), err)
 		return 1
@@ -90,14 +127,77 @@ func runStudySelfInventory(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "study-inventory: verify: %v\n", err)
 		return 1
 	}
-	output := studySelfInventoryOutput{Operation: "verify", Tip: tip, ManifestPath: *manifestPath, ContentRoot: verification.ActualRoot, Verification: &verification}
-	if code := renderStudySelfInventory(stdout, output, *asJSON); code != 0 {
+	writeStudySelfInventoryCache(cacheKey, verification)
+	return renderStudySelfInventoryVerification(stdout, tip, *manifestPath, verification, *asJSON)
+}
+
+func renderStudySelfInventoryVerification(stdout io.Writer, tip, manifestPath string, verification studymonitor.SelfInventoryVerification, asJSON bool) int {
+	output := studySelfInventoryOutput{Operation: "verify", Tip: tip, ManifestPath: manifestPath, ContentRoot: verification.ActualRoot, Verification: &verification}
+	if code := renderStudySelfInventory(stdout, output, asJSON); code != 0 {
 		return code
 	}
 	if !verification.OK {
 		return 1
 	}
 	return 0
+}
+
+func readStudySelfInventoryCache(key studySelfInventoryCacheKey) (studymonitor.SelfInventoryVerification, bool) {
+	path, err := studySelfInventoryCachePath(key)
+	if err != nil {
+		return studymonitor.SelfInventoryVerification{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return studymonitor.SelfInventoryVerification{}, false
+	}
+	var entry studySelfInventoryCacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil || entry.Key != key {
+		return studymonitor.SelfInventoryVerification{}, false
+	}
+	return entry.Verification, true
+}
+
+func writeStudySelfInventoryCache(key studySelfInventoryCacheKey, verification studymonitor.SelfInventoryVerification) {
+	path, err := studySelfInventoryCachePath(key)
+	if err != nil {
+		return
+	}
+	data, err := json.Marshal(studySelfInventoryCacheEntry{Key: key, Verification: verification})
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".verification-*.tmp")
+	if err != nil {
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		_ = os.Rename(tmpPath, path)
+	}
+}
+
+func studySelfInventoryCachePath(key studySelfInventoryCacheKey) (string, error) {
+	root, err := studySelfInventoryUserCacheDir()
+	if err != nil || strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("user cache directory unavailable")
+	}
+	data, err := json.Marshal(key)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return filepath.Join(root, "fak", "study-self-inventory", hex.EncodeToString(sum[:])+".json"), nil
 }
 
 func renderStudySelfInventory(w io.Writer, output studySelfInventoryOutput, asJSON bool) int {
