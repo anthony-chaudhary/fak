@@ -1,6 +1,8 @@
 package guardroute
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -34,6 +36,18 @@ func TestChildCrashRoutingDeterminism(t *testing.T) {
 			second := Decide(tc.fold, tc.bucket, 0)
 			if !reflect.DeepEqual(first, second) {
 				t.Fatalf("identical input produced different decisions:\nfirst:  %+v\nsecond: %+v", first, second)
+			}
+
+			firstBytes, err := json.Marshal(first)
+			if err != nil {
+				t.Fatalf("marshal first decision: %v", err)
+			}
+			secondBytes, err := json.Marshal(second)
+			if err != nil {
+				t.Fatalf("marshal second decision: %v", err)
+			}
+			if !bytes.Equal(firstBytes, secondBytes) {
+				t.Fatalf("identical input produced different bytes:\nfirst:  %s\nsecond: %s", firstBytes, secondBytes)
 			}
 			if first.Route != tc.wantRoute {
 				t.Fatalf("Route=%v, want %v: %+v", first.Route, tc.wantRoute, first)
