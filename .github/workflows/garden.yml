@@ -33,6 +33,10 @@ on:
     # garden verdict is re-emitted to the step summary daily so it's tracked.
     - cron: "23 6 * * *"
 
+# Supersede stale branch/PR work, but preserve every scheduled or manual audit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('ref-{0}', github.ref) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 permissions:
   contents: read
 
