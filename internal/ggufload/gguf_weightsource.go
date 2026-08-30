@@ -5,11 +5,160 @@ import (
 	"io"
 	"math"
 	"os"
+	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// qwen35MTPMaterializationName maps the closed Qwen3.8 trailing-block vocabulary into
+// the existing native mtp.* namespace. It adapts the target/MTP split and four glue-role
+// remaps from llama.cpp's MIT-licensed Qwen converter:
+// https://github.com/ggml-org/llama.cpp/blob/9723942adc518b43c4b95dc4dce6906903eb5e09/conversion/qwen.py#L277-L354
+//
+// handled is true for every trailing-block, nextn, or vision-sidecar tensor in this family.
+// An empty canonical name means skip: default target-only loads, vision tensors, misplaced
+// NextN tensors, and unknown future sidecars never leak into the target manifest.
+func qwen35MTPMaterializationName(name string, cfg model.Config) (canonical string, handled bool) {
+	if cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe" {
+		return "", false
+	}
+	if isGLMMoeDsaVisionTensor(name) {
+		return "", true
+	}
+	layer, suffix, ok := parseGLMBlkLayerSuffix(name)
+	if !ok {
+		return "", isGLMMoeDsaMTPTensor(name)
+	}
+	firstMTP := cfg.NumLayers
+	if layer < firstMTP || layer >= firstMTP+cfg.NumNextNPredictLayers {
+		return "", isGLMMoeDsaMTPTensor(name)
+	}
+	if !model.RetainMTP {
+		return "", true
+	}
+
+	switch suffix {
+	case "nextn.eh_proj.weight":
+		return "mtp.fc.weight", true
+	case "nextn.enorm.weight":
+		return "mtp.pre_fc_norm_embedding.weight", true
+	case "nextn.hnorm.weight":
+		return "mtp.pre_fc_norm_hidden.weight", true
+	case "nextn.shared_head_norm.weight":
+		return "mtp.norm.weight", true
+	}
+	if strings.HasPrefix(suffix, "nextn.") {
+		return "", true
+	}
+
+	base, ok := CanonicalTensorNameArch(name, cfg.ModelType)
+	if !ok {
+		return "", true
+	}
+	prefix := fmt.Sprintf("model.layers.%d.", layer)
+	decoderSuffix := strings.TrimPrefix(base, prefix)
+	if decoderSuffix == base {
+		return "", true
+	}
+	switch decoderSuffix {
+	case "input_layernorm.weight",
+		"post_attention_layernorm.weight",
+		"self_attn.q_norm.weight",
+		"self_attn.k_norm.weight",
+		"self_attn.q_proj.weight",
+		"self_attn.k_proj.weight",
+		"self_attn.v_proj.weight",
+		"self_attn.o_proj.weight",
+		"mlp.gate_proj.weight",
+		"mlp.up_proj.weight",
+		"mlp.down_proj.weight":
+		return fmt.Sprintf("mtp.layers.%d.%s", layer-firstMTP, decoderSuffix), true
+	default:
+		return "", true
+	}
+}
+
+var qwen35MTPRequiredMaterialized = [...]string{
+	"mtp.fc.weight",
+	"mtp.pre_fc_norm_embedding.weight",
+	"mtp.pre_fc_norm_hidden.weight",
+	"mtp.norm.weight",
+	"mtp.layers.0.input_layernorm.weight",
+	"mtp.layers.0.post_attention_layernorm.weight",
+	"mtp.layers.0.self_attn.q_norm.weight",
+	"mtp.layers.0.self_attn.k_norm.weight",
+	"mtp.layers.0.self_attn.q_proj.weight",
+	"mtp.layers.0.self_attn.k_proj.weight",
+	"mtp.layers.0.self_attn.v_proj.weight",
+	"mtp.layers.0.self_attn.o_proj.weight",
+	"mtp.layers.0.mlp.gate_proj.weight",
+	"mtp.layers.0.mlp.up_proj.weight",
+	"mtp.layers.0.mlp.down_proj.weight",
+}
+
+func newQwen35MTPSeen(cfg model.Config) map[string]bool {
+	if !model.RetainMTP || cfg.NumNextNPredictLayers == 0 || (cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe") {
+		return nil
+	}
+	return make(map[string]bool, len(qwen35MTPRequiredMaterialized))
+}
+
+func validateQwen35MTPMaterialized(seen map[string]bool) error {
+	if seen == nil {
+		return nil
+	}
+	missing := make([]string, 0)
+	for _, name := range qwen35MTPRequiredMaterialized {
+		if !seen[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("gguf: incomplete retained Qwen MTP head: missing %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func validateQwen35MTPShape(name string, shape []int, cfg model.Config) error {
+	h, hd := cfg.HiddenSize, cfg.HeadDim
+	qOut := cfg.NumHeads * hd
+	if cfg.AttnOutputGate {
+		qOut *= 2
+	}
+	var want []int
+	switch name {
+	case "mtp.fc.weight":
+		want = []int{h, 2 * h}
+	case "mtp.pre_fc_norm_embedding.weight", "mtp.pre_fc_norm_hidden.weight", "mtp.norm.weight",
+		"mtp.layers.0.input_layernorm.weight", "mtp.layers.0.post_attention_layernorm.weight":
+		want = []int{h}
+	case "mtp.layers.0.self_attn.q_norm.weight", "mtp.layers.0.self_attn.k_norm.weight":
+		want = []int{hd}
+	case "mtp.layers.0.self_attn.q_proj.weight":
+		want = []int{qOut, h}
+	case "mtp.layers.0.self_attn.k_proj.weight", "mtp.layers.0.self_attn.v_proj.weight":
+		want = []int{cfg.NumKVHeads * hd, h}
+	case "mtp.layers.0.self_attn.o_proj.weight":
+		want = []int{h, cfg.NumHeads * hd}
+	case "mtp.layers.0.mlp.gate_proj.weight", "mtp.layers.0.mlp.up_proj.weight":
+		want = []int{cfg.IntermediateSize, h}
+	case "mtp.layers.0.mlp.down_proj.weight":
+		want = []int{h, cfg.IntermediateSize}
+	default:
+		return nil
+	}
+	if len(shape) != len(want) {
+		return fmt.Errorf("gguf: Qwen MTP tensor %s has shape %v, want %v", name, shape, want)
+	}
+	for i := range shape {
+		if shape[i] != want[i] {
+			return fmt.Errorf("gguf: Qwen MTP tensor %s has shape %v, want %v", name, shape, want)
+		}
+	}
+	return nil
+}
 
 // mappedQ4KReaderAt carries the retained shard mapping beside the unchanged
 // ReaderAt fallback. span starts at shard offset zero and is capped to complete
@@ -218,16 +367,17 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	// adjacent in the tensor stream, so buffer the first half seen per layer and emit the merged
 	// kv_b_proj when its partner arrives (mergeGLMMoeDsaKVB). See gguf_glm_tensors.go.
 	kvbHalf := map[int]glmKVBHalf{}
+	qwenMTPSeen := newQwen35MTPSeen(cfg)
 	p.SetTotal(len(s.File.Tensors)) // arm the progress reporter (no-op on nil / unset Progress)
 	for _, info := range s.File.Tensors {
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
-		// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
-		// reads (llama.cpp ignores them too), before canonical mapping would reject them, for
-		// every arch that ships them as sidecars (GLM-5.2, DeepSeek, Qwen3.5/3.6). The
-		// materializing loader keys on the UNGATED union: even with model.RetainMTP set the GGUF
-		// MTP head has no canonical slot to materialize into yet (wiring is a later slice), so it
-		// is dropped from materialization here while the fit estimators still count its bytes.
-		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+		name, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
+		if qwenMTPHandled && name == "" {
+			continue
+		}
+		// Non-Qwen sidecars retain their historical materialization behavior: neither their
+		// MTP layout nor their vision layout has a canonical native slot in this loader.
+		if !qwenMTPHandled && archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 			continue
 		}
 		if archUsesMLAMoELayout(cfg.ModelType) {
@@ -278,9 +428,12 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		}
 
 		t = loadProfileStart(p)
-		name, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
-		if !ok {
-			return nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+		if !qwenMTPHandled {
+			var ok bool
+			name, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
+			if !ok {
+				return nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+			}
 		}
 		if p != nil {
 			tt.CanonicalName = name
@@ -288,6 +441,11 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 		if err != nil {
 			return nil, err
+		}
+		if qwenMTPHandled {
+			if err := validateQwen35MTPShape(name, shape, cfg); err != nil {
+				return nil, err
+			}
 		}
 		if p != nil {
 			tt.Shape = append([]int(nil), shape...)
@@ -345,6 +503,9 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 			}
 			return nil, err
 		}
+		if qwenMTPHandled {
+			qwenMTPSeen[name] = true
+		}
 		addNanos := loadProfileEnd(p, "quant_builder_add", t, int64(len(data))*4, 1)
 		if p != nil {
 			tt.AddNanos = addNanos
@@ -353,6 +514,9 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		}
 	}
 	if err := glmKVBUnpaired(kvbHalf); err != nil {
+		return nil, err
+	}
+	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
 		return nil, err
 	}
 	t = loadProfileStart(p)
@@ -374,12 +538,13 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	}
 	tensors := make([]model.NamedTensorF32, 0, len(s.File.Tensors))
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
+	qwenMTPSeen := newQwen35MTPSeen(cfg)
 	for _, info := range s.File.Tensors {
-		// Drop the MTP ("nextn") head + any vision tower the text forward never reads, for every
-		// arch that ships them as sidecars. Ungated union: the MTP head has no canonical slot to
-		// materialize into yet even under model.RetainMTP, so drop it from materialization while
-		// the estimators count its bytes.
-		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+		name, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
+		if qwenMTPHandled && name == "" {
+			continue
+		}
+		if !qwenMTPHandled && archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 			continue
 		}
 		// GGUF batched routed experts: one [E,out,in] blob splits 1->E into per-expert
@@ -419,21 +584,35 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 				}
 			}
 		}
-		name, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
-		if !ok {
-			return model.Config{}, nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+		if !qwenMTPHandled {
+			var ok bool
+			name, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
+			if !ok {
+				return model.Config{}, nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+			}
 		}
 		shape, data, err := s.shapeAndTensorF32(info)
 		if err != nil {
 			return model.Config{}, nil, err
+		}
+		if qwenMTPHandled {
+			if err := validateQwen35MTPShape(name, shape, cfg); err != nil {
+				return model.Config{}, nil, err
+			}
 		}
 		data, err = normalizeCanonicalTensorData(name, data, cfg)
 		if err != nil {
 			return model.Config{}, nil, err
 		}
 		tensors = append(tensors, model.NamedTensorF32{Name: name, Shape: shape, Data: data})
+		if qwenMTPHandled {
+			qwenMTPSeen[name] = true
+		}
 	}
 	if err := glmKVBUnpaired(kvbHalf); err != nil {
+		return model.Config{}, nil, err
+	}
+	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
 		return model.Config{}, nil, err
 	}
 	return cfg, tensors, nil

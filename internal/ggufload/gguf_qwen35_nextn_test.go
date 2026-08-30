@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // synthQwen35Meta is the minimal qwen35 metadata (*File).Config() accepts, shaped like the
@@ -40,6 +43,9 @@ func TestQwen35NextNExcludedFromNumLayers(t *testing.T) {
 	if cfg.NumLayers != 4 {
 		t.Fatalf("NumLayers=%d, want 4 (block_count=5 minus nextn_predict_layers=1)", cfg.NumLayers)
 	}
+	if cfg.NumNextNPredictLayers != 1 {
+		t.Fatalf("NumNextNPredictLayers=%d, want 1", cfg.NumNextNPredictLayers)
+	}
 	if len(cfg.LayerTypes) != 4 {
 		t.Fatalf("LayerTypes=%v, want 4 entries (schedule must derive AFTER the subtraction)", cfg.LayerTypes)
 	}
@@ -48,17 +54,167 @@ func TestQwen35NextNExcludedFromNumLayers(t *testing.T) {
 	}
 }
 
-// TestQwen35NextNAbsurdCountIgnored guards the subtraction: a nextn_predict_layers claim
-// that would consume the whole stack (or more) is metadata corruption, not a schedule —
-// keep block_count as-is rather than deriving a zero/negative-layer model.
-func TestQwen35NextNAbsurdCountIgnored(t *testing.T) {
-	f := &File{Metadata: synthQwen35Meta(4, 4)}
-	cfg, err := f.Config()
-	if err != nil {
-		t.Fatalf("Config: %v", err)
+// TestQwen35NextNAbsurdCountRejected guards the target/MTP split: a nextn_predict_layers
+// claim that consumes the whole stack is metadata corruption, not a target-only schedule.
+func TestQwen35NextNAbsurdCountRejected(t *testing.T) {
+	for _, nextn := range []uint64{2, 4} {
+		f := &File{Metadata: synthQwen35Meta(4, nextn)}
+		if _, err := f.Config(); err == nil {
+			t.Errorf("Config accepted incompatible nextn_predict_layers=%d, want error", nextn)
+		}
 	}
-	if cfg.NumLayers != 4 {
-		t.Fatalf("NumLayers=%d, want 4 (nextn_predict_layers >= block_count must be ignored)", cfg.NumLayers)
+}
+
+func qwen35NextNWeightSource(t *testing.T, names ...string) *WeightSource {
+	t.Helper()
+	payload := make([]byte, 64*32*4)
+	infos := make([]TensorInfo, 0, len(names))
+	for _, name := range names {
+		dims := []uint64{2, 2}
+		switch {
+		case name == "blk.4.nextn.eh_proj.weight":
+			dims = []uint64{64, 32}
+		case name == "blk.4.nextn.enorm.weight", name == "blk.4.nextn.hnorm.weight", name == "blk.4.nextn.shared_head_norm.weight",
+			name == "blk.4.attn_norm.weight", name == "blk.4.ffn_norm.weight":
+			dims = []uint64{32}
+		case name == "blk.4.attn_q_norm.weight", name == "blk.4.attn_k_norm.weight":
+			dims = []uint64{8}
+		case name == "blk.4.attn_q.weight":
+			dims = []uint64{32, 64}
+		case name == "blk.4.attn_k.weight", name == "blk.4.attn_v.weight":
+			dims = []uint64{32, 16}
+		case name == "blk.4.attn_output.weight":
+			dims = []uint64{32, 32}
+		case name == "blk.4.ffn_gate.weight", name == "blk.4.ffn_up.weight":
+			dims = []uint64{32, 64}
+		case name == "blk.4.ffn_down.weight", name == "blk.3.ffn_down.weight":
+			dims = []uint64{64, 32}
+		}
+		infos = append(infos, TensorInfo{Name: name, Dims: dims, Type: TensorF32})
+	}
+	ws, err := NewWeightSource(&File{Metadata: synthQwen35Meta(5, 1), Tensors: infos}, bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	return ws
+}
+
+var qwen35NextNFixtureMapping = map[string]string{
+	"blk.4.nextn.eh_proj.weight":          "mtp.fc.weight",
+	"blk.4.nextn.enorm.weight":            "mtp.pre_fc_norm_embedding.weight",
+	"blk.4.nextn.hnorm.weight":            "mtp.pre_fc_norm_hidden.weight",
+	"blk.4.nextn.shared_head_norm.weight": "mtp.norm.weight",
+	"blk.4.attn_norm.weight":              "mtp.layers.0.input_layernorm.weight",
+	"blk.4.ffn_norm.weight":               "mtp.layers.0.post_attention_layernorm.weight",
+	"blk.4.attn_q_norm.weight":            "mtp.layers.0.self_attn.q_norm.weight",
+	"blk.4.attn_k_norm.weight":            "mtp.layers.0.self_attn.k_norm.weight",
+	"blk.4.attn_q.weight":                 "mtp.layers.0.self_attn.q_proj.weight",
+	"blk.4.attn_k.weight":                 "mtp.layers.0.self_attn.k_proj.weight",
+	"blk.4.attn_v.weight":                 "mtp.layers.0.self_attn.v_proj.weight",
+	"blk.4.attn_output.weight":            "mtp.layers.0.self_attn.o_proj.weight",
+	"blk.4.ffn_gate.weight":               "mtp.layers.0.mlp.gate_proj.weight",
+	"blk.4.ffn_up.weight":                 "mtp.layers.0.mlp.up_proj.weight",
+	"blk.4.ffn_down.weight":               "mtp.layers.0.mlp.down_proj.weight",
+}
+
+func TestQwen35NextNRetentionMapsOnlyClosedTrailingSet(t *testing.T) {
+	orig := model.RetainMTP
+	defer func() { model.RetainMTP = orig }()
+	model.RetainMTP = true
+
+	names := []string{"blk.3.ffn_down.weight", "blk.4.nextn.embed_tokens.weight", "blk.4.nextn.future.weight", "mm.vision.weight"}
+	for name := range qwen35NextNFixtureMapping {
+		names = append(names, name)
+	}
+	ws := qwen35NextNWeightSource(t, names...)
+	cfg, tensors, err := ws.F32Tensors()
+	if err != nil {
+		t.Fatalf("F32Tensors: %v", err)
+	}
+	if cfg.NumLayers != 4 || cfg.NumNextNPredictLayers != 1 {
+		t.Fatalf("config target/mtp split=(%d,%d), want (4,1)", cfg.NumLayers, cfg.NumNextNPredictLayers)
+	}
+	got := make(map[string]bool, len(tensors))
+	for _, tensor := range tensors {
+		got[tensor.Name] = true
+	}
+	if !got["model.layers.3.mlp.down_proj.weight"] {
+		t.Fatal("target tensor was not preserved")
+	}
+	for source, canonical := range qwen35NextNFixtureMapping {
+		if !got[canonical] {
+			t.Errorf("%s did not materialize as %s", source, canonical)
+		}
+	}
+	if len(got) != len(qwen35NextNFixtureMapping)+1 {
+		t.Fatalf("materialized names=%v, want closed MTP set plus one target tensor", got)
+	}
+}
+
+func TestQwen35NextNTargetOnlyDefaultDropsWholeTrailingBlock(t *testing.T) {
+	orig := model.RetainMTP
+	defer func() { model.RetainMTP = orig }()
+	model.RetainMTP = false
+
+	ws := qwen35NextNWeightSource(t,
+		"blk.3.ffn_down.weight",
+		"blk.4.attn_q.weight",
+		"blk.4.nextn.eh_proj.weight",
+	)
+	_, tensors, err := ws.F32Tensors()
+	if err != nil {
+		t.Fatalf("F32Tensors: %v", err)
+	}
+	if len(tensors) != 1 || tensors[0].Name != "model.layers.3.mlp.down_proj.weight" {
+		t.Fatalf("target-only tensors=%v, want only target layer tensor", tensors)
+	}
+}
+
+func TestQwen35NextNQuantMaterializationRetainsMappedGlue(t *testing.T) {
+	orig := model.RetainMTP
+	defer func() { model.RetainMTP = orig }()
+	model.RetainMTP = true
+
+	names := []string{"blk.3.ffn_down.weight"}
+	for name := range qwen35NextNFixtureMapping {
+		names = append(names, name)
+	}
+	ws := qwen35NextNWeightSource(t, names...)
+	m, err := ws.QuantModel()
+	if err != nil {
+		t.Fatalf("QuantModel: %v", err)
+	}
+	if _, err := m.WeightSource(nil).Weight("mtp.fc.weight", compute.F32); err != nil {
+		t.Fatalf("quant MTP glue not retained under canonical name: %v", err)
+	}
+}
+
+func TestQwen35NextNRetentionRejectsIncompleteHead(t *testing.T) {
+	orig := model.RetainMTP
+	defer func() { model.RetainMTP = orig }()
+	model.RetainMTP = true
+
+	ws := qwen35NextNWeightSource(t, "blk.4.nextn.eh_proj.weight")
+	if _, _, err := ws.F32Tensors(); err == nil {
+		t.Fatal("F32Tensors accepted incomplete retained MTP head, want error")
+	}
+	if _, err := ws.QuantModel(); err == nil {
+		t.Fatal("QuantModel accepted incomplete retained MTP head, want error")
+	}
+}
+
+func TestQwen35NextNRetentionRejectsIncompatibleShape(t *testing.T) {
+	orig := model.RetainMTP
+	defer func() { model.RetainMTP = orig }()
+	model.RetainMTP = true
+
+	ws := qwen35NextNWeightSource(t, "blk.4.nextn.eh_proj.weight")
+	ws.File.Tensors[0].Dims = []uint64{32, 32}
+	if _, _, err := ws.F32Tensors(); err == nil {
+		t.Fatal("F32Tensors accepted incompatible mtp.fc shape, want error")
+	}
+	if _, err := ws.QuantModel(); err == nil {
+		t.Fatal("QuantModel accepted incompatible mtp.fc shape, want error")
 	}
 }
 

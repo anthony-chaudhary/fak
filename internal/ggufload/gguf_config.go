@@ -193,16 +193,24 @@ func (f *File) Config() (model.Config, error) {
 		cfg.PartialRotaryFactor = float64(ropeDim) / float64(headDim)
 	}
 	if canonArch := canonicalGGUFArch(arch); canonArch == "qwen35" || canonArch == "qwen35moe" {
-		// The qwen35 family (Qwen3.5/3.6, incl. the Bonsai-27B ternary repack normalized
-		// onto "qwen35" by canonicalGGUFArch) can ship trailing NextN/MTP draft blocks that
-		// block_count INCLUDES (witnessed: Qwen3.6-27B Q4_K_M declares block_count=65 +
-		// nextn_predict_layers=1, with only blk.64.nextn.* glue tensors at the tail). The
-		// text forward never runs them and the loader drops their tensors, so exclude
-		// them from NumLayers here — BEFORE the LayerTypes schedule derives — or the
-		// built model demands weights that don't exist (q8 tensor not built:
-		// model.layers.64.linear_attn.in_proj_qkv.weight).
-		if n, ok := f.Uint64(p + "nextn_predict_layers"); ok && int(n) < cfg.NumLayers {
-			cfg.NumLayers -= int(n)
+		// llama.cpp's Qwen converter appends the MTP decoder block after the target stack,
+		// includes it in block_count, and records the split in nextn_predict_layers. fak's
+		// target forward must retain the target depth while the optional MTP materializer
+		// addresses the trailing block separately. The native Qwen3.8 substrate currently
+		// supports exactly one MTP block; reject incompatible metadata instead of silently
+		// treating draft layers as target layers.
+		if n, ok := f.Uint64(p + "nextn_predict_layers"); ok {
+			if n > uint64(math.MaxInt) {
+				return model.Config{}, fmt.Errorf("gguf: %snextn_predict_layers overflows int: %d", p, n)
+			}
+			cfg.NumNextNPredictLayers = int(n)
+			if cfg.NumNextNPredictLayers > 1 {
+				return model.Config{}, fmt.Errorf("gguf: %snextn_predict_layers=%d is unsupported; want 0 or 1", p, cfg.NumNextNPredictLayers)
+			}
+			if cfg.NumNextNPredictLayers >= cfg.NumLayers {
+				return model.Config{}, fmt.Errorf("gguf: %snextn_predict_layers=%d must be smaller than block_count=%d", p, cfg.NumNextNPredictLayers, cfg.NumLayers)
+			}
+			cfg.NumLayers -= cfg.NumNextNPredictLayers
 		}
 		if interval, ok := f.Uint64(p + "full_attention_interval"); ok {
 			cfg.FullAttentionInterval = int(interval)
