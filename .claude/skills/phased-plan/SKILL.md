@@ -54,6 +54,17 @@ Before invoking the release skill, answer:
 
 Three "no"s → docs-only commit on the working branch with no version bump, no tag, no archive, no release entry.
 
+## Progress state — report movement without weakening claims
+
+Use [`docs/progress-state-defaults.md`](../../../docs/progress-state-defaults.md) as the canonical vocabulary. In every plan's **Current state**, report product, evidence, and queue independently; include the next movement. Do not use one overall `KEEP`, `REJECT`, or `HOLD` label as current state.
+
+- A failed or missing runtime receipt changes the evidence axis, not delivered product scope.
+- Mark a validator or correctness slice as `BOUNDED_ACCEPTANCE` only when that named boundary is fully witnessed; state the broader evidence still missing.
+- Award delivery credit for witnessed shipped scope, prepared packets, removed dependencies, launched runs, and reproduced evidence. Award performance credit only after the full applicable claim gate passes.
+- For fak-native performance, preserve exact artifact and quantization identity, `engine=fak-native`, fallback `0`, strict quality, inclusive request-boundary accounting, and a one-variable matched comparison. llama.cpp and MLX remain explicit reference/comparison arms only.
+- Keep at most three `ACTIVE_PROBE` items. Prefer `READY_TO_RUN`, `DEPENDENCY_ADVANCING`, `QUEUED_BEHIND <issue>`, or reversible `PARKED_LOW_VALUE` over indefinite `HOLD`. Reserve `EXTERNAL_BLOCK` for exhausted local, fleet, and dependency-clearing routes.
+- Preserve dated historical campaign decisions in **Execution log** even when current state moves to a more actionable queue label.
+
 ## Hero-exit rule — close the plan when the hero metric is met
 
 Every phased plan has a single 1-hop hero metric in its header. When that metric reaches its target, the **next phase queued is the close-out** — not another sub-phase, not a refactor of an adjacent surface, not "while we're in here."
