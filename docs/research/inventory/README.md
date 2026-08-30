@@ -17,7 +17,6 @@ Current maps:
 
 - [`local-tensor-build-2026-08-29.json`](local-tensor-build-2026-08-29.json) — current exhaustive machine map for the local TensorBuild snapshot at `snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d`, including whole-tree delta, provenance limits, candidate counts, receipt, and issue ownership.
 
-- [`anthony-chaudhary-cama-complete.json`](anthony-chaudhary-cama-complete.json) - exhaustive 3,668-file committed-tree map for private source `anthony-chaudhary/cama-complete` at `179c3db7696a77aa94e9e6441b73f6778f82763f`; the paired [`anthony-chaudhary-cama-complete-forge-receipt.json`](anthony-chaudhary-cama-complete-forge-receipt.json) records the complete six-surface forge census used by the 16-candidate study.
 
 - [`modular-modular.json`](modular-modular.json) - exhaustive 10,688-file maintained-tree map for `modular/modular` at `1c9fd2e03331f77d3a1034127cb3700b7fa43c02`; the paired [`modular-modular-forge-receipt.json`](modular-modular-forge-receipt.json) proves the six-endpoint 7,071-record forge census used by the 87-candidate study.
 - [`vllm-related-system-adjacency-v1.json`](vllm-related-system-adjacency-v1.json) —

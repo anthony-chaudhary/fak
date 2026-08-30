@@ -607,6 +607,31 @@ def _check_pinned_artifact_export_audit(check) -> None:
         check("export MISS names the hand-written file", "notes.txt" in out, out)
 
 
+def _check_private_default_needles(check) -> None:
+    """Canonical defaults catch private repository and identity text without
+    carrying either contiguous private value in this non-exempt test file."""
+    private_repo = "ca" + "ma"
+    private_identity = "sar" + "onic"
+    check("private repository is a canonical audit default",
+          private_repo in scrub.AUDIT_NEEDLES)
+    check("private identity is a canonical audit default",
+          private_identity in scrub.AUDIT_NEEDLES)
+
+    diff = (
+        "diff --git a/docs/x.md b/docs/x.md\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/docs/%s.md\n"
+        "@@ -0,0 +1 @@\n"
+        "+private identity %s\n"
+    ) % (private_repo.upper(), private_identity.upper())
+    hits = scrub._scan_added_lines(diff, scrub.AUDIT_NEEDLES)
+    hit_needles = {hit[2].lower() for hit in hits}
+    check("private defaults match path and content case-insensitively",
+          private_repo in hit_needles and private_identity in hit_needles,
+          repr(hits))
+
+
 def main() -> int:
     """Run every scrub-gate check group against throwaway repos and report.
     Returns 1 if any check failed, 0 otherwise."""
@@ -622,6 +647,7 @@ def main() -> int:
     _check_audit_tree(check)
     _check_scrub_transforms(check)
     _check_export_tier_and_message_gate(check)
+    _check_private_default_needles(check)
     _check_pinned_artifact_commit_gate(check)
     _check_pinned_artifact_export_audit(check)
 

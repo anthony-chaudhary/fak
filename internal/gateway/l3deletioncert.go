@@ -66,7 +66,7 @@ var bannedL3DeletionScopeTokens = []string{"deleted-everywhere", "weights", "bac
 // L3PoolWitness is the minimal CONTROL-PATH probe the deletion rung folds: an exists/mget
 // over an ordered page-key set returning ONLY a presence bit per key — never the page
 // bytes. It is the seam the rung reads the post-delete all-miss witness through; the
-// in-process MockL3Backend satisfies it, and a real CAMA-complete connector supplies the
+// in-process MockL3Backend satisfies it, and a real external remote-KV connector supplies the
 // same exists/mget over the RDMA pool. Returning bits (not bytes) is what keeps the mint
 // path off the data path (§6.5).
 type L3PoolWitness interface {

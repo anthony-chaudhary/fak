@@ -50,7 +50,7 @@ CHANNEL=<private-channel-key> python <private-bridge-helper> poll <sess> glmdec1
 
 `llama-bench` mmaps the 434 GB GGUF from NVMe (only touched pages resident,
 page-cache reclaimable) so it **cannot OOM-wedge** the shared host (it also runs
-`cama-server` ~16 GB + a 45-day SWE-bench `bench` eval — neither may die). This is
+`remote-cache-server` ~16 GB + a 45-day SWE-bench `bench` eval — neither may die). This is
 the documented memory-safe baseline arm.
 
 ```bash
@@ -60,7 +60,7 @@ GGUF=<nvme-model-dir>/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf
 ```
 
 **Do NOT run fak-native resident on CPU server unattended** until free RAM clears
-~1.1× model size (~480 GB) above the live `cama-server`/`bench` working sets — the
+~1.1× model size (~480 GB) above the live `remote-cache-server`/`bench` working sets — the
 all-resident `AddResidentQ4K` path wedged a 1 TB host once (#974). The fix in
 flight is the in-`fak serve` storage-tier + RAM-headroom preflight gate
 (`refuseSlowLoadPath` / `EstimateF32LoadMemoryPlan`); until that gate ships, the

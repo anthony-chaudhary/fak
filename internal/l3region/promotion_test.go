@@ -68,7 +68,7 @@ func TestL3PromotionWarnIsNonBehaviorChanging(t *testing.T) {
 
 // TestL3PromotionGateBite is the headline witness (acceptance criterion 3) against the
 // REAL L3 store: a turn-class page denied L3 promotion even at high access frequency,
-// while a durable page is admitted on its FIRST write — the inversion of CAMA's
+// while a durable page is admitted on its FIRST write — the inversion of the reference cache's
 // frequency-based admission into a truth-duration one.
 func TestL3PromotionGateBite(t *testing.T) {
 	ctx := context.Background()

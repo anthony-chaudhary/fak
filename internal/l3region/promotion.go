@@ -11,7 +11,7 @@ import (
 // G6 — durability-tiered L3 promotion (child C of the L3 epic; issue #76).
 //
 // Re-conceive L3 admission as a TRUTH-DURATION policy, not a cache-hit-rate one. A
-// CAMA-style L3 admits by recency/frequency (W-TinyLFU / SIEVE): a page earns the
+// Reference-cache-style L3 admits by recency/frequency (W-TinyLFU / SIEVE): a page earns the
 // shared pool by being HOT. Re-imagined, a page reaches the shared L3 pool ONLY if the
 // write-time durability gate (#498 — ctxmmu.classifyDurability stamping
 // Verdict.Meta["durability"]) classified it `bounded` or `durable`. A `turn` / `session`

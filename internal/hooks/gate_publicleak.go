@@ -18,9 +18,10 @@ import (
 // files. The effective needle list = the base AUDIT_NEEDLES unioned with an optional gitignored
 // sidecar JSON (so the operator's private identity tier can extend it without committing it).
 
-// auditNeedles is the verbatim base list from scrub_public_copy.py L304-326. The repeated private
-// address entries are kept exactly as in the source (de-duped at match time anyway). The Windows
-// user-path entries de-escape to the same runtime strings as the Python literals.
+// auditNeedles is the byte-faithful base list from scrub_public_copy.py's AUDIT_NEEDLES. The
+// repeated private address entries are kept exactly as in the source (de-duped at match time
+// anyway). The Windows user-path entries de-escape to the same runtime strings as the Python
+// literals.
 var auditNeedles = []string{
 	privateAddressNeedle(),
 	privateAddressNeedle(),
@@ -34,6 +35,8 @@ var auditNeedles = []string{
 	"node-" + "windows-a",
 	"node-" + "desktop-b",
 	".claude-" + "agent",
+	"ca" + "ma",
+	"sar" + "onic",
 	"sam" + "sung",
 }
 

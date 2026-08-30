@@ -284,7 +284,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
-- [CAMA v1.5.7: borrow the control loops around remote KV, not the cache server (2026-08-29)](docs/notes/CONCEPT-STUDY-CAMA-COMPLETE-2026-08-29.md) — exhaustive pinned tree/forge/history study; preserves FAK-native ownership, records the absent CAMA license and vLLM correctness warnings, deduplicates existing transport/admission work, and files five bounded remote-cache control gaps as #10273-#10277.
+- [Remote-KV reference v1.5.7: borrow the control loops around remote KV, not the cache server (2026-08-29)](docs/notes/CONCEPT-STUDY-REMOTE-KV-CONTROL-LOOPS-2026-08-29.md) — exhaustive pinned tree/forge/history study; preserves FAK-native ownership, records the absent root license and vLLM correctness warnings, deduplicates existing transport/admission work, and files five bounded remote-cache control gaps as #10273-#10277.
 
 - [Cross-layer sweeps: seven response surfaces, one evidence contract (2026-08-29)](docs/notes/CONCEPT-CROSS-LAYER-SWEEPS-2026-08-29.md) — maps kernel/host, native-model, serving, cache/context, routing/policy, agent-workload, and fleet/operations experiments; separates cleanup commands named sweep; and grounds the open #10189 evidence-contract spine in pinned MLCommons LoadGen validity lessons.
 

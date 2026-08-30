@@ -31,8 +31,8 @@ native execution path does not have. The resulting backlog is issues
 ## Provenance and license fence
 
 The source directory is not a trustworthy Git checkout. Git resolves an unrelated enclosing
-repository, so that revision is not cited. The declared `github.com/anthony-saronic/tensor-build`
-remote was unavailable through authenticated repository lookup and anonymous `ls-remote`; issue,
+repository, so that revision is not cited. The declared module path was owner-qualified and
+private; its remote was unavailable through authenticated repository lookup and anonymous `ls-remote`; issue,
 PR, release, discussion, blame, and commit-history claims are therefore **unavailable**, not
 empty. No root `LICENSE`, `COPYING`, `NOTICE`, or CLA is present.
 

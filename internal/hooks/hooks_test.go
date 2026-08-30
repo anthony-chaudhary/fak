@@ -37,6 +37,8 @@ func labHostFixture() string         { return "secret" + ".lab" }
 func operatorNameFixture() string    { return "anth" + "ony" }
 func privateLabAliasFixture() string { return "lab-" + "dgx2" }
 func privateGPUAliasFixture() string { return "dgx" + "2" }
+func privateRepoFixture() string     { return "ca" + "ma" }
+func privateIdentityFixture() string { return "sar" + "onic" }
 func userPathFixture(suffix string) string {
 	return `C:\Users\` + operatorNameFixture() + suffix
 }
@@ -68,6 +70,25 @@ func TestPublicLeak_backslashUsersNeedle(t *testing.T) {
 	f, _ := gatePublicLeak(d)
 	if len(f) == 0 {
 		t.Fatalf("expected a leak for a Windows user path; got none")
+	}
+}
+
+func TestPublicLeak_privateDefaultsAreCaseInsensitiveAcrossPathAndContent(t *testing.T) {
+	repoNeedle := strings.ToUpper(privateRepoFixture())
+	identityNeedle := strings.ToUpper(privateIdentityFixture())
+	d := diffOf("/r", map[string][]string{
+		"docs/" + repoNeedle + ".md": {"clean body"},
+		"docs/source.md":             {"private identity " + identityNeedle},
+	})
+	f, err := gatePublicLeak(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFindingFor(f, "PUBLIC_LEAK", privateRepoFixture()) {
+		t.Fatalf("case-insensitive private repository path must be caught; got %+v", f)
+	}
+	if !hasFindingFor(f, "PUBLIC_LEAK", privateIdentityFixture()) {
+		t.Fatalf("case-insensitive private identity content must be caught; got %+v", f)
 	}
 }
 
