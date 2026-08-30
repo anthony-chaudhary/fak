@@ -238,6 +238,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			continue
 		}
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
+			guardMaybeLaunchCrashRSI(os.Stderr, guardTraceID, agentName, class, code, crashRestarts)
 			crashRestarts++
 			var reap bool
 			crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)
@@ -487,6 +488,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				continue
 			}
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
+				guardMaybeLaunchCrashRSI(restarter.stderr, guardTraceID, agentName, class, code, crashRestarts)
 				crashRestarts++
 				var reap bool
 				crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)
