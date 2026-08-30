@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -645,6 +646,53 @@ func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) err
 	}
 }
 
+// formatGuardSessionResumeCommand returns the exact, copy/paste-ready command for
+// reopening the provider session that owns the guard's current trace. SessionStart
+// is the authority: missing, mismatched, unsupported, or malformed identity stays
+// silent rather than printing a command that could open the wrong conversation.
+func formatGuardSessionResumeCommand(agentName, traceID string) string {
+	provider := guardAgentBaseName(agentName)
+	if provider != "claude" && provider != "codex" {
+		return ""
+	}
+
+	match := resume.ResolveIdentity(resume.LoadIdentityRows(resolveSweepRegDir("")), traceID)
+	if !match.OK || match.Direction != "trace->uuid" {
+		return ""
+	}
+	rowProvider := strings.ToLower(strings.TrimSpace(match.Row.Provider))
+	if rowProvider != provider || !validGuardProviderSessionID(match.Paired) {
+		return ""
+	}
+
+	var argv []string
+	if provider == "claude" {
+		argv = []string{"fak", "guard", "--", "claude", "--resume", match.Paired}
+	} else {
+		argv = []string{"fak", "guard", "--", "codex", "resume", match.Paired}
+	}
+	return fmt.Sprintf("\nfak guard: resume this session with:\n  %s\n", shellJoin(argv))
+}
+
+func validGuardProviderSessionID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 36 {
+		return false
+	}
+	for i, r := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if r != '-' {
+				return false
+			}
+			continue
+		}
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // formatGuardResumeGuidance is the concise, actionable note printed when the wrapped agent
 // exits abnormally (a non-zero code — a crash, an OOM, or a terminal upstream error). The
 // guard process holds no agent conversation state itself — the wrapped tool owns that — so
@@ -959,6 +1007,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	if !quiet {
 		renderGuardPromotionOffers(os.Stderr)
 	}
+	resumeCommand := formatGuardSessionResumeCommand(agentName, srv.DefaultTraceID())
+	emitResumeCommand := func() {
+		if !quiet {
+			fmt.Fprint(os.Stderr, resumeCommand)
+		}
+	}
 	recordGuardUsage(guardExitCode)
 	// The session is over: drop this session's allow-overlay scope (#5180) so a
 	// `fak guard allow --session <tool>` widening does not silently become the next
@@ -976,9 +1030,11 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 			if code := ee.ExitCode(); code != 0 && !quiet {
 				fmt.Fprint(os.Stderr, formatGuardResumeGuidanceWithRefusals(agentName, code, currentRefusals))
 			}
+			emitResumeCommand()
 			os.Exit(ee.ExitCode())
 		}
 		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", agentName, runErr)
+		emitResumeCommand()
 		os.Exit(1)
 	}
 	// The child succeeded — but if the gateway itself failed mid-session (Serve returned
@@ -986,6 +1042,8 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// of the run, so do not report a silent success. A clean teardown returns nil.
 	if serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "fak guard: gateway error during the session: %v\n", serr)
+		emitResumeCommand()
 		os.Exit(1)
 	}
+	emitResumeCommand()
 }
