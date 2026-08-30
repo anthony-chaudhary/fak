@@ -196,7 +196,7 @@ func (worker) Run(){ splitHelper() }
 	}
 }
 
-func TestRemainingExtractionReportJSONIsByteDeterministic(t *testing.T) {
+func TestRemainingExtractionReportDeterminism(t *testing.T) {
 	pkg, err := vsLoadCmd(repoRootForSurface(t))
 	if err != nil {
 		t.Fatal(err)
