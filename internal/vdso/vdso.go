@@ -18,6 +18,7 @@
 package vdso
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"crypto/sha256"
@@ -40,6 +41,65 @@ const DefaultCacheSize = 1024
 // ErrInvalidTier2Capacity is returned when a live resize requests a non-positive
 // capacity. The current capacity, entries, LRU order, and generation are unchanged.
 var ErrInvalidTier2Capacity = errors.New("vdso: tier-2 capacity must be positive")
+
+// ResultReplicationStatus reports how far one tier-2 result-store insertion got.
+// The default is resident-only; fully replicated is possible only after an
+// explicitly configured durable store acknowledges the same Ref.
+type ResultReplicationStatus string
+
+const (
+	// ResultResidentOnly means the result is present only in the current vDSO LRU.
+	ResultResidentOnly ResultReplicationStatus = "resident_only"
+	// ResultFullyReplicated means both the current vDSO LRU and its durable delegate
+	// accepted the same result Ref.
+	ResultFullyReplicated ResultReplicationStatus = "fully_replicated"
+	// ResultPartiallyReplicated means the current vDSO LRU accepted the result but
+	// the configured durable delegate failed.
+	ResultPartiallyReplicated ResultReplicationStatus = "partially_replicated"
+)
+
+// MetaResultReplication is the tier-2 Lookup metadata key that reports the
+// stored result's replication status.
+const MetaResultReplication = "result_replication"
+
+// ResultStore is the optional durable delegate behind the vDSO's resident result
+// store. Store must persist the supplied Ref without replacing its content identity.
+type ResultStore interface {
+	Store(context.Context, abi.Ref) error
+}
+
+// ResultStoreReceipt reports the observable outcome of one eligible result
+// insertion. Resident remains true on a durable failure because write-through is
+// ordered current-store first, durable delegate second.
+type ResultStoreReceipt struct {
+	Ref         abi.Ref
+	Resident    bool
+	Durable     bool
+	Replication ResultReplicationStatus
+}
+
+// PartialReplicationError reports that the resident insertion succeeded but the
+// opt-in durable delegate failed. The receipt remains available for fail-closed
+// status handling, while Unwrap exposes the delegate failure.
+type PartialReplicationError struct {
+	Receipt ResultStoreReceipt
+	Cause   error
+}
+
+func (e *PartialReplicationError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "vdso: partial result-store replication"
+	}
+	return "vdso: partial result-store replication: " + e.Cause.Error()
+}
+
+// Unwrap returns the durable delegate failure.
+func (e *PartialReplicationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
 
 // Tier2CacheState is the coherent readback for the live tier-2 cache budget.
 // Generation belongs only to this configuration; it is independent of the world
@@ -135,12 +195,13 @@ type VDSO struct {
 
 	// cachemeta emission (§2.5). cacheSink observes tier-2 lifecycle events as
 	// cachemeta entries; witnessAdapters are per-tool external-witness extractors.
-	// Both are opt-in (nil/empty = unchanged behavior) and dispatched outside v.mu.
-	// regMu guards these two registries so emit/witness reads stay race-free without
-	// contending v.mu on the hot Lookup path.
+	// resultStore is the opt-in durable write-through delegate. All are opt-in
+	// (nil/empty = unchanged behavior) and invoked outside v.mu. regMu keeps their
+	// reads race-free without contending v.mu on the hot Lookup path.
 	regMu           sync.RWMutex
 	cacheSink       func(CacheEvent)
 	witnessAdapters map[string]WitnessFunc
+	resultStore     ResultStore
 
 	// emitDropped counts cachemeta emissions dropped because the tier-2 key could
 	// not be parsed by FromVDSOKey (#1939). Without this, a key-format regression
@@ -239,10 +300,11 @@ func (v *VDSO) MissReasons() map[string]uint64 {
 }
 
 type entry struct {
-	key      string
-	ref      abi.Ref
-	witness  string    // external world-state witness this entry was admitted under ("" = none)
-	filledAt time.Time // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
+	key         string
+	ref         abi.Ref
+	witness     string                  // external world-state witness this entry was admitted under ("" = none)
+	filledAt    time.Time               // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
+	replication ResultReplicationStatus // resident-only by default; upgraded only after durable acknowledgement
 }
 
 // clock reads the vDSO's time source (injectable for tests; time.Now in production).
@@ -361,6 +423,15 @@ func (v *VDSO) RegisterStatic(tool string, answer []byte) {
 	v.mu.Lock()
 	v.static[tool] = append([]byte(nil), answer...)
 	v.mu.Unlock()
+}
+
+// SetWriteThroughResultStore installs the optional durable result-store delegate.
+// A nil store restores the resident-only default. The delegate runs after the
+// current LRU insertion and outside v.mu.
+func (v *VDSO) SetWriteThroughResultStore(store ResultStore) {
+	v.regMu.Lock()
+	v.resultStore = store
+	v.regMu.Unlock()
 }
 
 // Caps advertises nothing special.
@@ -535,6 +606,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			ref := e.ref
 			hk, href, hwit := e.key, e.ref, e.witness
 			filledAt := e.filledAt
+			replication := e.replication
 			v.mu.Unlock()
 			atomic.AddInt64(&v.hits, 1)
 			// §2.5 consumer tracking: a HIT names the agent/turn that reused the entry
@@ -549,7 +621,8 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			}
 			return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK,
 				Meta: map[string]string{"served_by": "vdso", "tier": "2",
-					"age_ms": strconv.FormatInt(ageMs, 10)}}, true
+					"age_ms":              strconv.FormatInt(ageMs, 10),
+					MetaResultReplication: string(replication)}}, true
 		}
 		v.mu.Unlock()
 	}
@@ -628,44 +701,108 @@ func (v *VDSO) Emit(ev abi.Event) {
 		v.bumpAndPublish(c, tags)
 		return
 	}
+	_, _ = v.StoreResult(context.Background(), c, r)
+}
+
+// StoreResult inserts one eligible completed read into the current tier-2 store,
+// then writes the identical Ref to the opt-in durable delegate. The returned
+// receipt exposes partial replication; Emit uses this same seam but cannot return
+// its receipt through the abi.Emitter interface.
+func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) (ResultStoreReceipt, error) {
+	if c == nil || r == nil || r.Status != abi.StatusOK || destructive(c) {
+		return ResultStoreReceipt{}, nil
+	}
 	if !(metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint")) {
-		return
+		return ResultStoreReceipt{}, nil
 	}
 	// already served by the vDSO? don't re-store.
 	if r.Meta != nil && r.Meta["served_by"] == "vdso" {
-		return
+		return ResultStoreReceipt{}, nil
 	}
-	args := v.bytes(context.Background(), c.Args)
+	args := v.bytes(ctx, c.Args)
 	// Resource-mode soundness gate: a known-namespace read that can't name its entity
 	// is not cacheable (an entity-fine write would miss it) — don't store it.
 	if v.resourceMisnamed(c, args) {
-		return
+		return ResultStoreReceipt{}, nil
 	}
 	// Temporal-cache negative-result guard (neardup.go): in near-dup mode a negative
 	// answer ("not found" / empty) is never stored, so a formatting-variant query can
 	// never be served a stale negative that has since flipped positive.
-	if v.NearDupOf() && negativeResult(v.bytes(context.Background(), r.Payload)) {
-		return
+	if v.NearDupOf() && negativeResult(v.bytes(ctx, r.Payload)) {
+		return ResultStoreReceipt{}, nil
 	}
 	wit := v.resolveWitness(c, r)
-	// The fill + LRU-evict run under v.mu. We collect cachemeta emit jobs inside
-	// the lock (where the entry identities live) and dispatch them OUTSIDE the lock
-	// via this IIFE — the `defer v.mu.Unlock()` keeps the early-return unlock
-	// semantics byte-identical, so a sink that re-enters the vDSO cannot deadlock.
+
+	v.regMu.RLock()
+	durable := v.resultStore
+	v.regMu.RUnlock()
+
+	var key string
+	receipt, err := writeThroughResult(ctx, r.Payload, func(_ context.Context, ref abi.Ref) (bool, error) {
+		var stored bool
+		key, stored = v.storeResidentResult(c, args, ref, wit)
+		return stored, nil
+	}, durable)
+	if !receipt.Resident {
+		if status, ok := v.resultReplication(key, r.Payload); ok {
+			receipt.Resident = true
+			receipt.Durable = status == ResultFullyReplicated
+			receipt.Replication = status
+		}
+		return receipt, err
+	}
+	if receipt.Replication != ResultResidentOnly {
+		v.setResultReplication(key, r.Payload, receipt.Replication)
+	}
+	return receipt, err
+}
+
+type residentResultStore func(context.Context, abi.Ref) (bool, error)
+
+func writeThroughResult(ctx context.Context, ref abi.Ref, current residentResultStore, durable ResultStore) (ResultStoreReceipt, error) {
+	receipt := ResultStoreReceipt{Ref: ref}
+	resident, err := current(ctx, ref)
+	if err != nil || !resident {
+		return receipt, err
+	}
+	receipt.Resident = true
+	receipt.Replication = ResultResidentOnly
+	if durable == nil {
+		return receipt, nil
+	}
+	if err := durable.Store(ctx, ref); err != nil {
+		receipt.Replication = ResultPartiallyReplicated
+		return receipt, &PartialReplicationError{Receipt: receipt, Cause: err}
+	}
+	receipt.Durable = true
+	receipt.Replication = ResultFullyReplicated
+	return receipt, nil
+}
+
+func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, witness string) (string, bool) {
+	// The fill + LRU-evict run under v.mu. Cachemeta jobs cross the lock boundary
+	// because an observer may re-enter the vDSO.
+	var key string
 	fillJobs, evictJobs := func() (fill, evicted []emitJob) {
 		v.mu.Lock()
 		defer v.mu.Unlock()
+		key = v.keyLocked(c, args)
 		// Integrity gate (revoke.go): never RE-ADMIT under a witness a refutation retired —
 		// the durable CAS makes the poisoned bytes content-stable, so without this an evicted
 		// entry would silently repopulate on the next read.
-		if v.revokedLocked(wit) {
+		if v.revokedLocked(witness) {
 			return nil, nil
 		}
-		key := v.keyLocked(c, args)
 		if _, ok := v.cache[key]; ok {
 			return nil, nil
 		}
-		el := v.lru.PushFront(&entry{key: key, ref: r.Payload, witness: wit, filledAt: v.clock()})
+		el := v.lru.PushFront(&entry{
+			key:         key,
+			ref:         ref,
+			witness:     witness,
+			filledAt:    v.clock(),
+			replication: ResultResidentOnly,
+		})
 		v.cache[key] = el
 		atomic.AddInt64(&v.fills, 1)
 		// Pin the CAS bytes UNDER v.mu, before the entry is reachable to any Lookup,
@@ -673,8 +810,8 @@ func (v *VDSO) Emit(ev abi.Event) {
 		// entry will resolve on a later hit (the soundness race). The blob store is a
 		// leaf — it never re-enters the vDSO — so this foreign call under v.mu cannot
 		// deadlock, unlike emitCache (which a sink may re-enter, so that stays outside).
-		abi.PinResolved(r.Payload)
-		fill = []emitJob{{key: key, ref: r.Payload, witness: wit}}
+		abi.PinResolved(ref)
+		fill = []emitJob{{key: key, ref: ref, witness: witness}}
 		for v.lru.Len() > v.cap { // LRU eviction (unit 36)
 			back := v.lru.Back()
 			if back == nil {
@@ -695,6 +832,42 @@ func (v *VDSO) Emit(ev abi.Event) {
 	for _, j := range evictJobs {
 		v.emitCache(CacheEvict, j.key, j.ref, j.witness)
 	}
+	return key, len(fillJobs) != 0
+}
+
+func (v *VDSO) resultReplication(key string, ref abi.Ref) (ResultReplicationStatus, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	el, ok := v.cache[key]
+	if !ok {
+		return "", false
+	}
+	e := el.Value.(*entry)
+	if !sameResultRef(e.ref, ref) {
+		return "", false
+	}
+	return e.replication, true
+}
+
+func (v *VDSO) setResultReplication(key string, ref abi.Ref, status ResultReplicationStatus) {
+	v.mu.Lock()
+	if el, ok := v.cache[key]; ok {
+		e := el.Value.(*entry)
+		if sameResultRef(e.ref, ref) {
+			e.replication = status
+		}
+	}
+	v.mu.Unlock()
+}
+
+func sameResultRef(a, b abi.Ref) bool {
+	return a.Kind == b.Kind &&
+		a.Digest == b.Digest &&
+		bytes.Equal(a.Inline, b.Inline) &&
+		a.Handle == b.Handle &&
+		a.Len == b.Len &&
+		a.Taint == b.Taint &&
+		a.Scope == b.Scope
 }
 
 // emitJob carries a tier-2 identity (key + payload ref + witness) from a locked
