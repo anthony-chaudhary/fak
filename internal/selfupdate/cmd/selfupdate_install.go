@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -183,10 +184,12 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		}
 	} else {
 		fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+		attemptOptions := selfUpdateAttemptOptions(buildDir, installTarget, headRev)
 		res = selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
 			candidate = source
 			return nil
-		}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
+		}, attemptOptions)
+		reportSelfUpdateCandidateCacheOutcome(res, attemptOptions.CacheDir)
 		candidateEphemeral = true
 	}
 	if res.Installed {
@@ -373,6 +376,44 @@ func prepareSelfUpdateAttempt(ctx context.Context, runner selfinstall.Runner, re
 		return "", func() {}, fmt.Errorf("self-update: selected revision is not a full 40-hex commit")
 	}
 	return selfinstall.PrepareOrigin(ctx, runner, repoRoot, expectedCommit, buildDir)
+}
+
+type selfUpdateCandidateCacheOutcomeCounts struct {
+	Success int
+	Refusal int
+	Error   int
+}
+
+var selfUpdateCandidateCacheOutcomes struct {
+	sync.Mutex
+	counts selfUpdateCandidateCacheOutcomeCounts
+}
+
+func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir string) {
+	if strings.TrimSpace(cacheDir) == "" {
+		return
+	}
+
+	selfUpdateCandidateCacheOutcomes.Lock()
+	switch {
+	case result.Installed && result.Reused:
+		selfUpdateCandidateCacheOutcomes.counts.Success++
+	case result.Installed:
+		selfUpdateCandidateCacheOutcomes.counts.Refusal++
+	default:
+		selfUpdateCandidateCacheOutcomes.counts.Error++
+	}
+	counts := selfUpdateCandidateCacheOutcomes.counts
+	selfUpdateCandidateCacheOutcomes.Unlock()
+
+	fmt.Fprintf(selfUpdateProgress, "self-update: candidate-cache outcomes success=%d refusal=%d error=%d\n",
+		counts.Success, counts.Refusal, counts.Error)
+}
+
+func resetSelfUpdateCandidateCacheOutcomesForTest() {
+	selfUpdateCandidateCacheOutcomes.Lock()
+	selfUpdateCandidateCacheOutcomes.counts = selfUpdateCandidateCacheOutcomeCounts{}
+	selfUpdateCandidateCacheOutcomes.Unlock()
 }
 
 func selfUpdateAttemptOptions(buildDir, installTarget, expectedCommit string) selfinstall.Options {

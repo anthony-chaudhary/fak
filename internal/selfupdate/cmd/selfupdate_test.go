@@ -127,6 +127,30 @@ func TestSelfUpdateAttemptOptionsUsesCloneSharedCandidateCache(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateCandidateCacheOutcomeReadout(t *testing.T) {
+	oldProgress := selfUpdateProgress
+	var out strings.Builder
+	selfUpdateProgress = &out
+	resetSelfUpdateCandidateCacheOutcomesForTest()
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		resetSelfUpdateCandidateCacheOutcomesForTest()
+	})
+
+	cacheDir := t.TempDir()
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true, Reused: true}, cacheDir)
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true}, cacheDir)
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Stage: selfinstall.StageSmoke}, cacheDir)
+
+	want := "self-update: candidate-cache outcomes success=1 refusal=0 error=0\n" +
+		"self-update: candidate-cache outcomes success=1 refusal=1 error=0\n" +
+		"self-update: candidate-cache outcomes success=1 refusal=1 error=1\n"
+	if got := out.String(); got != want {
+		t.Fatalf("candidate-cache outcome readout = %q, want %q", got, want)
+	}
+	t.Log(strings.TrimSpace(out.String()))
+}
+
 func TestSelfUpdateAttemptRejectsUnpinnedSelection(t *testing.T) {
 	called := false
 	runner := func(context.Context, string, string, ...string) (string, bool) {

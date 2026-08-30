@@ -217,3 +217,25 @@ transaction stages twice. Demotion/retirement evidence: no cache-hit or speed cl
 the measured retry rebuilt and the readout records the failure. Invalidating assumption: the
 spine's cache can only serve real retries if build-input digest generation and identity
 persistence use one canonical representation.
+
+## Candidate-cache outcome readout — August 30, 2026 (#10214)
+
+Every cache-enabled source-build attempt now joins the existing self-update progress stream with
+one cumulative, machine-greppable readout:
+
+```text
+self-update: candidate-cache outcomes success=1 refusal=1 error=1
+```
+
+`success` counts an exact-input verified candidate restored and installed from the clone-shared
+cache. `refusal` counts a cache-enabled attempt that safely fell back to a newly gated build.
+`error` counts an attempt that did not produce an installed candidate. The captured contract test
+feeds one real `selfinstall.Result` from each class through the production formatter and asserts
+the exact cumulative readout; no dashboard, separate metrics file, receipt schema change, or
+cache-acceptance change was added.
+
+Promotion evidence: repeated dogfood runs retain zero `error` counts and show `success` increasing
+on exact-input retries. Demotion or retirement evidence: unexplained `refusal` growth, any `error`
+growth, or an operator surface that no longer captures the progress stream. Invalidating
+assumption: process-local cumulative counts are sufficient for the existing invocation readout;
+long-lived cross-process history would require a separately justified ledger fold.
