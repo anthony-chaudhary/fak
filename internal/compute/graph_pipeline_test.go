@@ -44,8 +44,8 @@ func TestGraphPipelineConvergesAndMatchesEagerOracle(t *testing.T) {
 	}
 
 	wantFirstOrder := []GraphPassName{
-		CanonicalizePassName, DCEPassName, CanonicalizePassName,
-		CanonicalizePassName, DCEPassName, CanonicalizePassName,
+		CanonicalizePassName, SCCPPassName, DCEPassName, CanonicalizePassName,
+		CanonicalizePassName, SCCPPassName, DCEPassName, CanonicalizePassName,
 	}
 	if gotOrder := receiptOrder(first); !reflect.DeepEqual(gotOrder, wantFirstOrder) {
 		t.Fatalf("first pass order = %v, want %v", gotOrder, wantFirstOrder)
@@ -53,11 +53,11 @@ func TestGraphPipelineConvergesAndMatchesEagerOracle(t *testing.T) {
 	if !first.Stable || first.Rounds != 2 {
 		t.Fatalf("first receipt stable/rounds = %t/%d, want true/2", first.Stable, first.Rounds)
 	}
-	wantFirstRounds := []int{1, 1, 1, 2, 2, 2}
+	wantFirstRounds := []int{1, 1, 1, 1, 2, 2, 2, 2}
 	if gotRounds := receiptRounds(first); !reflect.DeepEqual(gotRounds, wantFirstRounds) {
 		t.Fatalf("first receipt rounds = %v, want %v", gotRounds, wantFirstRounds)
 	}
-	wantFirstChanges := []int{1, 1, 0, 0, 0, 0}
+	wantFirstChanges := []int{1, 1, 0, 0, 0, 0, 0, 0}
 	if gotChanges := receiptChanges(first); !reflect.DeepEqual(gotChanges, wantFirstChanges) {
 		t.Fatalf("first changed-node counts = %v, want %v", gotChanges, wantFirstChanges)
 	}
@@ -82,14 +82,14 @@ func TestGraphPipelineConvergesAndMatchesEagerOracle(t *testing.T) {
 	if second.FinalGraphDigest != first.FinalGraphDigest {
 		t.Fatalf("second digest = %q, first = %q", second.FinalGraphDigest, first.FinalGraphDigest)
 	}
-	wantSecondOrder := []GraphPassName{CanonicalizePassName, DCEPassName, CanonicalizePassName}
+	wantSecondOrder := []GraphPassName{CanonicalizePassName, SCCPPassName, DCEPassName, CanonicalizePassName}
 	if gotOrder := receiptOrder(second); !reflect.DeepEqual(gotOrder, wantSecondOrder) {
 		t.Fatalf("second pass order = %v, want %v", gotOrder, wantSecondOrder)
 	}
 	if !second.Stable || second.Rounds != 1 {
 		t.Fatalf("second receipt stable/rounds = %t/%d, want true/1", second.Stable, second.Rounds)
 	}
-	wantSecondRounds := []int{1, 1, 1}
+	wantSecondRounds := []int{1, 1, 1, 1}
 	if gotRounds := receiptRounds(second); !reflect.DeepEqual(gotRounds, wantSecondRounds) {
 		t.Fatalf("second receipt rounds = %v, want %v", gotRounds, wantSecondRounds)
 	}

@@ -25,15 +25,26 @@ const (
 	GraphOpIdentity GraphOp = "identity"
 	GraphOpAdd      GraphOp = "add"
 	GraphOpMultiply GraphOp = "multiply"
+	GraphOpIf       GraphOp = "if"
 )
 
+// GraphRegion is one structured control-flow region. Its nodes may reference values
+// captured explicitly by the owning operation, and Outputs are yielded back to that
+// operation. The first spine uses two single-result regions for GraphOpIf.
+type GraphRegion struct {
+	Nodes   []GraphNode `json:"nodes"`
+	Outputs []NodeID    `json:"outputs"`
+}
+
 // GraphNode is the first typed compute IR node. Nodes are pure dataflow operations and Outputs
-// are their only observable roots. Value is meaningful for constants.
+// are their only observable roots. Value is meaningful for constants. Regions are meaningful
+// only for structured operations such as GraphOpIf.
 type GraphNode struct {
-	ID     NodeID   `json:"id"`
-	Op     GraphOp  `json:"op"`
-	Inputs []NodeID `json:"inputs"`
-	Value  float64  `json:"value"`
+	ID      NodeID        `json:"id"`
+	Op      GraphOp       `json:"op"`
+	Inputs  []NodeID      `json:"inputs"`
+	Value   float64       `json:"value"`
+	Regions []GraphRegion `json:"regions,omitempty"`
 }
 
 // Graph is a typed acyclic dataflow graph. Node order is representation order, while Outputs
@@ -53,40 +64,12 @@ func (g Graph) Validate() error {
 		return fmt.Errorf("compute graph: must contain at least one output")
 	}
 
-	nodes := make(map[NodeID]GraphNode, len(g.Nodes))
-	for i, node := range g.Nodes {
-		if node.ID == "" || !utf8.ValidString(string(node.ID)) {
-			return fmt.Errorf("compute graph: node %d has invalid empty or non-UTF-8 ID", i)
-		}
-		if node.Op == "" || !utf8.ValidString(string(node.Op)) {
-			return fmt.Errorf("compute graph: node %q has invalid empty or non-UTF-8 op", node.ID)
-		}
-		if _, exists := nodes[node.ID]; exists {
-			return fmt.Errorf("compute graph: duplicate node ID %q", node.ID)
-		}
-		if math.IsNaN(node.Value) || math.IsInf(node.Value, 0) {
-			return fmt.Errorf("compute graph: node %q has non-finite value", node.ID)
-		}
-		if err := validateGraphOp(node); err != nil {
-			return err
-		}
-		nodes[node.ID] = node
+	all := make(map[NodeID]bool)
+	if err := collectGraphNodeIDs(g.Nodes, all); err != nil {
+		return err
 	}
-
-	for _, node := range g.Nodes {
-		for _, input := range node.Inputs {
-			if _, ok := nodes[input]; !ok {
-				return fmt.Errorf("compute graph: node %q references unknown input %q", node.ID, input)
-			}
-		}
-	}
-	for i, output := range g.Outputs {
-		if _, ok := nodes[output]; !ok {
-			return fmt.Errorf("compute graph: output %d references unknown node %q", i, output)
-		}
-	}
-	if !graphIsAcyclic(g) {
-		return fmt.Errorf("compute graph: dependency cycle detected")
+	if err := validateGraphScope("compute graph", g.Nodes, g.Outputs, nil); err != nil {
+		return err
 	}
 	return nil
 }
@@ -100,25 +83,110 @@ func validateGraphOp(node GraphNode) error {
 		want = 1
 	case GraphOpAdd, GraphOpMultiply:
 		want = 2
+	case GraphOpIf:
+		if len(node.Inputs) == 0 {
+			return fmt.Errorf("compute graph: if node %q has 0 inputs, want at least condition", node.ID)
+		}
+		if len(node.Regions) != 2 {
+			return fmt.Errorf("compute graph: if node %q has %d regions, want 2", node.ID, len(node.Regions))
+		}
+		for i, region := range node.Regions {
+			if len(region.Outputs) != 1 {
+				return fmt.Errorf("compute graph: if node %q region %d has %d outputs, want 1", node.ID, i, len(region.Outputs))
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("compute graph: node %q has unknown op %q", node.ID, node.Op)
 	}
 	if len(node.Inputs) != want {
 		return fmt.Errorf("compute graph: %s node %q has %d inputs, want %d", node.Op, node.ID, len(node.Inputs), want)
 	}
+	if len(node.Regions) != 0 {
+		return fmt.Errorf("compute graph: %s node %q has %d regions, want 0", node.Op, node.ID, len(node.Regions))
+	}
 	return nil
 }
 
-func graphIsAcyclic(g Graph) bool {
-	indegree := make(map[NodeID]int, len(g.Nodes))
-	consumers := make(map[NodeID][]NodeID, len(g.Nodes))
-	for _, node := range g.Nodes {
-		indegree[node.ID] = len(node.Inputs)
+func collectGraphNodeIDs(nodes []GraphNode, all map[NodeID]bool) error {
+	for i, node := range nodes {
+		if node.ID == "" || !utf8.ValidString(string(node.ID)) {
+			return fmt.Errorf("compute graph: node %d has invalid empty or non-UTF-8 ID", i)
+		}
+		if all[node.ID] {
+			return fmt.Errorf("compute graph: duplicate node ID %q", node.ID)
+		}
+		all[node.ID] = true
+		for _, region := range node.Regions {
+			if err := collectGraphNodeIDs(region.Nodes, all); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateGraphScope(label string, nodes []GraphNode, outputs []NodeID, captures map[NodeID]bool) error {
+	local := make(map[NodeID]bool, len(nodes))
+	for _, node := range nodes {
+		local[node.ID] = true
+		if node.Op == "" || !utf8.ValidString(string(node.Op)) {
+			return fmt.Errorf("compute graph: node %q has invalid empty or non-UTF-8 op", node.ID)
+		}
+		if math.IsNaN(node.Value) || math.IsInf(node.Value, 0) {
+			return fmt.Errorf("compute graph: node %q has non-finite value", node.ID)
+		}
+		if err := validateGraphOp(node); err != nil {
+			return err
+		}
+	}
+	for _, node := range nodes {
 		for _, input := range node.Inputs {
+			if !local[input] && !captures[input] {
+				return fmt.Errorf("compute graph: node %q references unknown input %q", node.ID, input)
+			}
+		}
+		if node.Op == GraphOpIf {
+			regionCaptures := make(map[NodeID]bool, len(node.Inputs))
+			for _, input := range node.Inputs {
+				regionCaptures[input] = true
+			}
+			for i, region := range node.Regions {
+				if err := validateGraphScope(fmt.Sprintf("%s node %q region %d", label, node.ID, i), region.Nodes, region.Outputs, regionCaptures); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for i, output := range outputs {
+		if !local[output] && !captures[output] {
+			return fmt.Errorf("%s: output %d references unknown node %q", label, i, output)
+		}
+	}
+	if !graphScopeIsAcyclic(nodes) {
+		return fmt.Errorf("%s: dependency cycle detected", label)
+	}
+	return nil
+}
+
+func graphScopeIsAcyclic(nodes []GraphNode) bool {
+	local := make(map[NodeID]bool, len(nodes))
+	for _, node := range nodes {
+		local[node.ID] = true
+	}
+	indegree := make(map[NodeID]int, len(nodes))
+	consumers := make(map[NodeID][]NodeID, len(nodes))
+	for _, node := range nodes {
+		indegree[node.ID] = 0
+		for _, input := range node.Inputs {
+			if !local[input] {
+				continue
+			}
+			indegree[node.ID]++
 			consumers[input] = append(consumers[input], node.ID)
 		}
 	}
-	ready := make([]NodeID, 0, len(g.Nodes))
+	ready := make([]NodeID, 0, len(nodes))
 	for id, degree := range indegree {
 		if degree == 0 {
 			ready = append(ready, id)
@@ -136,7 +204,7 @@ func graphIsAcyclic(g Graph) bool {
 			}
 		}
 	}
-	return seen == len(g.Nodes)
+	return seen == len(nodes)
 }
 
 // StableIR returns the exact serialized graph representation used by pipeline convergence and
@@ -167,6 +235,7 @@ type GraphPassName string
 
 const (
 	CanonicalizePassName GraphPassName = "canonicalize"
+	SCCPPassName         GraphPassName = "sccp"
 	DCEPassName          GraphPassName = "dce"
 )
 
@@ -210,6 +279,7 @@ func CanonicalGraphPipeline() GraphPipeline {
 	return GraphPipeline{
 		Passes: []GraphPass{
 			CanonicalizeGraphPass{},
+			SparseConditionalConstantPropagationPass{MaxVisits: defaultSCCPMaxVisits},
 			DeadCodeEliminationPass{},
 			CanonicalizeGraphPass{},
 		},
@@ -340,6 +410,7 @@ func (CanonicalizeGraphPass) Apply(input Graph) (Graph, error) {
 		for i, input := range node.Inputs {
 			node.Inputs[i] = resolve(input)
 		}
+		rewriteGraphRegionInputs(node.Regions, resolve)
 		nodes = append(nodes, node)
 	}
 	outputs := cloneNodeIDs(g.Outputs)
@@ -456,11 +527,16 @@ func changedGraphNodeCount(before, after Graph) int {
 }
 
 func graphNodesEqual(a, b GraphNode) bool {
-	if a.ID != b.ID || a.Op != b.Op || math.Float64bits(a.Value) != math.Float64bits(b.Value) || len(a.Inputs) != len(b.Inputs) {
+	if a.ID != b.ID || a.Op != b.Op || math.Float64bits(a.Value) != math.Float64bits(b.Value) || len(a.Inputs) != len(b.Inputs) || len(a.Regions) != len(b.Regions) {
 		return false
 	}
 	for i := range a.Inputs {
 		if a.Inputs[i] != b.Inputs[i] {
+			return false
+		}
+	}
+	for i := range a.Regions {
+		if !graphRegionsEqual(a.Regions[i], b.Regions[i]) {
 			return false
 		}
 	}
@@ -470,10 +546,62 @@ func graphNodesEqual(a, b GraphNode) bool {
 func cloneGraph(g Graph) Graph {
 	nodes := make([]GraphNode, len(g.Nodes))
 	for i, node := range g.Nodes {
-		node.Inputs = cloneNodeIDs(node.Inputs)
-		nodes[i] = node
+		nodes[i] = cloneGraphNode(node)
 	}
 	return Graph{Nodes: nodes, Outputs: cloneNodeIDs(g.Outputs)}
+}
+
+func cloneGraphNode(node GraphNode) GraphNode {
+	node.Inputs = cloneNodeIDs(node.Inputs)
+	node.Regions = cloneGraphRegions(node.Regions)
+	return node
+}
+
+func cloneGraphRegions(regions []GraphRegion) []GraphRegion {
+	if regions == nil {
+		return nil
+	}
+	cloned := make([]GraphRegion, len(regions))
+	for i, region := range regions {
+		nodes := make([]GraphNode, len(region.Nodes))
+		for j, node := range region.Nodes {
+			nodes[j] = cloneGraphNode(node)
+		}
+		cloned[i] = GraphRegion{Nodes: nodes, Outputs: cloneNodeIDs(region.Outputs)}
+	}
+	return cloned
+}
+
+func graphRegionsEqual(a, b GraphRegion) bool {
+	if len(a.Nodes) != len(b.Nodes) || len(a.Outputs) != len(b.Outputs) {
+		return false
+	}
+	for i := range a.Nodes {
+		if !graphNodesEqual(a.Nodes[i], b.Nodes[i]) {
+			return false
+		}
+	}
+	for i := range a.Outputs {
+		if a.Outputs[i] != b.Outputs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func rewriteGraphRegionInputs(regions []GraphRegion, resolve func(NodeID) NodeID) {
+	for regionIndex := range regions {
+		for nodeIndex := range regions[regionIndex].Nodes {
+			node := &regions[regionIndex].Nodes[nodeIndex]
+			for i, input := range node.Inputs {
+				node.Inputs[i] = resolve(input)
+			}
+			rewriteGraphRegionInputs(node.Regions, resolve)
+		}
+		for i, output := range regions[regionIndex].Outputs {
+			regions[regionIndex].Outputs[i] = resolve(output)
+		}
+	}
 }
 
 func cloneNodeIDs(ids []NodeID) []NodeID {
