@@ -21,17 +21,42 @@ import (
 // component normalizes to "unknown" at observe time — mirroring the gateway's serving
 // metrics label defaulting — so an unlabeled legacy tap and a labeled tap can never mint
 // two spellings of the same series (which would render duplicate Prometheus series).
+const (
+	// PhasePrefill attributes cache work performed while ingesting the prompt.
+	PhasePrefill = "prefill"
+	// PhaseDecode attributes cache work performed while generating output tokens.
+	PhaseDecode = "decode"
+	// PhaseOther is the bounded fallback for absent or unrecognized pipeline phases.
+	PhaseOther = "other"
+)
+
+// Labels keys one (model, tenant, phase) series of the per-series breakdown. Phase has
+// a deliberately closed vocabulary: prefill, decode, or other. This prevents caller-
+// supplied pipeline names from creating unbounded telemetry cardinality.
 type Labels struct {
 	Model  string
 	Tenant string
+	Phase  string
 }
 
-// normalized trims each component and maps an empty result onto the explicit "unknown"
-// series, returning the canonical map key every observation is booked under.
+// normalized trims the identity components, maps empty identities onto "unknown", and
+// collapses every phase outside the closed vocabulary onto PhaseOther.
 func (l Labels) normalized() Labels {
 	l.Model = labelOrUnknown(l.Model)
 	l.Tenant = labelOrUnknown(l.Tenant)
+	l.Phase = normalizePhase(l.Phase)
 	return l
+}
+
+func normalizePhase(phase string) string {
+	switch strings.TrimSpace(phase) {
+	case PhasePrefill:
+		return PhasePrefill
+	case PhaseDecode:
+		return PhaseDecode
+	default:
+		return PhaseOther
+	}
 }
 
 func labelOrUnknown(v string) string {
@@ -84,7 +109,7 @@ func (o *Observer) ObserveLabeled(labels Labels, promptTokens, cacheablePrefixTo
 	o.observeAttributed(labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0, eligiblePromptTokens)
 }
 
-// LabeledStats is one (model, tenant) row of the per-series snapshot (#3391).
+// LabeledStats is one (model, tenant, phase) row of the per-series snapshot.
 type LabeledStats struct {
 	Labels         Labels
 	Turns          uint64
@@ -93,9 +118,9 @@ type LabeledStats struct {
 	ReusedTokens   uint64
 }
 
-// LabeledSnapshot returns the per-(model, tenant) rows, sorted by model then tenant so a
+// LabeledSnapshot returns the per-(model, tenant, phase) rows in deterministic order so a
 // renderer emits a deterministic series order. Unlabeled legacy taps land on the
-// ("unknown","unknown") row, so summing any column across the rows reconciles exactly
+// ("unknown","unknown", "other") row, so summing any column across the rows reconciles exactly
 // with the corresponding global counter in Snapshot(). Nil-safe like Snapshot; empty
 // until the first observation.
 func (o *Observer) LabeledSnapshot() []LabeledStats {
@@ -118,7 +143,10 @@ func (o *Observer) LabeledSnapshot() []LabeledStats {
 		if rows[i].Labels.Model != rows[j].Labels.Model {
 			return rows[i].Labels.Model < rows[j].Labels.Model
 		}
-		return rows[i].Labels.Tenant < rows[j].Labels.Tenant
+		if rows[i].Labels.Tenant != rows[j].Labels.Tenant {
+			return rows[i].Labels.Tenant < rows[j].Labels.Tenant
+		}
+		return rows[i].Labels.Phase < rows[j].Labels.Phase
 	})
 	return rows
 }

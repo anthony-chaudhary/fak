@@ -76,7 +76,7 @@ func TestLegacyTapsBookWholePromptEligible(t *testing.T) {
 			s.EligibleReuseRatio, s.ReuseRatio)
 	}
 	rows := o.LabeledSnapshot()
-	if len(rows) != 1 || rows[0].Labels != (Labels{Model: "unknown", Tenant: "unknown"}) {
+	if len(rows) != 1 || rows[0].Labels != (Labels{Model: "unknown", Tenant: "unknown", Phase: PhaseOther}) {
 		t.Fatalf("legacy rows = %+v, want one (unknown, unknown) series", rows)
 	}
 }
@@ -94,9 +94,9 @@ func TestLabeledRowsReconcileWithGlobals(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("rows = %+v, want 3 series", rows)
 	}
-	if rows[0].Labels != (Labels{Model: "qwen", Tenant: "acme"}) ||
-		rows[1].Labels != (Labels{Model: "qwen", Tenant: "globex"}) ||
-		rows[2].Labels != (Labels{Model: "unknown", Tenant: "unknown"}) {
+	if rows[0].Labels != (Labels{Model: "qwen", Tenant: "acme", Phase: PhaseOther}) ||
+		rows[1].Labels != (Labels{Model: "qwen", Tenant: "globex", Phase: PhaseOther}) ||
+		rows[2].Labels != (Labels{Model: "unknown", Tenant: "unknown", Phase: PhaseOther}) {
 		t.Fatalf("rows out of (model, tenant) order: %+v", rows)
 	}
 	if r := rows[0]; r.Turns != 2 || r.PromptTokens != 2000 || r.EligibleTokens != 1000 || r.ReusedTokens != 900 {
@@ -127,7 +127,7 @@ func TestLabelNormalizationCannotMintDuplicateSeries(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want both unlabeled spellings folded into one series", rows)
 	}
-	if rows[0].Labels != (Labels{Model: "unknown", Tenant: "unknown"}) || rows[0].PromptTokens != 200 {
+	if rows[0].Labels != (Labels{Model: "unknown", Tenant: "unknown", Phase: PhaseOther}) || rows[0].PromptTokens != 200 {
 		t.Fatalf("folded row = %+v, want (unknown, unknown) with prompt=200", rows[0])
 	}
 }
@@ -179,7 +179,7 @@ func TestLabeledAttributionConcurrentSessions(t *testing.T) {
 	for i, row := range rows {
 		session := i + 1
 		wantTenant := fmt.Sprintf("session-%02d", session)
-		if row.Labels != (Labels{Model: "synthetic-upstream", Tenant: wantTenant}) {
+		if row.Labels != (Labels{Model: "synthetic-upstream", Tenant: wantTenant, Phase: PhaseOther}) {
 			t.Fatalf("row %d labels = %+v, want tenant %q", i, row.Labels, wantTenant)
 		}
 		wantSessionPrompt := uint64(turnsPerSession*(session*1000+1) + turnsPerSession*(turnsPerSession-1)/2)
@@ -194,5 +194,81 @@ func TestLabeledAttributionConcurrentSessions(t *testing.T) {
 	global := o.Snapshot()
 	if global.Turns != sessions*turnsPerSession || global.PromptTokens != wantPrompt || global.EligibleTokens != wantPrompt || global.ReusedTokens != wantReused {
 		t.Fatalf("global attribution = %+v, want turns=%d prompt=eligible=%d reused=%d", global, sessions*turnsPerSession, wantPrompt, wantReused)
+	}
+}
+
+func TestPipelinePhasesReconcileWithGlobalTotals(t *testing.T) {
+	o := New()
+	o.ObserveLabeled(Labels{Model: "qwen", Tenant: "acme", Phase: PhasePrefill}, 1000, 800, 700, 900)
+	o.ObserveLabeled(Labels{Model: "qwen", Tenant: "acme", Phase: PhaseDecode}, 200, 100, 50, 150)
+
+	rows := o.LabeledSnapshot()
+	if len(rows) != 2 {
+		t.Fatalf("labeled rows = %d, want 2: %+v", len(rows), rows)
+	}
+
+	phases := make(map[string]bool, len(rows))
+	var turns, prompt, eligible, reused uint64
+	for _, row := range rows {
+		phases[row.Labels.Phase] = true
+		turns += row.Turns
+		prompt += row.PromptTokens
+		eligible += row.EligibleTokens
+		reused += row.ReusedTokens
+	}
+	if !phases[PhasePrefill] || !phases[PhaseDecode] {
+		t.Fatalf("phases = %v, want %q and %q", phases, PhasePrefill, PhaseDecode)
+	}
+
+	global := o.Snapshot()
+	if turns != global.Turns || prompt != global.PromptTokens || eligible != global.EligibleTokens || reused != global.ReusedTokens {
+		t.Fatalf("phase totals = turns:%d prompt:%d eligible:%d reused:%d, global = %+v", turns, prompt, eligible, reused, global)
+	}
+}
+
+func TestUnknownPipelinePhaseMapsToOther(t *testing.T) {
+	o := New()
+	for _, phase := range []string{"", "   ", "prefill-v2", "DECODE", "tenant-controlled"} {
+		o.ObserveLabeled(Labels{Model: "qwen", Tenant: "acme", Phase: phase}, 10, 5, 2, 8)
+	}
+
+	rows := o.LabeledSnapshot()
+	if len(rows) != 1 {
+		t.Fatalf("labeled rows = %d, want one bounded fallback row: %+v", len(rows), rows)
+	}
+	if rows[0].Labels.Phase != PhaseOther {
+		t.Fatalf("phase = %q, want %q", rows[0].Labels.Phase, PhaseOther)
+	}
+	if rows[0].Turns != 5 {
+		t.Fatalf("fallback turns = %d, want 5", rows[0].Turns)
+	}
+}
+
+func TestPipelinePhaseCardinalityCappedUnderAdversarialInput(t *testing.T) {
+	o := New()
+	known := []string{PhasePrefill, PhaseDecode}
+	for _, phase := range known {
+		o.ObserveLabeled(Labels{Model: "qwen", Tenant: "acme", Phase: phase}, 1, 0, 0, 1)
+	}
+	for i := 0; i < 1000; i++ {
+		phase := fmt.Sprintf("attacker-phase-%d", i)
+		o.ObserveLabeled(Labels{Model: "qwen", Tenant: "acme", Phase: phase}, 1, 0, 0, 1)
+	}
+
+	rows := o.LabeledSnapshot()
+	if len(rows) != 3 {
+		t.Fatalf("labeled rows = %d, want closed cardinality 3: %+v", len(rows), rows)
+	}
+	seen := map[string]uint64{}
+	for _, row := range rows {
+		seen[row.Labels.Phase] = row.Turns
+	}
+	for _, phase := range []string{PhasePrefill, PhaseDecode, PhaseOther} {
+		if _, ok := seen[phase]; !ok {
+			t.Fatalf("phase set = %v, missing %q", seen, phase)
+		}
+	}
+	if seen[PhaseOther] != 1000 {
+		t.Fatalf("other turns = %d, want 1000", seen[PhaseOther])
 	}
 }
