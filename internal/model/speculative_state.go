@@ -7,6 +7,7 @@ import "fmt"
 type HybridSpecCheckpoint struct {
 	owner      *HybridSpecState
 	generation uint64
+	baseCursor int
 	cursor     int
 	kv         [][]byte
 	recurrent  [][]byte
@@ -14,9 +15,12 @@ type HybridSpecCheckpoint struct {
 
 // HybridSpecState keeps attention KV and recurrent state at one token cursor.
 // Speculative writes and restoration always move both state families together.
+// baseCursor permits an accepted prefix to be evicted without losing the
+// absolute token position used to validate later speculative transactions.
 type HybridSpecState struct {
 	kv         [][]byte
 	recurrent  [][]byte
+	baseCursor int
 	cursor     int
 	generation uint64
 	active     bool
@@ -34,13 +38,14 @@ func NewHybridSpecState(kv, recurrent [][]byte) (*HybridSpecState, error) {
 	}, nil
 }
 
-// Begin snapshots the accepted prefix before speculative writes.
+// Begin snapshots the accepted resident state before speculative writes.
 func (s *HybridSpecState) Begin() HybridSpecCheckpoint {
 	s.generation++
 	s.active = true
 	return HybridSpecCheckpoint{
 		owner:      s,
 		generation: s.generation,
+		baseCursor: s.baseCursor,
 		cursor:     s.cursor,
 		kv:         cloneHybridState(s.kv),
 		recurrent:  cloneHybridState(s.recurrent),
@@ -67,10 +72,10 @@ func (s *HybridSpecState) Commit(checkpoint HybridSpecCheckpoint, accepted int) 
 	if accepted < 0 || accepted > speculative {
 		return fmt.Errorf("hybrid speculative state: accepted %d tokens from suffix of %d", accepted, speculative)
 	}
-	cursor := checkpoint.cursor + accepted
-	s.kv = cloneHybridState(s.kv[:cursor])
-	s.recurrent = cloneHybridState(s.recurrent[:cursor])
-	s.cursor = cursor
+	resident := len(checkpoint.kv) + accepted
+	s.kv = cloneHybridState(s.kv[:resident])
+	s.recurrent = cloneHybridState(s.recurrent[:resident])
+	s.cursor = checkpoint.cursor + accepted
 	s.active = false
 	return nil
 }
@@ -82,18 +87,39 @@ func (s *HybridSpecState) Rollback(checkpoint HybridSpecCheckpoint) error {
 	}
 	s.kv = cloneHybridState(checkpoint.kv)
 	s.recurrent = cloneHybridState(checkpoint.recurrent)
+	s.baseCursor = checkpoint.baseCursor
 	s.cursor = checkpoint.cursor
 	s.active = false
 	return nil
 }
 
-// Cursor returns the shared accepted-plus-speculative token position.
+// RetainLast evicts accepted resident state before the newest keep tokens while
+// preserving the absolute cursor. Eviction is forbidden during a transaction so
+// rollback always restores one coherent KV/recurrent window.
+func (s *HybridSpecState) RetainLast(keep int) error {
+	if keep < 0 {
+		return fmt.Errorf("hybrid speculative state: negative retained token count %d", keep)
+	}
+	if s.active {
+		return fmt.Errorf("hybrid speculative state: cannot evict during an active checkpoint")
+	}
+	if keep >= len(s.kv) {
+		return nil
+	}
+	drop := len(s.kv) - keep
+	s.kv = cloneHybridState(s.kv[drop:])
+	s.recurrent = cloneHybridState(s.recurrent[drop:])
+	s.baseCursor += drop
+	return nil
+}
+
+// Cursor returns the absolute accepted-plus-speculative token position.
 func (s *HybridSpecState) Cursor() int { return s.cursor }
 
-// KVState returns a copy of the attention state.
+// KVState returns a copy of the resident attention state.
 func (s *HybridSpecState) KVState() [][]byte { return cloneHybridState(s.kv) }
 
-// RecurrentState returns a copy of the recurrent GDN state.
+// RecurrentState returns a copy of the resident recurrent GDN state.
 func (s *HybridSpecState) RecurrentState() [][]byte { return cloneHybridState(s.recurrent) }
 
 func (s *HybridSpecState) validate(checkpoint HybridSpecCheckpoint) error {
@@ -103,7 +129,9 @@ func (s *HybridSpecState) validate(checkpoint HybridSpecCheckpoint) error {
 	if !s.active || checkpoint.generation != s.generation {
 		return fmt.Errorf("hybrid speculative state: stale checkpoint")
 	}
-	if len(s.kv) != len(s.recurrent) || s.cursor != len(s.kv) || checkpoint.cursor > s.cursor {
+	if len(s.kv) != len(s.recurrent) || s.cursor-s.baseCursor != len(s.kv) ||
+		checkpoint.baseCursor != s.baseCursor || checkpoint.cursor > s.cursor ||
+		checkpoint.cursor-checkpoint.baseCursor != len(checkpoint.kv) {
 		return fmt.Errorf("hybrid speculative state: inconsistent paired state")
 	}
 	return nil
