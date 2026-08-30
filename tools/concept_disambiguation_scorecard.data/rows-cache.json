@@ -271,6 +271,54 @@
       "parent": "kvlayout",
       "verdict": "defined",
       "gaps": ["not yet written into the concept glossary - currently defined-only"]
+    },
+    {
+      "id": "cache-phase-latency-bucket",
+      "canonical": "CachePhaseLatency (phase bucket)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatency is one immutable value bucket in a cache-phase latency receipt: a normalized prefill, decode, or other phase label paired with its observation count and accumulated duration.",
+      "distinction": "It is one per-phase VALUE, not CachePhaseLatencyReceipt (the reconciled snapshot containing every bucket) and not CachePhaseLatencyRecorder (the mutable concurrent accumulator that produces snapshots).",
+      "distinct_from": ["cache-phase-latency-receipt", "cache-phase-latency-recorder"],
+      "aliases": [],
+      "grounding": "cachephaselatency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cache-phase-latency-receipt",
+      "canonical": "CachePhaseLatencyReceipt (reconciled snapshot)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatencyReceipt is the stable exported snapshot that places the unlabeled observation and duration totals beside the fixed-order prefill, decode, and other CachePhaseLatency buckets from which those totals are derived.",
+      "distinction": "It is the immutable RECONCILING SNAPSHOT, not CachePhaseLatency (one bucket inside it) and not CachePhaseLatencyRecorder (the lock-protected live state that records observations).",
+      "distinct_from": ["cache-phase-latency-bucket", "cache-phase-latency-recorder"],
+      "aliases": [],
+      "grounding": "cachephaselatencyreceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cache-phase-latency-recorder",
+      "canonical": "CachePhaseLatencyRecorder (bounded accumulator)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatencyRecorder is the concurrency-safe live accumulator that normalizes caller-supplied phase labels into the closed prefill, decode, and other vocabulary, clamps negative durations, and derives CachePhaseLatencyReceipt snapshots from its counters.",
+      "distinction": "It is the mutable RECORDING MECHANISM, not CachePhaseLatency (one immutable phase bucket) and not CachePhaseLatencyReceipt (the snapshot returned to observers and native-profile receipts).",
+      "distinct_from": ["cache-phase-latency-bucket", "cache-phase-latency-receipt"],
+      "aliases": [],
+      "grounding": "cachephaselatencyrecorder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
@@ -472,6 +473,7 @@ func appendNativeProfilePhase(phases []nativeperf.ProfilePhase, name string, dur
 func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64, vocab int, controls map[string]string, newSession func() *model.Session) error {
 	loadDuration := time.Duration(loadNanos)
 	phases := appendNativeProfilePhase(nil, "load-setup", loadDuration)
+	var cachePhaseLatency modelperfobs.CachePhaseLatencyRecorder
 
 	s := newSession()
 	finishProfile := onceFinishNativeProfile(s.Close)
@@ -633,6 +635,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	b = append(b, '\n')
 	profileSum := sha256.Sum256(b)
 	q4kResidency := m.Q4KResidencyReceipt()
+	cacheLatencyReceipt := cachePhaseLatency.Receipt()
 	receipt := nativeProfileReceipt{
 		Schema:              nativeProfileReceiptSchema,
 		ProfileSHA256:       fmt.Sprintf("%x", profileSum),
@@ -648,6 +651,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 		Fallbacks:           fallbackReceipt,
 		Q4KResidency:        &q4kResidency,
 		Qwen35DecodeHandoff: &handoffReceipt,
+		CachePhaseLatency:   &cacheLatencyReceipt,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -46,6 +47,9 @@ func defaultSchedPrepare(ctx context.Context, c *abi.ToolCall, m *model.Model) s
 type NativeScheduler struct {
 	m       *model.Model
 	prepare schedPrepareFunc
+	now     func() time.Time
+
+	cachePhaseLatency modelperfobs.CachePhaseLatencyRecorder
 
 	mu sync.Mutex
 	// waiting holds admitted-but-not-yet-running lanes (the WAITING queue); lanes
@@ -129,6 +133,12 @@ type SharedWorkReceipt struct {
 	MACs   uint64
 }
 
+// CachePhaseLatencyReceipt reports fak-native KV-bearing prefill/decode latency
+// with a bounded pipeline-phase label and a reconciling unlabeled total.
+func (s *NativeScheduler) CachePhaseLatencyReceipt() modelperfobs.CachePhaseLatencyReceipt {
+	return s.cachePhaseLatency.Receipt()
+}
+
 func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,6 +163,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 	return &NativeScheduler{
 		m:             m,
 		prepare:       prepare,
+		now:           time.Now,
 		wake:          make(chan struct{}, 1),
 		drainDonation: true,
 	}
@@ -222,7 +233,9 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 		sess.Q4K = true
 		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
 	}
+	prefillStarted := s.now()
 	logits := sess.Prefill(prompt)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
@@ -517,7 +530,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane) {
 		if !ok {
 			return
 		}
+		decodeStarted := s.now()
 		ln.logits = ln.sess.Step(next)
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		select {
 		case <-s.wake:
 			return
@@ -545,7 +560,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	}
 	if len(cont) == 1 {
 		for i, ln := range cont {
+			decodeStarted := s.now()
 			ln.logits = ln.sess.Step(ids[i])
+			s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		}
 		return
 	}
@@ -557,7 +574,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 		seqs[i] = ln.sess
 	}
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
+	decodeStarted := s.now()
 	out := bs.StepBatch(ids)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
 		s.mu.Lock()
 		s.sharedBatchSteps++

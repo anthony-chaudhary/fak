@@ -5,9 +5,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
 
 // TestNativeSchedulerBatchesLanesAndFreesCancelled is the acceptance-#4 witness:
@@ -108,5 +110,49 @@ func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 	}
 	if !ln.Reclaimed() {
 		t.Fatal("cancelled lane did not signal KV reclaim")
+	}
+}
+
+func TestNativeSchedulerReportsDeterministicCachePhaseLatency(t *testing.T) {
+	m := model.NewSynthetic(SyntheticConfig())
+	s := NewNativeScheduler(m)
+	defer s.Close()
+
+	var clockMu sync.Mutex
+	now := time.Unix(0, 0)
+	s.now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		current := now
+		now = now.Add(2 * time.Millisecond)
+		return current
+	}
+
+	req, err := s.Admit(context.Background(), inlineCall("search_flights", `{"from":"SFO"}`))
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	for range req.Tokens() {
+	}
+	if _, err := req.Result(); err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+
+	receipt := s.CachePhaseLatencyReceipt()
+	if got, want := len(receipt.Phases), 3; got != want {
+		t.Fatalf("phase cardinality = %d, want %d", got, want)
+	}
+	if got := receipt.Phases[0]; got.Phase != modelperfobs.CachePipelinePhasePrefill || got.Observations != 1 || got.Total != 2*time.Millisecond {
+		t.Fatalf("prefill bucket = %+v, want one 2ms observation", got)
+	}
+	decode := receipt.Phases[1]
+	if decode.Phase != modelperfobs.CachePipelinePhaseDecode || decode.Observations == 0 {
+		t.Fatalf("decode bucket = %+v, want bounded non-empty decode observations", decode)
+	}
+	if decode.Total != time.Duration(decode.Observations)*2*time.Millisecond {
+		t.Fatalf("decode total = %s, want %d deterministic 2ms observations", decode.Total, decode.Observations)
+	}
+	if receipt.Observations != receipt.Phases[0].Observations+decode.Observations || receipt.Total != receipt.Phases[0].Total+decode.Total {
+		t.Fatalf("unlabeled receipt does not reconcile with known phases: %+v", receipt)
 	}
 }

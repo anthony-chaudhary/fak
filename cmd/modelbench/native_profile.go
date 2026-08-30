@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -230,21 +231,22 @@ type nativeSourceIdentity struct {
 }
 
 type nativeProfileReceipt struct {
-	Schema              string                            `json:"schema"`
-	BindingSHA256       string                            `json:"binding_sha256"`
-	ProfileSHA256       string                            `json:"profile_sha256"`
-	EnvelopeID          string                            `json:"envelope_id"`
-	Artifact            nativeArtifactIdentity            `json:"artifact"`
-	ModelConfig         map[string]any                    `json:"model_config"`
-	ModelConfigSHA256   string                            `json:"model_config_sha256"`
-	Host                nativeHostIdentity                `json:"host"`
-	Source              nativeSourceIdentity              `json:"source"`
-	Binary              nativeFileIdentity                `json:"binary"`
-	Controls            map[string]string                 `json:"controls"`
-	Execution           metalgemm.ExecutionReceipt        `json:"execution"`
-	Fallbacks           model.MetalFallbackReceipt        `json:"fallbacks"`
-	Q4KResidency        *model.Q4KResidencyReceipt        `json:"q4k_residency,omitempty"`
-	Qwen35DecodeHandoff *model.Qwen35DecodeHandoffReceipt `json:"qwen35_decode_handoff,omitempty"`
+	Schema              string                                 `json:"schema"`
+	BindingSHA256       string                                 `json:"binding_sha256"`
+	ProfileSHA256       string                                 `json:"profile_sha256"`
+	EnvelopeID          string                                 `json:"envelope_id"`
+	Artifact            nativeArtifactIdentity                 `json:"artifact"`
+	ModelConfig         map[string]any                         `json:"model_config"`
+	ModelConfigSHA256   string                                 `json:"model_config_sha256"`
+	Host                nativeHostIdentity                     `json:"host"`
+	Source              nativeSourceIdentity                   `json:"source"`
+	Binary              nativeFileIdentity                     `json:"binary"`
+	Controls            map[string]string                      `json:"controls"`
+	Execution           metalgemm.ExecutionReceipt             `json:"execution"`
+	Fallbacks           model.MetalFallbackReceipt             `json:"fallbacks"`
+	Q4KResidency        *model.Q4KResidencyReceipt             `json:"q4k_residency,omitempty"`
+	Qwen35DecodeHandoff *model.Qwen35DecodeHandoffReceipt      `json:"qwen35_decode_handoff,omitempty"`
+	CachePhaseLatency   *modelperfobs.CachePhaseLatencyReceipt `json:"cache_phase_latency,omitempty"`
 }
 
 func sha256JSON(v any) (string, error) {
