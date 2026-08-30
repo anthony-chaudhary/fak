@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +206,52 @@ func TestLaunchDoctorHumanOutputNamesEntryPointRoles(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("human output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestInstalledLaunchQualificationReceipt(t *testing.T) {
+	readyRows := []launchDoctorRow{{
+		Provider:       "codex",
+		Reason:         "READY",
+		PathWinner:     redactLocalPath(filepath.Join(t.TempDir(), shimName("codex"))),
+		Underlying:     redactLocalPath(filepath.Join(t.TempDir(), "codex.cmd")),
+		InterceptReady: true,
+	}}
+	receipt := buildInstalledLaunchQualification(readyRows)
+	if receipt.Schema != installedLaunchQualificationSchema || !receipt.Qualified || len(receipt.Providers) != 1 {
+		t.Fatalf("success receipt = %#v", receipt)
+	}
+	provider := receipt.Providers[0]
+	if provider.Harness != "fak-launch/codex" || provider.Status != "READY" || provider.Failure != "" {
+		t.Fatalf("success provider = %#v", provider)
+	}
+	if want := []string{"<local>/codex.cmd", "fak guard", "<local>/codex.cmd"}; !reflect.DeepEqual(provider.Chain, want) {
+		t.Fatalf("resolved chain = %#v, want %#v", provider.Chain, want)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), t.TempDir()) || strings.Contains(string(encoded), `C:\`) {
+		t.Fatalf("receipt leaks local path: %s", encoded)
+	}
+
+	failed := buildInstalledLaunchQualification([]launchDoctorRow{{Provider: "codex", Reason: "UNDERLYING_MISSING"}})
+	if failed.Qualified || len(failed.Providers) != 1 || failed.Providers[0].Failure != "UNDERLYING_MISSING" || len(failed.Providers[0].Chain) != 0 {
+		t.Fatalf("failure receipt = %#v", failed)
+	}
+
+	report := buildLaunchDoctor(launchshim.Config{Providers: map[string]launchshim.Provider{
+		"codex": {Command: filepath.Join(t.TempDir(), "codex.cmd")},
+	}}, nil, filepath.Join(t.TempDir(), "launch.json"), t.TempDir(), func(name string) (string, error) {
+		return "", exec.ErrNotFound
+	}, func(path string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	})
+	if report.Qualification.Schema != installedLaunchQualificationSchema || report.Qualification.Qualified {
+		t.Fatalf("doctor qualification = %#v", report.Qualification)
+	}
+	if got := report.Qualification.Providers[0].Failure; got == "" {
+		t.Fatalf("doctor failure is untyped: %#v", report.Qualification)
 	}
 }

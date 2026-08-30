@@ -1466,13 +1466,17 @@ func readReleaseReadiness(path string) (workdelivery.WorkUnit, workdelivery.Rece
 		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
 	}
 	var envelope struct {
-		Unit    workdelivery.WorkUnit `json:"unit"`
-		Receipt workdelivery.Receipt  `json:"receipt"`
+		Unit          workdelivery.WorkUnit                `json:"unit"`
+		Receipt       workdelivery.Receipt                 `json:"receipt"`
+		Qualification *installedLaunchQualificationReceipt `json:"installed_launch_qualification,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
 	}
 	if err := envelope.Unit.Validate(); err != nil {
+		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
+	}
+	if err := validateInstalledLaunchQualification(envelope.Qualification); err != nil {
 		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
 	}
 	return envelope.Unit, envelope.Receipt, nil
