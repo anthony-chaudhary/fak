@@ -2,6 +2,7 @@ package selfupdatecmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 )
 
 func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, artifact *selfUpdateArtifactTarget, metadataGeneration uint64, signedVersion string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
+	setSelfUpdateCandidateCacheDisposition(selfUpdateCandidateCacheDisposition{State: selfUpdateCandidateCacheDisabled})
 	reportSelfUpdateProgress(20, "acquiring self-update lock")
 	installTarget := strings.TrimSpace(*target)
 	if installTarget == "" {
@@ -185,11 +187,12 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	} else {
 		fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
 		attemptOptions := selfUpdateAttemptOptions(buildDir, installTarget, headRev)
+		cacheEntryPresent := selfUpdateCandidateCacheEntryPresent(attemptOptions.CacheDir)
 		res = selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
 			candidate = source
 			return nil
 		}, attemptOptions)
-		reportSelfUpdateCandidateCacheOutcome(res, attemptOptions.CacheDir)
+		reportSelfUpdateCandidateCacheOutcome(res, attemptOptions.CacheDir, cacheEntryPresent)
 		candidateEphemeral = true
 	}
 	if res.Installed {
@@ -384,13 +387,98 @@ type selfUpdateCandidateCacheOutcomeCounts struct {
 	Error   int
 }
 
-var selfUpdateCandidateCacheOutcomes struct {
-	sync.Mutex
-	counts selfUpdateCandidateCacheOutcomeCounts
+type selfUpdateCandidateCacheState string
+
+const (
+	selfUpdateCandidateCacheDisabled selfUpdateCandidateCacheState = "disabled"
+	selfUpdateCandidateCacheMiss     selfUpdateCandidateCacheState = "miss"
+	selfUpdateCandidateCacheHit      selfUpdateCandidateCacheState = "hit"
+	selfUpdateCandidateCacheRejected selfUpdateCandidateCacheState = "rejected"
+
+	selfUpdateCandidateCacheReasonMax = 160
+)
+
+type selfUpdateCandidateCacheDisposition struct {
+	State  selfUpdateCandidateCacheState `json:"state"`
+	Reason string                        `json:"reason,omitempty"`
 }
 
-func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir string) {
+var selfUpdateCandidateCacheOutcomes struct {
+	sync.Mutex
+	counts      selfUpdateCandidateCacheOutcomeCounts
+	disposition selfUpdateCandidateCacheDisposition
+}
+
+func (receipt selfUpdateReceipt) MarshalJSON() ([]byte, error) {
+	type receiptAlias selfUpdateReceipt
+	disposition := selfUpdateCandidateCacheDispositionSnapshot()
+	var candidateCache *selfUpdateCandidateCacheDisposition
+	if disposition.State != "" {
+		candidateCache = &disposition
+	}
+	return json.Marshal(struct {
+		receiptAlias
+		CandidateCache *selfUpdateCandidateCacheDisposition `json:"candidate_cache,omitempty"`
+	}{
+		receiptAlias:   receiptAlias(receipt),
+		CandidateCache: candidateCache,
+	})
+}
+
+func selfUpdateCandidateCacheEntryPresent(cacheDir string) bool {
 	if strings.TrimSpace(cacheDir) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(cacheDir, "manifest.json"))
+	return err == nil
+}
+
+func deriveSelfUpdateCandidateCacheDisposition(result selfinstall.Result, cacheDir string, cacheEntryPresent bool) selfUpdateCandidateCacheDisposition {
+	if strings.TrimSpace(cacheDir) == "" {
+		return selfUpdateCandidateCacheDisposition{State: selfUpdateCandidateCacheDisabled}
+	}
+	if result.Reused {
+		return selfUpdateCandidateCacheDisposition{State: selfUpdateCandidateCacheHit}
+	}
+	if cacheEntryPresent {
+		return selfUpdateCandidateCacheDisposition{
+			State:  selfUpdateCandidateCacheRejected,
+			Reason: boundedSelfUpdateCandidateCacheReason("preexisting cache entry was stale or otherwise not reusable"),
+		}
+	}
+	disposition := selfUpdateCandidateCacheDisposition{State: selfUpdateCandidateCacheMiss}
+	if !result.Installed {
+		disposition.Reason = boundedSelfUpdateCandidateCacheReason("cold cache was not populated because candidate gating failed")
+	}
+	return disposition
+}
+
+func boundedSelfUpdateCandidateCacheReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= selfUpdateCandidateCacheReasonMax {
+		return reason
+	}
+	return strings.TrimSpace(reason[:selfUpdateCandidateCacheReasonMax])
+}
+
+func setSelfUpdateCandidateCacheDisposition(disposition selfUpdateCandidateCacheDisposition) {
+	disposition.Reason = boundedSelfUpdateCandidateCacheReason(disposition.Reason)
+	selfUpdateCandidateCacheOutcomes.Lock()
+	selfUpdateCandidateCacheOutcomes.disposition = disposition
+	selfUpdateCandidateCacheOutcomes.Unlock()
+}
+
+func selfUpdateCandidateCacheDispositionSnapshot() selfUpdateCandidateCacheDisposition {
+	selfUpdateCandidateCacheOutcomes.Lock()
+	disposition := selfUpdateCandidateCacheOutcomes.disposition
+	selfUpdateCandidateCacheOutcomes.Unlock()
+	return disposition
+}
+
+func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir string, cacheEntryPresent bool) {
+	disposition := deriveSelfUpdateCandidateCacheDisposition(result, cacheDir, cacheEntryPresent)
+	setSelfUpdateCandidateCacheDisposition(disposition)
+	if disposition.State == selfUpdateCandidateCacheDisabled {
 		return
 	}
 
@@ -413,6 +501,7 @@ func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir s
 func resetSelfUpdateCandidateCacheOutcomesForTest() {
 	selfUpdateCandidateCacheOutcomes.Lock()
 	selfUpdateCandidateCacheOutcomes.counts = selfUpdateCandidateCacheOutcomeCounts{}
+	selfUpdateCandidateCacheOutcomes.disposition = selfUpdateCandidateCacheDisposition{}
 	selfUpdateCandidateCacheOutcomes.Unlock()
 }
 
