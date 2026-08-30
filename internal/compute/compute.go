@@ -695,3 +695,111 @@ type RegionSlotPromotion struct {
 type RegionSlotReceipt struct {
 	Promotions []RegionSlotPromotion `json:"promotions"`
 }
+
+// GraphArgumentDirection describes how a graph call uses one by-reference
+// aggregate. InputOutput is a mutable argument whose final value can become a
+// graph result after its initial value becomes an ordinary argument.
+type GraphArgumentDirection string
+
+const (
+	GraphArgumentInput       GraphArgumentDirection = "input"
+	GraphArgumentOutput      GraphArgumentDirection = "output"
+	GraphArgumentInputOutput GraphArgumentDirection = "input-output"
+)
+
+// GraphArgumentPromotionAction is the selected graph ABI for one argument. The
+// by-reference action is the existing ABI and is the fail-closed fallback.
+type GraphArgumentPromotionAction string
+
+const (
+	GraphArgumentKeepByReference GraphArgumentPromotionAction = "keep-by-reference"
+	GraphArgumentPromoteToValue  GraphArgumentPromotionAction = "promote-to-value"
+	GraphArgumentPromoteToResult GraphArgumentPromotionAction = "promote-to-result"
+	GraphArgumentPromoteToBoth   GraphArgumentPromotionAction = "promote-to-value-and-result"
+)
+
+// GraphArgumentPromotionCandidate contains the whole-program facts required to
+// rewrite a by-reference graph argument. CompleteCallSCC means every reference
+// in the candidate's strongly connected call component is a known direct call,
+// so caller and callee signatures can be changed together.
+type GraphArgumentPromotionCandidate struct {
+	Name             string                 `json:"name"`
+	Direction        GraphArgumentDirection `json:"direction"`
+	SizeBytes        int                    `json:"size_bytes"`
+	MaxSizeBytes     int                    `json:"max_size_bytes"`
+	ByReference      bool                   `json:"by_reference"`
+	Exported         bool                   `json:"exported,omitempty"`
+	DirectCallUses   bool                   `json:"direct_call_uses"`
+	CompleteCallSCC  bool                   `json:"complete_call_scc"`
+	VolatileAccess   bool                   `json:"volatile_access,omitempty"`
+	Captured         bool                   `json:"captured,omitempty"`
+	Escapes          bool                   `json:"escapes,omitempty"`
+	UnsafeProjection bool                   `json:"unsafe_projection,omitempty"`
+}
+
+// GraphArgumentPromotionSelection records the selected ABI or the exact reason
+// the current by-reference ABI remains in use.
+type GraphArgumentPromotionSelection struct {
+	Name     string                       `json:"name"`
+	Action   GraphArgumentPromotionAction `json:"action"`
+	Eligible bool                         `json:"eligible"`
+	Reason   string                       `json:"reason,omitempty"`
+}
+
+// KeepGraphArgumentByReference returns the current graph ABI explicitly. It is
+// both the selector's conservative fallback and the compatibility oracle for
+// callers that do not opt into argument promotion.
+func KeepGraphArgumentByReference(name, reason string) GraphArgumentPromotionSelection {
+	return GraphArgumentPromotionSelection{
+		Name:   name,
+		Action: GraphArgumentKeepByReference,
+		Reason: reason,
+	}
+}
+
+// SelectGraphArgumentPromotion chooses whether a graph caller/callee SCC may
+// replace one by-reference aggregate with value arguments and/or SSA results.
+// It fails closed: any missing proof retains the current by-reference ABI.
+func SelectGraphArgumentPromotion(candidate GraphArgumentPromotionCandidate) GraphArgumentPromotionSelection {
+	fallback := func(reason string) GraphArgumentPromotionSelection {
+		return KeepGraphArgumentByReference(candidate.Name, reason)
+	}
+
+	switch {
+	case !candidate.ByReference:
+		return fallback("not-by-reference")
+	case candidate.Exported:
+		return fallback("exported")
+	case !candidate.DirectCallUses:
+		return fallback("non-direct-call-use")
+	case !candidate.CompleteCallSCC:
+		return fallback("incomplete-call-scc")
+	case candidate.VolatileAccess:
+		return fallback("volatile-access")
+	case candidate.Captured:
+		return fallback("captured")
+	case candidate.Escapes:
+		return fallback("escapes")
+	case candidate.UnsafeProjection:
+		return fallback("unsafe-projection")
+	case candidate.SizeBytes <= 0:
+		return fallback("invalid-size")
+	case candidate.MaxSizeBytes <= 0:
+		return fallback("invalid-size-limit")
+	case candidate.SizeBytes > candidate.MaxSizeBytes:
+		return fallback("oversized")
+	}
+
+	selection := GraphArgumentPromotionSelection{Name: candidate.Name, Eligible: true}
+	switch candidate.Direction {
+	case GraphArgumentInput:
+		selection.Action = GraphArgumentPromoteToValue
+	case GraphArgumentOutput:
+		selection.Action = GraphArgumentPromoteToResult
+	case GraphArgumentInputOutput:
+		selection.Action = GraphArgumentPromoteToBoth
+	default:
+		return fallback("unsupported-direction")
+	}
+	return selection
+}
