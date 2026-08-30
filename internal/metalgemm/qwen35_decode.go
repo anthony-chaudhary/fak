@@ -58,20 +58,29 @@ type Qwen35DecodeReceipt struct {
 	Committed, CompletedWait                                    bool
 }
 
-// RunQwen35Decode executes one Qwen linear-attention mixer in one caller-owned
-// ProjectionGraph. Every failure before command-buffer submission declines; no
-// resident state has changed and the historical path remains safe. Once the
-// command commits, accepted remains true for every failure and callers must not
-// replay the operation on the host because resident state may have advanced.
-func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35DecodeReceipt, accepted bool, err error) {
-	geometry, err := validateQwen35DecodeRequest(req)
+// EncodeQwen35Decode appends one Qwen linear-attention block to a caller-owned
+// ProjectionGraph without submitting or reading it. The caller must keep every
+// resident weight alive until the graph finishes. This boundary adapts the
+// whole-graph lifetime used by llama.cpp's Qwen3.5 graph builder
+// (ggml-org/llama.cpp@9723942adc) and MLX's state-dependency ordering
+// (ml-explore/mlx-lm@77c33b1437); it does not import either runtime or source.
+//
+// Validation completes before the graph gains an encoder or the GDN state is
+// retained. Once this function succeeds, callers may append another layer,
+// final norm, or LM head and then perform one terminal FinishRead.
+func EncodeQwen35Decode(graph *ProjectionGraph, input *GraphResult, req Qwen35DecodeRequest) (result *GraphResult, receipt Qwen35DecodeReceipt, err error) {
+	if graph == nil || input == nil || input.graph != graph || input.ptr == nil || input.p != 1 {
+		return nil, receipt, &GDNDeclinedError{Reason: "invalid caller-owned Qwen decode graph input"}
+	}
+	hidden := input.out
+	geometry, err := validateQwen35DecodeGeometry(req, hidden)
 	if err != nil {
-		return nil, Qwen35DecodeReceipt{}, false, err
+		return nil, receipt, err
 	}
 	weights := []*Q8Weight{req.Weights.InQKV, req.Weights.InZ, req.Weights.InB, req.Weights.InA, req.Weights.Out}
 	for _, weight := range weights {
 		if weight == nil {
-			return nil, Qwen35DecodeReceipt{}, false, &GDNDeclinedError{Reason: "missing resident Q8 decode weight"}
+			return nil, receipt, &GDNDeclinedError{Reason: "missing resident Q8 decode weight"}
 		}
 	}
 	for _, weight := range weights {
@@ -82,16 +91,110 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 			weights[i].mu.RUnlock()
 		}
 	}()
-	if err := validateLockedQwen35DecodeWeights(req.Weights, len(req.Input), geometry); err != nil {
-		return nil, Qwen35DecodeReceipt{}, false, err
+	if err := validateLockedQwen35DecodeWeights(req.Weights, hidden, geometry); err != nil {
+		return nil, receipt, err
 	}
-	if err := validateQwen35DecodeBlock(req); err != nil {
-		return nil, Qwen35DecodeReceipt{}, false, err
+	if err := validateQwen35DecodeBlockHidden(req, hidden); err != nil {
+		return nil, receipt, err
 	}
 
+	beforeEncoders := graph.encoders
+	mixerInput := input
+	if req.Block != nil {
+		mixerInput, err = graph.RMSNorm(input, req.Block.InputNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
+		if err != nil {
+			return nil, receipt, err
+		}
+	}
+	quantizedInput, err := graph.QuantizeQ8(mixerInput)
+	if err != nil {
+		return nil, receipt, err
+	}
+	projected := make([]*GraphResult, 4)
+	for i, weight := range weights[:4] {
+		projected[i], err = graph.EncodeQ8From(weight, quantizedInput)
+		if err != nil {
+			return nil, receipt, err
+		}
+	}
+	core, err := graph.encodeGDN(req.State, projected[0], projected[1], projected[2], projected[3], req.Panel, 1)
+	if err != nil {
+		return nil, receipt, err
+	}
+	quantizedCore, err := graph.QuantizeQ8(core)
+	if err != nil {
+		return nil, receipt, err
+	}
+	result, err = graph.EncodeQ8From(req.Weights.Out, quantizedCore)
+	if err != nil {
+		return nil, receipt, err
+	}
+	projectionDispatches, mlpProjectionDispatches := 5, 0
+	rmsNormEncoders, residualAddEncoders, swiGLUEncoders := 0, 0, 0
+	constantUploads := 4
+	wantEncoders := 8
+	if req.Block != nil {
+		if err = graph.AddInPlace(input, result); err != nil {
+			return nil, receipt, err
+		}
+		var mlpInput *GraphResult
+		mlpInput, err = graph.RMSNorm(input, req.Block.MLPNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
+		if err != nil {
+			return nil, receipt, err
+		}
+		var gate, up, down *GraphResult
+		gate, err = graph.EncodeQ4KFrom(req.Weights.MLPActivation, mlpInput)
+		if err != nil {
+			return nil, receipt, err
+		}
+		up, err = graph.EncodeQ4KFrom(req.Weights.MLPUp, mlpInput)
+		if err != nil {
+			return nil, receipt, err
+		}
+		if err = graph.SwiGLUInPlace(gate, up); err != nil {
+			return nil, receipt, err
+		}
+		if req.Weights.MLPDownQ4 != nil {
+			down, err = graph.EncodeQ4KFrom(req.Weights.MLPDownQ4, gate)
+		} else {
+			down, err = graph.EncodeQ6KFrom(req.Weights.MLPDownQ6, gate)
+		}
+		if err != nil {
+			return nil, receipt, err
+		}
+		if err = graph.AddInPlace(input, down); err != nil {
+			return nil, receipt, err
+		}
+		result = input
+		projectionDispatches, mlpProjectionDispatches = 8, 3
+		rmsNormEncoders, residualAddEncoders, swiGLUEncoders = 2, 2, 1
+		constantUploads, wantEncoders = 6, 16
+	}
+	receipt = Qwen35DecodeReceipt{
+		ProjectionDispatches: projectionDispatches, MixerProjectionDispatches: 5, MLPProjectionDispatches: mlpProjectionDispatches,
+		Quantizers: 2, GDNEncoders: 1, RMSNormEncoders: rmsNormEncoders, ResidualAddEncoders: residualAddEncoders, SwiGLUEncoders: swiGLUEncoders,
+		ConstantUploads: constantUploads, Encoders: graph.encoders - beforeEncoders,
+	}
+	if receipt.Encoders != wantEncoders {
+		return nil, receipt, fmt.Errorf("metalgemm: incomplete caller-owned Qwen decode encoding: %+v", receipt)
+	}
+	return result, receipt, nil
+}
+
+// RunQwen35Decode preserves the standalone compatibility boundary around
+// EncodeQwen35Decode: one input upload, one submission, and one final readback.
+// Pre-submit failures decline. Once the command commits, accepted remains true
+// and callers must not replay because resident state may have advanced.
+func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35DecodeReceipt, accepted bool, err error) {
+	if len(req.Input) == 0 || len(req.Input)%32 != 0 {
+		return nil, receipt, false, &GDNDeclinedError{Reason: "decode input must be a non-empty multiple of 32"}
+	}
+	if _, err := validateQwen35DecodeGeometry(req, len(req.Input)); err != nil {
+		return nil, receipt, false, err
+	}
 	graph, err := BeginProjectionGraph(req.Input, nil, nil, 1, len(req.Input))
 	if err != nil {
-		return nil, Qwen35DecodeReceipt{}, false, err
+		return nil, receipt, false, err
 	}
 	defer graph.Free()
 	if req.InjectPostSubmitFailureForTest {
@@ -101,103 +204,39 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	mixerInput := input
-	if req.Block != nil {
-		mixerInput, err = graph.RMSNorm(input, req.Block.InputNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
-		if err != nil {
-			return nil, receipt, false, err
-		}
-	}
-	quantizedInput, err := graph.QuantizeQ8(mixerInput)
+	result, encoded, err := EncodeQwen35Decode(graph, input, req)
 	if err != nil {
-		return nil, receipt, false, err
-	}
-	projected := make([]*GraphResult, 4)
-	for i, weight := range weights[:4] {
-		projected[i], err = graph.EncodeQ8From(weight, quantizedInput)
-		if err != nil {
-			return nil, receipt, false, err
-		}
-	}
-	core, err := graph.encodeGDN(req.State, projected[0], projected[1], projected[2], projected[3], req.Panel, 1)
-	if err != nil {
-		return nil, receipt, false, err
-	}
-	quantizedCore, err := graph.QuantizeQ8(core)
-	if err != nil {
-		return nil, receipt, false, err
-	}
-	result, err := graph.EncodeQ8From(req.Weights.Out, quantizedCore)
-	if err != nil {
-		return nil, receipt, false, err
-	}
-	if req.Block != nil {
-		if err = graph.AddInPlace(input, result); err != nil {
-			return nil, receipt, false, err
-		}
-		var mlpInput *GraphResult
-		mlpInput, err = graph.RMSNorm(input, req.Block.MLPNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
-		if err != nil {
-			return nil, receipt, false, err
-		}
-		var gate, up, down *GraphResult
-		gate, err = graph.EncodeQ4KFrom(req.Weights.MLPActivation, mlpInput)
-		if err != nil {
-			return nil, receipt, false, err
-		}
-		up, err = graph.EncodeQ4KFrom(req.Weights.MLPUp, mlpInput)
-		if err != nil {
-			return nil, receipt, false, err
-		}
-		if err = graph.SwiGLUInPlace(gate, up); err != nil {
-			return nil, receipt, false, err
-		}
-		if req.Weights.MLPDownQ4 != nil {
-			down, err = graph.EncodeQ4KFrom(req.Weights.MLPDownQ4, gate)
-		} else {
-			down, err = graph.EncodeQ6KFrom(req.Weights.MLPDownQ6, gate)
-		}
-		if err != nil {
-			return nil, receipt, false, err
-		}
-		if err = graph.AddInPlace(input, down); err != nil {
-			return nil, receipt, false, err
-		}
-		result = input
+		return nil, encoded, false, err
 	}
 	outputs, graphReceipt, err := graph.FinishRead(result)
 	accepted = graphReceipt.Committed
-	projectionDispatches, mlpProjectionDispatches := 5, 0
-	rmsNormEncoders, residualAddEncoders, swiGLUEncoders := 0, 0, 0
-	constantUploads := 4
-	wantEncoders := 8
-	if req.Block != nil {
-		projectionDispatches, mlpProjectionDispatches = 8, 3
-		rmsNormEncoders, residualAddEncoders, swiGLUEncoders = 2, 2, 1
-		constantUploads, wantEncoders = 6, 16
-	}
-	receipt = Qwen35DecodeReceipt{
-		CommandBuffers: 1, Commits: decodeBoolInt(graphReceipt.Committed), CompletionWaits: decodeBoolInt(graphReceipt.CompletedWait),
-		ProjectionDispatches: projectionDispatches, MixerProjectionDispatches: 5, MLPProjectionDispatches: mlpProjectionDispatches,
-		Quantizers: 2, GDNEncoders: 1, RMSNormEncoders: rmsNormEncoders, ResidualAddEncoders: residualAddEncoders, SwiGLUEncoders: swiGLUEncoders,
-		InputUploads: 1, ConstantUploads: constantUploads, FinalReadbacks: graphReceipt.HostReadbacks,
-		Encoders: graphReceipt.Encoders, Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait,
-	}
+	receipt = encoded
+	receipt.CommandBuffers = 1
+	receipt.Commits = decodeBoolInt(graphReceipt.Committed)
+	receipt.CompletionWaits = decodeBoolInt(graphReceipt.CompletedWait)
+	receipt.InputUploads = 1
+	receipt.FinalReadbacks = graphReceipt.HostReadbacks
+	receipt.Encoders = graphReceipt.Encoders
+	receipt.Committed = graphReceipt.Committed
+	receipt.CompletedWait = graphReceipt.CompletedWait
 	if err != nil {
 		return nil, receipt, accepted, err
 	}
 	if len(outputs) != 1 || len(outputs[0]) != req.Weights.Out.Out || !receipt.Committed || !receipt.CompletedWait ||
-		receipt.Encoders != wantEncoders || receipt.FinalReadbacks != 1 {
+		receipt.Encoders != encoded.Encoders || receipt.FinalReadbacks != 1 {
 		return nil, receipt, true, fmt.Errorf("metalgemm: incomplete Qwen decode mixer receipt: %+v", receipt)
 	}
 	return outputs[0], receipt, true, nil
 }
 
 func validateQwen35DecodeBlock(req Qwen35DecodeRequest) error {
+	return validateQwen35DecodeBlockHidden(req, len(req.Input))
+}
+
+func validateQwen35DecodeBlockHidden(req Qwen35DecodeRequest, hidden int) error {
 	if req.Block == nil {
 		return nil
 	}
-	hidden := len(req.Input)
 	if len(req.Block.InputNorm) != hidden || len(req.Block.MLPNorm) != hidden ||
 		req.Block.RMSNormEpsilon <= 0 || req.Block.RMSNormEpsilon != req.Panel.RMSNormEpsilon {
 		return &GDNDeclinedError{Reason: "invalid Qwen decode block normalization"}
@@ -226,6 +265,10 @@ func decodeBoolInt(v bool) int {
 }
 
 func validateQwen35DecodeRequest(req Qwen35DecodeRequest) (GDNGeometry, error) {
+	return validateQwen35DecodeGeometry(req, len(req.Input))
+}
+
+func validateQwen35DecodeGeometry(req Qwen35DecodeRequest, hidden int) (GDNGeometry, error) {
 	if req.State == nil {
 		return GDNGeometry{}, &GDNDeclinedError{Reason: "nil decode owner"}
 	}
@@ -236,7 +279,7 @@ func validateQwen35DecodeRequest(req Qwen35DecodeRequest) (GDNGeometry, error) {
 	if req.Panel.Tokens != 0 && req.Panel.Tokens != 1 {
 		return GDNGeometry{}, &GDNDeclinedError{Reason: fmt.Sprintf("decode tokens=%d, want 1", req.Panel.Tokens)}
 	}
-	if len(req.Input) == 0 || len(req.Input)%32 != 0 {
+	if hidden == 0 || hidden%32 != 0 {
 		return GDNGeometry{}, &GDNDeclinedError{Reason: "decode input must be a non-empty multiple of 32"}
 	}
 	if err := validateGDNConstants(geometry, req.Panel); err != nil {
