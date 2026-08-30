@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:e5abdc8e78982ec73ad314d574abeabbed98cec68f89325628f75977c7a8f97f",
-  "tracked_files": 18482,
-  "tracked_bytes": 421403006,
+  "content_root": "sha256:e0817549189eda40e8017292e96e68882c0f63d6c6e42f4b7e8f50850327903b",
+  "tracked_files": 18486,
+  "tracked_bytes": 421470449,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1862,8 +1862,8 @@
     },
     {
       "path": "INDEX.md",
-      "content_sha256": "sha256:44985a2b6485f622c852405e0be1bd2e1ba7b54f1a7ba022f7b4a671fc927031",
-      "bytes": 492573,
+      "content_sha256": "sha256:f284b36a1625fc6e52226f2ec97412ec211595401849f8159d7849417784d468",
+      "bytes": 493135,
       "classification": "documentation"
     },
     {
@@ -43451,6 +43451,15 @@
       ]
     },
     {
+      "path": "docs/notes/CONCEPT-STUDY-CAMA-COMPLETE-2026-08-29.md",
+      "content_sha256": "sha256:96d24aaef7fed625d0db328930005c743dbeb3169a38cf2271f9dc96ed179948",
+      "bytes": 18946,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/notes/CONCEPT-STUDY-CAVEMAN-2026-08-13.md",
       "content_sha256": "sha256:3d853041b4c95a94130c855425046d84cb3d855747b63df7b91cdf3f28d6a63a",
       "bytes": 16507,
@@ -50614,8 +50623,8 @@
     },
     {
       "path": "docs/research/README.md",
-      "content_sha256": "sha256:33809f91a43b96896b953ce064b4fa6d8193831842077e0af0284e44012affad",
-      "bytes": 16085,
+      "content_sha256": "sha256:3a28b575fea306aeaff4e6bce48c0f3815270bcb258c5af88c88185c70cb32e7",
+      "bytes": 16621,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -50646,6 +50655,15 @@
       "classification": "documentation",
       "source_classes": [
         "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/research/ai-ops-storage-qualification-study-2026-08-29.md",
+      "content_sha256": "sha256:b53dafff6cc3ed2a56b83a167cb42b9f4e503f308cfc2ff72261187ca2727a4b",
+      "bytes": 11796,
+      "classification": "documentation",
+      "source_classes": [
         "readme_docs"
       ]
     },
@@ -50923,8 +50941,8 @@
     },
     {
       "path": "docs/research/inventory/README.md",
-      "content_sha256": "sha256:706efd3656b10ee31c0dc8765253e82b31c6c4977c0bf94146ed069cb4c28191",
-      "bytes": 4003,
+      "content_sha256": "sha256:21786c4a41e487f9ff53f9e702abea2a25404d684c6c02899c69f401fe7c6697",
+      "bytes": 4754,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -50970,6 +50988,24 @@
       "path": "docs/research/inventory/ai-dynamo-nixl.json",
       "content_sha256": "sha256:743c1930d63b4ee11c822ad82895f94855964c9c40bbd09faf96344003f0e505",
       "bytes": 23022,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/research/inventory/anthony-chaudhary-cama-complete-forge-receipt.json",
+      "content_sha256": "sha256:1472426e228b0f4d7a78875e7b70bc0a1563f721ad144499251a754a2f233a6d",
+      "bytes": 10921,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "docs/research/inventory/anthony-chaudhary-cama-complete.json",
+      "content_sha256": "sha256:983b84e22fdc673dc5a9501a4d975683c488be067c11a6ee0cde24e61ad3fc27",
+      "bytes": 16447,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -51742,8 +51778,8 @@
     },
     {
       "path": "docs/research/monitored-repositories.json",
-      "content_sha256": "sha256:331d53b8d18f9e98e427311dc204941dabb004fc19bef088b054adddac9af041",
-      "bytes": 178778,
+      "content_sha256": "sha256:8b20d8873474d6090db5831e9a63edf294d8ac5d6db23554dce70ec7f7f1c7d1",
+      "bytes": 185577,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -51751,8 +51787,8 @@
     },
     {
       "path": "docs/research/monitored-repositories.md",
-      "content_sha256": "sha256:fccf000ca63e429096a32cb0f8307e69e5ab5098c3c43909271570f31b761761",
-      "bytes": 8162,
+      "content_sha256": "sha256:a8644973ac5d1716cc2caa473b91487c733b2ea98b592b262a3829e0e9324f65",
+      "bytes": 8847,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
