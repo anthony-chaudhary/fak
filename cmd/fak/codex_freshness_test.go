@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -372,10 +373,10 @@ func TestIsNotGitRepositoryUsesGitStderr(t *testing.T) {
 }
 
 func TestCodexFreshnessValidLeaseSkipsInspection(t *testing.T) {
-	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: "0123456789abcdef0123456789abcdef01234567", TargetCommit: "0123456789abcdef0123456789abcdef01234567"})
 	defer restore()
 	statePath := codexFreshnessTestStatePath(t)
-	if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+	if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), "0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatal(err)
 	}
 	called := false
@@ -390,16 +391,16 @@ func TestCodexFreshnessValidLeaseSkipsInspection(t *testing.T) {
 }
 
 func TestCodexFreshnessCheckNowBypassesLeaseAndIsStripped(t *testing.T) {
-	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: "0123456789abcdef0123456789abcdef01234567", TargetCommit: "0123456789abcdef0123456789abcdef01234567"})
 	defer restore()
 	statePath := codexFreshnessTestStatePath(t)
-	if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+	if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), "0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatal(err)
 	}
 	called := false
 	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
 		called = true
-		return codexFreshnessInspection{Assessment: codexFreshnessAssessment{Verdict: codexFreshnessFresh}}
+		return codexFreshnessInspection{Assessment: codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: "0123456789abcdef0123456789abcdef01234567", TargetCommit: "0123456789abcdef0123456789abcdef01234567"}}
 	}
 	args, code, stop := runCodexFreshnessAdmission([]string{"--freshness-check-now", "--model", "x"})
 	if stop || code != 0 || !called || !reflect.DeepEqual(args, []string{"--model", "x"}) {
@@ -487,7 +488,7 @@ func TestCodexFreshnessStaleClaimIsReaped(t *testing.T) {
 }
 
 func TestCodexFreshnessFreshInspectionWritesLease(t *testing.T) {
-	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: "0123456789abcdef0123456789abcdef01234567", TargetCommit: "0123456789abcdef0123456789abcdef01234567"})
 	defer restore()
 	statePath := codexFreshnessTestStatePath(t)
 	_, code, stop := runCodexFreshnessAdmission(nil)
@@ -512,14 +513,14 @@ func TestCodexFreshnessInspectionErrorRemainsFailClosed(t *testing.T) {
 }
 
 func TestCodexFreshnessLeaseRenewsOnWindowsCompatiblePath(t *testing.T) {
-	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh})
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: "0123456789abcdef0123456789abcdef01234567", TargetCommit: "0123456789abcdef0123456789abcdef01234567"})
 	defer restore()
 	statePath := codexFreshnessTestStatePath(t) + ".json"
 	first := codexFreshnessNow().Add(-codexFreshnessLeaseTTL - time.Minute)
-	if err := codexFreshnessWriteLease(statePath, first); err != nil {
+	if err := codexFreshnessWriteReceipt(statePath, first, "0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatal(err)
 	}
-	if err := codexFreshnessWriteLease(statePath, codexFreshnessNow()); err != nil {
+	if err := codexFreshnessWriteReceipt(statePath, codexFreshnessNow(), "0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatalf("renew lease: %v", err)
 	}
 	if !codexFreshnessLeaseValid(statePath, codexFreshnessNow()) {
@@ -546,6 +547,7 @@ func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func(
 	oldReexec, oldStatus := codexFreshnessReexec, codexFreshnessStatus
 	oldResolveContext, oldParentPID := codexFreshnessResolveCheckout, codexFreshnessParentPID
 	oldNow, oldCacheDir := codexFreshnessNow, codexFreshnessCacheDir
+	oldRunningCommit, oldUserConfigDir := codexFreshnessRunningCommit, codexFreshnessUserConfigDir
 	cacheDir := t.TempDir()
 	oldArgs := append([]string(nil), os.Args...)
 	codexFreshnessExecutable = func() (string, error) { return `C:\bin\fak.exe`, nil }
@@ -553,6 +555,8 @@ func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func(
 	codexFreshnessResolveCheckout = func() (string, string, error) { return `C:\work\fak`, `C:\bin\fak.exe`, nil }
 	codexFreshnessNow = func() time.Time { return time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC) }
 	codexFreshnessCacheDir = func() (string, error) { return cacheDir, nil }
+	codexFreshnessUserConfigDir = func() (string, error) { return filepath.Join(cacheDir, "no-config"), nil }
+	codexFreshnessRunningCommit = func() string { return "0123456789abcdef0123456789abcdef01234567" }
 	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection { return codexFreshnessInspection{Assessment: assessment} }
 	codexFreshnessUpdate = func(_, _ string) (string, error) { return "", errors.New("unexpected update") }
 	codexFreshnessReexec = func(_ string, _ []string, _ string) error { return errors.New("unexpected reexec") }
@@ -566,6 +570,136 @@ func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func(
 		codexFreshnessResolveCheckout = oldResolveContext
 		codexFreshnessParentPID = oldParentPID
 		codexFreshnessNow, codexFreshnessCacheDir = oldNow, oldCacheDir
+		codexFreshnessRunningCommit, codexFreshnessUserConfigDir = oldRunningCommit, oldUserConfigDir
 		os.Args = oldArgs
+	}
+}
+
+func TestCodexFreshnessPolicyPrecedence(t *testing.T) {
+	filtered, policy, err := parseCodexFreshnessSettings([]string{"--freshness-max-age", "15m", "--freshness-force", "--model", "x"}, "2h", "false", codexFreshnessConfig{MaxAge: "3h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.MaxAge != 15*time.Minute || !policy.Force || !reflect.DeepEqual(filtered, []string{"--model", "x"}) {
+		t.Fatalf("filtered=%q policy=%+v", filtered, policy)
+	}
+	_, policy, err = parseCodexFreshnessSettings(nil, "45m", "", codexFreshnessConfig{MaxAge: "3h"})
+	if err != nil || policy.MaxAge != 45*time.Minute || policy.Force {
+		t.Fatalf("env policy=%+v err=%v", policy, err)
+	}
+	_, policy, err = parseCodexFreshnessSettings(nil, "", "", codexFreshnessConfig{})
+	if err != nil || policy.MaxAge != codexFreshnessLeaseTTL {
+		t.Fatalf("default policy=%+v err=%v", policy, err)
+	}
+}
+
+func TestCodexFreshnessReceiptRejectsInvalidStates(t *testing.T) {
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	running := "0123456789abcdef0123456789abcdef01234567"
+	other := "fedcba9876543210fedcba9876543210fedcba98"
+	path := filepath.Join(t.TempDir(), "freshness.json")
+	cases := []struct {
+		name    string
+		payload []byte
+		maxAge  time.Duration
+	}{
+		{name: "missing", maxAge: time.Hour},
+		{name: "corrupt", payload: []byte("{oops"), maxAge: time.Hour},
+		{name: "expired", payload: freshnessReceiptJSON(t, now.Add(-2*time.Hour), running, running), maxAge: time.Hour},
+		{name: "future", payload: freshnessReceiptJSON(t, now.Add(time.Second), running, running), maxAge: time.Hour},
+		{name: "running mismatch", payload: freshnessReceiptJSON(t, now, other, other), maxAge: time.Hour},
+		{name: "target mismatch", payload: freshnessReceiptJSON(t, now, running, other), maxAge: time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_ = os.Remove(path)
+			if tc.payload != nil {
+				if err := os.WriteFile(path, tc.payload, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if codexFreshnessLeaseValidFor(path, now, tc.maxAge, running) {
+				t.Fatal("invalid receipt accepted")
+			}
+		})
+	}
+}
+
+func TestCodexFreshnessReceiptPathsCountInspections(t *testing.T) {
+	running := "0123456789abcdef0123456789abcdef01234567"
+	for _, tc := range []struct {
+		name            string
+		age             time.Duration
+		args            []string
+		wantInspections int
+	}{
+		{name: "fresh local hit", age: time.Minute, wantInspections: 0},
+		{name: "expired", age: 2 * time.Hour, args: []string{"--freshness-max-age", "1h"}, wantInspections: 1},
+		{name: "forced", age: time.Minute, args: []string{"--freshness-force"}, wantInspections: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: running, TargetCommit: running})
+			defer restore()
+			statePath := codexFreshnessTestStatePath(t) + ".json"
+			if err := codexFreshnessWriteReceipt(statePath, codexFreshnessNow().Add(-tc.age), running, running); err != nil {
+				t.Fatal(err)
+			}
+			inspections := 0
+			codexFreshnessInspect = func(_, _ string) codexFreshnessInspection {
+				inspections++
+				return codexFreshnessInspection{Assessment: codexFreshnessAssessment{Verdict: codexFreshnessFresh, RunningCommit: running, TargetCommit: running}}
+			}
+			args := append(tc.args, "--model", "x")
+			started := time.Now()
+			filtered, code, stop := runCodexFreshnessAdmission(args)
+			if stop || code != 0 || inspections != tc.wantInspections || !reflect.DeepEqual(filtered, []string{"--model", "x"}) {
+				t.Fatalf("filtered=%q code=%d stop=%v inspections=%d elapsed=%s", filtered, code, stop, inspections, time.Since(started))
+			}
+		})
+	}
+}
+
+func freshnessReceiptJSON(t *testing.T, checkedAt time.Time, running, target string) []byte {
+	t.Helper()
+	raw, err := json.Marshal(codexFreshnessLease{Schema: codexFreshnessReceiptSchema, CheckedAt: checkedAt, RunningCommit: running, TargetCommit: target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestCodexFreshnessConfigEnvCLIForcePrecedence(t *testing.T) {
+	configForce := true
+	filtered, policy, err := parseCodexFreshnessSettings(
+		[]string{"--freshness-max-age=10m", "--model", "x"},
+		"20m", "false", codexFreshnessConfig{MaxAge: "30m", Force: &configForce},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.MaxAge != 10*time.Minute || policy.Force || !reflect.DeepEqual(filtered, []string{"--model", "x"}) {
+		t.Fatalf("CLI/env/config precedence: filtered=%q policy=%+v", filtered, policy)
+	}
+	_, policy, err = parseCodexFreshnessSettings(nil, "", "", codexFreshnessConfig{MaxAge: "30m", Force: &configForce})
+	if err != nil || policy.MaxAge != 30*time.Minute || !policy.Force {
+		t.Fatalf("config policy=%+v err=%v", policy, err)
+	}
+}
+
+func TestLoadCodexFreshnessConfig(t *testing.T) {
+	old := codexFreshnessUserConfigDir
+	dir := t.TempDir()
+	codexFreshnessUserConfigDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { codexFreshnessUserConfigDir = old })
+	path := filepath.Join(dir, "fak", "codex-freshness.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"max_age":"25m","force":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadCodexFreshnessConfig()
+	if err != nil || got.MaxAge != "25m" || got.Force == nil || !*got.Force {
+		t.Fatalf("config=%+v err=%v", got, err)
 	}
 }

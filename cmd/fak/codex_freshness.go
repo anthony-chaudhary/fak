@@ -20,15 +20,28 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
-const codexFreshnessReexecEnv = "FAK_CODEX_FRESHNESS_REEXEC"
+const (
+	codexFreshnessReexecEnv     = "FAK_CODEX_FRESHNESS_REEXEC"
+	codexFreshnessMaxAgeEnv     = "FAK_CODEX_FRESHNESS_MAX_AGE"
+	codexFreshnessForceEnv      = "FAK_CODEX_FRESHNESS_FORCE"
+	codexFreshnessReceiptSchema = "fak.codex-freshness.v1"
+)
 
 const (
 	codexFreshnessLeaseTTL = 6 * time.Hour
 	codexFreshnessClaimTTL = 30 * time.Minute
 )
 
+type codexFreshnessConfig struct {
+	MaxAge string `json:"max_age"`
+	Force  *bool  `json:"force,omitempty"`
+}
+
 type codexFreshnessLease struct {
-	CheckedAt time.Time `json:"checked_at"`
+	Schema        string    `json:"schema"`
+	CheckedAt     time.Time `json:"checked_at"`
+	RunningCommit string    `json:"running_commit"`
+	TargetCommit  string    `json:"target_commit"`
 }
 
 type codexFreshnessVerdict uint8
@@ -52,11 +65,13 @@ type codexFreshnessInspection struct {
 }
 
 var (
-	codexFreshnessNow        = time.Now
-	codexFreshnessCacheDir   = os.UserCacheDir
-	codexFreshnessExecutable = os.Executable
-	codexFreshnessGetwd      = os.Getwd
-	codexFreshnessInspect    = func(root, _ string) codexFreshnessInspection {
+	codexFreshnessNow           = time.Now
+	codexFreshnessCacheDir      = os.UserCacheDir
+	codexFreshnessExecutable    = os.Executable
+	codexFreshnessGetwd         = os.Getwd
+	codexFreshnessUserConfigDir = os.UserConfigDir
+	codexFreshnessRunningCommit = func() string { return strings.TrimSpace(binstamp.Self().Revision) }
+	codexFreshnessInspect       = func(root, _ string) codexFreshnessInspection {
 		skew := versionskew.AssessStamp(context.Background(), versionskew.RealRunner, root, "origin/main", binstamp.Self())
 		assessment := codexFreshnessAssessment{
 			RunningCommit: skew.Running,
@@ -152,7 +167,12 @@ func (s *codexStartupStatus) Stop() {
 // runCodexFreshnessAdmission ensures a checkout-local launcher evaluates admission
 // from a current stamped binary before it starts an agent that can mutate the checkout.
 func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
-	filtered, checkNow, err := parseCodexFreshnessCheckNow(args)
+	config, err := loadCodexFreshnessConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak codex:", err)
+		return nil, 2, true
+	}
+	filtered, policy, err := parseCodexFreshnessSettings(args, os.Getenv(codexFreshnessMaxAgeEnv), os.Getenv(codexFreshnessForceEnv), config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak codex:", err)
 		return nil, 2, true
@@ -181,7 +201,8 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
 		return nil, 1, true
 	}
-	if !checkNow && codexFreshnessLeaseValid(statePath+".json", codexFreshnessNow()) {
+	runningCommit := strings.TrimSpace(codexFreshnessRunningCommit())
+	if !policy.Force && codexFreshnessLeaseValidFor(statePath+".json", codexFreshnessNow(), policy.MaxAge, runningCommit) {
 		return filtered, 0, false
 	}
 	claimed, err := codexFreshnessAcquireClaim(statePath+".lock", codexFreshnessNow())
@@ -203,7 +224,7 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 	switch inspection.Assessment.Verdict {
 	case codexFreshnessFresh:
 		consumeCodexFreshnessReexecMarker()
-		if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+		if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), inspection.Assessment.RunningCommit, inspection.Assessment.TargetCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
 			return nil, 1, true
 		}
@@ -223,7 +244,7 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
 			return nil, 1, true
 		}
-		if err := codexFreshnessWriteLease(statePath+".json", codexFreshnessNow()); err != nil {
+		if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), installedCommit, installedCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
 			return nil, 1, true
 		}
@@ -325,19 +346,92 @@ func isFullGitCommit(value string) bool {
 	return true
 }
 
-func parseCodexFreshnessCheckNow(args []string) ([]string, bool, error) {
+func loadCodexFreshnessConfig() (codexFreshnessConfig, error) {
+	dir, err := codexFreshnessUserConfigDir()
+	if err != nil || strings.TrimSpace(dir) == "" {
+		return codexFreshnessConfig{}, nil
+	}
+	path := filepath.Join(dir, "fak", "codex-freshness.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return codexFreshnessConfig{}, nil
+	}
+	if err != nil {
+		return codexFreshnessConfig{}, fmt.Errorf("read freshness config %s: %w", path, err)
+	}
+	var config codexFreshnessConfig
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return codexFreshnessConfig{}, fmt.Errorf("parse freshness config %s: %w", path, err)
+	}
+	return config, nil
+}
+
+type codexFreshnessSettings struct {
+	MaxAge time.Duration
+	Force  bool
+}
+
+func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, config codexFreshnessConfig) ([]string, codexFreshnessSettings, error) {
+	policy := codexFreshnessSettings{MaxAge: codexFreshnessLeaseTTL}
+	if raw := strings.TrimSpace(config.MaxAge); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			return nil, policy, fmt.Errorf("freshness config max_age must be a non-negative duration, got %q", raw)
+		}
+		policy.MaxAge = d
+	}
+	if config.Force != nil {
+		policy.Force = *config.Force
+	}
+	if raw := strings.TrimSpace(envMaxAge); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			return nil, policy, fmt.Errorf("%s must be a non-negative duration, got %q", codexFreshnessMaxAgeEnv, raw)
+		}
+		policy.MaxAge = d
+	}
+	if raw := strings.TrimSpace(envForce); raw != "" {
+		force, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, policy, fmt.Errorf("%s must be a boolean, got %q", codexFreshnessForceEnv, raw)
+		}
+		policy.Force = force
+	}
 	filtered := make([]string, 0, len(args))
-	checkNow := false
-	for _, arg := range args {
-		if arg == "--freshness-check-now" {
-			checkNow = true
-		} else if strings.HasPrefix(arg, "--freshness-check-now=") {
-			return nil, false, fmt.Errorf("--freshness-check-now does not take a value")
-		} else {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--freshness-check-now" || arg == "--freshness-force":
+			policy.Force = true
+		case strings.HasPrefix(arg, "--freshness-check-now=") || strings.HasPrefix(arg, "--freshness-force="):
+			return nil, policy, fmt.Errorf("%s does not take a value", strings.SplitN(arg, "=", 2)[0])
+		case arg == "--freshness-max-age":
+			if i+1 >= len(args) {
+				return nil, policy, fmt.Errorf("--freshness-max-age requires a duration")
+			}
+			i++
+			d, err := time.ParseDuration(args[i])
+			if err != nil || d < 0 {
+				return nil, policy, fmt.Errorf("--freshness-max-age must be a non-negative duration, got %q", args[i])
+			}
+			policy.MaxAge = d
+		case strings.HasPrefix(arg, "--freshness-max-age="):
+			raw := strings.TrimPrefix(arg, "--freshness-max-age=")
+			d, err := time.ParseDuration(raw)
+			if err != nil || d < 0 {
+				return nil, policy, fmt.Errorf("--freshness-max-age must be a non-negative duration, got %q", raw)
+			}
+			policy.MaxAge = d
+		default:
 			filtered = append(filtered, arg)
 		}
 	}
-	return filtered, checkNow, nil
+	return filtered, policy, nil
+}
+
+func parseCodexFreshnessCheckNow(args []string) ([]string, bool, error) {
+	filtered, policy, err := parseCodexFreshnessSettings(args, "", "", codexFreshnessConfig{})
+	return filtered, policy.Force, err
 }
 
 func codexFreshnessStatePath(root, executable string) (string, error) {
@@ -354,18 +448,36 @@ func codexFreshnessStatePath(root, executable string) (string, error) {
 	return filepath.Join(dir, hex.EncodeToString(sum[:])), nil
 }
 func codexFreshnessLeaseValid(path string, now time.Time) bool {
+	return codexFreshnessLeaseValidFor(path, now, codexFreshnessLeaseTTL, codexFreshnessRunningCommit())
+}
+
+func codexFreshnessLeaseValidFor(path string, now time.Time, maxAge time.Duration, runningCommit string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	var lease codexFreshnessLease
-	if json.Unmarshal(raw, &lease) != nil || lease.CheckedAt.IsZero() || lease.CheckedAt.After(now) {
+	if json.Unmarshal(raw, &lease) != nil || lease.Schema != codexFreshnessReceiptSchema || lease.CheckedAt.IsZero() || lease.CheckedAt.After(now) || maxAge <= 0 {
 		return false
 	}
-	return now.Sub(lease.CheckedAt) < codexFreshnessLeaseTTL
+	running := strings.TrimSpace(runningCommit)
+	leaseRunning := strings.TrimSpace(lease.RunningCommit)
+	leaseTarget := strings.TrimSpace(lease.TargetCommit)
+	if running == "" || len(running) != 40 || len(leaseRunning) != 40 || len(leaseTarget) != 40 || !strings.EqualFold(running, leaseRunning) || !strings.EqualFold(leaseRunning, leaseTarget) {
+		return false
+	}
+	return now.Sub(lease.CheckedAt) < maxAge
 }
+
 func codexFreshnessWriteLease(path string, now time.Time) error {
-	raw, err := json.Marshal(codexFreshnessLease{CheckedAt: now.UTC()})
+	return codexFreshnessWriteReceipt(path, now, "", "")
+}
+
+func codexFreshnessWriteReceipt(path string, now time.Time, runningCommit, targetCommit string) error {
+	raw, err := json.Marshal(codexFreshnessLease{
+		Schema: codexFreshnessReceiptSchema, CheckedAt: now.UTC(),
+		RunningCommit: strings.TrimSpace(runningCommit), TargetCommit: strings.TrimSpace(targetCommit),
+	})
 	if err != nil {
 		return err
 	}
@@ -374,6 +486,7 @@ func codexFreshnessWriteLease(path string, now time.Time) error {
 	}
 	return writeFileAtomic(path, append(raw, '\n'), 0o600)
 }
+
 func codexFreshnessAcquireClaim(path string, now time.Time) (bool, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
