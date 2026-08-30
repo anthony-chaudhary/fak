@@ -233,6 +233,46 @@ func TestWorktreeEnvDoesNotMutateBase(t *testing.T) {
 	}
 }
 
+func TestEnsureBuildDirsRecreatesMissingOwnedDirectories(t *testing.T) {
+	wt := t.TempDir()
+	env, err := EnsureBuildDirs(wt)
+	if err != nil {
+		t.Fatalf("EnsureBuildDirs: %v", err)
+	}
+	for _, name := range []string{"GOCACHE", "GOTMPDIR"} {
+		info, statErr := os.Stat(env[name])
+		if statErr != nil || !info.IsDir() {
+			t.Fatalf("%s directory was not recreated: info=%v err=%v", name, info, statErr)
+		}
+	}
+}
+
+func TestEnsureBuildDirsFailsClosedOnCreationError(t *testing.T) {
+	wt := t.TempDir()
+	gotmp := filepath.Join(wt, ".gotmp")
+	if err := os.WriteFile(gotmp, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := EnsureBuildDirs(wt)
+	if err == nil {
+		t.Fatal("EnsureBuildDirs unexpectedly accepted a non-directory GOTMPDIR")
+	}
+	if detail := err.Error(); !strings.Contains(detail, "create GOTMPDIR directory") || !strings.Contains(detail, gotmp) {
+		t.Fatalf("error %q does not identify the failed variable and path", detail)
+	}
+}
+
+func TestEnsureBuildDirsDoesNotResurrectMissingWorktree(t *testing.T) {
+	wt := filepath.Join(t.TempDir(), "reaped-worker")
+	_, err := EnsureBuildDirs(wt)
+	if err == nil || !strings.Contains(err.Error(), "stat managed worktree") {
+		t.Fatalf("missing worktree error = %v, want actionable stat failure", err)
+	}
+	if _, statErr := os.Stat(wt); !os.IsNotExist(statErr) {
+		t.Fatalf("missing worktree was recreated, stat err=%v", statErr)
+	}
+}
+
 func TestIsWorkerWorktreeOnlyMarkerDirs(t *testing.T) {
 	if !IsWorkerWorktree(filepath.FromSlash("/tmp/Fleet/worker-worktrees/fak-worker-wt-tools-deadbeef")) {
 		t.Fatal("marker worktree not recognized")
@@ -593,8 +633,7 @@ func TestLandDiffErrorFailsOpen(t *testing.T) {
 // TestLandDerivesMsgFromWorktreeTipWhenNoFile proves the witness-sweep call site
 // (which has no pre-written message file) borrows the worker's own commit subject.
 func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-o\n+n\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-o\n+n\n", "x\n").
 		reply("log", 0, "fix(x): resolve thing (#3168) (fak x)\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")

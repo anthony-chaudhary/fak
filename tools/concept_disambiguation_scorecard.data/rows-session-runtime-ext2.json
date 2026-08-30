@@ -663,7 +663,7 @@
       "kind": "config",
       "definition": "tuiSessionsSchema is the const naming the TUI overview-sessions payload schema version (fak.tui.sessions.v1).",
       "distinction": "A SCHEMA-VERSION STRING constant for the TUI sessions view - not SessionRow (the data it renders).",
-      "distinct_from": ["x-session-runtime-sessionrow"],
+      "distinct_from": ["x-session-runtime-sessionrow", "issue10049-load-tui-sessions", "issue10049-tui-sessions-json-input"],
       "aliases": [],
       "grounding": "tuiSessionsSchema",
       "grounding_kind": "symbol",

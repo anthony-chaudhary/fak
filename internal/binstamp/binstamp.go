@@ -67,6 +67,10 @@ func Self() Stamp {
 
 // stampFrom extracts the stamp from a (possibly nil) BuildInfo. Split out so tests can
 // drive the extraction with a synthetic BuildInfo.
+// FromBuildInfo converts Go build metadata read from any binary into a Stamp.
+// It lets recovery tools inspect a stale target without executing it.
+func FromBuildInfo(bi *debug.BuildInfo) Stamp { return stampFrom(bi) }
+
 func stampFrom(bi *debug.BuildInfo) Stamp {
 	if bi == nil {
 		return Stamp{}

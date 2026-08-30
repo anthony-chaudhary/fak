@@ -56,7 +56,7 @@ func TestServeRegistersFakReadEngineBeforeGatewayNew(t *testing.T) {
 // regression the verb exists to catch.
 func TestServeWiringDetectsDroppedField(t *testing.T) {
 	root := repoRootFromTest(t)
-	gw, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "gateway.go"))
+	gw, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "config.go"))
 	if err != nil {
 		t.Fatalf("read real gateway.go: %v", err)
 	}
@@ -68,9 +68,9 @@ func TestServeWiringDetectsDroppedField(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(fake, "internal", "gateway"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Real gateway.go (the Config fields still exist) but a serve.go that sets only Model:
+	// Real config.go (the Config fields still exist) but a serve.go that sets only Model:
 	// every audited Config-backed feature should now read as dead-wired.
-	if err := os.WriteFile(filepath.Join(fake, "internal", "gateway", "gateway.go"), gw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(fake, "internal", "gateway", "config.go"), gw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stub := "package main\nfunc x() {\n\tsrv, _ := gateway.New(gateway.Config{\n\t\tModel: *model,\n\t})\n\t_ = srv\n}\n"

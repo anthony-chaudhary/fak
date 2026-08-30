@@ -810,7 +810,8 @@
       "distinction": "The UNGRADED admission pool - NOT gradedPool (the same pool after evidence grading) and NOT GradeCandidates (the grader that produces those grades).",
       "distinct_from": [
         "c729-graded-pool",
-        "c729-grade-candidates"
+        "c729-grade-candidates",
+        "issue10231-placementtax-validate-candidate"
       ],
       "aliases": [],
       "grounding": "placementCandidates",

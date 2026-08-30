@@ -39,6 +39,7 @@ type slackRefreshOptions struct {
 	BlockersLabel   string
 	BlockersRepoURL string
 	BacklogIssues   string
+	BacklogChannel  string
 }
 
 type slackWalkRow struct {
@@ -77,6 +78,8 @@ type slackGitHubIssue struct {
 }
 
 type slackGitHubRunner func(args ...string) ([]byte, error)
+
+var slackRefreshRunScoreboardPost = runScoreboardPost
 
 func runSlackRefreshGH(args ...string) ([]byte, error) {
 	cmd, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, args...)
@@ -182,8 +185,8 @@ func slackRefreshActions() map[string]slackRefreshAction {
 				if len(issues) == 0 {
 					detail, verdict = "GitHub returned zero open issues", "OK"
 				}
-				args := []string{"--channel", os.Getenv("FAK_BACKLOG_CHANNEL"), "--kpi", "backlog-triage", "--value", fmt.Sprint(len(issues)), "--verdict", verdict, "--detail", detail}
-				return runScoreboardPost(stdout, stderr, withDryRun(args, dryRun))
+				args := []string{"--channel", opts.BacklogChannel, "--kpi", "backlog-triage", "--value", fmt.Sprint(len(issues)), "--verdict", verdict, "--detail", detail}
+				return slackRefreshRunScoreboardPost(stdout, stderr, withDryRun(args, dryRun))
 			},
 		},
 		"marketing": {
@@ -405,6 +408,7 @@ func runSlackRefreshWithGH(stdout, stderr io.Writer, argv []string, gh slackGitH
 	blockersIssues := fs.String("blockers-issues", "", "gh issue-list JSON file to use when refreshing blockers")
 	blockersLabel := fs.String("blockers-label", "blocked", "issue label represented by --blockers-issues")
 	blockersRepoURL := fs.String("blockers-repo-url", "", "repo URL used for the blockers triage link")
+	backlogChannel := fs.String("backlog-channel", "", "Slack channel for the backlog scoreboard refresh")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -417,7 +421,7 @@ func runSlackRefreshWithGH(stdout, stderr io.Writer, argv []string, gh slackGitH
 	}
 	opts := slackRefreshOptions{
 		NewsTitle: *newsTitle, NewsFile: *newsFile, BlockersIssues: *blockersIssues,
-		BlockersLabel: *blockersLabel, BlockersRepoURL: *blockersRepoURL,
+		BlockersLabel: *blockersLabel, BlockersRepoURL: *blockersRepoURL, BacklogChannel: *backlogChannel,
 	}
 	cleanup := func() {}
 	if needsGitHubPayload(selected, opts.BlockersIssues) {

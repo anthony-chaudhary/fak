@@ -25,8 +25,8 @@ func TestAttributionNightlyWorkflowEntrypointPopulatedWitness(t *testing.T) {
 	temp := t.TempDir()
 	receiptPath := filepath.Join(temp, "receipt.json")
 	historyPath := filepath.Join(temp, "history.jsonl")
-	claudeRoot := filepath.Join(root, "internal", "trajectory", "testdata", "audit", "claude", "projects")
-	codexRoot := filepath.Join(root, "internal", "trajectory", "testdata", "audit", "codex", "sessions")
+	at := time.Date(2026, 8, 21, 22, 0, 0, 0, time.UTC)
+	claudeRoot, codexRoot := stageTrajectoryNightlyFixtures(t, root, temp, at.Add(-time.Minute))
 	command := exec.Command("bash", filepath.Join(".github", "scripts", "trajectory-attribution-nightly.sh"))
 	command.Dir = root
 	command.Env = append(os.Environ(),
@@ -36,7 +36,7 @@ func TestAttributionNightlyWorkflowEntrypointPopulatedWitness(t *testing.T) {
 		"FAK_TRAJECTORY_CORPUS=fleet",
 		"FAK_TRAJECTORY_CLAUDE_ROOT="+mustAbsTrajectoryNightly(t, claudeRoot),
 		"FAK_TRAJECTORY_CODEX_ROOT="+mustAbsTrajectoryNightly(t, codexRoot),
-		"FAK_TRAJECTORY_AT="+time.Now().UTC().Format(time.RFC3339Nano),
+		"FAK_TRAJECTORY_AT="+at.Format(time.RFC3339Nano),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -136,12 +136,14 @@ func TestAttributionNightlyInjectedBudgetFailureWitness(t *testing.T) {
 		t.Fatal(err)
 	}
 	receiptPath := filepath.Join(temp, "receipt.json")
+	at := time.Date(2026, 8, 21, 22, 0, 0, 0, time.UTC)
+	claudeRoot, _ := stageTrajectoryNightlyFixtures(t, root, temp, at.Add(-time.Minute))
 	var stdout, stderr bytes.Buffer
 	rc := runTrajectory(&stdout, &stderr, []string{
 		"nightly", "--budget", budgetPath, "--history", filepath.Join(temp, "history.jsonl"),
 		"--receipt", receiptPath, "--corpus", "local",
-		"--claude-root", filepath.Join(root, "internal", "trajectory", "testdata", "audit", "claude", "projects"),
-		"--codex-root", filepath.Join(temp, "missing-codex"), "--at", time.Now().UTC().Format(time.RFC3339Nano),
+		"--claude-root", claudeRoot,
+		"--codex-root", filepath.Join(temp, "missing-codex"), "--at", at.Format(time.RFC3339Nano),
 	})
 	if rc != 3 {
 		t.Fatalf("rc=%d, want budget failure 3; stderr=%s", rc, stderr.String())
@@ -165,6 +167,33 @@ func TestAttributionNightlyInjectedBudgetFailureWitness(t *testing.T) {
 	if strings.Contains(string(mustReadTrajectoryNightly(t, receiptPath)), "audit the fixture") {
 		t.Fatal("receipt leaked transcript content")
 	}
+}
+
+func stageTrajectoryNightlyFixtures(t *testing.T, repoRoot, tempRoot string, modTime time.Time) (string, string) {
+	t.Helper()
+	sourceRoot := filepath.Join(repoRoot, "internal", "trajectory", "testdata", "audit")
+	claudeRoot := filepath.Join(tempRoot, "corpus", "claude", "projects")
+	codexRoot := filepath.Join(tempRoot, "corpus", "codex", "sessions")
+	fixtures := []struct {
+		source string
+		target string
+	}{
+		{source: filepath.Join(sourceRoot, "claude", "projects", "fak", "claude-session.jsonl"), target: filepath.Join(claudeRoot, "fak", "claude-session.jsonl")},
+		{source: filepath.Join(sourceRoot, "codex", "sessions", "2026", "08", "21", "codex-session.jsonl"), target: filepath.Join(codexRoot, "2026", "08", "21", "codex-session.jsonl")},
+	}
+	for _, fixture := range fixtures {
+		contents := mustReadTrajectoryNightly(t, fixture.source)
+		if err := os.MkdirAll(filepath.Dir(fixture.target), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fixture.target, contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(fixture.target, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return claudeRoot, codexRoot
 }
 
 func mustReadTrajectoryNightly(t *testing.T, path string) []byte {

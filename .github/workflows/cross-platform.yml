@@ -56,6 +56,17 @@ jobs:
       - name: launchshim acceptance (Claude + Codex)
         run: go test ./internal/launchshim -run 'TestProviderAcceptanceMatrix|TestConcurrentSaveNeverTearsConfig|TestCanonicalCommand|TestActivationLifecyclePreservesUserBytesAndConverges|TestActivationBlocksResolveShimFirst' -count=1
 
+      # The Windows-only launch race in #9847 crossed process replacement, Git ref movement,
+      # receipt parsing, and inherited-environment semantics. Keep its narrow acceptance live
+      # on the platform where the production failure occurred.
+      - name: self-update freshness linearization (Windows)
+        if: runner.os == 'Windows'
+        run: go test ./cmd/fak -run 'TestSelfUpdateAttemptPinsSelectionAcrossMovingOrigin|TestSelfUpdateAttemptRealGitPinsSelectionAcrossMovingOrigin|TestRunCodexFreshnessAdmissionReexecAdmitsSelectedCommitAfterRefAdvances|TestCodexFreshnessInstalledRevisionRequiresChangedPrimaryReceipt|TestCodexFreshnessReexecEnvironmentScrubsInheritedMarkersCaseInsensitively|TestCodexFreshnessReexecHelperRoundTrip' -count=1 -timeout=3m
+
+      - name: self-update replacement boundary (Windows)
+        if: runner.os == 'Windows'
+        run: go test ./internal/selfinstall -run '^TestLaunchTransactionHoldsPriorAtReplacementBoundary$' -count=1 -timeout=2m
+
       - name: build (whole module compiles)
         run: go build ./...
 

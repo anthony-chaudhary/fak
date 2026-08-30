@@ -10,10 +10,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
-	"github.com/anthony-chaudhary/fak/internal/attemptbudget"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
-	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 
@@ -462,7 +460,6 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	var terminated func() bool
 	ctx, terminated, cleanupTerminate := watchArmTermination(ctx, cfg.terminateSignal())
 	defer cleanupTerminate()
-	stopTerminated := func() bool { return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m) }
 
 	// Resume re-entry (#1363/#4124): when this run is keyed on a session whose drive state
 	// carries a non-zero write-ahead turn checkpoint — a prior attempt was interrupted
@@ -476,359 +473,25 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		m.ResumedPendingTurn = resume
 	}
 
-	var repeatedFailures attemptbudget.RepeatedFailureTracker
-	for turn := 0; turn < maxTurns; turn++ {
-		var toolTerminalPayload string
-		if turn > 0 && cfg.toolTerminalWake != nil {
-			select {
-			case <-cfg.toolTerminalWake.signal:
-				wake := cfg.toolTerminalWake.next()
-				payload, _ := json.Marshal(wake)
-				toolTerminalPayload = string(payload)
-			case <-ctx.Done():
-				return m, ctx.Err()
-			}
-		}
-		// Mid-flight set-budget (#5158): write any staged budget through to the wired
-		// session table at THIS clean boundary — BEFORE the gate reads it — so the same
-		// boundary's gate adjudicates the fresh allotment (an exhausted one stops the arm
-		// here with its closed exhaustion reason). With no table wired the staged write
-		// drains as REFUSED. A no-op with no mailbox or nothing staged.
-		cfg.applyMidflightBudget(turn + 1)
-		// Mid-flight interrupt (#5158): a boundary-clean stop armed while the previous turn
-		// was in flight lands HERE — the in-flight turn already completed its admitted
-		// results — carrying the closed INTERRUPTED witness on StoppedBySession, never
-		// mid-tool and never a turn-cap inference. A no-op with no mailbox or nothing armed.
-		if reason, stopped := cfg.takeMidflightInterrupt(turn + 1); stopped {
-			if toolTerminalPayload != "" {
-				cfg.toolTerminalWake.release()
-			}
-			m.StoppedBySession = reason
-			if fak {
-				finalizeFak(k, &m)
-			}
-			return m, nil
-		}
-		// Session-control gate (no-op when no table is wired): read the session's live
-		// drive state at the turn boundary. A non-proceed verdict ends the arm here —
-		// budget-exhausted / drained / stopped / paused — with the reason recorded, so a
-		// stop is taken at a CLEAN boundary, never mid-turn.
-		perTurnCap, proceed, stopReason := cfg.gateTurn(ctx)
-		if !proceed {
-			if toolTerminalPayload != "" {
-				cfg.toolTerminalWake.release()
-			}
-			m.StoppedBySession = stopReason
-			if fak {
-				finalizeFak(k, &m)
-			}
-			return m, nil
-		}
-		if toolTerminalPayload != "" {
-			cfg.toolTerminalWake.mark("DISPATCHED")
-			messages = append(messages, Message{Role: RoleUser, Content: toolTerminalPayload})
-			sessionctl.RecordToolTerminalWakeNext(cfg.trace, toolTerminalPayload)
-		}
-		cfg.applyPace(perTurnCap)
-		// Typed loop-progress (#5148): the turn boundary is the first witnessed
-		// transition of this turn — emitted AFTER the session gate admitted it, so a
-		// turn that never ran is never announced. A no-op with no observer wired.
-		cfg.emitProgress(ProgressEvent{Kind: ProgressTurnStarted, Turn: turn + 1})
-
-		// Boundary directive splice (loop_directives.go): operator steer (#850),
-		// objective redirect (#2755), tightened constraint floor (#2756) and the
-		// context-spike advisory (#2197), folded into THIS turn's input in that order.
-		// Every drain is a no-op without a wired trace/table/gate, so the historical
-		// loop is byte-for-byte unchanged.
-		beforeDirectives := len(messages)
-		messages = spliceTurnDirectives(cfg, messages)
-		injected := append([]Message(nil), messages[beforeDirectives:]...)
-		inputClaim, err := cfg.claimTurnInputs(turn+1, injected)
-		if err != nil {
-			return m, fmt.Errorf("%s arm turn %d claim admitted input: %w", m.Arm, turn+1, err)
-		}
-		releaseClaim := func(reason string, cause error) error {
-			if err := cfg.releaseInputClaim(inputClaim, reason); err != nil {
-				return fmt.Errorf("%w; release input claim: %v", cause, err)
-			}
-			return cause
-		}
-		// Render the model-facing prompt exactly once. SessionPlanner.RenderTurn is
-		// stateful, so a second call for evidence could itself change the request.
-		planned, err := cfg.promptMessages(ctx, messages)
-		if err != nil {
-			return m, fmt.Errorf("%s arm turn %d prompt assembly: %w", m.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_FAILED", err))
-		}
-		if inputClaim.ID != "" && !claimedInputsSurviveAssembly(injected, planned) {
-			err := fmt.Errorf("prompt assembly dropped claimed input")
-			return m, fmt.Errorf("%s arm turn %d prompt assembly: %w", m.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_DROPPED_CLAIMED_INPUT", err))
-		}
-		if cfg.modelRequestObserver != nil {
-			boundary := ModelRequestBoundary{
-				Model: model, Turn: turn + 1, Stream: stream, MaxTokens: perTurnCap,
-				Messages: append([]Message(nil), planned...),
-				Tools:    append([]ToolDef(nil), tools...),
-				Injected: injected,
-			}
-			if inputClaim.ID != "" {
-				claimCopy := inputClaim
-				boundary.InputClaim = &claimCopy
-			}
-			if err := cfg.modelRequestObserver(boundary); err != nil {
-				return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, releaseClaim("REQUEST_RECEIPT_FAILED", err))
-			}
-		} else if inputClaim.ID != "" {
-			err := fmt.Errorf("durable input claim requires a model request observer")
-			return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, releaseClaim("REQUEST_RECEIPT_UNWIRED", err))
-		}
-
-		var streamedChunks []string
-		turnSink := sink
-		if stream {
-			turnSink = func(chunk string) error {
-				if sink != nil {
-					if err := sink(chunk); err != nil {
-						return err
-					}
-				}
-				streamedChunks = append(streamedChunks, chunk)
-				return nil
-			}
-		}
-		comp, err := complete(ctx, planned, tools, turnSink, sampleOptsFor(perTurnCap)...)
-		if err != nil {
-			completionErr := err
-			err = releaseClaim("MODEL_DISPATCH_FAILED", err)
-			// A completion error caused by this session's terminate (#2758) — the watcher
-			// cancelled the in-flight call's context — is the op WORKING, not a failure:
-			// stop typed (StoppedBySession=TERMINATED), no error. Any other error keeps
-			// the historical fail-loud path.
-			terminated := stopTerminated()
-			if stream && cfg.interruptedTurnObserver != nil {
-				observed := InterruptedTurn{
-					Turn: turn + 1, Chunks: append([]string(nil), streamedChunks...),
-					Reason: ClassifyTermination(completionErr),
-				}
-				if observeErr := cfg.interruptedTurnObserver(observed); observeErr != nil {
-					return m, fmt.Errorf("%s arm turn %d interrupted output receipt: %v (completion: %w)", m.Arm, turn+1, observeErr, err)
-				}
-			}
-			if terminated {
-				return m, nil
-			}
-			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
-		}
-		m.Turns++
-		m.PromptTokens += comp.Usage.PromptTokens
-		m.CompletionTokens += comp.Usage.CompletionTokens
-		// Report this turn's output usage to the session budget (no-op without a table).
-		cfg.debitTurn(comp.Usage)
-		asst := comp.Message
-		asst.Role = RoleAssistant
-		// Tool-call conformance: the model announced tool calls but none parsed.
-		// Treating this as a final answer (len(ToolCalls)==0 below) would skip the
-		// intended tool AND its adjudication — the silent no-op a non-OpenAI-shaped
-		// emitter (e.g. a GLM-5.2 variant) causes. Fail closed instead.
-		if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-			return m, fmt.Errorf("%s arm turn %d: upstream announced tool_calls but none parsed; refusing to skip adjudication", m.Arm, turn+1)
-		}
-		messages = append(messages, asst)
-		if len(asst.ToolCalls) == 0 {
-			if cfg.finalGate != nil {
-				if satisfied, missing := cfg.finalGate(); !satisfied {
-					continuation := "STOP_UNWITNESSED: missing declared witness: " + missing + ". Continue working until that witness exists."
-					sessionctl.RecordStopWitnessNext(cfg.trace, continuation)
-					messages = append(messages, Message{Role: RoleUser, Content: continuation})
-					cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
-					continue
-				}
-			}
-			// The model ended the turn with a final answer, not a tool call: any pending
-			// speculation can never be confirmed, so squash it (no authoritative call to
-			// match) — a clean run leaks no provisional effect.
-			sp.resolve(ctx, nil, &m)
-			m.FinalAnswer = asst.Content
-			cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
-			if fak {
-				finalizeFak(k, &m)
-			}
-			return m, nil
-		}
-		// RESUME edge (#1318): the model's authoritative next call is now known. If a
-		// speculation was suspended after the previous turn, resolve it here — promote on
-		// a match, squash on a miss — WITHIN this turn index (no extra Complete ran). A
-		// no-op when no speculation is pending or no speculator is wired.
-		sp.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), &m)
-		var turnResults []*abi.Result
-		for _, tc := range asst.ToolCalls {
-			// Terminate is taken INSIDE the turn (#2758): before dispatching each tool
-			// call, not only at the boundary. A terminated session starts no new work —
-			// the remaining tool calls are never dispatched — where a drain would let
-			// every one of them run.
-			if stopTerminated() {
-				return m, nil
-			}
-			// Tool-call runaway budget (#5235, the #2887 floor): spend one unit of the
-			// session's per-CALL allotment BEFORE this call is dispatched or counted. The
-			// boundary gate above cannot hold this line — it only runs between turns, so a
-			// single turn emitting a long tool-call loop would run the whole batch out.
-			// Exhaustion ends the arm HERE, mid-turn, with the closed
-			// BUDGET_TOOLCALLS_EXHAUSTED witness on StoppedBySession and no final answer —
-			// the remaining calls are never dispatched, exactly like a terminate. A no-op
-			// with no table wired or no ceiling configured.
-			if reason := cfg.debitToolCall(); reason != "" {
-				m.StoppedBySession = reason
-				if fak {
-					finalizeFak(k, &m)
-				}
-				return m, nil
-			}
-			m.ToolCalls++
-			tool := tc.Function.Name
-			rawArgs := tc.Function.Arguments
-			var content string
-			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
-			// Dispatch is announced BEFORE the verdict is known, so a client watching the
-			// stream sees the call in flight rather than only its outcome (#5148).
-			cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tool})
-			switch {
-			case cfg.dropMidflightCall(tc.ID, turn+1):
-				// Mid-flight drop-pending-call (#5158): the operator named THIS queued call
-				// to be skipped BEFORE dispatch — exactly this call and nothing else. It
-				// never reaches the engine; the model sees a typed status=skipped receipt
-				// (#2414) carrying the closed CALL_DROPPED_BY_OPERATOR reason, never a
-				// feigned success, and can re-issue if it still needs the call.
-				content = ToolReceipt{
-					Status:      ToolResultSkipped,
-					Reason:      "CALL_DROPPED_BY_OPERATOR",
-					Disposition: "RETRYABLE",
-					Fix:         "the operator dropped this call mid-flight; re-issue it if it is still needed",
-					Detail:      "skipped before dispatch by a mid-flight drop-pending-call verb; never dispatched",
-				}.JSON()
-				ev.Verdict = "DROPPED"
-				ev.By = "operator"
-				ev.Note = "DROPPED by a mid-flight drop-pending-call verb (skipped before dispatch)"
-			case cfg.constraintDenied(tool, &content, &ev):
-				// Out-of-band tightened floor (#2756): a tool the operator forbade
-				// mid-session is denied BEFORE dispatch — never sent — with a typed
-				// receipt carrying the closed CONSTRAINT_* reason (content + ev were
-				// filled by constraintDenied). The next planner turn reads a
-				// structured verdict and adapts; the session keeps running.
-			case sp.barWrite(tool, &m):
-				// Before-consumption write barrier (#1319): this write follows a squashed
-				// speculation (a write behind an unconfirmed speculative read), so it is
-				// BLOCKED from the engine — never dispatched, no durable effect. This is a
-				// legitimate NOT-SENT no-op, so the model sees a typed status=skipped
-				// receipt (#2414) — never a feigned success — and can re-issue once the
-				// read is real.
-				content = ToolReceipt{
-					Status:      ToolResultSkipped,
-					Reason:      "WRITE_BARRED",
-					Disposition: "RETRYABLE",
-					Fix:         "re-issue this write after the authoritative read it depends on has actually run",
-					Detail:      "held behind an unconfirmed speculative read (squashed); never dispatched",
-				}.JSON()
-				ev.Verdict = "BARRED"
-				ev.By = "write-barrier"
-				ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"
-			case fak:
-				// Per-tool-call model routing (opt-in #598): classify this call and bind the
-				// chosen engine PRE-Syscall. With an account roster wired (--route-accounts,
-				// #2528) the routed id is resolved through it to a residency-honest
-				// EngineRoute() first. No manifest => "" => the kernel default, so the
-				// historical loop is unchanged.
-				// Classify the exact metadata shape that execViaKernel will lower onto
-				// the ToolCall, so native manifest matching stays in parity with the
-				// proxy path for read_only and sensitivity labels.
-				// A call that CREATES delegated work (--spawn placement, #5420) takes its
-				// own rung here instead of inheriting this turn's: same pre-Syscall point,
-				// so the residency floor still adjudicates the real destination. Unarmed,
-				// or an agent type the operator never declared, falls through to the
-				// ordinary per-tool-call route unchanged.
-				engine, rerr := cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
-				if rerr != nil {
-					// Fail loud, exactly like the gateway's buildCall: a misconfigured roster
-					// must never silently dispatch a routed call to the wrong (or default)
-					// account. The call never reaches k.Syscall; the model sees a structured
-					// error and can adapt.
-					dj, _ := json.Marshal(map[string]string{"error": rerr.Error()})
-					content = string(dj)
-					ev.Verdict = "route-error"
-					ev.By = "route-accounts"
-					ev.Note = "ROUTE REFUSED (fail-loud): " + rerr.Error()
-				} else {
-					content, ev = execViaKernel(ctx, k, tool, rawArgs, engine, ev, cfg.principal)
-					// Out-of-band operator inbox (#2757): an ESCALATE-gated deny
-					// parks on the sessionctl pending-action queue for an external
-					// approve/deny when the session's inbox is open; the returned
-					// content/ev already honor the verdict (approved re-dispatch,
-					// or the typed abort receipt). A no-op without a wired trace,
-					// an open inbox, or an ESCALATE deny, so the historical loop
-					// is byte-for-byte unchanged.
-					content, ev = cfg.parkEscalatedDeny(ctx, k, tool, rawArgs, engine, content, ev)
-				}
-			default:
-				content, ev = execNaive(tool, rawArgs, &m, ev)
-			}
-			// The kernel's verdict for this call, drawn from the SAME closed vocabulary the
-			// rest of the kernel refuses with (verdictName + the deny's closed reason) — the
-			// event a client gates on (#5148). Emitted after the switch so an ESCALATE park
-			// that re-dispatched (parkEscalatedDeny) reports its FINAL verdict, not the
-			// provisional deny.
-			cfg.emitProgress(ProgressEvent{
-				Kind: ProgressCallAdjudicated, Turn: turn + 1, CallID: tc.ID, Tool: tool,
-				Verdict: ev.Verdict, Reason: ev.Reason,
-			})
-			if log != nil {
-				*log = append(*log, ev)
-			}
-			if strings.Contains(strings.ToLower(content), "ignore previous instructions") {
-				m.InjectionInContext = true
-			}
-			if tool == toolBook && strings.Contains(content, "confirmation") && !strings.Contains(content, `"error"`) {
-				m.TaskCompleted = true // the actual goal (a real booking) succeeded
-			}
-			if recordRepeatedFailure(&repeatedFailures, tool, rawArgs, content) {
-				return m, fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
-			}
-			messages = append(messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
-			// The result has entered the transcript: report HOW it entered (clean /
-			// quarantined / tainted), derived from signals the loop already read (#5148).
-			cfg.emitProgress(ProgressEvent{
-				Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
-				Taint: admittedTaint(ev, content), Summary: progressResultSummary(tool, content),
-			})
-			// Capture this call's result as a prior output for the next speculation (only
-			// when speculating, so the historical loop allocates nothing extra).
-			if sp != nil {
-				turnResults = append(turnResults, &abi.Result{
-					Call:    &abi.ToolCall{Tool: tool},
-					Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(content), Len: int64(len(content))},
-					Status:  abi.StatusOK,
-				})
-			}
-		}
-		// Every tool call this turn proposed has been adjudicated and admitted: the turn
-		// is complete (#5148). An ABNORMAL end — terminate, session gate, error — returns
-		// above without this event; its reason rides the terminal ArmMetrics witness.
-		cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
-		// Retire any armed write barrier at the turn boundary — it gates only this turn's
-		// writes, never a later turn's (#1319).
-		sp.disarm()
-		// SUSPEND edge (#1318): predict the model's NEXT call from this turn's signature +
-		// prior outputs, run it effect-free ahead of the model, and suspend it for the next
-		// turn boundary to resolve. A no-op when no speculator is wired or nothing is
-		// predicted. This is Speculator.Predict's first live, non-test caller.
-		if sp != nil && len(asst.ToolCalls) > 0 {
-			sp.speculate(ctx, turn, asst.ToolCalls[len(asst.ToolCalls)-1].Function.Name, turnResults, &m)
-		}
+	runner := armRunner{
+		cfg:         &cfg,
+		metrics:     &m,
+		fak:         fak,
+		kernel:      k,
+		speculation: sp,
+		messages:    messages,
+		tools:       tools,
+		model:       model,
+		stream:      stream,
+		sink:        sink,
+		complete:    complete,
+		log:         log,
 	}
-	m.HitTurnCap = true
-	// The loop hit the turn cap with a speculation still pending: squash it (it was never
-	// confirmed by an authoritative call), so no provisional effect leaks past the run.
-	sp.resolve(ctx, nil, &m)
-	if fak {
-		finalizeFak(k, &m)
+	runner.stopTerminated = func() bool {
+		return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m)
+	}
+	if err := runner.run(ctx, maxTurns); err != nil {
+		return m, err
 	}
 	return m, nil
 }

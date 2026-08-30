@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -46,6 +47,9 @@ func defaultSchedPrepare(ctx context.Context, c *abi.ToolCall, m *model.Model) s
 type NativeScheduler struct {
 	m       *model.Model
 	prepare schedPrepareFunc
+	now     func() time.Time
+
+	cachePhaseLatency modelperfobs.CachePhaseLatencyRecorder
 
 	mu sync.Mutex
 	// waiting holds admitted-but-not-yet-running lanes (the WAITING queue); lanes
@@ -63,11 +67,12 @@ type NativeScheduler struct {
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
-	maxObservedRunning int
-	sharedBatchSteps   uint64
-	sharedPanels       uint64
-	sharedMACs         uint64
-	closed             bool
+	maxObservedRunning  int
+	sharedBatchSteps    uint64
+	sharedPanels        uint64
+	sharedMACs          uint64
+	q4kGateUpOutputSlab bool
+	closed              bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
 	// the live paged-KV block budget and preempts running lanes at scheduler boundaries
@@ -80,6 +85,15 @@ type NativeScheduler struct {
 
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
+
+	// executor serializes lane mutation between the ordinary scheduler goroutine and
+	// Complete callers that donate their blocked drain to advancing scheduler work.
+	// The goroutine remains the fallback whenever donation is disabled or no Complete
+	// drain is waiting.
+	executor          sync.Mutex
+	drainDonation     bool
+	blockedDrains     int
+	donatedIterations uint64
 }
 
 // SetMaxRunning bounds how many admitted lanes run concurrently; the rest wait in the
@@ -90,6 +104,15 @@ func (s *NativeScheduler) SetMaxRunning(n int) {
 	s.maxRunning = n
 	s.mu.Unlock()
 	s.signal()
+}
+
+// SetQ4KGateUpOutputSlab selects the explicit session-owned slab for Q4_K lanes.
+// Set it before Admit; applying it to every session constructor keeps preemption
+// restore and ordinary admission behavior identical.
+func (s *NativeScheduler) SetQ4KGateUpOutputSlab(enabled bool) {
+	s.mu.Lock()
+	s.q4kGateUpOutputSlab = enabled
+	s.mu.Unlock()
 }
 
 // MaxObservedRunning reports the peak running-set size the loop reached — the witness
@@ -108,6 +131,12 @@ type SharedWorkReceipt struct {
 	Steps  uint64
 	Panels uint64
 	MACs   uint64
+}
+
+// CachePhaseLatencyReceipt reports fak-native KV-bearing prefill/decode latency
+// with a bounded pipeline-phase label and a reconciling unlabeled total.
+func (s *NativeScheduler) CachePhaseLatencyReceipt() modelperfobs.CachePhaseLatencyReceipt {
+	return s.cachePhaseLatency.Receipt()
 }
 
 func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
@@ -131,7 +160,36 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 	if prepare == nil {
 		prepare = defaultSchedPrepare
 	}
-	return &NativeScheduler{m: m, prepare: prepare, wake: make(chan struct{}, 1)}
+	return &NativeScheduler{
+		m:             m,
+		prepare:       prepare,
+		now:           time.Now,
+		wake:          make(chan struct{}, 1),
+		drainDonation: true,
+	}
+}
+
+// SetDrainDonation selects whether a blocked Complete drain may execute native
+// scheduler iterations while it awaits its own tokens. Enabled by default. Disable
+// it before the first Admit to retain the scheduler-goroutine-only oracle/fallback.
+func (s *NativeScheduler) SetDrainDonation(enabled bool) {
+	s.mu.Lock()
+	s.drainDonation = enabled
+	s.mu.Unlock()
+	s.signal()
+}
+
+// DrainDonationReceipt is the execution witness for await-caller donation. Each
+// iteration represents native scheduler work executed by a blocked Complete caller,
+// not by a substitute engine or runtime.
+type DrainDonationReceipt struct {
+	Iterations uint64
+}
+
+func (s *NativeScheduler) DrainDonationReceipt() DrainDonationReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return DrainDonationReceipt{Iterations: s.donatedIterations}
 }
 
 // Caps advertises the lifecycle seam (so a consumer negotiates streaming/cancel
@@ -173,8 +231,11 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 		// implement q4kw dispatch.
 		sess.Quant = true
 		sess.Q4K = true
+		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
 	}
+	prefillStarted := s.now()
 	logits := sess.Prefill(prompt)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
@@ -212,11 +273,19 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 // Complete is the one-shot shim every LifecycleEngine offers so it also satisfies
 // the bare EngineDriver: admit, drain the stream, return the assembled turn.
 func (s *NativeScheduler) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	donate := s.beginBlockedDrain()
+	if donate {
+		defer s.endBlockedDrain()
+	}
 	req, err := s.Admit(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	for range req.Tokens() {
+	if donate {
+		s.drainWithDonation(req.Tokens())
+	} else {
+		for range req.Tokens() {
+		}
 	}
 	res, err := req.Result()
 	if err != nil {
@@ -265,88 +334,163 @@ func (s *NativeScheduler) signal() {
 func (s *NativeScheduler) run() {
 	for {
 		s.mu.Lock()
-		// 1. Drop finished/cancelled lanes from the running set, freeing their slots.
-		live := s.lanes[:0]
-		for _, ln := range s.lanes {
-			if !ln.terminal {
-				live = append(live, ln)
-			}
-		}
-		s.lanes = live
-		// 2. Retire cancelled preempted lanes, then readmit older preempted lanes before
-		// promoting fresh waiting work so a preempted victim cannot starve behind arrivals.
-		s.dropCanceledPreemptedLocked()
-		s.readmitPreemptedLocked()
-		// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
-		// cancelled while it was still waiting is retired here rather than promoted.
-		if s.promotionPicker != nil && len(s.waiting) > 1 {
-			slots := len(s.waiting)
-			if s.maxRunning > 0 {
-				slots = s.maxRunning - len(s.lanes)
-			}
-			c := make([]PromotionCandidate, len(s.waiting))
-			for i, ln := range s.waiting {
-				c[i] = PromotionCandidate{Index: i, Hint: ln.hint}
-			}
-			order := s.promotionPicker(c, slots, s.sessionAffinity)
-			reordered := make([]*schedLane, 0, len(s.waiting))
-			used := map[int]bool{}
-			for _, i := range order {
-				if i >= 0 && i < len(s.waiting) && !used[i] {
-					reordered = append(reordered, s.waiting[i])
-					used[i] = true
-				}
-			}
-			for i, ln := range s.waiting {
-				if !used[i] {
-					reordered = append(reordered, ln)
-				}
-			}
-			s.waiting = reordered
-		}
-		kept := s.waiting[:0]
-		for _, ln := range s.waiting {
-			if ln.ctx.Err() != nil {
-				ln.finish(nil, ln.ctx.Err())
-				continue
-			}
-			if s.maxRunning > 0 && len(s.lanes) >= s.maxRunning {
-				kept = append(kept, ln)
-				continue
-			}
-			s.lanes = append(s.lanes, ln)
-		}
-		s.waiting = kept
-		s.enforcePreemptionLocked()
-		running := len(s.lanes)
-		if running > s.maxObservedRunning {
-			s.maxObservedRunning = running
-		}
-		var solo *schedLane
-		var active []*schedLane
-		if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {
-			solo = s.lanes[0]
-		} else if running > 0 {
-			active = make([]*schedLane, running)
-			copy(active, s.lanes)
-		}
+		donorOwnsWork := s.drainDonation && s.blockedDrains > 0
 		closed := s.closed
 		idle := len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
 		s.mu.Unlock()
-
-		if idle {
-			if closed {
+		if donorOwnsWork {
+			if closed && idle {
 				return
 			}
 			<-s.wake
 			continue
 		}
-		if solo != nil {
-			s.stepSolo(solo)
+
+		s.executor.Lock()
+		_, idle, closed = s.runIteration(false)
+		s.executor.Unlock()
+		if idle {
+			if closed {
+				return
+			}
+			<-s.wake
+		}
+	}
+}
+
+func (s *NativeScheduler) beginBlockedDrain() bool {
+	s.mu.Lock()
+	if !s.drainDonation || s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	s.blockedDrains++
+	s.mu.Unlock()
+	s.signal()
+	return true
+}
+
+func (s *NativeScheduler) endBlockedDrain() {
+	s.mu.Lock()
+	s.blockedDrains--
+	s.mu.Unlock()
+	s.signal()
+}
+
+func (s *NativeScheduler) drainWithDonation(tokens <-chan abi.EngineToken) {
+	for {
+		select {
+		case _, ok := <-tokens:
+			if !ok {
+				return
+			}
+			continue
+		default:
+		}
+
+		if s.executor.TryLock() {
+			didWork, _, _ := s.runIteration(true)
+			s.executor.Unlock()
+			if didWork {
+				continue
+			}
+		}
+		<-tokens
+	}
+}
+
+// runIteration advances one native scheduler boundary. executor must be held.
+// donated limits the solo fast path to one token so the donating caller can return
+// to draining its bounded token channel before executing another iteration.
+func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool) {
+	s.mu.Lock()
+	// 1. Drop finished/cancelled lanes from the running set, freeing their slots.
+	live := s.lanes[:0]
+	for _, ln := range s.lanes {
+		if !ln.terminal {
+			live = append(live, ln)
+		}
+	}
+	s.lanes = live
+	// 2. Retire cancelled preempted lanes, then readmit older preempted lanes before
+	// promoting fresh waiting work so a preempted victim cannot starve behind arrivals.
+	s.dropCanceledPreemptedLocked()
+	s.readmitPreemptedLocked()
+	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
+	// cancelled while it was still waiting is retired here rather than promoted.
+	if s.promotionPicker != nil && len(s.waiting) > 1 {
+		slots := len(s.waiting)
+		if s.maxRunning > 0 {
+			slots = s.maxRunning - len(s.lanes)
+		}
+		c := make([]PromotionCandidate, len(s.waiting))
+		for i, ln := range s.waiting {
+			c[i] = PromotionCandidate{Index: i, Hint: ln.hint}
+		}
+		order := s.promotionPicker(c, slots, s.sessionAffinity)
+		reordered := make([]*schedLane, 0, len(s.waiting))
+		used := map[int]bool{}
+		for _, i := range order {
+			if i >= 0 && i < len(s.waiting) && !used[i] {
+				reordered = append(reordered, s.waiting[i])
+				used[i] = true
+			}
+		}
+		for i, ln := range s.waiting {
+			if !used[i] {
+				reordered = append(reordered, ln)
+			}
+		}
+		s.waiting = reordered
+	}
+	kept := s.waiting[:0]
+	for _, ln := range s.waiting {
+		if ln.ctx.Err() != nil {
+			ln.finish(nil, ln.ctx.Err())
 			continue
 		}
+		if s.maxRunning > 0 && len(s.lanes) >= s.maxRunning {
+			kept = append(kept, ln)
+			continue
+		}
+		s.lanes = append(s.lanes, ln)
+	}
+	s.waiting = kept
+	s.enforcePreemptionLocked()
+	running := len(s.lanes)
+	if running > s.maxObservedRunning {
+		s.maxObservedRunning = running
+	}
+	var solo *schedLane
+	var active []*schedLane
+	if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {
+		solo = s.lanes[0]
+	} else if running > 0 {
+		active = make([]*schedLane, running)
+		copy(active, s.lanes)
+	}
+	closed = s.closed
+	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
+	s.mu.Unlock()
+
+	if idle {
+		return false, idle, closed
+	}
+	if solo != nil {
+		if donated {
+			s.stepOnce([]*schedLane{solo})
+		} else {
+			s.stepSolo(solo)
+		}
+	} else {
 		s.stepOnce(active)
 	}
+	if donated {
+		s.mu.Lock()
+		s.donatedIterations++
+		s.mu.Unlock()
+	}
+	return true, false, closed
 }
 
 // emitToken advances the lane by one token: it argmaxes the current logits, delivers
@@ -386,7 +530,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane) {
 		if !ok {
 			return
 		}
+		decodeStarted := s.now()
 		ln.logits = ln.sess.Step(next)
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		select {
 		case <-s.wake:
 			return
@@ -414,7 +560,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	}
 	if len(cont) == 1 {
 		for i, ln := range cont {
+			decodeStarted := s.now()
 			ln.logits = ln.sess.Step(ids[i])
+			s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		}
 		return
 	}
@@ -426,7 +574,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 		seqs[i] = ln.sess
 	}
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
+	decodeStarted := s.now()
 	out := bs.StepBatch(ids)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
 		s.mu.Lock()
 		s.sharedBatchSteps++

@@ -118,7 +118,7 @@ func TestPonytailEvaluationModeScheduleIsDeterministicAndCounterbalanced(t *test
 	var prior []string
 	for trial := 1; trial <= len(ponytailBenchmarkArms); trial++ {
 		arms, seed := counterbalancedArmOrder("up.behavior.hardware-calibration", trial)
-		if len(seed) != 64 || len(arms) != len(ponytailBenchmarkArms) {
+		if len(seed) != 64 || len(arms) != len(ponytailBenchmarkArms) { //boundarylint:ignore CHANGE_DETECTOR_TEST the seeded SHA-256 identifier is 64 hex characters while arm cardinality is checked against its source list
 			t.Fatalf("trial %d arms=%v seed=%q", trial, arms, seed)
 		}
 		if seenFirst[arms[0]] {

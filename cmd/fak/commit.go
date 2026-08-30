@@ -121,7 +121,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit; the gate runs before any `git add`, so a file this commit ADDS needs changed:<path> (committed:<path> is refuted for it)")
 	reclaimLock := fs.Bool("reclaim-stale-index-lock", false, "RECOVERY (no commit): reclaim a stale index lock and next-index residue. Dry-run unless --apply; same path as `fak commit status --reclaim-stale-index-lock`")
-	reclaimApply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the reclaimed files (default: dry-run)")
+	reclaimCommitLock := fs.Bool("reclaim-stale-commit-lock", false, "RECOVERY (no commit): reclaim only <git-dir>/fak-commit.lock when its recorded owner is proven stale or foreign. Dry-run unless --apply")
+	reclaimApply := fs.Bool("apply", false, "with a --reclaim-stale-*-lock recovery, actually remove the proven-stale lock file(s) (default: dry-run)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -136,6 +137,17 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	*dir = pathutil.ExpandTilde(*dir)
 	paths = append(paths, fs.Args()...)
+	if *reclaimLock && *reclaimCommitLock {
+		fmt.Fprintln(stderr, "fak commit: choose either --reclaim-stale-commit-lock or --reclaim-stale-index-lock, not both")
+		return 2
+	}
+
+	// The serialized commit lane and git's index lane use different lockfiles and
+	// different stale-owner proofs. Keep their recovery modes explicit so clearing a
+	// dead fak committer can never sweep unrelated index residue as a side effect.
+	if *reclaimCommitLock {
+		return runCommitLockReclaimAlias(stdout, stderr, *dir, *reclaimApply)
+	}
 
 	// --reclaim-stale-index-lock aliases the `fak commit status` recovery onto `fak commit`
 	// itself (#5338). A committer meets the lock wedge HERE, so the way out has to be
@@ -872,7 +884,8 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	// exact moment they cannot go looking for it. Name it inline (#5338). It stays advisory:
 	// the reclaim itself still refuses unless the lane evidence proves the lock orphaned.
 	if res.Reason == safecommit.ReasonLockBusy {
-		fmt.Fprintln(stdout, "  wedged? if the holder is dead, `fak commit --reclaim-stale-index-lock` shows what is reclaimable (add --apply to remove); `fak commit status` shows the live owner")
+		fmt.Fprintln(stdout, "  wedged? `fak commit --reclaim-stale-commit-lock` probes only the serialized commit lock (add --apply to remove a proven stale owner); `fak commit status` shows the live owner")
+		fmt.Fprintln(stdout, "  separate git residue: `fak commit --reclaim-stale-index-lock` handles only index.lock and next-index files")
 	}
 	renderCommitScore(stdout, res)
 	renderCommitVelocity(stdout, res)

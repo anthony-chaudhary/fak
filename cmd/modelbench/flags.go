@@ -34,6 +34,9 @@ type benchFlags struct {
 	metal                 *bool
 	verify                *bool
 	backendName           *string
+	q4kGateUpSlab         *bool
+	vulkanQ4KProfile      *bool
+	vulkanStageQ4K        *bool
 	requireNonReference   *bool
 	workloadPath          *string
 	workloadPrefillCap    *int
@@ -53,6 +56,7 @@ type benchFlags struct {
 	nativeProfileOut      *string
 	nativeProfileReadback *string
 	nativeProfileCompare  *string
+	nativeDecodeHandoff   *model.Qwen35DecodeHandoffMode
 
 	processExit     func(int)
 	weightCloser    func() error
@@ -63,6 +67,9 @@ type benchFlags struct {
 // parseFlags defines and parses the command-line flags, then expands a leading ~
 // in the path flags (Go/PowerShell don't), so ~/... opens as intended.
 func parseFlags() *benchFlags {
+	nativeProfileComparisonPhaseSelection = profileComparisonPhasePrefill
+	nativeProfileComparisonAxisSelection = profileComparisonAxisSequence
+	nativeDecodeHandoff := model.Qwen35DecodeHandoffAuto
 	f := &benchFlags{
 		dir:                   flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (fak format: config/manifest/weights.f32)"),
 		hf:                    flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors, bf16/f32, loaded fully in Go); overrides -dir"),
@@ -81,6 +88,9 @@ func parseFlags() *benchFlags {
 		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (auto-compiled on darwin/arm64+cgo, no build tag needed; implies -quant for the Q8 weight store; with -q4k, routes Q4_K tensors through MetalQ4K)"),
 		verify:                flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit"),
 		backendName:           flag.String("backend", "legacy", "execution backend: legacy or a compute backend name"),
+		q4kGateUpSlab:         flag.Bool("q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each benchmark session"),
+		vulkanQ4KProfile:      flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)"),
+		vulkanStageQ4K:        flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)"),
 		requireNonReference:   flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend"),
 		workloadPath:          flag.String("workload", "", "optional recorded agent workload JSON; emits workload_prefill/workload_decode"),
 		workloadPrefillCap:    flag.Int("workload-prefill-cap", 0, "cap recorded workload prompt lengths for smoke runs (0 = full recorded length)"),
@@ -100,7 +110,11 @@ func parseFlags() *benchFlags {
 		nativeProfileOut:      flag.String("native-performance-profile", "", "write one fak-native Metal P=32/T=64 session capture in the existing native-performance v1 schema, then exit"),
 		nativeProfileReadback: flag.String("native-performance-readback", "", "validate a native-performance profile and its companion raw-event receipt without loading a model"),
 		nativeProfileCompare:  flag.String("native-performance-compare", "", "compare exactly six comma-separated canonical profile paths in order: 3 selector OFF controls, then 3 selector ON candidates; requires every candidate below the control median and at least 15% median improvement; companion .receipt.json paths are derived"),
+		nativeDecodeHandoff:   &nativeDecodeHandoff,
 	}
+	flag.Var(&nativeProfileComparisonPhaseSelection, "native-performance-compare-phase", "stable comparison phase: prefill (default), steady-decode, or end-to-end (full contiguous capture including setup, verification, and teardown)")
+	flag.Var(&nativeProfileComparisonAxisSelection, "native-performance-compare-axis", "typed comparison axis: sequence (default) or m3-decode-handoff")
+	flag.Var(f.nativeDecodeHandoff, "native-performance-qwen35-decode-handoff", "benchmark-only Qwen3.8 decode route: AUTO (compatible default), CONTROL, or MIXER; CONTROL/MIXER require the sequence selector ON")
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
 	*f.gguf = pathutil.ExpandTilde(*f.gguf)
@@ -204,6 +218,9 @@ func validateFlagCombinations(f *benchFlags) error {
 	}
 	if nativeModes > 1 {
 		return fmt.Errorf("-native-performance-readback, -native-performance-profile, and -native-performance-compare are mutually exclusive")
+	}
+	if *f.nativeDecodeHandoff != model.Qwen35DecodeHandoffAuto && *f.nativeProfileOut == "" {
+		return fmt.Errorf("-native-performance-qwen35-decode-handoff=%s requires -native-performance-profile", *f.nativeDecodeHandoff)
 	}
 	if *f.nativeProfileOut != "" && (*f.gguf == "" || !*f.q4k || !*f.metal || *f.decodePrompt != 32 || *f.decodeSteps != 64) {
 		return fmt.Errorf("-native-performance-profile requires -gguf, -q4k, -metal, -decode-prompt=32, and -decode-steps=64")

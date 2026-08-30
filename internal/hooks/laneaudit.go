@@ -11,11 +11,12 @@ import (
 // laneaudit.go — the whole-tree complement of the per-commit leaf check in commitstamp.go. The
 // commit lint catches a bad stamp on ONE commit; this answers the standing question "which real
 // leaves have no declared lane at all?". dos.toml's own doctrine is ONE LANE PER LEAF (PARTITION.md:
-// "the honest partition is ONE LANE PER LEAF") — every internal/<leaf> package should appear in the
-// `[lanes]` taxonomy so its `(fak <leaf>)` ship-stamp binds to a real unit and the arbiter can
-// detect a same-tree collision on its edits. A leaf that drifts in WITHOUT a lane silently breaks
-// both. This turns that drift from "something an operator has to remember to reconcile" into a
-// deterministic, re-runnable count that a gate can ratchet to zero.
+// "the honest partition is ONE LANE PER LEAF") — every internal/<leaf> package must resolve through
+// the `[lanes]` taxonomy so its ship-stamp binds to a real unit and the arbiter can detect a
+// same-tree collision on its edits. Most use the package name; an established composite lane may
+// own several explicit trees. A leaf that drifts in WITHOUT either form silently breaks both. This
+// turns that drift from "something an operator has to remember to reconcile" into a deterministic,
+// re-runnable count that a gate can ratchet to zero.
 
 // LeafGap names a real Go-package leaf with no declared dos.toml lane.
 type LeafGap struct {
@@ -50,10 +51,34 @@ func UndeclaredLeaves(root string) ([]LeafGap, error) {
 		if !dirHasGoFiles(filepath.Join(dir, name)) {
 			continue // not a Go package (e.g. a testdata-only or doc dir): not a leaf
 		}
+		// Some established composite lanes intentionally differ from the package
+		// basename. An explicit tree owner is authoritative even when the lane is
+		// named studyreceipt and the package is internal/study.
+		probe := filepath.ToSlash(filepath.Join("internal", name, "_lane_ownership.go"))
+		if explicitTreeLaneForPath(probe, tax) != "" {
+			continue
+		}
 		gaps = append(gaps, LeafGap{Leaf: name, Base: "internal"})
 	}
 	sort.Slice(gaps, func(i, j int) bool { return gaps[i].Leaf < gaps[j].Leaf })
 	return gaps, nil
+}
+
+// explicitTreeLaneForPath is the authored-tree-only half of laneForPath. It has
+// no directory-convention fallback, because a fallback cannot prove that the
+// arbiter has an actual region to compare for this package.
+func explicitTreeLaneForPath(path string, tax laneTaxonomy) string {
+	p := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	if lane, ok := tax.exact[p]; ok {
+		return lane
+	}
+	best, owner := "", ""
+	for prefix, lane := range tax.prefixes {
+		if strings.HasPrefix(p, prefix) && len(prefix) > len(best) {
+			best, owner = prefix, lane
+		}
+	}
+	return owner
 }
 
 // dirHasGoFiles reports whether dir directly contains at least one .go file.

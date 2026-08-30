@@ -31,12 +31,5 @@
 
 # --- cmd/fak (lane `cmd`, held by another loop at the time of writing) ---
 
-cmd/fak cmdSessionRecover # baseline: compatibility wrapper exists but the live session-recover dispatch calls runSessionRecover directly; owning cmd lane must wire or delete it.
-cmd/fak dispatchAmbientCodexPIDsExcludingSidecarParents # baseline: extracted ambient-process helper has no current call site; owning cmd lane must wire or delete it.
-cmd/fak dispatchAmbientCodexProcessCount # baseline: extracted ambient-process counter has no current call site; owning cmd lane must wire or delete it.
-cmd/fak guardCurrentEffectivePolicyDigest # baseline: extracted policy-digest helper has no current call site; owning cmd lane must wire or delete it.
 cmd/fak joinArgs # baseline: render helper has no current call site; owning cmd lane must wire or delete it.
-cmd/fak lookaheadLessonForCompact # baseline: extracted compaction-lesson helper has no current call site; owning cmd lane must wire or delete it.
-cmd/fak recordGuardSessionStartIdentity # baseline: extracted session-start identity recorder has no current call site; owning cmd lane must wire or delete it.
-cmd/fak recordGuardSessionStartJournal # baseline: extracted session-start journal recorder has no current call site; owning cmd lane must wire or delete it.
 cmd/fak writeIndexRepo # baseline: test helper has no current call site; owning cmd lane must wire or delete it.

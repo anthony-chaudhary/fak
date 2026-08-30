@@ -31,3 +31,7 @@ internal/modelroute/testdata/provider_contracts/upstream/*.txt text eol=lf
 # The new-model replay ledger is generated and compared byte-for-byte; keep its
 # canonical JSON line endings stable under core.autocrlf=true (#9570).
 internal/newmodel/testdata/replay/ledger.json text eol=lf
+
+# Effective-instruction fixtures and their receipt are SHA-256 addressed; keep
+# one byte sequence across autocrlf-enabled Windows and Unix checkouts (#10157).
+internal/agentsindex/testdata/effective/** text eol=lf

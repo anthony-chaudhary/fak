@@ -44,6 +44,8 @@ func TestFullMatrix(t *testing.T) {
 		}
 		for _, query := range dashboard.Queries {
 			switch query.Kind {
+			case PanelTarget:
+				t.Fatalf("panel target %q escaped dashboard.Panels", query.Name)
 			case Annotation:
 				annotations++
 			case Variable:

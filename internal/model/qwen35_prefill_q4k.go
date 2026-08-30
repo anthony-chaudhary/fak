@@ -92,6 +92,35 @@ const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequenc
 // The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
 var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
 
+// Qwen35MetalGDNPreprojectedSequenceAvailable reports whether this build owns
+// the native Metal sequence backend. Callers use this capability readback to
+// distinguish an unselected supported route from a platform-unavailable route;
+// it does not admit a fallback implementation.
+func Qwen35MetalGDNPreprojectedSequenceAvailable() bool {
+	return newQwen35MetalGDNSequenceBackend != nil
+}
+
+// Qwen35MetalSequenceSelectorState is model-authored selection provenance. It
+// reflects whether this Session admitted the native sequence owner; callers do
+// not supply or override it when the public receipt is assembled.
+type Qwen35MetalSequenceSelectorState string
+
+const (
+	Qwen35MetalSequenceSelectorOff Qwen35MetalSequenceSelectorState = "off"
+	Qwen35MetalSequenceSelectorOn  Qwen35MetalSequenceSelectorState = "on"
+)
+
+// Qwen35MetalSequenceEvidenceState distinguishes a truthful zero from a route
+// that did not run or cannot run in the current execution envelope.
+type Qwen35MetalSequenceEvidenceState string
+
+const (
+	Qwen35MetalSequenceEvidenceNotSelected Qwen35MetalSequenceEvidenceState = "not_selected"
+	Qwen35MetalSequenceEvidenceUnsupported Qwen35MetalSequenceEvidenceState = "unsupported"
+	Qwen35MetalSequenceEvidenceUnavailable Qwen35MetalSequenceEvidenceState = "unavailable"
+	Qwen35MetalSequenceEvidenceExecuted    Qwen35MetalSequenceEvidenceState = "executed"
+)
+
 type qwen35GDNSequenceSnapshotter interface {
 	SnapshotQwen35GDNAuxState(Qwen35GDNAuxState) (conv, recurrent []float32, err error)
 }
@@ -101,21 +130,25 @@ type qwen35GDNSequenceSnapshotter interface {
 // has not produced a terminal receipt; a committed post-submit failure remains
 // available so callers can distinguish it from the default path.
 type Qwen35MetalForwardSequenceReceipt struct {
-	Path              string                           `json:"path"`
-	Available         bool                             `json:"available"`
-	Tokens            int                              `json:"tokens"`
-	CommandBuffers    int                              `json:"command_buffers"`
-	Encoders          int                              `json:"encoders"`
-	TerminalWaits     int                              `json:"terminal_waits"`
-	TerminalReadbacks int                              `json:"terminal_readbacks"`
-	HostUploadBytes   uint64                           `json:"host_upload_bytes"`
-	HostReadbackBytes uint64                           `json:"host_readback_bytes"`
-	Committed         bool                             `json:"committed"`
-	CompletedWait     bool                             `json:"completed_wait"`
-	TimingAvailable   bool                             `json:"timing_available"`
-	GPUMilliseconds   float64                          `json:"gpu_milliseconds"`
-	WaitMilliseconds  float64                          `json:"wait_milliseconds"`
-	StateIdentity     *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
+	Path                  string                           `json:"path"`
+	Available             bool                             `json:"available"`
+	SelectorState         Qwen35MetalSequenceSelectorState `json:"selector_state"`
+	EvidenceState         Qwen35MetalSequenceEvidenceState `json:"evidence_state"`
+	Tokens                int                              `json:"tokens"`
+	CommandBuffers        int                              `json:"command_buffers"`
+	Encoders              int                              `json:"encoders"`
+	IntermediateWaits     int                              `json:"intermediate_waits"`
+	IntermediateReadbacks int                              `json:"intermediate_readbacks"`
+	TerminalWaits         int                              `json:"terminal_waits"`
+	TerminalReadbacks     int                              `json:"terminal_readbacks"`
+	HostUploadBytes       uint64                           `json:"host_upload_bytes"`
+	HostReadbackBytes     uint64                           `json:"host_readback_bytes"`
+	Committed             bool                             `json:"committed"`
+	CompletedWait         bool                             `json:"completed_wait"`
+	TimingAvailable       bool                             `json:"timing_available"`
+	GPUMilliseconds       float64                          `json:"gpu_milliseconds"`
+	WaitMilliseconds      float64                          `json:"wait_milliseconds"`
+	StateIdentity         *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
@@ -284,19 +317,48 @@ func (s *Session) failQwen35MetalForwardSequence(cause error) error {
 	return err
 }
 
+// Qwen35MetalForwardSequenceStatus returns model-authored selection and support
+// state even when no terminal execution receipt exists. The status is separate
+// from Qwen35MetalForwardSequenceReceipt so historical execution-only callers
+// retain the zero-value absence contract.
+func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceReceipt {
+	base := Qwen35MetalForwardSequenceReceipt{
+		Path:          Qwen35MetalGDNSequenceForwardPath,
+		SelectorState: Qwen35MetalSequenceSelectorOff,
+		EvidenceState: Qwen35MetalSequenceEvidenceUnsupported,
+	}
+	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
+		return base
+	}
+	if newQwen35MetalGDNSequenceBackend == nil {
+		base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
+		return base
+	}
+	base.EvidenceState = Qwen35MetalSequenceEvidenceNotSelected
+	if s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted && !s.qwen35HAL.decodeAccepted {
+		return base
+	}
+	base.SelectorState = Qwen35MetalSequenceSelectorOn
+	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
+	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
+	if !ok {
+		return base
+	}
+	receipt, ok := runner.Qwen35MetalForwardSequenceReceipt()
+	if !ok {
+		return base
+	}
+	receipt.SelectorState = Qwen35MetalSequenceSelectorOn
+	receipt.EvidenceState = Qwen35MetalSequenceEvidenceExecuted
+	return receipt
+}
+
 // Qwen35MetalForwardSequenceReceipt returns the last terminal whole-sequence
 // receipt as a scalar-only value snapshot. The zero value has Available=false
 // and means this session has no such execution evidence.
 func (s *Session) Qwen35MetalForwardSequenceReceipt() Qwen35MetalForwardSequenceReceipt {
-	if s == nil || s.qwen35HAL == nil {
-		return Qwen35MetalForwardSequenceReceipt{}
-	}
-	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
-	if !ok {
-		return Qwen35MetalForwardSequenceReceipt{}
-	}
-	receipt, ok := runner.Qwen35MetalForwardSequenceReceipt()
-	if !ok {
+	receipt := s.Qwen35MetalForwardSequenceStatus()
+	if receipt.EvidenceState != Qwen35MetalSequenceEvidenceExecuted {
 		return Qwen35MetalForwardSequenceReceipt{}
 	}
 	return receipt

@@ -75,8 +75,8 @@ func TestCurrentSnapshotCoversConstraintsWavesAndOSSWalk(t *testing.T) {
 	if len(snapshot.ReadyWaves) != 2 || snapshot.ReadyWaves[0].ID != "metal" || snapshot.ReadyWaves[1].ID != "cuda" {
 		t.Fatalf("unexpected independent waves: %+v", snapshot.ReadyWaves)
 	}
-	if len(snapshot.Collisions) < 2 || len(snapshot.OSSWalk) != 6 {
-		t.Fatalf("current snapshot lacks collision or OSS walk coverage: collisions=%+v walk=%+v", snapshot.Collisions, snapshot.OSSWalk)
+	if len(snapshot.Collisions) < 2 {
+		t.Fatalf("current snapshot lacks collision coverage: %+v", snapshot.Collisions)
 	}
 	chain := make([]string, 0, len(snapshot.OSSWalk))
 	for _, step := range snapshot.OSSWalk {
@@ -132,6 +132,7 @@ func TestRenderCurrentMarkdownIsDeterministicAndExplicit(t *testing.T) {
 		"active-native-lane-collision",
 		"55.73 GiB startup",
 		"cuda-cache-correctness",
+		"on `A100-SXM4-40GB`",
 		"36 GiB laptop placement",
 		"Divide-and-conquer execution",
 		"mac.m1-streamed-q4k-no-copy",

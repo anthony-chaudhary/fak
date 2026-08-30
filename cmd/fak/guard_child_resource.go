@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -86,7 +85,19 @@ type guardResourceReceipt struct {
 	ActivationID       string  `json:"activation_id,omitempty"`
 }
 
-func guardResourcePolicyFromEnv() guardResourcePolicy {
+type guardResourceConfig struct {
+	MaxMemoryMB  uint64
+	PollInterval time.Duration
+	ReceiptPath  string
+}
+
+var guardResourceConfigured guardResourceConfig
+
+func setGuardResourceConfig(config guardResourceConfig) {
+	guardResourceConfigured = config
+}
+
+func guardResourcePolicyConfigured() guardResourcePolicy {
 	metric := procguard.MemoryMetricCommit
 	maxTree := guardTreeCommitDefault
 	headroom := procguard.RequiredSystemCommitHeadroom(os.Getenv)
@@ -97,30 +108,13 @@ func guardResourcePolicyFromEnv() guardResourcePolicy {
 		headroom = 0 // physical capacity is not a current system-RSS pressure sample.
 	}
 	p := guardResourcePolicy{PollInterval: guardResourcePollDefault, Metric: metric, MaxTreeBytes: maxTree, MinSystemHeadroom: headroom}
-	// The generic name is preferred. Metric-specific names retain compatibility
-	// with the Windows spine and give Darwin an RSS-honest override.
-	override := strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_MEMORY_MB"))
-	if override == "" && metric == procguard.MemoryMetricRSS {
-		override = strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_RSS_MB"))
+	if guardResourceConfigured.MaxMemoryMB > 0 && guardResourceConfigured.MaxMemoryMB <= ^uint64(0)>>20 {
+		p.MaxTreeBytes = guardResourceConfigured.MaxMemoryMB << 20
 	}
-	if override == "" {
-		override = strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB"))
-	}
-	if n, ok := parseGuardResourceMegabytes(override); ok {
-		p.MaxTreeBytes = n
-	}
-	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("FAK_CHILD_RESOURCE_POLL"))); err == nil && d >= 100*time.Millisecond {
-		p.PollInterval = d
+	if guardResourceConfigured.PollInterval >= 100*time.Millisecond {
+		p.PollInterval = guardResourceConfigured.PollInterval
 	}
 	return p
-}
-
-func parseGuardResourceMegabytes(raw string) (uint64, bool) {
-	n, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil || n == 0 || n > ^uint64(0)>>20 {
-		return 0, false
-	}
-	return n << 20, true
 }
 
 func guardTreeRSSDefault(hostPhysicalBytes uint64) uint64 {
@@ -185,7 +179,7 @@ func appendGuardResourceReceipt(path string, r guardResourceReceipt) error {
 }
 
 func guardResourceReceiptPath() string {
-	if p := strings.TrimSpace(os.Getenv("FAK_CHILD_RESOURCE_JOURNAL")); p != "" {
+	if p := strings.TrimSpace(guardResourceConfigured.ReceiptPath); p != "" {
 		return p
 	}
 	if base, err := os.UserConfigDir(); err == nil && strings.TrimSpace(base) != "" {
@@ -235,6 +229,10 @@ func scrubGuardResourceDetail(detail string) string {
 }
 
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
+	return startGuardChildResourceMonitorWithCollector(rootPID, traceID, agent, policy, procguard.CollectMemorySnapshot)
+}
+
+func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
 	out := make(chan guardChildWaitEvent, 1)
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
@@ -245,7 +243,13 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 				return
 			case <-ticker.C:
 			}
-			snapshot, supported, detail := procguard.CollectMemorySnapshot(rootPID)
+			snapshot, supported, detail := collect(rootPID)
+			if runtime.GOOS == "darwin" && snapshot.RootPID == 0 {
+				// The root exited during Darwin's independent relation/RSS census.
+				// Leave its exit to the normal child wait/crash path; there is no
+				// resource violation to receipt or reap.
+				return
+			}
 			if !supported {
 				if runtime.GOOS == "windows" {
 					out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_UNAVAILABLE", detail)

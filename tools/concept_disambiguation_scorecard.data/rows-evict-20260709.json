@@ -119,7 +119,7 @@
       "kind": "symbol",
       "definition": "agent.KVSpanEvictor is the Go interface (EvictKVSpan) InKernelPlanner implements to bridge a tool-result QUARANTINE (#579) into the kvmmu governance layer: it rebuilds the transcript as labeled per-message K/V segments on a fresh model.Session and evicts the poisoned segment via the proven model.KVCache.Evict, engaged only when FAK_INKERNEL_KVMMU opts in.",
       "distinction": "It is the kvmmu-BRIDGE half of quarantine eviction (fresh-session segment rebuild + re-RoPE), distinct from its sibling agent.PoisonEvictor (which drops a reusable radixkv PREFIX node instead) and from the generic informal 'evictor' role term - the gateway type-asserts a planner to both interfaces independently and either can be absent.",
-      "distinct_from": ["evict-evictor", "evict-kvcache"],
+      "distinct_from": ["evict-evictor", "evict-kvcache", "issue10229-kv-span-evict"],
       "aliases": ["KVSpanEvictor"],
       "grounding": "KVSpanEvictor",
       "grounding_kind": "symbol",

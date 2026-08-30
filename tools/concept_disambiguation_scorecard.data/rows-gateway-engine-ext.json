@@ -244,7 +244,12 @@
       "distinction": "It is the planner that drives the in-kernel model decode, distinct from the modelengine EngineDriver wrapper (inkernel) and from proxy/mock planners that call an external upstream.",
       "distinct_from": [
         "inkernel (engine id)",
-        "modelengine"
+        "modelengine",
+        "issue10046-gateway-inkernelplannerconfig-binding",
+        "issue10046-gateway-configured-inkernelplanner-construction",
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+        "issue10229-inkernel-expert-spill",
+        "issue10229-inkernel-qwen-q4k-prefill-chunk-config-error"
       ],
       "aliases": [],
       "grounding": "inkernelplanner",

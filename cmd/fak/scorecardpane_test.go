@@ -48,7 +48,7 @@ func TestControlPaneSinceJSONWitness(t *testing.T) {
 	}
 	dir := gitInitRepo(t)
 	baseline := scorecardpane.Baseline{
-		Schema: "x", Commit: "seedsha", TotalDebt: 8, GradeDebt: 3,
+		Schema: scorecardpane.BaselineSchema, Commit: "seedsha", TotalDebt: 8, GradeDebt: 3,
 		Metrics: map[string]int{"a": 3, "b": 5}, GradeWeights: map[string]int{"a": 1, "b": 2},
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "tools"), 0o755); err != nil {

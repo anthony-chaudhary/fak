@@ -49,7 +49,7 @@ CHILD_RUN_ENV = "FAK_DISPATCH_PREFLIGHT_TEST_CHILD"
 
 def no_window_creationflags() -> int:
     """CREATE_NO_WINDOW on Windows, ``0`` on POSIX — mirrors
-    ``dispatch_preflight._no_window_creationflags`` so the one child this file spawns
+    ``dispatch_preflight._no_window_creationflags`` so this test module's children
     cannot pop a console window when the suite runs windowless."""
     return 0x08000000 if os.name == "nt" else 0
 
@@ -1892,16 +1892,26 @@ class FakBinProvenanceTest(unittest.TestCase):
     def test_repository_relation_uses_git_ancestry_not_revision_age(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-            subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=root, check=True)
-            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
+            subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
             (root / "row").write_text("one", encoding="utf-8")
-            subprocess.run(["git", "add", "row"], cwd=root, check=True)
-            subprocess.run(["git", "commit", "-qm", "one"], cwd=root, check=True)
-            old = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            subprocess.run(["git", "add", "row"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
+            subprocess.run(["git", "commit", "-qm", "one"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
+            old = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+                creationflags=no_window_creationflags()).strip()
             (root / "row").write_text("two", encoding="utf-8")
-            subprocess.run(["git", "commit", "-qam", "two"], cwd=root, check=True)
-            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            subprocess.run(["git", "commit", "-qam", "two"], cwd=root, check=True,
+                           creationflags=no_window_creationflags())
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+                creationflags=no_window_creationflags()).strip()
 
             self.assertEqual(self.mod.repository_build_relation(root, old),
                              {"expected_head": head, "observed_build": old,

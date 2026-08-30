@@ -12,10 +12,12 @@ var nativeFirstExtensions = map[string]bool{".go": true, ".md": true, ".txt": tr
 
 func checkNativeFirst(d *StagedDiff) ([]Finding, error) {
 	var out []Finding
+	candidates := 0
 	for path, lines := range d.AddedByFile {
 		if !nativeFirstExtensions[strings.ToLower(filepath.Ext(path))] {
 			continue
 		}
+		candidates += len(lines)
 		for _, line := range lines {
 			finding := nativefirst.ScanLine(line.Text)
 			if finding == nil {
@@ -28,5 +30,6 @@ func checkNativeFirst(d *StagedDiff) ([]Finding, error) {
 			})
 		}
 	}
+	d.NoteCandidates("NATIVE_FIRST", candidates, "added line(s) in native-first-scannable files")
 	return out, nil
 }

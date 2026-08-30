@@ -76,6 +76,7 @@ var servewiringData = []wiringRow{
 	{"trajctlmetrics", "(trajectory metrics observer)", "TrajctlMetrics", verdictOffByDefault, "internal/gateway/metrics.go", "projects bounded objective health onto /metrics when configured"},
 	{"vcachecalibration", "(provider calibration)", "VCacheCalibration", verdictOffByDefault, "internal/gateway/gateway.go:2145", "applies fresh measured provider cacheability floors when available"},
 	{"inkernelchat", "--gguf / --tokenizer", "InKernelModel", verdictWired, "internal/gateway/gateway.go:861", "with model+tokenizer and no --base-url, /v1/chat/completions and /v1/messages serve the in-kernel model"},
+	{"inkernelplannerconfig", "--native-qwen-q4k-prefill-chunk-tokens / --native-qwen35-metal-gdn-sequence / --native-q4k-gateup-slab", "InKernelPlanner", verdictOffByDefault, "internal/gateway/gateway.go:newInKernelChatPlanner", "carries explicit native planner/session settings from the serve CLI into every in-kernel planner; defaults preserve prior behavior"},
 	{"replica", "--replica-base-url", "ReplicaBaseURLs", verdictWired, "internal/gateway/gateway.go:715", "2+ endpoints -> ReplicaRouter round-robin"},
 	{"vdso", "--vdso / --invalidation", "VDSO", verdictWired, "internal/kernel/kernel.go:348", "dedup fast path + tier-2 invalidation granularity"},
 	{"vdsoproxyfill", "--vdso-proxy-fill", "VDSOProxyFill", verdictOffByDefault, "internal/gateway/gateway.go:1868", "warms the vDSO tier-2 cache from admitted inbound tool_result blocks; off by default"},
@@ -140,9 +141,9 @@ func runServeWiring(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak serve-wiring: read serve.go: %v\n", err)
 		return 1
 	}
-	gwSrc, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "gateway.go"))
+	gwSrc, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "config.go"))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak serve-wiring: read gateway.go: %v\n", err)
+		fmt.Fprintf(stderr, "fak serve-wiring: read config.go: %v\n", err)
 		return 1
 	}
 

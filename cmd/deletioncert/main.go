@@ -264,7 +264,7 @@ func proveL3DeletionRung(subject string) error {
 	pool := gateway.NewMockL3Backend()
 
 	// The evicted span was backed by a SET of external L3 pages; key each by its content
-	// address (the same content-addressing the real CAMA-complete store uses). In
+	// address (the same content-addressing an external L3 page store uses). In
 	// production these resolve from the span's Ref.Digest via
 	// l3region.L3RegionBackend.PageKeys; here ResolveL3PageKeys maps page Refs -> keys.
 	backing := []string{

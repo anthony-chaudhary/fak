@@ -516,7 +516,7 @@
     {
       "issue": 79,
       "state": "CLOSED",
-      "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+      "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/79",
       "relevance": "mapped-anchor",
       "candidate_ids": [

@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+func TestSessionIndexHealthMissingDefaultIndexUsesStatusContract(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out, errb bytes.Buffer
+	if code := runSessionIndexHealth(&out, &errb, nil); code != 0 {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "RED (index_missing)") || strings.Contains(errb.String(), "--index is required") {
+		t.Fatalf("stdout=%s stderr=%s", out.String(), errb.String())
+	}
+}
+
 func TestSessionIndexHealthMissingIndexHumanAndJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 	var out, errb bytes.Buffer

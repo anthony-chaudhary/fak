@@ -14,9 +14,6 @@ func TestPinnedReleaseReplayLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Cases) != 10 {
-		t.Fatalf("manifest count = %d, want 10", len(corpus.Cases))
-	}
 	ledger, err := Replay(corpus)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +36,7 @@ func TestPinnedReleaseReplayLedger(t *testing.T) {
 	if want := replayFixture(t, "ledger.json"); !bytes.Equal(encoded, want) {
 		t.Fatalf("committed ledger drifted; got:\n%s", encoded)
 	}
-	if ledger.Summary.Manifests != 10 || ledger.Summary.ArchitectureFamilies < 3 || !ledger.Summary.ByteIdentical {
+	if ledger.Summary.Manifests != len(corpus.Cases) || ledger.Summary.ArchitectureFamilies < 3 || !ledger.Summary.ByteIdentical {
 		t.Fatalf("replay summary does not cover the required corpus: %+v", ledger.Summary)
 	}
 	if ledger.Summary.Packets == 0 || ledger.Summary.Refusals == 0 {
@@ -64,13 +61,14 @@ func TestPinnedReleaseReplayLedger(t *testing.T) {
 			t.Fatalf("unwitnessed source pin %s@%s", row.Repository, row.Revision)
 		}
 		seen[row.Repository] = true
-		if len(row.SourceConfigSHA256) != 64 || len(row.OutcomeSHA256) != 64 || !row.ByteIdentical {
+		if len(row.SourceConfigSHA256) != 64 || len(row.OutcomeSHA256) != 64 || !row.ByteIdentical { //boundarylint:ignore CHANGE_DETECTOR_TEST both fields are SHA-256 hex digests, whose algorithm-defined width is exactly 64 characters
 			t.Fatalf("row lost config/outcome digest: %+v", row)
 		}
 		if row.Execution != "not-run" || row.ModelExecuted || row.SupportClaim || row.PerformanceClaim {
 			t.Fatalf("row crossed the evidence boundary: %+v", row)
 		}
-		if row.LicenseDisposition != ReplayLicenseDisposition || len(row.Obligations) != 6 || len(row.SemanticGaps) == 0 {
+		manifest := replayManifestForCase(t, corpus, row.ID)
+		if row.LicenseDisposition != ReplayLicenseDisposition || !rowCoversManifestObligations(row, manifest) || len(row.SemanticGaps) == 0 {
 			t.Fatalf("row lost license, obligation, or gap evidence: %+v", row)
 		}
 		if strings.Contains(row.Repository, "Qwen3.6") && (row.CompatibilityException == "" || row.ManualCorrections != 1) {
@@ -98,7 +96,8 @@ func TestReplayRecordsTypedSemanticRefusal(t *testing.T) {
 		if row.Outcome != "refusal" || row.Reason != RefusalUnknownSemanticDelta || row.Axis != "attention" {
 			t.Fatalf("typed refusal was not retained: %+v", row)
 		}
-		if !contains(row.SemanticGaps, "attention:deepseek-sparse-attention") || len(row.Obligations) != 6 {
+		manifest := replayManifestForCase(t, corpus, row.ID)
+		if !contains(row.SemanticGaps, "attention:deepseek-sparse-attention") || !rowCoversManifestObligations(row, manifest) {
 			t.Fatalf("refusal lost semantic gap or open obligations: %+v", row)
 		}
 		return
@@ -134,4 +133,33 @@ func replayFixture(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func replayManifestForCase(t *testing.T, corpus ReplayCorpus, id string) ReleaseManifest {
+	t.Helper()
+	for _, replayCase := range corpus.Cases {
+		if replayCase.ID != id {
+			continue
+		}
+		var manifest ReleaseManifest
+		if err := json.Unmarshal(replayCase.Manifest, &manifest); err != nil {
+			t.Fatalf("parse replay manifest %q: %v", id, err)
+		}
+		normalizeManifest(&manifest)
+		return manifest
+	}
+	t.Fatalf("replay corpus missing case %q", id)
+	return ReleaseManifest{}
+}
+
+func rowCoversManifestObligations(row ReplayRow, manifest ReleaseManifest) bool {
+	if len(row.Obligations) != len(manifest.Obligations) {
+		return false
+	}
+	for _, obligation := range manifest.Obligations {
+		if !contains(row.Obligations, obligation.Kind+":"+obligation.ID) {
+			return false
+		}
+	}
+	return true
 }

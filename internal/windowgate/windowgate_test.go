@@ -76,6 +76,53 @@ func TestPSInstallerRules(t *testing.T) {
 	}
 }
 
+func TestPSInstallerAllowsOnlyExactHostRelaunchDesktopAdapter(t *testing.T) {
+	const exact = `$brokerSpool = Join-Path (Split-Path -Parent $Log) 'relaunch'
+$brokerArgs = "host-relaunch-broker --dir ` + "`" + `"$brokerSpool` + "`" + `""
+$brokerAction = New-ScheduledTaskAction -Execute $fak -Argument $brokerArgs
+$brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+New-Item -ItemType Directory -Force -Path $brokerSpool -ErrorAction Stop
+Register-ScheduledTask -TaskName 'FakStallMonitor' -Action $action -Principal $principal
+Register-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Action $brokerAction -Principal $brokerPrincipal -Trigger $brokerTrigger -Settings $brokerSettings -Force -ErrorAction Stop
+$broker = Get-ScheduledTask -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop
+if ($broker.Principal.LogonType -ne 'InteractiveToken') { throw 'wrong broker principal' }
+if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -ne $brokerArgs) { throw 'action mismatch' }
+if (-not (Test-Path -LiteralPath $broker.Actions.Execute -PathType Leaf)) { throw 'missing executable' }
+if (-not (Test-Path -LiteralPath $brokerSpool -PathType Container)) { throw 'missing spool' }
+$brokerInfo = Get-ScheduledTaskInfo -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop
+if ([uint32]$brokerInfo.LastTaskResult -eq 0x80070002) { throw 'executable not found' }
+`
+	if v, bad := PSInstallerViolation("tools/fak_stall_monitor.ps1", exact); bad {
+		t.Fatalf("exact desktop adapter contract rejected: %s", v)
+	}
+
+	for _, tc := range []struct {
+		name string
+		rel  string
+		src  string
+	}{
+		{name: "ordinary interactive task", rel: "tools/ordinary.ps1", src: strings.Replace(exact, "FakHostRelaunchBroker", "OrdinaryTask", 1)},
+		{name: "wrong task identity", rel: "tools/fak_stall_monitor.ps1", src: strings.ReplaceAll(exact, "FakHostRelaunchBroker", "OtherBroker")},
+		{name: "wrong adapter verb", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "host-relaunch-broker", "serve", 1)},
+		{name: "wrong action", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "-Execute $fak -Argument $brokerArgs", "-Execute powershell.exe -Argument $brokerArgs", 1)},
+		{name: "wrong run-as user", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "$env:USERNAME -LogonType Interactive", "SYSTEM -LogonType Interactive", 1)},
+		{name: "elevated broker", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "-RunLevel Limited", "-RunLevel Highest", 1)},
+		{name: "wrong trigger", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "-AtLogOn -User $env:USERNAME", "-AtStartup", 1)},
+		{name: "missing execution limit", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, " -ExecutionTimeLimit (New-TimeSpan -Minutes 2)", "", 1)},
+		{name: "missing principal read-back", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "if ($broker.Principal.LogonType -ne 'InteractiveToken')", "if ($broker.Principal.LogonType -ne 'S4U')", 1)},
+		{name: "missing action read-back", rel: "tools/fak_stall_monitor.ps1", src: strings.Replace(exact, "if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -ne $brokerArgs)", "if ($false)", 1)},
+		{name: "second interactive task", rel: "tools/fak_stall_monitor.ps1", src: exact + "$other = New-ScheduledTaskPrincipal -LogonType Interactive\nRegister-ScheduledTask -TaskName Other -Principal $other\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, bad := PSInstallerViolation(tc.rel, tc.src); !bad {
+				t.Fatal("interactive task escaped the general detector")
+			}
+		})
+	}
+}
+
 func TestPSStartProcessRules(t *testing.T) {
 	src := "Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile'\n"
 	if got := PSStartProcessViolations("tools/x.ps1", src); len(got) != 1 {

@@ -1,0 +1,60 @@
+{
+  "schema": "fak-native-qwen38-metal-observation/v1",
+  "issue": 10005,
+  "status": "success",
+  "captured_at_utc": "2026-08-29T21:45:46Z",
+  "completed_at_utc": "2026-08-29T21:45:46Z",
+  "run_id": "npc1_62d2682ca2432b2389542531306ed38a",
+  "engine": "inkernel",
+  "model": "qwen38:27b",
+  "runtime": "native",
+  "backend": "metal",
+  "device": "Apple M3 Pro",
+  "fallback_count": 0,
+  "fallback_active": false,
+  "llama_cpp_used": false,
+  "build": {
+    "version": "0.45.0",
+    "commit": "59af6d4cb424bb2aaa82932067550c763cb22e6f",
+    "dirty": false,
+    "stamped": true,
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "scope": "One bounded local fak-native Qwen3.8 Metal execution; no comparative performance claim.",
+  "model_identity": {
+    "alias": "qwen38:27b",
+    "family": "Qwen3.8",
+    "quantization": "Q4_K_M"
+  },
+  "required_execution": {
+    "engine": "fak-native",
+    "runtime_engine": "inkernel",
+    "planner": "inkernel",
+    "model_owner": "fak",
+    "fallback_count": 0,
+    "fallback_active": false,
+    "llama_cpp_used": false
+  },
+  "observed_execution": {
+    "engine": "fak-native",
+    "runtime_engine": "inkernel",
+    "planner": "inkernel",
+    "model": "Qwen3.8",
+    "model_owner": "fak",
+    "fallback_count": 0,
+    "fallback_active": false,
+    "llama_cpp_used": false,
+    "completed": true,
+    "output_tokens": 1,
+    "correlation_key": "npc1_62d2682ca2432b2389542531306ed38a"
+  },
+  "native_receipt": {
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "q4k": true,
+    "sha256": "d9a5f3eb8489643530b91563d69b5fa1415014f5ebe4cbeda23ce4c7c56145d7"
+  },
+  "live_execution_obtained": true,
+  "raw_logs_committed": false,
+  "private_identifiers_committed": false
+}

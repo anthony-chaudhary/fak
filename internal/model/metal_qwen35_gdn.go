@@ -58,6 +58,7 @@ func (s *Session) tryQwen35MetalGDNDecode(layer int, mixed, z, b, a, convWeight,
 		Mixed: mixed, Z: z, B: b, A: a, Conv1D: convWeight, ALog: aLog, DTBias: dtBias, Norm: norm, RMSNormEpsilon: eps,
 		State: q.sequenceLayers[layer],
 	})
+	s.recordQwen35ResidentGDNAccepted()
 	if err != nil {
 		return nil, true, s.failQwen35GDNSequence(layer, "resident decode", err)
 	}
@@ -77,6 +78,7 @@ func (s *Session) ResetQwen35MetalGDNDecode() {
 	s.qwen35HAL.freeSequence()
 	s.qwen35HAL.decodeAccepted = false
 	s.qwen35HAL.decodePath = ""
+	s.qwen35HAL.decodeHandoff = Qwen35DecodeHandoffReceipt{}
 }
 
 // Qwen35GDNDecodePath reports selected execution identity without inferring it

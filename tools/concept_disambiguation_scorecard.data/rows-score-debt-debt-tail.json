@@ -28,7 +28,8 @@
       "definition": "The fak performance-rsi-scorecard CLI command, implemented by cmdPerformanceRSIScorecard, scores versioned end-to-end performance RSI evidence and optionally compares it with a prior report to measure whether the complete performance improvement loop is closing.",
       "distinction": "Use performance-rsi-scorecard for the end-to-end performance improvement-loop scorecard over versioned evidence, including comparison with a prior report. Unlike mlpdebt, it does not name the MLP scorecard hard-debt integer; unlike generic debt or score surfaces, it is specifically the performance RSI loop evaluator rather than an umbrella metric or reusable scoring mechanism.",
       "distinct_from": [
-        "cov-debt-tail-score-debt-mlpdebt"
+        "cov-debt-tail-score-debt-mlpdebt",
+        "issue10230-performance-rsi-debt"
       ],
       "aliases": [],
       "grounding": "cmdPerformanceRSIScorecard",

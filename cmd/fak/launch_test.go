@@ -589,14 +589,13 @@ func TestStableLaunchUpdatePoliciesPreserveProcessContract(t *testing.T) {
 	})
 
 	t.Run("fail is strict and does not spawn", func(t *testing.T) {
-		t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "fail")
 		called := false
 		launchChildRunner = func(io.Reader, io.Writer, io.Writer, string, []string) int {
 			called = true
 			return 0
 		}
 		var stdout, stderr bytes.Buffer
-		code := runLaunch(&stdout, &stderr, []string{"codex", "arg"})
+		code := runLaunch(&stdout, &stderr, []string{"--update-launch-policy=fail", "codex", "arg"})
 		if code != 75 || called || !strings.Contains(stderr.String(), "self-update is replacing") {
 			t.Fatalf("code=%d called=%t stdout=%q stderr=%q", code, called, stdout.String(), stderr.String())
 		}

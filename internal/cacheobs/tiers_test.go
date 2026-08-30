@@ -3,6 +3,7 @@ package cacheobs
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -278,7 +279,7 @@ var tierJSONKeys = map[string]bool{
 	"tiers": true, "total": true, "tier": true, "status": true, "ops": true, "op": true, "backend": true,
 	"requests": true, "hits": true, "misses": true, "errors": true,
 	"bytes": true, "sized_accesses": true, "latency_ns": true, "timed_accesses": true,
-	"hit_ratio": true, "mean_bytes": true, "mean_latency_ns": true,
+	"hit_ratio": true, "mean_bytes": true, "mean_latency_ns": true, "rejected_tier_accesses": true,
 }
 
 func closedVocabularyValues() map[string]bool {
@@ -398,8 +399,16 @@ func TestObserveTierRejectsOutOfVocabularyAccess(t *testing.T) {
 	o.ObserveTier(TierAccess{Tier: numCacheTiers, Op: OpRead, Outcome: OutcomeHit, Backend: BackendMemory})
 
 	rep := o.TierSnapshot()
-	if rep.Total.Requests != 0 {
-		t.Fatalf("out-of-vocabulary accesses must be ignored whole, got %+v", rep.Total)
+	snap := o.Snapshot()
+	if rep.Total.Requests != 0 || rep.RejectedTierAccesses != 5 {
+		t.Fatalf("five out-of-vocabulary accesses must be rejected whole, got %+v", rep)
+	}
+	if snap.RejectedTierAccesses != rep.RejectedTierAccesses {
+		t.Fatalf("snapshots disagree on rejected tier accesses: stats=%d tier=%d", snap.RejectedTierAccesses, rep.RejectedTierAccesses)
+	}
+	encoded, err := json.Marshal(rep)
+	if err != nil || !strings.Contains(string(encoded), `"rejected_tier_accesses":5`) {
+		t.Fatalf("tier report JSON does not expose the rejected aggregate: %s (err=%v)", encoded, err)
 	}
 	for _, ts := range rep.Tiers {
 		if len(ts.Ops) != 0 {
@@ -420,7 +429,8 @@ func TestObserveTierRejectsOutOfVocabularyAccess(t *testing.T) {
 	nilObs.ObserveTier(TierAccess{Tier: TierLocalPrefix, Op: OpRead, Outcome: OutcomeHit, Backend: BackendMemory})
 	nilObs.DeclareTier(TierLocalPrefix, TierStatusSupported)
 	nilRep := nilObs.TierSnapshot()
-	if len(nilRep.Tiers) != len(AllTiers()) || nilRep.Total.Requests != 0 {
+	nilSnap := nilObs.Snapshot()
+	if len(nilRep.Tiers) != len(AllTiers()) || nilRep.Total.Requests != 0 || nilRep.RejectedTierAccesses != 0 || nilSnap.RejectedTierAccesses != 0 {
 		t.Fatalf("a nil observer must report the vocabulary with zero traffic, got %+v", nilRep)
 	}
 	for _, ts := range nilRep.Tiers {
@@ -437,6 +447,35 @@ func TestObserveTierRejectsOutOfVocabularyAccess(t *testing.T) {
 	}
 	if _, ok := o.TierSnapshot().Tier(CacheTier(99)); ok {
 		t.Fatal("Tier() must not resolve a value outside the vocabulary")
+	}
+
+	// A subsequent valid access is accepted without changing the rejection aggregate.
+	o.ObserveTier(TierAccess{Tier: TierSharedStore, Op: OpRead, Outcome: OutcomeHit, Backend: BackendRemote})
+	rep = o.TierSnapshot()
+	snap = o.Snapshot()
+	if rep.Total.Requests != 1 || rep.Total.Hits != 1 || rep.RejectedTierAccesses != 5 || snap.RejectedTierAccesses != 5 {
+		t.Fatalf("valid access must book once without changing rejected count: stats=%+v tier=%+v", snap, rep)
+	}
+
+	// The internal turn tap books a known-valid access directly and does not increment the
+	// public-admission rejection aggregate.
+	internal := New()
+	internal.Observe(100, 50)
+	if internal.Snapshot().RejectedTierAccesses != 0 || internal.TierSnapshot().RejectedTierAccesses != 0 {
+		t.Fatal("internal valid tier observation incremented the rejection aggregate")
+	}
+
+	// Rejection accounting saturates rather than wrapping to zero.
+	saturated := New()
+	saturated.rejectedTierAccesses = math.MaxUint64 - 1
+	invalid := TierAccess{Tier: CacheTier(99), Op: OpRead, Outcome: OutcomeHit, Backend: BackendMemory}
+	saturated.ObserveTier(invalid)
+	saturated.ObserveTier(invalid)
+	if got := saturated.Snapshot().RejectedTierAccesses; got != math.MaxUint64 {
+		t.Fatalf("rejected count wrapped instead of saturating: %d", got)
+	}
+	if got := saturated.TierSnapshot().RejectedTierAccesses; got != math.MaxUint64 {
+		t.Fatalf("tier report rejected count wrapped instead of saturating: %d", got)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -55,19 +54,12 @@ func TestAutomaticWIPLifecycleDoesNotBlockRecoveryWhenCaptureFails(t *testing.T)
 }
 
 func TestWorkerLifecycleMutationHooksStayWired(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("caller path unavailable")
-	}
-	body, err := os.ReadFile(filepath.Join(filepath.Dir(file), "worktree_worker.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := readEntrypoint(t, "worktree_worker.go")
 	for _, want := range []string{
-		`beginAutomaticWIPLifecycle(repoRoot, "worker-reap"`,
+		`beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap"`,
 		`beginAutomaticWIPLifecycle(repoRoot, "crash-recovery"`,
 	} {
-		if !bytes.Contains(body, []byte(want)) {
+		if !strings.Contains(body, want) {
 			t.Fatalf("automatic lifecycle hook missing: %s", want)
 		}
 	}

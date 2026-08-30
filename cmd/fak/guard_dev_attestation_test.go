@@ -32,7 +32,10 @@ func TestInstallGuardDevAttestationBindsLiveLaneAndFailsAfterRelease(t *testing.
 	t.Setenv("DISPATCH_LANE", "issue-9850")
 	t.Setenv("DISPATCH_ISSUE", "9850")
 	t.Setenv("FLEET_WORKER_WORKTREE_DIR", wt)
-	t.Setenv("FAK_REPO_ROOT", root)
+	t.Setenv("FAK_REPO_ROOT", filepath.Join(root, "legacy-wrong-root"))
+	oldWorkspace := guardDevWorkspaceForWorktree
+	guardDevWorkspaceForWorktree = func(string) string { return root }
+	t.Cleanup(func() { guardDevWorkspaceForWorktree = oldWorkspace })
 	live := true
 	oldLive := guardDevLeaseLive
 	guardDevLeaseLive = func(context.Context, string) ([]byte, error) {
@@ -68,7 +71,10 @@ func TestInstallGuardDevAttestationRejectsMismatchedWorktreeAndOwner(t *testing.
 	t.Setenv("DISPATCH_LANE", "issue-9850")
 	t.Setenv("DISPATCH_ISSUE", "9850")
 	t.Setenv("FLEET_WORKER_WORKTREE_DIR", wt)
-	t.Setenv("FAK_REPO_ROOT", root)
+	t.Setenv("FAK_REPO_ROOT", filepath.Join(root, "legacy-wrong-root"))
+	oldWorkspace := guardDevWorkspaceForWorktree
+	guardDevWorkspaceForWorktree = func(string) string { return root }
+	t.Cleanup(func() { guardDevWorkspaceForWorktree = oldWorkspace })
 	// CWD mismatch is rejected before an attacker-controlled environment can reach DOS.
 	if err := installGuardDevAttestation("trace-9850", ""); err == nil {
 		t.Fatal("expected worktree mismatch refusal")

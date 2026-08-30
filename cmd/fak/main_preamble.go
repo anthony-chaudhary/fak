@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -47,6 +48,10 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
 	}
+	if code, handled := runExactDevHandoff(os.Stdin, os.Stdout, os.Stderr, os.Args[1], os.Args[2:]); handled {
+		recordUsage(*verb, *argv, code, start)
+		os.Exit(code)
+	}
 	if devhandoff.IsCommand(os.Args[1]) {
 		fmt.Fprintf(os.Stderr, "fak: %q moved to the separate fak-dev executable (DEV_COMMAND_MOVED)\n", os.Args[1])
 		fmt.Fprintf(os.Stderr, "  run: fak dev %s\n", strings.Join(os.Args[1:], " "))
@@ -72,4 +77,24 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		os.Exit(code)
 	}
 	return false
+}
+
+var (
+	executeExactDevHandoff   = runDevHandoff
+	executeExactBuildHandoff = runBuildHandoff
+)
+
+// runExactDevHandoff preserves useful top-level spellings for build and committed-tree
+// inventory while keeping their implementations in fak-dev. Other moved developer
+// commands keep the explicit `fak dev ...` compatibility route and DEV_COMMAND_MOVED
+// guidance.
+func runExactDevHandoff(stdin io.Reader, stdout, stderr io.Writer, verb string, argv []string) (int, bool) {
+	if verb != "build" && verb != "study-inventory" {
+		return 0, false
+	}
+	if verb == "build" {
+		return executeExactBuildHandoff(stdin, stdout, stderr, argv), true
+	}
+	childArgv := append([]string{verb}, argv...)
+	return executeExactDevHandoff(stdin, stdout, stderr, childArgv), true
 }

@@ -93,7 +93,7 @@
     {
       "number": 29,
       "state": "closed",
-      "title": "feat(transport): native KVCache-\u003ebytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
+      "title": "feat(transport): native KVCache->bytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/29",
       "record_digest": "sha256:641415ed343734a2c1eb80ef6e4eb7b12db1385433a981776643946c44275fa8"
     },
@@ -254,7 +254,7 @@
     {
       "number": 70,
       "state": "closed",
-      "title": "feat(metal): q4_k device GEMM — upload q4_k (f16/int8), not Q8-dequant-\u003ef32",
+      "title": "feat(metal): q4_k device GEMM — upload q4_k (f16/int8), not Q8-dequant->f32",
       "url": "https://github.com/anthony-chaudhary/fak/issues/70",
       "record_digest": "sha256:3f216324a23a5553880224dbef47a5fbbacb1b0481ec2fabb51fb3b0d9c9b15e"
     },
@@ -268,7 +268,7 @@
     {
       "number": 75,
       "state": "closed",
-      "title": "feat(l3): verified cross-tenant prefix-sharing — make CAMA's riskiest optimization provably safe (G1+G4)",
+      "title": "feat(l3): verified cross-tenant prefix-sharing — make external-cache's riskiest optimization provably safe (G1+G4)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/75",
       "record_digest": "sha256:b56eb0d2651fe1f74558beafd4e26a0bbb5d41e5d35171e254421a04a38fdc65"
     },
@@ -282,7 +282,7 @@
     {
       "number": 79,
       "state": "closed",
-      "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+      "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/79",
       "record_digest": "sha256:c5960c04d1113a0416c51b015e75133a7dc001b25cbd36c7fe4ae27d5c903443"
     },
@@ -443,7 +443,7 @@
     {
       "number": 188,
       "state": "closed",
-      "title": "docs(glm-plan): \"FP8 ~700 GB, fits 8×H100\" — 8×80 GB = 640 GB \u003c 700 GB",
+      "title": "docs(glm-plan): \"FP8 ~700 GB, fits 8×H100\" — 8×80 GB = 640 GB < 700 GB",
       "url": "https://github.com/anthony-chaudhary/fak/issues/188",
       "record_digest": "sha256:536a624e3f0bff65d8cde19e9503d4bea09b252a91d3bd88602dc5941c31ba74"
     },
@@ -1374,7 +1374,7 @@
     {
       "number": 1067,
       "state": "closed",
-      "title": "fix(model): --metal q4k frees qt.raw but CPU prefill GEMM still reads it -\u003e slice-bounds panic on multi-K prompts",
+      "title": "fix(model): --metal q4k frees qt.raw but CPU prefill GEMM still reads it -> slice-bounds panic on multi-K prompts",
       "url": "https://github.com/anthony-chaudhary/fak/issues/1067",
       "record_digest": "sha256:6779ad45119917cdf686ca4ed32d507d81e363d2a16f436ad09db214b27e6c88"
     },
@@ -1535,7 +1535,7 @@
     {
       "number": 1451,
       "state": "closed",
-      "title": "fix(dispatch): weekly-cap gate mis-parses GLM \"Weekly/Monthly Limit Exhausted … will reset at \u003cISO\u003e\" → re-spawns doomed workers for the whole week",
+      "title": "fix(dispatch): weekly-cap gate mis-parses GLM \"Weekly/Monthly Limit Exhausted … will reset at <ISO>\" → re-spawns doomed workers for the whole week",
       "url": "https://github.com/anthony-chaudhary/fak/issues/1451",
       "record_digest": "sha256:c91a2e3c8c277a405480897a10b8230694d0affc45ad634e0bb246b957f10855"
     },
@@ -1605,7 +1605,7 @@
     {
       "number": 1685,
       "state": "closed",
-      "title": "Dev kit: `fak backend scaffold \u003cname\u003e` generator (taxonomy + cgo stub + parity test)",
+      "title": "Dev kit: `fak backend scaffold <name>` generator (taxonomy + cgo stub + parity test)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/1685",
       "record_digest": "sha256:c452eeb1caa701a8edf778ce4ba30ec274086160b65edebaa7c03665c1cc55e0"
     },
@@ -1696,7 +1696,7 @@
     {
       "number": 1942,
       "state": "closed",
-      "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -\u003e M1-M5 verdicts)",
+      "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -> M1-M5 verdicts)",
       "url": "https://github.com/anthony-chaudhary/fak/issues/1942",
       "record_digest": "sha256:69a351ea8e8010bdf5cf5d55e814f6f8488a903b1d1fe21d592f133125459018"
     },
@@ -1752,7 +1752,7 @@
     {
       "number": 2128,
       "state": "closed",
-      "title": "feat(guard): Bash exit-143 git/gh hang detector -\u003e TOOL_HANG_SHELL_MISMATCH + the PowerShell recovery command",
+      "title": "feat(guard): Bash exit-143 git/gh hang detector -> TOOL_HANG_SHELL_MISMATCH + the PowerShell recovery command",
       "url": "https://github.com/anthony-chaudhary/fak/issues/2128",
       "record_digest": "sha256:b5afc7f6a137ff5653541c3556904f030471fa64f63d8390c3263121cc2f96a9"
     },
@@ -1773,7 +1773,7 @@
     {
       "number": 2236,
       "state": "open",
-      "title": "epic(superset): fak \u003e best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
+      "title": "epic(superset): fak > best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
       "url": "https://github.com/anthony-chaudhary/fak/issues/2236",
       "record_digest": "sha256:170d91c8a4b7ceb5834d575202b9526f2565aabfc482358b35aad70446296d51"
     },
@@ -2319,7 +2319,7 @@
     {
       "number": 4202,
       "state": "open",
-      "title": "feat(model/spec): stochastic (T\u003e0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
+      "title": "feat(model/spec): stochastic (T>0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
       "url": "https://github.com/anthony-chaudhary/fak/issues/4202",
       "record_digest": "sha256:86efbe01bd1e9af9601481b2df6d5aa48072900ab38b86c47e86c8d953bc7043"
     },
@@ -3346,7 +3346,7 @@
           "kind": "issue",
           "id": "2236",
           "state": "open",
-          "title": "epic(superset): fak \u003e best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
+          "title": "epic(superset): fak > best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
           "url": "https://github.com/anthony-chaudhary/fak/issues/2236",
           "record_digest": "sha256:170d91c8a4b7ceb5834d575202b9526f2565aabfc482358b35aad70446296d51"
         }
@@ -3730,7 +3730,7 @@
           "kind": "issue",
           "id": "2236",
           "state": "open",
-          "title": "epic(superset): fak \u003e best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
+          "title": "epic(superset): fak > best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
           "url": "https://github.com/anthony-chaudhary/fak/issues/2236",
           "record_digest": "sha256:170d91c8a4b7ceb5834d575202b9526f2565aabfc482358b35aad70446296d51"
         }
@@ -6347,7 +6347,7 @@
           "kind": "issue",
           "id": "70",
           "state": "closed",
-          "title": "feat(metal): q4_k device GEMM — upload q4_k (f16/int8), not Q8-dequant-\u003ef32",
+          "title": "feat(metal): q4_k device GEMM — upload q4_k (f16/int8), not Q8-dequant->f32",
           "url": "https://github.com/anthony-chaudhary/fak/issues/70",
           "record_digest": "sha256:3f216324a23a5553880224dbef47a5fbbacb1b0481ec2fabb51fb3b0d9c9b15e"
         },
@@ -6363,7 +6363,7 @@
           "kind": "issue",
           "id": "1067",
           "state": "closed",
-          "title": "fix(model): --metal q4k frees qt.raw but CPU prefill GEMM still reads it -\u003e slice-bounds panic on multi-K prompts",
+          "title": "fix(model): --metal q4k frees qt.raw but CPU prefill GEMM still reads it -> slice-bounds panic on multi-K prompts",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1067",
           "record_digest": "sha256:6779ad45119917cdf686ca4ed32d507d81e363d2a16f436ad09db214b27e6c88"
         },
@@ -6624,7 +6624,7 @@
           "kind": "issue",
           "id": "79",
           "state": "closed",
-          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/79",
           "record_digest": "sha256:c5960c04d1113a0416c51b015e75133a7dc001b25cbd36c7fe4ae27d5c903443"
         },
@@ -6656,7 +6656,7 @@
           "issue:#6066 state=open basis=body_tokens score=27 record=sha256:52bc5603eff922559cd7cd943aed8ba56f4078e4090272a5b563a3b2ff8572b9"
         ],
         "full_matches_digest": "sha256:d4edc781918634417bfa0c6269504b6ad8abf95354aff4b901d68b8754af3f46",
-        "digest": "sha256:30429bce31fda0539b136a504867155c28121e5ada06db73a068d94c20630283"
+        "digest": "sha256:af7c8be002c90593da40367b7005d9f4c51819c81648c63e400bc26ceb23d690"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
@@ -6674,7 +6674,7 @@
           "kind": "issue",
           "id": "79",
           "state": "closed",
-          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/79",
           "record_digest": "sha256:c5960c04d1113a0416c51b015e75133a7dc001b25cbd36c7fe4ae27d5c903443"
         },
@@ -6746,7 +6746,7 @@
           "issue:#1054 state=closed basis=body_phrase score=49 record=sha256:145cca09661d11df5f0c47ebfa6de28a384c13c9b8768a35086ed60678d4a83e"
         ],
         "full_matches_digest": "sha256:4f8ab1938525639696c41a9d248499a32c21e953b1e73d666371ccc0d482977b",
-        "digest": "sha256:e86a01e7c9a5f3046c8520e14979ec6ef80562a2904f5d8d565da4f35b826dbc"
+        "digest": "sha256:2d8a67ba1a97dc3d8acd5e2517e49e1c9e012e534aac6dfeba5c47ac8737ed5b"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
@@ -6991,7 +6991,7 @@
           "kind": "issue",
           "id": "79",
           "state": "closed",
-          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/79",
           "record_digest": "sha256:c5960c04d1113a0416c51b015e75133a7dc001b25cbd36c7fe4ae27d5c903443"
         }
@@ -7015,7 +7015,7 @@
           "issue:#6066 state=open basis=body_tokens score=27 record=sha256:52bc5603eff922559cd7cd943aed8ba56f4078e4090272a5b563a3b2ff8572b9"
         ],
         "full_matches_digest": "sha256:972c3f11bf412e7aa777ec0bb42b442e416c9f5d302ce143308e50daab9456be",
-        "digest": "sha256:08ff4fb626e27f0947f42229e7a5cc02b5e2658d956351f5088b0bada04a2470"
+        "digest": "sha256:35226b71106846c06e74151cbae20680c50979b881eb131f2b0f5d3cc936f623"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
@@ -7077,7 +7077,7 @@
           "kind": "issue",
           "id": "79",
           "state": "closed",
-          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+          "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (external-cache semantics layer)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/79",
           "record_digest": "sha256:c5960c04d1113a0416c51b015e75133a7dc001b25cbd36c7fe4ae27d5c903443"
         },
@@ -7109,7 +7109,7 @@
           "issue:#6066 state=open basis=body_tokens score=27 record=sha256:52bc5603eff922559cd7cd943aed8ba56f4078e4090272a5b563a3b2ff8572b9"
         ],
         "full_matches_digest": "sha256:d4edc781918634417bfa0c6269504b6ad8abf95354aff4b901d68b8754af3f46",
-        "digest": "sha256:9275002843f1a3e470cd9ddddbf9d435ef1159fd868ac0d076ae367fff2839a3"
+        "digest": "sha256:ff18177c28068daf316f69f2860bfead4348ce8b19a2667d43d53dc5d092e165"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
@@ -8768,7 +8768,7 @@
           "kind": "issue",
           "id": "188",
           "state": "closed",
-          "title": "docs(glm-plan): \"FP8 ~700 GB, fits 8×H100\" — 8×80 GB = 640 GB \u003c 700 GB",
+          "title": "docs(glm-plan): \"FP8 ~700 GB, fits 8×H100\" — 8×80 GB = 640 GB < 700 GB",
           "url": "https://github.com/anthony-chaudhary/fak/issues/188",
           "record_digest": "sha256:536a624e3f0bff65d8cde19e9503d4bea09b252a91d3bd88602dc5941c31ba74"
         },
@@ -9786,7 +9786,7 @@
           "kind": "issue",
           "id": "1685",
           "state": "closed",
-          "title": "Dev kit: `fak backend scaffold \u003cname\u003e` generator (taxonomy + cgo stub + parity test)",
+          "title": "Dev kit: `fak backend scaffold <name>` generator (taxonomy + cgo stub + parity test)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1685",
           "record_digest": "sha256:c452eeb1caa701a8edf778ce4ba30ec274086160b65edebaa7c03665c1cc55e0"
         },
@@ -12190,7 +12190,7 @@
           "kind": "issue",
           "id": "1451",
           "state": "closed",
-          "title": "fix(dispatch): weekly-cap gate mis-parses GLM \"Weekly/Monthly Limit Exhausted … will reset at \u003cISO\u003e\" → re-spawns doomed workers for the whole week",
+          "title": "fix(dispatch): weekly-cap gate mis-parses GLM \"Weekly/Monthly Limit Exhausted … will reset at <ISO>\" → re-spawns doomed workers for the whole week",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1451",
           "record_digest": "sha256:c91a2e3c8c277a405480897a10b8230694d0affc45ad634e0bb246b957f10855"
         }
@@ -12385,7 +12385,7 @@
           "kind": "issue",
           "id": "75",
           "state": "closed",
-          "title": "feat(l3): verified cross-tenant prefix-sharing — make CAMA's riskiest optimization provably safe (G1+G4)",
+          "title": "feat(l3): verified cross-tenant prefix-sharing — make external-cache's riskiest optimization provably safe (G1+G4)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/75",
           "record_digest": "sha256:b56eb0d2651fe1f74558beafd4e26a0bbb5d41e5d35171e254421a04a38fdc65"
         },
@@ -12421,7 +12421,7 @@
           "issue:#3320 state=closed basis=title_tokens score=73 record=sha256:68d66a9f471ec1e8b4eeba1668161248a839c23bfd703acb7ec40dfe546e7dcc"
         ],
         "full_matches_digest": "sha256:f55d9e242bd32280d5d2834774cbc21666346e9bd61070a81fa737017ed1db7c",
-        "digest": "sha256:c5a1bd194594eb4c5d8c71ec0b04b3b9380ecb6090c10c5e8f0186e478c7662a"
+        "digest": "sha256:71d7723fc3043d729d4cc2b92694555e5b9ccd724aa6b56733f95a5452e2861d"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
@@ -12737,7 +12737,7 @@
           "kind": "issue",
           "id": "2128",
           "state": "closed",
-          "title": "feat(guard): Bash exit-143 git/gh hang detector -\u003e TOOL_HANG_SHELL_MISMATCH + the PowerShell recovery command",
+          "title": "feat(guard): Bash exit-143 git/gh hang detector -> TOOL_HANG_SHELL_MISMATCH + the PowerShell recovery command",
           "url": "https://github.com/anthony-chaudhary/fak/issues/2128",
           "record_digest": "sha256:b5afc7f6a137ff5653541c3556904f030471fa64f63d8390c3263121cc2f96a9"
         },
@@ -13811,7 +13811,7 @@
           "kind": "issue",
           "id": "4202",
           "state": "open",
-          "title": "feat(model/spec): stochastic (T\u003e0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
+          "title": "feat(model/spec): stochastic (T>0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
           "url": "https://github.com/anthony-chaudhary/fak/issues/4202",
           "record_digest": "sha256:86efbe01bd1e9af9601481b2df6d5aa48072900ab38b86c47e86c8d953bc7043"
         },
@@ -14075,7 +14075,7 @@
           "kind": "issue",
           "id": "4202",
           "state": "open",
-          "title": "feat(model/spec): stochastic (T\u003e0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
+          "title": "feat(model/spec): stochastic (T>0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
           "url": "https://github.com/anthony-chaudhary/fak/issues/4202",
           "record_digest": "sha256:86efbe01bd1e9af9601481b2df6d5aa48072900ab38b86c47e86c8d953bc7043"
         },
@@ -14207,7 +14207,7 @@
           "kind": "issue",
           "id": "4202",
           "state": "open",
-          "title": "feat(model/spec): stochastic (T\u003e0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
+          "title": "feat(model/spec): stochastic (T>0) rejection-sampling losslessness for in-kernel speculative decode — close the sampled half of the parity row",
           "url": "https://github.com/anthony-chaudhary/fak/issues/4202",
           "record_digest": "sha256:86efbe01bd1e9af9601481b2df6d5aa48072900ab38b86c47e86c8d953bc7043"
         },
@@ -14693,7 +14693,7 @@
           "kind": "issue",
           "id": "1942",
           "state": "closed",
-          "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -\u003e M1-M5 verdicts)",
+          "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -> M1-M5 verdicts)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1942",
           "record_digest": "sha256:69a351ea8e8010bdf5cf5d55e814f6f8488a903b1d1fe21d592f133125459018"
         },
@@ -14889,7 +14889,7 @@
           "kind": "issue",
           "id": "29",
           "state": "closed",
-          "title": "feat(transport): native KVCache-\u003ebytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
+          "title": "feat(transport): native KVCache->bytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/29",
           "record_digest": "sha256:641415ed343734a2c1eb80ef6e4eb7b12db1385433a981776643946c44275fa8"
         },
@@ -15643,7 +15643,7 @@
           "kind": "issue",
           "id": "1942",
           "state": "closed",
-          "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -\u003e M1-M5 verdicts)",
+          "title": "test(vcache): end-to-end golden integration test for `fak vcache observe` (transcript -> M1-M5 verdicts)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1942",
           "record_digest": "sha256:69a351ea8e8010bdf5cf5d55e814f6f8488a903b1d1fe21d592f133125459018"
         },
@@ -15839,7 +15839,7 @@
           "kind": "issue",
           "id": "29",
           "state": "closed",
-          "title": "feat(transport): native KVCache-\u003ebytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
+          "title": "feat(transport): native KVCache->bytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
           "url": "https://github.com/anthony-chaudhary/fak/issues/29",
           "record_digest": "sha256:641415ed343734a2c1eb80ef6e4eb7b12db1385433a981776643946c44275fa8"
         },

@@ -7,8 +7,17 @@
       "kind": "subsystem",
       "definition": "The kernel-owned raw attention state: per-position Key and Value tensor rows for the running model, supporting in-place eviction and prefix reuse.",
       "distinction": "Local raw tensors the kernel owns - NOT vCache (a control plane over a remote cache) and NOT cachemeta (which owns no tensors).",
-      "distinct_from": ["vcache", "cachemeta", "radixkv", "c4681-kvcached", "x3-cache-gocache"],
-      "aliases": ["model KV", "local KV"],
+      "distinct_from": [
+        "vcache",
+        "cachemeta",
+        "radixkv",
+        "c4681-kvcached",
+        "x3-cache-gocache"
+      ],
+      "aliases": [
+        "model KV",
+        "local KV"
+      ],
       "grounding": "kvcache",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -23,8 +32,18 @@
       "kind": "subsystem",
       "definition": "The virtual API cache: a page-table abstraction that models a remote provider's prefix cache as virtual pages, with a manifest of canonical prefix chains and warmth belief.",
       "distinction": "A CONTROL PLANE over a cache you do not own - NOT the KV cache (local tensors) and NOT the provider prompt-cache itself.",
-      "distinct_from": ["kv-cache", "prompt-cache", "cachemeta", "x-goal25-cache-vcacheqa", "x3-cache-gocache"],
-      "aliases": ["virtual API cache", "vcachegov", "vcachechain"],
+      "distinct_from": [
+        "kv-cache",
+        "prompt-cache",
+        "cachemeta",
+        "x-goal25-cache-vcacheqa",
+        "x3-cache-gocache"
+      ],
+      "aliases": [
+        "virtual API cache",
+        "vcachegov",
+        "vcachechain"
+      ],
       "grounding": "vcache",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -39,8 +58,14 @@
       "kind": "subsystem",
       "definition": "The typed metadata contract (tier 1): owns no payloads, names reusable cache entries, and carries their validity / security / residency metadata and typed lookup verdicts.",
       "distinction": "The PASSIVE metadata foundation every cache plane builds on - NOT vCache (the active control loop built atop it).",
-      "distinct_from": ["vcache", "kv-cache", "enginecache"],
-      "aliases": ["cache metadata contract"],
+      "distinct_from": [
+        "vcache",
+        "kv-cache",
+        "enginecache"
+      ],
+      "aliases": [
+        "cache metadata contract"
+      ],
       "grounding": "cachemeta",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -55,8 +80,15 @@
       "kind": "concept",
       "definition": "The upstream provider feature: a prefix cached via cache_control breakpoints, reported back as cache_read_input_tokens / cache_creation_input_tokens with a specific pricing multiplier.",
       "distinction": "A provider FEATURE you use - NOT vCache (the control loop you build) and NOT the KV cache (local tensors).",
-      "distinct_from": ["vcache", "provider-cache", "cache-read"],
-      "aliases": ["Anthropic prompt cache", "cachereadinputtokens"],
+      "distinct_from": [
+        "vcache",
+        "provider-cache",
+        "cache-read"
+      ],
+      "aliases": [
+        "Anthropic prompt cache",
+        "cachereadinputtokens"
+      ],
       "grounding": "cachereadinputtokens",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -71,8 +103,13 @@
       "kind": "metric",
       "definition": "A cachemeta entry on plane=provider: the OBSERVED telemetry record of what the provider's prompt cache did (read/creation token counts), marked non-re-serveable local proof.",
       "distinction": "The recorded OBSERVATION of the provider feature - NOT the Prompt cache feature itself and NOT a local cache fak can serve from.",
-      "distinct_from": ["prompt-cache", "vcache"],
-      "aliases": ["provider-side cache"],
+      "distinct_from": [
+        "prompt-cache",
+        "vcache"
+      ],
+      "aliases": [
+        "provider-side cache"
+      ],
       "grounding": "providercache",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -87,8 +124,13 @@
       "kind": "config",
       "definition": "The WRITE placement mechanism: the cache_control breakpoint you place to tell the provider where to cache a prefix.",
       "distinction": "The breakpoint you PLACE - NOT cache_read (what the provider reports it served) and NOT cache_creation (what it reports it wrote).",
-      "distinct_from": ["cache-read", "cache-creation-tokens"],
-      "aliases": ["cache breakpoint"],
+      "distinct_from": [
+        "cache-read",
+        "cache-creation-tokens"
+      ],
+      "aliases": [
+        "cache breakpoint"
+      ],
       "grounding": "cachecontrol",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -103,8 +145,13 @@
       "kind": "metric",
       "definition": "The READ telemetry: cache_read_input_tokens, what the provider reports it served from its cache rather than re-prefilling, billed at 0.1x base input.",
       "distinction": "What the provider reports it READ - NOT cache_control (the placement) and NOT cache_creation (the write cost).",
-      "distinct_from": ["cache-creation-tokens", "cache-control"],
-      "aliases": ["cachereadtokens"],
+      "distinct_from": [
+        "cache-creation-tokens",
+        "cache-control"
+      ],
+      "aliases": [
+        "cachereadtokens"
+      ],
       "grounding": "cachereadtokens",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -119,8 +166,13 @@
       "kind": "metric",
       "definition": "The WRITE telemetry: cache_creation_input_tokens, what the provider reports it wrote to its cache on this call, billed at 1.25-2.0x base input depending on TTL.",
       "distinction": "What the provider reports it WROTE - NOT cache_read (the read rebate) and NOT cache_control (the placement mechanism).",
-      "distinct_from": ["cache-read", "cache-control"],
-      "aliases": ["cachecreationtokens"],
+      "distinct_from": [
+        "cache-read",
+        "cache-control"
+      ],
+      "aliases": [
+        "cachecreationtokens"
+      ],
       "grounding": "cachecreationtokens",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -135,8 +187,13 @@
       "kind": "subsystem",
       "definition": "A local token-trie data structure for fast prefix lookup that points INTO KV-cache spans, with materialization binding so cross-model spans are never reused.",
       "distinction": "The token-trie INDEX into KV spans - NOT the KV cache (the tensor storage it indexes) and NOT vCache (remote abstraction).",
-      "distinct_from": ["kv-cache", "vcache"],
-      "aliases": ["radix tree KV"],
+      "distinct_from": [
+        "kv-cache",
+        "vcache"
+      ],
+      "aliases": [
+        "radix tree KV"
+      ],
       "grounding": "radixkv",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -151,8 +208,14 @@
       "kind": "subsystem",
       "definition": "The adapter that translates cachemeta invalidation directives into a remote serving engine's control API (SGLang / vLLM prefix-cache reset or span evict).",
       "distinction": "The ADAPTER to a remote engine's cache - NOT cachemeta (the pure contract) and NOT vCache (the policy that triggers it).",
-      "distinct_from": ["cachemeta", "vcache", "xenginekv"],
-      "aliases": ["remote cache bridge"],
+      "distinct_from": [
+        "cachemeta",
+        "vcache",
+        "xenginekv"
+      ],
+      "aliases": [
+        "remote cache bridge"
+      ],
       "grounding": "enginecache",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -167,8 +230,13 @@
       "kind": "subsystem",
       "definition": "Storage of materialized lossy projections (summary, QA, facts) over canonical memory pages, with FAULT / RECOMPUTE / HIT materialization verdicts.",
       "distinction": "STORES derived projections - NOT MemoryView (the typed CONTRACT for a projection) and NOT the KV cache (raw tensors).",
-      "distinct_from": ["memoryview", "kv-cache"],
-      "aliases": ["derived view cache"],
+      "distinct_from": [
+        "memoryview",
+        "kv-cache"
+      ],
+      "aliases": [
+        "derived view cache"
+      ],
       "grounding": "viewcache",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -183,8 +251,14 @@
       "kind": "subsystem",
       "definition": "The typed virtual-view contract binding a lossy derived projection (summary, graph) to its canonical raw-memory source by content digest + byte span, with provenance.",
       "distinction": "The CONTRACT binding a projection to its source - NOT ViewCache (the storage of materialized views) and NOT the canonical raw bytes.",
-      "distinct_from": ["viewcache", "kv-cache"],
-      "aliases": ["memview", "semantic view contract"],
+      "distinct_from": [
+        "viewcache",
+        "kv-cache"
+      ],
+      "aliases": [
+        "memview",
+        "semantic view contract"
+      ],
       "grounding": "memview",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -199,8 +273,13 @@
       "kind": "subsystem",
       "definition": "The placement POLICY that knows each tier's physical character (HBM / DRAM / NUMA-far / CXL / disk / remote) and demotes hot entries one tier colder under pressure.",
       "distinction": "The placement POLICY - NOT the KV cache (the storage it places) and NOT KV transfer (the migration directive it emits).",
-      "distinct_from": ["kv-cache", "kv-transfer"],
-      "aliases": ["tiered cache policy"],
+      "distinct_from": [
+        "kv-cache",
+        "kv-transfer"
+      ],
+      "aliases": [
+        "tiered cache policy"
+      ],
       "grounding": "planplacement",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -215,8 +294,13 @@
       "kind": "symbol",
       "definition": "The migration DIRECTIVE emitted by hardware-aware placement: migrate / offload / restore / route a KV span between tiers.",
       "distinction": "The migration DIRECTIVE - NOT the KV cache (the storage) and NOT the hardware-aware policy (which emits it).",
-      "distinct_from": ["hardware-aware-cache", "kv-cache"],
-      "aliases": ["KV relocation"],
+      "distinct_from": [
+        "hardware-aware-cache",
+        "kv-cache"
+      ],
+      "aliases": [
+        "KV relocation"
+      ],
       "grounding": "kvtransfer",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -231,14 +315,21 @@
       "kind": "symbol",
       "definition": "The unit of cacheable work in vCache: a cachemeta entry whose identity carries every axis that must match for provider reuse (content digest, model, tokenizer, endpoints, position in prefix DAG).",
       "distinction": "A LOGICAL UNIT named by its identity axes - NOT vCache (the control system managing vBlocks) and NOT the KV cache (raw tensors).",
-      "distinct_from": ["vcache", "kv-cache"],
-      "aliases": ["virtual block"],
+      "distinct_from": [
+        "vcache",
+        "kv-cache"
+      ],
+      "aliases": [
+        "virtual block"
+      ],
       "grounding": "vblock",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "vcache",
       "verdict": "defined",
-      "gaps": ["not yet written into the concept glossary - currently defined-only"]
+      "gaps": [
+        "not yet written into the concept glossary - currently defined-only"
+      ]
     },
     {
       "id": "kvlayout",
@@ -247,14 +338,22 @@
       "kind": "symbol",
       "definition": "The interface abstracting the per-position bytes a given attention variant caches and how to reconstruct per-head K/V from those bytes (standard vs MLA).",
       "distinction": "The reconstruction INTERFACE over cached bytes - NOT the KV cache (the storage) and NOT MLAConfig (the projection geometry).",
-      "distinct_from": ["kv-cache", "mla-config", "kvlayout-interface", "layout-ctxplan", "layout-tensor"],
+      "distinct_from": [
+        "kv-cache",
+        "mla-config",
+        "kvlayout-interface",
+        "layout-ctxplan",
+        "layout-tensor"
+      ],
       "aliases": [],
       "grounding": "kvlayout",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "kv-cache",
       "verdict": "defined",
-      "gaps": ["not yet written into the concept glossary - currently defined-only"]
+      "gaps": [
+        "not yet written into the concept glossary - currently defined-only"
+      ]
     },
     {
       "id": "mla-config",
@@ -263,14 +362,98 @@
       "kind": "symbol",
       "definition": "The low-rank MLA projection geometry (DeepSeek V2/V3): latent width, RoPE dim, and down/up projection matrices for compressing the K/V cache.",
       "distinction": "The projection PARAMETERS - NOT KVLayout (the interface that uses them) and NOT the KV cache (the cached tensors).",
-      "distinct_from": ["kvlayout", "kv-cache"],
+      "distinct_from": [
+        "kvlayout",
+        "kv-cache"
+      ],
       "aliases": [],
       "grounding": "mlaconfig",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "kvlayout",
       "verdict": "defined",
-      "gaps": ["not yet written into the concept glossary - currently defined-only"]
+      "gaps": [
+        "not yet written into the concept glossary - currently defined-only"
+      ]
+    },
+    {
+      "id": "cache-phase-latency-bucket",
+      "canonical": "CachePhaseLatency (phase bucket)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatency is one immutable value bucket in a cache-phase latency receipt: a normalized prefill, decode, or other phase label paired with its observation count and accumulated duration.",
+      "distinction": "It is one per-phase VALUE, not CachePhaseLatencyReceipt (the reconciled snapshot containing every bucket) and not CachePhaseLatencyRecorder (the mutable concurrent accumulator that produces snapshots).",
+      "distinct_from": [
+        "cache-phase-latency-receipt",
+        "cache-phase-latency-recorder"
+      ],
+      "aliases": [],
+      "grounding": "cachephaselatency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cache-phase-latency-receipt",
+      "canonical": "CachePhaseLatencyReceipt (reconciled snapshot)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatencyReceipt is the stable exported snapshot that places the unlabeled observation and duration totals beside the fixed-order prefill, decode, and other CachePhaseLatency buckets from which those totals are derived.",
+      "distinction": "It is the immutable RECONCILING SNAPSHOT, not CachePhaseLatency (one bucket inside it) and not CachePhaseLatencyRecorder (the lock-protected live state that records observations).",
+      "distinct_from": [
+        "cache-phase-latency-bucket",
+        "cache-phase-latency-recorder"
+      ],
+      "aliases": [],
+      "grounding": "cachephaselatencyreceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cache-phase-latency-recorder",
+      "canonical": "CachePhaseLatencyRecorder (bounded accumulator)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "modelperfobs.CachePhaseLatencyRecorder is the concurrency-safe live accumulator that normalizes caller-supplied phase labels into the closed prefill, decode, and other vocabulary, clamps negative durations, and derives CachePhaseLatencyReceipt snapshots from its counters.",
+      "distinction": "It is the mutable RECORDING MECHANISM, not CachePhaseLatency (one immutable phase bucket) and not CachePhaseLatencyReceipt (the snapshot returned to observers and native-profile receipts).",
+      "distinct_from": [
+        "cache-phase-latency-bucket",
+        "cache-phase-latency-receipt"
+      ],
+      "aliases": [],
+      "grounding": "cachephaselatencyrecorder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cache-fill-fixture",
+      "canonical": "cache-fill fixture",
+      "family": "cache",
+      "kind": "artifact",
+      "definition": "A deterministic test payload written by the vCache fixture generator so the inspection command can exercise manifest and payload validation without contacting a live provider cache.",
+      "distinction": "It is generated TEST INPUT for cache inspection, not an operation that warms a provider prompt cache and not cachefill telemetry or policy.",
+      "distinct_from": [
+        "vcache",
+        "prompt-cache",
+        "cache-fill-observability"
+      ],
+      "aliases": [
+        "cachefill fixture"
+      ],
+      "grounding": "cachefill",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

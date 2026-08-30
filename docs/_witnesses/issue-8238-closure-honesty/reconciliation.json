@@ -8,7 +8,7 @@
   "audit_snapshot": {
     "head": "7825ba897a4dff736fdbdf748908732e4e37e8e5",
     "schema": "fleet-issue-closure-audit/1",
-    "complete_window_sha256": "c35eaecdcaf51db42187e5628594166aea9455e40ba7a5a406ebea216bd66a4e",
+    "complete_window_sha256": "f3de07c45caa421757e79e4aad2257d8929faadedf2ecbdaf1033545e75bb501",
     "raw_complete_window_sha256": "98ea69ba7fa4954fe063a71eab162fba3cf6bee28ce4c157acf3d362a8b0d3f2",
     "publication_redacted_issue_numbers": [
       265,
@@ -120728,7 +120728,7 @@
     },
     {
       "number": 75,
-      "title": "feat(l3): verified cross-tenant prefix-sharing — make CAMA's riskiest optimizati",
+      "title": "feat(l3): verified cross-tenant prefix-sharing — make external-cache's riskiest ",
       "source_state": "CLOSED",
       "source_state_reason": "COMPLETED",
       "source_bucket": "TRUE_RESOLVED",

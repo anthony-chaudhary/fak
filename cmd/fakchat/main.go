@@ -104,17 +104,18 @@ func main() {
 // extracted helpers take a single *cliFlags rather than a long parameter list, with
 // no change to the flags or their defaults.
 type cliFlags struct {
-	hf      *string
-	gguf    *string
-	tokDir  *string
-	sys     *string
-	prompt  *string
-	maxNew  *int
-	metal   *bool
-	temp    *float64
-	seed    *int64
-	quiet   *bool
-	q4kLoad bool // FAK_Q4K env at parse time (resident Q4_K loader)
+	hf            *string
+	gguf          *string
+	tokDir        *string
+	sys           *string
+	prompt        *string
+	maxNew        *int
+	metal         *bool
+	temp          *float64
+	seed          *int64
+	quiet         *bool
+	q4kGateUpSlab *bool
+	q4kLoad       bool // FAK_Q4K env at parse time (resident Q4_K loader)
 }
 
 // parseFlags registers and parses the CLI flags, expands leading ~ in path flags, and
@@ -122,16 +123,17 @@ type cliFlags struct {
 // inline block did.
 func parseFlags() *cliFlags {
 	fl := &cliFlags{
-		hf:     flag.String("hf", "", "HuggingFace model dir (config.json + model.safetensors[.index.json])"),
-		gguf:   flag.String("gguf", "", "GGUF checkpoint path; loads through the memory-lean quant path"),
-		tokDir: flag.String("tokenizer", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)"),
-		sys:    flag.String("sys", "You are a helpful assistant.", "system prompt"),
-		prompt: flag.String("prompt", "", "user prompt — REQUIRED"),
-		maxNew: flag.Int("max-new", 256, "max new tokens to generate"),
-		metal:  flag.Bool("metal", false, "run prefill on the Metal GPU (requires Apple Silicon+cgo; decode stays CPU Q8)"),
-		temp:   flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)"),
-		seed:   flag.Int64("seed", 1, "RNG seed for temperature sampling"),
-		quiet:  flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)"),
+		hf:            flag.String("hf", "", "HuggingFace model dir (config.json + model.safetensors[.index.json])"),
+		gguf:          flag.String("gguf", "", "GGUF checkpoint path; loads through the memory-lean quant path"),
+		tokDir:        flag.String("tokenizer", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)"),
+		sys:           flag.String("sys", "You are a helpful assistant.", "system prompt"),
+		prompt:        flag.String("prompt", "", "user prompt — REQUIRED"),
+		maxNew:        flag.Int("max-new", 256, "max new tokens to generate"),
+		metal:         flag.Bool("metal", false, "run prefill on the Metal GPU (requires Apple Silicon+cgo; decode stays CPU Q8)"),
+		temp:          flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)"),
+		seed:          flag.Int64("seed", 1, "RNG seed for temperature sampling"),
+		quiet:         flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)"),
+		q4kGateUpSlab: flag.Bool("q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each chat session"),
 	}
 	flag.Parse()
 
@@ -307,7 +309,7 @@ func runHybrid(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.To
 		cfg.ModelType, loadMS, len(ids), backend)
 	out := bufio.NewWriter(os.Stdout)
 	rng := rand.New(rand.NewSource(*fl.seed))
-	s := m.NewSession()
+	s := newFakchatSession(m, *fl.q4kGateUpSlab)
 	s.Quant = quantLoaded
 	s.Q4 = q4
 	s.Q4K = q4k
@@ -356,7 +358,7 @@ func runHybrid(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.To
 // streams the decode to stdout and prints the timing summary — behaviour-identical to the
 // inline default block.
 func runStandard(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.Tokenizer, ids []int, stops map[int]bool, useMetal bool, loadMS float64, spin func(string) func()) {
-	s := m.NewSession()
+	s := newFakchatSession(m, *fl.q4kGateUpSlab)
 	s.Quant = true
 	s.Metal = useMetal
 	if useMetal {
@@ -394,6 +396,12 @@ func runStandard(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.
 	}
 	fmt.Fprintf(os.Stderr, "\n---\nprefill: %d tok in %.2fs (%.1f tok/s)  |  decode: %d tok in %.2fs (%.1f tok/s)\n",
 		len(ids), prefillS, prefTPS, gen, decodeS, decTPS)
+}
+
+func newFakchatSession(m *model.Model, q4kGateUpSlab bool) *model.Session {
+	s := m.NewSession()
+	s.Q4KGateUpOutputSlab = q4kGateUpSlab
+	return s
 }
 
 func readModelConfig(hf, gguf string) (model.Config, error) {

@@ -44,6 +44,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/relay"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // WalkSchema is the versioned payload tag the `--json` walk emits.
@@ -740,7 +741,7 @@ var registry = []Super{
 			{Kind: KindLoop, Ref: "report:cachevalue", Why: "the cache-value P&L feed: dark means the witnessed kernel-reuse trend stops being published", Enter: "fak slack refresh --surface cachevalue"},
 			{Kind: KindLoop, Ref: "report:bench", Why: "the bench feed: dark means benchmark rollups / run-requests stop reaching the bench nodes", Enter: "fak slack refresh --surface bench"},
 			{Kind: KindLoop, Ref: "report:dojo", Why: "the dojo rollup feed: dark means calibration trends stop being posted (distinct from the dojo gym loop itself)", Enter: "fak slack refresh --surface dojo"},
-			{Kind: KindLoop, Ref: "report:backlog", Why: "the backlog feed: dark means the issue-triage + bottleneck digest stops surfacing", Enter: "fak slack refresh --surface backlog"},
+			{Kind: KindLoop, Ref: "report:backlog", Why: "the backlog feed: dark means the issue-triage + bottleneck digest stops surfacing", Enter: "fak slack refresh --surface backlog --backlog-channel " + scoreboard.CICDReportChannel},
 			{Kind: KindLoop, Ref: "report:node-usage", Why: "the node-usage feed: dark means compute-node usage snapshots stop, and idle silicon goes unnoticed", Enter: "fak slack refresh --surface node-usage"},
 			{Kind: KindLoop, Ref: "report:steering", Why: "the steering feed: dark means the steering-guard surface stops reporting how steerable the fleet is", Enter: "fak slack refresh --surface steering"},
 		},

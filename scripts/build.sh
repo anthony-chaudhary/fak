@@ -26,6 +26,7 @@
 #   VERSION  version stamped into the binary (default: ./VERSION, else empty)
 #   TAGS     go build tags, space-separated  (default: none; e.g. TAGS=cuda, TAGS=dev)
 #   PROFILE  build profile                   (default: release; dev|race for #3710)
+#   PGO      release PGO profile path         (default: off; explicit paths are release-only)
 #   GCFLAGS  extra -gcflags (dev|race only)  (default: none; set 'all=-N -l' so Delve steps
 #                                             pristinely by disabling inlining/optimization)
 # GOOS, GOARCH, CGO_ENABLED, CGO_*, GOTOOLCHAIN pass through from the environment
@@ -40,6 +41,19 @@ TAGS="${TAGS:-}"
 PROFILE="${PROFILE:-release}"
 GCFLAGS="${GCFLAGS:-}"
 
+# PGO is an explicit release input: an unset value preserves the ordinary build through
+# Go's documented rollback (`-pgo off`), while an explicitly empty or auto-discovered
+# value is refused so a caller cannot silently select a nearby default.pgo.
+if [ "${PGO+x}" = x ] && [ -z "$PGO" ]; then
+  echo "build.sh: PGO must be 'off' or an explicit profile path (empty is ambiguous)" >&2
+  exit 2
+fi
+PGO="${PGO:-off}"
+if [ "$PGO" = "auto" ]; then
+  echo "build.sh: PGO='auto' is not pinned; use 'off' or an explicit profile path" >&2
+  exit 2
+fi
+
 # BuildVersion is stamped in EVERY profile so `fak version` never lies about what ran;
 # only the strip/trim/DWARF posture differs between the shipped and the debuggable builds.
 STAMP="-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${VERSION}"
@@ -48,17 +62,29 @@ case "$PROFILE" in
   release)
     # Shipped: strip symbols + DWARF (-s -w) and trim host paths (-trimpath) for a
     # reproducible-ready static binary. The one recipe every consumer above inherits.
-    set -- -trimpath -ldflags "-s -w ${STAMP}"
+    if [ "$PGO" != "off" ] && { [ ! -f "$PGO" ] || [ ! -r "$PGO" ] || [ ! -s "$PGO" ]; }; then
+      echo "build.sh: PGO profile is not a non-empty readable regular file: $PGO" >&2
+      exit 2
+    fi
+    set -- -pgo "$PGO" -trimpath -ldflags "-s -w ${STAMP}"
     ;;
   dev)
     # Debuggable: keep DWARF/symbols (no -s -w) and host paths (no -trimpath) so Delve
     # can set a breakpoint and step; still stamp BuildVersion.
+    if [ "$PGO" != "off" ]; then
+      echo "build.sh: PGO profiles are release-only; PROFILE=dev requires PGO=off" >&2
+      exit 2
+    fi
     set -- -ldflags "${STAMP}"
     [ -n "$GCFLAGS" ] && set -- "$@" -gcflags "$GCFLAGS"
     ;;
   race)
     # Debuggable + the race detector. -race REQUIRES cgo (the caller sets CGO_ENABLED=1);
     # the result is instrumented and NOT the static pure-Go binary the other profiles emit.
+    if [ "$PGO" != "off" ]; then
+      echo "build.sh: PGO profiles are release-only; PROFILE=race requires PGO=off" >&2
+      exit 2
+    fi
     set -- -race -ldflags "${STAMP}"
     [ -n "$GCFLAGS" ] && set -- "$@" -gcflags "$GCFLAGS"
     ;;

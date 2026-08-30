@@ -168,6 +168,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	count := fs.Int("count", 2, "number of account session slots to allocate")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	freshStartCap := fs.Int("fresh-start-cap", dispatchWaveDefaultFreshCap, "maximum never-attempted issues admitted this wave (attempted WIP is not counted)")
+	finishFirstOverride := fs.Bool("finish-first-override", false, "explicitly admit the configured fresh-start cap despite a finish-first progress hold")
 	backend := fs.String("backend", "codex", "worker backend (claude|opencode|codex); default codex")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to each tick")
@@ -223,7 +224,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	preflightResult, preflightErr := dispatchWaveDependencyRetry(3*dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
+	preflightResult, preflightErr := dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
 		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
 		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, err
 	})
@@ -236,8 +237,14 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 	product, allocationCount, preflightShortfall, preflight := preflightResult.Product, preflightResult.AllocationCount, preflightResult.Shortfall, preflightResult.Payload
+	finishFirstAdmission := loadDispatchFinishFirstAdmission(root, *freshStartCap, allocationCount, *finishFirstOverride)
+	*freshStartCap = finishFirstAdmission.AllowedFreshStarts
+	if preflight != nil {
+		preflight["finish_first_admission"] = finishFirstAdmission
+	}
 
 	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, allocationCount, preflight)
+	rec["finish_first_admission"] = finishFirstAdmission
 	dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
 	if allocationCount <= 0 {
 		rec["granted"] = 0

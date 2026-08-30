@@ -18,8 +18,9 @@ func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
 	if receipt.Snapshot == "" || receipt.LoopHealth == nil || receipt.PerformanceRSIDebt == nil || receipt.DominantBottleneck == "" {
 		t.Fatalf("scored receipt is missing bounded score evidence: %+v", receipt)
 	}
+	assertSingleInvocationOutcome(t, receipt.InvocationOutcomes, OutcomeSuccess)
 	rendered := FormatLoopTurnReceipt(receipt)
-	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`} {
+	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`, `"invocation_outcomes":{"success":1,"refusal":0,"error":0}`} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered receipt missing %q: %s", want, rendered)
 		}
@@ -27,7 +28,15 @@ func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
 }
 
 func TestScoreLoopTurnMakesUnavailableInputExplicitAndNonfatal(t *testing.T) {
-	for _, input := range []string{"", filepath.Join(t.TempDir(), "missing.json")} {
+	tests := []struct {
+		input   string
+		outcome InvocationOutcome
+	}{
+		{input: "", outcome: OutcomeRefusal},
+		{input: filepath.Join(t.TempDir(), "missing.json"), outcome: OutcomeError},
+	}
+	for _, tc := range tests {
+		input := tc.input
 		receipt := ScoreLoopTurn(input)
 		if receipt.Schema != LoopTurnSchema || receipt.Status != LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
 			t.Fatalf("input %q receipt header=%+v", input, receipt)
@@ -38,7 +47,30 @@ func TestScoreLoopTurnMakesUnavailableInputExplicitAndNonfatal(t *testing.T) {
 		if receipt.LoopHealth != nil || receipt.PerformanceRSIDebt != nil {
 			t.Fatalf("input %q invented score data: %+v", input, receipt)
 		}
+		assertSingleInvocationOutcome(t, receipt.InvocationOutcomes, tc.outcome)
+		assertFormattedInvocationOutcome(t, receipt, tc.outcome)
 	}
+}
+
+func assertSingleInvocationOutcome(t *testing.T, counts OutcomeCounts, want InvocationOutcome) {
+	t.Helper()
+	if counts.Total() != 1 {
+		t.Fatalf("invocation outcome total = %d, want 1: %+v", counts.Total(), counts)
+	}
+	wantCounts := OutcomeCounts{}
+	wantCounts.observe(want)
+	if counts != wantCounts {
+		t.Fatalf("invocation outcomes = %+v, want %+v", counts, wantCounts)
+	}
+}
+
+func assertFormattedInvocationOutcome(t *testing.T, receipt LoopTurnReceipt, want InvocationOutcome) {
+	t.Helper()
+	var formatted LoopTurnReceipt
+	if err := json.Unmarshal([]byte(FormatLoopTurnReceipt(receipt)), &formatted); err != nil {
+		t.Fatalf("formatted receipt is not queryable JSON: %v", err)
+	}
+	assertSingleInvocationOutcome(t, formatted.InvocationOutcomes, want)
 }
 
 func fixture(t *testing.T) Evidence {
@@ -52,7 +84,7 @@ func fixture(t *testing.T) Evidence {
 
 func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 	e := fixture(t)
-	if len(e.Dimensions) != 16 {
+	if len(e.Dimensions) != 16 { //boundarylint:ignore CHANGE_DETECTOR_TEST the scorecard schema exposes exactly 16 named dimensions and this test guards that schema
 		t.Fatalf("got %d", len(e.Dimensions))
 	}
 	a := Score(e)
@@ -450,13 +482,20 @@ func TestRenderersAndComparison(t *testing.T) {
 	if err := Compare(&r, prior); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(RenderHuman(r), "dominant bottleneck") || !strings.Contains(RenderMarkdown(r), "Normalized ratio") {
-		t.Fatal("renderer missing fields")
+	human := RenderHuman(r)
+	markdown := RenderMarkdown(r)
+	for name, rendered := range map[string]string{"human": human, "Markdown": markdown} {
+		for _, want := range []string{"invocation outcomes", "success=1", "refusal=0", "error=0"} {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("%s renderer missing %q: %s", name, want, rendered)
+			}
+		}
 	}
 	b, err := MarshalJSON(r)
-	if err != nil || !bytes.Contains(b, []byte(`"comparison"`)) {
+	if err != nil || !bytes.Contains(b, []byte(`"comparison"`)) || !bytes.Contains(b, []byte(`"invocation_outcomes"`)) {
 		t.Fatalf("json: %v", err)
 	}
+	assertSingleInvocationOutcome(t, r.InvocationOutcomes, OutcomeSuccess)
 }
 func TestNativeProvenanceAndNoLlamaFallback(t *testing.T) {
 	e := fixture(t)
@@ -1064,8 +1103,20 @@ func TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths(t *testing.T) {
 	if err := os.WriteFile(malformed, []byte(`{"schema":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	strictInvalid := filepath.Join(t.TempDir(), "strict-invalid.json")
+	if err := os.WriteFile(strictInvalid, []byte(`{"schema":"not-performance-rsi-v1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	for _, input := range []string{malformed, t.TempDir()} {
+	for _, tc := range []struct {
+		input   string
+		outcome InvocationOutcome
+	}{
+		{input: malformed, outcome: OutcomeRefusal},
+		{input: strictInvalid, outcome: OutcomeRefusal},
+		{input: t.TempDir(), outcome: OutcomeError},
+	} {
+		input := tc.input
 		receipt := ScoreLoopTurn(input)
 		if receipt.Status != LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
 			t.Fatalf("input %q receipt header = %+v", input, receipt)
@@ -1076,6 +1127,8 @@ func TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths(t *testing.T) {
 		if receipt.LoopHealth != nil || receipt.PerformanceRSIDebt != nil || receipt.DominantBottleneck != "" {
 			t.Fatalf("input %q invented score data: %+v", input, receipt)
 		}
+		assertSingleInvocationOutcome(t, receipt.InvocationOutcomes, tc.outcome)
+		assertFormattedInvocationOutcome(t, receipt, tc.outcome)
 	}
 }
 

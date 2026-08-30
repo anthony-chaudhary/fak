@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,7 +137,17 @@ func TestRunAccountsStatusIncludesDiscoveredCodexHomes(t *testing.T) {
 	if rc := runAccounts(&stdout, &stderr, []string{"status", "--json", "--registry", filepath.Join(root, "accounts.json"), "--home", filepath.Join(root, "claude-home")}); rc != 0 {
 		t.Fatalf("status rc=%d stderr=%s", rc, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), `"name":"blue"`) || !strings.Contains(stdout.String(), `"can_serve":true`) {
+	var report accounts.LoginReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode status: %v\n%s", err, stdout.String())
+	}
+	var found bool
+	for _, seat := range report.Seats {
+		if seat.Name == "blue" && seat.CanServe {
+			found = true
+		}
+	}
+	if !found {
 		t.Fatalf("status omitted ready Codex home:\n%s", stdout.String())
 	}
 }

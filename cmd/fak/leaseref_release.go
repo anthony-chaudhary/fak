@@ -27,6 +27,9 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	holder := fs.String("holder", "", "the holder identity that owns the lease")
 	gen := fs.Int64("generation", 0, "the fencing token from acquire (0 = don't check the token)")
 	force := fs.Bool("force", false, "operator override: delete the record without the holder check")
+	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
+	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
+	announceRepo := fs.String("announce-repo", "", "owner/repo for --announce=on")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -54,7 +57,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 			return 1
 		}
-		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec)
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 		return emitLeaserefJSON(stdout, stderr, leaseref.FenceVerdict{
 			OK:     true,
 			Detail: "lease " + *id + " force-released (holder check skipped)",
@@ -62,7 +65,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	}
 	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
 	if err == nil && v.OK {
-		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec)
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })
 }

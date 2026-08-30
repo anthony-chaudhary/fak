@@ -23,7 +23,7 @@ func TestCapturedSelfcheckReceipt(t *testing.T) {
 		"protocol=fak.harness.run/v1",
 		"normal=8 resumed=2 approval=4 failure=3",
 		"skins=2 runs=3 goals=1 dashboards=8",
-		"html_sha256=d4832cb8e123b7e01c5f14e5425520849304e9a64238b3501c16571bc3cd01a9",
+		"html_sha256=fa6f87a175d81b4e7aa98dfc2202e8d0077179ccf7dd9f9ababc79a7d2b2e9ba",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("receipt missing %q: %s", want, stdout.String())

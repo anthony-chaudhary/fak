@@ -24,7 +24,8 @@ package devcmd
 //	                         the sectioned AGENTS.md view (#3535): a compact resident
 //	                         TOC by default, ranked sections for a query, --section <slug>
 //	                         / --full for byte-exact bodies, --write-resident to (re)write
-//	                         the resident TOC block into CLAUDE.md
+//	                         the resident TOC block into CLAUDE.md; --for <path> resolves
+//	                         the trusted effective root-to-target hierarchy (#9391)
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -74,6 +75,11 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 	agentsSection := fs.String("section", "", "fak-dev index agents: emit one AGENTS.md section by slug")
 	agentsFull := fs.Bool("full", false, "fak-dev index agents: emit the whole AGENTS.md verbatim")
 	agentsWriteResident := fs.Bool("write-resident", false, "fak-dev index agents: (re)write the resident TOC block into CLAUDE.md")
+	agentsFor := fs.String("for", "", "fak-dev index agents: resolve effective instructions for a target path")
+	var agentsFallbacks stringListFlag
+	fs.Var(&agentsFallbacks, "fallback", "fak-dev index agents: lower-precedence instruction file name (repeatable)")
+	agentsMaxBytes := fs.Int64("max-bytes", 0, "fak-dev index agents: shared effective-instruction byte budget")
+	agentsTrust := fs.Bool("trust", false, "fak-dev index agents: mark caller-verified sources trusted")
 	// Parse flags that may appear ANYWHERE around the positional query (the natural
 	// `fak-dev index leaf cache --limit 6` order), not just before it. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection.
@@ -137,7 +143,8 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 	case "execaudit", "executables", "exec":
 		return indexExecAudit(stdout, stderr, rootDir, *asJSON, *limit)
 	case "agents", "agentsmd", "agent":
-		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
+		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident,
+			*agentsFor, []string(agentsFallbacks), *agentsMaxBytes, *agentsTrust)
 
 	case "ownership":
 		return indexOwnership(stdout, stderr, rootDir, args, *asJSON)
@@ -154,6 +161,14 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		writeIndexUsage(stderr)
 		return 2
 	}
+}
+
+type stringListFlag []string
+
+func (v *stringListFlag) String() string { return strings.Join(*v, ",") }
+func (v *stringListFlag) Set(value string) error {
+	*v = append(*v, value)
+	return nil
 }
 
 func isIndexSubcommand(s string) bool {
@@ -411,9 +426,9 @@ func writeIndexUsage(w io.Writer) {
   fak-dev index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
   fak-dev index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
   fak-dev index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
-  fak-dev index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
+  fak-dev index agents [<query>]  sectioned AGENTS.md view; --for PATH resolves the effective hierarchy
   fak-dev index graph             HEAD-only Markdown reachability census under named resolver rules
-  flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
+  flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident  --for PATH  --fallback NAME  --max-bytes N  --trust
 `)
 }
 

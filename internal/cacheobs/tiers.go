@@ -382,6 +382,8 @@ type TierStats struct {
 type TierReport struct {
 	Tiers []TierStats  `json:"tiers"`
 	Total TierCounters `json:"total"`
+	// RejectedTierAccesses is observer-owned admission telemetry, not a tier row.
+	RejectedTierAccesses uint64 `json:"rejected_tier_accesses"`
 }
 
 // defaultTierStatus is the tier support this BUILD ships, and it is a statement about the
@@ -424,10 +426,15 @@ func (o *Observer) DeclareTier(tier CacheTier, status TierStatus) {
 // mis-attribute. Bytes and latency are folded only when the access says it measured them.
 // Safe for concurrent use.
 func (o *Observer) ObserveTier(a TierAccess) {
-	if o == nil || !a.valid() {
+	if o == nil {
 		return
 	}
 	o.mu.Lock()
+	if !a.valid() {
+		o.rejectedTierAccesses = saturatingAddU64(o.rejectedTierAccesses, 1)
+		o.mu.Unlock()
+		return
+	}
 	o.observeTierLocked(a)
 	o.mu.Unlock()
 }
@@ -477,6 +484,7 @@ func (o *Observer) observeTierLocked(a TierAccess) {
 func (o *Observer) TierSnapshot() TierReport {
 	rows := make(map[tierKey]tierTotals)
 	status := make(map[CacheTier]TierStatus, int(numCacheTiers))
+	var rejected uint64
 	if o != nil {
 		o.mu.Lock()
 		for k, v := range o.tierRows {
@@ -485,9 +493,10 @@ func (o *Observer) TierSnapshot() TierReport {
 		for t, s := range o.tierStatus {
 			status[t] = s
 		}
+		rejected = o.rejectedTierAccesses
 		o.mu.Unlock()
 	}
-	rep := TierReport{Tiers: make([]TierStats, 0, int(numCacheTiers))}
+	rep := TierReport{Tiers: make([]TierStats, 0, int(numCacheTiers)), RejectedTierAccesses: rejected}
 	var grand tierTotals
 	for _, tier := range AllTiers() {
 		ts := TierStats{Tier: tier.String(), Status: status[tier].String()}

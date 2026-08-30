@@ -2,10 +2,10 @@ package gateway
 
 // l3share.go — child D of the L3 disaggregated-cache epic (#75 / epic #504; study
 // docs/notes/L3-DISAGGREGATED-CACHE-REIMAGINED.md §4 Option D + §3 G1+G4): make
-// CAMA's riskiest optimization — cross-tenant prefix-sharing on an external L3 tier —
+// the reference cache's riskiest optimization — cross-tenant prefix-sharing on an external L3 tier —
 // PROVABLY SAFE on the read path.
 //
-// THE EDGE. An external L3 KV store (CAMA is the reference target) shares prefixes:
+// THE EDGE. The external L3 reference store shares prefixes:
 // two requests with the same prefix hit the same content-addressed L3 pages. That is
 // its headline efficiency win and its sharpest unguarded edge — the store "does NOT
 // verify content", so it cannot tell a SAFE share (a public system prompt — share

@@ -1,0 +1,87 @@
+{
+  "schema": "fak.harnesskit-upgrade-witness/v1",
+  "plan_schema": "fak.harnesskit-upgrade-plan/v1",
+  "supported_n_minus_one": {
+    "schema_version": "fak.harnesskit-compatibility-report/v1",
+    "compatible": true,
+    "contract_version": "v1alpha1",
+    "host_contract": "v1alpha1",
+    "contract_reason": "compatible",
+    "outcomes": [
+      {
+        "name": "events.trace",
+        "required": false,
+        "compatible": false,
+        "reason": "capability_absent",
+        "min_revision": 1,
+        "max_revision": 1,
+        "detail": "host did not explicitly offer this capability"
+      },
+      {
+        "name": "tools.invoke",
+        "required": true,
+        "compatible": true,
+        "reason": "compatible",
+        "min_revision": 1,
+        "max_revision": 2,
+        "required_status": "stable",
+        "offered_revision": 2,
+        "offered_status": "stable",
+        "detail": "explicit offer satisfies the declared range"
+      }
+    ]
+  },
+  "supported_allowed": true,
+  "incompatible_refusal": {
+    "schema_version": "fak.harnesskit-compatibility-report/v1",
+    "compatible": false,
+    "contract_version": "v1alpha1",
+    "host_contract": "v1alpha1",
+    "contract_reason": "compatible",
+    "outcomes": [
+      {
+        "name": "events.trace",
+        "required": false,
+        "compatible": false,
+        "reason": "capability_absent",
+        "min_revision": 1,
+        "max_revision": 1,
+        "detail": "host did not explicitly offer this capability"
+      },
+      {
+        "name": "tools.invoke",
+        "required": true,
+        "compatible": false,
+        "reason": "revision_above_maximum",
+        "min_revision": 1,
+        "max_revision": 2,
+        "required_status": "stable",
+        "offered_revision": 3,
+        "offered_status": "stable",
+        "detail": "host revision 3 exceeds maximum 2"
+      }
+    ]
+  },
+  "incompatible_allowed": false,
+  "refusal_steps": [
+    {
+      "code": "block_required_incompatibility",
+      "capability": "tools.invoke",
+      "blocking": true,
+      "detail": "revision_above_maximum: host revision 3 exceeds maximum 2"
+    },
+    {
+      "code": "review_optional_gap",
+      "capability": "events.trace",
+      "blocking": false,
+      "detail": "capability_absent: host did not explicitly offer this capability"
+    },
+    {
+      "code": "review_behavioral_change",
+      "capability": "tools.invoke",
+      "blocking": false,
+      "detail": "capability semantics revision changed (revision)"
+    }
+  ],
+  "readout": "harnesskit compatibility refused: tools.invoke: revision_above_maximum (host revision 3 exceeds maximum 2)"
+}

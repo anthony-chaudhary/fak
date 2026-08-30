@@ -26,7 +26,17 @@ func collectHostSnapshot() (hostSnapshot, error) {
 // native command's stdout. Command failures are handled by the caller as
 // unavailable fields rather than synthesized zero-valued observations.
 func runDarwinNativeCommand(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	var cmd *exec.Cmd
+	switch name {
+	case "/usr/bin/vm_stat":
+		cmd = exec.CommandContext(ctx, "/usr/bin/vm_stat", args...)
+	case "/usr/sbin/sysctl":
+		cmd = exec.CommandContext(ctx, "/usr/sbin/sysctl", args...)
+	case "/bin/ps":
+		cmd = exec.CommandContext(ctx, "/bin/ps", args...)
+	default:
+		return "", fmt.Errorf("unsupported Darwin native command %q", name)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err

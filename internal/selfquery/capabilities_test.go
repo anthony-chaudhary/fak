@@ -186,6 +186,35 @@ func TestCapabilitiesDiscoversRuntimeEfficiencyOutcomes(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesDiscoversNativePerformanceStagesFromSharedCatalog(t *testing.T) {
+	catalog := &Catalog{}
+	tests := []struct {
+		query   string
+		detail  string
+		command string
+	}{
+		{"serve native model", "docs/model-engine-env.md", "fak serve --gguf <model.gguf> --metal"},
+		{"benchmark native inference", "docs/model-engine-env.md", "fak benchmarks describe modelbench"},
+		{"evaluate model quality", "docs/quality/output-quality-regression-runbook.md", "fak quality run --json"},
+		{"profile native bottleneck", "docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md", "fak native-performance --profile-next profile.json"},
+		{"performance receipt", "docs/benchmarks/NATIVE-PERFORMANCE-REGRESSION-GATE.md", "fak native-performance --gate gate-request.json"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			got, err := catalog.Capabilities(CapabilitiesRequest{Query: tc.query, Limit: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Cards) != 1 || got.Cards[0].DetailRef != tc.detail {
+				t.Fatalf("Capabilities(%q) = %#v, want detail %q first", tc.query, got.Cards, tc.detail)
+			}
+			if command := strings.Join(got.Cards[0].Request.Command, " "); command != tc.command {
+				t.Fatalf("Capabilities(%q) command = %q, want %q", tc.query, command, tc.command)
+			}
+		})
+	}
+}
+
 func cardIDs(cards []FeatureCard) []string {
 	ids := make([]string, 0, len(cards))
 	for _, card := range cards {

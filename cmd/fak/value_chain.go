@@ -127,9 +127,6 @@ func recordDispatchValueChainUsage(root string, payload map[string]any, at time.
 }
 
 func defaultValueChainLedger() string {
-	if path := os.Getenv("FAK_VALUE_CHAIN_LEDGER"); path != "" {
-		return path
-	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""

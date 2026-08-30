@@ -50,8 +50,10 @@ func TestJoinDarwinMemorySnapshotRejectsIncompleteRows(t *testing.T) {
 	if len(snapshot.Processes) != 2 {
 		t.Fatalf("partial ownership must remain available for fail-closed reap: %+v", snapshot.Processes)
 	}
-	if _, detail := joinDarwinMemorySnapshot(100, census, relations[1:]); !strings.Contains(detail, "root pid 100 missing") {
-		t.Fatalf("missing root relation detail=%q", detail)
+	if _, detail := joinDarwinMemorySnapshotWithProbe(100, census, relations[1:], func(int) (bool, error) {
+		return true, nil
+	}); !strings.Contains(detail, "root pid 100 missing") {
+		t.Fatalf("live missing root relation detail=%q", detail)
 	}
 }
 
@@ -85,7 +87,34 @@ func TestJoinDarwinMemorySnapshotSkipsExitedDescendants(t *testing.T) {
 	}
 }
 
-func TestJoinDarwinMemorySnapshotKeepsRootAndProbeFailuresFatal(t *testing.T) {
+func TestJoinDarwinMemorySnapshotTreatsMissingExitedRootAsExitChurn(t *testing.T) {
+	snapshot, detail := joinDarwinMemorySnapshotWithProbe(100, nil, nil, func(pid int) (bool, error) {
+		if pid != 100 {
+			t.Fatalf("probe pid=%d, want root", pid)
+		}
+		return false, nil
+	})
+	if detail != "" {
+		t.Fatalf("vanished root must defer to child wait path, detail=%q snapshot=%+v", detail, snapshot)
+	}
+	if snapshot.RootPID != 0 || len(snapshot.Processes) != 0 {
+		t.Fatalf("vanished-root terminal snapshot=%+v", snapshot)
+	}
+}
+
+func TestJoinDarwinMemorySnapshotKeepsLiveRootAndProbeFailuresFatal(t *testing.T) {
+	if _, detail := joinDarwinMemorySnapshotWithProbe(100, nil, nil, func(int) (bool, error) {
+		return true, nil
+	}); !strings.Contains(detail, "root pid 100 missing from relation census") {
+		t.Fatalf("live missing relation root detail=%q", detail)
+	}
+	probeErr := errors.New("liveness unavailable")
+	if _, detail := joinDarwinMemorySnapshotWithProbe(100, nil, nil, func(int) (bool, error) {
+		return false, probeErr
+	}); !strings.Contains(detail, "probe missing relation root pid 100: liveness unavailable") {
+		t.Fatalf("missing relation root probe failure detail=%q", detail)
+	}
+
 	relations := []Proc{
 		{PID: 100, PPID: IntPtr(1), Name: "root"},
 		{PID: 101, PPID: IntPtr(100), Name: "child"},
@@ -98,12 +127,36 @@ func TestJoinDarwinMemorySnapshotKeepsRootAndProbeFailuresFatal(t *testing.T) {
 		t.Fatalf("missing root detail=%q", detail)
 	}
 
-	probeErr := errors.New("liveness unavailable")
 	census := []Proc{{PID: 100, Name: "root", WSMB: IntPtr(11)}}
 	if _, detail := joinDarwinMemorySnapshotWithProbe(100, census, relations, func(int) (bool, error) {
 		return false, probeErr
 	}); !strings.Contains(detail, "probe missing rss pid 101: liveness unavailable") {
 		t.Fatalf("probe failure detail=%q", detail)
+	}
+}
+
+func TestCollectDarwinMemorySnapshotStopsQuietlyWhenRootExitsBeforeRelationCensus(t *testing.T) {
+	censusCalls := 0
+	relationCalls := 0
+	probed := 0
+	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(100, func() ([]Proc, string) {
+		censusCalls++
+		return nil, ""
+	}, func() ([]Proc, string) {
+		relationCalls++
+		return nil, ""
+	}, func(pid int) (bool, error) {
+		probed++
+		if pid != 100 {
+			t.Fatalf("probe pid=%d, want root", pid)
+		}
+		return false, nil
+	})
+	if detail != "" || snapshot.RootPID != 0 {
+		t.Fatalf("vanished root must produce a terminal sample: detail=%q snapshot=%+v", detail, snapshot)
+	}
+	if censusCalls != 1 || relationCalls != 1 || probed != 1 {
+		t.Fatalf("collections census=%d relations=%d probes=%d, want one graceful terminal sample", censusCalls, relationCalls, probed)
 	}
 }
 

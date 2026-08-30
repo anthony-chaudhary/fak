@@ -10,12 +10,14 @@ import (
 )
 
 func TestTokenEffectivenessCoversEveryDefaultSaver(t *testing.T) {
-	report := buildTokenEffectivenessReport(collectTokenDefaultsScorecard(repoRoot()))
+	scorecard := collectTokenDefaultsScorecard(repoRoot())
+	report := buildTokenEffectivenessReport(scorecard)
 	if report.OK || report.Debt != 1 {
 		t.Fatalf("report = %+v; want only default-on #3536 blocked as debt (headroom remains visible off+gated)", report)
 	}
-	if len(report.Rows) != 10 {
-		t.Fatalf("rows = %d, want source-derived 10", len(report.Rows))
+	sourceRows := scorecard["corpus"].(map[string]any)["lever_status"].([]map[string]any)
+	if len(report.Rows) != len(sourceRows) {
+		t.Fatalf("rows = %d, want one per source row %d", len(report.Rows), len(sourceRows))
 	}
 	for _, row := range report.Rows {
 		if row.Key == "" || row.Default == "" || row.Configured == "" || row.Owner == "" || row.Mechanism == "" || row.EffectMetric == "" || row.WitnessKind == "" || row.Witness == "" || len(row.Paths) == 0 || row.Control == "" || row.Scope == "" || len(row.Provenance) == 0 {
@@ -33,13 +35,12 @@ func TestTokenEffectivenessCLIJSONAndMissingCoverage(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Schema != "fak-token-effectiveness/2" || len(report.Rows) != 10 {
-		t.Fatalf("report = %+v", report)
-	}
-
 	scorecard := collectTokenDefaultsScorecard(repoRoot())
 	corpus := scorecard["corpus"].(map[string]any)
 	rows := corpus["lever_status"].([]map[string]any)
+	if report.Schema != "fak-token-effectiveness/2" || len(report.Rows) != len(rows) {
+		t.Fatalf("report = %+v; source rows=%d", report, len(rows))
+	}
 	rows[len(rows)-2]["key"] = "new_saver_without_effect_witness"
 	missing := buildTokenEffectivenessReport(scorecard)
 	if missing.OK || missing.Debt != report.Debt+1 || missing.Rows[len(rows)-2].Observed != "missing" {

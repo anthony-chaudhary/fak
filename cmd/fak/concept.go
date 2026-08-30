@@ -208,14 +208,16 @@ func (f *classifyRowsFlag) Set(value string) error {
 }
 
 type conceptClassifyReceipt struct {
-	Schema     string                          `json:"schema"`
-	OK         bool                            `json:"ok"`
-	DryRun     bool                            `json:"dry_run"`
-	Staged     bool                            `json:"staged"`
-	Idempotent bool                            `json:"idempotent"`
-	Rows       []conceptcatalog.ClassifyResult `json:"rows"`
-	Files      []string                        `json:"files"`
-	Timings    conceptcatalog.PhaseTimings     `json:"phase_timings"`
+	Schema            string                          `json:"schema"`
+	OK                bool                            `json:"ok"`
+	DryRun            bool                            `json:"dry_run"`
+	Staged            bool                            `json:"staged"`
+	Idempotent        bool                            `json:"idempotent"`
+	BeforeFamilyCount int                             `json:"before_family_count"`
+	AfterFamilyCount  int                             `json:"after_family_count"`
+	Rows              []conceptcatalog.ClassifyResult `json:"rows"`
+	Files             []string                        `json:"files"`
+	Timings           conceptcatalog.PhaseTimings     `json:"phase_timings"`
 }
 
 func runConceptClassify(out, errw io.Writer, c conceptcatalog.Catalog, args []string) int {
@@ -268,7 +270,7 @@ func emitConceptPlan(out, errw io.Writer, root string, p conceptcatalog.Plan, dr
 		}
 	}
 	if jsonOut {
-		_ = json.NewEncoder(out).Encode(conceptClassifyReceipt{Schema: "fak.concept_classify_receipt.v1", OK: true, DryRun: dry, Staged: stage, Idempotent: len(p.Files) == 0, Rows: p.Classifications, Files: relFiles(p.Files), Timings: p.Timings})
+		_ = json.NewEncoder(out).Encode(conceptClassifyReceipt{Schema: "fak.concept_classify_receipt.v1", OK: true, DryRun: dry, Staged: stage, Idempotent: len(p.Files) == 0, BeforeFamilyCount: p.BeforeFamilyCount, AfterFamilyCount: p.AfterFamilyCount, Rows: p.Classifications, Files: relFiles(p.Files), Timings: p.Timings})
 		return 0
 	}
 	fmt.Fprintf(out, "%s %s: family %d -> %d\n", map[bool]string{true: "PLAN", false: "APPLIED"}[dry], p.Mode, p.BeforeFamilyCount, p.AfterFamilyCount)

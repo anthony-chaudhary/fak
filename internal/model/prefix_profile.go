@@ -3,12 +3,13 @@ package model
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 // PrefixProfileEvent attributes prefix-cache ownership and transfer work. Events
-// are emitted only when FAK_PREFIX_PROFILE names a JSONL file, keeping the normal
+// are emitted only when SetPrefixProfilePath names a JSONL file, keeping the normal
 // decode path free of clocks and I/O.
 type PrefixProfileEvent struct {
 	Schema        string    `json:"schema"`
@@ -27,7 +28,16 @@ type PrefixProfileEvent struct {
 var prefixProfile = struct {
 	sync.Mutex
 	path string
-}{path: os.Getenv("FAK_PREFIX_PROFILE")}
+}{}
+
+// SetPrefixProfilePath explicitly configures the optional prefix-profile JSONL sink.
+// An empty path disables profiling. The setting is process-wide because prefix snapshots
+// are shared across model sessions; callers must configure it before serving requests.
+func SetPrefixProfilePath(path string) {
+	prefixProfile.Lock()
+	prefixProfile.path = strings.TrimSpace(path)
+	prefixProfile.Unlock()
+}
 
 func prefixProfileStart() time.Time {
 	if prefixProfile.path == "" {

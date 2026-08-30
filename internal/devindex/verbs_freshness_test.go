@@ -54,6 +54,33 @@ func TestVerbManifest(t *testing.T) {
 	}
 }
 
+// TestVerbManifestCoversEveryDispatcherVerb is the independent dispatcher-to-
+// manifest parity oracle for the curated C3 surface. Verbs() deliberately falls
+// back for uncurated dispatcher cases, so testing that live view cannot prove the
+// quality overlay is complete; compare the raw dispatch tokens to verbManifest.
+func TestVerbManifestCoversEveryDispatcherVerb(t *testing.T) {
+	root := FindRoot(".")
+	b, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "main.go"))
+	if err != nil {
+		t.Fatalf("read cmd/fak/main.go: %v", err)
+	}
+	manifest := make(map[string]bool)
+	for _, v := range verbManifest {
+		for _, spelling := range v.Spellings() {
+			manifest[strings.ToLower(spelling)] = true
+		}
+	}
+	var missing []string
+	for _, verb := range mainDispatchVerbs(b) {
+		if !manifest[verb] {
+			missing = append(missing, verb)
+		}
+	}
+	if len(missing) != 0 {
+		t.Fatalf("dispatcher verbs missing C3 manifest rows: %s", strings.Join(missing, ", "))
+	}
+}
+
 func TestIdempotencyVerbNamesAmbiguousRecovery(t *testing.T) {
 	cat := &Catalog{Root: FindRoot(".")}
 	v, ok := cat.VerbByName("idempotency")

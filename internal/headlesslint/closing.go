@@ -6,8 +6,8 @@ package headlesslint
 // different run-level question about the SAME final summary: does it CLOSE in a shape
 // the operator can scan? AGENTS.md makes the rule explicit —
 //
-//	Close operator-facing turns with scannable bullets, verdict first; make the last
-//	line a bullet carrying the next checkable step.
+//	Close operator-facing turns with verdict-first bullets, one claim and inline
+//	evidence per line; make the final line the next checkable step.
 //
 // A turn that ends on a trailing multi-sentence prose paragraph buries the verdict and
 // the next step in text the operator has to re-read to act on. ScanClosing is the fold
@@ -31,7 +31,7 @@ import (
 // doctrine stay coupled — TestClosingDoctrineBindsAgentsMd asserts AGENTS.md still
 // carries this exact line, so a reworded rule reds the fold's binding instead of
 // silently drifting. It is the closing-shape twin of leftovers.go's Doctrine.
-const ClosingDoctrine = "Close operator-facing turns with scannable bullets, verdict first; make the last line a bullet carrying the next checkable step."
+const ClosingDoctrine = "Close operator-facing turns with verdict-first bullets, one claim and inline evidence per line;\nmake the final line the next checkable step."
 
 // ClosingSchema is the versioned envelope tag for a ClosingReport.
 const ClosingSchema = "fak-closing-fold/1"

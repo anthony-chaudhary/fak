@@ -41,7 +41,7 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "studyadjacency", Owner: OwnerDev, Rationale: "audits related-runtime research adjacency"},
 	{Path: moduleInternalPrefix + "studyclass", Owner: OwnerDev, Rationale: "classifies repository study evidence"},
 	{Path: moduleInternalPrefix + "studyforge", Owner: OwnerDev, Rationale: "captures forge-history research evidence"},
-	{Path: moduleInternalPrefix + "studylink", Owner: OwnerDev, Rationale: "joins study evidence to witnessed repository work"},
+	{Path: moduleInternalPrefix + "studylink", Owner: OwnerShared, Rationale: "shares the deterministic study-evidence join with the runtime learning-mesh compiler while fak-dev owns repository study-link orchestration"},
 	{Path: moduleInternalPrefix + "studymonitor", Owner: OwnerDev, Rationale: "tracks recurring repository study sources"},
 	{Path: moduleInternalPrefix + "studyprio", Owner: OwnerDev, Rationale: "prioritizes uncovered repository study joins"},
 	{Path: moduleInternalPrefix + "studytickets", Owner: OwnerDev, Rationale: "constructs repository ticket closure from study evidence"},

@@ -27,3 +27,10 @@ This map positions the current `cache` coverage backlog. Each entry names the ex
 - **`readvcachetelemetry`** — the exact `cache` symbol `readvcachetelemetry`; use this spelling for that operation rather than the undifferentiated family name.
 - **`treecache`** — the exact `cache` symbol `treecache`; use this spelling for that operation rather than the undifferentiated family name.
 - **`microcachedemo`** — the exact `cache` symbol `microcachedemo`; use this spelling for that operation rather than the undifferentiated family name.
+
+
+### fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)
+
+fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn.
+
+**Distinct from:** It measures the fraction of turns with any provider cache hit; it is not fak_gateway_inference_cached_prompt_tokens_total, which accumulates the number of cached prompt tokens.

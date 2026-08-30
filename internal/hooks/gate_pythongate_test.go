@@ -62,6 +62,54 @@ func TestPythonToolGate_AgreesWithRatchet(t *testing.T) {
 	}
 }
 
+func TestPythonToolGateAdmitsOnlyDeclaredSyntaxImportedCompanion(t *testing.T) {
+	build := func(testSource string, declare bool) *TrackedTree {
+		root := t.TempDir()
+		files := map[string]string{
+			pythonBaselineFile:    "package pythongate\n\nvar grandfathered = []string{\n\t\"tools/owner.py\",\n}\n",
+			"tools/owner.py":      "def run(): pass\n",
+			"tools/owner_test.py": testSource,
+		}
+		if declare {
+			files[pythonTestCompanionFile] = "package pythongate\n\nvar testCompanions = []TestCompanion{\n\t{\"tools/owner_test.py\", \"tools/owner.py\", \"0123456789012345678901234567890123456789\"},\n}\n"
+		} else {
+			files[pythonTestCompanionFile] = "package pythongate\n\nvar testCompanions = []TestCompanion{}\n"
+		}
+		paths := make([]string, 0, len(files))
+		for rel, body := range files {
+			p := filepath.Join(root, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			paths = append(paths, rel)
+		}
+		return &TrackedTree{Root: root, Paths: paths, fileCache: map[string]fileEntry{}}
+	}
+
+	if findings, err := gatePythonToolTree(build("import owner\n", true)); err != nil || len(findings) != 0 {
+		t.Fatalf("declared syntax import was not admitted: findings=%v err=%v", findings, err)
+	}
+	for _, tc := range []struct {
+		name    string
+		source  string
+		declare bool
+	}{
+		{name: "undeclared", source: "import owner\n"},
+		{name: "docstring spoof", source: "\"\"\"\nimport owner\n\"\"\"\n", declare: true},
+		{name: "invalid syntax", source: "import owner as\n", declare: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, err := gatePythonToolTree(build(tc.source, tc.declare))
+			if err != nil || len(findings) != 1 || findings[0].File != "tools/owner_test.py" {
+				t.Fatalf("companion escaped: findings=%v err=%v", findings, err)
+			}
+		})
+	}
+}
+
 // TestPythonToolGate_FiresOnNewTool: a synthetic tree with a baseline that does NOT list
 // tools/newthing.py must produce exactly one NEW_PYTHON_TOOL finding; adding the row clears
 // it. An untracked scratch .py (absent from Paths) must NOT fire. The nested tools/**/x.py is

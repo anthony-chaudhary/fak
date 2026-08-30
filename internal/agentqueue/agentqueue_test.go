@@ -6,6 +6,7 @@ import (
 )
 
 func snap() Snapshot {
+	//enumlint:exempt This reconciliation fixture deliberately contains only queued and completed intents; state-specific behavior is covered by focused tests below.
 	return Snapshot{Schema: Schema, Generation: "g1", Pool: PoolSpec{ID: "p", Min: 1, Desired: 2, Max: 2}, Intents: []Intent{{ID: "b", State: IntentQueued}, {ID: "a", State: IntentQueued}, {ID: "done", State: IntentCompleted}}}
 }
 func TestDeterministicDuplicateTick(t *testing.T) {

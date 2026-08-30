@@ -57,6 +57,8 @@ func main() {
 	quiet := flag.Bool("quiet", false, "Skip welcome banner")
 	autoDownload := flag.Bool("download", false, "Auto-download default model if not found")
 	backend := flag.String("backend", "", "Compute backend to run through, e.g. cuda (default: the pure-Go Q8 CPU path). Use to prove GPU usage on a build that registered an accelerator.")
+	vulkanQ4KProfile := flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
+	vulkanStageQ4K := flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
 	flag.Parse()
 
 	// Expand a leading ~ at the parse boundary so every downstream path — and the
@@ -103,7 +105,7 @@ func main() {
 	// Pick the compute path. The default is the proven pure-Go Q8 CPU lane; -backend
 	// routes the forward pass through the compute HAL instead — the path that runs on
 	// (and proves usage of) a GPU when this build registered one (e.g. cuda).
-	session, device, err := newSession(m, *backend)
+	session, device, err := newSession(m, *backend, *vulkanQ4KProfile, *vulkanStageQ4K)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(1)
@@ -130,24 +132,28 @@ func main() {
 	}
 
 	chatLoop(&session, m, tok, stops, stats, chatConfig{
-		sys:     *sys,
-		maxNew:  *maxNew,
-		temp:    *temp,
-		seed:    *seed,
-		quiet:   *quiet,
-		backend: *backend,
+		sys:              *sys,
+		maxNew:           *maxNew,
+		temp:             *temp,
+		seed:             *seed,
+		quiet:            *quiet,
+		backend:          *backend,
+		vulkanQ4KProfile: *vulkanQ4KProfile,
+		vulkanStageQ4K:   *vulkanStageQ4K,
 	})
 }
 
 // chatConfig is the run-invariant set of flag values the incremental chat loop reads
 // per turn — bundled so chatLoop keeps a single, stable signature.
 type chatConfig struct {
-	sys     string
-	maxNew  int
-	temp    float64
-	seed    int64
-	quiet   bool
-	backend string
+	sys              string
+	maxNew           int
+	temp             float64
+	seed             int64
+	quiet            bool
+	backend          string
+	vulkanQ4KProfile bool
+	vulkanStageQ4K   bool
 }
 
 // chatLoop runs the interactive REPL: it reads a user line, handles the /exit and
@@ -192,7 +198,7 @@ func chatLoop(session **model.Session, m *model.Model, tok *tokenizer.Tokenizer,
 		}
 		if userMsg == "/clear" {
 			(*session).Close()
-			*session, _, _ = newSession(m, cfg.backend) // backend already validated at startup
+			*session, _, _ = newSession(m, cfg.backend, cfg.vulkanQ4KProfile, cfg.vulkanStageQ4K) // backend already validated at startup
 			cachedIDs = nil
 			firstTurn = true
 			cumReused, cumPrompt = 0, 0
@@ -427,8 +433,11 @@ func printNoModelHelp(quiet bool) {
 // backend routes through the compute HAL (NewBackendSession) — the path that runs on a
 // GPU when this build registered one — and fails loudly (rather than silently on CPU) if
 // the named backend is not compiled into this build.
-func newSession(m *model.Model, backend string) (*model.Session, string, error) {
+func newSession(m *model.Model, backend string, vulkanQ4KProfile, vulkanStageQ4K bool) (*model.Session, string, error) {
 	if backend == "" {
+		if vulkanQ4KProfile || vulkanStageQ4K {
+			return nil, "", fmt.Errorf("-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
+		}
 		s := m.NewSession()
 		s.Quant = true // resident Q8_0 weights — the fast, proven CPU path
 		return s, "cpu (pure-Go Q8 reference)", nil
@@ -438,6 +447,9 @@ func newSession(m *model.Model, backend string) (*model.Session, string, error) 
 		return nil, "", fmt.Errorf("compute backend %q is not registered in this build (have: %s)\n"+
 			"   → rebuild with its build tag on matching hardware, e.g. `go run -tags cuda ./cmd/simpledemo -backend cuda` on an NVIDIA box",
 			backend, strings.Join(compute.Registered(), ", "))
+	}
+	if (vulkanQ4KProfile || vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, vulkanQ4KProfile, vulkanStageQ4K) {
+		return nil, "", fmt.Errorf("-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
 	}
 	// The in-kernel device backends stream f32 weights (widened to f16 on the GPU); they
 	// have no quantized device GEMM, so they cannot serve a GGUF-quantized model loaded

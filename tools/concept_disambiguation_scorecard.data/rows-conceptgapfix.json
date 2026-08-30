@@ -8,7 +8,8 @@
       "definition": "guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_capabilities, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off).",
       "distinction": "The guard HOOK program that runs ONCE at session start to seed the first turn's affordance hint; distinct from the SessionStart EVENT (x-session-runtime-sessionstart) that is merely the trigger it fires on, and from the mid-session guard hooks that gate individual tool calls rather than emitting a first-turn hint.",
       "distinct_from": [
-        "x-session-runtime-sessionstart"
+        "x-session-runtime-sessionstart",
+        "issue10049-guard-session-start-install"
       ],
       "aliases": [],
       "grounding": "guardSessionStart",

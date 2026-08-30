@@ -300,3 +300,18 @@ func TestInventoryCleanAndAmbiguousDoNotOverclaim(t *testing.T) {
 		t.Fatalf("ambiguous row = %+v", rows)
 	}
 }
+
+func TestSamePathResolvesSymlinkedParent(t *testing.T) {
+	realRoot := t.TempDir()
+	realWorktree := filepath.Join(realRoot, "worker")
+	if err := os.Mkdir(realWorktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if !samePath(realWorktree, filepath.Join(aliasRoot, "worker")) {
+		t.Fatalf("samePath did not resolve %q to %q", aliasRoot, realRoot)
+	}
+}

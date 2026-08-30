@@ -267,6 +267,19 @@ func TestContextAdapterApplyIsTypedIdempotentAndReportsPartialFailure(t *testing
 	}
 }
 
+func TestAggregateContextApplyTreatsSkippedAsNeutral(t *testing.T) {
+	skipped := ContextActionResult{}
+	skipped.Status = ContextActionSkipped
+	if got := aggregateContextApply([]ContextActionResult{skipped}); got != ContextApplyNoOp {
+		t.Fatalf("skipped-only aggregate = %s, want %s", got, ContextApplyNoOp)
+	}
+	applied := ContextActionResult{}
+	applied.Status = ContextActionApplied
+	if got := aggregateContextApply([]ContextActionResult{applied, skipped}); got != ContextApplyApplied {
+		t.Fatalf("applied+skipped aggregate = %s, want %s", got, ContextApplyApplied)
+	}
+}
+
 func TestContextAdapterActionVocabularyIsClosedAndStalePlansFailClosed(t *testing.T) {
 	for _, kind := range []ContextActionKind{
 		ContextActionPin,

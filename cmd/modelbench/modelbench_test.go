@@ -28,10 +28,11 @@ import (
 
 func testBool(v bool) *bool { return &v }
 
-func testString(v string) *string                 { return &v }
-func testInt(v int) *int                          { return &v }
-func testFloat64(v float64) *float64              { return &v }
-func testDuration(v time.Duration) *time.Duration { return &v }
+func testString(v string) *string                                                      { return &v }
+func testInt(v int) *int                                                               { return &v }
+func testFloat64(v float64) *float64                                                   { return &v }
+func testDuration(v time.Duration) *time.Duration                                      { return &v }
+func testDecodeHandoff(v model.Qwen35DecodeHandoffMode) *model.Qwen35DecodeHandoffMode { return &v }
 
 type testCloser func() error
 
@@ -44,18 +45,18 @@ func testCompleteBenchFlags() *benchFlags {
 		name: testString(""), out: testString(""), prefillSizesCSV: testString("16"),
 		prefillReps: testInt(1), decodeReps: testInt(1), decodeSteps: testInt(1), decodePrompt: testInt(1),
 		quant: testBool(false), metal: testBool(false), verify: testBool(false),
-		backendName: testString("legacy"), requireNonReference: testBool(false),
+		backendName: testString("legacy"), q4kGateUpSlab: testBool(false), vulkanQ4KProfile: testBool(false), vulkanStageQ4K: testBool(false), requireNonReference: testBool(false),
 		workloadPath: testString(""), workloadPrefillCap: testInt(0), loadOnly: testBool(false),
 		loadProfile: testBool(false), loadProfileTrace: testBool(false), loadProfileTraceEvery: testInt(25),
 		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
 		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
 		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
-		nativeProfileCompare: testString(""),
+		nativeProfileCompare: testString(""), nativeDecodeHandoff: testDecodeHandoff(model.Qwen35DecodeHandoffAuto),
 	}
 }
 
 func testBenchFlags(q4k, quant, metal bool) *benchFlags {
-	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal)}
+	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal), q4kGateUpSlab: testBool(false)}
 }
 
 func TestStreamQ4KValidation(t *testing.T) {
@@ -574,6 +575,17 @@ func TestQ4KMetalSessionFlagsUseMetalQ4K(t *testing.T) {
 	}
 }
 
+func TestQ4KSlabExplicitFlagReachesModelbenchSession(t *testing.T) {
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	f := testBenchFlags(true, false, false)
+	*f.q4kGateUpSlab = true
+	s := &model.Session{}
+	applyLegacySessionFlags(s, f)
+	if !s.Q4KGateUpOutputSlab {
+		t.Fatal("explicit modelbench Q4_K slab setting did not reach session")
+	}
+}
+
 func TestQ8MetalSessionFlagsKeepMetalLane(t *testing.T) {
 	f := testBenchFlags(false, true, true)
 	s := &model.Session{}
@@ -640,6 +652,7 @@ func testNativeProfileControls() map[string]string {
 	}
 	controls[nativeControlGGUFMMap] = "1"
 	controls[nativeProfileSequenceSelector] = nativeProfileSelectorOff
+	controls[nativeProfileDecodeHandoffControl] = model.Qwen35DecodeHandoffAuto.String()
 	controls[nativeControlFlagBudget] = "0"
 	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
 	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
@@ -659,7 +672,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 	required[nativeControlGGUFMMap] = "0"
 	declarations = append(declarations, nativeControlGGUFMMap+"=0")
 	lookup := func(key string) (string, bool) { value, ok := required[key]; return value, ok }
-	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0); err != nil {
+	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0, model.Qwen35DecodeHandoffAuto); err != nil {
 		t.Fatalf("documented control envelope rejected: %v", err)
 	}
 	for _, selector := range []string{nativeProfileSelectorOff, nativeProfileSelectorOn} {
@@ -668,11 +681,26 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 			env[nativeProfileSequenceSelector] = selector
 			decls := append(append([]string(nil), declarations...), nativeProfileSequenceSelector+"="+selector)
 			lookup := func(key string) (string, bool) { value, ok := env[key]; return value, ok }
-			controls, err := nativeProfileControlEnvironment(lookup, decls, 0)
+			controls, err := nativeProfileControlEnvironment(lookup, decls, 0, model.Qwen35DecodeHandoffAuto)
 			if err != nil || controls[nativeProfileSequenceSelector] != selector {
 				t.Fatalf("typed selector rejected or not captured: controls=%v err=%v", controls, err)
 			}
 		})
+	}
+	for _, mode := range []model.Qwen35DecodeHandoffMode{model.Qwen35DecodeHandoffControl, model.Qwen35DecodeHandoffMixer} {
+		t.Run("graded handoff "+mode.String(), func(t *testing.T) {
+			env := mapsStringClone(required)
+			env[nativeProfileSequenceSelector] = nativeProfileSelectorOn
+			decls := append(append([]string(nil), declarations...), nativeProfileSequenceSelector+"="+nativeProfileSelectorOn)
+			lookup := func(key string) (string, bool) { value, ok := env[key]; return value, ok }
+			controls, err := nativeProfileControlEnvironment(lookup, decls, 0, mode)
+			if err != nil || controls[nativeProfileDecodeHandoffControl] != mode.String() {
+				t.Fatalf("graded handoff rejected or missing: controls=%v err=%v", controls, err)
+			}
+		})
+	}
+	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0, model.Qwen35DecodeHandoffControl); err == nil {
+		t.Fatal("CONTROL accepted without sequence ON")
 	}
 
 	tests := []struct {
@@ -708,7 +736,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 				decls = append(decls, test.declaration)
 			}
 			lookup := func(key string) (string, bool) { value, ok := env[key]; return value, ok }
-			if _, err := nativeProfileControlEnvironment(lookup, decls, test.budget); err == nil {
+			if _, err := nativeProfileControlEnvironment(lookup, decls, test.budget, model.Qwen35DecodeHandoffAuto); err == nil {
 				t.Fatal("behavior-changing control was accepted")
 			}
 		})
@@ -760,6 +788,7 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 		t.Fatal(err)
 	}
 	q4kResidency := (&model.Model{}).Q4KResidencyReceipt()
+	handoffReceipt := model.Qwen35DecodeHandoffReceipt{Mode: model.Qwen35DecodeHandoffAuto}
 	receipt := nativeProfileReceipt{
 		Schema:        nativeProfileReceiptSchema,
 		ProfileSHA256: fmt.Sprintf("%x", profileSHA),
@@ -769,13 +798,14 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 			Model:              "unsloth/Qwen3.8-27B-GGUF", ModelRevision: "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
 		},
 		ModelConfig: config, ModelConfigSHA256: configSHA,
-		Host:         nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
-		Source:       nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
-		Binary:       nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
-		Controls:     testNativeProfileControls(),
-		Execution:    execution,
-		Fallbacks:    model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
-		Q4KResidency: &q4kResidency,
+		Host:                nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
+		Source:              nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
+		Binary:              nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
+		Controls:            testNativeProfileControls(),
+		Execution:           execution,
+		Fallbacks:           model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+		Q4KResidency:        &q4kResidency,
+		Qwen35DecodeHandoff: &handoffReceipt,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -813,6 +843,9 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 	// v1 writer omits it and retains its original binding shape, so readback stays compatible.
 	legacy := receipt
 	legacy.Q4KResidency = nil
+	legacy.Qwen35DecodeHandoff = nil
+	legacy.Controls = mapsStringClone(receipt.Controls)
+	delete(legacy.Controls, nativeProfileDecodeHandoffControl)
 	legacy.BindingSHA256, _ = nativeReceiptBinding(legacy)
 	if err := validateNativeProfileReceipt(profileBytes, profile, legacy); err != nil {
 		t.Fatalf("legacy v1 receipt rejected: %v", err)
@@ -834,6 +867,7 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 		{name: "residency count", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.MappedSuccess.Tensors++ }},
 		{name: "residency control", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.FAKGGUFMMap = "0" }},
 		{name: "residency digest", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.IntegritySHA256 = strings.Repeat("d", 64) }},
+		{name: "handoff mode", edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.Mode = model.Qwen35DecodeHandoffMixer }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -843,6 +877,8 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 			copy.Execution.Events = append([]metalgemm.ExecutionEvent(nil), receipt.Execution.Events...)
 			q4kResidencyCopy := *receipt.Q4KResidency
 			copy.Q4KResidency = &q4kResidencyCopy
+			handoffCopy := *receipt.Qwen35DecodeHandoff
+			copy.Qwen35DecodeHandoff = &handoffCopy
 			test.edit(&copy)
 			if err := validateNativeProfileReceipt(profileBytes, profile, copy); err == nil {
 				t.Fatal("tampered receipt was accepted")

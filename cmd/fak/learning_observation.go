@@ -30,7 +30,7 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 		source := fs.String("source", "", "source provenance")
 		content := fs.String("content", "", "record content")
 		outcome := fs.String("outcome", "", "verdict outcome: kept or rejected")
-		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		store, code := parseLearningObservationStore(fs, argv[1:], storePath, stderr)
 		if code != 0 {
 			return code
 		}
@@ -44,7 +44,7 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 		from := fs.String("from", "", "source record ID")
 		relation := fs.String("relation", "", "closed-enum relation")
 		to := fs.String("to", "", "target record ID")
-		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		store, code := parseLearningObservationStore(fs, argv[1:], storePath, stderr)
 		if code != 0 {
 			return code
 		}
@@ -56,7 +56,7 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 	}
 	if sub == "trace" {
 		candidate := fs.String("candidate", "", "candidate record ID")
-		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		store, code := parseLearningObservationStore(fs, argv[1:], storePath, stderr)
 		if code != 0 {
 			return code
 		}
@@ -70,11 +70,11 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 	return 2
 }
 
-func parseLearningObservationStore(fs *flag.FlagSet, args []string, storePath string, stderr io.Writer) (*learningobservation.Store, int) {
+func parseLearningObservationStore(fs *flag.FlagSet, args []string, storePath *string, stderr io.Writer) (*learningobservation.Store, int) {
 	if err := fs.Parse(args); err != nil {
 		return nil, 2
 	}
-	store, err := learningobservation.Load(storePath)
+	store, err := learningobservation.Load(*storePath)
 	if err != nil {
 		return nil, learningObservationError(stderr, err)
 	}

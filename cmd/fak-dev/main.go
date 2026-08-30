@@ -34,6 +34,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCIPreflight(stdout, stderr, argv[1:])
 	case "checkpoint":
 		return devcmd.RunCheckpoint(stdout, stderr, argv[1:])
+	case "build":
+		return devcmd.RunBuild(stdout, stderr, argv[1:])
 	case "buildcheck":
 		return devcmd.RunBuildCheck(stdout, stderr, argv[1:])
 	case "blast":
@@ -133,6 +135,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
 	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  checkpoint [flags]                    append a developer progress milestone")
+	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
 	fmt.Fprintln(w, "  blast estimate PATH [flags]           estimate dependency blast radius")
 	fmt.Fprintln(w, "  amd-gpu-facts [flags]                 inspect AMD GPU development-host counters")

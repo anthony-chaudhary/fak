@@ -187,6 +187,7 @@ type AdmissionStats struct {
 type AdmissionController struct {
 	mu      sync.Mutex
 	policy  AdmissionPolicy
+	budgets []batchBudget         // independent capacity axes folded for every admission
 	running map[string]SeqRequest // admitted, holding budget, keyed by TraceID
 	tokens  int                   // Σ running[*].Tokens, maintained incrementally
 	waiting []waitEntry           // waiting queue, re-sorted by effective priority each round
@@ -205,7 +206,15 @@ type waitEntry struct {
 
 // NewAdmissionController builds a gate under the given policy.
 func NewAdmissionController(p AdmissionPolicy) *AdmissionController {
-	return &AdmissionController{policy: p, running: map[string]SeqRequest{}}
+	return newAdmissionControllerWithBudgets(p, admissionBatchBudgets(p)...)
+}
+
+func newAdmissionControllerWithBudgets(p AdmissionPolicy, budgets ...batchBudget) *AdmissionController {
+	return &AdmissionController{
+		policy:  p,
+		budgets: append([]batchBudget(nil), budgets...),
+		running: map[string]SeqRequest{},
+	}
 }
 
 // AdmissionLease is the live request's hold on one admitted scheduler slot, plus (when a
@@ -249,6 +258,7 @@ func (l *AdmissionLease) SettleUsage(u agent.Usage) {
 // gate sheds overload or a trust verdict denies a request before the planner runs.
 type AdmissionError struct {
 	Verdict AdmissionVerdict
+	Budget  string
 	Reason  string
 }
 
@@ -276,13 +286,13 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 		c.stats.Denied++
 		return VerdictDenied
 	}
-	if c.impossibleReason(req) != "" {
+	if c.impossibleBudgetLocked(req).status == batchBudgetExhausted {
 		c.stats.Shed++
 		return VerdictShed
 	}
 	// Fast path: nobody is waiting and there is headroom now — admit immediately so an
 	// idle/underloaded node does not pay a Schedule round to serve its first requests.
-	if len(c.waiting) == 0 && c.hasHeadroomLocked(req.Tokens) {
+	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status != batchBudgetExhausted {
 		c.admitLocked(req)
 		return VerdictAdmitted
 	}
@@ -317,12 +327,12 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
 	}
-	if reason := c.impossibleReason(req); reason != "" {
+	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetExhausted {
 		c.stats.Shed++
 		c.mu.Unlock()
-		return nil, &AdmissionError{Verdict: VerdictShed, Reason: reason}
+		return nil, &AdmissionError{Verdict: VerdictShed, Budget: check.budget, Reason: check.reason}
 	}
-	if len(c.waiting) == 0 && c.hasHeadroomLocked(req.Tokens) {
+	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status != batchBudgetExhausted {
 		c.admitLocked(req)
 		c.mu.Unlock()
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
@@ -391,7 +401,8 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	})
 	var admitted []SeqRequest
 	for _, e := range c.waiting {
-		if !c.hasHeadroomLocked(e.req.Tokens) {
+		check := c.batchBudgetStatusLocked(e.req)
+		if check.status == batchBudgetExhausted {
 			break // head-of-line: do not let a lower-priority request skip a blocked one
 		}
 		c.admitLocked(e.req)
@@ -399,6 +410,9 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			close(e.ready)
 		}
 		admitted = append(admitted, e.req)
+		if check.status == batchBudgetReached {
+			break
+		}
 	}
 	// The admitted set is the sorted prefix; keep the rest. Copy so the released entries
 	// are not retained by the backing array across later Offer appends.
@@ -452,25 +466,20 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 	}
 }
 
-// impossibleReason reports capacity constraints that cannot become satisfiable by waiting.
-// Caller holds c.mu.
-func (c *AdmissionController) impossibleReason(req SeqRequest) string {
-	if c.policy.TokenBudget > 0 && req.Tokens > c.policy.TokenBudget {
-		return fmt.Sprintf("request tokens %d exceed scheduler token budget %d", req.Tokens, c.policy.TokenBudget)
-	}
-	return ""
+// impossibleBudgetLocked reports a capacity constraint that cannot become
+// satisfiable by waiting: the composed fold still exhausts on an otherwise
+// empty running set. Caller holds c.mu.
+func (c *AdmissionController) impossibleBudgetLocked(req SeqRequest) batchBudgetCheck {
+	return foldBatchBudgets(batchBudgetSnapshot{}, req, c.budgets)
 }
 
-// hasHeadroomLocked reports whether a request of the given token footprint fits the
-// running set right now under both caps. Caller holds c.mu.
-func (c *AdmissionController) hasHeadroomLocked(tokens int) bool {
-	if c.policy.MaxNumSeqs > 0 && len(c.running) >= c.policy.MaxNumSeqs {
-		return false
-	}
-	if c.policy.TokenBudget > 0 && c.tokens+tokens > c.policy.TokenBudget {
-		return false
-	}
-	return true
+// batchBudgetStatusLocked folds every independent budget against the same
+// immutable running-set snapshot. Caller holds c.mu.
+func (c *AdmissionController) batchBudgetStatusLocked(req SeqRequest) batchBudgetCheck {
+	return foldBatchBudgets(batchBudgetSnapshot{
+		running: len(c.running),
+		tokens:  c.tokens,
+	}, req, c.budgets)
 }
 
 // admitLocked moves a request into the running set and charges its tokens. Caller holds c.mu.

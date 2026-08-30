@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
@@ -205,6 +206,10 @@ func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 		fmt.Fprintln(os.Stderr, "backend: -require-non-reference needs -backend to name a compute backend")
 		f.exit(2)
 	}
+	if (*f.vulkanQ4KProfile || *f.vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, *f.vulkanQ4KProfile, *f.vulkanStageQ4K) {
+		fmt.Fprintln(os.Stderr, "backend: -vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
+		f.exit(2)
+	}
 	return be, registeredBackends
 }
 
@@ -267,9 +272,11 @@ func runVerify(f *benchFlags, m *model.Model, vocab int) {
 		ids := lcgIDs(P, vocab)
 		sc := m.NewSession()
 		sc.Quant = true
+		sc.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 		lc := sc.Prefill(ids)
 		sg := m.NewSession()
 		sg.Metal = true
+		sg.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 		lg := sg.Prefill(ids)
 		var maxAbs float64
 		ac, ag := mathx.ArgmaxF32(lc), mathx.ArgmaxF32(lg)
@@ -349,6 +356,7 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 func applyLegacySessionFlags(s *model.Session, f *benchFlags) {
 	s.Quant = *f.quant
 	s.Q4K = *f.q4k
+	s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
 	if *f.q4k {
 		s.MetalQ4K = *f.metal
 		return
@@ -465,6 +473,7 @@ func appendNativeProfilePhase(phases []nativeperf.ProfilePhase, name string, dur
 func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64, vocab int, controls map[string]string, newSession func() *model.Session) error {
 	loadDuration := time.Duration(loadNanos)
 	phases := appendNativeProfilePhase(nil, "load-setup", loadDuration)
+	var cachePhaseLatency modelperfobs.CachePhaseLatencyRecorder
 
 	s := newSession()
 	finishProfile := onceFinishNativeProfile(s.Close)
@@ -474,6 +483,13 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
 			return fmt.Errorf("native performance candidate route unavailable: %w", err)
 		}
+	}
+	var handoffMode model.Qwen35DecodeHandoffMode
+	if err := handoffMode.Set(controls[nativeProfileDecodeHandoffControl]); err != nil {
+		return fmt.Errorf("native performance decode handoff: %w", err)
+	}
+	if err := s.SetQwen35DecodeHandoffMode(handoffMode); err != nil {
+		return fmt.Errorf("native performance decode handoff unavailable: %w", err)
 	}
 	profiler := model.NewPhaseProfiler()
 	s.PhaseProfiler = profiler
@@ -536,6 +552,10 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	}
 	d = time.Since(t)
 	phases = appendNativeProfilePhase(phases, "verification", d)
+	handoffReceipt := s.Qwen35DecodeHandoffReceipt()
+	if err := model.ValidateQwen35DecodeHandoffReceipt(handoffReceipt); err != nil {
+		return fmt.Errorf("native performance decode handoff receipt: %w", err)
+	}
 
 	t = time.Now()
 	finishProfile()
@@ -615,20 +635,23 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	b = append(b, '\n')
 	profileSum := sha256.Sum256(b)
 	q4kResidency := m.Q4KResidencyReceipt()
+	cacheLatencyReceipt := cachePhaseLatency.Receipt()
 	receipt := nativeProfileReceipt{
-		Schema:            nativeProfileReceiptSchema,
-		ProfileSHA256:     fmt.Sprintf("%x", profileSum),
-		EnvelopeID:        envelope.ID,
-		Artifact:          nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
-		ModelConfig:       loadedConfig,
-		ModelConfigSHA256: loadedConfigSHA,
-		Host:              host,
-		Source:            source,
-		Binary:            binary,
-		Controls:          controls,
-		Execution:         executionReceipt,
-		Fallbacks:         fallbackReceipt,
-		Q4KResidency:      &q4kResidency,
+		Schema:              nativeProfileReceiptSchema,
+		ProfileSHA256:       fmt.Sprintf("%x", profileSum),
+		EnvelopeID:          envelope.ID,
+		Artifact:            nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
+		ModelConfig:         loadedConfig,
+		ModelConfigSHA256:   loadedConfigSHA,
+		Host:                host,
+		Source:              source,
+		Binary:              binary,
+		Controls:            controls,
+		Execution:           executionReceipt,
+		Fallbacks:           fallbackReceipt,
+		Q4KResidency:        &q4kResidency,
+		Qwen35DecodeHandoff: &handoffReceipt,
+		CachePhaseLatency:   &cacheLatencyReceipt,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -866,7 +889,7 @@ func main() {
 	var nativeControls map[string]string
 	if *f.nativeProfileOut != "" {
 		var err error
-		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget)
+		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget, *f.nativeDecodeHandoff)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)

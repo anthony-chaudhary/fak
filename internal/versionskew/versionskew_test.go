@@ -77,6 +77,27 @@ func TestVerdict_String(t *testing.T) {
 //   - a stamped running commit that is an ANCESTOR of the trunk tip -> SKEWED;
 //   - the tip itself -> FRESH; a commit newer than the ref -> AHEAD;
 //   - an ABSENT/DIRTY/UNSTAMPED stamp -> its own token, never a silent Unknown.
+
+func TestAssessStampExactFullSHAStopsBeforeAncestry(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	calls := make([]string, 0, 2)
+	runner := func(_ context.Context, _ string, command string, args ...string) (string, bool) {
+		calls = append(calls, command+" "+strings.Join(args, " "))
+		if command == "git" && len(args) >= 2 && args[0] == "rev-parse" {
+			return sha + "\n", true
+		}
+		t.Fatalf("unexpected ancestry subprocess: %s %s", command, strings.Join(args, " "))
+		return "", false
+	}
+	got := AssessStamp(context.Background(), runner, ".", "origin/main", stamped(sha))
+	if got.Verdict != Fresh || got.Relation != RelEqual {
+		t.Fatalf("assessment=%+v, want fresh/equal", got)
+	}
+	if len(calls) != 1 || strings.Contains(calls[0], "merge-base") {
+		t.Fatalf("exact SHA used ancestry subprocesses: %v", calls)
+	}
+}
+
 func TestAssessStamp_gitAncestry(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) string {

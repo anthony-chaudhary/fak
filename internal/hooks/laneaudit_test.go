@@ -13,6 +13,7 @@ concurrent = ["gateway", "policy"]
 [lanes.trees]
 gateway = ["internal/gateway/**"]
 policy  = ["internal/policy/**"]
+studyreceipt = ["internal/study/**", "cmd/fak/study.go"]
 `
 	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(dosToml), 0o644); err != nil {
 		t.Fatal(err)
@@ -32,6 +33,7 @@ policy  = ["internal/policy/**"]
 	}
 	mk("internal/gateway", true)
 	mk("internal/policy", true)
+	mk("internal/study", true)     // composite lane name differs from package basename
 	mk("internal/newleaf", true)   // real Go pkg, no lane -> expected gap
 	mk("internal/another", true)   // real Go pkg, no lane -> expected gap
 	mk("internal/docsonly", false) // no Go file -> not a leaf
@@ -50,7 +52,7 @@ policy  = ["internal/policy/**"]
 	if !got["newleaf"] || !got["another"] {
 		t.Errorf("want newleaf+another flagged, got %v", got)
 	}
-	if got["gateway"] || got["policy"] {
+	if got["gateway"] || got["policy"] || got["study"] {
 		t.Errorf("declared lanes must not be flagged, got %v", got)
 	}
 	if got["docsonly"] {

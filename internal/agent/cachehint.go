@@ -177,6 +177,9 @@ func applyCacheHintToJSON(body []byte, result CacheHintResult) ([]byte, error) {
 		if err := applyAnthropicTTL(obj, ttl); err != nil {
 			return nil, err
 		}
+	case ProviderGemini, ProviderXAI:
+		// Neither provider advertises an explicit cache-hint contract;
+		// negotiation records the advisory downgrade and the body stays intact.
 	}
 	return json.Marshal(obj)
 }

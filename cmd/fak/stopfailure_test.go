@@ -51,9 +51,10 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 		t.Fatalf("plan code=%d stderr=%s", code, stderr.String())
 	}
 	var plan struct {
-		Counts     map[string]int `json:"counts"`
-		IgnoredOld int            `json:"ignored_old_markers"`
-		Candidates map[string][]struct {
+		Counts      map[string]int `json:"counts"`
+		IgnoredOld  int            `json:"ignored_old_markers"`
+		CleanedZero int            `json:"legacy_zero_markers"`
+		Candidates  map[string][]struct {
 			MarkerPath        string `json:"marker_path"`
 			Consecutive       int    `json:"consecutive"`
 			Origin            string `json:"origin"`
@@ -65,8 +66,8 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatalf("plan JSON: %v\n%s", err, stdout.String())
 	}
-	if plan.Counts["RECENT_REVIEW"] != 2 || plan.Counts["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"] != 1 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.Counts["ZERO_TOTAL"] != 1 {
-		t.Fatalf("counts = %#v", plan.Counts)
+	if plan.Counts["RECENT_REVIEW"] != 2 || plan.Counts["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"] != 1 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.CleanedZero != 1 {
+		t.Fatalf("counts = %#v legacy_zero_markers=%d", plan.Counts, plan.CleanedZero)
 	}
 	if plan.IgnoredOld != 1 {
 		t.Fatalf("ignored_old_markers = %d, want 1", plan.IgnoredOld)
@@ -121,9 +122,9 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("apply code=%d stderr=%s", code, stderr.String())
 	}
-	assertStopFailureConsecutive(t, stopDir, "stale", 0)
-	assertStopFailureConsecutive(t, stopDir, "claudeonly", 0)
-	assertStopFailureConsecutive(t, stopDir, "progressed", 0)
+	assertStopFailureAbsent(t, stopDir, "stale")
+	assertStopFailureAbsent(t, stopDir, "claudeonly")
+	assertStopFailureAbsent(t, stopDir, "progressed")
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
@@ -199,7 +200,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("clear-reviewed apply code=%d stderr=%s", code, stderr.String())
 	}
-	assertStopFailureConsecutive(t, stopDir, "recent", 0)
+	assertStopFailureAbsent(t, stopDir, "recent")
 	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
 }
 
@@ -237,5 +238,12 @@ func assertStopFailureConsecutive(t *testing.T, dir, session string, want int) {
 	}
 	if got := doc["consecutive"]; got != want {
 		t.Fatalf("%s consecutive=%d, want %d", session, got, want)
+	}
+}
+
+func assertStopFailureAbsent(t *testing.T, dir, session string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, session+".json")); !os.IsNotExist(err) {
+		t.Fatalf("%s marker should be removed, stat err=%v", session, err)
 	}
 }

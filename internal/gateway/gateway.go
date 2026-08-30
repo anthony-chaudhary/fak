@@ -634,7 +634,9 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 		// cross-process reduce and break the sharded serve (#971).
 		logf("gateway: expert-parallel ranks=%d rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped", cfg.ExpertParallelRanks)
 	}
-	return agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
+	plannerCfg := cfg.InKernelPlanner
+	plannerCfg.CPUOffloadExperts = cfg.CPUOffloadExperts
+	return agent.NewInKernelPlannerWithConfig(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, plannerCfg)
 }
 
 func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
@@ -681,6 +683,7 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	}
 	p.APIKeyFunc = cfg.APIKeyFunc
 	p.AccountFailoverFunc = cfg.AccountFailoverFunc
+	p.TransientTargetFunc = cfg.TransientTargetFunc
 	p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 	p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 	p.ForceResponsesStream = cfg.ForceResponsesStream

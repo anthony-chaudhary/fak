@@ -188,6 +188,9 @@ func TestBuildRooflineSweepMeasurementUsesStablePlateauAndMarginalGains(t *testi
 	if got.RawObservedPeakWorkerCount != 4 || got.RawObservedPeakMedianGBS != 100 || got.MeasuredSustainableGBS != 100 || !reflect.DeepEqual(got.PlateauWorkerCounts, []int{4, 8}) {
 		t.Fatalf("peak summary=%+v", got)
 	}
+	if got.RawObservedPeakStatus != "measured" || got.SaturationKneeStatus != "measured" || got.EnvelopeDigest == "" {
+		t.Fatalf("shared sweep evidence=%+v", got)
+	}
 	if got.SaturationKneeWorkerCount != 2 || got.StabilityRule != rooflineStabilityRule {
 		t.Fatalf("knee/stability=%+v", got)
 	}
@@ -252,6 +255,9 @@ func TestBuildRooflineSweepMeasurementOmitsMalformedPointWithoutZeroPlaceholder(
 	}
 	if got.RequestedPointCount != 4 || got.PointCount != 3 || got.OmittedPointCount != 1 || len(got.OmittedPoints) != 1 {
 		t.Fatalf("omission summary=%+v", got)
+	}
+	if got.RawObservedPeakStatus != "not_identifiable" || got.SaturationKneeStatus != "not_identifiable" {
+		t.Fatalf("omitted point retained an exact finding: %+v", got)
 	}
 	if got.OmittedPoints[0].WorkerCount != 2 || got.OmittedPoints[0].Reason == "" || !strings.Contains(got.OmittedPoints[0].Reason, "positive") {
 		t.Fatalf("omission=%+v", got.OmittedPoints[0])
@@ -360,8 +366,10 @@ func TestRooflineSweepSchemaPreservesEvidenceAndCaveats(t *testing.T) {
 		`"knee_threshold":0.9`,
 		`"raw_observed_peak_worker_count":8`,
 		`"raw_observed_peak_median_gb_s":101`,
+		`"raw_observed_peak_status":"measured"`,
 		`"plateau_worker_counts":[4,8]`,
 		`"saturation_knee_worker_count":2`,
+		`"saturation_knee_status":"measured"`,
 		`"efficiency_versus_sustainable_peak":`,
 		`"marginal_gain_gb_s":`,
 		`"calibration_duration_ms":`,

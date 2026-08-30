@@ -24,6 +24,7 @@ func (r DevReuse) valid() bool {
 var portableDevPatterns = map[string]string{
 	"affected":     "dependency-aware affected-test selection is reusable across repositories",
 	"blockers":     "typed blocker discovery is a reusable multi-agent coordination pattern",
+	"build":        "durable phase-timed build receipts are reusable across repositories",
 	"buildcheck":   "peer-dirty-safe compile checking is a reusable shared-checkout pattern",
 	"ci-preflight": "clean-tip verification separates committed evidence from working-tree state",
 	"commit":       "path-scoped serialized commits are a reusable shared-checkout pattern",
@@ -323,6 +324,17 @@ var maintainerDevCommands = []string{
 	"workflow-audit",
 	"workpattern",
 	"worktype",
+	"agentic",
+	"compute-trace",
+	"coordinate",
+	"hostdiag",
+	"learning-mesh",
+	"performance-rsi-scorecard",
+	"runtime-capabilities",
+	"shellprov",
+	"up",
+	"watchdog-audit-health",
+	"watchdog-audit-run",
 }
 
 var labDevCommands = map[string]string{

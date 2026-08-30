@@ -14,12 +14,9 @@ import (
 
 func TestAttributionNightlyPopulatedReceiptAndTrend(t *testing.T) {
 	budget := attributionTestBudget()
-	root := filepath.Join("testdata", "audit")
-	sources := []AuditSource{
-		{Name: AuditSourceClaude, Root: filepath.Join(root, "claude", "projects"), RootLabel: "claude/projects"},
-		{Name: AuditSourceCodex, Root: filepath.Join(root, "codex", "sessions"), RootLabel: "codex/sessions"},
-	}
-	receipt := RunAttributionNightly(AttributionNightlyOptions{Sources: sources, Budget: budget, Now: time.Now(), Corpus: "fleet"})
+	now := time.Date(2026, 8, 21, 22, 0, 0, 0, time.UTC)
+	sources, root := attributionNightlyFixtureSources(t, now.Add(-time.Minute))
+	receipt := RunAttributionNightly(AttributionNightlyOptions{Sources: sources, Budget: budget, Now: now, Corpus: "fleet"})
 	if receipt.Status != AttributionStatusPass {
 		t.Fatalf("status=%s breaches=%+v error=%s", receipt.Status, receipt.Breaches, receipt.CollectionError)
 	}
@@ -42,7 +39,7 @@ func TestAttributionNightlyPopulatedReceiptAndTrend(t *testing.T) {
 	if err := AppendAttributionReceipt(history, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	second := RunAttributionNightly(AttributionNightlyOptions{Sources: sources, Budget: budget, Now: time.Now().Add(time.Minute), Corpus: "fleet"})
+	second := RunAttributionNightly(AttributionNightlyOptions{Sources: sources, Budget: budget, Now: now.Add(time.Minute), Corpus: "fleet"})
 	if err := AppendAttributionReceipt(history, &second); err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +53,38 @@ func TestAttributionNightlyPopulatedReceiptAndTrend(t *testing.T) {
 	if lines := bytes.Count(bytes.TrimSpace(rows), []byte{'\n'}) + 1; lines != 2 {
 		t.Fatalf("history rows=%d, want 2:\n%s", lines, rows)
 	}
+}
+
+func attributionNightlyFixtureSources(t *testing.T, modTime time.Time) ([]AuditSource, string) {
+	t.Helper()
+	sourceRoot := filepath.Join("testdata", "audit")
+	root := t.TempDir()
+	fixtures := []struct {
+		source string
+		target string
+	}{
+		{source: filepath.Join(sourceRoot, "claude", "projects", "fak", "claude-session.jsonl"), target: filepath.Join(root, "claude", "projects", "fak", "claude-session.jsonl")},
+		{source: filepath.Join(sourceRoot, "codex", "sessions", "2026", "08", "21", "codex-session.jsonl"), target: filepath.Join(root, "codex", "sessions", "2026", "08", "21", "codex-session.jsonl")},
+	}
+	for _, fixture := range fixtures {
+		contents, err := os.ReadFile(fixture.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(fixture.target), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fixture.target, contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(fixture.target, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return []AuditSource{
+		{Name: AuditSourceClaude, Root: filepath.Join(root, "claude", "projects"), RootLabel: "claude/projects"},
+		{Name: AuditSourceCodex, Root: filepath.Join(root, "codex", "sessions"), RootLabel: "codex/sessions"},
+	}, root
 }
 
 func TestAttributionNightlyNoDataAndCollectionFailureAreDistinct(t *testing.T) {
@@ -162,13 +191,14 @@ func TestAttributionNightlyTrendRejectsMismatchedEnvelopes(t *testing.T) {
 }
 
 func TestAttributionNightlyBoundsPhysicalIOAndDetectsGrowth(t *testing.T) {
+	const readLimit = 7
 	var observed bytes.Buffer
-	contents, err := readAttributionBounded(io.TeeReader(strings.NewReader(strings.Repeat("x", 100)), &observed), 7)
+	contents, err := readAttributionBounded(io.TeeReader(strings.NewReader(strings.Repeat("x", 100)), &observed), readLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(contents) != 7 || observed.Len() != 7 {
-		t.Fatalf("read=%d observed=%d, want exact 7-byte ceiling", len(contents), observed.Len())
+	if len(contents) != readLimit || observed.Len() != len(contents) {
+		t.Fatalf("read=%d observed=%d, want exact %d-byte ceiling", len(contents), observed.Len(), readLimit)
 	}
 	path := filepath.Join(t.TempDir(), "growing.jsonl")
 	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {

@@ -65,3 +65,37 @@ func TestRunCapabilitiesIndexesOnDemandFleetCommitCheck(t *testing.T) {
 		t.Fatalf("command=%q", command)
 	}
 }
+
+func TestRunCapabilitiesJSONExposesNativePerformanceStages(t *testing.T) {
+	tests := []struct {
+		query   string
+		wantID  string
+		command string
+	}{
+		{"serve native model", "native-serve", "fak serve --gguf <model.gguf> --metal"},
+		{"benchmark native inference", "model-benchmark", "fak benchmarks describe modelbench"},
+		{"evaluate model quality", "model-quality", "fak quality run --json"},
+		{"profile native bottleneck", "native-profile", "fak native-performance --profile-next profile.json"},
+		{"performance receipt", "performance-receipt", "fak native-performance --gate gate-request.json"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.wantID, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := runCapabilities(&out, &errOut, []string{"--json", tc.query, "--limit", "1"}); code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, errOut.String())
+			}
+			var got struct {
+				Outcomes []capindex.ProductOutcome `json:"outcomes"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Outcomes) != 1 || got.Outcomes[0].ID != tc.wantID {
+				t.Fatalf("response=%#v, want %q first", got, tc.wantID)
+			}
+			if command := strings.Join(got.Outcomes[0].Command, " "); command != tc.command {
+				t.Fatalf("command=%q, want %q", command, tc.command)
+			}
+		})
+	}
+}

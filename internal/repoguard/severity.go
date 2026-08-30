@@ -75,6 +75,7 @@ func (s Severity) DecisionLabel() string {
 // are SILENT (record) so they never enter the model's context; the rungs whose
 // fix-hint genuinely helps the agent stay at warn.
 var defaultSeverity = map[string]Severity{
+	ReasonBuildCacheCleanRace:           SeverityDeny,   // deletes shared compiler state while peers may still consume it
 	guardReason:                         SeverityRecord, // OUT_OF_TREE_WRITE: routine cross-repo work; a placement convention
 	ReasonLiveMonitorOutputRead:         SeverityRecord, // niche, harmless-if-wrong anti-pattern
 	ReasonInteractiveHang:               SeverityWarn,   // the non-interactive-form hint avoids a wasted turn

@@ -38,8 +38,8 @@ func TestUpdatePolicyPrecedenceAndBound(t *testing.T) {
 	t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "fail")
 	t.Setenv("FAK_UPDATE_LAUNCH_WAIT", "3s")
 	policy, wait, err = UpdatePolicy(config, "", "")
-	if err != nil || policy != UpdatePolicyFail || wait != 3*time.Second {
-		t.Fatalf("environment policy=%q wait=%s err=%v", policy, wait, err)
+	if err != nil || policy != UpdatePolicyWait || wait != 2500*time.Millisecond {
+		t.Fatalf("legacy environment overrode config: policy=%q wait=%s err=%v", policy, wait, err)
 	}
 	policy, wait, err = UpdatePolicy(config, "prior", "1h")
 	if err != nil || policy != UpdatePolicyPrior || wait != maxUpdateWait {
@@ -56,8 +56,8 @@ func TestUpdatePolicyPrecedenceAndBound(t *testing.T) {
 func TestUpdatePolicyLoadsFromLaunchConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "launch.json")
 	t.Setenv("FAK_LAUNCH_CONFIG", path)
-	t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "")
-	t.Setenv("FAK_UPDATE_LAUNCH_WAIT", "")
+	t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "fail")
+	t.Setenv("FAK_UPDATE_LAUNCH_WAIT", "3s")
 	if err := Save(Config{
 		UpdateLaunchPolicy: UpdatePolicyWait,
 		UpdateLaunchWaitMS: 1250,

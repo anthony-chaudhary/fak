@@ -106,7 +106,7 @@ func TestDeterministicOrderingAndPrivacySafeSerialization(t *testing.T) {
 	if err := json.Unmarshal(first, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded) != 10 {
+	if len(decoded) != 10 { //boundarylint:ignore CHANGE_DETECTOR_TEST the serialized assurance report schema contains exactly ten top-level fields
 		t.Fatalf("top-level field count = %d: %v", len(decoded), decoded)
 	}
 }

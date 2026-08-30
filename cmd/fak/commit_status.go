@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlane"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
 var commitStatusFn = commitlane.Status
@@ -167,6 +169,64 @@ func runCommitReclaimAlias(stdout, stderr io.Writer, dir string, apply bool) int
 		return 1
 	}
 	return runIndexLockReclaim(stdout, stderr, rep, apply)
+}
+
+// runCommitLockReclaimAlias is the narrow actuator for the advisory lock that
+// serializes fak commit. Its target is always exactly <git-dir>/fak-commit.lock:
+// index.lock, refs, and other worktrees are outside this recovery's authority.
+//
+// The default path is a non-mutating ProbeLock. Apply deliberately delegates to
+// ReapStaleLockResult instead of deleting from the dry-run probe: that API probes
+// again immediately before os.Remove, closing the live-holder race and preserving
+// the typed PID-reuse/foreign-holder policy in one audited implementation.
+func runCommitLockReclaimAlias(stdout, stderr io.Writer, dir string, apply bool) int {
+	rep, err := commitStatusFn(context.Background(), commitlane.Options{Dir: dir})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak commit: %v\n", err)
+		return 1
+	}
+	if strings.TrimSpace(rep.GitDir) == "" {
+		fmt.Fprintln(stderr, "fak commit: commit status did not resolve a git directory")
+		return 1
+	}
+	lockPath := filepath.Join(rep.GitDir, "fak-commit.lock")
+	if !apply {
+		probe := safecommit.ProbeLock(lockPath)
+		if !probe.Reapable() {
+			renderCommitLockNoReclaim(stdout, probe)
+			return 0
+		}
+		fmt.Fprintf(stdout, "fak-commit.lock: WOULD reclaim (%s, pid=%d) %s — re-run with --apply to remove\n", probe.Reason, probe.HolderPID, lockPath)
+		return 0
+	}
+
+	result := safecommit.ReapStaleLockResult(lockPath)
+	switch {
+	case result.Reaped:
+		fmt.Fprintf(stdout, "fak-commit.lock: reclaimed (%s, pid=%d) %s\n", result.Reason, result.HolderPID, lockPath)
+		return 0
+	case result.Failed():
+		fmt.Fprintf(stderr, "fak commit: fak-commit.lock reclaim failed (%s, pid=%d, %s): %s\n", result.Reason, result.HolderPID, result.RemoveErrClass, result.RemoveErr)
+		return 1
+	default:
+		// The typed actuator re-probed and refused the remove. Probe once more only
+		// to make that fail-safe decision legible; this read cannot authorize a delete.
+		renderCommitLockNoReclaim(stdout, safecommit.ProbeLock(lockPath))
+		return 0
+	}
+}
+
+func renderCommitLockNoReclaim(w io.Writer, probe safecommit.LockProbe) {
+	switch {
+	case !probe.Exists:
+		fmt.Fprintf(w, "fak-commit.lock: no reclaim (absent) %s\n", probe.Path)
+	case probe.HolderPID == 0:
+		fmt.Fprintf(w, "fak-commit.lock: no reclaim (owner unknown; preserved) %s\n", probe.Path)
+	case probe.Alive:
+		fmt.Fprintf(w, "fak-commit.lock: no reclaim (holder live, pid=%d; preserved) %s\n", probe.HolderPID, probe.Path)
+	default:
+		fmt.Fprintf(w, "fak-commit.lock: no reclaim (not proven stale; preserved) %s\n", probe.Path)
+	}
 }
 
 func renderCommitStatus(w io.Writer, rep commitlane.Report) {

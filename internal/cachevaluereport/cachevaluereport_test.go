@@ -1,6 +1,8 @@
 package cachevaluereport
 
 import (
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,59 @@ const (
 	weekALate  = "2026-06-18"
 	weekB      = "2026-06-24"
 )
+
+func TestFold_SurfacesRejectedTierAccesses(t *testing.T) {
+	rows := []cachevalueledger.Row{
+		{Date: weekAEarly, SessionType: "guard", Turns: 5, PromptTokens: 100, ReusedTokens: 50, RejectedTierAccesses: 2},
+		{Date: weekALate, SessionType: "serve", Turns: 5, PromptTokens: 100, ReusedTokens: 50, RejectedTierAccesses: 3},
+		{Date: weekB, SessionType: "guard", Turns: 10, PromptTokens: 200, ReusedTokens: 100, RejectedTierAccesses: 5},
+	}
+	baselineRows := append([]cachevalueledger.Row(nil), rows...)
+	for i := range baselineRows {
+		baselineRows[i].RejectedTierAccesses = 0
+	}
+	baseline := Fold(baselineRows, fixedNow)
+	got := Fold(rows, fixedNow)
+
+	if len(got.Buckets) != 2 || got.Buckets[0].RejectedTierAccesses != 5 || got.Buckets[1].RejectedTierAccesses != 5 {
+		t.Fatalf("weekly rejected tier accesses = %+v, want 5 and 5", got.Buckets)
+	}
+	if got.RejectedTierAccesses != 10 {
+		t.Fatalf("report rejected tier accesses=%d, want 10", got.RejectedTierAccesses)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil || !strings.Contains(string(encoded), `"rejected_tier_accesses":10`) {
+		t.Fatalf("report JSON omitted rejected tier accesses: %s (err=%v)", encoded, err)
+	}
+	rendered := Render(got)
+	if !strings.Contains(rendered, "rejected tier accesses: 10") {
+		t.Fatalf("default render omitted nonzero rejected total:\n%s", rendered)
+	}
+	if got.OK != baseline.OK || got.Verdict != baseline.Verdict || got.Finding != baseline.Finding ||
+		got.Reason != baseline.Reason || got.LatestReuseRatio != baseline.LatestReuseRatio || got.LatestTrend != baseline.LatestTrend {
+		t.Fatalf("rejection telemetry changed reuse verdict: got=%+v baseline=%+v", got, baseline)
+	}
+	for i := range got.Buckets {
+		if got.Buckets[i].RealizedReuseRatio != baseline.Buckets[i].RealizedReuseRatio || got.Buckets[i].Trend != baseline.Buckets[i].Trend {
+			t.Fatalf("bucket %d reuse changed: got=%+v baseline=%+v", i, got.Buckets[i], baseline.Buckets[i])
+		}
+	}
+}
+
+func TestFold_RejectedTierAccessesSaturates(t *testing.T) {
+	rows := []cachevalueledger.Row{
+		{Date: weekAEarly, SessionType: "guard", Turns: 1, RejectedTierAccesses: math.MaxUint64},
+		{Date: weekALate, SessionType: "serve", Turns: 1, RejectedTierAccesses: 1},
+	}
+
+	got := Fold(rows, fixedNow)
+	if got.RejectedTierAccesses != math.MaxUint64 {
+		t.Fatalf("report rejected tier accesses=%d, want saturated %d", got.RejectedTierAccesses, uint64(math.MaxUint64))
+	}
+	if len(got.Buckets) != 1 || got.Buckets[0].RejectedTierAccesses != math.MaxUint64 {
+		t.Fatalf("bucket rejected tier accesses=%+v, want saturated %d", got.Buckets, uint64(math.MaxUint64))
+	}
+}
 
 func TestFold_EmptyIsInsufficientButOK(t *testing.T) {
 	r := Fold(nil, fixedNow)

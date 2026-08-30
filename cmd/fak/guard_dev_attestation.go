@@ -28,11 +28,14 @@ type guardWorktreeOwner struct {
 	LeaseID string `json:"lease_id"`
 }
 
-var guardDevLeaseLive = func(ctx context.Context, workspace string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "dos", "lease-lane", "--workspace", workspace, "live")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	return cmd.Output()
-}
+var (
+	guardDevLeaseLive = func(ctx context.Context, workspace string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "dos", "lease-lane", "--workspace", workspace, "live")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Output()
+	}
+	guardDevWorkspaceForWorktree = guardCommonWorkspace
+)
 
 // installGuardDevAttestation shifts SELF_MODIFY authorization to guard startup.
 // Only a sanctioned detached worktree carrying a matching owner stamp and a live
@@ -75,11 +78,7 @@ func installGuardDevAttestation(trace, policyPath string) error {
 	if json.Unmarshal(ownerBytes, &owner) != nil || owner.Schema != "fak-worker-worktree-owner/1" || owner.PID <= 0 || (owner.LeaseID != lane && owner.LeaseID != "resolve-"+lane) {
 		return errors.New("dev attestation: owner stamp does not match lane")
 	}
-	workspace := strings.TrimSpace(os.Getenv("FAK_REPO_ROOT"))
-
-	if workspace == "" {
-		workspace = guardCommonWorkspace(absWT)
-	}
+	workspace := guardDevWorkspaceForWorktree(absWT)
 	if workspace == "" {
 		return errors.New("dev attestation: main workspace is not provable")
 	}

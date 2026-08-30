@@ -1861,6 +1861,7 @@ go test -run 'Verdict|Adjud|HTTPSyscall|DefaultDeny|DenyIsValue|FailsClosed' ./i
 | **FAK 616** — The Witness-Gated Issue-Dispatch Loop | **FAK 614**, **FAK 307** |
 | **FAK 617** — Loops All the Way Down: The Durable Verified Loop, Loop Health, and Session Net-True | **FAK 614**, **FAK 616** |
 | **FAK 618** — Navigating the Shipped Surface: Verb, Command, or Internal Leaf? | **FAK 209**, **FAK 617** |
+| **FAK 619** — From Objective to Runtime Evidence and Retained Learning | **FAK 614**, **FAK 618** |
 
 ### FAK 601 — The Claims Ledger: SHIPPED/SIMULATED/STUB and the 0/29-Novel Posture
 
@@ -2206,11 +2207,90 @@ and `internal/modelperfobs` is the reusable measurement contract. Then name whic
 you would test after changing only the observation fold, and which command is safe to run
 first when an entry offers both a report and a mutating action.
 
+### FAK 619 — From Objective to Runtime Evidence and Retained Learning
+
+**Prerequisites:** **FAK 614**, **FAK 618**
+
+**You'll be able to:**
+
+- Turn an objective into a bounded plan, preserve external-study provenance, and compile
+  findings into explicit transfer candidates without confusing any of those steps with
+  execution
+- Inspect what the current binary can run before loading a model, then distinguish that
+  preflight from actually starting the unified runtime
+- Trace native-performance facts from bounded metrics and artifacts through SLO coverage
+  into the scorecard that decides what the next improvement cycle must learn
+
+The work-and-learning route has three distinct boundaries. `fak agentic` calls
+`internal/agentic` to compile broad text into a deterministic, read-only, offline
+expand → experiment → contract plan; its `fak ultracode` handoff is data, not a worker
+launch. `fak study` stores and retrieves immutable content-addressed research receipts.
+`fak learning-mesh compile --file LEDGER.json` then calls `internal/learningmesh` to
+compare provenance-bearing mechanisms across declared hardware, framework, engine, and
+baseline envelopes. A `COPY`, `ADAPT`, `BENCHMARK_ONLY`, `REJECT`, or `UNKNOWN` candidate
+is still a candidate, never permission to change the product execution path.
+
+Two discovery leaves support that route without becoming hidden authorities:
+`internal/docsearch` loads the curated documentation map used by repository discovery,
+while `internal/openviking` is an optional, bounded HTTP adapter for OpenViking search,
+message, and commit operations. The local documentation map remains usable offline, and
+an OpenViking result still needs the same study provenance and witness as any other
+external observation.
+
+The runtime route starts with `fak runtime-capabilities`, whose `internal/runtimecap`
+fold separates “the binary runs,” “the governed control plane runs,” and “this requested
+model backend is runnable.” Exact `--backend` requests fail closed; only an explicit
+`--prefer-backend ... --fallback-policy local_cpu_degraded --cpu-envelope ...` posture
+may select the portable CPU fallback, and remote placement must pass every declared gate
+before payload load. `fak up` is the short product door for `fak serve`: it starts the
+same gateway, flags, policy, metrics, and session lifecycle rather than a second server.
+Behind optional runtime operations, `internal/dockerprocess` bounds Docker Compose calls
+for the rich dashboard, and `internal/harnessserve` owns one adapter-provided loopback
+model process with readiness, one-token probe, ownership, and bounded shutdown receipts.
+Update automation stays separate: `internal/selfupdate` classifies `current`, `stale`,
+`divergent`, or audit-only `attention` and supplies an explicit next command; it does not
+silently replace a running runtime.
+
+The native-performance route is another evidence pipeline, not one giant metric bag:
+
+| Stage | Owning contract and relationship |
+| --- | --- |
+| Define and collect | `internal/nativeperfobscontract` freezes the Qwen3.8, `fak-native` signal set and its cardinality/freshness rules; `internal/nativeperfbackend` defines bounded per-backend Prometheus snapshots where unavailable values remain absent rather than zero. |
+| Correlate and expose evidence | `internal/nativeperfcorrelation` replaces high-cardinality run, request, trace, and receipt IDs with a scrubbed bounded key; `internal/nativeperfartifact` maps that key to at most five public-safe, expiring receipt/profile/trace/report links. |
+| Decide operational health | `internal/nativeperfslo` compares only matched `module@rev` + benchmark + Qwen3.8 model + backend envelopes and preserves `missing_evidence`; `internal/nativeperfcoverage` proves dashboards, contracts, PromQL, fixtures, and live receipts agree. |
+| Select and learn | `internal/sweepcert` validates extrema, thresholds, censored edges, constraints, and point provenance across a declared sweep. `fak performance-rsi-scorecard` feeds versioned evidence to `internal/perfrsiscore`, which scores the complete improvement loop, names debt and the dominant bottleneck, and can compare a prior report; it does not claim raw model speed. |
+
+**Lab:**
+
+```bash
+go run ./cmd/fak agentic --json --objective "turn one measured performance finding into a bounded learning cycle"
+go run ./cmd/fak study search --limit 5 --store /tmp/fak-learning-study "native performance"
+go run ./cmd/fak learning-mesh compile --file docs/_witnesses/issue-9839/mechanisms.json > /tmp/fak-learning-candidates.json
+cmp /tmp/fak-learning-candidates.json docs/_witnesses/issue-9839/candidates.json
+go run ./cmd/fak runtime-capabilities
+go run ./cmd/fak up --help
+go run ./cmd/fak performance-rsi-scorecard --input internal/perfrsiscore/testdata/complete.json --json > /tmp/fak-learning-performance-rsi.json
+go test ./internal/agentic ./internal/dockerprocess ./internal/docsearch ./internal/harnessserve ./internal/learningmesh ./internal/nativeperfartifact ./internal/nativeperfbackend ./internal/nativeperfcorrelation ./internal/nativeperfcoverage ./internal/nativeperfobscontract ./internal/nativeperfslo ./internal/openviking ./internal/perfrsiscore ./internal/runtimecap ./internal/selfupdate ./internal/sweepcert -count=1
+```
+
+**Expected result:** The agentic plan reports `read_only=true` and `offline=true`; an
+empty study store returns `[]`; the learning-mesh output matches its captured candidate
+witness byte for byte; runtime capabilities emits `fak-runtime-capabilities/1` without
+loading a payload; `fak up --help` prints the shared serve contract without starting a
+listener; and the scorecard plus focused package tests complete locally. Put every
+`fak study search` flag before the query because the query is positional.
+
+**Checkpoint:** Given a new native benchmark finding, state where you would (a) retain
+its external provenance, (b) decide whether it transfers to another envelope, (c) prove
+the dashboard does not turn missing evidence into zero, and (d) measure whether the
+performance-learning loop improved. Then explain why neither `fak agentic` nor
+`fak runtime-capabilities` launches the work it describes.
+
 ---
 
 ## You've finished the path
 
-If you can pass the checkpoints through **FAK 618**, you can: stand up and harden the
+If you can pass the checkpoints through **FAK 619**, you can: stand up and harden the
 gateway in front of any OpenAI- or Anthropic-compatible model; author and review a
 capability floor; explain the write-time quarantine and the IFC taint lattice; read the
 in-kernel model's forward pass and its oracle-parity ledger; tell an honest benchmark

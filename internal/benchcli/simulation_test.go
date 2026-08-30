@@ -545,6 +545,8 @@ func validSimulationEvidence(evidenceType EvidenceType, claim ClaimCeiling) Simu
 		Cost: SimulationCost{HostWallTimeMS: 3.5, HostCPUTimeMS: 2.25, Bytes: 4096},
 	}
 	switch evidenceType {
+	case EvidenceStructuralCount, EvidenceAnalyticalBound, EvidenceCycleSimulation, EvidenceHardwareMeasurement:
+		// These producers require no type-specific provenance block.
 	case EvidenceTraceSimulation:
 		ev.Trace = validTrace()
 	case EvidenceLearnedEstimate:

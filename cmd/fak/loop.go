@@ -114,12 +114,21 @@ var loopTreeKill = procguard.KillPID
 
 var loopExecutable = os.Executable
 
-var loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+var loopNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return execLoopCommand{cmd: cmd}
 }
+
+const (
+	loopPerformanceRSIOutputEnv = "FAK_PERFORMANCE_RSI_OUTPUT"
+	loopIDEnv                   = "FAK_LOOP_ID"
+	loopRunIDEnv                = "FAK_LOOP_RUN_ID"
+	loopSandboxEnvAllow         = "FAK_SANDBOX_ENV_ALLOW"
+	loopPerformanceRSIMaxBytes  = 1 << 20
+)
 
 func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("loop append", flag.ContinueOnError)
@@ -323,6 +332,25 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		Command: filepath.Base(cmdArgs[0]),
 	})
 
+	performanceRSIInput := strings.TrimSpace(os.Getenv(perfrsiscore.LoopTurnInputEnv))
+	var performanceRSIOutput string
+	var performanceRSIPrepErr error
+	var childEnv []string
+	if performanceRSIInput == "" {
+		performanceRSIOutput, performanceRSIPrepErr = reserveLoopPerformanceRSIOutput(*ledger)
+		env := envMap(os.Environ())
+		env[loopIDEnv] = *loopID
+		env[loopRunIDEnv] = *runID
+		if performanceRSIOutput != "" {
+			env[loopPerformanceRSIOutputEnv] = performanceRSIOutput
+		} else {
+			delete(env, loopPerformanceRSIOutputEnv)
+		}
+		env[loopSandboxEnvAllow] = appendLoopEnvAllow(env[loopSandboxEnvAllow],
+			loopPerformanceRSIOutputEnv, loopIDEnv, loopRunIDEnv)
+		childEnv = envSliceFromMap(env)
+	}
+
 	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
 		ledger:    *ledger,
 		loopID:    *loopID,
@@ -331,6 +359,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		principal: *principal,
 		evidence:  baseEvidence,
 		metrics:   baseMetrics,
+		env:       childEnv,
 	})
 	if fatal != 0 {
 		return fatal
@@ -358,6 +387,12 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	// while missing/invalid independently produced input remains nonfatal so the
 	// dispatch's exit code and stdout report keep their existing meaning.
 	performanceRSIReceipt := perfrsiscore.ScoreLoopTurnFromEnvironment()
+	if performanceRSIInput == "" {
+		performanceRSIReceipt = scoreAutomaticLoopPerformanceRSI(performanceRSIOutput, *runID, performanceRSIPrepErr)
+	}
+	if err := perfrsiscore.RecordLoopTurnUsage(performanceRSIReceipt); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: record performance-rsi usage: %v\n", err)
+	}
 	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
 
 	if *asJSON {
@@ -373,29 +408,6 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	return exitCode
 }
 
-// writeLoopRunReport emits one `fak loop run --json` report. Every report -- the containment
-// refusal's and the completed run's alike -- names the same four things: the report schema,
-// the ledger it was recorded in, and the loop/run it describes. Those live here so a refusal
-// can never publish a differently identified report than a run that finished; outcome carries
-// only the fields that differ (status/reason, or exit code and duration). It returns false
-// when the encode failed and the caller must exit 1 instead of reporting success.
-func writeLoopRunReport(stdout, stderr io.Writer, ledger, loopID, runID string, outcome map[string]any) bool {
-	rep := map[string]any{
-		"schema":      "fak.loop-run-report.v1",
-		"ledger_path": ledger,
-		"loop_id":     loopID,
-		"run_id":      runID,
-	}
-	for k, v := range outcome {
-		rep[k] = v
-	}
-	if err := writeIndentedJSON(stdout, rep); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
-		return false
-	}
-	return true
-}
-
 // loopRunChildCtx carries the ledger identity + base evidence/metrics threaded through the
 // START and END loop events that loopRunChild records around the child process.
 type loopRunChildCtx struct {
@@ -406,6 +418,7 @@ type loopRunChildCtx struct {
 	principal string
 	evidence  []loopmgr.EvidenceRef
 	metrics   map[string]int64
+	env       []string
 }
 
 // loopRunChild starts the child process, records its START and END loop events, and returns
@@ -415,7 +428,7 @@ type loopRunChildCtx struct {
 // event, or the end event on an otherwise-clean exit). A non-zero child exit with a failed
 // end-append still returns fatal 0 so the real exit code reaches the caller's report.
 func loopRunChild(stdout, stderr io.Writer, childArgv []string, rc loopRunChildCtx) (exitCode int, durationMS int64, fatal int) {
-	cmd := loopNewCommand(childArgv, stdout, stderr)
+	cmd := loopNewCommand(childArgv, rc.env, stdout, stderr)
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		m := cloneLoopMetrics(rc.metrics)

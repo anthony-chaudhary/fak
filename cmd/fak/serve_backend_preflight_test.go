@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
 type servePreflightBackend struct {
@@ -117,10 +118,10 @@ func TestServeBackendForwardPreflightSupportMatrix(t *testing.T) {
 				t.Fatalf("error=%T %v, want *model.UnsupportedBackendForwardError", err, err)
 			}
 			if unsupported.Backend != "cuda" || unsupported.Forward != fakmodel.ForwardQwen35GDN ||
-				unsupported.IntendedPath != fakmodel.Qwen35GDNCUDAPath {
+				unsupported.IntendedPath != fakmodel.Qwen35GDNCUDAPath+" or "+fakmodel.Qwen35GDNVulkanPath {
 				t.Fatalf("wrong typed refusal: %#v", unsupported)
 			}
-			for _, want := range []string{fakmodel.Qwen35GDNCUDAPath, "refusing generic QKV/CPU fallback"} {
+			for _, want := range []string{fakmodel.Qwen35GDNCUDAPath, fakmodel.Qwen35GDNVulkanPath, "refusing generic QKV/CPU fallback"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal missing %q: %v", want, err)
 				}
@@ -294,5 +295,64 @@ func TestServeBackendForwardPreflightOpenErrorRemainsGGUFError(t *testing.T) {
 	})
 	if !errors.Is(got, want) || !strings.HasPrefix(got.Error(), "gguf:") {
 		t.Fatalf("open error=%v, want unchanged GGUF error", got)
+	}
+}
+
+func validServeLocalAdmissionRequest() modelreg.LocalAdmissionRequest {
+	const gib = int64(1 << 30)
+	sha := strings.Repeat("a", 64)
+	return modelreg.LocalAdmissionRequest{
+		Declaration: modelreg.LocalAdmissionDeclaration{
+			ModelID: "tiny-gguf", ArtifactSHA256: sha, ArtifactBytes: gib,
+			RuntimeID: "llama.cpp", RuntimeVersion: "b1234", RequiredRuntimeCapability: "gguf",
+			Requested: modelreg.LocalDeviceTarget{DeviceKind: "cuda", DeviceID: "0", Resources: modelreg.LocalResourceRequirements{DiskBytes: gib, RAMBytes: gib, VRAMBytes: 2 * gib}},
+		},
+		Artifact: modelreg.LocalVerifiedArtifactFacts{Path: "/cache/tiny.gguf", SHA256: sha, Bytes: gib, Verified: true},
+		Runtime:  modelreg.LocalRuntimeFacts{ID: "llama.cpp", Version: "b1234", Capabilities: []string{"gguf", "openai-http", "cpu", "cuda"}, Verified: true},
+		Host: modelreg.LocalHostFacts{
+			DiskKnown: true, FreeDiskBytes: 8 * gib, RAMKnown: true, FreeRAMBytes: 8 * gib,
+			Devices: []modelreg.LocalDeviceFacts{{Kind: "cuda", ID: "0", Available: true, VRAMKnown: true, FreeVRAMBytes: 4 * gib}},
+		},
+	}
+}
+
+func TestServeLocalRuntimePreflightRefusesBeforeLauncherOrNetwork(t *testing.T) {
+	req := validServeLocalAdmissionRequest()
+	req.Host.Devices = nil // requested GPU is not measured on this host
+	launcherCalls, networkCalls := 0, 0
+
+	decision, err := preflightServeLocalRuntime(req, func(modelreg.LocalLaunchResourceReservation) error {
+		launcherCalls++
+		// A real external launcher may later contact its loopback health endpoint;
+		// trapping it here proves admission refusal precedes that entire boundary.
+		networkCalls++
+		return nil
+	})
+	var refusal *modelreg.LocalAdmissionRefusalError
+	if !errors.As(err, &refusal) || decision.Verdict != modelreg.LocalAdmissionRefuse || len(decision.Refusals) == 0 || decision.Refusals[0].Code != modelreg.LocalRefusalDeviceUnavailable {
+		t.Fatalf("preflight decision=%+v err=%T %v, want typed unavailable-GPU refusal", decision, err, err)
+	}
+	if launcherCalls != 0 || networkCalls != 0 {
+		t.Fatalf("refusal crossed effect boundary: launcher=%d network=%d, want both zero", launcherCalls, networkCalls)
+	}
+}
+
+func TestServeLocalRuntimePreflightPassesAuditablePlanToLauncher(t *testing.T) {
+	req := validServeLocalAdmissionRequest()
+	launcherCalls := 0
+	var launched modelreg.LocalLaunchResourceReservation
+	decision, err := preflightServeLocalRuntime(req, func(plan modelreg.LocalLaunchResourceReservation) error {
+		launcherCalls++
+		launched = plan
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("admitted local runtime refused: %v", err)
+	}
+	if launcherCalls != 1 || decision.Verdict != modelreg.LocalAdmissionAdmit || decision.Plan == nil {
+		t.Fatalf("decision=%+v launcher_calls=%d, want one admitted launch", decision, launcherCalls)
+	}
+	if launched.ArtifactSHA256 != req.Declaration.ArtifactSHA256 || launched.DeviceKind != "cuda" || launched.DeviceID != "0" || launched.Required.VRAMBytes != 2*(1<<30) {
+		t.Fatalf("launcher did not receive the admitted artifact/runtime/resource plan: %+v", launched)
 	}
 }

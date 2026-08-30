@@ -174,17 +174,14 @@ func TestRunCodexDryRun(t *testing.T) {
 		"guard --split off",
 		"--policy floor.json",
 		"--api-key-env MY_OPENAI_KEY",
-		"codex -c model_auto_compact_token_limit=96000 exec --json check the repo",
+		"codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec --json check the repo",
 	} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("dry-run stdout missing %q:\n%s", want, gotOut)
 		}
 	}
 	gotErr := errb.String()
-	if strings.Contains(gotOut, "--dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("bare dry-run unexpectedly bypassed Codex approvals/sandbox:\n%s", gotOut)
-	}
-	for _, want := range []string{"agent 80% / fak info 20%", "Codex native approvals + sandbox (default)", "fak gates remain active", "dry-run"} {
+	for _, want := range []string{"agent 80% / fak info 20%", "approval/sandbox bypass (managed default)", "Codex subagents inherit this mode", "fak gates remain active", "dry-run"} {
 		if !strings.Contains(gotErr, want) {
 			t.Fatalf("dry-run stderr missing %q:\n%s", want, gotErr)
 		}
@@ -205,19 +202,24 @@ func TestRunCodexDryRunExplicitSkipPermissions(t *testing.T) {
 	if !strings.Contains(out.String(), "codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec check the repo") {
 		t.Fatalf("explicit bypass dry-run omitted Codex flag:\n%s", out.String())
 	}
-	for _, want := range []string{"full approval/sandbox bypass explicitly requested", "fak gates remain active"} {
+	for _, want := range []string{"approval/sandbox bypass (managed default)", "fak gates remain active"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("explicit bypass banner missing %q:\n%s", want, errb.String())
 		}
 	}
 }
 
-func TestRunCodexSkipPermissionsHelpNamesNativeDefaultAndFakGates(t *testing.T) {
+func TestRunCodexPermissionHelpNamesManagedDefaultAndNativeOptOut(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runCodex(&out, &errb, []string{"--help"}); rc != 2 {
 		t.Fatalf("runCodex --help rc=%d, want 2", rc)
 	}
-	for _, want := range []string{"default false: native Codex approvals + sandbox", "fak routing, capacity, policy, hook, and loop gates still apply"} {
+	for _, want := range []string{
+		"default true for managed launches",
+		"restore Codex's native approval prompts and sandbox",
+		"Codex subagents inherit this parent permission mode",
+		"fak routing, capacity, policy, hook, and loop gates still apply",
+	} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("Codex help missing %q:\n%s", want, errb.String())
 		}
@@ -242,8 +244,9 @@ func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 		wantBypass bool
 		wantBanner string
 	}{
-		{name: "bare keeps native Codex layer", wantBanner: "Codex native approvals + sandbox (default)"},
-		{name: "explicit flag selects full bypass", extra: []string{"--skip-permissions"}, wantBypass: true, wantBanner: "full approval/sandbox bypass explicitly requested"},
+		{name: "bare uses managed bypass default", wantBypass: true, wantBanner: "approval/sandbox bypass (managed default)"},
+		{name: "native opt-out restores Codex layer", extra: []string{"--native-permissions"}, wantBanner: "native approvals + sandbox explicitly restored"},
+		{name: "legacy explicit flag still selects bypass", extra: []string{"--skip-permissions"}, wantBypass: true, wantBanner: "approval/sandbox bypass (managed default)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"codex", "--freshness-gate", "off", "--dry-run", "--split", "off"}
@@ -260,7 +263,7 @@ func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 			if has := strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox"); has != tc.wantBypass {
 				t.Fatalf("subprocess bypass present=%v, want %v:\n%s", has, tc.wantBypass, got)
 			}
-			for _, want := range []string{tc.wantBanner, "fak gates remain active"} {
+			for _, want := range []string{tc.wantBanner, "Codex subagents inherit this mode", "fak gates remain active"} {
 				if !strings.Contains(got, want) {
 					t.Fatalf("subprocess output missing %q:\n%s", want, got)
 				}
@@ -287,10 +290,10 @@ func TestRunCodexExecSeam(t *testing.T) {
 	if len(gotArgv) == 0 || gotArgv[1] != "guard" {
 		t.Fatalf("argv was not a guard launch: %#v", gotArgv)
 	}
-	if strings.Contains(strings.Join(gotArgv, " "), "--dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("bare Codex exec still passed bypass flag: %#v", gotArgv)
+	if !strings.Contains(strings.Join(gotArgv, " "), "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("bare managed Codex exec omitted bypass flag: %#v", gotArgv)
 	}
-	if !strings.HasSuffix(strings.Join(gotArgv, " "), "-- codex -c model_auto_compact_token_limit=96000 exec do x") {
+	if !strings.HasSuffix(strings.Join(gotArgv, " "), "-- codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec do x") {
 		t.Fatalf("argv tail wrong: %#v", gotArgv)
 	}
 	if len(gotEnv) == 0 {
@@ -823,4 +826,47 @@ func codexLauncherCurrentThreadFixture(t *testing.T) (string, string) {
 		`{"timestamp":"2026-07-06T16:30:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"shell_1","output":"## main"}}`,
 	})
 	return home, threadID
+}
+
+func TestRunCodexSuccessfulLaunchUsesConciseTimedStatus(t *testing.T) {
+	orig := codexLaunchRun
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int { return 0 }
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
+	if rc != 0 {
+		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
+	}
+	got := errb.String()
+	for _, unwanted := range []string{"  view        =", "  permissions =", "  command     ="} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("normal launch stderr contains verbose preamble %q:\n%s", unwanted, got)
+		}
+	}
+	for _, want := range []string{
+		"fak codex: launching Codex through fak guard ...",
+		"fak codex: Codex completed successfully in ",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("normal launch stderr missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunCodexDryRunRetainsCommandDetails(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{"--dry-run", "--split", "off", "--", "exec", "do x"})
+	if rc != 0 {
+		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
+	}
+	got := errb.String()
+	for _, want := range []string{"dry-run - not launching", "  view        =", "  permissions =", "  command     ="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dry-run stderr missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(out.String(), " guard ") || !strings.Contains(out.String(), " exec do x") {
+		t.Fatalf("dry-run stdout did not retain runnable command: %q", out.String())
+	}
 }

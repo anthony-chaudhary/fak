@@ -342,3 +342,67 @@ func receiverTypeName(recv *ast.FieldList) string {
 	}
 	return "?"
 }
+
+// StronglyConnectedComponents returns the graph's strongly connected components
+// in deterministic order. Nodes inside a component are sorted by ID; components
+// are ordered by their first ID. Edge kinds restrict the traversal when provided.
+func (g *Graph) StronglyConnectedComponents(kinds ...string) [][]NodeID {
+	allow := kindSet(kinds)
+	index := 0
+	indices := make(map[NodeID]int, len(g.nodes))
+	lowlink := make(map[NodeID]int, len(g.nodes))
+	onStack := make(map[NodeID]bool, len(g.nodes))
+	stack := make([]NodeID, 0, len(g.nodes))
+	components := make([][]NodeID, 0)
+
+	var visit func(NodeID)
+	visit = func(id NodeID) {
+		indices[id] = index
+		lowlink[id] = index
+		index++
+		stack = append(stack, id)
+		onStack[id] = true
+
+		edges := append([]Edge(nil), g.fwd[id]...)
+		sort.Slice(edges, func(i, j int) bool { return edges[i].To < edges[j].To })
+		for _, edge := range edges {
+			if allow != nil && !allow[edge.Kind] {
+				continue
+			}
+			to := edge.To
+			if _, seen := indices[to]; !seen {
+				visit(to)
+				if lowlink[to] < lowlink[id] {
+					lowlink[id] = lowlink[to]
+				}
+			} else if onStack[to] && indices[to] < lowlink[id] {
+				lowlink[id] = indices[to]
+			}
+		}
+
+		if lowlink[id] != indices[id] {
+			return
+		}
+		component := make([]NodeID, 0, 1)
+		for {
+			last := len(stack) - 1
+			member := stack[last]
+			stack = stack[:last]
+			onStack[member] = false
+			component = append(component, member)
+			if member == id {
+				break
+			}
+		}
+		sort.Slice(component, func(i, j int) bool { return component[i] < component[j] })
+		components = append(components, component)
+	}
+
+	for _, node := range g.Nodes() {
+		if _, seen := indices[node.ID]; !seen {
+			visit(node.ID)
+		}
+	}
+	sort.Slice(components, func(i, j int) bool { return components[i][0] < components[j][0] })
+	return components
+}

@@ -23,7 +23,7 @@ func TestBuildCompleteCoverageUncoveredAndDeterministic(t *testing.T) {
 	if !reflect.DeepEqual(one, two) {
 		t.Fatal("build is not deterministic")
 	}
-	if len(one.Joins) != 6 || summary.Total != 6 || summary.Actionable != 5 {
+	if len(one.Joins) != 6 || summary.Total != 6 || summary.Actionable != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture cardinalities are fixed evidence for complete join and ledger preservation
 		t.Fatalf("coverage summary=%+v joins=%d", summary, len(one.Joins))
 	}
 	want := map[string]Disposition{
@@ -47,6 +47,15 @@ func TestBuildCompleteCoverageUncoveredAndDeterministic(t *testing.T) {
 	}
 	if summary.Counts[Uncovered] != 1 || summary.Counts[Conflict] != 1 || len(summary.ManualReview) < 2 {
 		t.Fatalf("summary=%+v", summary)
+	}
+}
+
+func TestBuildSeedJoinRejectsNonAffirmativeWitnessMode(t *testing.T) {
+	seed := witnessSeed{Issue: 7, Mode: Uncovered}
+	issues := map[int]ForgeRecord{7: {Number: 7, State: "open"}}
+	join, _ := buildSeedJoin(Join{}, seed, issues, t.TempDir(), "revision")
+	if join.Disposition != Conflict || !join.ManualReview || join.Confidence != "invalid-explicit-witness-mode" {
+		t.Fatalf("non-affirmative witness mode did not fail closed: %+v", join)
 	}
 }
 
@@ -116,7 +125,7 @@ func TestCheckedArtifactsCoverCompactIndex(t *testing.T) {
 	if err := ValidateStructure(ledger, &index, root); err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Joins) != 193 {
+	if len(ledger.Joins) != 193 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture cardinalities are fixed evidence for complete join and ledger preservation
 		t.Fatalf("checked ledger joins=%d want 193", len(ledger.Joins))
 	}
 	for _, join := range ledger.Joins {

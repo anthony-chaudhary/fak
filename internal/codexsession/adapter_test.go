@@ -39,7 +39,7 @@ func TestAdapterResumesPersistedThreadWithNewExecutionEpoch(t *testing.T) {
 	if state.SessionID != "logical-1" || state.Coordinates.ThreadID != "thread-raw-secret" || state.Epoch != 2 {
 		t.Fatalf("state = %+v", state)
 	}
-	if len(state.Events) != 18 {
+	if len(state.Events) != 18 { //boundarylint:ignore CHANGE_DETECTOR_TEST the transcript fixture contains exactly 18 lifecycle events whose complete preservation is the contract
 		t.Fatalf("events = %d, want two complete nine-event turns", len(state.Events))
 	}
 }

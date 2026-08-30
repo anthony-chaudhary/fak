@@ -85,7 +85,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Session lifecycle hooks (Claude Code)", []string{
 		"precompact-hook", "deny-all-continue", "toolproc-hooks", "task-handoff", "task-handoff-file",
-		"task-handoff-repo", "task-handoff-live", "operator-directed",
+		"task-handoff-repo", "task-handoff-live", "operator-directed", "host-recovery",
 	}},
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",
@@ -97,17 +97,19 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
+		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
 		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile", "output-profile", "work-profile",
 	}},
 	{"Fleet control bus", []string{
-		"fleet-bus", "fleet-bus-dir", "fleet-bus-id", "fleet-bus-interval",
+		"fleet-bus",
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
-		"debug-stats", "resource-stats", "dojo",
+		"debug-stats", "resource-stats", "child-max-memory-mb", "child-resource-poll", "child-resource-journal", "dojo",
 	}},
 	{"Diagnostics & replay", []string{
 		"probe", "replay-trace", "replay-wire",

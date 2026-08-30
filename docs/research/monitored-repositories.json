@@ -1,8 +1,88 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-28T21:55:00Z",
+  "updated_at": "2026-08-30T04:16:17Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+    {
+      "repository": "modular/modular",
+      "url": "https://github.com/modular/modular",
+      "status": "studied",
+      "priority": 1,
+      "why": "FAK's closest broad native-inference design peer across serving admission, KV movement, speculative decoding, model architecture, accelerator kernels, graph optimization, async runtime, and cache support. The study adapts mechanisms into FAK-owned Go/native paths and explicitly excludes a Modular runtime dependency or fallback.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "1c9fd2e03331f77d3a1034127cb3700b7fa43c02",
+      "stars_at_check": 29305,
+      "last_push_at_check": "2026-08-28T09:02:51Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md",
+      "refresh_issue": "#9900",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/modular-modular.json",
+        "forge_receipt_path": "docs/research/inventory/modular-modular-forge-receipt.json",
+        "indexed_revision": "1c9fd2e03331f77d3a1034127cb3700b7fa43c02",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 16,
+        "candidate_count": 87,
+        "filed_issue_count": 68,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "docs/research/inventory/modular-modular-forge-receipt.json",
+              "gh api --paginate --slurp repos/modular/modular/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo modular/modular --state all --limit 10000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:modular,name:modular) discussions(first:100)"
+            ],
+            "note": "Complete six-endpoint census through 2026-08-28T23:59:59Z with checksum sha256:a0752d13d096c945d50198126de5083a4c3878f00c84fe26bfc404322ba0f40e: 3,716 issues, 2,667 pull requests, 523 discussions, 151 labels, 14 releases, and zero milestones; targeted candidate threads received deeper read-back."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"Qwen3.5 MTP embedding hidden concatenation layout\"",
+              "fak dev index docs \"graph compiler pass pipeline SCCP SROA Mem2Reg\"",
+              "fak dev index leaves \"KV transfer onload tensor parallel topology\"",
+              "internal/model/qwen35_mtp_forward.go"
+            ],
+            "note": "All 87 candidate rows received three-layer FAK self-query and exact-owner deduplication; the note preserves PRESENT, PARTIAL, and ABSENT dispositions."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md#full-candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9900",
+              "https://github.com/anthony-chaudhary/fak/issues/9910",
+              "https://github.com/anthony-chaudhary/fak/issues/9977",
+              "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md"
+            ],
+            "note": "Parent #9900 owns 68 contract-clean children in the contiguous #9910-#9977 range; live read-back proved unique immutable markers, receipt references, labels, and Generation G3 routing. Durable decision/outcome receipts: study_a55850a776986e47ab91c858765a98e3cc4ce918086bb8ef380d5aa4f2325189 and study_96c38d851458c92a9dea84574cff09471a9d13bf9d4a050eb076c5bb8b62416f."
+          }
+        ],
+        "issue_refs": [
+          "#9900",
+          "#9910",
+          "#9977"
+        ],
+        "completeness_critic": "Exhaustive maintained-tree inventory, full reachable history and tags, complete six-endpoint forge census, README/design/runtime/test/roadmap/license review, candidate-specific FAK self-query, exact-owner dedupe, 87-row disposition matrix, independent source-anchor review, and live issue-contract read-back are covered. Generated/target/vendor trees are deliberately excluded; forge comments/reviews/timelines and every linked commit were not traversed for all 7,071 parents, while candidate-bearing threads were followed selectively."
+      }
+    },
     {
       "repository": "ruvnet/ruflo",
       "url": "https://github.com/ruvnet/ruflo",
@@ -200,20 +280,20 @@
     },
     {
       "repository": "local/tensor-build",
-      "url": "file:///C:/work/tb/tensor-build-main",
+      "url": "local://tensor-build-main",
       "status": "studied",
       "priority": 6,
-      "why": "Local TensorBuild snapshot deeply studied for transferable identity, evidence-tier, artifact-reachability, operator-surface, disambiguation, and work-cost mechanisms; surviving gaps filed as #6874-#6876. Revision history and license remain unavailable, so concepts only were borrowed.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+      "why": "Whole-tree TensorBuild recheck extracted evidence, measurement, and native-runtime contracts, ablated TensorRT-specific mechanisms, reconciled seven existing fak owners, and filed 13 bounded leaves. Source history, forge state, and license remain unavailable, so every borrow is concepts-only.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d",
       "stars_at_check": 0,
       "last_push_at_check": "",
-      "study_note": "docs/notes/tensor-build-local-study-2026-08-15.md",
+      "study_note": "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md",
       "refresh_issue": "#8985",
       "inventory": {
         "mode": "exhaustive",
-        "map_path": "docs/research/inventory/local-tensor-build.json",
-        "indexed_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+        "map_path": "docs/research/inventory/local-tensor-build-2026-08-29.json",
+        "indexed_revision": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d",
         "source_classes": [
           "readme_docs",
           "architecture_design",
@@ -228,37 +308,39 @@
           "completeness_critic",
           "issue_tracking"
         ],
-        "subsystem_count": 18,
-        "candidate_count": 11,
-        "filed_issue_count": 3,
-        "completeness_critic": "exhaustive local snapshot map with raw-versus-indexed denominator; generated trees internal/build and internal/conn/web/dist are named; changelog, roadmap/TODO, license/provenance, unavailable forge/history surfaces, fak self-query, candidate dispositions, and issue tracking are explicit; no source license or attributable Git/forge history is available, so concepts only",
+        "subsystem_count": 16,
+        "candidate_count": 26,
+        "filed_issue_count": 16,
+        "completeness_critic": "exhaustive local snapshot map with raw-versus-indexed denominator; generated trees internal/build and internal/conn/web/dist are named; worldview, runtime, tests, results, changelog, roadmap/TODO, license/provenance, unavailable forge/history surfaces, 32/32 source-hash read-back, fak self-query, candidate dispositions, and issue tracking are explicit; no source license or attributable Git/forge history is available, so concepts only",
         "source_evidence": [
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "docs/notes/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25",
-              "C:/work/tb/tensor-build-main/.github/ISSUE_TEMPLATE/general-ticket.md",
-              "C:/work/tb/tensor-build-main/.github/PULL_REQUEST_TEMPLATE.md",
-              "docs/notes/tensor-build-local-study-2026-08-15.md#issues-prs-and-discussions"
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#provenance-and-license-fence",
+              "source:.github/ISSUE_TEMPLATE/general-ticket.md",
+              "source:.github/PULL_REQUEST_TEMPLATE.md",
+              "gh api graphql --raw-field query=repository-discussions"
             ],
             "note": "Templates prove local workflow shape only. Issues, pull requests, discussions, and releases cannot be enumerated and are explicitly unavailable."
           },
           {
             "class": "fak_selfquery_witness",
             "evidence": [
-              "fak capabilities \"engine identity backend implementation benchmark receipt evidence artifact reachability experiment results\"",
-              "fak capabilities \"agent human control parity work class token spend attribution\"",
-              "fak capabilities \"failed experiment ledger negative result candidate borrow issue tracking\""
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#candidate-matrix",
+              "fak study search --limit 20 tensor-build",
+              "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4",
+              "candidate-specific current-tree searches and open-and-closed GitHub issue searches"
             ],
-            "note": "Candidate-specific self-query was replayed; combined artifact and negative-ledger axes had no direct match, while work-cost/control/cache/routing surfaces matched. Dedupe remains anchored to current issue states."
+            "note": "Candidate-specific source and issue queries were replayed. Every new leaf had no exact open or closed owner; seven candidates retained existing owners and four off-axis mechanisms were excluded or watched."
           },
           {
             "class": "candidate_matrix",
             "evidence": [
-              "docs/research/inventory/local-tensor-build.json#non_tree_study.candidate_matrix",
-              "docs/notes/tensor-build-local-study-2026-08-15.md#candidate-matrix-and-current-fak-witnesses"
+              "docs/research/inventory/local-tensor-build-2026-08-29.json#non_tree_study",
+              "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#candidate-matrix",
+              "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4"
             ],
-            "note": "Eleven candidates were re-adjudicated; the refresh corrected the #6874-#6876 association and found no novel unowned borrow."
+            "note": "Twenty-six candidates were adjudicated: 13 new leaves, seven exact existing owners, two present no-issue mechanisms, and four watch/exclude decisions."
           },
           {
             "class": "issue_tracking",
@@ -266,16 +348,47 @@
               "https://github.com/anthony-chaudhary/fak/issues/8985",
               "https://github.com/anthony-chaudhary/fak/issues/6874",
               "https://github.com/anthony-chaudhary/fak/issues/6875",
-              "https://github.com/anthony-chaudhary/fak/issues/6876"
+              "https://github.com/anthony-chaudhary/fak/issues/6876",
+              "https://github.com/anthony-chaudhary/fak/issues/10268",
+              "https://github.com/anthony-chaudhary/fak/issues/10269",
+              "https://github.com/anthony-chaudhary/fak/issues/10270",
+              "https://github.com/anthony-chaudhary/fak/issues/10271",
+              "https://github.com/anthony-chaudhary/fak/issues/10278",
+              "https://github.com/anthony-chaudhary/fak/issues/10279",
+              "https://github.com/anthony-chaudhary/fak/issues/10280",
+              "https://github.com/anthony-chaudhary/fak/issues/10281",
+              "https://github.com/anthony-chaudhary/fak/issues/10282",
+              "https://github.com/anthony-chaudhary/fak/issues/10283",
+              "https://github.com/anthony-chaudhary/fak/issues/10284",
+              "https://github.com/anthony-chaudhary/fak/issues/10285",
+              "https://github.com/anthony-chaudhary/fak/issues/10286"
             ],
-            "note": "#6874 is closed; #6875 and #6876 remain open. This refresh produced no new issue."
+            "note": "The recheck retained prior owners #6874-#6876, linked exact current owners #3978, #4032, #5645, and #8635, and filed 13 new bounded leaves."
           }
         ],
         "issue_refs": [
           "#8985",
           "#6874",
           "#6875",
-          "#6876"
+          "#6876",
+          "#3978",
+          "#4032",
+          "#5601",
+          "#5645",
+          "#8635",
+          "#10268",
+          "#10269",
+          "#10270",
+          "#10271",
+          "#10278",
+          "#10279",
+          "#10280",
+          "#10281",
+          "#10282",
+          "#10283",
+          "#10284",
+          "#10285",
+          "#10286"
         ]
       }
     },
@@ -1150,13 +1263,13 @@
       "url": "https://github.com/anthropics/claude-code",
       "status": "studied",
       "priority": 16,
-      "why": "Public plugin agents, coordinator workflows, advanced recovery recipes, release claims, and proprietary-license boundary were studied against fak's twelve-axis Ultracode orchestration contract. Public examples inspire composition, but do not replace fak leases, effect receipts, or independent witness.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "005c5dade90c2c59c88d819d8723e7b579addb5e",
-      "stars_at_check": 143015,
-      "last_push_at_check": "2026-08-25T22:31:52Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
-      "refresh_issue": "#8995",
+      "why": "Public plugin/workflow evidence and proprietary-license limits remain inventoried; the 2026-08-29 refresh adds mixed-version daemon, persisted-writer, alias, and update behavior as INSPIRE-ONLY compatibility evidence for the harness ABI study.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "f1af9b1f4b1fd4c776135381606edada82ef638e",
+      "stars_at_check": 143374,
+      "last_push_at_check": "2026-08-28T18:19:32Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/anthropics-claude-code.json",
@@ -1459,13 +1572,13 @@
       "url": "https://github.com/openai/codex",
       "status": "studied",
       "priority": 19,
-      "why": "Codex provider-clear behavior was revalidated at its typed thread-start seam against an exhaustive pinned tree and non-tree audit: /clear and /new both replace the thread, while only /clear reports ThreadStartSource::Clear. FAK keeps that distinction and rejects harness-specific TUI coupling.",
-      "last_checked": "2026-08-26",
-      "checked_revision": "2764e83626efe55f64e04d153fc99a157327f3c2",
-      "stars_at_check": 118185,
-      "last_push_at_check": "2026-08-26T01:23:02Z",
-      "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8998",
+      "why": "The exhaustive provider-session inventory remains intact; the 2026-08-29 compatibility refresh adds stable/experimental schema separation, bidirectional current/released executor tests, configuration migration, build provenance, and unresolved mixed-version failures.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "6478a751fde8884b2fdc76486fe23175a8e795d4",
+      "stars_at_check": 119758,
+      "last_push_at_check": "2026-08-29T10:54:29Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/openai-codex.json",
@@ -1535,13 +1648,13 @@
       "url": "https://github.com/google-gemini/gemini-cli",
       "status": "studied",
       "priority": 20,
-      "why": "Gemini CLI provider-clear behavior was studied at its typed lifecycle seam: clear, with new as an alias, ends the old session, mints a session id, and emits SessionStart(Clear). The provider session-reset guide records the integration consequence and exact upstream evidence.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
-      "stars_at_check": 106686,
-      "last_push_at_check": "2026-08-26T01:07:54Z",
-      "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8999",
+      "why": "The exhaustive provider-session inventory remains intact; the 2026-08-29 compatibility refresh adds stable hook DTO translators, extension update rollback, tolerant configuration behavior, and open event-spelling/unit-migration negative knowledge.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "0bd1d439751478771c45d3d0895a6a9760554bf4",
+      "stars_at_check": 106741,
+      "last_push_at_check": "2026-08-29T01:56:42Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/google-gemini-gemini-cli.json",
@@ -1602,6 +1715,81 @@
         "issue_refs": [
           "#8999",
           "#8220"
+        ]
+      }
+    },
+    {
+      "repository": "anomalyco/opencode",
+      "url": "https://github.com/anomalyco/opencode",
+      "status": "studied",
+      "priority": 20,
+      "why": "The 2026-08-29 compatibility study covers structural v1/v2 server probing, lazy compatibility adapters, configuration/storage migrations, plugin engine ranges checked before import, and open initialization/import failure reports.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "dc4449df0d52199704ea4989a5a993ebbc605612",
+      "stars_at_check": 202328,
+      "last_push_at_check": "2026-08-29T15:07:42Z",
+      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
+      "refresh_issue": "#10020",
+      "inventory": {
+        "mode": "standard",
+        "source_classes": [
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "candidate_count": 4,
+        "filed_issue_count": 0,
+        "completeness_critic": "Targeted pinned implementation/test and release/issue study of compatibility seams, not an exhaustive repository inventory. README-only claims, external hosted behavior, release artifacts, and every subsystem/PR were excluded from positive claims; issue reports remain negative knowledge until merged code is rechecked.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "https://github.com/anomalyco/opencode/issues/46161",
+              "https://github.com/anomalyco/opencode/issues/46095",
+              "gh pr list --state all --repo anomalyco/opencode",
+              "gh api graphql repository discussions anomalyco/opencode",
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#negative-knowledge-shipped-versus-open"
+            ],
+            "note": "Open failures are refresh triggers, not shipped implementation evidence."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"harness ABI capability negotiation compatibility ranges schema digest\"",
+              "fak capabilities \"extension update rollback plugin version migration\"",
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#what-fak-already-proves"
+            ],
+            "note": "Capability queries plus exact tree/index fallback established the FAK status on each axis."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#candidate-matrix",
+              "fak study get study_d2e87854f7d555384500becb1b8328cea3f3c8de0376fedee4526d6580069429"
+            ],
+            "note": "Four OpenCode mechanisms are adjudicated within the cross-player matrix."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10020",
+              "https://github.com/anthony-chaudhary/fak/issues/6805"
+            ],
+            "note": "Existing issue owners cover surviving work; no duplicate issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#10020",
+          "#6805",
+          "#6456",
+          "#8200",
+          "#8913"
         ]
       }
     },
@@ -2113,7 +2301,9 @@
         "source_evidence": [
           {
             "class": "paper_source",
-            "evidence": ["https://arxiv.org/abs/2608.07915v1"],
+            "evidence": [
+              "https://arxiv.org/abs/2608.07915v1"
+            ],
             "note": "Version 1 source and PDF read; method, tables, appendices, calibration/evaluation envelope, and claim boundaries reconciled."
           },
           {
@@ -2133,7 +2323,9 @@
           },
           {
             "class": "candidate_matrix",
-            "evidence": ["docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md#candidate-matrix"]
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md#candidate-matrix"
+            ]
           },
           {
             "class": "issue_tracking",
@@ -2144,7 +2336,13 @@
             ]
           }
         ],
-        "issue_refs": ["#9785", "#9789", "#9141", "#9161", "#2236"],
+        "issue_refs": [
+          "#9785",
+          "#9789",
+          "#9141",
+          "#9161",
+          "#2236"
+        ],
         "completeness_critic": "Paper source/PDF, all load-bearing code, README/demos/eval/bench/plot surfaces, all assets, exact tree, both commits, GitHub metadata and collaboration surfaces, license, FAK self-query, candidate dispositions, dedupe, and issue contract were covered; Projects v2 token scope, dependency repos, and the noncanonical fork are the declared exclusions."
       }
     },
@@ -3289,6 +3487,300 @@
             "note": "Tracker and sole surviving implementation issue were independently read back; the candidate passed the live, dedupe-armed issue contract as dispatchable."
           }
         ]
+      }
+    },
+    {
+      "repository": "diepquynh/ultracode",
+      "url": "https://github.com/diepquynh/ultracode",
+      "status": "candidate",
+      "priority": 63,
+      "why": "Newly discovered named Ultracode plugin with repository inventory, multi-role workflow stages, approval gates, and an explicit quality-versus-token-cost posture directly relevant to the FAK Ultracode effectiveness audit.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "63f0d6e4dbf62258190e938ee4ebf9b93278f119",
+      "stars_at_check": 4,
+      "last_push_at_check": "2026-08-29T19:44:24Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "hesreallyhim/ultracode-workflows",
+      "url": "https://github.com/hesreallyhim/ultracode-workflows",
+      "status": "candidate",
+      "priority": 64,
+      "why": "Named Ultracode workflow library with deterministic scripts, resumable checkpoints, adversarial verification, arithmetic coverage, plan previews, and runtime observation; it was absent from the earlier source ledger and is directly comparable on effectiveness controls.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "9b5404d11b885b28380d3eb17471ef7b17601b5e",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-08-07T06:48:37Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Suraj1235/open-dynamic-workflows",
+      "url": "https://github.com/Suraj1235/open-dynamic-workflows",
+      "status": "candidate",
+      "priority": 65,
+      "why": "Open-source script-as-orchestrator engine for Ultracode-style workflows across Codex, OpenCode, MCP clients, and local models, with daemon and embedded execution paths that may inform FAK portability and control-plane boundaries.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "972bb98494ea23f907df88850024bd7022b099d4",
+      "stars_at_check": 33,
+      "last_push_at_check": "2026-07-09T16:35:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Caleb0796/codex-ultracode-kit",
+      "url": "https://github.com/Caleb0796/codex-ultracode-kit",
+      "status": "candidate",
+      "priority": 66,
+      "why": "Small Codex-specific Ultracode kit combining an in-session skill with a deterministic external fan-out harness and skeptic verification, directly overlapping FAK's Codex adapter and effectiveness-envelope questions.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "8176113ed18b0df1ef1a2717e2eb556aaf132018",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-07-04T05:40:28Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "KangarooKi/Ultracode",
+      "url": "https://github.com/KangarooKi/Ultracode",
+      "status": "candidate",
+      "priority": 67,
+      "why": "Independent local coding CLI named UltraCode with task graphs, permissions, hooks, background commands, MCP, memory, worktrees, and subagents; useful as a product-surface variant but license provenance requires explicit review.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "4a7d1b6eb10e4e020b628b7fbaa21c1837b31edd",
+      "stars_at_check": 5,
+      "last_push_at_check": "2026-06-01T01:19:52Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "toel1234/oh-my-opencode",
+      "url": "https://github.com/toel1234/oh-my-opencode",
+      "status": "candidate",
+      "priority": 68,
+      "why": "Ultrawork lineage with multi-model orchestration, background agents, opt-in team mode, intent routing, progress tooling, and completion enforcement; adjacent rather than name-identical, but relevant to the OSS variant inventory.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "18d7643bc1eb4f3e99e0e80e7b8cca9fe199ff1a",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-05-10T20:12:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "QuintinShaw/pi-dynamic-workflows",
+      "url": "https://github.com/QuintinShaw/pi-dynamic-workflows",
+      "status": "candidate",
+      "priority": 69,
+      "why": "High-signal dynamic-workflow runtime with batch-scoped cancellation, nested caps, deterministic state deltas, prefix resume, and terminal child draining; its directional authoring study lacks a committed matched provider artifact.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "2f85c9eb350319e14a2ff16b98986a30b3c8bb4d",
+      "stars_at_check": 458,
+      "last_push_at_check": "2026-08-29T15:48:04Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "code-yeongyu/oh-my-openagent",
+      "url": "https://github.com/code-yeongyu/oh-my-openagent",
+      "status": "candidate",
+      "priority": 70,
+      "why": "Current Ultrawork lineage with an observable stop goal, atomic todos, cleanup, real-surface QA scenarios, and bounded reviewer resubmission; repository-level license metadata is inconclusive and requires a full provenance pass before reuse.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "b4e0094c04df49360271fd9e449681d0c386eb35",
+      "stars_at_check": 68507,
+      "last_push_at_check": "2026-08-29T16:59:42Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "Yeachan-Heo/oh-my-claudecode",
+      "url": "https://github.com/Yeachan-Heo/oh-my-claudecode",
+      "status": "candidate",
+      "priority": 71,
+      "why": "Historical Ultrawork lineage whose retirement and stop-hook echo-loop reports provide negative evidence for live-goal-derived persistence and immediate cancellation semantics.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "adf4bf3280c8a8d7b932d5c11aef84ba22d6a11d",
+      "stars_at_check": 38876,
+      "last_push_at_check": "2026-08-29T16:39:27Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md"
+    },
+    {
+      "repository": "mlcommons/inference",
+      "url": "https://github.com/mlcommons/inference",
+      "status": "studied",
+      "priority": 72,
+      "why": "Apache-2.0 LoadGen study for reusable traffic generation, frozen workload and RNG identity, raw result logging, bounded peak search, and independent performance-validity checks. Relevant to FAK's cross-layer sweep evidence contract, not as a universal runner or algorithm. Refresh when the pinned LoadGen peak-search or validity semantics change, #10189 or #10079 lands, or a mapped FAK surface adds a finding class the proposed folds cannot represent.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "cfb0df14b21a3898521891f021a1c6aadec2ab2c",
+      "stars_at_check": 1622,
+      "last_push_at_check": "2026-08-29T21:11:11Z",
+      "study_note": "docs/notes/CONCEPT-CROSS-LAYER-SWEEPS-2026-08-29.md",
+      "refresh_issue": "#10192"
+    },
+    {
+      "repository": "anthony-chaudhary/metrics-service",
+      "url": "https://github.com/anthony-chaudhary/metrics-service",
+      "status": "studied",
+      "priority": 73,
+      "why": "Private repository studied for aligned typed partial fleet evidence, component readiness with recovery actions, and registry-driven dashboard and alert drift auditing. No project license grant was found at the pinned revision, so follow-ons are clean-room adaptations only; refresh if licensing, release provenance, or the pinned mechanisms materially change.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "df58aad21de603992fc7b4900ac814610092c6c3",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-05-12T01:20:46Z",
+      "study_note": "docs/research/metrics-service-study-2026-08-29.md",
+      "refresh_issue": "#10287",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthony-chaudhary-metrics-service.json",
+        "indexed_revision": "df58aad21de603992fc7b4900ac814610092c6c3",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 6,
+        "candidate_count": 6,
+        "filed_issue_count": 3,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "GitHub repository metadata at 2026-08-29",
+              "three historical pull requests",
+              "zero issues",
+              "tags through v0.21.16",
+              "GitHub Releases through v0.19.0"
+            ],
+            "note": "The pinned private repository had three historical pull requests and no issues; tags continued beyond the latest GitHub Release, and tags were unsigned."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "internal/metrics/device_spine_scrape.go:122-175",
+              "internal/metrics/device_spine_federate.go:55-72",
+              "internal/serverproduct/contract.go:97-235",
+              "internal/serverproduct/encoding.go:16-92",
+              "internal/metrics/openmetrics.go:13-344",
+              "internal/metrics/parity_dashboard.go:198-370"
+            ],
+            "note": "Exact FAK source anchors decided PRESENT/PARTIAL/ABSENT dispositions and bounded the clean-room follow-ons."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/metrics-service-study-2026-08-29.md#candidate-dispositions"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10287",
+              "https://github.com/anthony-chaudhary/fak/issues/10312",
+              "https://github.com/anthony-chaudhary/fak/issues/10313",
+              "https://github.com/anthony-chaudhary/fak/issues/10314"
+            ],
+            "note": "The tracker and three independently shippable follow-ons carry the immutable study receipt and pinned clean-room provenance constraint."
+          }
+        ],
+        "issue_refs": [
+          "#10287",
+          "#10312",
+          "#10313",
+          "#10314"
+        ],
+        "completeness_critic": "Covered the committed tree, runtime/config/collector/storage/API lifecycle, operator UI and Grafana surfaces, tracked tests and fixtures, complete local history and tags, releases, pull requests, issues and discussions, provenance and license searches, current FAK overlap, candidate dispositions, deduplication, and delegated reads independently rechecked by the coordinator. Untracked target files, dependency-by-dependency license audit, external production deployments, and private runtime logs are outside the decision denominator."
+      }
+    },
+    {
+      "repository": "anthony-chaudhary/Benchmark",
+      "url": "https://github.com/anthony-chaudhary/Benchmark",
+      "status": "studied",
+      "priority": 74,
+      "why": "Pinned clean-room study of benchmark orchestration and evidence mechanisms. FAK already covers typed metrics, sinks, raw integrity, preflight, publication admission, and execution/export separation; watcher-safe snapshots, correlation receipts, and parser-completeness receipts survive as bounded follow-ons. Refresh if licensing, methodology, or the pinned mechanisms materially change.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "b60f2f05e23ec38ae4f50ca19717c2f615ed419a",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-08-19T00:33:36Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md",
+      "refresh_issue": "#10263",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthony-chaudhary-benchmark.json",
+        "indexed_revision": "b60f2f05e23ec38ae4f50ca19717c2f615ed419a",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 44,
+        "candidate_count": 9,
+        "filed_issue_count": 3,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "GitHub repository metadata at 2026-08-29",
+              "842 commits",
+              "309 tags",
+              "14 closed and zero open issues",
+              "zero pull requests",
+              "discussions disabled",
+              "zero stars and zero forks",
+              "last push 2026-08-19T00:33:36Z"
+            ],
+            "note": "Forge census was captured separately from the mechanical local-tree inventory."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "internal/cacheobs/metricspec.go:77-169",
+              "internal/findingsink/findingsink.go:137-168",
+              "internal/auditreceipt/auditreceipt.go:59-243",
+              "internal/benchmarkartifact",
+              "internal/armbench/manifest.go",
+              "internal/benchcatalog/ingest.go:168-314",
+              "internal/benchauthority/validate.go:23-178",
+              "internal/bench/ctxadmission.go:341-490",
+              "internal/bench/setupparity.go:510-517"
+            ],
+            "note": "Exact FAK seams decided PRESENT/PARTIAL dispositions and prevented duplicate abstractions."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md#candidate-dispositions",
+              "study_36e9161928991db39b7aebd463809d8ca37e9ac9d66ba074888c4bd45edd6882"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10263",
+              "https://github.com/anthony-chaudhary/fak/issues/10302",
+              "https://github.com/anthony-chaudhary/fak/issues/10303",
+              "https://github.com/anthony-chaudhary/fak/issues/10304"
+            ],
+            "note": "The parent and three bounded follow-ons carry pinned clean-room provenance and the durable receipt."
+          }
+        ],
+        "issue_refs": [
+          "#10263",
+          "#10302",
+          "#10303",
+          "#10304"
+        ],
+        "completeness_critic": "Covered the committed tree, architecture and runtime flow, tests and fixtures, local history and tags, forge issues/PRs/discussions metadata, provenance and license evidence, current FAK overlap, candidate dispositions, deduplication, issue filing, and durable receipt read-back. Inventory totals are a mechanical local-tree denominator that includes broad environment material, not project-owned source totals. Private deployments, external runtime logs, dependency-by-dependency license review, producer authentication, and comparative effectiveness remain outside the denominator."
       }
     }
   ]

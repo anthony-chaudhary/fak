@@ -246,6 +246,27 @@ func TestRunDispatchesBuildcheckUsage(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesBuildWithArgvAndExitPassthrough(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"build", "--profile", "not-a-profile"})
+	if code != 2 {
+		t.Fatalf("code=%d, want handler exit 2; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), `--profile must be release, dev, or race (got "not-a-profile")`) {
+		t.Fatalf("stderr does not prove argv reached RunBuild: %s", errOut.String())
+	}
+}
+
+func TestHelpAdvertisesTimedProductBuild(t *testing.T) {
+	var out bytes.Buffer
+	writeHelp(&out)
+	for _, want := range []string{"build [--profile P]", "record phase timings"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestRunDispatchesCIPreflightUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"ci-preflight", "--repo", t.TempDir(), "--ref", "missing", "--json"})

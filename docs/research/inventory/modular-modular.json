@@ -1,0 +1,816 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "modular/modular",
+  "url": "https://github.com/modular/modular",
+  "indexed_revision": "1c9fd2e03331f77d3a1034127cb3700b7fa43c02",
+  "observed_at": "2026-08-28T23:30:00-07:00",
+  "totals": {
+    "files": 10688,
+    "directories": 1577,
+    "bytes": 238952456,
+    "runtime_files": 2987,
+    "test_files": 4593,
+    "docs_files": 759,
+    "text_lines": 1448362
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "AsyncRT/benchmarks/README.md",
+        "AsyncRT/docs/README.md",
+        "Cache/docs/README.md",
+        "KGEN/docs/README.md",
+        "KGEN/docs/manual/README.md",
+        "KGEN/test/mojo-debug/README.md",
+        "KGEN/test/mojo-integration/extern-c-abi/README.md",
+        "KGEN/tools/mblack/README.md",
+        "KGEN/tools/mblack/src/mblib2to3/README",
+        "KGEN/utils/jupyter-mojo/extension/README.md",
+        "Licenses/README.md",
+        "README.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "KGEN/docs/DesignOverview.md",
+        "docs/eng-design/README.md",
+        "docs/max/develop/serve-custom-model-architectures.mdx",
+        "docs/max/gpu/architecture.mdx",
+        "docs/max/images/gpu/cpu-gpu-architecture-dark.png",
+        "docs/max/images/gpu/cpu-gpu-architecture.png",
+        "docs/max/images/gpu/sm-architecture-dark.png",
+        "docs/max/images/gpu/sm-architecture.png",
+        "max/docs/design-docs/README.md",
+        "max/docs/design-docs/amd-printf-lessons-learned.md",
+        "max/docs/design-docs/elementwise-ops.md",
+        "max/docs/design-docs/fp8-support-in-mojo.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".buildifier.json",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/doc_issue.yaml",
+        ".github/ISSUE_TEMPLATE/max_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_builds_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_feature_request.yaml",
+        ".github/ISSUE_TEMPLATE/mcloud_issue.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_feature_request.yaml",
+        ".github/labeler.yml",
+        ".github/workflows/auto-labeler.yml",
+        ".github/workflows/check_pr_target.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".github/workflows/build_and_test.yml",
+        ".github/workflows/test_pre_commit.yml",
+        "AsyncRT/test/BUILD.bazel",
+        "AsyncRT/test/crash-reporting/crash.mlir",
+        "AsyncRT/test/crash-reporting/crashdb-default.mlir",
+        "AsyncRT/test/crash-reporting/default-find-handler.mlir",
+        "AsyncRT/test/crash-reporting/handler-not-found.mlir",
+        "AsyncRT/test/crash-reporting/handler-on-path.mlir",
+        "AsyncRT/test/crash-reporting/handler-path-from-config.mlir",
+        "AsyncRT/test/crash-reporting/simulated-crash.mlir",
+        "AsyncRT/test/tcmalloc/BUILD.bazel",
+        "AsyncRT/test/tcmalloc/minimal.mojo"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        "docs/max/nightly-changelog.md",
+        "docs/write-nightly-release.py",
+        "max/tests/integration/nn/kv_cache/test_block_manager_release_leak.py",
+        "max/tests/integration/pipelines/test_device_graph_capture_release.py",
+        "mojo/docs/nightly-changelog.md",
+        "mojo/docs/write-nightly-release.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/doc_issue.yaml",
+        ".github/ISSUE_TEMPLATE/max_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_builds_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_feature_request.yaml",
+        ".github/ISSUE_TEMPLATE/mcloud_issue.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_feature_request.yaml",
+        ".github/PULL_REQUEST_TEMPLATE.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "evidence": [
+        "mojo/docs/roadmap.mdx"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "KGEN/test/mojo-lsp-server-node/package.json",
+        "KGEN/tools/mblack/LICENSE",
+        "KGEN/tools/mblack/src/mblib2to3/LICENSE",
+        "KGEN/tools/mblack/tests/data/include_exclude_tests/pyproject.toml",
+        "KGEN/tools/mblack/tests/data/invalid_gitignore_tests/pyproject.toml",
+        "KGEN/tools/mblack/tests/data/invalid_nested_gitignore_tests/pyproject.toml",
+        "KGEN/tools/mblack/tests/data/nested_gitignore_tests/pyproject.toml",
+        "KGEN/utils/jupyter-mojo/extension/package.json",
+        "KGEN/utils/jupyter-mojo/extension/pyproject.toml",
+        "LICENSE",
+        "Licenses/LICENSE",
+        "Licenses/Third-Party-Notices"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "max",
+      "files": 6003,
+      "directories": 741,
+      "bytes": 159252426,
+      "runtime_files": 1897,
+      "test_files": 2612,
+      "docs_files": 236,
+      "text_lines": 879193,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 2973
+        },
+        {
+          "language": "Config",
+          "files": 337
+        },
+        {
+          "language": "Docs",
+          "files": 236
+        },
+        {
+          "language": "Shell",
+          "files": 49
+        },
+        {
+          "language": "C",
+          "files": 15
+        },
+        {
+          "language": "C++",
+          "files": 9
+        }
+      ],
+      "example_paths": [
+        "max/CLAUDE.md",
+        "max/CONTRIBUTING.md",
+        "max/README.md",
+        "max/docs/README.md",
+        "max/docs/accuracy-debugging.md",
+        "max/docs/contributing-models.md",
+        "max/docs/design-docs/README.md",
+        "max/docs/design-docs/amd-printf-lessons-learned.md",
+        "max/docs/design-docs/elementwise-ops.md",
+        "max/docs/design-docs/fp8-support-in-mojo.md",
+        "max/docs/design-docs/genai-paged-attention.md",
+        "max/docs/design-docs/matmul-on-blackwell-part-1.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "KGEN",
+      "files": 2312,
+      "directories": 385,
+      "bytes": 19078248,
+      "runtime_files": 609,
+      "test_files": 1478,
+      "docs_files": 39,
+      "text_lines": 298327,
+      "languages": [
+        {
+          "language": "C++",
+          "files": 321
+        },
+        {
+          "language": "C",
+          "files": 243
+        },
+        {
+          "language": "Python",
+          "files": 95
+        },
+        {
+          "language": "Docs",
+          "files": 38
+        },
+        {
+          "language": "TypeScript",
+          "files": 18
+        },
+        {
+          "language": "Config",
+          "files": 16
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "KGEN/docs/DesignOverview.md",
+        "KGEN/docs/MojoCompilerWalkthrough.md",
+        "KGEN/docs/MojoLLDB.md",
+        "KGEN/docs/README.md",
+        "KGEN/docs/WorkingInOSRepo.md",
+        "KGEN/docs/arcana/Closures.md",
+        "KGEN/docs/arcana/Conformance.md",
+        "KGEN/docs/arcana/Generics.md",
+        "KGEN/docs/arcana/Thunks.md",
+        "KGEN/docs/arcana/WitnessElaboration.md",
+        "KGEN/docs/attic/TaskList.md",
+        "KGEN/docs/manual/CommonTypesAndTools.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "mojo",
+      "files": 1358,
+      "directories": 256,
+      "bytes": 36722882,
+      "runtime_files": 26,
+      "test_files": 427,
+      "docs_files": 191,
+      "text_lines": 123730,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 191
+        },
+        {
+          "language": "Python",
+          "files": 36
+        },
+        {
+          "language": "Config",
+          "files": 7
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "mojo/CLAUDE.md",
+        "mojo/CONTRIBUTING.md",
+        "mojo/README.md",
+        "mojo/docs/README.md",
+        "mojo/docs/cheatsheet-tooling/README.md",
+        "mojo/docs/cheatsheet-tooling/bin/build.py",
+        "mojo/docs/code/README.md",
+        "mojo/docs/code/manual/basics/README.md",
+        "mojo/docs/code/manual/c-ffi/README.md",
+        "mojo/docs/code/manual/c-ffi/test_c_number_types.mojo",
+        "mojo/docs/code/manual/c-ffi/test_call_libc.mojo",
+        "mojo/docs/code/manual/c-ffi/test_memory.mojo"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "Support",
+      "files": 403,
+      "directories": 75,
+      "bytes": 2128311,
+      "runtime_files": 299,
+      "test_files": 37,
+      "docs_files": 20,
+      "text_lines": 49103,
+      "languages": [
+        {
+          "language": "C++",
+          "files": 160
+        },
+        {
+          "language": "C",
+          "files": 144
+        },
+        {
+          "language": "Docs",
+          "files": 20
+        },
+        {
+          "language": "Python",
+          "files": 2
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "Support/benchmarks/Log/LogBenchmark.cpp",
+        "Support/benchmarks/Log/LogThroughputBenchmark.cpp",
+        "Support/benchmarks/Log/LogWorkloadBenchmark.cpp",
+        "Support/docs/ADT.md",
+        "Support/docs/ASN1.md",
+        "Support/docs/Compiler.md",
+        "Support/docs/CrashReporting.md",
+        "Support/docs/Cryptography.md",
+        "Support/docs/DebugInfoDialect.md",
+        "Support/docs/Driver.md",
+        "Support/docs/Filesystem.md",
+        "Support/docs/Frameworks.md"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 249,
+      "directories": 43,
+      "bytes": 12208953,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 249,
+      "text_lines": 67610,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 53
+        },
+        {
+          "language": "Docs",
+          "files": 31
+        },
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docs/BUILD.bazel",
+        "docs/README.md",
+        "docs/_includes/README.md",
+        "docs/_includes/install-modular.mdx",
+        "docs/_includes/install-openai.mdx",
+        "docs/_redirects.json",
+        "docs/code/README.md",
+        "docs/code/develop/basic-ops/BUILD.bazel",
+        "docs/code/develop/basic-ops/arithmetic.py",
+        "docs/code/develop/basic-ops/compose_linear_layer.py",
+        "docs/code/develop/basic-ops/concat.py",
+        "docs/code/develop/basic-ops/functional_activations.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "bazel",
+      "files": 186,
+      "directories": 16,
+      "bytes": 8515204,
+      "runtime_files": 54,
+      "test_files": 17,
+      "docs_files": 5,
+      "text_lines": 8038,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 43
+        },
+        {
+          "language": "Shell",
+          "files": 10
+        },
+        {
+          "language": "Docs",
+          "files": 5
+        },
+        {
+          "language": "C++",
+          "files": 4
+        },
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "C",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "bazel/docs/usage.md",
+        "bazel/internal/GTestMainObjcPoolCheck.cpp",
+        "bazel/internal/apply_mojo_fixits.py",
+        "bazel/internal/bazel-debug.sh",
+        "bazel/internal/binary_test.bzl",
+        "bazel/internal/cc-toolchain/collect-cc-coverage.sh",
+        "bazel/internal/cc-toolchain/tools/linker-driver.sh",
+        "bazel/internal/cc-toolchain/tools/multi-platform-clang++.sh",
+        "bazel/internal/cc-toolchain/tools/multi-platform-clang.sh",
+        "bazel/internal/create_venv.py",
+        "bazel/internal/debugging_test_bin.cpp",
+        "bazel/internal/debugging_test_lib.cpp"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "AsyncRT",
+      "files": 86,
+      "directories": 20,
+      "bytes": 642643,
+      "runtime_files": 63,
+      "test_files": 11,
+      "docs_files": 6,
+      "text_lines": 15523,
+      "languages": [
+        {
+          "language": "C++",
+          "files": 34
+        },
+        {
+          "language": "C",
+          "files": 29
+        },
+        {
+          "language": "Docs",
+          "files": 6
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "AsyncRT/benchmarks/QueueBenchmark.cpp",
+        "AsyncRT/benchmarks/README.md",
+        "AsyncRT/benchmarks/bench_allocator.cpp",
+        "AsyncRT/docs/AsyncRTRuntime.md",
+        "AsyncRT/docs/AsyncValue.md",
+        "AsyncRT/docs/README.md",
+        "AsyncRT/docs/WorkQueue.md",
+        "AsyncRT/docs/WorkQueueNonblocking.md",
+        "AsyncRT/include/AsyncRT/CompilerSupport/Context.h",
+        "AsyncRT/include/AsyncRT/CompilerSupport/LLVMThreadPool.h",
+        "AsyncRT/include/AsyncRT/CompilerSupport/MLIRLocationDecoder.h",
+        "AsyncRT/include/AsyncRT/ForwardDecls.h"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 21,
+      "directories": 15,
+      "bytes": 87578,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 1327,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        },
+        {
+          "language": "Config",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        ".buildifier.json",
+        ".pre-commit-config.yaml",
+        "AGENTS.md",
+        "AI_TOOL_POLICY.md",
+        "CLAUDE.md",
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "README.md",
+        "context7.json",
+        "pyproject.toml"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "Cache",
+      "files": 21,
+      "directories": 11,
+      "bytes": 135878,
+      "runtime_files": 11,
+      "test_files": 5,
+      "docs_files": 4,
+      "text_lines": 3253,
+      "languages": [
+        {
+          "language": "C++",
+          "files": 7
+        },
+        {
+          "language": "C",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "Cache/docs/README.md",
+        "Cache/include/Cache/BlobCache.h",
+        "Cache/include/Cache/CacheTelemetryContext.h",
+        "Cache/include/Cache/CachedTransform.h",
+        "Cache/include/Cache/Support/Keys.h",
+        "Cache/lib/BlobCache.cpp",
+        "Cache/lib/CacheTelemetryContext.cpp",
+        "Cache/lib/CachedTransform.cpp",
+        "Cache/test/BUILD.bazel",
+        "Cache/test/cache-mgr/Inputs/empty.txt",
+        "Cache/test/cache-mgr/Inputs/some_file.txt",
+        "Cache/test/cache-mgr/Inputs/some_file_windows.txt"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 17,
+      "directories": 2,
+      "bytes": 31419,
+      "runtime_files": 13,
+      "test_files": 2,
+      "docs_files": 1,
+      "text_lines": 833,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 15
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/doc_issue.yaml",
+        ".github/ISSUE_TEMPLATE/max_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_builds_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/max_feature_request.yaml",
+        ".github/ISSUE_TEMPLATE/mcloud_issue.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_bug_report.yaml",
+        ".github/ISSUE_TEMPLATE/mojo_feature_request.yaml",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/labeler.yml",
+        ".github/workflows/auto-labeler.yml",
+        ".github/workflows/build_and_test.yml"
+      ],
+      "source_classes": [
+        "open_closed_issues_prs_discussions",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "Init",
+      "files": 13,
+      "directories": 6,
+      "bytes": 40500,
+      "runtime_files": 6,
+      "test_files": 4,
+      "docs_files": 0,
+      "text_lines": 1070,
+      "languages": [
+        {
+          "language": "C++",
+          "files": 4
+        },
+        {
+          "language": "Python",
+          "files": 4
+        },
+        {
+          "language": "C",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "Init/include/Init/DevelopmentSignalHandler.h",
+        "Init/include/Init/Init.h",
+        "Init/integration-test/python/InitBindings.cpp",
+        "Init/integration-test/python/test_script.py",
+        "Init/integration-test/python/test_script_gil.py",
+        "Init/integration-test/python/test_signal_handler_python.py",
+        "Init/integration-test/python/test_signal_handler_python_gil.py",
+        "Init/lib/DevelopmentSignalHandler.cpp",
+        "Init/lib/Init.cpp",
+        "Init/unittests/DevelopmentSignalHandlerTests.cpp"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".cursor",
+      "files": 4,
+      "directories": 1,
+      "bytes": 26043,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "Config",
+      "files": 4,
+      "directories": 3,
+      "bytes": 4922,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 93,
+      "languages": [
+        {
+          "language": "C",
+          "files": 1
+        },
+        {
+          "language": "C++",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "Config/include/Config/Version.h",
+        "Config/lib/Version.cpp"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "Licenses",
+      "files": 4,
+      "directories": 0,
+      "bytes": 63607,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 13,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "Licenses/LICENSE",
+        "Licenses/README.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "utils",
+      "files": 4,
+      "directories": 1,
+      "bytes": 9389,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 249,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 3
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "utils/local_transformers_setup/README.md",
+        "utils/local_transformers_setup/cleanup_local_transformers.sh",
+        "utils/local_transformers_setup/setup_local_transformers.sh",
+        "utils/setup-gpu-clock.sh"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 3,
+      "directories": 2,
+      "bytes": 4453,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "KGEN/include/KGEN/Compiler/Target",
+    "KGEN/lib/Compiler/ObjectCompiler/Target",
+    "KGEN/lib/KGENToLLVM/Target",
+    "KGEN/lib/Target",
+    "KGEN/test/mojo-tool/build",
+    "KGEN/tools/mojo/Build",
+    "Support/lib/DebugInfoDialect/DebugInfoToLLVM/Target",
+    "max/kernels/src/comm/vendor",
+    "max/kernels/src/linalg/matmul/vendor"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git, KGEN/include/KGEN/Compiler/Target, KGEN/lib/Compiler/ObjectCompiler/Target, KGEN/lib/KGENToLLVM/Target, KGEN/lib/Target, KGEN/test/mojo-tool/build, KGEN/tools/mojo/Build, Support/lib/DebugInfoDialect/DebugInfoToLLVM/Target, max/kernels/src/comm/vendor, max/kernels/src/linalg/matmul/vendor; classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+}

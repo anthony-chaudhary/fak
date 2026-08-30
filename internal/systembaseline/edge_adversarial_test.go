@@ -294,7 +294,7 @@ func TestAdversarialOversizedProcessCensusStaysBounded(t *testing.T) {
 	policy := DefaultPolicy()
 	policy.IncludeTopConsumers = true
 	report := Build(baseline, command, 10, time.Second, policy, 0, false)
-	if len(report.TopNonSUT) != 5 {
+	if len(report.TopNonSUT) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the report contract returns the configured top-five non-SUT entries
 		t.Fatalf("top consumer count=%d, want hard bound 5", len(report.TopNonSUT))
 	}
 	if err := report.Validate(); err != nil {

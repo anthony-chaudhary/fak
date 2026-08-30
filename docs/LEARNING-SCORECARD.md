@@ -5,7 +5,7 @@ description: "fak's deterministic learning-docs scorecard: does the teaching set
 
 # Learning-docs scorecard
 
-<!-- learning-scorecard: 2026-08-27 · process: tools/learning_scorecard.py -->
+<!-- learning-scorecard: 2026-08-29 · process: tools/learning_scorecard.py -->
 
 > Regenerate: `python tools/learning_scorecard.py --markdown --stamp DATE > docs/LEARNING-SCORECARD.md`
 
@@ -24,7 +24,7 @@ This is the measuring stick for the learning-2× program: does the *teaching* se
 | Coverage (overall) | 100.0% |
 | — reachable from a front door | 100.0% |
 | — expected learning topics covered | 100.0% |
-| Stamp freshness | age Noned / cadence 1d |
+| Stamp freshness | age 0d / cadence 1d |
 
 ## Priorities — fix the most-important, most-broken first
 

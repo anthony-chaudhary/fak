@@ -150,7 +150,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		})
 	} else {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMMGroup, func(observation *metalgemm.ExecutionObservation) {
-			if q4kMLPOutputSlabSelected(names, pos, P) {
+			if q4kMLPOutputSlabSelected(s.Q4KGateUpOutputSlab, names, pos, P) {
 				need := 0
 				for _, w := range ws {
 					if w.Out > (q4kMLPOutputSlabMaxFloats-need)/P {
@@ -209,8 +209,8 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 // q4kMLPOutputSlabSelected narrows experimental reuse to an exact same-layer gate/up pair. The
 // feature remains default-off pending the #9102 Mac KEEP gate; every other group and panel keeps
 // GEMMGroupWithEvents' call-owned allocation.
-func q4kMLPOutputSlabSelected(names []string, pos []int, P int) bool {
-	if os.Getenv("FAK_Q4K_GATEUP_SLAB") != "1" || P <= 1 || P > q4kMLPOutputSlabMaxTokens || len(names) != 2 || len(pos) != 2 || pos[0] != 0 || pos[1] != 1 {
+func q4kMLPOutputSlabSelected(enabled bool, names []string, pos []int, P int) bool {
+	if !enabled || P <= 1 || P > q4kMLPOutputSlabMaxTokens || len(names) != 2 || len(pos) != 2 || pos[0] != 0 || pos[1] != 1 {
 		return false
 	}
 	const gateSuffix = "mlp.gate_proj.weight"

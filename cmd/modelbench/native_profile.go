@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -78,15 +79,16 @@ var nativeProfileDeniedEnvironment = []string{
 }
 
 const (
-	nativeControlFlagBudget   = "flag:-budget"
-	nativeControlLogicalCPUs  = "runtime:logical_cpus"
-	nativeControlGOMAXPROCS   = "runtime:gomaxprocs"
-	nativeControlWorkers      = "runtime:matmul_workers"
-	nativeControlQ8Workers    = "runtime:q8_decode_workers"
-	nativeControlWorkerBudget = "runtime:worker_budget"
+	nativeControlFlagBudget           = "flag:-budget"
+	nativeControlLogicalCPUs          = "runtime:logical_cpus"
+	nativeControlGOMAXPROCS           = "runtime:gomaxprocs"
+	nativeControlWorkers              = "runtime:matmul_workers"
+	nativeControlQ8Workers            = "runtime:q8_decode_workers"
+	nativeControlWorkerBudget         = "runtime:worker_budget"
+	nativeProfileDecodeHandoffControl = "flag:-native-performance-qwen35-decode-handoff"
 )
 
-func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ []string, budget float64) (map[string]string, error) {
+func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ []string, budget float64, handoffMode model.Qwen35DecodeHandoffMode) (map[string]string, error) {
 	if budget != 0 {
 		return nil, fmt.Errorf("native performance profile unavailable: -budget must be 0, got %g", budget)
 	}
@@ -111,6 +113,10 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 		sequenceSelector = nativeProfileUnset
 	}
 	controls[nativeProfileSequenceSelector] = sequenceSelector
+	if handoffMode != model.Qwen35DecodeHandoffAuto && sequenceSelector != nativeProfileSelectorOn {
+		return nil, fmt.Errorf("native performance profile unavailable: decode handoff %s requires %s=%s", handoffMode, nativeProfileSequenceSelector, nativeProfileSelectorOn)
+	}
+	controls[nativeProfileDecodeHandoffControl] = handoffMode.String()
 	for _, key := range nativeProfileDeniedEnvironment {
 		if got, ok := lookup(key); ok {
 			return nil, fmt.Errorf("native performance profile unavailable: %s override is not allowed (got %q)", key, got)
@@ -149,11 +155,15 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 
 func validateNativeProfileControls(controls map[string]string) error {
 	legacyLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 7
-	if len(controls) != legacyLen && len(controls) != legacyLen+1 {
-		return fmt.Errorf("native performance control receipt has %d fields, want %d or %d", len(controls), legacyLen, legacyLen+1)
+	extra := 0
+	if _, ok := controls[nativeProfileSequenceSelector]; ok {
+		extra++
 	}
-	if _, ok := controls[nativeProfileSequenceSelector]; len(controls) == legacyLen+1 && !ok {
-		return fmt.Errorf("extended native performance control receipt is missing %s", nativeProfileSequenceSelector)
+	if _, ok := controls[nativeProfileDecodeHandoffControl]; ok {
+		extra++
+	}
+	if len(controls) != legacyLen+extra {
+		return fmt.Errorf("native performance control receipt has %d fields, want %d for its typed extensions", len(controls), legacyLen+extra)
 	}
 	for key, want := range nativeProfileRequiredEnvironment {
 		if controls[key] != want {
@@ -165,6 +175,15 @@ func validateNativeProfileControls(controls map[string]string) error {
 	}
 	if selector, ok := controls[nativeProfileSequenceSelector]; ok && selector != nativeProfileUnset && selector != nativeProfileSelectorOff && selector != nativeProfileSelectorOn {
 		return fmt.Errorf("selector control %s was not captured as typed %s or %s", nativeProfileSequenceSelector, nativeProfileSelectorOff, nativeProfileSelectorOn)
+	}
+	if value, ok := controls[nativeProfileDecodeHandoffControl]; ok {
+		var mode model.Qwen35DecodeHandoffMode
+		if err := mode.Set(value); err != nil {
+			return fmt.Errorf("decode handoff control: %w", err)
+		}
+		if mode != model.Qwen35DecodeHandoffAuto && controls[nativeProfileSequenceSelector] != nativeProfileSelectorOn {
+			return fmt.Errorf("decode handoff %s requires sequence selector ON", mode)
+		}
 	}
 	for _, key := range nativeProfileDeniedEnvironment {
 		if controls[key] != nativeProfileUnset {
@@ -212,20 +231,22 @@ type nativeSourceIdentity struct {
 }
 
 type nativeProfileReceipt struct {
-	Schema            string                     `json:"schema"`
-	BindingSHA256     string                     `json:"binding_sha256"`
-	ProfileSHA256     string                     `json:"profile_sha256"`
-	EnvelopeID        string                     `json:"envelope_id"`
-	Artifact          nativeArtifactIdentity     `json:"artifact"`
-	ModelConfig       map[string]any             `json:"model_config"`
-	ModelConfigSHA256 string                     `json:"model_config_sha256"`
-	Host              nativeHostIdentity         `json:"host"`
-	Source            nativeSourceIdentity       `json:"source"`
-	Binary            nativeFileIdentity         `json:"binary"`
-	Controls          map[string]string          `json:"controls"`
-	Execution         metalgemm.ExecutionReceipt `json:"execution"`
-	Fallbacks         model.MetalFallbackReceipt `json:"fallbacks"`
-	Q4KResidency      *model.Q4KResidencyReceipt `json:"q4k_residency,omitempty"`
+	Schema              string                                 `json:"schema"`
+	BindingSHA256       string                                 `json:"binding_sha256"`
+	ProfileSHA256       string                                 `json:"profile_sha256"`
+	EnvelopeID          string                                 `json:"envelope_id"`
+	Artifact            nativeArtifactIdentity                 `json:"artifact"`
+	ModelConfig         map[string]any                         `json:"model_config"`
+	ModelConfigSHA256   string                                 `json:"model_config_sha256"`
+	Host                nativeHostIdentity                     `json:"host"`
+	Source              nativeSourceIdentity                   `json:"source"`
+	Binary              nativeFileIdentity                     `json:"binary"`
+	Controls            map[string]string                      `json:"controls"`
+	Execution           metalgemm.ExecutionReceipt             `json:"execution"`
+	Fallbacks           model.MetalFallbackReceipt             `json:"fallbacks"`
+	Q4KResidency        *model.Q4KResidencyReceipt             `json:"q4k_residency,omitempty"`
+	Qwen35DecodeHandoff *model.Qwen35DecodeHandoffReceipt      `json:"qwen35_decode_handoff,omitempty"`
+	CachePhaseLatency   *modelperfobs.CachePhaseLatencyReceipt `json:"cache_phase_latency,omitempty"`
 }
 
 func sha256JSON(v any) (string, error) {
@@ -465,6 +486,23 @@ func validateNativeProfileReceipt(profileBytes []byte, profile nativeperf.Profil
 	}
 	if err := validateNativeProfileControls(receipt.Controls); err != nil {
 		return err
+	}
+	handoffMode := model.Qwen35DecodeHandoffAuto
+	if value, ok := receipt.Controls[nativeProfileDecodeHandoffControl]; ok {
+		if err := handoffMode.Set(value); err != nil {
+			return err
+		}
+		if receipt.Qwen35DecodeHandoff == nil {
+			return fmt.Errorf("decode handoff control lacks a session receipt")
+		}
+	}
+	if receipt.Qwen35DecodeHandoff != nil {
+		if receipt.Qwen35DecodeHandoff.Mode != handoffMode {
+			return fmt.Errorf("decode handoff receipt mode %s does not match control %s", receipt.Qwen35DecodeHandoff.Mode, handoffMode)
+		}
+		if err := model.ValidateQwen35DecodeHandoffReceipt(*receipt.Qwen35DecodeHandoff); err != nil {
+			return fmt.Errorf("decode handoff receipt: %w", err)
+		}
 	}
 	if err := metalgemm.ValidateExecutionReceipt(receipt.Execution); err != nil {
 		return err

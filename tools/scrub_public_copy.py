@@ -338,6 +338,8 @@ AUDIT_NEEDLES = [
     "node-windows-a",
     "node-desktop-b",
     ".claude-agent",
+    "ca" + "ma",
+    "sar" + "onic",
     # Employer affiliation. Fine in private working material, must NEVER leak into
     # the public tree -- catches `Samsung`, `samsungmsl`, `samsung.com`, "Samsung
     # Data Fabric / CMM-D / Cognos" pitch language, etc. (case-insensitive

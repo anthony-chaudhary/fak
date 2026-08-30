@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "issue10230-performance-rsi-debt",
+      "canonical": "PerformanceRSIDebt (performance-RSI unresolved-dimension debt)",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "PerformanceRSIDebt is the perfrsiscore report metric counting canonical performance dimensions that remain BEHIND or UNKNOWN. Build derives it as Behind plus Unknown, uses zero as the clean condition, and passes the already-computed value to human and Markdown renderers.",
+      "distinction": "Use PerformanceRSIDebt for the unresolved-dimension COUNT computed by the performance-RSI scorecard. Unlike performance-rsi-scorecard, it is the metric emitted by that evaluator; unlike the generic scorecard renderer, it is computed before presentation and RenderHuman or RenderMarkdown only project it.",
+      "distinct_from": [
+        "cov-debt-tail-score-debt-cmdperformancersiscorecard",
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "PerformanceRSIDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

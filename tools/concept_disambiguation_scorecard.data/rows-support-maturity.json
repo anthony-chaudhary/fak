@@ -7,7 +7,7 @@
       "kind": "concept",
       "definition": "A capability is supported when fak has an implemented path that accepts the case without asserting how broadly it is exercised, whether every answer is right, how it compares to a peer, or whether it is production-mature.",
       "distinction": "Support is the existence of the path or feature; coverage measures the space exercised or positioned, correctness proves behavior against a contract/oracle, parity compares against a named baseline, and maturity summarizes readiness.",
-      "distinct_from": ["coverage", "correctness", "parity", "maturity"],
+      "distinct_from": ["coverage", "correctness", "parity", "maturity", "issue9909-native-receipt-signal-supported"],
       "aliases": [],
       "grounding": "support",
       "grounding_kind": "doc",

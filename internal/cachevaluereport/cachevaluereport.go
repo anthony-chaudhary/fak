@@ -23,6 +23,7 @@ package cachevaluereport
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -76,10 +77,12 @@ type Bucket struct {
 	PartialTurns   uint64 `json:"partial_turns"`
 	ColdTurns      uint64 `json:"cold_turns"`
 
-	PromptTokens     uint64 `json:"prompt_tokens"`
-	ReusedTokens     uint64 `json:"reused_tokens"`
-	GatePromptTokens uint64 `json:"gate_prompt_tokens"` // multi-turn only
-	GateReusedTokens uint64 `json:"gate_reused_tokens"`
+	PromptTokens uint64 `json:"prompt_tokens"`
+	ReusedTokens uint64 `json:"reused_tokens"`
+	// RejectedTierAccesses sums the cumulative process snapshots carried by included rows.
+	RejectedTierAccesses uint64 `json:"rejected_tier_accesses"`
+	GatePromptTokens     uint64 `json:"gate_prompt_tokens"` // multi-turn only
+	GateReusedTokens     uint64 `json:"gate_reused_tokens"`
 
 	RealizedReuseRatio float64 `json:"realized_reuse_ratio"`
 	Thin               bool    `json:"thin"` // MultiTurnTurns < MinBucketTurns
@@ -102,6 +105,8 @@ type Report struct {
 	TotalRows         int `json:"total_rows"`     // rows with turns > 0
 	TotalSessions     int `json:"total_sessions"` // == TotalRows (alias for the human report)
 	MultiTurnSessions int `json:"multi_turn_sessions"`
+	// RejectedTierAccesses sums included rows; it is not a delta or an accepted-access count.
+	RejectedTierAccesses uint64 `json:"rejected_tier_accesses"`
 
 	// LatestReuseRatio is the most recent bucket's realized reuse; LatestTrend is its
 	// direction. These are the headline a card shows.
@@ -140,6 +145,13 @@ func sortedPeriodKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+func saturatingAddUint64(total, next uint64) uint64 {
+	if next > math.MaxUint64-total {
+		return math.MaxUint64
+	}
+	return total + next
+}
+
 // Fold rolls a slice of ledger rows up into a weekly trend Report. It is pure: the
 // only time input is `now`, used solely to stamp GeneratedAt — bucketing comes from
 // each row's own Date. Rows with zero turns (no session activity) are skipped, the
@@ -171,6 +183,7 @@ func Fold(rows []cachevalueledger.Row, now time.Time) Report {
 			continue
 		}
 		r.TotalRows++
+		r.RejectedTierAccesses = saturatingAddUint64(r.RejectedTierAccesses, row.RejectedTierAccesses)
 		key := isoWeek(d)
 		a := byPeriod[key]
 		if a == nil {
@@ -188,6 +201,7 @@ func Fold(rows []cachevalueledger.Row, now time.Time) Report {
 		b.ColdTurns += row.ColdTurns
 		b.PromptTokens += row.PromptTokens
 		b.ReusedTokens += row.ReusedTokens
+		b.RejectedTierAccesses = saturatingAddUint64(b.RejectedTierAccesses, row.RejectedTierAccesses)
 		st := row.SessionType
 		if st == "" {
 			st = "unknown"
@@ -275,6 +289,9 @@ func Render(r Report) string {
 	fmt.Fprintf(&sb, "cache-value roll-up (Track 1, WITNESSED kernel reuse) — %s\n", r.Verdict)
 	fmt.Fprintf(&sb, "  %s\n", r.Finding)
 	fmt.Fprintf(&sb, "  fence: %s\n", PublishableValueFamily)
+	if r.RejectedTierAccesses > 0 {
+		fmt.Fprintf(&sb, "  rejected tier accesses: %d\n", r.RejectedTierAccesses)
+	}
 	if len(r.Buckets) == 0 {
 		return sb.String()
 	}

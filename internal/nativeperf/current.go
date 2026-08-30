@@ -264,7 +264,7 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 				ExitWhen:       "The default fak-native CUDA decode path passes full-model quality with zero fallback and a repeated same-artifact end-to-end gain, or the measured profile selects another driver.",
 				ReadyLeverIDs:  append([]string(nil), readyByEnvelope[cudaEnvelope]...),
 				Evidence: []EvidenceRef{
-					{Class: "accepted", Summary: "Five cold unique runs were 5/5 exact at 11.8-12.1 decode tok/s on A100-SXM4-40GB.", Ref: "docs/_witnesses/issue-8819-qwen38-cache-attribution/summary.json"},
+					{Class: "accepted", Summary: "Five cold unique runs were 5/5 exact at 11.8-12.1 decode tok/s on `A100-SXM4-40GB`.", Ref: "docs/_witnesses/issue-8819-qwen38-cache-attribution/summary.json"},
 					{Class: "hypothesis", Summary: "Q8_1 activation quantization followed by signed DP4A Q4_K MMVQ is the issue-owned P=1 sequence; no gain is assumed.", Ref: "https://github.com/anthony-chaudhary/fak/issues/8635"},
 				},
 			},

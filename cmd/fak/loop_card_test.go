@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -28,10 +29,14 @@ type loopCardSlack struct {
 func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) {
 	oldNewCommand := loopNewCommand
 	defer func() { loopNewCommand = oldNewCommand }()
-	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+	var childEnv []string
+	loopNewCommand = func(argv, env []string, stdout, stderr io.Writer) loopCommand {
+		childEnv = env
 		return &fakeLoopCommand{pid: 9777}
 	}
 	t.Setenv(perfrsiscore.LoopTurnInputEnv, filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json"))
+	usageLedger := filepath.Join(t.TempDir(), "performance-rsi-usage.jsonl")
+	t.Setenv(perfrsiscore.UsageLedgerEnv, usageLedger)
 
 	var stdout, stderr bytes.Buffer
 	code := runLoop(&stdout, &stderr, []string{
@@ -46,6 +51,9 @@ func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) 
 	if code != 0 {
 		t.Fatalf("runLoop code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
+	if childEnv != nil {
+		t.Fatalf("explicit %s behavior injected a child environment: %v", perfrsiscore.LoopTurnInputEnv, childEnv)
+	}
 	const marker = "fak loop run: performance-rsi loop-turn "
 	if got := strings.Count(stderr.String(), marker); got != 1 {
 		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr.String())
@@ -55,15 +63,100 @@ func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) 
 			t.Fatalf("loop-turn receipt missing %q:\n%s", want, stderr.String())
 		}
 	}
+	fold, err := perfrsiscore.FoldUsage(usageLedger)
+	if err != nil {
+		t.Fatalf("fold performance RSI usage: %v", err)
+	}
+	if len(fold.Weeks) != 1 || fold.Weeks[0].Invocations != 1 || fold.Weeks[0].Scored != 1 || fold.Weeks[0].InvocationOutcomes.Success != 1 {
+		t.Fatalf("performance RSI usage fold = %+v", fold)
+	}
+}
+
+func TestLoopRunScoresMatchingRunScopedPerformanceRSIOutput(t *testing.T) {
+	t.Setenv(perfrsiscore.LoopTurnInputEnv, "")
+	t.Setenv("FAK_LOOP_RUN_HELPER", "performance-rsi")
+
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", ledger,
+		"--loop", "dispatch/issues",
+		"--run", "issue-10156-matching",
+		"--no-guard",
+		"--",
+		os.Args[0], "-test.run=^TestLoopRunHelper$",
+	})
+	if code != 0 {
+		t.Fatalf("runLoop code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	receipt := loopPerformanceRSIReceipt(t, stderr.String())
+	if receipt.Status != perfrsiscore.LoopTurnScored || receipt.Reason != "SCORE_COMPLETE" || receipt.Snapshot != "issue-10156-matching" {
+		t.Fatalf("matching output receipt = %+v", receipt)
+	}
+	if receipt.InvocationOutcomes.Success != 1 || receipt.InvocationOutcomes.Refusal != 0 || receipt.InvocationOutcomes.Error != 0 || receipt.InvocationOutcomes.Total() != 1 {
+		t.Fatalf("matching output invocation outcomes = %+v", receipt.InvocationOutcomes)
+	}
+	if receipt.Input == "" || filepath.Dir(receipt.Input) != filepath.Dir(ledger) {
+		t.Fatalf("run-scoped output %q is not beside ledger %q", receipt.Input, ledger)
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatalf("load loop ledger: %v", err)
+	}
+	if got := gotKinds(events); got != "fire,admit,start,end" {
+		t.Fatalf("automatic score changed loop events: got %s", got)
+	}
+}
+
+func TestLoopRunRejectsCrossRunPerformanceRSIOutput(t *testing.T) {
+	t.Setenv(perfrsiscore.LoopTurnInputEnv, "")
+	t.Setenv("FAK_LOOP_RUN_HELPER", "performance-rsi")
+	t.Setenv("FAK_LOOP_TEST_RSI_SNAPSHOT", "another-run")
+
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", ledger,
+		"--loop", "dispatch/issues",
+		"--run", "issue-10156-current",
+		"--no-guard",
+		"--",
+		os.Args[0], "-test.run=^TestLoopRunHelper$",
+	})
+	if code != 0 {
+		t.Fatalf("cross-run output changed dispatch code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	receipt := loopPerformanceRSIReceipt(t, stderr.String())
+	if receipt.Status != perfrsiscore.LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
+		t.Fatalf("cross-run output receipt = %+v", receipt)
+	}
+	if receipt.InvocationOutcomes.Success != 0 || receipt.InvocationOutcomes.Refusal != 1 || receipt.InvocationOutcomes.Error != 0 || receipt.InvocationOutcomes.Total() != 1 {
+		t.Fatalf("cross-run invocation outcomes = %+v", receipt.InvocationOutcomes)
+	}
+	if !strings.Contains(receipt.UnavailableDiagnostic, `snapshot "another-run" does not match loop run "issue-10156-current"`) {
+		t.Fatalf("cross-run diagnostic = %q", receipt.UnavailableDiagnostic)
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatalf("load loop ledger: %v", err)
+	}
+	if got := gotKinds(events); got != "fire,admit,start,end" {
+		t.Fatalf("cross-run score changed loop events: got %s", got)
+	}
 }
 
 func TestLoopRunPreservesDispatchWhenPerformanceRSIInputUnavailable(t *testing.T) {
 	oldNewCommand := loopNewCommand
 	defer func() { loopNewCommand = oldNewCommand }()
-	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+	loopNewCommand = func(argv, env []string, stdout, stderr io.Writer) loopCommand {
 		return &fakeLoopCommand{pid: 9777}
 	}
 	t.Setenv(perfrsiscore.LoopTurnInputEnv, "")
+	usageLedger := filepath.Join(t.TempDir(), "performance-rsi-usage.jsonl")
+	t.Setenv(perfrsiscore.UsageLedgerEnv, usageLedger)
 
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var stdout, stderr bytes.Buffer
@@ -97,11 +190,129 @@ func TestLoopRunPreservesDispatchWhenPerformanceRSIInputUnavailable(t *testing.T
 	if got := strings.Count(stderr.String(), marker); got != 1 {
 		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr.String())
 	}
-	for _, want := range []string{`"status":"unavailable"`, `"reason":"SCORE_INPUT_UNAVAILABLE"`, `"unavailable_diagnostic":"FAK_PERFORMANCE_RSI_INPUT is not set"`} {
+	for _, want := range []string{`"status":"unavailable"`, `"reason":"SCORE_INPUT_UNAVAILABLE"`, `"unavailable_diagnostic":"FAK_PERFORMANCE_RSI_OUTPUT was not produced for this run"`, `"invocation_outcomes":{"success":0,"refusal":1,"error":0}`} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("explicit unavailable receipt missing %q:\n%s", want, stderr.String())
 		}
 	}
+	receipt := loopPerformanceRSIReceipt(t, stderr.String())
+	if receipt.InvocationOutcomes.Total() != 1 || receipt.InvocationOutcomes.Refusal != 1 {
+		t.Fatalf("missing output invocation outcomes = %+v", receipt.InvocationOutcomes)
+	}
+	fold, err := perfrsiscore.FoldUsage(usageLedger)
+	if err != nil {
+		t.Fatalf("fold unavailable performance RSI usage: %v", err)
+	}
+	if len(fold.Weeks) != 1 || fold.Weeks[0].Invocations != 1 || fold.Weeks[0].Unavailable != 1 || fold.Weeks[0].InvocationOutcomes.Refusal != 1 {
+		t.Fatalf("unavailable performance RSI usage fold = %+v", fold)
+	}
+}
+
+func TestScoreAutomaticLoopPerformanceRSIRejectsUnsafeOutputShapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, path string)
+	}{
+		{
+			name: "zero-size regular file",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatalf("write empty output: %v", err)
+				}
+			},
+		},
+		{
+			name: "nonregular directory",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatalf("create output directory: %v", err)
+				}
+			},
+		},
+		{
+			name: "oversized regular file",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+				f, err := os.Create(path)
+				if err != nil {
+					t.Fatalf("create oversized output: %v", err)
+				}
+				if err := f.Truncate(loopPerformanceRSIMaxBytes + 1); err != nil {
+					_ = f.Close()
+					t.Fatalf("truncate oversized output: %v", err)
+				}
+				if err := f.Close(); err != nil {
+					t.Fatalf("close oversized output: %v", err)
+				}
+			},
+		},
+		{name: "missing file", setup: func(t *testing.T, path string) {}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "performance-rsi.json")
+			tt.setup(t, path)
+			receipt := scoreAutomaticLoopPerformanceRSI(path, "run-current", nil)
+			if receipt.Status != perfrsiscore.LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
+				t.Fatalf("receipt status/reason = %q/%q, want unavailable/SCORE_INPUT_UNAVAILABLE", receipt.Status, receipt.Reason)
+			}
+			counts := receipt.InvocationOutcomes
+			if counts.Success != 0 || counts.Refusal != 1 || counts.Error != 0 || counts.Total() != 1 {
+				t.Fatalf("invocation outcomes = %+v, want exactly one refusal", counts)
+			}
+		})
+	}
+}
+
+func writeLoopPerformanceRSIOutput(target, snapshot string) error {
+	f, err := os.Open(filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json"))
+	if err != nil {
+		return err
+	}
+	evidence, err := perfrsiscore.Decode(f)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	evidence.Snapshot = snapshot
+	body, err := json.Marshal(evidence)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".performance-rsi-child-*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, target)
+}
+
+func loopPerformanceRSIReceipt(t *testing.T, stderr string) perfrsiscore.LoopTurnReceipt {
+	t.Helper()
+	const marker = "fak loop run: performance-rsi loop-turn "
+	if got := strings.Count(stderr, marker); got != 1 {
+		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr)
+	}
+	encoded := strings.SplitN(strings.SplitN(stderr, marker, 2)[1], "\n", 2)[0]
+	var receipt perfrsiscore.LoopTurnReceipt
+	if err := json.Unmarshal([]byte(encoded), &receipt); err != nil {
+		t.Fatalf("decode performance RSI receipt: %v\n%s", err, encoded)
+	}
+	return receipt
 }
 
 type loopCardMsg struct {

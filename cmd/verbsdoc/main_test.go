@@ -1,10 +1,29 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestRenderPagePreservesGeneratedDocumentShell(t *testing.T) {
+	surface := []byte("# fak verb surface (generated)\n\nintro\n" + string(surfaceTableMarker) + "|---|---|---|---|---|---|---|\n")
+	got, err := renderPage(surface)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(got, []byte(pageFrontmatter+"# fak verb surface (generated)\n")) {
+		t.Fatalf("generated page lost required frontmatter:\n%s", got)
+	}
+	if bytes.Count(got, []byte("\n## Surface table\n")) != 1 {
+		t.Fatalf("generated page surface heading count != 1:\n%s", got)
+	}
+
+	if _, err := renderPage([]byte("no table")); err == nil {
+		t.Fatal("render accepted a page with no verb table marker")
+	}
+}
 
 func TestPrintDoesNotTouchDiskAndCheckDetectsDrift(t *testing.T) {
 	root := repoRoot(t)

@@ -117,20 +117,24 @@ func TestQwen35MTPDrafterPrefixExtensionKeepsForward(t *testing.T) {
 	if got := d.Propose([]int{10, 11}); !reflect.DeepEqual(got, []int{2, 3}) {
 		t.Fatalf("first draft = %v, want [2 3]", got)
 	}
-	if got := d.Propose([]int{10, 11, 2, 3, 12}); !reflect.DeepEqual(got, []int{1, 2}) {
+	extended := []int{10, 11, 2, 3, 12}
+	if got := d.Propose(extended); !reflect.DeepEqual(got, []int{1, 2}) {
 		t.Fatalf("extended-prefix draft = %v, want [1 2]", got)
 	}
 	if len(factory.forwards) != 1 {
 		t.Fatalf("forward instances = %d, want 1 for genuine prefix extension", len(factory.forwards))
 	}
-	var positions []int
-	for _, call := range factory.forwards[0].calls {
-		positions = append(positions, call.pos)
+	calls := factory.forwards[0].calls
+	if want := len(extended) + d.k - 1; len(calls) != want {
+		t.Fatalf("forward calls = %d, want committed prefix plus draft lookahead = %d", len(calls), want)
 	}
-	if !reflect.DeepEqual(positions, []int{0, 1, 2, 3, 4, 5}) {
-		t.Fatalf("forward positions = %v, want monotonic extension [0..5]", positions)
+	for wantPos, call := range calls {
+		if call.pos != wantPos {
+			t.Fatalf("forward call %d position = %d, want monotonic position %d", wantPos, call.pos, wantPos)
+		}
 	}
-	if got := factory.forwards[0].calls[4].embedding; !reflect.DeepEqual(got, []float32{12, -12}) {
+	currentIndex := len(extended) - 1
+	if got := calls[currentIndex].embedding; !reflect.DeepEqual(got, []float32{12, -12}) {
 		t.Fatalf("current-token embedding at extension = %v, want callback result for token 12", got)
 	}
 }

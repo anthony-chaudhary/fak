@@ -405,6 +405,34 @@ func TestLoadMissingClaimsDegrades(t *testing.T) {
 	}
 }
 
+func TestClaimDocumentSetBindsDetailPagePackages(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "claims"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(
+		"[lanes.trees]\n"+
+			"docs = [\"docs/**\"]\n"+
+			"gateway = [\"internal/gateway/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAIMS.md"), []byte(
+		"## Claims\n- [SHIPPED] [Gateway](docs/claims/gateway.md) [exposure: default-on]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "claims", "gateway.md"), []byte(
+		"- [SHIPPED] served by `internal/gateway` with a focused package witness.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.ClaimsForLeaf("gateway"); len(got) != 1 {
+		t.Fatalf("ClaimsForLeaf(gateway) = %v, want the linked detail-page claim", got)
+	}
+}
+
 func TestLoadMissingDosToml(t *testing.T) {
 	if _, err := Load(t.TempDir()); err == nil {
 		t.Error("Load with no dos.toml should error (no taxonomy to serve)")

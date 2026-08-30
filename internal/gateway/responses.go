@@ -508,11 +508,11 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 					}},
 				})
 			case "function_call_output":
-				// A tool RESULT the client executed — normalize only the Responses wire's
+				// A tool RESULT the client executed — normalize the Responses wire's
 				// documented string|input_text union, then send the canonical bytes through
 				// the same result-side floor. Representation skew may degrade safely; policy
 				// and malformed content still fail closed.
-				output, err := responsesFunctionCallOutputText(it.Output)
+				output, err := decodeResponsesFunctionCallOutput(it.Output)
 				if err != nil {
 					return nil, err
 				}
@@ -532,54 +532,86 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 	}
 }
 
-// responsesFunctionCallOutputText canonicalizes the two textual output shapes emitted
-// by Responses-compatible harness versions. It is deliberately strict: arbitrary JSON,
-// image/file parts, and malformed text parts are rejected rather than stringified, while
-// every accepted string is returned to the existing RoleTool result-admission path.
-func responsesFunctionCallOutputText(raw json.RawMessage) (string, error) {
-	b := trimLeadingWS(raw)
-	if len(b) == 0 {
-		return "", errInvalidFunctionCallOutput
-	}
-	if b[0] == '"' {
-		var text string
-		if err := json.Unmarshal(raw, &text); err != nil {
-			return "", errInvalidFunctionCallOutput
-		}
-		return text, nil
-	}
-	if b[0] != '[' {
-		return "", errInvalidFunctionCallOutput
-	}
-	var parts []struct {
-		Type string          `json:"type"`
-		Text json.RawMessage `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil || len(parts) == 0 {
-		return "", errInvalidFunctionCallOutput
-	}
-	texts := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part.Type != "input_text" || len(trimLeadingWS(part.Text)) == 0 {
-			return "", errInvalidFunctionCallOutput
-		}
-		var text string
-		if err := json.Unmarshal(part.Text, &text); err != nil {
-			return "", errInvalidFunctionCallOutput
-		}
-		texts = append(texts, text)
-	}
-	return strings.Join(texts, "\n"), nil
-}
-
-var errInvalidFunctionCallOutput = errInput("function_call_output.output must be a string or an array of input_text parts")
-
 // errInvalidInput is the 400 cause when `input` is neither a string nor an array.
 var errInvalidInput = errInput("input must be a string or an array of input items")
 
 type errInput string
 
 func (e errInput) Error() string { return string(e) }
+
+const (
+	// Codex currently emits a short list of textual MCP result parts. Keep that
+	// compatibility path finite even when a hostile client sends tiny fragments.
+	maxResponsesFunctionOutputParts = 256
+	// The route-level transcript limit is the compatibility ceiling for a single
+	// decoded tool result too; no valid HTTP request can exceed it.
+	maxResponsesFunctionOutputBytes = maxTranscriptBody
+)
+
+type responsesFunctionOutputPart struct {
+	Type string  `json:"type"`
+	Text *string `json:"text,omitempty"`
+}
+
+// decodeResponsesFunctionCallOutput normalizes the Responses output union without
+// weakening result admission. Legacy strings retain their exact decoded value.
+// Structured output accepts only textual input-content parts; image, file, unknown,
+// and malformed parts are refused instead of silently disappearing before the
+// result-side policy sees them.
+func decodeResponsesFunctionCallOutput(raw json.RawMessage) (string, error) {
+	b := trimLeadingWS(raw)
+	if len(b) == 0 {
+		return "", errInput("function_call_output.output is required")
+	}
+	switch b[0] {
+	case '"':
+		var output string
+		if err := json.Unmarshal(raw, &output); err != nil {
+			return "", errInput("function_call_output.output string is malformed: " + err.Error())
+		}
+		if len(output) > maxResponsesFunctionOutputBytes {
+			return "", errInput(fmt.Sprintf("function_call_output.output exceeds the %d-byte limit", maxResponsesFunctionOutputBytes))
+		}
+		return output, nil
+	case '[':
+		var parts []responsesFunctionOutputPart
+		if err := json.Unmarshal(raw, &parts); err != nil {
+			return "", errInput("function_call_output.output content array is malformed: " + err.Error())
+		}
+		if len(parts) == 0 {
+			return "", errInput("function_call_output.output content array must not be empty")
+		}
+		if len(parts) > maxResponsesFunctionOutputParts {
+			return "", errInput(fmt.Sprintf("function_call_output.output has too many content parts (maximum %d)", maxResponsesFunctionOutputParts))
+		}
+		var output strings.Builder
+		for i, part := range parts {
+			if part.Type == "" {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d] content type is required", i))
+			}
+			if part.Type != "input_text" {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d] has unsupported content type %q", i, part.Type))
+			}
+			if part.Text == nil {
+				return "", errInput(fmt.Sprintf("function_call_output.output[%d].input_text.text is required", i))
+			}
+			separatorBytes := 0
+			if i > 0 {
+				separatorBytes = 1
+			}
+			if len(*part.Text) > maxResponsesFunctionOutputBytes-output.Len()-separatorBytes {
+				return "", errInput(fmt.Sprintf("function_call_output.output exceeds the %d-byte limit", maxResponsesFunctionOutputBytes))
+			}
+			if separatorBytes != 0 {
+				output.WriteByte('\n')
+			}
+			output.WriteString(*part.Text)
+		}
+		return output.String(), nil
+	default:
+		return "", errInput("function_call_output.output must be a string or an array of content parts")
+	}
+}
 
 // responsesContentText flattens a Responses message item's `content` (a bare string
 // OR an array of typed parts: input_text / output_text / text) to a single string.

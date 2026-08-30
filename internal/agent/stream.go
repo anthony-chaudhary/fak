@@ -184,6 +184,19 @@ func (c *upstreamCall) failoverAccountCred(p *HTTPPlanner, reason string) bool {
 	return false
 }
 
+// failoverTransientTarget adopts a configured alternate for a transient 5xx/529
+// without invoking the permanent account-wall callback.
+func (c *upstreamCall) failoverTransientTarget(p *HTTPPlanner, status int) bool {
+	if p == nil || p.TransientTargetFunc == nil {
+		return false
+	}
+	if newCred, ok := p.TransientTargetFunc(status); ok && newCred != "" && newCred != c.apiKey {
+		c.apiKey = newCred
+		return true
+	}
+	return false
+}
+
 // rehomeToSiblingSeat runs the shared account-cap rehome arm behind Complete's and
 // CompleteStream's 429-account-cap and 403/402-usage-overage branches: on a successful
 // swap it flips triedRehome/rehomePending and clears the cap-wait so the caller re-sends
@@ -544,6 +557,8 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	// is invisible to the client. rehomePending defers the confirmed-rehome notify to the 200.
 	triedRehome := false
 	rehomePending := false
+	triedTransientRetry := false
+	triedTransientTarget := false
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		stop, err := p.waitBeforeAttempt(ctx, attempt, &rs, deadline, budgetOn)
@@ -581,6 +596,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, r, raw, attempt, rejectedResponseRetry{
 			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 			triedRehome: &triedRehome, rehomePending: &rehomePending,
+			triedTransientRetry: &triedTransientRetry, triedTransientTarget: &triedTransientTarget,
 			recordRefreshState: true, bodyCap: 400,
 		})
 		if statusErr != nil {

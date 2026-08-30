@@ -15,6 +15,9 @@ const darwinMemorySnapshotAttempts = 3
 
 func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(rootPID, CollectProcesses, CollectRelations, darwinProcessAlive)
+	if rootPID > 0 && snapshot.RootPID == 0 {
+		return snapshot, true, ""
+	}
 	physical, physicalErr := hostPhysicalMemoryBytes()
 	snapshot.HostPhysicalBytes = physical
 	detail = joinDetails(detail, physicalErr)
@@ -35,6 +38,15 @@ func collectDarwinMemorySnapshotWithCollectors(rootPID int, collectCensus, colle
 		var joinErr string
 		var recollect bool
 		snapshot, joinErr, recollect = joinDarwinMemorySnapshotForCollection(rootPID, census, relations, processAlive)
+		if rootPID > 0 && snapshot.RootPID == 0 && censusErr == "" && relationErr == "" {
+			return snapshot, ""
+		}
+		if snapshot.RootPID == 0 {
+			// A collector error is still fail-closed even if the liveness probe
+			// also observes the root gone; only a clean census pair may emit the
+			// terminal-sample marker.
+			snapshot.RootPID = rootPID
+		}
 		detail := joinDetails(censusErr, relationErr, joinErr)
 		if detail == "" || censusErr != "" || relationErr != "" || !recollect || attempt+1 == darwinMemorySnapshotAttempts {
 			return snapshot, detail
@@ -83,6 +95,17 @@ func joinDarwinMemorySnapshotForCollection(rootPID int, census, relations []Proc
 		children[*row.PPID] = append(children[*row.PPID], row.PID)
 	}
 	if _, ok := byRelation[rootPID]; !ok {
+		alive, err := processAlive(rootPID)
+		if err != nil {
+			return s, fmt.Sprintf("probe missing relation root pid %d: %v", rootPID, err), false
+		}
+		if !alive {
+			// RootPID zero is the internal terminal-sample marker. It distinguishes
+			// an exited root from a valid zero-byte snapshot without widening the
+			// cross-platform collector API.
+			s.RootPID = 0
+			return s, "", false
+		}
 		return s, fmt.Sprintf("root pid %d missing from relation census", rootPID), false
 	}
 	for ppid := range children {

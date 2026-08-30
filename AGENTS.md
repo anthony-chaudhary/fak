@@ -282,17 +282,21 @@ tree. Release history and channel contract: [`docs/releases/`](docs/releases/) a
 
 Choose the planning primitive by work shape:
 
-- **Phased deliverable:** finite ordered phases with observable completion. Use
-  keep **Current state** accurate, append to
+- **Phased deliverable:** finite ordered phases with observable completion. Keep
+  **Current state** accurate across the independent product, evidence, and queue axes in
+  [`docs/progress-state-defaults.md`](docs/progress-state-defaults.md), append dated facts to
   **Execution log**, run `/phased-plan` each phase, and archive completed plans under
   `docs/plans/completed/`. `fak plan-audit` catches drift.
-- **Ongoing program:** recurring unbounded work. Use
-  track health/cadence/next run rather
+- **Ongoing program:** recurring unbounded work. Track health, cadence, and next movement rather
   than percent complete, and archive under `docs/programs/completed/` only when retired.
 
-Plans are canonical state, not narration. Update them in the same commit as the work; document
-scope changes explicitly. For parallel work, assign distinct file sets and integrate only after
-all workers finish. Audit before starting a new plan when active-plan load is high.
+Plans are canonical state, not narration. A missing or failed performance receipt changes the
+evidence axis; it does not erase delivered scope or force the whole item into `HOLD`. Preserve
+historical `KEEP`/`REJECT`/`HOLD` decisions in the execution log, keep delivery credit separate
+from performance credit, and never weaken the applicable claim gate. Update plans in the same
+commit as the work; document scope changes explicitly. For parallel work, assign distinct file
+sets and integrate only after all workers finish. Audit before starting a new plan when
+active-plan load is high.
 ## Where to go next
 
 | If you want to… | Read |

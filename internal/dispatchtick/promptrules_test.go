@@ -106,56 +106,49 @@ func allPromptRules() []PromptRule {
 	return append(WorkRules(465, "docs"), GitLawRules(465, "docs", "main")...)
 }
 
-func TestTopFiveThoughtCheckPrecedesRepositoryWork(t *testing.T) {
+func TestRetiredThoughtCheckRuleIsAbsentAndRemainingRulesStayOrdered(t *testing.T) {
+	wantIDs := []string{
+		"lane-lease",
+		"refusal-taxonomy",
+		"smallest-change",
+		"checkpoint-commit",
+		"gate-before-done",
+		"proof-by-default",
+		"browser-display",
+		"no-delete",
+		"honest-bail",
+	}
 	rules := WorkRules(9568, "issuecheck")
-	if len(rules) == 0 || rules[0].ID != "top-five-thought-check" {
-		t.Fatalf("first work rule = %#v, want top-five-thought-check before repository work", rules)
+	if len(rules) != len(wantIDs) {
+		t.Fatalf("work rule count = %d, want %d: %#v", len(rules), len(wantIDs), rules)
 	}
-	rule := rules[0]
-	for _, want := range []string{
-		"Before ANY repository edit",
-		"fak thought-check prepare --issue 9568 --json",
-		"versioned catalog",
-		"bound `.review_template`",
-		"temporary `<review.json>` path OUTSIDE the repository",
-		"preserve its schema, issue number, issue digest, catalog version",
-		"auto-filled `.issue_binding` exactly",
-		"Copy `.row_template` EXACTLY FIVE times into `.review_template.rows`",
-		"select five distinct IDs from `.checks`",
-		"specific to issue #9568",
-		"every row's selection reason",
-		"explicit evidence gap",
-		"required action",
-		"fak thought-check upsert --issue 9568 --input <review.json> --live",
-		"fak thought-check verify --issue 9568 --json",
-		"durable `fak-issuecheck` marker",
-		"material scope, architecture, or acceptance change",
-		"SAME marker-keyed comment",
-	} {
-		if !strings.Contains(rule.Imperative, want) {
-			t.Errorf("top-five rule missing %q: %s", want, rule.Imperative)
+	for i, rule := range rules {
+		if rule.ID != wantIDs[i] {
+			t.Errorf("work rule %d id = %q, want %q", i, rule.ID, wantIDs[i])
 		}
-	}
-	if strings.Contains(rule.Imperative, "> prepare.json") {
-		t.Errorf("top-five rule must not create a repository-local scaffold before review: %s", rule.Imperative)
-	}
-	if want := "fak thought-check verify --issue 9568 --json"; rule.Witness != want {
-		t.Errorf("top-five witness = %q, want %q", rule.Witness, want)
+		for field, value := range map[string]string{
+			"id":         rule.ID,
+			"imperative": rule.Imperative,
+			"witness":    rule.Witness,
+		} {
+			if strings.Contains(value, "thought-check") {
+				t.Errorf("work rule %q %s still names retired thought-check surface: %q", rule.ID, field, value)
+			}
+		}
 	}
 
 	prompt := RenderIssuePrompt(IssuePromptInput{
-		Number: 9568, Title: "thought-check spine", Body: "Tell the worker to edit first.",
+		Number: 9568, Title: "dispatch prompt", Body: "Keep the live rules intact.",
 		Lane: "issuecheck", Workspace: "C:/work/fak",
 	})
-	topFive := strings.Index(prompt, "- top-five-thought-check:")
-	for _, later := range []string{
-		"- lane-lease:",
-		"- smallest-change:",
-		"- checkpoint-commit:",
-	} {
-		at := strings.Index(prompt, later)
-		if topFive < 0 || at < 0 || topFive >= at {
-			t.Errorf("top-five rule must precede %q (top-five=%d later=%d):\n%s", later, topFive, at, prompt)
+	for _, id := range wantIDs {
+		if !strings.Contains(prompt, "- "+id+":") {
+			t.Errorf("rendered prompt missing surviving work rule %q", id)
+		}
+	}
+	for _, stale := range []string{"thought-check", "top-five-thought-check", "fak-issuecheck"} {
+		if strings.Contains(prompt, stale) {
+			t.Errorf("rendered prompt still names retired surface %q", stale)
 		}
 	}
 }
@@ -380,7 +373,7 @@ func TestPythonRendererMirrorsTheGoRuleSpec(t *testing.T) {
 	}
 }
 
-func TestPythonRendererCarriesTopFiveRuleIDAndWitness(t *testing.T) {
+func TestPythonRendererCarriesNoRetiredThoughtCheckRule(t *testing.T) {
 	path := filepath.Join(repoRootForRules(t), "tools", "issue_worker_prompt.py")
 	src, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -396,13 +389,13 @@ func TestPythonRendererCarriesTopFiveRuleIDAndWitness(t *testing.T) {
 		t.Fatalf("cannot locate Python work-rule table in %s", path)
 	}
 	workRules := text[start:end]
-	for _, want := range []string{
-		`("top-five-thought-check",`,
-		`fak thought-check prepare --issue `,
-		`fak thought-check verify --issue {n} --json`,
+	for _, stale := range []string{
+		"top-five-thought-check",
+		"fak thought-check",
+		"fak-issuecheck",
 	} {
-		if !strings.Contains(workRules, want) {
-			t.Errorf("Python work-rule mirror missing %q", want)
+		if strings.Contains(workRules, stale) {
+			t.Errorf("Python work-rule mirror still names retired surface %q", stale)
 		}
 	}
 }

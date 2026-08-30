@@ -31,7 +31,7 @@ The authority is [`inventory.json`](inventory.json). The compact operator view i
 | Framework Desktop Ryzen AI Max+ 395 | 256-bit LPDDR5x-8000 shared CPU/iGPU memory | 64 GB | 48–52 GiB | 256 GB/s | ~215 GB/s maximum GPU MBW measured on the related pre-production 128 GB system | 120 W sustained / 140 W boost processor | $1,959 DIY system selection |
 | Framework Desktop Ryzen AI Max+ 395 | 256-bit LPDDR5x-8000 shared CPU/iGPU memory | 128 GB | 92–104 GiB | 256 GB/s | ~215 GB/s maximum GPU MBW on pre-production Framework hardware | 120 W sustained / 140 W boost processor | $3,449 DIY system selection |
 | Apple Mac Studio M5 Max | Apple unified CPU/GPU memory | 128 GB | 96–108 GiB | 614 GB/s | `null` — preorder, not shipping until 2026-09-22 | 480 W system maximum continuous | $5,399 configured estimate |
-| NVIDIA DGX Spark | coherent LPDDR5x shared by Grace CPU and Blackwell GPU | 128 GB | 104–112 GiB | 273 GB/s | `null` for GPU inference; CPU STREAM context retained separately | 140 W GB10 TDP / 240 W supply | $4,699 reported list; $5,299.99 observed retail |
+| `NVIDIA DGX Spark` | coherent LPDDR5x shared by Grace CPU and Blackwell GPU | 128 GB | 104–112 GiB | 273 GB/s | `null` for GPU inference; CPU STREAM context retained separately | 140 W GB10 TDP / 240 W supply | $4,699 reported list; $5,299.99 observed retail |
 | Dell Precision 7875 | eight-channel CPU-attached DDR5-5200 ECC RDIMM | 128 GB | 108–116 GiB | 332.8 GB/s theoretical | `null` on the Dell; 206.1 GB/s comparable-topology context only | 350 W CPU / 1,350 W configured PSU | $19,897.33, no storage |
 
 Prices are nominal USD before tax. Framework rows omit storage, OS, fan, power cable, tiles,
@@ -116,7 +116,7 @@ PY
 External HTTP status is only a reachability witness, never proof that a claim is true. The final
 parallel probe returned HTTP 200 for 16 of 19 source URLs. Framework's configurator and Dell's
 storefront returned HTTP 403 to the probe after both had rendered during collection; the Best Buy
-listing timed out. NVIDIA Marketplace also timed out in a separate price probe, so the DGX list
+listing timed out. NVIDIA Marketplace also timed out in a separate price probe, so the `NVIDIA DGX Spark` list
 price is explicitly sourced to the dated third-party report rather than falsely marked as a
 direct official observation.
 

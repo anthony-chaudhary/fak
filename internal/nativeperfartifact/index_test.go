@@ -140,6 +140,137 @@ func TestIndexRejectsCorrelationCollision(t *testing.T) {
 	}
 }
 
+func TestLiveArtifactSeriesProducesBoundedQwen38MetalMetrics(t *testing.T) {
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	digest := strings.Repeat("a", 64)
+	observation := LiveObservation{
+		CompletedAt: now.Add(-30 * time.Second),
+		ModuleRev:   "internal/nativeperfartifact@r3+g3e0ab906a",
+		ModelFamily: "Qwen3.8",
+		Backend:     "metal",
+		Record: Record{
+			CorrelationKey: keyA,
+			Engine:         "fak-native",
+			Artifacts: []Artifact{
+				ready(KindMetalProfile, "https://artifacts.example.test/metal.json", now.Add(time.Hour)),
+				ready(KindReceipt, "https://artifacts.example.test/receipt.json", now.Add(time.Hour)),
+			},
+		},
+	}
+	for n := range observation.Record.Artifacts {
+		observation.Record.Artifacts[n].SHA256 = digest
+	}
+
+	got := ProduceLiveSeries(now, 5*time.Minute, observation)
+	if got.Status != SeriesProduced || got.UnavailableReason != ReasonNone {
+		t.Fatalf("series status = %q/%q, want %q/%q", got.Status, got.UnavailableReason, SeriesProduced, ReasonNone)
+	}
+	want := "# HELP fak_native_artifact_info Bounded public-safe native artifact evidence state.\n" +
+		"# TYPE fak_native_artifact_info gauge\n" +
+		`fak_native_artifact_info{engine="fak-native",correlation_key="` + keyA + `",kind="benchmark_receipt",state="ready"} 1` + "\n" +
+		`fak_native_artifact_info{engine="fak-native",correlation_key="` + keyA + `",kind="metal_profile_bundle",state="ready"} 1` + "\n"
+	if got.Prometheus != want {
+		t.Fatalf("Prometheus output mismatch:\n--- got ---\n%s--- want ---\n%s", got.Prometheus, want)
+	}
+	if again := ProduceLiveSeries(now, 5*time.Minute, observation); again != got {
+		t.Fatalf("producer is nondeterministic:\nfirst=%+v\nagain=%+v", got, again)
+	}
+	for _, forbidden := range []string{digest, "artifacts.example.test", observation.ModuleRev, observation.ModelFamily} {
+		if strings.Contains(got.Prometheus, forbidden) {
+			t.Fatalf("series leaked %q: %s", forbidden, got.Prometheus)
+		}
+	}
+	series := 0
+	for _, line := range strings.Split(got.Prometheus, "\n") {
+		if !strings.HasPrefix(line, "fak_native_artifact_info{") {
+			continue
+		}
+		series++
+		if labels := strings.Count(line, "="); labels != 4 {
+			t.Fatalf("series has %d labels, want 4: %s", labels, line)
+		}
+	}
+	if series != len(observation.Record.Artifacts) || series > MaxArtifacts {
+		t.Fatalf("series count = %d, artifacts = %d, maximum = %d", series, len(observation.Record.Artifacts), MaxArtifacts)
+	}
+}
+
+func TestLiveArtifactSeriesFailsClosedWithTypedUnavailable(t *testing.T) {
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	valid := LiveObservation{
+		CompletedAt: now.Add(-30 * time.Second),
+		ModuleRev:   "internal/nativeperfartifact@r3+g3e0ab906a",
+		ModelFamily: "Qwen3.8",
+		Backend:     "metal",
+		Record: Record{
+			CorrelationKey: keyA,
+			Engine:         "fak-native",
+			Artifacts: []Artifact{
+				ready(KindReceipt, "https://artifacts.example.test/receipt.json", now.Add(time.Hour)),
+			},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*LiveObservation)
+		want   UnavailableReason
+	}{
+		{
+			name: "incomplete identity",
+			mutate: func(observation *LiveObservation) {
+				observation.ModuleRev = ""
+			},
+			want: ReasonIncomplete,
+		},
+		{
+			name: "stale observation",
+			mutate: func(observation *LiveObservation) {
+				observation.CompletedAt = now.Add(-6 * time.Minute)
+			},
+			want: ReasonStale,
+		},
+		{
+			name: "expired artifact",
+			mutate: func(observation *LiveObservation) {
+				observation.Record.Artifacts[0].ExpiresAt = now
+			},
+			want: ReasonStale,
+		},
+		{
+			name: "private locator",
+			mutate: func(observation *LiveObservation) {
+				observation.Record.Artifacts[0].Locator = "https://artifacts.example.test/private/operator/receipt.json"
+			},
+			want: ReasonPrivate,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			observation := valid
+			observation.Record.Artifacts = append([]Artifact(nil), valid.Record.Artifacts...)
+			test.mutate(&observation)
+			got := ProduceLiveSeries(now, 5*time.Minute, observation)
+			if got.Status != SeriesUnavailable || got.UnavailableReason != test.want {
+				t.Fatalf("series status = %q/%q, want %q/%q", got.Status, got.UnavailableReason, SeriesUnavailable, test.want)
+			}
+			if got.Prometheus != "" {
+				t.Fatalf("unavailable evidence emitted metrics: %s", got.Prometheus)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{observation.Record.Artifacts[0].Locator, observation.Record.Artifacts[0].SHA256, observation.ModuleRev} {
+				if forbidden != "" && strings.Contains(string(encoded), forbidden) {
+					t.Fatalf("unavailable result leaked %q: %s", forbidden, encoded)
+				}
+			}
+		})
+	}
+}
+
 func TestGrafanaDashboardContractAndFixture(t *testing.T) {
 	root := filepath.Join("..", "..")
 	contractPath := filepath.Join(root, "tools", "grafana", "provisioning", "contracts", "fak-native-artifacts.json")

@@ -20,6 +20,14 @@ func validReceipt(t *testing.T, role, lever string) ExperimentReceipt {
 	r.Role, r.Revision, r.Machine.ScrubbedID = role, "rev-123", "lab-node-class-a"
 	r.Memory = MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
 	r.Quality = QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+	criterion, err := ResolveComparisonCriterion(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Comparison, err = comparisonIdentity(criterion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	r.ModuleVersions = []ModuleRevision{{Module: "internal/model", Revision: "r10+gaaaaaaa"}}
 	r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
 	r.ProfilerArtifacts = []ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
@@ -113,6 +121,26 @@ func TestValidateReceiptSchemaCompatibilityAndAggregateAmbient(t *testing.T) {
 	legacy.Schema = ReceiptSchemaV1
 	if err := ValidateReceipt(ActiveGraph(), legacy); err != nil {
 		t.Fatalf("legacy v1: %v", err)
+	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyFields map[string]json.RawMessage
+	if err := json.Unmarshal(legacyJSON, &legacyFields); err != nil {
+		t.Fatal(err)
+	}
+	delete(legacyFields, "comparison")
+	legacyJSON, err = json.Marshal(legacyFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preComparisonV1 ExperimentReceipt
+	if err := json.Unmarshal(legacyJSON, &preComparisonV1); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReceipt(ActiveGraph(), preComparisonV1); err != nil {
+		t.Fatalf("pre-comparison v1: %v", err)
 	}
 	legacy.SystemBaselines = []systembaseline.Report{baselineAttestation(systembaseline.VerdictClean, true)}
 	if err := ValidateReceipt(ActiveGraph(), legacy); err == nil || !strings.Contains(err.Error(), "v1 receipts cannot carry") {
@@ -222,6 +250,15 @@ func TestCompareReceiptsDeterministicAndRejectsDrift(t *testing.T) {
 	if first != second || math.Abs(first.DeltaTokensPerS-1) > 1e-12 {
 		t.Fatalf("comparison drift: %+v %+v", first, second)
 	}
+	if first.CriterionDigest != b.Comparison.CriterionDigest {
+		t.Fatalf("comparison digest=%q, want %q", first.CriterionDigest, b.Comparison.CriterionDigest)
+	}
+	originalComparison := c.Comparison
+	c.Comparison.CriterionDigest = strings.Repeat("f", 64)
+	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "comparison identity") {
+		t.Fatalf("comparison identity drift err=%v", err)
+	}
+	c.Comparison = originalComparison
 	c.Controls.Batch = 2
 	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "undeclared control axis drifted") {
 		t.Fatalf("drift err=%v", err)

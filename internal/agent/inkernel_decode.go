@@ -21,6 +21,21 @@ type inKernelPrefillSession interface {
 	Prefill([]int) []float32
 }
 
+func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
+	s.Quant = p.quant
+	// Resident Q4_K decode runs on both host and device paths. The slab selector is
+	// session-scoped alongside that mode, so an explicit planner setting reaches every
+	// real request session and never leaks between planners.
+	s.Q4K = p.q4k
+	s.Q4KGateUpOutputSlab = p.q4kGateUpOutputSlab
+	s.CPUOffloadExperts = p.cpuOffloadExperts
+	p.applyExpertSpill(s)
+	if p.backend == nil && p.metal {
+		s.Metal = true
+		s.MetalQ4K = p.q4k
+	}
+}
+
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
 	gen, promptTok, matched, prefillS, decodeS, stopped, _ = p.generateReusedContext(context.Background(), ids, maxNew, temp, topP, topK, stops, emit)
 	return
@@ -155,28 +170,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if closeSession {
 		defer s.Close()
 	}
-	s.Quant = p.quant
-	// resident-Q4_K decode runs on BOTH the host (cpu-ref) AND the cuda backend: the device HAL
-	// copies the raw Q4_K super-blocks resident and serves them with the dequant-fused k_q4k_gemm
-	// tile (internal/compute/cuda.go MatMul/BatchedMatMul case Q4_K, #485), so a device session can
-	// decode Q4_K directly — no f32/Q8 round-trip. (The old gate forced Q8/F32 on any backend.)
-	s.Q4K = p.q4k
-	s.CPUOffloadExperts = p.cpuOffloadExperts
-	// …and the GRADED form of that same placement (#5612), when the operator sized one: which MoE
-	// layers spill to host, and how many device bytes the routed-expert ring (#5611) may hold. No
-	// grade -> no-op, so the line above remains the whole placement decision it was.
-	p.applyExpertSpill(s)
-	// Apple-Silicon Metal GPU forward (`fak serve --metal`): engage the metalgemm GPU
-	// prefill + GPU-resident Q8 decode on the CPU session. Guarded to backend==nil — Metal
-	// is the CPU-session seam (s.Backend stays nil), and setting s.Metal on a device session
-	// is incoherent; serve also rejects --metal with --backend up front. s.MetalQ4K mirrors
-	// cmd/fakchat (s.MetalQ4K = q4k && metal). Inert on non-Metal builds (the model
-	// package's metal dispatch falls back to CPU) and the resident decode self-declines any
-	// non-dense-Qwen-Q8 model, so this never forces an unsupported GPU path.
-	if p.backend == nil && p.metal {
-		s.Metal = true
-		s.MetalQ4K = p.q4k
-	}
+	p.configureNativeSession(s)
 	qwen35MetalStateIdentityEnabled := false
 	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
 		if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {
@@ -252,14 +246,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
 		var executed bool
 		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
-		if measurement != nil && !measurement.inferenceDisabled {
-			measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceReceipt()
-		}
 		if err != nil {
+			captureQwen35MetalForwardSequenceReceipt(p, s, measurement)
 			return
 		}
 		p.qwen35MetalGDNExecuted.Store(executed)
 	}
+	captureQwen35MetalForwardSequenceReceipt(p, s, measurement)
 	if qwen35MetalStateIdentityEnabled {
 		if err = finalizeAndCaptureQwen35MetalStateIdentity(s, measurement); err != nil {
 			return
@@ -421,6 +414,14 @@ type decodeLane struct {
 	stopped bool
 	done    bool
 	err     error
+}
+
+func captureQwen35MetalForwardSequenceReceipt(p *InKernelPlanner, s *model.Session, measurement *nativeInferenceMeasurement) {
+	if p == nil || s == nil || measurement == nil || measurement.inferenceDisabled || p.m == nil ||
+		p.backend != nil || !p.metal || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() {
+		return
+	}
+	measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceStatus()
 }
 
 func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {

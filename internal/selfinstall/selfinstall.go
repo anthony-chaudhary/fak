@@ -63,67 +63,47 @@ const (
 
 // Result reports the outcome of an Install attempt.
 type Result struct {
-	Installed bool   // the target was replaced with a freshly-verified binary
-	Stage     Stage  // the last stage attempted
-	Detail    string // captured output / error context for the failing or final stage
+	Installed            bool              // the target was replaced with a freshly-verified binary
+	Stage                Stage             // the last stage attempted
+	Detail               string            // captured output / error context for the failing or final stage
+	SourceCommit         string            // selected source revision for this activation
+	ArtifactSourceCommit string            // source revision that originally produced the artifact bytes
+	BuildInputDigest     string            // complete executable-input identity
+	BuildEnvelope        map[string]string // toolchain/platform/options bound by BuildInputDigest
+	ArtifactDigest       string            // SHA-256 of the activated candidate
+	ArtifactSize         int64
+	AppVersion           string
+	Reused               bool
 }
 
-const candidateCacheSchema = "fak.selfinstall.candidate-cache.v1"
-
-var candidateGoEnvKeys = []string{
-	"GOVERSION",
-	"GOROOT",
-	"GOTOOLCHAIN",
-	"GOHOSTOS",
-	"GOHOSTARCH",
-	"GOOS",
-	"GOARCH",
-	"GOAMD64",
-	"GOARM64",
-	"GOARM",
-	"GO386",
-	"GOMIPS",
-	"GOMIPS64",
-	"GOEXPERIMENT",
-	"GOFIPS140",
-	"CGO_ENABLED",
-	"CC",
-	"CXX",
-	"CGO_CFLAGS",
-	"CGO_CPPFLAGS",
-	"CGO_CXXFLAGS",
-	"CGO_LDFLAGS",
-	"PKG_CONFIG",
-	"GOFLAGS",
-	"GO111MODULE",
-	"GOWORK",
-}
+const candidateCacheSchema = "fak.selfinstall.candidate-cache.v2"
 
 type candidateCacheInput struct {
-	Schema         string   `json:"schema"`
-	ExpectedCommit string   `json:"expected_commit"`
-	SourceCommit   string   `json:"source_commit"`
-	HostOS         string   `json:"host_os"`
-	HostArch       string   `json:"host_arch"`
-	GoEnvKeys      []string `json:"go_env_keys"`
-	GoEnv          string   `json:"go_env"`
-	BuildArgs      []string `json:"build_args"`
-	VetArgs        []string `json:"vet_args"`
+	Schema           string            `json:"schema"`
+	BuildInputDigest string            `json:"build_input_digest"`
+	BuildEnvelope    map[string]string `json:"build_envelope"`
+	SourceCommit     string            `json:"source_commit"`
+	HostOS           string            `json:"host_os"`
+	HostArch         string            `json:"host_arch"`
+	BuildArgs        []string          `json:"build_args"`
+	VetArgs          []string          `json:"vet_args"`
 }
 
 type candidateCacheManifest struct {
-	Schema         string `json:"schema"`
-	ExpectedCommit string `json:"expected_commit"`
-	InputDigest    string `json:"input_digest"`
-	ArtifactDigest string `json:"artifact_digest"`
-	ArtifactSize   int64  `json:"artifact_size"`
-	BoundDigest    string `json:"bound_digest"`
+	Schema               string `json:"schema"`
+	ArtifactSourceCommit string `json:"artifact_source_commit"`
+	BuildInputDigest     string `json:"build_input_digest"`
+	InputDigest          string `json:"input_digest"`
+	ArtifactDigest       string `json:"artifact_digest"`
+	ArtifactSize         int64  `json:"artifact_size"`
+	BoundDigest          string `json:"bound_digest"`
 }
 
 type candidateVersionIdentity struct {
-	Commit  string `json:"commit"`
-	Dirty   bool   `json:"dirty"`
-	Stamped bool   `json:"stamped"`
+	AppVersion string `json:"app_version"`
+	Commit     string `json:"commit"`
+	Dirty      bool   `json:"dirty"`
+	Stamped    bool   `json:"stamped"`
 }
 
 // Options configures Install.
@@ -192,6 +172,10 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	}
 	buildArgs := append(append([]string{}, buildInputs...), "-o", tmp, "./cmd/fak")
 	buildInputs = append(buildInputs, "./cmd/fak")
+	identityBuildInputs := []string{"-buildvcs=true"}
+	if ld := versionLDFlags(opts.RepoRoot, ""); ld != "" {
+		identityBuildInputs = append(identityBuildInputs, "-ldflags", ld)
+	}
 	vetArgs := []string{"vet", "./cmd/fak"}
 
 	cacheDir := strings.TrimSpace(opts.CacheDir)
@@ -201,27 +185,27 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		validCommit(expectedCommit) &&
 		strings.EqualFold(sourceCommit, expectedCommit)
 	cacheHit := false
+	artifactSourceCommit := sourceCommit
+	appVersion := ""
 	if cacheEligible {
-		envArgs := append([]string{"env"}, candidateGoEnvKeys...)
-		if out, ok := run(ctx, opts.RepoRoot, "go", envArgs...); ok {
+		identity, err := deriveBuildInputIdentity(ctx, opts.RepoRoot, "./cmd/fak", buildInputOptions{BuildFlags: identityBuildInputs})
+		if err == nil {
 			cacheInput = candidateCacheInput{
-				Schema:         candidateCacheSchema,
-				ExpectedCommit: expectedCommit,
-				SourceCommit:   sourceCommit,
-				HostOS:         runtime.GOOS,
-				HostArch:       runtime.GOARCH,
-				GoEnvKeys:      append([]string{}, candidateGoEnvKeys...),
-				GoEnv:          normalizeCommandOutput(out),
-				BuildArgs:      append([]string{}, buildInputs...),
-				VetArgs:        append([]string{}, vetArgs...),
+				Schema:           candidateCacheSchema,
+				BuildInputDigest: identity.Digest,
+				BuildEnvelope:    identity.Envelope,
+				SourceCommit:     sourceCommit,
+				HostOS:           runtime.GOOS,
+				HostArch:         runtime.GOARCH,
+				BuildArgs:        append([]string{}, identityBuildInputs...),
+				VetArgs:          append([]string{}, vetArgs...),
 			}
-			if restoreCandidateCache(cacheDir, cacheInput, tmp) == nil {
-				if _, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); ok {
+			if manifest, err := restoreCandidateCache(cacheDir, cacheInput, tmp); err == nil {
+				if identity, _, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, manifest.ArtifactSourceCommit); ok {
 					cacheHit = true
+					artifactSourceCommit = manifest.ArtifactSourceCommit
+					appVersion = identity.AppVersion
 				} else {
-					// Digest-valid bytes still need to start and attest the exact selected
-					// commit on every activation. Any smoke/provenance failure falls through
-					// to a full build+vet rather than failing open or wedging updates.
 					_ = os.Remove(tmp)
 				}
 			}
@@ -249,8 +233,10 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		// 3. smoke: the freshly-built binary must run and report its full machine-readable
 		//    provenance. When the caller selected an exact commit, the candidate must attest
 		//    that full commit and a clean build before it can be cached or swapped.
-		if out, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); !ok {
+		if identity, out, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); !ok {
 			return Result{Stage: StageSmoke, Detail: trim(out)}
+		} else {
+			appVersion = identity.AppVersion
 		}
 		if cacheEligible {
 			if err := refreshCandidateCache(cacheDir, cacheInput, tmp); err != nil {
@@ -263,18 +249,22 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 
 	// 4. swap: only now is the candidate trusted over the running fleet.
 	cleanupBuildArtifact = false
+	artifactDigest, artifactSize, err := fileSHA256(tmp)
+	if err != nil && !os.IsNotExist(err) {
+		return Result{Stage: StageSmoke, Detail: "hash verified candidate: " + err.Error()}
+	}
 	if err := swap(tmp, opts.Target); err != nil {
 		return Result{Stage: StageSwap, Detail: err.Error()}
 	}
+	cleanupBuildArtifact = false
 	detail := "installed " + filepath.Base(opts.Target)
 	if cacheHit {
-		detail += " from exact-commit verified candidate cache"
+		detail += " from build-input verified candidate cache"
 	}
-	return Result{Installed: true, Stage: StageSwap, Detail: detail + cacheRefreshDetail}
-}
-
-func normalizeCommandOutput(out string) string {
-	return strings.TrimSpace(strings.ReplaceAll(out, "\r\n", "\n"))
+	return Result{Installed: true, Stage: StageSwap, Detail: detail + cacheRefreshDetail,
+		SourceCommit: sourceCommit, ArtifactSourceCommit: artifactSourceCommit,
+		BuildInputDigest: cacheInput.BuildInputDigest, BuildEnvelope: cacheInput.BuildEnvelope,
+		ArtifactDigest: artifactDigest, ArtifactSize: artifactSize, AppVersion: appVersion, Reused: cacheHit}
 }
 
 func emptyLabel(value string) string {
@@ -284,28 +274,29 @@ func emptyLabel(value string) string {
 	return value
 }
 
-func smokeCandidate(ctx context.Context, run Runner, repoRoot, candidate, expectedCommit string) (string, bool) {
+func smokeCandidate(ctx context.Context, run Runner, repoRoot, candidate, expectedCommit string) (candidateVersionIdentity, string, bool) {
 	out, ok := run(ctx, repoRoot, candidate, "version", "--json")
 	if !ok {
-		return out, false
+		return candidateVersionIdentity{}, out, false
 	}
 	var identity candidateVersionIdentity
 	if err := json.Unmarshal([]byte(out), &identity); err != nil {
 		if expectedCommit == "" && versionOutputStamped(out) {
-			return out, true
+			return candidateVersionIdentity{}, out, true
 		}
-		return "candidate provenance is not valid `version --json`: " + trim(out), false
+		return candidateVersionIdentity{}, "candidate provenance is not valid `version --json`: " + trim(out), false
 	}
 	if !identity.Stamped || identity.Dirty || !validCommit(identity.Commit) {
-		return "candidate binary is unstamped or dirty; refusing to swap: " + trim(out), false
+		return candidateVersionIdentity{}, "candidate binary is unstamped or dirty; refusing to swap: " + trim(out), false
 	}
 	if expectedCommit != "" && !strings.EqualFold(identity.Commit, expectedCommit) {
-		return fmt.Sprintf("candidate binary reports commit %s, want exact commit %s", identity.Commit, expectedCommit), false
+		return candidateVersionIdentity{}, fmt.Sprintf("candidate binary reports commit %s, want exact commit %s", identity.Commit, expectedCommit), false
 	}
-	return out, true
+	return identity, out, true
 }
 
 func candidateInputDigest(input candidateCacheInput) (string, error) {
+	input.SourceCommit = ""
 	data, err := json.Marshal(input)
 	if err != nil {
 		return "", err
@@ -357,49 +348,50 @@ func fileSHA256(path string) (string, int64, error) {
 	return hex.EncodeToString(h.Sum(nil)), info.Size(), nil
 }
 
-func restoreCandidateCache(dir string, input candidateCacheInput, dst string) error {
+func restoreCandidateCache(dir string, input candidateCacheInput, dst string) (candidateCacheManifest, error) {
 	inputDigest, err := candidateInputDigest(input)
 	if err != nil {
-		return err
+		return candidateCacheManifest{}, err
 	}
 	data, err := os.ReadFile(candidateCachePaths(dir))
 	if err != nil {
-		return err
+		return candidateCacheManifest{}, err
 	}
 	var manifest candidateCacheManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return err
+		return candidateCacheManifest{}, err
 	}
 	if manifest.Schema != candidateCacheSchema ||
-		!strings.EqualFold(manifest.ExpectedCommit, input.ExpectedCommit) ||
+		manifest.BuildInputDigest != input.BuildInputDigest ||
+		!validCommit(manifest.ArtifactSourceCommit) ||
 		manifest.InputDigest != inputDigest ||
 		manifest.BoundDigest != candidateBoundDigest(inputDigest, manifest.ArtifactDigest) {
-		return fmt.Errorf("candidate cache identity mismatch")
+		return candidateCacheManifest{}, fmt.Errorf("candidate cache identity mismatch")
 	}
 	if !validSHA256(manifest.ArtifactDigest) {
-		return fmt.Errorf("candidate cache artifact digest is malformed")
+		return candidateCacheManifest{}, fmt.Errorf("candidate cache artifact digest is malformed")
 	}
 	artifact := candidateArtifactPath(dir, manifest.ArtifactDigest)
 	digest, size, err := fileSHA256(artifact)
 	if err != nil {
-		return err
+		return candidateCacheManifest{}, err
 	}
 	if digest != manifest.ArtifactDigest || size != manifest.ArtifactSize {
-		return fmt.Errorf("candidate cache artifact digest mismatch")
+		return candidateCacheManifest{}, fmt.Errorf("candidate cache artifact digest mismatch")
 	}
 	if err := atomicCopyFile(artifact, dst); err != nil {
-		return err
+		return candidateCacheManifest{}, err
 	}
 	copiedDigest, copiedSize, err := fileSHA256(dst)
 	if err != nil {
 		_ = os.Remove(dst)
-		return err
+		return candidateCacheManifest{}, err
 	}
 	if copiedDigest != manifest.ArtifactDigest || copiedSize != manifest.ArtifactSize {
 		_ = os.Remove(dst)
-		return fmt.Errorf("restored candidate digest mismatch")
+		return candidateCacheManifest{}, fmt.Errorf("restored candidate digest mismatch")
 	}
-	return nil
+	return manifest, nil
 }
 
 func validSHA256(s string) bool {
@@ -434,12 +426,13 @@ func refreshCandidateCache(dir string, input candidateCacheInput, src string) er
 		return fmt.Errorf("refreshed candidate digest mismatch")
 	}
 	manifest := candidateCacheManifest{
-		Schema:         candidateCacheSchema,
-		ExpectedCommit: input.ExpectedCommit,
-		InputDigest:    inputDigest,
-		ArtifactDigest: artifactDigest,
-		ArtifactSize:   artifactSize,
-		BoundDigest:    candidateBoundDigest(inputDigest, artifactDigest),
+		Schema:               candidateCacheSchema,
+		ArtifactSourceCommit: input.SourceCommit,
+		BuildInputDigest:     input.BuildInputDigest,
+		InputDigest:          inputDigest,
+		ArtifactDigest:       artifactDigest,
+		ArtifactSize:         artifactSize,
+		BoundDigest:          candidateBoundDigest(inputDigest, artifactDigest),
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -581,8 +574,12 @@ func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (
 	} else if !os.IsNotExist(err) {
 		return "", noop, fmt.Errorf("prepare-origin: cannot inspect worktree path %s: %v", dir, err)
 	}
-	// Make sure the ref is current before we detach onto it.
-	_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
+	// Mutable refs need a refresh immediately before materialization. A caller that already
+	// selected a full immutable commit must not fetch again: that preserves one attempt's
+	// identity and avoids an unnecessary metadata write in the linearized transaction.
+	if !validCommit(ref) {
+		_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
+	}
 	if out, ok := run(ctx, repoRoot, "git", "worktree", "add", "--detach", dir, ref); !ok {
 		// Git may have materialized part of the directory/admin entry before returning
 		// failure. The path was proven absent above, so removing that partial result

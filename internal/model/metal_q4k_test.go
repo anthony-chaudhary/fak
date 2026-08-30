@@ -1132,6 +1132,7 @@ func TestMetalQ4KSingleRowGemmDispatchMatchesGEMM(t *testing.T) {
 }
 
 func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "1")
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")
 	}
@@ -1151,7 +1152,6 @@ func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
 	}
 	X := randomVecF(P*in, 9102)
 
-	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
 	controlSession := m.NewSession()
 	controlSession.MetalQ4K = true
 	control := controlSession.q4kGemmGroupDispatch(names, X, P)
@@ -1166,9 +1166,9 @@ func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
 		controlCopy[i] = append([]float32(nil), control[i]...)
 	}
 
-	t.Setenv("FAK_Q4K_GATEUP_SLAB", "1")
 	candidateSession := m.NewSession()
 	candidateSession.MetalQ4K = true
+	candidateSession.Q4KGateUpOutputSlab = true
 	var stable *float32
 	for call := 0; call < 65; call++ { // 64 compute-layer equivalents, then the next chunk's first layer.
 		got := candidateSession.q4kGemmGroupDispatch(names, X, P)
@@ -1203,6 +1203,7 @@ func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
 
 	isolationSession := m.NewSession()
 	isolationSession.MetalQ4K = true
+	isolationSession.Q4KGateUpOutputSlab = true
 	isolated := isolationSession.q4kGemmGroupDispatch(names, X, P)
 	if isolated == nil {
 		t.Fatal("isolated session group returned nil")
@@ -1225,6 +1226,7 @@ func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
 
 	largeSession := m.NewSession()
 	largeSession.MetalQ4K = true
+	largeSession.Q4KGateUpOutputSlab = true
 	largeP := q4kMLPOutputSlabMaxTokens + 1
 	large := largeSession.q4kGemmGroupDispatch(names, randomVecF(largeP*in, 9103), largeP)
 	if large == nil {
@@ -1241,6 +1243,7 @@ func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
 	}
 	unsupportedSession := m.NewSession()
 	unsupportedSession.MetalQ4K = true
+	unsupportedSession.Q4KGateUpOutputSlab = true
 	unsupported := unsupportedSession.q4kGemmGroupDispatch(unsupportedNames, X, P)
 	if unsupported == nil {
 		t.Fatal("unsupported-group allocating fallback returned nil")
@@ -1264,7 +1267,6 @@ func TestMetalQ4KMLPOutputSlabProductionPrefillReusesAcrossLayersAndChunks(t *te
 	first := []int{3, 7, 11, 5, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61}
 	second := []int{67, 71, 73, 79, 83, 89, 97}
 
-	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
 	control := m.NewSession()
 	control.Q4K = true
 	control.MetalQ4K = true
@@ -1274,10 +1276,10 @@ func TestMetalQ4KMLPOutputSlabProductionPrefillReusesAcrossLayersAndChunks(t *te
 		t.Fatalf("default-off production prefill stats = %+v", control.q4kMLPOutputSlabStats)
 	}
 
-	t.Setenv("FAK_Q4K_GATEUP_SLAB", "1")
 	candidate := m.NewSession()
 	candidate.Q4K = true
 	candidate.MetalQ4K = true
+	candidate.Q4KGateUpOutputSlab = true
 	gotFirst := candidate.Prefill(first)
 	if got, want := candidate.q4kMLPOutputSlabStats, (q4kMLPOutputSlabStats{Calls: 4, Allocations: 1, Reuses: 3, HighWaterBytes: uint64(len(first) * cfg.IntermediateSize * 2 * 4)}); got != want {
 		t.Fatalf("first production chunk stats = %+v, want %+v", got, want)

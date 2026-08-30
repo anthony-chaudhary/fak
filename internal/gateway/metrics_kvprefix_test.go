@@ -62,6 +62,90 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 	}
 }
 
+func TestRejectedTierMetricDeterminism(t *testing.T) {
+	cacheobs.Default.ObserveTier(cacheobs.TierAccess{
+		Tier:    cacheobs.CacheTier(255),
+		Op:      cacheobs.OpRead,
+		Outcome: cacheobs.OutcomeHit,
+		Backend: cacheobs.BackendMemory,
+	})
+
+	render := func() string {
+		var b strings.Builder
+		writeKVPrefixMetrics(&b)
+		return b.String()
+	}
+
+	first := render()
+	second := render()
+	if first != second {
+		t.Fatalf("same rejected-tier input rendered different bytes:\n--- first ---\n%s--- second ---\n%s", first, second)
+	}
+}
+
+func TestMetricsExposesRejectedTierAccesses(t *testing.T) {
+	srv := newTestServer(t)
+	const metric = "fak_gateway_kv_prefix_tier_accesses_rejected_total"
+
+	before := cacheobs.Default.Snapshot()
+	beforeTier := cacheobs.Default.TierSnapshot()
+	beforeText := srv.renderMetrics()
+	for _, want := range []string{
+		"# HELP " + metric + " ",
+		"# TYPE " + metric + " counter",
+	} {
+		if !strings.Contains(beforeText, want) {
+			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, beforeText)
+		}
+	}
+	if got := metricUint64(t, beforeText, metric); got != before.RejectedTierAccesses {
+		t.Fatalf("initial scraped rejected tier accesses = %d, snapshot = %d", got, before.RejectedTierAccesses)
+	}
+
+	cacheobs.Default.ObserveTier(cacheobs.TierAccess{
+		Tier:    cacheobs.CacheTier(255),
+		Op:      cacheobs.OpRead,
+		Outcome: cacheobs.OutcomeHit,
+		Backend: cacheobs.BackendMemory,
+	})
+
+	after := cacheobs.Default.Snapshot()
+	afterTier := cacheobs.Default.TierSnapshot()
+	if after.RejectedTierAccesses != before.RejectedTierAccesses+1 {
+		t.Fatalf("rejected tier accesses did not advance by one: before=%d after=%d", before.RejectedTierAccesses, after.RejectedTierAccesses)
+	}
+	if after.Turns != before.Turns || after.PromptTokens != before.PromptTokens || after.ReusedTokens != before.ReusedTokens ||
+		afterTier.Total.Requests != beforeTier.Total.Requests {
+		t.Fatalf("invalid tier access changed accepted denominators: stats before=%+v after=%+v tier requests before=%d after=%d",
+			before, after, beforeTier.Total.Requests, afterTier.Total.Requests)
+	}
+
+	afterText := srv.renderMetrics()
+	if strings.Contains(afterText, metric+"{") {
+		t.Fatalf("rejected tier counter must be unlabeled:\n%s", afterText)
+	}
+	if got := metricUint64(t, afterText, metric); got != after.RejectedTierAccesses {
+		t.Fatalf("scraped rejected tier accesses = %d, snapshot = %d", got, after.RejectedTierAccesses)
+	}
+}
+
+func metricUint64(t *testing.T, text, name string) uint64 {
+	t.Helper()
+	line := metricLine(text, name)
+	if line == "" {
+		t.Fatalf("no %s line:\n%s", name, text)
+	}
+	value := strings.TrimSpace(strings.TrimPrefix(line, name))
+	if strings.ContainsAny(value, "{}") {
+		t.Fatalf("%s row has labels or raw dimensions: %q", name, line)
+	}
+	n, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		t.Fatalf("parse %q as uint64: %v", line, err)
+	}
+	return n
+}
+
 // TestMetricsExposesKVPrefixBySource covers the provenance axis (#3896): the same in-kernel
 // prompt tokens split by WHERE they were served from, orthogonal to the reuse-depth family.
 // The process-global tap may carry counts from sibling tests, so the family-present check
@@ -386,13 +470,14 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 			t.Fatalf("disabled KV memory reporter missing %q\n--- metrics ---\n%s", want, text)
 		}
 	}
+	physicalTierText := strings.ReplaceAll(text, "fak_gateway_kv_prefix_tier_accesses_rejected_total", "")
 	for _, absent := range []string{
 		"fak_gateway_kv_memory_resident_tokens",
 		"fak_gateway_kv_memory_evictions_total",
 		"fak_gateway_kv_memory_splits_total",
 		"fak_gateway_kv_prefix_tier_",
 	} {
-		if strings.Contains(text, absent) {
+		if strings.Contains(physicalTierText, absent) {
 			t.Fatalf("disabled KV memory reporter should not emit %q\n--- metrics ---\n%s", absent, text)
 		}
 	}

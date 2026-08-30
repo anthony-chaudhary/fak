@@ -7,6 +7,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -93,8 +94,12 @@ func TestRunOwnedBrokerPowerShellReceipts(t *testing.T) {
 				if receipt.Outcome != tt.want[i] || receipt.ErrorClass != tt.wantClass[i] {
 					t.Fatalf("receipt[%d] = %+v", i, receipt)
 				}
-				if receipt.LaunchClass != shellprov.LaunchHook || receipt.ShellImage != shellprov.ShellPowerShell || receipt.ShellEdition != shellprov.EditionDesktop || receipt.ShellVersion != "5.1" {
+				if receipt.LaunchClass != shellprov.LaunchHook || receipt.ShellImage != shellprov.ShellPowerShell || receipt.ShellEdition != shellprov.EditionDesktop {
 					t.Fatalf("bounded fields = %+v", receipt)
+				}
+				version, err := strconv.ParseFloat(receipt.ShellVersion, 64)
+				if err != nil || version <= 5.0 {
+					t.Fatalf("PowerShell version %q must parse and follow the prior desktop release: %v", receipt.ShellVersion, err)
 				}
 				if i > 0 && receipt.LaunchID != receipts[0].LaunchID {
 					t.Fatalf("launch IDs differ: %q %q", receipts[0].LaunchID, receipt.LaunchID)

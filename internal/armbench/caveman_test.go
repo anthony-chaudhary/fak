@@ -92,7 +92,7 @@ func TestCavemanNativeMediumCanonicalArmAndRawOutput(t *testing.T) {
 	if profile.Identity != "caveman:native:medium" || profile.SHA256 != hex.EncodeToString(wantDigest[:]) {
 		t.Fatalf("profile witness = %#v", profile)
 	}
-	if len(p.Calls) != 90 || len(p.Summary) != 3 || p.Summary[2].Arm != "native_medium" {
+	if len(p.Calls) != 90 || len(p.Summary) != 3 || p.Summary[2].Arm != "native_medium" { //boundarylint:ignore CHANGE_DETECTOR_TEST the benchmark fixture is a fixed 30-prompt by 3-arm matrix with one summary per arm
 		t.Fatalf("arms not paired: calls=%d summary=%#v", len(p.Calls), p.Summary)
 	}
 	for _, call := range p.Calls {

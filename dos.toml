@@ -398,8 +398,60 @@ concurrent = [
   "studylink",
   "studyprio",
   "studytickets",
+  "sweepcert",
   "microfleeteconomics",
   "modeldescriptor",
+  "openviking",
+  "dockerprocess",
+  "nativebench",
+  "selfupdate",
+  # #9326 current-census ownership reconciliation: each newly classified top-level Go
+  # package keeps its package-named concurrent lane, the compiler and same-tree
+  # collision boundary. internal/study remains explicitly owned by the pre-existing
+  # studyreceipt tree; the detectors now resolve that authored owner without changing
+  # the established boundary.
+  # Creation history already used the matching `(fak <package>)` stamp for 191/228
+  # leaves; keeping the other independent package APIs at the same boundary avoids a
+  # broader topic lane, catch-all, or package move. Every path is explicit below.
+  "agentdescriptor", "agentic", "agentquery", "agentqueue", "amoprofpub", "archfitness",
+  "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
+  "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
+  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools",
+  "codexmcpdiag", "codexsession", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
+  "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
+  "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
+  "devhandoff", "disambiguation", "discoveryrouter", "docreach", "docsearch", "doneclaimaudit",
+  "dosdecision", "edgequal", "enumlint", "estimatecal", "exclusivefile", "fabricmap",
+  "fastintent", "fleetsearch", "flowmetrics", "fp4meta", "framevisibility", "frontmatter",
+  "gardenbudget", "geminicache", "generation", "genlock", "ggufinterop", "goalregistry",
+  "grafanacontract", "harnessartifact", "harnessclassify", "harnesscompose", "harnesscontrolpacket", "harnesscontrolstudy",
+  "harnesscreationreceipt", "harnesscreationstudy", "harnesscrossover", "harnessderive", "harnessdiscover", "harnessgallery",
+  "harnesshost", "harnessinit", "harnessinspect", "harnessinstructions", "harnessmix", "harnessoverride",
+  "harnesspreview", "harnessprotocol", "harnessrelease", "harnessresolve", "harnessselect", "harnessserve",
+  "harnessverify", "harnessweb", "interspersedflags", "issuecentrality", "issuecheck", "issueownerprompt",
+  "issuepolicy", "kquantbits", "kvint2eval", "kvquantquality", "kvvectoreval", "lanebeat",
+  "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
+  "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
+  "localappmetrics", "localappux", "macromailbox", "macrostate", "managedinventory", "markerblock",
+  "memoryindex", "microscaleeval", "modelloadplan", "modelpack", "modelsrc", "nativefirst",
+  "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage", "nativeperfobscontract",
+  "nativeperfslo", "numbermap", "openaiadapter", "opensweharder", "orchestration", "orientation",
+  "pagespublish", "parentdir", "perfrsiscore", "portability", "portabilitycontract", "portabilitylab",
+  "privacy", "processalive", "processforest", "processstart", "proctest", "projectionspine",
+  "providercost", "providerjobaccounting", "qevicteval", "quantbench", "quantcompat", "quantfixture",
+  "quantlicense", "quantmatrix", "quantmeta", "quantobs", "quantroute", "quantwatch",
+  "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp", "qwenflashnext", "qwensemanticstop",
+  "qwenworkbudget", "refid", "releasereadiness", "requanteval", "residualquant", "resourcelifecycle",
+  "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor",
+  "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
+  "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
+  "stalework", "strictjson", "stringlist", "stringset", "studybench", "studyforge",
+  "subtractiveprofile", "suiteverify", "supervisionpolicy", "supportgraph", "terminalbarrier", "terminalrelief",
+  "testenv", "testquality", "toolplugin", "toolpriorbench", "trajectoryassurance", "turnavoid",
+  "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer", "usagepreflight",
+  "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplease", "wiplifecycle",
+  "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
+  "placementtax",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -561,7 +613,12 @@ autopick = [
   "studylink",
   "studyprio",
   "studytickets",
+  "sweepcert",
   "microfleeteconomics",
+  "openviking",
+  "dockerprocess",
+  "nativebench",
+  "selfupdate",
   # new-leaf:lane
 ]
 
@@ -577,6 +634,7 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+nativebench = ["internal/nativebench/**"]
 adjudicator = ["internal/adjudicator/**"]
 agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
@@ -1014,7 +1072,6 @@ propagationscore = ["internal/propagationscore/**"]
 pythongate = ["internal/pythongate/**"]
 qaprocessscore = ["internal/qaprocessscore/**"]
 quality = ["internal/quality/**"]
-placementtax = ["internal/placementtax/**"]
 questionledger = ["internal/questionledger/**"]
 qwen36nodereports = ["internal/qwen36nodereports/**"]
 qwen36parity = ["internal/qwen36parity/**"]
@@ -1185,7 +1242,241 @@ studylink = ["internal/studylink/**"]
 studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]
 microfleeteconomics = ["internal/microfleeteconomics/**"]
+sweepcert = ["internal/sweepcert/**"]
 modeldescriptor = ["internal/modeldescriptor/**"]
+openviking = ["internal/openviking/**"]
+dockerprocess = ["internal/dockerprocess/**"]
+selfupdate = ["internal/selfupdate/**"]
+# #9326: explicit ownership for the 228 package boundaries classified above.
+agentdescriptor = ["internal/agentdescriptor/**"]
+agentic = ["internal/agentic/**"]
+agentquery = ["internal/agentquery/**"]
+agentqueue = ["internal/agentqueue/**"]
+amoprofpub = ["internal/amoprofpub/**"]
+archfitness = ["internal/archfitness/**"]
+archrank = ["internal/archrank/**"]
+armbench = ["internal/armbench/**"]
+auditreceipt = ["internal/auditreceipt/**"]
+benchmarkdown = ["internal/benchmarkdown/**"]
+bitnetmeta = ["internal/bitnetmeta/**"]
+bitnetruntime = ["internal/bitnetruntime/**"]
+blastlease = ["internal/blastlease/**"]
+borrowprovenance = ["internal/borrowprovenance/**"]
+buildoverlay = ["internal/buildoverlay/**"]
+categorybaseline = ["internal/categorybaseline/**"]
+causalreceipt = ["internal/causalreceipt/**"]
+cavemanpairwise = ["internal/cavemanpairwise/**"]
+cavemansafety = ["internal/cavemansafety/**"]
+childprocess = ["internal/childprocess/**"]
+citeverify = ["internal/citeverify/**"]
+cloudhandoff = ["internal/cloudhandoff/**"]
+codebookmeta = ["internal/codebookmeta/**"]
+codetools = ["internal/codetools/**"]
+codexmcpdiag = ["internal/codexmcpdiag/**"]
+codexsession = ["internal/codexsession/**"]
+commitlifecycle = ["internal/commitlifecycle/**"]
+committedbuildwitness = ["internal/committedbuildwitness/**"]
+committedtree = ["internal/committedtree/**"]
+composition = ["internal/composition/**"]
+computetrace = ["internal/computetrace/**"]
+computetune = ["internal/computetune/**"]
+configguide = ["internal/configguide/**"]
+configsurface = ["internal/configsurface/**"]
+coordination = ["internal/coordination/**"]
+cubicquanteval = ["internal/cubicquanteval/**"]
+cudaarch = ["internal/cudaarch/**"]
+deliverystages = ["internal/deliverystages/**"]
+demoassert = ["internal/demoassert/**"]
+dependencyquarantine = ["internal/dependencyquarantine/**"]
+devcheckpoint = ["internal/devcheckpoint/**"]
+devcmd = ["internal/devcmd/**"]
+devhandoff = ["internal/devhandoff/**"]
+disambiguation = ["internal/disambiguation/**"]
+discoveryrouter = ["internal/discoveryrouter/**"]
+docreach = ["internal/docreach/**"]
+docsearch = ["internal/docsearch/**"]
+doneclaimaudit = ["internal/doneclaimaudit/**"]
+dosdecision = ["internal/dosdecision/**"]
+edgequal = ["internal/edgequal/**"]
+enumlint = ["internal/enumlint/**"]
+estimatecal = ["internal/estimatecal/**"]
+exclusivefile = ["internal/exclusivefile/**"]
+fabricmap = ["internal/fabricmap/**"]
+fastintent = ["internal/fastintent/**"]
+fleetsearch = ["internal/fleetsearch/**"]
+flowmetrics = ["internal/flowmetrics/**"]
+fp4meta = ["internal/fp4meta/**"]
+framevisibility = ["internal/framevisibility/**"]
+frontmatter = ["internal/frontmatter/**"]
+gardenbudget = ["internal/gardenbudget/**"]
+geminicache = ["internal/geminicache/**"]
+generation = ["internal/generation/**"]
+genlock = ["internal/genlock/**"]
+ggufinterop = ["internal/ggufinterop/**"]
+goalregistry = ["internal/goalregistry/**"]
+grafanacontract = ["internal/grafanacontract/**"]
+harnessartifact = ["internal/harnessartifact/**"]
+harnessclassify = ["internal/harnessclassify/**"]
+harnesscompose = ["internal/harnesscompose/**"]
+harnesscontrolpacket = ["internal/harnesscontrolpacket/**"]
+harnesscontrolstudy = ["internal/harnesscontrolstudy/**"]
+harnesscreationreceipt = ["internal/harnesscreationreceipt/**"]
+harnesscreationstudy = ["internal/harnesscreationstudy/**"]
+harnesscrossover = ["internal/harnesscrossover/**"]
+harnessderive = ["internal/harnessderive/**"]
+harnessdiscover = ["internal/harnessdiscover/**"]
+harnessgallery = ["internal/harnessgallery/**"]
+harnesshost = ["internal/harnesshost/**"]
+harnessinit = ["internal/harnessinit/**"]
+harnessinspect = ["internal/harnessinspect/**"]
+harnessinstructions = ["internal/harnessinstructions/**"]
+harnessmix = ["internal/harnessmix/**"]
+harnessoverride = ["internal/harnessoverride/**"]
+harnesspreview = ["internal/harnesspreview/**"]
+harnessprotocol = ["internal/harnessprotocol/**"]
+harnessrelease = ["internal/harnessrelease/**"]
+harnessresolve = ["internal/harnessresolve/**"]
+harnessselect = ["internal/harnessselect/**"]
+harnessserve = ["internal/harnessserve/**"]
+harnessverify = ["internal/harnessverify/**"]
+harnessweb = ["internal/harnessweb/**"]
+interspersedflags = ["internal/interspersedflags/**"]
+issuecentrality = ["internal/issuecentrality/**"]
+issuecheck = ["internal/issuecheck/**"]
+issueownerprompt = ["internal/issueownerprompt/**"]
+issuepolicy = ["internal/issuepolicy/**"]
+kquantbits = ["internal/kquantbits/**"]
+kvint2eval = ["internal/kvint2eval/**"]
+kvquantquality = ["internal/kvquantquality/**"]
+kvvectoreval = ["internal/kvvectoreval/**"]
+lanebeat = ["internal/lanebeat/**"]
+launchshim = ["internal/launchshim/**"]
+learningmesh = ["internal/learningmesh/**"]
+learningobservation = ["internal/learningobservation/**"]
+lifecycleadapter = ["internal/lifecycleadapter/**"]
+lightgapscore = ["internal/lightgapscore/**"]
+lightroteval = ["internal/lightroteval/**"]
+linefmt = ["internal/linefmt/**"]
+llamacppinterop = ["internal/llamacppinterop/**"]
+localadmission = ["internal/localadmission/**"]
+localappcert = ["internal/localappcert/**"]
+localappcontract = ["internal/localappcontract/**"]
+localapphelper = ["internal/localapphelper/**"]
+localappmetrics = ["internal/localappmetrics/**"]
+localappux = ["internal/localappux/**"]
+macromailbox = ["internal/macromailbox/**"]
+macrostate = ["internal/macrostate/**"]
+managedinventory = ["internal/managedinventory/**"]
+markerblock = ["internal/markerblock/**"]
+memoryindex = ["internal/memoryindex/**"]
+microscaleeval = ["internal/microscaleeval/**"]
+modelloadplan = ["internal/modelloadplan/**"]
+modelpack = ["internal/modelpack/**"]
+modelsrc = ["internal/modelsrc/**"]
+nativefirst = ["internal/nativefirst/**"]
+nativeperf = ["internal/nativeperf/**"]
+nativeperfartifact = ["internal/nativeperfartifact/**"]
+nativeperfbackend = ["internal/nativeperfbackend/**"]
+nativeperfcorrelation = ["internal/nativeperfcorrelation/**"]
+nativeperfcoverage = ["internal/nativeperfcoverage/**"]
+nativeperfobscontract = ["internal/nativeperfobscontract/**"]
+nativeperfslo = ["internal/nativeperfslo/**"]
+numbermap = ["internal/numbermap/**"]
+openaiadapter = ["internal/openaiadapter/**"]
+opensweharder = ["internal/opensweharder/**"]
+orchestration = ["internal/orchestration/**"]
+orientation = ["internal/orientation/**"]
+pagespublish = ["internal/pagespublish/**"]
+parentdir = ["internal/parentdir/**"]
+perfrsiscore = ["internal/perfrsiscore/**"]
+portability = ["internal/portability/**"]
+portabilitycontract = ["internal/portabilitycontract/**"]
+portabilitylab = ["internal/portabilitylab/**"]
+privacy = ["internal/privacy/**"]
+processalive = ["internal/processalive/**"]
+processforest = ["internal/processforest/**"]
+processstart = ["internal/processstart/**"]
+proctest = ["internal/proctest/**"]
+projectionspine = ["internal/projectionspine/**"]
+providercost = ["internal/providercost/**"]
+providerjobaccounting = ["internal/providerjobaccounting/**"]
+qevicteval = ["internal/qevicteval/**"]
+quantbench = ["internal/quantbench/**"]
+quantcompat = ["internal/quantcompat/**"]
+quantfixture = ["internal/quantfixture/**"]
+quantlicense = ["internal/quantlicense/**"]
+quantmatrix = ["internal/quantmatrix/**"]
+quantmeta = ["internal/quantmeta/**"]
+quantobs = ["internal/quantobs/**"]
+quantroute = ["internal/quantroute/**"]
+quantwatch = ["internal/quantwatch/**"]
+qwen38ladder = ["internal/qwen38ladder/**"]
+qwen38quant = ["internal/qwen38quant/**"]
+qwen38quantrun = ["internal/qwen38quantrun/**"]
+qwen4exp = ["internal/qwen4exp/**"]
+qwenflashnext = ["internal/qwenflashnext/**"]
+qwensemanticstop = ["internal/qwensemanticstop/**"]
+qwenworkbudget = ["internal/qwenworkbudget/**"]
+refid = ["internal/refid/**"]
+releasereadiness = ["internal/releasereadiness/**"]
+requanteval = ["internal/requanteval/**"]
+residualquant = ["internal/residualquant/**"]
+resourcelifecycle = ["internal/resourcelifecycle/**"]
+resumeactuator = ["internal/resumeactuator/**"]
+rolloutmode = ["internal/rolloutmode/**"]
+rotationmeta = ["internal/rotationmeta/**"]
+runtimecap = ["internal/runtimecap/**"]
+scorecardportfolio = ["internal/scorecardportfolio/**"]
+scratchjanitor = ["internal/scratchjanitor/**"]
+serverartifact = ["internal/serverartifact/**"]
+servicewatchdog = ["internal/servicewatchdog/**"]
+sessiondiag = ["internal/sessiondiag/**"]
+sessionmine = ["internal/sessionmine/**"]
+sessionrecovery = ["internal/sessionrecovery/**"]
+sessionregistry = ["internal/sessionregistry/**"]
+shellprov = ["internal/shellprov/**"]
+shelltoken = ["internal/shelltoken/**"]
+sortkeys = ["internal/sortkeys/**"]
+speedab = ["internal/speedab/**"]
+stackpreflight = ["internal/stackpreflight/**"]
+stackresolve = ["internal/stackresolve/**"]
+stalework = ["internal/stalework/**"]
+strictjson = ["internal/strictjson/**"]
+stringlist = ["internal/stringlist/**"]
+stringset = ["internal/stringset/**"]
+studybench = ["internal/studybench/**"]
+studyforge = ["internal/studyforge/**"]
+subtractiveprofile = ["internal/subtractiveprofile/**"]
+suiteverify = ["internal/suiteverify/**"]
+supervisionpolicy = ["internal/supervisionpolicy/**"]
+supportgraph = ["internal/supportgraph/**"]
+terminalbarrier = ["internal/terminalbarrier/**"]
+terminalrelief = ["internal/terminalrelief/**"]
+testenv = ["internal/testenv/**"]
+testquality = ["internal/testquality/**"]
+toolplugin = ["internal/toolplugin/**"]
+toolpriorbench = ["internal/toolpriorbench/**"]
+trajectoryassurance = ["internal/trajectoryassurance/**"]
+turnavoid = ["internal/turnavoid/**"]
+turntaxvisual = ["internal/turntaxvisual/**"]
+ultracodeborrow = ["internal/ultracodeborrow/**"]
+ultracodecrossover = ["internal/ultracodecrossover/**"]
+ultracodedogfood = ["internal/ultracodedogfood/**"]
+ultracodetokenizer = ["internal/ultracodetokenizer/**"]
+usagepreflight = ["internal/usagepreflight/**"]
+vcachecalibration = ["internal/vcachecalibration/**"]
+vllmquant = ["internal/vllmquant/**"]
+wavefuel = ["internal/wavefuel/**"]
+wipinventory = ["internal/wipinventory/**"]
+wiplease = ["internal/wiplease/**"]
+wiplifecycle = ["internal/wiplifecycle/**"]
+witnessprocess = ["internal/witnessprocess/**"]
+workaccount = ["internal/workaccount/**"]
+workdelivery = ["internal/workdelivery/**"]
+workflowoutcomestudy = ["internal/workflowoutcomestudy/**"]
+workloadfit = ["internal/workloadfit/**"]
+workshape = ["internal/workshape/**"]
+placementtax = ["internal/placementtax/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1686,6 +1977,19 @@ refusal  = true
 summary  = "a destructive or write op targets a path OUTSIDE this repo -- it would create / delete / overwrite inside a SIBLING tree (another project or git repo) or the workspace's parent, not the workspace itself"
 fix      = "operate inside the workspace; send scratch to a temp dir (/tmp, ~/.cache), never a sibling. Floor: tools/repo_guard.py (a Claude Code PreToolUse hook in .claude/settings.json) resolves each target against the repo root and denies out-of-tree ones; set FAK_REPO_GUARD=warn for advisory, off to disable. FAK regex twin: examples/repo-guard-policy.json."
 see_also = ["tools/repo_guard.py", "examples/repo-guard-policy.json", ".claude/settings.json", "DOGFOOD-CLAUDE.md", "tools/check_committed_files.py"]
+
+# Shared Go build-cache deletion race (#10074): `go clean -cache` removes
+# archives from the ambient action graph while concurrent build/vet processes may
+# still reference them. Three independent sessions performed this operation at
+# the same timestamp before a freshness build failed on missing stdlib archives.
+# The compiled PreToolUse hook denies the executed command shape by default; the
+# embedded guard policy mirrors it across the host shell aliases.
+[reasons.BUILD_CACHE_CLEAN_RACE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "an agent-issued go clean requests deletion of the ambient Go build cache while peer build or vet processes may still reference its entries"
+fix      = "use the managed isolated paths: fak-dev buildcheck --vet or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off."
+see_also = ["internal/repoguard/build_cache_clean.go", "cmd/repoguard/main.go", "cmd/fak/guard-default-policy.json"]
 
 # Would-hang interactive commands (#2080): an interactive invocation assumes a
 # human is watching; under a headless agent harness it is a silent hang (`git

@@ -39,3 +39,12 @@ func TestDiagnosticPreviewIsConsentSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestReadyStateRendersReadyCopy(t *testing.T) {
+	got := Render(View{State: StateReady, Mode: ModeAutomatic})
+	for _, want := range []string{"Local features are ready", "Your tasks run on this Mac.", "Mode: Automatic"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ready render missing %q: %s", want, got)
+		}
+	}
+}

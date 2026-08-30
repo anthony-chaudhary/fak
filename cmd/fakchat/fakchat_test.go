@@ -9,7 +9,18 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+func TestExplicitQ4KSlabReachesFakchatSession(t *testing.T) {
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	s := newFakchatSession(model.NewSynthetic(model.Config{VocabSize: 8, HiddenSize: 4, NumLayers: 1}), true)
+	defer s.Close()
+	if !s.Q4KGateUpOutputSlab {
+		t.Fatal("explicit fakchat Q4_K slab setting did not reach session")
+	}
+}
 
 func TestSampleArgmax(t *testing.T) {
 	tests := []struct {

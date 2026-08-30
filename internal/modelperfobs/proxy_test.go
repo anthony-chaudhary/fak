@@ -3,6 +3,7 @@ package modelperfobs
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,68 @@ import (
 	"testing"
 	"time"
 )
+
+type failingRequestBody struct{ err error }
+
+func (b failingRequestBody) Read([]byte) (int, error) { return 0, b.err }
+func (failingRequestBody) Close() error               { return nil }
+
+func TestProxyRecordsEarlyFailureInboundBodyRead(t *testing.T) {
+	testProxyRecordsEarlyFailure(t, http.StatusBadRequest, func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", nil)
+		r.Body = failingRequestBody{err: errors.New("forced inbound body read failure")}
+		return r
+	})
+}
+
+func TestProxyRecordsEarlyFailureOutboundRequestConstruction(t *testing.T) {
+	testProxyRecordsEarlyFailure(t, http.StatusBadGateway, func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"test"}`))
+		r.Method = "invalid method"
+		return r
+	})
+}
+
+func testProxyRecordsEarlyFailure(t *testing.T, wantStatus int, request func() *http.Request) {
+	t.Helper()
+	backend, err := ParseBackend("http://backend.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := t.TempDir() + "/observations.jsonl"
+	proxy := &Proxy{Backend: backend, Ledger: ledger}
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, request())
+
+	if w.Code != wantStatus {
+		t.Fatalf("response status=%d, want %d; body=%q", w.Code, wantStatus, w.Body.String())
+	}
+	f, err := os.Open(ledger)
+	if err != nil {
+		t.Fatalf("early failure did not create observation ledger: %v", err)
+	}
+	rows, err := ReadObservations(bufio.NewReader(f))
+	closeErr := f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ledger rows=%d, want exactly 1: %+v", len(rows), rows)
+	}
+	got := rows[0]
+	if got.RequestID == "" || got.CompletedAt.IsZero() || got.Error == "" {
+		t.Fatalf("early-failure observation lacks id/completion/error: %+v", got)
+	}
+	proxy.mu.Lock()
+	defer proxy.mu.Unlock()
+	if len(proxy.active) != 0 || len(proxy.overlaps) != 0 {
+		t.Fatalf("active request state leaked: active=%v overlaps=%v", proxy.active, proxy.overlaps)
+	}
+}
 
 func TestProxyCapturesStreamingTimingAndUsage(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

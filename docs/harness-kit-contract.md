@@ -5,7 +5,7 @@ description: "The v1alpha1 public Go contract for external agent-product builder
 
 # Harness-kit public builder contract
 
-Status: **v1alpha1**, issue #6786. Import `github.com/anthony-chaudhary/fak/pkg/harnesskit`; anything below `github.com/anthony-chaudhary/fak/internal/` is private and Go itself rejects that import from an external module.
+Status: **v1alpha1**, issues #6786 and #6805. Import `github.com/anthony-chaudhary/fak/pkg/harnesskit`; anything below `github.com/anthony-chaudhary/fak/internal/` is private and Go itself rejects that import from an external module.
 
 ## Value and centrality
 
@@ -28,7 +28,19 @@ This is **Core** work: it freezes the external/kernel boundary before public SDK
 
 `Capability` names requested authority. `Extension` attaches a provenance-pinned implementation to one of `tools`, `models`, `context`, `instructions`, `transports`, or `events`. `Profile` groups extensions and requested capabilities. `ProductSpec` combines a profile and transport declarations; `Builder.Build` validates and freezes it. `Factory` is the host lifecycle seam, `Services` is its deliberately narrow capability-filtered reachability, and `Stream[T]` is the ordered streaming seam.
 
-`harnesskit.PublicContract()` and `ContractJSON()` are normative machine-readable forms. The schema records all extension planes, lifecycle states, stable error codes, security reachability, ownership, and compatibility rules. Within `v1alpha1`, additions are allowed; removing a symbol, plane, state, code, or changing its meaning requires a new contract version.
+`harnesskit.PublicContract()` and `ContractJSON()` are normative machine-readable forms. `PublicCompatibilityContract()` publishes the negotiation, semantic-diff, and upgrade-plan schemas without changing the original `Contract` struct. Within `v1alpha1`, additions are allowed; removing a symbol, plane, state, code, or changing its meaning requires a new contract version.
+
+## Compatibility and upgrades
+
+A builder declares a `BuilderContract` containing named `CapabilityRequirement` rows. Every row has an inclusive minimum and maximum semantic revision, may be optional, and may require an explicit `stable`, `experimental`, or `deprecated` status. A host publishes a `RuntimeContract` containing one explicit revision and status per capability. Upstream CLI or package versions may be recorded as provenance, but they are not compatibility proof.
+
+`NegotiateCompatibility` is deterministic and side-effect-free. Its versioned report sorts outcomes by capability and uses stable reason codes such as `capability_absent`, `revision_above_maximum`, and `status_mismatch`. Required gaps refuse compatibility; optional gaps remain visible without blocking. Empty, unknown, duplicated, or malformed declarations are never guessed compatible. Writers emit the current canonical schema; readers may tolerate additive fields but must refuse an unknown schema or reason rather than silently selecting “latest.”
+
+Use `ActivateCompatible` when the builder/host boundary is not already pinned by an older integration. It negotiates before lock verification and before any `Factory.Start`, returning both the machine report and a coded `CompatibilityError` on refusal. The original `Activate` signature remains available for source compatibility.
+
+`DiffContracts` explicitly compares contract semantics; it does not reflect over Go struct layout. Added capabilities and experimental-to-stable promotion are additive, changed behavior or forward revisions are behavioral, and removals, revision rollback, stable-to-experimental demotion, or contract-line changes are breaking. Deprecated offers carry a replacement and removal horizon, and negotiation refuses the deprecation until the replacement is present and valid.
+
+`PlanUpgrade` only computes a versioned `UpgradePlan`. It never edits builder-owned source, configuration, or lock files. The plan blocks breaking changes and required incompatibilities, while surfacing behavioral review, optional gaps, and deprecation migrations as explicit steps. The clean-module capture at [`_witnesses/issue-6805-harnesskit-upgrade.json`](_witnesses/issue-6805-harnesskit-upgrade.json) proves an N-1 revision range accepts a supported host upgrade and produces actionable JSON for a deliberately too-new refusal.
 
 ## Operating semantics
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -287,6 +288,10 @@ type Config struct {
 	// remedy label, never a raw upstream body. nil keeps the terminal-on-account-403 behavior
 	// unchanged.
 	AccountFailoverFunc func(reason string) (newCred string, ok bool)
+	// TransientTargetFunc supplies a distinct replacement credential after a temporary
+	// upstream 5xx/529 survives one same-target probe. It must not permanently wall the
+	// current account; nil preserves same-target retry behavior.
+	TransientTargetFunc func(status int) (newCred string, ok bool)
 	// ExtraHeaders are trusted host-supplied headers added to every upstream provider
 	// request in proxy mode. They carry account-routing metadata that is not a generic
 	// provider credential, such as ChatGPT-Account-Id for Codex ChatGPT subscription
@@ -359,6 +364,9 @@ type Config struct {
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs
 	// Session.Q4K (the SDOT int8 GEMV path, FAK_Q4K at boot).
 	InKernelQ4K bool
+	// InKernelPlanner carries native execution settings from the operator-facing serve
+	// flags into the planner. Zero values preserve the native defaults.
+	InKernelPlanner agent.InKernelPlannerConfig
 	// LocalModelID names the model id a client asks for to reach the in-kernel model
 	// when it is served ALONGSIDE a live upstream proxy — BaseURL set AND
 	// InKernelModel+Tokenizer loaded, the dual planner (dual_planner.go). Empty

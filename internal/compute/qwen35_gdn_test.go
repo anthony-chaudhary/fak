@@ -95,17 +95,41 @@ func TestQwen35GDNAllocationsPreserveDecodeAndSequenceLayouts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := qwen35GDNAllocations(tt.prefix, tt.separator, tt.scratchRows, tt.outRows, hidden, keyDim, valueDim, valueHeads, convDim)
-			if len(got) != 9 {
-				t.Fatalf("allocation count = %d, want 9", len(got))
+			if len(got) == 0 {
+				t.Fatal("allocations are empty")
+			}
+			seen := make(map[string]bool, len(got))
+			qNormIndex := -1
+			for i, allocation := range got {
+				if allocation.name == "" || seen[allocation.name] {
+					t.Fatalf("allocation %d has empty or duplicate identity %q", i, allocation.name)
+				}
+				seen[allocation.name] = true
+				rows := tt.scratchRows
+				if i == len(got)-1 {
+					rows = tt.outRows
+				}
+				if rows > 0 && (len(allocation.shape) != 2 || allocation.shape[0] != rows) {
+					t.Fatalf("allocation %q shape = %v, want %d rows", allocation.name, allocation.shape, rows)
+				}
+				if rows == 0 && len(allocation.shape) != 1 {
+					t.Fatalf("allocation %q shape = %v, want single-row vector", allocation.name, allocation.shape)
+				}
+				if allocation.name == tt.wantQ {
+					qNormIndex = i
+				}
 			}
 			if got[0].name != tt.wantFirstName || !reflect.DeepEqual(got[0].shape, tt.wantFirst) {
 				t.Fatalf("first allocation = %#v, want name=%q shape=%v", got[0], tt.wantFirstName, tt.wantFirst)
 			}
-			if got[8].name != tt.prefix+"output" || !reflect.DeepEqual(got[8].shape, tt.wantOutput) {
-				t.Fatalf("output allocation = %#v, want name=%q shape=%v", got[8], tt.prefix+"output", tt.wantOutput)
+			output := got[len(got)-1]
+			if output.name != tt.prefix+"output" || !reflect.DeepEqual(output.shape, tt.wantOutput) {
+				t.Fatalf("last allocation = %#v, want output name=%q shape=%v", output, tt.prefix+"output", tt.wantOutput)
 			}
-			if got[5].name != tt.wantQ {
-				t.Fatalf("q-norm allocation name = %q, want %q", got[5].name, tt.wantQ)
+			if qNormIndex < 1 || qNormIndex+1 >= len(got) ||
+				got[qNormIndex-1].name != tt.prefix+"conv"+tt.separator+"out" ||
+				got[qNormIndex+1].name != tt.prefix+"k"+tt.separator+"norm" {
+				t.Fatalf("q-norm allocation %q is not ordered between conv-out and k-norm: %#v", tt.wantQ, got)
 			}
 		})
 	}

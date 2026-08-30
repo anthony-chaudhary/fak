@@ -1,0 +1,63 @@
+{
+  "rows": [
+    {
+      "id": "issue10229-inkernel-expert-spill",
+      "canonical": "inkernel_expert_spill.go (served graded expert-spill seam)",
+      "family": "gateway-engine",
+      "kind": "subsystem",
+      "definition": "inkernel_expert_spill.go is the agent planner seam that resolves a loaded model’s graded MoE expert-spill placement once from operator intent and measured device budget, then applies that placement to each request session.",
+      "distinction": "The SERVE-SIDE LIFECYCLE BRIDGE for graded expert spill, not InKernelPlanner (the whole native request planner) and not its Qwen prefill-chunk control.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelplanner",
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens"
+      ],
+      "aliases": [],
+      "grounding": "inkernel_expert_spill",
+      "grounding_kind": "path",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10229-inkernel-qwen-q4k-prefill-chunk-config-error",
+      "canonical": "InKernelQwenQ4KPrefillChunkConfigError (deferred native-prefill bounds error)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an explicit resident-Qwen Q4_K prefill chunk size lies outside 128..8192; a targeted request returns it before tokenization or model execution.",
+      "distinction": "The FAIL-CLOSED ERROR VALUE for an invalid bound, not QwenQ4KPrefillChunkTokens (the requested planner setting) and not InKernelPlanner (the planner retaining it).",
+      "distinct_from": [
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+        "x-gateway-engine-inkernelplanner"
+      ],
+      "aliases": [],
+      "grounding": "InKernelQwenQ4KPrefillChunkConfigError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10229-kv-span-evict",
+      "canonical": "kvSpanEvict (planner KV-quarantine bridge gate)",
+      "family": "evict",
+      "kind": "config",
+      "definition": "kvSpanEvict is the planner-scoped enablement bit set only when FAK_INKERNEL_KVMMU opts in on the CPU model path; guarded eviction code checks it before rebuilding a session and evicting a quarantined tool-result K/V span.",
+      "distinction": "The ENABLEMENT GATE for the live planner bridge, not KVSpanEvictor (the public quarantine-bridge interface) and not KVCache.Evict (the model cache mutation it eventually invokes).",
+      "distinct_from": [
+        "evict-kvspanevictor",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "kvSpanEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

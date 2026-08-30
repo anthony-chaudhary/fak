@@ -36,6 +36,7 @@ type qwen35HALState struct {
 	sequenceFailure  error
 	decodeAccepted   bool
 	decodePath       string
+	decodeHandoff    Qwen35DecodeHandoffReceipt
 }
 
 type qwen35HALLayerState struct {

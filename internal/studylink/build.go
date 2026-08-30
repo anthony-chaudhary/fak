@@ -437,6 +437,9 @@ func buildSeedJoin(join Join, seed witnessSeed, issueByNumber map[int]ForgeRecor
 	case Partial:
 		join.Disposition, join.Confidence, join.ManualReview = Partial, "explicit-partial-scope", true
 		join.ManualReason = seed.Reason
+	case Conflict, Obsolete, Uncovered:
+		join.Disposition, join.Confidence, join.ManualReview = Conflict, "invalid-explicit-witness-mode", true
+		join.ManualReason = fmt.Sprintf("explicit witness mode %s cannot seed affirmative repository evidence", seed.Mode)
 	}
 	return join, evidence
 }

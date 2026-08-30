@@ -21,8 +21,10 @@ package devindex
 // checkable local link IS — only on which tree it is resolved against.
 
 import (
+	"fmt"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -52,6 +54,21 @@ func gitHEADOut(root string, args ...string) ([]byte, error) {
 // headTreePaths returns the set of slash-separated file paths committed at HEAD,
 // path.Clean-normalized for membership tests.
 func headTreePaths(root string) (map[string]bool, error) {
+	top, err := gitHEADOut(root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, err
+	}
+	want, err := canonicalRepoPath(root)
+	if err != nil {
+		return nil, err
+	}
+	got, err := canonicalRepoPath(strings.TrimSpace(string(top)))
+	if err != nil {
+		return nil, err
+	}
+	if got != want {
+		return nil, fmt.Errorf("git root %s does not match requested catalog root %s", got, want)
+	}
 	out, err := gitHEADOut(root, "ls-tree", "-r", "--name-only", "HEAD")
 	if err != nil {
 		return nil, err
@@ -65,6 +82,18 @@ func headTreePaths(root string) (map[string]bool, error) {
 		tree[path.Clean(p)] = true
 	}
 	return tree, nil
+}
+
+func canonicalRepoPath(root string) (string, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
 }
 
 // cleanLocalLinkTarget applies the shared local-link filter both HEAD-aware

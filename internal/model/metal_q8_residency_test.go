@@ -19,13 +19,30 @@ func exactQwen38Q8Config() Config {
 	return Config{ModelType: "qwen3_5_text", NumLayers: 64, LayerTypes: types}
 }
 
-func TestQwen38MetalQ8RuntimeInventoryIsExact272(t *testing.T) {
-	names, err := qwen38MetalQ8RuntimeNames(exactQwen38Q8Config())
+func qwen35LinearLayerCount(cfg Config) int {
+	count := 0
+	for layer := range cfg.LayerTypes {
+		if cfg.isLinearAttnLayer(layer) {
+			count++
+		}
+	}
+	return count
+}
+
+func qwen35Q8ProjectionCount(cfg Config) int {
+	const linearProjections, fullAttentionProjections = 5, 2
+	linear := qwen35LinearLayerCount(cfg)
+	return linear*linearProjections + (len(cfg.LayerTypes)-linear)*fullAttentionProjections
+}
+
+func TestQwen38MetalQ8RuntimeInventoryMatchesLayerArchitecture(t *testing.T) {
+	cfg := exactQwen38Q8Config()
+	names, err := qwen38MetalQ8RuntimeNames(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(names) != 272 {
-		t.Fatalf("inventory=%d want 272", len(names))
+	if want := qwen35Q8ProjectionCount(cfg); len(names) != want {
+		t.Fatalf("inventory=%d want %d projections derived from layer architecture", len(names), want)
 	}
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {

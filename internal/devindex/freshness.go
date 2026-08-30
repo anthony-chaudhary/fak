@@ -213,14 +213,33 @@ func (c *Catalog) CheckFreshnessReport() FreshnessReport {
 // one .go file but have no declared dos.toml lane. It mirrors
 // internal/hooks.UndeclaredLeaves, recomputed from this catalog's already-parsed lane
 // set (c.declared — every name in [lanes] AND every [lanes.trees] key, the SAME set
-// the authoritative gate builds) so the tier-1 package need not import the hooks gate
-// yet reaches the identical verdict (pinned by a live parity test). A leaf declared in
-// [lanes] with no explicit tree is declared, NOT drift; counting only [lanes.trees]
-// keys would falsely flag it. Sorted, deduped.
+// the authoritative gate builds) plus the explicit tree resolver, so the tier-1
+// package need not import the hooks gate yet reaches the identical verdict (pinned by
+// a live parity test). A leaf is owned when its package name is declared or an authored
+// tree maps its files to a differently named composite lane. Sorted, deduped.
 //
 // A tree it cannot read yields no gaps. That is the drift-only view; ask
 // CheckFreshnessReport if you need to tell "no gaps" apart from "never looked".
 func (c *Catalog) UndeclaredLeaves() []string { g, _ := c.undeclaredLeaves(); return g }
+
+// ExplicitTreeLaneForPath resolves only authored [lanes.trees] exact paths and
+// prefixes. Unlike LaneForPath it deliberately has no internal/<package>
+// convention fallback, so a live-census parity test can prove that ownership is
+// present in the taxonomy rather than merely infer the package name. This is the
+// strict read used by the #9326 current-package reconciliation witness.
+func (c *Catalog) ExplicitTreeLaneForPath(path string) string {
+	p := strings.ToLower(normPath(path))
+	if lane, ok := c.exact[p]; ok {
+		return lane
+	}
+	best, owner := "", ""
+	for prefix, lane := range c.prefixes {
+		if strings.HasPrefix(p, prefix) && len(prefix) > len(best) {
+			best, owner = prefix, lane
+		}
+	}
+	return owner
+}
 
 // undeclaredLeaves is UndeclaredLeaves plus the reason it could not finish, if any:
 // an unreadable internal/ (nothing was scanned at all) or an unreadable package
@@ -252,6 +271,14 @@ func (c *Catalog) undeclaredLeaves() ([]string, *Unchecked) {
 		}
 		if !hasGo {
 			continue // not a Go package (testdata/doc dir): not a leaf
+		}
+		// A composite lane may deliberately own a differently named package
+		// (internal/study is part of studyreceipt). Resolve the authored tree before
+		// calling the package undeclared; requiring owner == basename would report a
+		// gap even though arbitration already has an exact region for every file.
+		probe := filepath.ToSlash(filepath.Join("internal", e.Name(), "_lane_ownership.go"))
+		if c.ExplicitTreeLaneForPath(probe) != "" {
+			continue
 		}
 		gaps = append(gaps, name)
 	}

@@ -356,3 +356,11 @@ func validInventoryMapForTest() InventoryMap {
 		Subsystems: []InventorySubsystem{{Path: "cmd", Files: 1, RuntimeFiles: 1}},
 	}
 }
+
+func TestSelfInventoryVerificationCacheContractNamesFailClosedKey(t *testing.T) {
+	for _, want := range []string{"immutable-tip", "repository", "manifest", "inventory-schema", "complete verdict", "fail-closed"} {
+		if !strings.Contains(SelfInventoryVerificationCacheContract, want) {
+			t.Fatalf("cache contract %q missing %q", SelfInventoryVerificationCacheContract, want)
+		}
+	}
+}

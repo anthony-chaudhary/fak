@@ -58,13 +58,13 @@ func (e *NativeInferenceReceiptUnsupportedError) Error() string {
 }
 
 // InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the
-// bounded Qwen resident-Q4_K prefill control is nonempty but not one of the
-// supported widths. Targeted requests return it before tokenization or model
+// bounded Qwen resident-Q4_K prefill control is outside the supported range.
+// Targeted requests return it before tokenization or model
 // execution; unrelated model paths do not acquire a new failure mode.
 type InKernelQwenQ4KPrefillChunkConfigError struct {
 	Value string
 }
 
 func (e *InKernelQwenQ4KPrefillChunkConfigError) Error() string {
-	return "FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS=" + e.Value + ": want one of 512, 1024, 2048, 4096, 8192"
+	return "native Qwen Q4_K prefill chunk tokens " + e.Value + ": want 128..8192 (set with --native-qwen-q4k-prefill-chunk-tokens)"
 }

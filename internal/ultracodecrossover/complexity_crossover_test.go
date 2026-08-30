@@ -21,7 +21,7 @@ func TestComplexityCampaignStopsAfterTwoFailures(t *testing.T) {
 	if report.LastEqualOutcomeRung != 3 || report.FirstFailureRung != 4 || report.StoppedAfterRung != 5 {
 		t.Fatalf("unexpected crossover: %+v", report)
 	}
-	if len(report.Rungs) != 5 || report.Rungs[3].Verdict != "ABSTAIN" {
+	if len(report.Rungs) != 5 || report.Rungs[3].Verdict != "ABSTAIN" { //boundarylint:ignore CHANGE_DETECTOR_TEST the crossover fixture defines five ordered rungs and pins the fourth rung verdict
 		t.Fatalf("abstentions were not preserved: %+v", report.Rungs)
 	}
 }

@@ -366,7 +366,8 @@
         "render (verb)",
         "rendered-ctxplan",
         "x-ci-coverage-render-materialize-renderers",
-        "x2-render-materialize-gitdailyrenderhealth"
+        "x2-render-materialize-gitdailyrenderhealth",
+        "issue10230-performance-rsi-debt"
       ],
       "aliases": [],
       "grounding": "renderer",

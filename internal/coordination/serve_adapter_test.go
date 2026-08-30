@@ -2,6 +2,8 @@ package coordination
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,8 +116,10 @@ func TestServeAdapterObserveProjectsBoundedContentFreeEvidence(t *testing.T) {
 	if got.Provenance != ServeMeasured || !got.ObservedAt.Equal(source.ObservedAt) || !got.ValidUntil.Equal(source.ValidUntil) || got.Generation != source.Generation || !got.Fresh {
 		t.Fatalf("projected evidence = %#v", got)
 	}
-	if len(got.StableID) != 32 {
-		t.Fatalf("StableID length = %d, want bounded 32-byte hex", len(got.StableID))
+	wantStableIDSum := sha256.Sum256(source.Identity)
+	wantStableID := hex.EncodeToString(wantStableIDSum[:sha256.Size/2])
+	if got.StableID != wantStableID {
+		t.Fatalf("StableID = %q, want content-free source identity %q", got.StableID, wantStableID)
 	}
 }
 
@@ -454,7 +458,8 @@ func TestServeAdapterSelfCheckDeterministicAndContentFree(t *testing.T) {
 	if !first.Passed || first.Action != ServeDefer || first.Error != "" {
 		t.Fatalf("SelfCheck = %#v", first)
 	}
-	if first != second || len(first.Digest) != 64 {
+	digest, err := hex.DecodeString(first.Digest)
+	if first != second || err != nil || len(digest) != sha256.Size {
 		t.Fatalf("SelfCheck not deterministic: first %#v second %#v", first, second)
 	}
 	for _, forbidden := range []string{"prompt", "payload", "private", "context"} {

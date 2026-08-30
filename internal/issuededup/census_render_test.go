@@ -76,3 +76,35 @@ func TestCensusJSONCarriesPerPairEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderCensusNamesExactSupersetReasonAndMeasurements(t *testing.T) {
+	rep := Census(exactSupersetBacklog(), 0, 0)
+	md := RenderCensus(rep)
+	for _, want := range []string{
+		"#6001 ↔ #6002",
+		"on " + MatchedOnExactBodySuperset,
+		"reason " + CensusReasonExactBodySuperset,
+		"exact normalized title",
+		"common body prefix:",
+		"shorter chars; longer body:",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("rendered exact/superset proposal missing %q\n--- report ---\n%s", want, md)
+		}
+	}
+
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal exact/superset report: %v", err)
+	}
+	for _, want := range []string{
+		`"reason":"` + CensusReasonExactBodySuperset + `"`,
+		`"common_prefix_chars"`,
+		`"shorter_body_chars"`,
+		`"longer_body_chars"`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("exact/superset JSON evidence missing %s: %s", want, b)
+		}
+	}
+}

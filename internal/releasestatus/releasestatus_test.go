@@ -13,7 +13,7 @@ func TestParseGoTestWorkUnitsDividesCapturedLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := ParseGoTestWorkUnits(string(log))
-	if len(got) != 12 {
+	if len(got) != 12 { //boundarylint:ignore CHANGE_DETECTOR_TEST the release-status fixture enumerates all 12 required status checks
 		t.Fatalf("work units = %d, want 12: %+v", len(got), got)
 	}
 	wantPairs := [][2]string{

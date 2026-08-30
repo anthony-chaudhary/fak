@@ -78,6 +78,14 @@ func TestValueChainUsageLedgerAndWeeklyFold(t *testing.T) {
 	}
 }
 
+func TestValueChainLedgerIgnoresLegacyEnvironment(t *testing.T) {
+	legacy := filepath.Join(t.TempDir(), "legacy.jsonl")
+	t.Setenv("FAK_VALUE_CHAIN_LEDGER", legacy)
+	if got := defaultValueChainLedger(); got == legacy {
+		t.Fatalf("legacy environment still controls ledger path: %s", got)
+	}
+}
+
 func TestValueChainSelfcheckMatchesCapturedWitness(t *testing.T) {
 	root := repoRoot()
 	var out, errOut bytes.Buffer

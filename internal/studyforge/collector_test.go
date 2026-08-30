@@ -53,7 +53,7 @@ func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
 	if err = Validate(got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Receipt.Status != StatusComplete || len(got.Records) != 6 {
+	if got.Receipt.Status != StatusComplete || len(got.Records) != 6 { //boundarylint:ignore CHANGE_DETECTOR_TEST the collector fixture supplies six records and requires complete preservation
 		t.Fatalf("status=%s records=%d", got.Receipt.Status, len(got.Records))
 	}
 	issues, _ := sourceByName(got.Receipt.Sources, "issues")
@@ -69,6 +69,18 @@ func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
 	}
 	if got.Receipt.IndexChecksum != again.Receipt.IndexChecksum {
 		t.Fatal("checksum changed")
+	}
+}
+
+func TestCollectorDefaultsUseTimeoutBoundClients(t *testing.T) {
+	fromConstructor := NewCollector(nil)
+	if got := fromConstructor.Client.Timeout; got != defaultHTTPTimeout || got <= 0 {
+		t.Fatalf("NewCollector default timeout = %s, want %s", got, defaultHTTPTimeout)
+	}
+	var zero Collector
+	zero.defaults()
+	if got := zero.Client.Timeout; got != defaultHTTPTimeout || got <= 0 {
+		t.Fatalf("zero Collector default timeout = %s, want %s", got, defaultHTTPTimeout)
 	}
 }
 

@@ -558,6 +558,9 @@ func aggregateContextApply(outcomes []ContextActionResult) ContextApplyStatus {
 			partial = true
 		case ContextActionFailed:
 			failed = true
+		case ContextActionSkipped:
+			// A planned no-op is neutral; it must not turn an otherwise
+			// successful application into a partial or failed result.
 		}
 	}
 	if partial || (applied && failed) {

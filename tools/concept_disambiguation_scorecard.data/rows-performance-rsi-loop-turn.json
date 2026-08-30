@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "performance-rsi-loop-turn-scorer",
+      "canonical": "performance-RSI loop-turn scorer",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "ScoreLoopTurn evaluates one completed loop run's strict performance-RSI evidence and emits the nonfatal loop-turn receipt.",
+      "distinction": "Unlike loopscore, which grades loop durability across a corpus, this scorer evaluates one current run's performance evidence after its child exits.",
+      "distinct_from": [
+        "loopscore"
+      ],
+      "aliases": [
+        "ScoreLoopTurn"
+      ],
+      "grounding": "ScoreLoopTurn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

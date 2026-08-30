@@ -1,0 +1,23 @@
+{
+  "schema": "fak-agents-effective-receipt/1",
+  "issue": "#9391",
+  "parent_issue": "#3535",
+  "build_revision": "998cccd70",
+  "working_tree": true,
+  "command": "fak-dev index agents --root internal/agentsindex/testdata/effective/repo --for nested/deeper/work.go --fallback FALLBACK.md --max-bytes 4096 --trust --json",
+  "scenarios": [
+    "root",
+    "nested",
+    "override",
+    "fallback",
+    "deletion-promotion",
+    "cwd-change",
+    "untrusted",
+    "outside-root",
+    "truncation"
+  ],
+  "runs": [
+    {"sha256": "4a8dd0440e18a920cbb0abacf298339b7c7ab9a7d2aca09cfc7d429bb4e84734"},
+    {"sha256": "4a8dd0440e18a920cbb0abacf298339b7c7ab9a7d2aca09cfc7d429bb4e84734"}
+  ]
+}

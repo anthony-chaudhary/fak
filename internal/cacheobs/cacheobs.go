@@ -123,9 +123,12 @@ type Observer struct {
 	// section as the aggregate counters, so the two can never desync.
 	tierRows   map[tierKey]*tierTotals
 	tierStatus map[CacheTier]TierStatus
-	frozen     uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
-	partial    uint64 // turns between ColdCeil and FrozenFloor
-	cold       uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// rejectedTierAccesses counts public ObserveTier calls rejected because at least one
+	// dimension fell outside its closed vocabulary. Rejected accesses never open a row.
+	rejectedTierAccesses uint64
+	frozen               uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
+	partial              uint64 // turns between ColdCeil and FrozenFloor
+	cold                 uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
 	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
 	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
 	// one slot; a renderer accumulates left-to-right to emit `le` lines.
@@ -291,6 +294,8 @@ type Stats struct {
 	Turns        uint64
 	PromptTokens uint64
 	ReusedTokens uint64
+	// RejectedTierAccesses is the number of invalid public tier observations dropped whole.
+	RejectedTierAccesses uint64
 	// CacheableTokens is the lookup-side half of the #3390 split: prompt tokens that
 	// matched the prefix index at lookup time, before eviction/admission decided what
 	// was servable. Always >= ReusedTokens; equal when every tap lacked lookup info.
@@ -416,6 +421,7 @@ func (o *Observer) Snapshot() Stats {
 		Turns:                    o.turns,
 		PromptTokens:             o.promptTokens,
 		ReusedTokens:             o.reusedTokens,
+		RejectedTierAccesses:     o.rejectedTierAccesses,
 		CacheableTokens:          o.cacheableTokens,
 		EligibleTokens:           o.eligibleTokens,
 		PreemptedReuseLostTokens: o.preemptedReuseLostTokens,

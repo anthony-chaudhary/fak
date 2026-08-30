@@ -43,6 +43,7 @@ type ExperimentReceipt struct {
 	Memory            MemoryMetrics           `json:"memory"`
 	Execution         ExecutionIdentity       `json:"execution"`
 	Quality           QualityMetric           `json:"quality"`
+	Comparison        ComparisonIdentity      `json:"comparison"`
 	ModuleVersions    []ModuleRevision        `json:"module_versions"`
 	Commands          []string                `json:"commands"`
 	ProfilerArtifacts []ArtifactRef           `json:"profiler_artifacts"`
@@ -105,6 +106,7 @@ type Comparison struct {
 	Schema                  string  `json:"schema"`
 	EnvelopeID              string  `json:"envelope_id"`
 	ChangedLeverID          string  `json:"changed_lever_id"`
+	CriterionDigest         string  `json:"criterion_digest"`
 	BaselineRevision        string  `json:"baseline_revision"`
 	CandidateRevision       string  `json:"candidate_revision"`
 	BaselineMeanTokensPerS  float64 `json:"baseline_mean_tokens_per_second"`
@@ -259,6 +261,11 @@ func receiptValidationProblems(r ExperimentReceipt) []string {
 	if r.Execution.FallbackCount != 0 {
 		f = append(f, "fallback count must be zero")
 	}
+	if r.Schema != ReceiptSchemaV1 || r.Comparison != (ComparisonIdentity{}) {
+		if err := validateComparisonIdentity(r); err != nil {
+			f = append(f, err.Error())
+		}
+	}
 	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
 		f = append(f, "quality metric must be captured and finite")
 	}
@@ -375,11 +382,11 @@ func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Compar
 	if baseline.EnvelopeID != candidate.EnvelopeID || baseline.ChangedLeverID != candidate.ChangedLeverID {
 		return Comparison{}, fmt.Errorf("receipts target different envelope or lever")
 	}
-	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
+	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || baseline.Comparison != candidate.Comparison || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
 		return Comparison{}, fmt.Errorf("receipts are incomparable: an undeclared control axis drifted")
 	}
 	b, c := meanTPS(baseline.Repetitions), meanTPS(candidate.Repetitions)
-	return Comparison{Schema: "fak-native-performance-comparison/v1", EnvelopeID: baseline.EnvelopeID, ChangedLeverID: baseline.ChangedLeverID, BaselineRevision: baseline.Revision, CandidateRevision: candidate.Revision, BaselineMeanTokensPerS: b, CandidateMeanTokensPerS: c, DeltaTokensPerS: c - b, DeltaPercent: (c - b) / b * 100}, nil
+	return Comparison{Schema: "fak-native-performance-comparison/v1", EnvelopeID: baseline.EnvelopeID, ChangedLeverID: baseline.ChangedLeverID, CriterionDigest: baseline.Comparison.CriterionDigest, BaselineRevision: baseline.Revision, CandidateRevision: candidate.Revision, BaselineMeanTokensPerS: b, CandidateMeanTokensPerS: c, DeltaTokensPerS: c - b, DeltaPercent: (c - b) / b * 100}, nil
 }
 
 func findLeverEnvelope(graph Graph, leverID string) (Lever, Envelope, error) {

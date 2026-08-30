@@ -85,6 +85,7 @@ var verbTiers = map[string]VerbTier{
 	"serve":        TierFrontdoor,
 	"session":      TierFrontdoor,
 	"signal":       TierFrontdoor,
+	"study":        TierFrontdoor,
 	"top":          TierFrontdoor,
 	"version":      TierFrontdoor,
 
@@ -177,6 +178,7 @@ var verbTiers = map[string]VerbTier{
 	"boundary":                      TierDev,
 	"breath":                        TierDev,
 	"budget":                        TierDev,
+	"build":                         TierDev,
 	"buildcheck":                    TierDev,
 	"c":                             TierDev,
 	"cachesweep":                    TierDev,
@@ -404,6 +406,17 @@ var verbTiers = map[string]VerbTier{
 	"workflow":                      TierDev,
 	"workflow-audit":                TierDev,
 	"worktree":                      TierDev,
+	"agentic":                       TierDev,
+	"compute-trace":                 TierDev,
+	"coordinate":                    TierDev,
+	"hostdiag":                      TierDev,
+	"learning-mesh":                 TierDev,
+	"performance-rsi-scorecard":     TierDev,
+	"runtime-capabilities":          TierDev,
+	"shellprov":                     TierDev,
+	"up":                            TierDev,
+	"watchdog-audit-health":         TierDev,
+	"watchdog-audit-run":            TierDev,
 }
 
 // TierOf resolves a verb token (canonical name OR any alias spelling, any case)

@@ -182,7 +182,7 @@ func TestLoopRunUsesFakGuardByDefault(t *testing.T) {
 
 	loopExecutable = func() (string, error) { return "C:/tools/fak.exe", nil }
 	var captured []string
-	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+	loopNewCommand = func(argv, env []string, stdout, stderr io.Writer) loopCommand {
 		captured = append([]string(nil), argv...)
 		return &fakeLoopCommand{pid: 4242}
 	}
@@ -224,7 +224,7 @@ func TestLoopRunGuardRefusesOutOfTreeEffect(t *testing.T) {
 	oldNewCommand := loopNewCommand
 	defer func() { loopNewCommand = oldNewCommand }()
 	spawned := false
-	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+	loopNewCommand = func(argv, env []string, stdout, stderr io.Writer) loopCommand {
 		spawned = true
 		return &fakeLoopCommand{pid: 1}
 	}
@@ -588,6 +588,28 @@ func TestLoopRunHelper(t *testing.T) {
 		}
 		return
 	}
+	if mode == "performance-rsi" {
+		output := os.Getenv(loopPerformanceRSIOutputEnv)
+		loopID := os.Getenv(loopIDEnv)
+		runID := os.Getenv(loopRunIDEnv)
+		if output == "" || loopID == "" || runID == "" {
+			fmt.Fprintf(os.Stderr, "performance-rsi helper missing output/loop/run environment\n")
+			os.Exit(10)
+		}
+		allowed := os.Getenv(loopSandboxEnvAllow)
+		for _, name := range []string{loopPerformanceRSIOutputEnv, loopIDEnv, loopRunIDEnv} {
+			if !containsCommaValue(allowed, name) {
+				fmt.Fprintf(os.Stderr, "performance-rsi helper allowlist missing %s\n", name)
+				os.Exit(11)
+			}
+		}
+		snapshot := firstNonEmpty(os.Getenv("FAK_LOOP_TEST_RSI_SNAPSHOT"), runID)
+		if err := writeLoopPerformanceRSIOutput(output, snapshot); err != nil {
+			fmt.Fprintf(os.Stderr, "performance-rsi helper write: %v\n", err)
+			os.Exit(12)
+		}
+		return
+	}
 	stdout, stderr, exit := loopHelperPlan(mode)
 	if stdout != "" {
 		fmt.Fprintln(os.Stdout, stdout)
@@ -598,6 +620,15 @@ func TestLoopRunHelper(t *testing.T) {
 	if exit != 0 {
 		os.Exit(exit)
 	}
+}
+
+func containsCommaValue(values, want string) bool {
+	for _, value := range strings.Split(values, ",") {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoopStatusMissingLedger(t *testing.T) {

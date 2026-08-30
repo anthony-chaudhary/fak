@@ -59,6 +59,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,190 @@ import (
 // reader can tell a usage journal apart from any other JSONL ledger and refuse to
 // fold a row whose schema it does not understand.
 const SchemaV1 = "fak-usage-log/1"
+
+// DiagnosticSchemaV1 identifies the optional structured diagnostic stream. It is
+// deliberately distinct from SchemaV1: diagnostics are operational hints, not
+// authoritative usage rows, receipts, or hash-chained evidence.
+const DiagnosticSchemaV1 = "fak-kernel-diagnostic/1"
+
+// DiagnosticLevel is the closed severity vocabulary for DiagnosticSink.
+type DiagnosticLevel uint8
+
+const (
+	DiagnosticDebug DiagnosticLevel = iota + 1
+	DiagnosticInfo
+	DiagnosticWarn
+	DiagnosticError
+)
+
+// LazyValue defers producing a diagnostic scalar until Emit has established that
+// the level is enabled and the key is not configured as sensitive.
+type LazyValue func() any
+
+// DiagnosticSink emits optional, non-authoritative JSONL diagnostics. It never
+// appends to or changes the usage journal; callers that need durable facts must
+// continue to use Logger and the receipt/journal surfaces that own those facts.
+// A nil writer disables the sink. DiagnosticSink is safe for concurrent use.
+type DiagnosticSink struct {
+	mu        sync.Mutex
+	w         io.Writer
+	minLevel  DiagnosticLevel
+	sensitive map[string]struct{}
+}
+
+type diagnosticRecord struct {
+	Schema string         `json:"schema"`
+	Level  string         `json:"level"`
+	Event  string         `json:"event"`
+	Fields map[string]any `json:"fields"`
+}
+
+// NewDiagnosticSink constructs a diagnostic sink whose enabled levels are at or
+// above minLevel. sensitiveKeys are replaced with "[REDACTED]" without evaluating
+// a LazyValue supplied for that key. Empty keys and invalid levels are rejected.
+func NewDiagnosticSink(w io.Writer, minLevel DiagnosticLevel, sensitiveKeys ...string) (*DiagnosticSink, error) {
+	if !minLevel.valid() {
+		return nil, fmt.Errorf("usagelog: invalid diagnostic minimum level %d", minLevel)
+	}
+	sensitive := make(map[string]struct{}, len(sensitiveKeys))
+	for _, key := range sensitiveKeys {
+		if strings.TrimSpace(key) == "" {
+			return nil, errors.New("usagelog: diagnostic sensitive key is empty")
+		}
+		sensitive[key] = struct{}{}
+	}
+	return &DiagnosticSink{w: w, minLevel: minLevel, sensitive: sensitive}, nil
+}
+
+// Emit writes one deterministic structured JSON line. kv must be alternating
+// non-empty string keys and supported JSON scalar values (or LazyValue closures
+// returning such values). Malformed input, duplicate keys, closure panics, and
+// unsupported values fail before serialization. Filtered and disabled calls
+// return before inspecting values, so lazy closures cannot run on those paths.
+func (d *DiagnosticSink) Emit(level DiagnosticLevel, event string, kv ...any) error {
+	if d == nil {
+		return errors.New("usagelog: nil diagnostic sink")
+	}
+	if !level.valid() {
+		return fmt.Errorf("usagelog: invalid diagnostic level %d", level)
+	}
+	if d.w == nil || level < d.minLevel {
+		return nil
+	}
+	if strings.TrimSpace(event) == "" {
+		return errors.New("usagelog: diagnostic event is empty")
+	}
+	if len(kv)%2 != 0 {
+		return fmt.Errorf("usagelog: diagnostic key/value count %d is odd", len(kv))
+	}
+
+	fields := make(map[string]any, len(kv)/2)
+	for i := 0; i < len(kv); i += 2 {
+		key, ok := kv[i].(string)
+		if !ok {
+			return fmt.Errorf("usagelog: diagnostic key at index %d has type %T, want string", i, kv[i])
+		}
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("usagelog: diagnostic key at index %d is empty", i)
+		}
+		if _, exists := fields[key]; exists {
+			return fmt.Errorf("usagelog: duplicate diagnostic key %q", key)
+		}
+		fields[key] = nil
+	}
+	for i := 0; i < len(kv); i += 2 {
+		key := kv[i].(string)
+		if _, redact := d.sensitive[key]; redact {
+			fields[key] = "[REDACTED]"
+			continue
+		}
+		value, err := diagnosticScalar(kv[i+1])
+		if err != nil {
+			return fmt.Errorf("usagelog: diagnostic key %q: %w", key, err)
+		}
+		fields[key] = value
+	}
+
+	line, err := json.Marshal(diagnosticRecord{
+		Schema: DiagnosticSchemaV1,
+		Level:  level.String(),
+		Event:  event,
+		Fields: fields,
+	})
+	if err != nil {
+		return fmt.Errorf("usagelog: marshal diagnostic: %w", err)
+	}
+	line = append(line, '\n')
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n, err := d.w.Write(line)
+	if err != nil {
+		return fmt.Errorf("usagelog: write diagnostic: %w", err)
+	}
+	if n != len(line) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func (l DiagnosticLevel) valid() bool {
+	return l >= DiagnosticDebug && l <= DiagnosticError
+}
+
+// String returns the stable JSON spelling of a diagnostic level.
+func (l DiagnosticLevel) String() string {
+	switch l {
+	case DiagnosticDebug:
+		return "debug"
+	case DiagnosticInfo:
+		return "info"
+	case DiagnosticWarn:
+		return "warn"
+	case DiagnosticError:
+		return "error"
+	default:
+		return ""
+	}
+}
+
+func diagnosticScalar(value any) (resolved any, err error) {
+	if lazy, ok := value.(LazyValue); ok {
+		if lazy == nil {
+			return nil, errors.New("nil lazy value")
+		}
+		func() {
+			defer func() {
+				if recover() != nil {
+					err = errors.New("lazy value panicked")
+				}
+			}()
+			resolved = lazy()
+		}()
+		if err != nil {
+			return nil, err
+		}
+		value = resolved
+	}
+
+	switch value := value.(type) {
+	case nil, string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64:
+		return value, nil
+	case float32:
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return nil, fmt.Errorf("unsupported value %v", value)
+		}
+		return value, nil
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, fmt.Errorf("unsupported value %v", value)
+		}
+		return value, nil
+	default:
+		return nil, fmt.Errorf("unsupported value type %T", value)
+	}
+}
 
 // Row is one durable usage record: the on-disk JSONL schema for a single top-level
 // `fak <verb>` invocation. Field order of the CHAINED fields (Schema..PID, see

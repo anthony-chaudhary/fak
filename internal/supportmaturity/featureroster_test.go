@@ -3,16 +3,17 @@ package supportmaturity
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 )
 
-// readClaims loads the repo's real CLAIMS.md — the bound witness the feature roster
-// resolves against. It walks up from this test file (located via runtime.Caller) to the
-// module root (the directory holding go.mod) and reads CLAIMS.md beside it. The witness is
-// the LIVE ledger, not a fixture: that is what makes a rostered feature's rung a binding
-// against the honesty ledger rather than a self-report.
+// readClaims loads the repo's real CLAIMS.md document set — the compact index plus every
+// claims page it links. It walks up from this test file (located via runtime.Caller) to the
+// module root (the directory holding go.mod), then follows the index's authoritative links.
+// The witness is the LIVE ledger, not a fixture: that is what makes a rostered feature's
+// rung a binding against the honesty ledger rather than a self-report.
 func readClaims(t *testing.T) string {
 	t.Helper()
 	_, here, _, ok := runtime.Caller(0)
@@ -34,7 +35,21 @@ func readClaims(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read CLAIMS.md at repo root %s: %v", dir, err)
 	}
-	return string(b)
+	var claims strings.Builder
+	claims.Write(b)
+	links := regexp.MustCompile(`\(docs/claims/([^)]+\.md)\)`).FindAllStringSubmatch(string(b), -1)
+	if len(links) == 0 {
+		t.Fatal("CLAIMS.md indexes no claim pages; support-maturity witness would be incomplete")
+	}
+	for _, link := range links {
+		page, err := os.ReadFile(filepath.Join(dir, "docs", "claims", filepath.FromSlash(link[1])))
+		if err != nil {
+			t.Fatalf("read CLAIMS.md child %s: %v", link[1], err)
+		}
+		claims.WriteByte('\n')
+		claims.Write(page)
+	}
+	return claims.String()
 }
 
 // TestFromClaimTagTotalAndOrdered pins the register→ladder lowering: every closed tag

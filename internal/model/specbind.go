@@ -57,6 +57,125 @@ func (e *Qwen35MTPSpecDecodeUnsupportedError) Unwrap() error {
 
 type qwen35MTPDrafterBuilder func(*Model, int, Qwen35MTPTargetHidden, Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error)
 
+// qwen35MTPTargetTransaction owns one speculative mutation of the live target.
+// Verification may evaluate every draft token, but Commit always restores the
+// pre-round snapshot and replays only the accepted prefix. Abort restores none.
+// That deliberately prices recovery work in the native path instead of relying
+// on cache-only suffix eviction, which cannot restore hidden or recurrent state.
+type qwen35MTPTargetTransaction struct {
+	target       *Session
+	snapshot     *PrefixSnapshot
+	beforeLogits []float32
+	draft        []int
+	verify       func([]int) [][]float32
+	step         func(int) []float32
+	closed       bool
+	closeCount   int
+}
+
+func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*qwen35MTPTargetTransaction, error) {
+	if target == nil {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction needs a session")
+	}
+	snapshot, err := target.PrefixSnapshot()
+	if err != nil {
+		return nil, fmt.Errorf("model: snapshot Qwen3.8 MTP target transaction: %w", err)
+	}
+	return &qwen35MTPTargetTransaction{
+		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
+		verify: func(draft []int) [][]float32 { return target.VerifyForward(draft, nil, nil) },
+		step:   target.Step,
+	}, nil
+}
+
+func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err error) {
+	if tx == nil || tx.closed || tx.snapshot == nil {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
+	}
+	tx.draft = append(tx.draft[:0], draft...)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			rows = nil
+			err = tx.rollbackFailure("verify", fmt.Errorf("%v", recovered))
+		}
+	}()
+	return tx.verify(draft), nil
+}
+
+func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, err error) {
+	if tx == nil || tx.closed || tx.snapshot == nil {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
+	}
+	if accepted < 0 || accepted > len(tx.draft) {
+		return nil, tx.rollbackFailure("commit", fmt.Errorf("accepted prefix %d outside draft length %d", accepted, len(tx.draft)))
+	}
+	rollback, err := tx.snapshot.Clone()
+	if err != nil {
+		tx.finish()
+		return nil, fmt.Errorf("model: preserve Qwen3.8 MTP commit rollback: %w", err)
+	}
+	if err := tx.restore(); err != nil {
+		rollback.Close()
+		tx.finish()
+		return nil, err
+	}
+	// Restore transfers the original snapshot into the live session. Retain the
+	// independent clone until replay succeeds so a mid-block failure can undo
+	// every accepted token rather than exposing a partially committed prefix.
+	tx.snapshot.Close()
+	tx.snapshot = rollback
+	logits = append([]float32(nil), tx.beforeLogits...)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logits = nil
+			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
+		}
+	}()
+	for _, token := range tx.draft[:accepted] {
+		logits = tx.step(token)
+	}
+	tx.finish()
+	return logits, nil
+}
+
+func (tx *qwen35MTPTargetTransaction) rollbackFailure(stage string, cause error) error {
+	restoreErr := tx.restore()
+	tx.finish()
+	if restoreErr != nil {
+		return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %v; rollback failed: %w", stage, cause, restoreErr)
+	}
+	return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %w", stage, cause)
+}
+
+func (tx *qwen35MTPTargetTransaction) Abort() error {
+	if tx == nil || tx.closed {
+		return nil
+	}
+	if err := tx.restore(); err != nil {
+		tx.finish()
+		return err
+	}
+	tx.finish()
+	return nil
+}
+
+func (tx *qwen35MTPTargetTransaction) restore() error {
+	if err := tx.snapshot.Restore(tx.target); err != nil {
+		return fmt.Errorf("model: restore Qwen3.8 MTP target transaction: %w", err)
+	}
+	return nil
+}
+
+func (tx *qwen35MTPTargetTransaction) finish() {
+	if tx.closed {
+		return
+	}
+	tx.snapshot.Close()
+	tx.snapshot = nil
+	tx.closed = true
+	tx.closeCount++
+}
+
 // SpecDecodeGreedy runs greedy speculative decoding of the target Session using the drafter
 // Session as the co-resident proposer, driven by polymodel.SpecDecode. It is the pure engine
 // binding — it does NOT consult polymodel.Enabled(); the gated request-path entry is
@@ -118,11 +237,9 @@ func SpecDecodeGreedy(target, drafter *Session, prompt []int, n, k int) (polymod
 // SpecDecodeGreedyQwen35MTP is the explicit native Qwen3.8 MTP entry point.
 // It is intentionally opt-in and never changes ordinary Generate/Prefill behavior.
 //
-// Each proposal reconstructs the committed prefix in a fresh hidden-source
-// session before the MTP drafter may read it. Each verify round likewise uses a
-// fresh target session. Rejected drafts are therefore discarded by closing the
-// round session rather than claiming recurrent-state rollback support that the
-// Qwen hybrid target does not have. The caller's target session remains untouched.
+// One live target session owns the run. Each verify round snapshots every mutable
+// target state, evaluates the bounded draft, then restores and replays exactly the
+// accepted prefix. A failed run restores the caller's entry snapshot.
 func SpecDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int) (polymodel.SpecDecodeRun, error) {
 	return specDecodeGreedyQwen35MTP(target, prompt, n, k, NewQwen35MTPDrafter)
 }
@@ -163,14 +280,30 @@ func specDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int, build qw
 		}
 	}
 
-	var hiddenSource *Session
-	var hiddenCommitted []int
+	target.captureTargetHidden = true
+	targetLogits := target.Prefill(prompt)
+	if len(targetLogits) == 0 {
+		return polymodel.SpecDecodeRun{}, errors.New("model: Qwen3.8 MTP target returned empty prompt logits")
+	}
+	advanceTarget := func(committed []int) error {
+		if !qwen35MTPTargetMatchesCommitted(target, committed) {
+			return errors.New("model: Qwen3.8 MTP live target diverged from committed prefix")
+		}
+		for _, token := range committed[target.Cache.Len():] {
+			targetLogits = target.Step(token)
+			if len(targetLogits) == 0 {
+				return errors.New("model: Qwen3.8 MTP target returned empty decode logits")
+			}
+		}
+		return nil
+	}
+
 	d, err := build(target.M, k, func(prefix []int) ([]float32, error) {
-		if hiddenSource == nil || len(prefix) == 0 || !tokenPrefix(prefix, hiddenCommitted) {
-			return nil, fmt.Errorf("model: target hidden for unevaluated prefix length %d is unavailable", len(prefix))
+		if len(prefix) == 0 || !qwen35MTPTargetHasEvaluatedPrefix(target, prefix) {
+			return nil, fmt.Errorf("model: target hidden for unevaluated prefix length %d is unavailable (cache=%d hidden=%d)", len(prefix), target.Cache.Len(), len(target.targetHiddenTokens))
 		}
 		pos := len(prefix) - 1
-		hidden, err := hiddenSource.TargetHiddenAt(pos)
+		hidden, err := target.TargetHiddenAt(pos)
 		if err != nil {
 			return nil, fmt.Errorf("committed prefix position %d: %w", pos, err)
 		}
@@ -182,25 +315,22 @@ func specDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int, build qw
 	defer d.Close()
 
 	var runtimeErr error
+	var pending *qwen35MTPTargetTransaction
 	propose := func(committed []int) []int {
 		if runtimeErr != nil || d.Err() != nil {
 			return nil
 		}
-		source, err := newQwen35MTPIsolatedSession(target.M)
-		if err != nil {
-			runtimeErr = err
+		if pending != nil {
+			targetLogits, runtimeErr = pending.Commit(len(pending.draft))
+			pending = nil
+		}
+		if runtimeErr == nil {
+			runtimeErr = advanceTarget(committed)
+		}
+		if runtimeErr != nil {
 			return nil
 		}
-		defer source.Close()
-		if err := evaluateQwen35MTPTargetPrefix(source, committed); err != nil {
-			runtimeErr = err
-			return nil
-		}
-		hiddenSource = source
-		hiddenCommitted = append(hiddenCommitted[:0], committed...)
 		draft := d.Propose(committed)
-		hiddenSource = nil
-		hiddenCommitted = hiddenCommitted[:0]
 		if err := d.Err(); err != nil {
 			runtimeErr = err
 		}
@@ -210,10 +340,26 @@ func specDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int, build qw
 		if runtimeErr != nil || d.Err() != nil {
 			return nil
 		}
-		argmax, err := verifyQwen35MTPRound(target.M, committed, draft)
+		if err := advanceTarget(committed); err != nil {
+			runtimeErr = err
+			return nil
+		}
+		pending, err = beginQwen35MTPTargetTransaction(target, targetLogits)
 		if err != nil {
 			runtimeErr = err
 			return nil
+		}
+		rows, err := pending.Verify(draft)
+		if err != nil {
+			runtimeErr = err
+			_ = pending.Abort()
+			pending = nil
+			return nil
+		}
+		argmax := make([]int, 0, len(rows)+1)
+		argmax = append(argmax, argmaxF32(targetLogits))
+		for _, row := range rows {
+			argmax = append(argmax, argmaxF32(row))
 		}
 		return argmax
 	}
@@ -221,16 +367,71 @@ func specDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int, build qw
 	run, decodeErr := polymodel.SpecDecode(prompt, propose, verify, polymodel.SpecDecodeConfig{
 		MaxNewTokens: n,
 		MaxDraft:     k,
-		// No rollback hook: every verifier is isolated to one round and is closed
-		// after producing target argmax. Rejection discards the whole session.
+		Rollback: func(evictKV int) {
+			if pending == nil || runtimeErr != nil {
+				return
+			}
+			accepted := len(pending.draft) - evictKV
+			targetLogits, runtimeErr = pending.Commit(accepted)
+			pending = nil
+		},
 	})
+	if pending != nil {
+		if decodeErr == nil && runtimeErr == nil {
+			targetLogits, runtimeErr = pending.Commit(len(pending.draft))
+		} else {
+			_ = pending.Abort()
+		}
+		pending = nil
+	}
 	if drafterErr := d.Err(); drafterErr != nil {
 		return run, drafterErr
 	}
 	if runtimeErr != nil {
 		return run, runtimeErr
 	}
-	return run, decodeErr
+	if decodeErr != nil {
+		return run, decodeErr
+	}
+	committed := append(append([]int(nil), prompt...), run.Output...)
+	if err := advanceTarget(committed); err != nil {
+		return run, err
+	}
+	return run, nil
+}
+
+func qwen35MTPTargetMatchesCommitted(target *Session, committed []int) bool {
+	if target == nil || target.Cache == nil || target.Cache.Len() > len(committed) {
+		return false
+	}
+	target.targetHiddenMu.RLock()
+	defer target.targetHiddenMu.RUnlock()
+	if len(target.targetHiddenTokens) < target.Cache.Len() {
+		return false
+	}
+	for i, token := range target.targetHiddenTokens[:target.Cache.Len()] {
+		if token != committed[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func qwen35MTPTargetHasEvaluatedPrefix(target *Session, prefix []int) bool {
+	if target == nil || target.Cache == nil || len(prefix) > target.Cache.Len() {
+		return false
+	}
+	target.targetHiddenMu.RLock()
+	defer target.targetHiddenMu.RUnlock()
+	if len(target.targetHiddenTokens) < len(prefix) {
+		return false
+	}
+	for i, token := range prefix {
+		if target.targetHiddenTokens[i] != token {
+			return false
+		}
+	}
+	return true
 }
 
 func newQwen35MTPIsolatedSession(m *Model) (session *Session, err error) {

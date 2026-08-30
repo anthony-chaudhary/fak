@@ -25,6 +25,10 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 fak runtime-capabilities [--receipt-schema fak-runtime-capabilities/1|fak-execution-mode-receipt/1] [--backend NAME] [--prefer-backend NAME] [--fallback-policy pin_or_refuse|local_cpu_degraded] [--cpu-envelope ID] [--placement local_only|prefer_local|remote_allowed] [remote gate flags]
 ```
 
+The default remains `fak-runtime-capabilities/1`. Opt into `--receipt-schema fak-execution-mode-receipt/1` for the uniform execution record. Its closed modes are `local_accelerator`, `local_cpu_degraded`, `remote_backed`, `offline_control_mock`, `offline_model_backed`, `control_only`, and `refused`; status and audit views carry explicit evidence states; independently observed views must agree or the receipt refuses, while the pre-payload projection marks both views `unwitnessed`. Model-backed records require exact engine, model, and local backend or remote provider evidence. A native/performance record is invalid unless `engine` is exactly `fak-native`, so engine substitution cannot masquerade as native execution. Unknown and unavailable facts are emitted as `unknown` or `unwitnessed`, not inferred.
+
+`--execution-mode-fixture MODE` is available only with that opt-in schema. It emits deterministic schema coverage for one of the seven modes and stamps `witness.status: "fixture"` plus `witness.certification: "unwitnessed"`; it is not clean-host, device, provider, or model-execution evidence. Receipt collection is a bounded projection of the already-built capabilities report and performs no payload load or outbound probe.
+
 Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command performs no model-weight load and keeps three states separate: the executable runs, the governed control plane runs, and a fak-native model backend can execute for the requested policy. `--backend` remains an exact lookup: unknown, uncompiled, unavailable, or platform-unsupported backends return structured reasons and remediation without falling back to `cpu-ref` or another engine.
 
 `--prefer-backend` is the explicit degraded-mode seam. When the preferred backend is unavailable, `--fallback-policy local_cpu_degraded` may select `cpu-ref` only if an exact `--cpu-envelope` row from `supported_cpu_envelopes` matches the host and the pre-load host-RAM budget clears. Unsupported or over-budget CPU fallback requests refuse before payload load, and the report emits a `local_cpu_degraded` receipt naming the requested backend, the selected `cpu-ref` path, the supported envelope, and the accelerator refusal reason. The optional `--goos`, `--goarch`, `--host-total-ram-bytes`, and `--host-free-ram-bytes` flags are diagnostic overrides for witness capture.
@@ -32,10 +36,6 @@ Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command pe
 `--placement remote_allowed` adds an explicit remote admission path after an unavailable `--prefer-backend`; `local_only`, `prefer_local`, exact `--backend`, and pinned-native requests never use it. The caller must exactly match `--remote-target` with `--authorize-remote-target` and declare provider, engine, model, endpoint class/region when applicable, boundary state classes, egress, credential name/presence, TLS/proxy, reachability, timeout, retry ceiling, and budget. The machine-readable `remote_placement` receipt names local `fak` control-plane ownership and the remote execution trigger and gates. This command performs no outbound traffic and accepts no credential secret. It never silently chooses llama.cpp, Ollama, a provider, or a future fak cloud target.
 
 The report includes `goos`, `goarch`, build tags, host memory, registered backend names/classes/tiers, portable `cpu-ref` status, supported CPU envelopes, `engine: "fak-native"` when execution is available, and `payload_compatibility: "supported" | "refused" | "not_checked"` for explicit CPU-envelope admission. This is distinct from `fak preflight`, which adjudicates a tool call against policy and grammar.
-
-The default remains `fak-runtime-capabilities/1`. Opt into `--receipt-schema fak-execution-mode-receipt/1` for the uniform execution record. Its closed modes are `local_accelerator`, `local_cpu_degraded`, `remote_backed`, `offline_control_mock`, `offline_model_backed`, `control_only`, and `refused`; status and audit views carry explicit evidence states; independently observed views must agree or the receipt refuses, while the pre-payload projection marks both views `unwitnessed`. Model-backed records require exact engine, model, and local backend or remote provider evidence. A native/performance record is invalid unless `engine` is exactly `fak-native`, so engine substitution cannot masquerade as native execution. Unknown and unavailable facts are emitted as `unknown` or `unwitnessed`, not inferred.
-
-`--execution-mode-fixture MODE` is available only with that opt-in schema. It emits deterministic schema coverage for one of the seven modes and stamps `witness.status: "fixture"` plus `witness.certification: "unwitnessed"`; it is not clean-host, device, provider, or model-execution evidence. Receipt collection is a bounded projection of the already-built capabilities report and performs no payload load or outbound probe.
 ## `native-performance`: query the raw-model hill climb
 
 `fak native-performance` renders the committed Qwen3.8-27B optimization graph as a
@@ -615,7 +615,11 @@ fak sweep     [--json] | --clean-junk [--json] | --apply --lane L -m "SUBJECT" [
 fak sync      [check|apply|push] [--fetch] [--json]   # safe shared-trunk sync/push; preserves unrelated dirty work and reports the sweep next action
 fak profile   <pkg> [--bench RE] [--cpuprofile F] [--memprofile F] [--top] [-n]   # host-aware Go benchmark profiler; captures pprof CPU + allocation profiles
 fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak manage, using a selected Claude config home
-fak codex     [--dry-run] [--freshness-gate on|off] [--freshness-check-now] [--split off] [--managed-cache on] -- exec --json "task"  # checkout-local launchers reuse a successful freshness proof for 6h, prove freshness against origin/main when due, coalesce concurrent updates by letting the loser continue immediately on the safe current binary, guarded self-update/re-exec once when stale, and refuse unknown/update failure; --freshness-check-now bypasses the lease and --freshness-gate off is the explicit escape; release installs without a checkout stay offline
+fak codex     [--dry-run] [--freshness-gate on|off] [--freshness-max-age D] [--freshness-force] [--native-permissions] [--split off] [--managed-cache on] -- exec --json "task"  # checkout-local launchers prove freshness against origin/main, guarded self-update/re-exec once when stale, and refuse unknown/update failure; --freshness-check-now bypasses the six-hour successful-check lease; overlapping launches immediately use the current launcher while one owner checks or updates; --freshness-gate off is the explicit escape; release installs without a checkout stay offline
+`fak codex` managed launches default to Codex's non-interactive `--dangerously-bypass-approvals-and-sandbox` mode because fak still enforces its independent routing, capacity, policy, hook, and loop gates. This disables Codex's native approval prompts and sandbox, including for Codex subagents that inherit the parent permission mode. Use `--native-permissions` to restore Codex's native approvals and sandbox; legacy `--skip-permissions` remains accepted as an explicit bypass opt-in.
+
+Freshness precedence is CLI over environment over `%UserConfigDir%/fak/codex-freshness.json` (`{"max_age":"6h","force":false}`) over the six-hour default: --freshness-max-age D overrides FAK_CODEX_FRESHNESS_MAX_AGE; --freshness-force (and compatibility spelling --freshness-check-now) always performs a real check. A fresh ak.codex-freshness.v1 receipt binds its timestamp to the full running and target SHAs; missing, corrupt, expired, future-skewed, or SHA-mismatched receipts fall through to inspection rather than authorizing launch.
+
 fak c <target>|--target NAME|--auto|--list-targets      # pick a named compute backend (mac/gcp/local/anthropic + ~/.fak/targets.json); --auto ranks by health then cheapest/most-local (cost local<mac<gcp<anthropic), fails over past a DOWN target. quota is a [stub] (not a live fak accounts read) and never excludes
 fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
 fak serve     --addr :8080 [--require-key-env VAR] [--fleet-bus [--fleet-bus-dir DIR]] [--session-registry PATH|off]   # OpenAI-compatible HTTP + MCP gateway (any-language agents). `--session-registry` scopes WHICH SESSIONS this serve can see and write (#5825): unset keeps today's shared per-user default (`FAK_SESSION_REGISTRY`, else `<UserConfigDir>/fak/session-registry.json` — the single file EVERY serve on the box shares), which is the right reach for a real fleet but means a serve started only to drive its own sessions still adopts every live session on the host, so a fanned `fak fleet control send --op pause --all` writes to peers' work. `--fleet-bus-dir` does NOT narrow this: it scopes the BUS (announcements, directives, claims, acks) and nothing about which sessions get written, so a private bus over the shared registry reads like a sandbox and is not one. Pass a path to hydrate from and mirror to that file alone, or `off` for a pure in-memory table that adopts nothing and persists nothing. An armed `--fleet-bus` serve prints its own reach — session count and registry — before it drains a single directive
@@ -660,6 +664,58 @@ fak attest    --policy FILE [--probes FILE] [--json]        # compliance attesta
 fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
+fak-selfupdate [same flags]                                      # thin standalone bootstrap; shares the exact updater, receipt schema, cache, transaction, rollback, and source-selection implementation
+fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
+fak self-update --installer msix --msix-appinstaller-uri HTTPS_URL --msix-package PACKAGE --msix-publisher SUBJECT --msix-artifact-digest SHA256 --msix-source-revision REV [--msix-full-fallback-uri HTTPS_URL --msix-full-artifact-digest SHA256] [--msix-repair|--msix-uninstall]
+
+Windows MSIX/App Installer delivery is explicit opt-in. `--installer` has precedence over
+`FAK_SELF_UPDATE_INSTALLER`; when neither is set, `native` remains the default. The adapter
+requires the package identity `Name` from `AppxManifest.xml`, separate app (`fak`),
+artifact-digest, and source-revision identities plus
+the expected signing-certificate subject. It validates the downloaded package signature and
+publisher before invoking App Installer. Online `.appinstaller` delivery uses Windows block-map
+differential updates; `--offline` selects `--msix-full-fallback-uri` (or the primary URI when no
+separate full bundle is supplied). A distinct full fallback requires its own `--msix-full-artifact-digest`; the receipt reports the selected delivery and whether fallback ran. Downgrades are refused unless `--msix-allow-downgrade` is
+explicitly set. Repair and uninstall are explicit, mutually exclusive operations. PowerShell
+runs non-interactively in a hidden process; selecting `msix` on a non-Windows host is refused.
+
+Source self-update derives a deterministic digest from Go's complete non-standard dependency graph for `./cmd/fak`, including generated/runtime source files, `go:embed` assets, native inputs, module metadata, toolchain/platform/CGO architecture knobs, tags, and build/link flags. A docs-only or test-only source revision can therefore reuse the prior digest-verified artifact without compiling again; any graph or build-envelope uncertainty falls back to the full build, vet, and smoke gates. JSON update receipts expose `build_provenance` with the selected source commit, the source commit that originally built reused bytes, build-input and artifact digests, artifact size, build envelope, and reuse decision.
+
+Self-update keeps these identities separate: Git owns the selected/source commits (exact
+40-hex comparison), the build-input walker owns its SHA-256, the verified file bytes own the
+artifact SHA-256 and slot ID, `VERSION`/linker provenance owns app version, and selfinstall
+owns the monotonic metadata generation. A digest-equal candidate refreshes selected-source
+metadata but does not copy, swap, activate, or change app version. Persisted rollback state
+selects a verified artifact slot by digest, never by an ambiguous app-version string.
+
+Self-update also emits a deterministic per-component plan. Every `targets[]` row names the desired and installed artifact digests, acquisition (`reuse` or `transfer_or_build`), activation (`no_op` or `activate`), compatibility group, and rollback action. Already-current components are excluded from activation; compatibility-coupled stale components remain one staged transaction, so an activation failure restores every component moved by that transaction.
+`--manifest-url` opts into conditional selection before any git fetch, build, or install. The
+server returns a canonical JSON payload signed by the public Ed25519 key pinned in the binary.
+The signature is verified before schema, manifest ID, channel, cohort, OS, architecture,
+installed revision identity, expiry, disposition, target version/revision, or optional retry
+time is trusted. `no-update` and `cohort-hold` stop without changing the installed binary.
+Authenticated envelopes and ETags are cached; a `304` or `--offline` may reuse only an
+unexpired identity-matched cache and never extends signed expiry. `429`/`503` Retry-After is
+bounded to 24 hours and cached. `--force` contacts the server despite cache freshness/backoff,
+but never bypasses signature, identity, or expiry checks. Without `--manifest-url`, behavior
+is unchanged.
+
+Manifest v2 may also carry a full executable target for the selected OS/architecture. The
+signature binds the artifact URL, platform, architecture, SHA-256, byte size, app version,
+source revision, expiry, and monotonic metadata generation as one identity. Self-update
+rejects corrupt signatures or bytes, expired metadata, generation or app-version rollback,
+same-generation changed payloads (freeze/mirror equivocation), duplicate usable targets, and
+version/revision mix-and-match. A usable target is downloaded with a strict size bound and
+SHA-256 check, then must pass `version --json` smoke and attest the signed app version plus
+exact source commit before activation. Verified bytes are copied into immutable
+generation+digest slots; activation reads from that slot and never deletes older verified
+slots, so the prior artifact remains recoverable. When the authenticated catalog has no
+complete target for this host/component set, self-update preserves the full pristine-source
+build, vet, provenance-smoke, and transactional activation fallback. A present matching target
+that fails authentication or verification is a hard refusal, never a reason to build different
+bytes from source.
+
+Signed targets may also advertise per-source zstd deltas. Self-update selects one only when the installed artifact SHA-256 exactly matches the delta source and the patch is below the transfer-ratio threshold. Patch size/SHA-256 and patched target size/SHA-256 are verified before the existing smoke/activation gate. Wrong source, corrupt patch, unavailable zstd, patch failure, or poor ratio falls back to the independently signed full artifact. The receipt's `transfer` object records chosen path, delta/full bytes, total time, verification, fallback reason, and fallback bytes/time cost.
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
@@ -763,19 +819,19 @@ spellings. Omit `--public-safe-key-file` only for a coordination issue whose rea
 the raw holder and tree values.
 
 Successful `acquire`, `renew`, and `release` operations can post this public-safe record
-ambiently. This is opt-in and configured only through environment/configuration (never a
-secret command-line value):
+as an explicit lifecycle option. The non-secret destination and mode travel as flags; only
+the key-file locator remains in the secret-bearing environment:
 
 ```sh
-export FAK_LEASEREF_ANNOUNCE=on
-export FAK_LEASEREF_ANNOUNCE_ISSUE=123
-export FAK_LEASEREF_ANNOUNCE_REPO=OWNER/REPO
 export FAK_LEASEREF_ANNOUNCE_KEY_FILE=~/.config/fak/lease-announce.key
+fak leaseref acquire --id L --holder "$ME" --tree 'docs/**' \
+  --announce on --announce-issue 123 --announce-repo OWNER/REPO
+# renew and release accept the same three --announce* flags
 ```
 
 The key-file variable names a file; the key itself must not be placed in argv, environment,
 JSON, logs, issue comments, or the repository. The default/unset state is explicitly
-**disabled**. Set `FAK_LEASEREF_ANNOUNCE=offline` to explicitly suppress the network edge;
+**disabled**. Pass `--announce offline` to explicitly suppress the network edge;
 a missing/unreadable/empty key is reported explicitly and no comment is attempted. A `gh`
 post failure emits only a sanitized warning and can never reverse, mask, or change the exit
 status of the already-successful local lease operation. Comments expose transition timing,
@@ -1328,15 +1384,17 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
 for supported PowerShell/POSIX startup files. Uninstall removes only that block.
 
+The standalone `fak-selfupdate` executable is a recovery-sized entry point over the same package implementation as `fak self-update`. It accepts the same flags and emits the same `fak.self-update.receipt/v1` JSON. In particular, `fak-selfupdate --check --target PATH` inspects the target's embedded Go build metadata without executing that potentially stale or partially replaced binary.
+
 The managed `fak-launch` target remains runnable while `fak self-update` replaces the
 deployed binary. During that bounded transaction it defaults to `prior`, immediately
-running the last known-good executable. Set `FAK_UPDATE_LAUNCH_POLICY=wait` to wait (at
-most 10 seconds by default) and then run the new executable, or set it to `fail` for a
-strict, actionable failure. `FAK_UPDATE_LAUNCH_WAIT=30s` changes the bounded wait (capped
-at five minutes). The equivalent launch-config keys are
+running the last known-good executable. Pass `--update-launch-policy=wait` to wait (at
+most 10 seconds by default) and then run the new executable, or pass
+`--update-launch-policy=fail` for a strict, actionable failure.
+`--update-launch-wait=30s` changes the bounded wait (capped at five minutes).
+The equivalent launch-config keys are
 `"update_launch_policy": "prior|wait|fail"` and `"update_launch_wait_ms": N`.
-A managed launcher also accepts leading
-`--update-launch-policy=prior|wait|fail` and `--update-launch-wait=DURATION` flags.
+A managed launcher accepts those flags only when they precede the provider command.
 Flags after the provider or `--` remain provider arguments. These paths are
 non-interactive and preserve argv boundaries, stdin, stdout, stderr, and exit status.
 

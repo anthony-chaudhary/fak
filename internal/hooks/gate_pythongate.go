@@ -1,8 +1,15 @@
 package hooks
 
 import (
+	"bytes"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os/exec"
+	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -17,12 +24,14 @@ import (
 //
 // It is the pythongate twin of gate_tierdeclared.go: like that gate, it does NOT import its
 // tier-2 scorecard package (an upward import a tier-1 hooks package may not make). It parses
-// the single source of truth — the `grandfathered` baseline literal in
-// internal/pythongate/baseline.go — from the tracked tree and compares it to the tracked
-// tools/*.py set, so it can never become a rival authority to the ratchet it fronts.
+// the baseline plus exact reviewed test-companion declarations from the tracked
+// tree and compares them to the tracked tools/*.py set, so it can never become a
+// rival authority to the ratchet it fronts.
 
 // pythonBaselineFile is the single source of truth for the de-Python grandfathered baseline.
 const pythonBaselineFile = "internal/pythongate/baseline.go"
+
+const pythonTestCompanionFile = "internal/pythongate/testcompanions.go"
 
 // reasonNewPythonTool mirrors pythongate.ReasonNewPythonTool without importing the tier-2
 // package (kept as a literal so the tier-1 gate stays import-clean; the test asserts they agree).
@@ -64,6 +73,81 @@ func declaredPyBaseline(t *TrackedTree) (map[string]bool, bool) {
 	return declared, true
 }
 
+func declaredPyTestCompanions(t *TrackedTree, baseline map[string]bool) map[string]bool {
+	body, exists := t.FileBytes(pythonTestCompanionFile)
+	if !exists {
+		return nil
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), pythonTestCompanionFile, body, 0)
+	if err != nil {
+		return nil
+	}
+	allowed := map[string]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		decl, ok := node.(*ast.ValueSpec)
+		if !ok || len(decl.Names) != 1 || decl.Names[0].Name != "testCompanions" || len(decl.Values) != 1 {
+			return true
+		}
+		list, ok := decl.Values[0].(*ast.CompositeLit)
+		if !ok {
+			return false
+		}
+		for _, element := range list.Elts {
+			row, ok := element.(*ast.CompositeLit)
+			if !ok || len(row.Elts) < 2 {
+				continue
+			}
+			pathLit, pathOK := row.Elts[0].(*ast.BasicLit)
+			moduleLit, moduleOK := row.Elts[1].(*ast.BasicLit)
+			if !pathOK || !moduleOK || pathLit.Kind != token.STRING || moduleLit.Kind != token.STRING {
+				continue
+			}
+			companion, pathErr := strconv.Unquote(pathLit.Value)
+			module, moduleErr := strconv.Unquote(moduleLit.Value)
+			if pathErr != nil || moduleErr != nil || companion != strings.TrimSuffix(module, ".py")+"_test.py" || !baseline[module] {
+				continue
+			}
+			if !containsTrackedPath(t.Paths, companion) || !containsTrackedPath(t.Paths, module) {
+				continue
+			}
+			source, ok := t.FileBytes(companion)
+			if ok && pythonSyntaxImports(source, strings.TrimSuffix(path.Base(module), ".py")) {
+				allowed[companion] = true
+			}
+		}
+		return false
+	})
+	return allowed
+}
+
+func containsTrackedPath(paths []string, want string) bool {
+	for _, candidate := range paths {
+		if candidate == want {
+			return true
+		}
+	}
+	return false
+}
+
+func pythonSyntaxImports(source []byte, module string) bool {
+	const inspectImports = `import ast, sys
+target = sys.argv[1]
+try:
+    tree = ast.parse(sys.stdin.read())
+except SyntaxError:
+    raise SystemExit(2)
+for node in ast.walk(tree):
+    if isinstance(node, ast.Import) and any(alias.name == target for alias in node.names):
+        raise SystemExit(0)
+    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == target:
+        raise SystemExit(0)
+raise SystemExit(1)
+`
+	cmd := exec.Command("python3", "-I", "-S", "-c", inspectImports, module)
+	cmd.Stdin = bytes.NewReader(source)
+	return cmd.Run() == nil
+}
+
 // gatePythonToolTree emits a NEW_PYTHON_TOOL finding for every tracked tools/*.py that is not
 // in the grandfathered baseline — the same verdict pythongate.ScanTree computes, one boundary
 // earlier. It reads the tracked path set (so an untracked scratch .py in tools/ is correctly
@@ -74,6 +158,7 @@ func gatePythonToolTree(t *TrackedTree) ([]Finding, error) {
 	if !ok {
 		return nil, ErrCouldNotRun
 	}
+	testCompanions := declaredPyTestCompanions(t, baseline)
 	var findings []Finding
 	for _, p := range t.Paths {
 		// prefix+suffix at ANY depth is the ratchet's real scope: git pathspec `*` is not
@@ -84,7 +169,7 @@ func gatePythonToolTree(t *TrackedTree) ([]Finding, error) {
 		if !strings.HasPrefix(p, "tools/") || !strings.HasSuffix(p, ".py") {
 			continue
 		}
-		if baseline[p] {
+		if baseline[p] || testCompanions[p] {
 			continue
 		}
 		findings = append(findings, Finding{

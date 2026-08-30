@@ -3,7 +3,7 @@
 // Option B): an L3RegionBackend behind fak's already-frozen Resolver seam
 // (internal/abi.RegionBackend, registered via abi.RegisterRegionBackend).
 //
-// WHAT THE SEAM IS. An external L3 KV store (CAMA is the reference target) holds
+// WHAT THE SEAM IS. An external L3 KV store holds
 // content-addressed PAGES — fixed-size blocks reached over RDMA mget/mset. fak's
 // abi.Ref already carries a Digest (a content address) at the syscall boundary. So
 // a Ref.Digest resolves to a SET of L3 page keys, and paging a region in/out IS an
@@ -13,7 +13,7 @@
 // set behind the frozen Ref/Resolver interface — a backend swap, not an ABI change.
 //
 // WHAT STAGE 1 SHIPS (and ONLY Stage 1). Against a FAKE in-memory L3 (L3Store, a
-// page-keyed Go map standing in for the RDMA pool — no CAMA, no network), it proves
+// page-keyed Go map standing in for the RDMA pool — no remote service, no network), it proves
 // the two load-bearing properties the seam needs:
 //   - a Ref resolves to a page-key SET: Put chunks a region into fixed-size pages,
 //     msets each under its content-address page key, and records the ordered key set
@@ -32,7 +32,7 @@
 // HONEST SCOPE / WHAT IS DEFERRED (per the epic's "control path only" constraint):
 //   - Stage 2 (evict over the tier): L3Store.Mdel is the invalidation mechanism, but
 //     wiring KVCache.Evict to invalidate a span's backing page keys is NOT done here.
-//   - Stage 3 (real store): the CAMA connector, mget_rdma loopback, and the
+//   - Stage 3 (real store): an external remote-KV connector, mget_rdma loopback, and the
 //     data-path-bypass (bulk bytes flow client-direct while the resolver computes
 //     page-key sets and invalidations out of band) are NOT done here. The in-memory
 //     L3Store moves bytes through its map; that is a Stage-1 stand-in, not the
@@ -64,7 +64,7 @@ import (
 const CapL3Tier abi.Capability = "l3.tier"
 
 // PageBytes is the fixed page size a region is chunked into before it lands in L3.
-// A real L3/CAMA pages KV in fixed blocks reached by one mget/mset key; 4 KiB is a
+// A real L3 store pages KV in fixed blocks reached by one mget/mset key; 4 KiB is a
 // representative block. A real deployment sizes this to the store's own block size.
 const PageBytes = 4096
 
@@ -89,7 +89,7 @@ type page struct {
 }
 
 // L3Store is the FAKE in-memory L3 KV pool: a page-keyed byte map standing in for the
-// external store reached over RDMA mget/mset in production (no CAMA, no network). It
+// external store reached over RDMA mget/mset in production (no remote service, no network). It
 // is content-addressed — the key IS sha256(page) — so Mset is idempotent and two
 // identical pages share one slot. Concurrency-safe.
 type L3Store struct {

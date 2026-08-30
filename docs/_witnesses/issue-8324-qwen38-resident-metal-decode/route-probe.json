@@ -1,0 +1,69 @@
+{
+  "schema": "fak.issue-8324-qwen38-resident-metal-decode-route-probe/1",
+  "issue": 8324,
+  "epic": {
+    "issue": 10193,
+    "row": 6
+  },
+  "base_revision": "8fbba932b8128700aef41dd52ab548664a919003",
+  "observed_on_utc": "2026-08-29",
+  "artifact": {
+    "status": "AVAILABLE_VERIFIED",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "private_path_included": false,
+    "eligible_if_copied_to_sanctioned_node": true
+  },
+  "local_host": {
+    "status": "CAPACITY_INELIGIBLE",
+    "os": "darwin",
+    "arch": "arm64",
+    "model": "Apple M3 Pro",
+    "model_identifier": "Mac15,7",
+    "memory_bytes": 38654705664,
+    "memory_gib": 36,
+    "minimum_required_gib": 64,
+    "eligible": false
+  },
+  "public_apple_target": {
+    "status": "NO_PUBLIC_VERIFIED_GE64GIB_TARGET",
+    "minimum_required_gib": 64,
+    "eligible": false,
+    "detail": "No public target identity and availability receipt was supplied or observed."
+  },
+  "private_bridge": {
+    "doctor_status": "NOT_READY",
+    "eligible": false,
+    "detail": "The scrubbed private bridge doctor did not yield a sanctioned Apple session."
+  },
+  "receipt_route": {
+    "current_envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+    "current_envelope_memory_gib": 36,
+    "supports_required_64gib_target": false,
+    "periodic_full_attention_residency_provable": false,
+    "exact_multi_token_cosine_provable": false,
+    "matching_greedy_tokens_provable": false,
+    "current_commands_printable": true,
+    "performance_acceptance_possible": false
+  },
+  "sanctioned_route": {
+    "script": "sanctioned-rerun.sh",
+    "required_os": "darwin",
+    "required_arch": "arm64",
+    "required_accelerator": "Apple Metal",
+    "minimum_memory_gib": 64,
+    "explicit_sanction_required": true,
+    "exact_artifact_digest_required": true,
+    "command_ready": true,
+    "performance_acceptance_ready": false
+  },
+  "decision": "HOLD_CAPACITY_AND_CLAIM_TOPOLOGY_UNPROVEN",
+  "privacy": {
+    "account_included": false,
+    "hostname_included": false,
+    "private_path_included": false,
+    "credential_included": false,
+    "raw_private_log_included": false
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "rows": [
+    {
+      "id": "issue9909-disambiguation-witnesses",
+      "canonical": "DisambiguationWitnesses (worker-land scorecard proof bundle)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "DisambiguationWitnesses is the workerworktree landing receipt that groups the before, isolated-worktree, and post-apply concept-scorecard witnesses under one shared timeout authority.",
+      "distinction": "It is the typed three-view proof bundle consumed by managed worker landing, not worktreewitness, which runs an arbitrary command in a detached trunk worktree.",
+      "distinct_from": [
+        "witness-proof-worktreewitness"
+      ],
+      "aliases": [],
+      "grounding": "DisambiguationWitnesses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-runtimecap-fallback-policy",
+      "canonical": "runtimecap fallback policy (pin/refuse or local CPU degrade)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "runtimecap fallback policy selects whether an unavailable requested backend stays pinned and refuses or may degrade into a declared local CPU envelope; Probe records the selected posture in the runtime-capabilities receipt.",
+      "distinction": "It is runtime capability fallback for backend execution, not the deployable policy manifest that governs tool capabilities and not the orchestration fast-profile response to an unavailable speed binding.",
+      "distinct_from": [
+        "policy-manifest",
+        "issue9909-fast-intent-fallback-policy"
+      ],
+      "aliases": [],
+      "grounding": "FallbackPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-fast-intent-fallback-policy",
+      "canonical": "FastIntent.FallbackPolicy (fast-profile fallback action)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "FastIntent.FallbackPolicy is the portable orchestration request field that chooses degrade or refuse when the requested fast harness binding is unsupported during fast-plan resolution.",
+      "distinction": "It governs orchestration response to an unavailable fast-profile mechanism; it is not runtimecap backend fallback, which chooses pin/refuse versus a declared local CPU execution envelope.",
+      "distinct_from": [
+        "issue9909-runtimecap-fallback-policy"
+      ],
+      "aliases": [],
+      "grounding": "FallbackPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-guardrail-clusters",
+      "canonical": "guardrailClusters (agent-readiness rule catalog)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardrailClusters is the agent-readiness catalog of labeled rule-token alternatives used to measure whether AGENTS.md surfaces each required shared-trunk operating guardrail.",
+      "distinction": "It is a documentation-analysis catalog for detecting rule coverage, not a guardrail safety boundary and not a runtime gate that admits or refuses an action.",
+      "distinct_from": [
+        "guardrail"
+      ],
+      "aliases": [],
+      "grounding": "guardrailClusters",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-attestation-policy-ref",
+      "canonical": "policyRef (attestation policy digest)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "policyRef is the attestation wire object that binds the exact capability-floor manifest path to its SHA-256 digest so a compliance proof can be rechecked against the same policy bytes.",
+      "distinction": "It is an attestation reference to one policy artifact, not the policy manifest schema or the compiled in-memory Policy consulted by adjudication.",
+      "distinct_from": [
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "policyRef",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-release-weight-session",
+      "canonical": "releaseWeightSession (model-weight hold release)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "releaseWeightSession decrements the model weight-closer session hold after a native inference path finishes and completes deferred weight teardown when the last active holder leaves after CloseWeights begins.",
+      "distinction": "It releases one model-weight lifetime hold; it is not the served Session record that persists run state across turns and it does not schedule or end an agent session.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "releaseWeightSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-cached-prompt-hit-ratio",
+      "canonical": "fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn.",
+      "distinction": "It measures the fraction of turns with any provider cache hit; it is not fak_gateway_inference_cached_prompt_tokens_total, which accumulates the number of cached prompt tokens.",
+      "distinct_from": [
+        "c4681-fakgatewayinferencecachedprompttokenstotal"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_inference_cached_prompt_hit_ratio",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-output-tokens-per-second",
+      "canonical": "fak_gateway_inference_output_tokens_per_second (blended generation throughput)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "fak_gateway_inference_output_tokens_per_second is the gateway Prometheus gauge for cumulative completion tokens divided by full inference wall-clock across served turns, including prefill time.",
+      "distinction": "It is blended model generation throughput over full inference time, not the tool vDSO hit path and not decode-only throughput, which subtracts prefill before dividing.",
+      "distinct_from": [
+        "vdso"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_inference_output_tokens_per_second",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-native-receipt-signal-supported",
+      "canonical": "fak_native_receipt_signal_supported (latest-signal authority gauge)",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "fak_native_receipt_signal_supported is the labeled Prometheus gauge that reports whether the latest admitted native receipt carried authoritative support for each prefill, decode, queue, kernel, and transfer signal.",
+      "distinction": "It reports per-signal support on the latest receipt; it is not the broad support concept and not the cumulative unsupported-receipt exclusion counter.",
+      "distinct_from": [
+        "support",
+        "issue9909-native-receipt-unsupported-total"
+      ],
+      "aliases": [],
+      "grounding": "fak_native_receipt_signal_supported",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9909-native-receipt-unsupported-total",
+      "canonical": "fak_native_receipt_unsupported_total (excluded native-receipt counter)",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "fak_native_receipt_unsupported_total is the Prometheus counter of native receipt observations excluded from native performance totals because the receipt lacks the required supported or authoritative evidence.",
+      "distinction": "It counts cumulative excluded receipt observations; it is not the latest-receipt per-signal support gauge, which reports a current labeled capability bit.",
+      "distinct_from": [
+        "issue9909-native-receipt-signal-supported"
+      ],
+      "aliases": [],
+      "grounding": "fak_native_receipt_unsupported_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,8 @@ const (
 	Schema       = "fak-native-performance-artifacts/1"
 	MaxArtifacts = 5
 )
+
+var moduleRevRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*@r[1-9][0-9]*\+g[0-9a-f]{7,64}$`)
 
 var (
 	ErrNotFound        = errors.New("native performance artifact not found")
@@ -46,6 +49,86 @@ const (
 	StateBroken   State = "broken"
 	StateRedacted State = "redacted"
 )
+
+type SeriesStatus string
+
+const (
+	SeriesProduced    SeriesStatus = "produced"
+	SeriesUnavailable SeriesStatus = "unavailable"
+)
+
+type UnavailableReason string
+
+const (
+	ReasonNone            UnavailableReason = "none"
+	ReasonIncomplete      UnavailableReason = "incomplete"
+	ReasonStale           UnavailableReason = "stale"
+	ReasonPrivate         UnavailableReason = "private"
+	ReasonUntrustedScheme UnavailableReason = "untrusted_scheme"
+)
+
+// LiveObservation binds one completed Qwen3.8 Metal run to the scrubbed index
+// record produced for it. Identity and revision are validation inputs, not
+// metric labels, so an observation cannot expand Prometheus cardinality.
+type LiveObservation struct {
+	CompletedAt time.Time
+	ModuleRev   string
+	ModelFamily string
+	Backend     string
+	Record      Record
+}
+
+// LiveSeriesResult distinguishes an emitted bounded series from evidence that
+// is honestly unavailable. Unavailable results carry only a closed reason and
+// never echo source fields that could contain paths, locators, or digests.
+type LiveSeriesResult struct {
+	Status            SeriesStatus      `json:"status"`
+	UnavailableReason UnavailableReason `json:"unavailable_reason"`
+	Prometheus        string            `json:"prometheus,omitempty"`
+}
+
+// ProduceLiveSeries renders the existing fak_native_artifact_info contract for
+// one fresh, complete Qwen3.8 Metal observation. The output has four fixed
+// labels and at most MaxArtifacts samples; immutable revision and digest fields
+// are validated but intentionally not exported as labels.
+func ProduceLiveSeries(now time.Time, maxAge time.Duration, observation LiveObservation) LiveSeriesResult {
+	unavailable := func(reason UnavailableReason) LiveSeriesResult {
+		return LiveSeriesResult{Status: SeriesUnavailable, UnavailableReason: reason}
+	}
+	if now.IsZero() || maxAge <= 0 || observation.CompletedAt.IsZero() || now.Before(observation.CompletedAt) ||
+		!moduleRevRE.MatchString(observation.ModuleRev) || observation.ModelFamily != "Qwen3.8" || observation.Backend != "metal" {
+		return unavailable(ReasonIncomplete)
+	}
+	if now.Sub(observation.CompletedAt) > maxAge {
+		return unavailable(ReasonStale)
+	}
+
+	record, err := scrub(observation.Record)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPrivate):
+			return unavailable(ReasonPrivate)
+		case errors.Is(err, ErrUntrustedScheme):
+			return unavailable(ReasonUntrustedScheme)
+		default:
+			return unavailable(ReasonIncomplete)
+		}
+	}
+	for _, artifact := range record.Artifacts {
+		if !artifact.ExpiresAt.IsZero() && !now.Before(artifact.ExpiresAt) {
+			return unavailable(ReasonStale)
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("# HELP fak_native_artifact_info Bounded public-safe native artifact evidence state.\n")
+	b.WriteString("# TYPE fak_native_artifact_info gauge\n")
+	for _, artifact := range record.Artifacts {
+		fmt.Fprintf(&b, "fak_native_artifact_info{engine=\"fak-native\",correlation_key=%q,kind=%q,state=%q} 1\n",
+			record.CorrelationKey, artifact.Kind, artifact.State)
+	}
+	return LiveSeriesResult{Status: SeriesProduced, UnavailableReason: ReasonNone, Prometheus: b.String()}
+}
 
 // Artifact is safe to serialize into a public index. Locator must be an HTTPS
 // URL without credentials, query strings, fragments, or private path material.
@@ -119,6 +202,8 @@ func (i *Index) Resolve(correlationKey string, kind Kind, now time.Time) (Artifa
 	}
 	artifact := record.Artifacts[idx]
 	switch artifact.State {
+	case StateReady:
+		// Continue through expiry and locator validation below.
 	case StateBroken:
 		return Artifact{}, ErrBroken
 	case StateRedacted:

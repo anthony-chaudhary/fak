@@ -24,6 +24,7 @@ type prepushSeamSnapshot struct {
 	changedFiles func(string, string, string) ([]string, error)
 	extractTip   func(string, string) (string, error)
 	listGraph    func(string) (map[string]string, map[string][]string, int, error)
+	listTestOnly func(string, []string) map[string]bool
 	build        func(string, []string) (string, bool)
 	now          func() time.Time
 }
@@ -35,6 +36,7 @@ func snapshotPrepushSeams() prepushSeamSnapshot {
 		changedFiles: prepushChangedFiles,
 		extractTip:   prepushExtractTip,
 		listGraph:    prepushListGraph,
+		listTestOnly: prepushListTestOnly,
 		build:        prepushBuild,
 		now:          prepushNow,
 	}
@@ -46,6 +48,7 @@ func (s prepushSeamSnapshot) restore() {
 	prepushChangedFiles = s.changedFiles
 	prepushExtractTip = s.extractTip
 	prepushListGraph = s.listGraph
+	prepushListTestOnly = s.listTestOnly
 	prepushBuild = s.build
 	prepushNow = s.now
 }
@@ -65,6 +68,7 @@ func setupHappyPrepushSeams(t *testing.T) {
 		return map[string]string{"internal/q/q.go": "mod/q"},
 			map[string][]string{"mod/p": {"mod/q"}}, 2, nil
 	}
+	prepushListTestOnly = func(string, []string) map[string]bool { return nil }
 	prepushBuild = func(string, []string) (string, bool) { return "", true }
 	prepushNow = time.Now
 }
@@ -114,6 +118,97 @@ func TestEvaluatePrePushBuildEmptySelectionIsNoop(t *testing.T) {
 	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
 	if code != 0 || res.Verdict != "NOOP" {
 		t.Fatalf("want NOOP/exit0 for empty selection, got verdict=%s code=%d", res.Verdict, code)
+	}
+}
+
+func TestEvaluatePrePushBuildOmitsProvenTestOnlyPackage(t *testing.T) {
+	setupHappyPrepushSeams(t)
+	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
+		return map[string]string{"tools/probe/probe_test.go": "mod/tools/probe"},
+			map[string][]string{}, 1, nil
+	}
+	prepushChangedFiles = func(string, string, string) ([]string, error) {
+		return []string{"tools/probe/probe_test.go"}, nil
+	}
+	prepushListTestOnly = func(_ string, packages []string) map[string]bool {
+		if len(packages) != 1 || packages[0] != "mod/tools/probe" {
+			t.Fatalf("classifier received %v, want the selected test-only package", packages)
+		}
+		return map[string]bool{"mod/tools/probe": true}
+	}
+	prepushBuild = func(string, []string) (string, bool) {
+		t.Fatal("go build must not receive a package proven to contain only tests")
+		return "", false
+	}
+
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 0 || res.Verdict != "NOOP" || !res.OK {
+		t.Fatalf("test-only delta must be a compile NOOP: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+	if !contains(res.ChangedPackages, "mod/tools/probe") || len(res.SelectedPackages) != 0 {
+		t.Fatalf("changed package must remain visible while build selection is empty: changed=%v selected=%v", res.ChangedPackages, res.SelectedPackages)
+	}
+}
+
+func TestEvaluatePrePushBuildKeepsProductionImporter(t *testing.T) {
+	setupHappyPrepushSeams(t)
+	prepushListTestOnly = func(string, []string) map[string]bool {
+		return map[string]bool{"mod/q": true}
+	}
+	prepushBuild = func(_ string, packages []string) (string, bool) {
+		if len(packages) != 1 || packages[0] != "mod/p" {
+			t.Fatalf("build received %v, want only production importer mod/p", packages)
+		}
+		return "", true
+	}
+
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 0 || res.Verdict != "OK" || !res.OK {
+		t.Fatalf("production importer must still build: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+	if len(res.SelectedPackages) != 1 || res.SelectedPackages[0] != "mod/p" {
+		t.Fatalf("selected packages = %v, want [mod/p]", res.SelectedPackages)
+	}
+}
+
+func TestEvaluatePrePushBuildUnknownPackageStaysFailSafe(t *testing.T) {
+	setupHappyPrepushSeams(t)
+	prepushListTestOnly = func(string, []string) map[string]bool { return nil }
+	prepushBuild = func(_ string, packages []string) (string, bool) {
+		if !contains(packages, "mod/q") {
+			t.Fatalf("unclassified package was removed from compile admission: %v", packages)
+		}
+		return "no required module provides package mod/q", false
+	}
+
+	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
+	if code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" || res.OK {
+		t.Fatalf("unclassified load failure must block: verdict=%s code=%d ok=%v", res.Verdict, code, res.OK)
+	}
+}
+
+func TestListTestOnlyPackagesUsesExactGoMetadata(t *testing.T) {
+	root := t.TempDir()
+	writePrepushFixtureFile(t, filepath.Join(root, "go.mod"), "module testonlyfixture\n\ngo 1.26\n")
+	writePrepushFixtureFile(t, filepath.Join(root, "only", "only_test.go"), "package only\n\nimport \"testing\"\n\nfunc TestOnly(t *testing.T) {}\n")
+	writePrepushFixtureFile(t, filepath.Join(root, "real", "real.go"), "package real\n")
+
+	got := listTestOnlyPackages(root, []string{"testonlyfixture/only", "testonlyfixture/real", "testonlyfixture/missing"})
+	if !got["testonlyfixture/only"] {
+		t.Fatalf("test-only package not classified: %v", got)
+	}
+	if got["testonlyfixture/real"] || got["testonlyfixture/missing"] {
+		t.Fatalf("production or unreported package classified test-only: %v", got)
+	}
+}
+
+func writePrepushFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

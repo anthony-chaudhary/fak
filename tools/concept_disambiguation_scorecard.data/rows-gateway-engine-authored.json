@@ -18,5 +18,70 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "gateway-engine-exec-via-kernel",
+      "canonical": "execViaKernel (agent-loop syscall adapter)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content.",
+      "distinction": "The per-call ADAPTER at the agent loop boundary — not the kernel coordinator itself and not an inference engine backend.",
+      "distinct_from": [
+        "kernel",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "execViaKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10046-gateway-inkernelplannerconfig-binding",
+      "canonical": "Gateway in-kernel planner configuration binding",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The serveNativePlannerConfig production seam binds explicit serve flags into agent.InKernelPlannerConfig and then into gateway.Config.InKernelPlanner before the gateway constructs its native planner.",
+      "distinction": "This is the CLI-to-gateway binding for typed native settings, not agent.InKernelPlannerConfig, the reusable settings type, and not InKernelPlanner, the runtime request planner.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelplanner",
+        "issue10046-plan-inkernelplannerconfig",
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens"
+      ],
+      "aliases": [
+        "InKernelPlannerConfig"
+      ],
+      "grounding": "serveNativePlannerConfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10046-gateway-configured-inkernelplanner-construction",
+      "canonical": "Gateway configured in-kernel planner construction",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "newInKernelChatPlanner carries gateway.Config.InKernelPlanner into agent.NewInKernelPlannerWithConfig when the gateway selects its in-process native chat planner.",
+      "distinction": "This is the gateway factory boundary that invokes the typed constructor; it is not NewInKernelPlannerWithConfig itself and not the resulting InKernelPlanner runtime.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelplanner",
+        "issue10046-plan-newinkernelplannerwithconfig"
+      ],
+      "aliases": [
+        "NewInKernelPlannerWithConfig"
+      ],
+      "grounding": "newInKernelChatPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

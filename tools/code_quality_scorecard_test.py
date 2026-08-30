@@ -7,6 +7,7 @@ Run:  python -m pytest tools/code_quality_scorecard_test.py -q
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 import os
 import subprocess
@@ -207,6 +208,55 @@ def test_payload_clean_is_ok():
     kpis = [cq.kpi_build(True, ""), cq.kpi_format([])]
     p = cq.build_payload(workspace="/x", kpis=kpis)
     assert p["corpus"]["code_debt"] == 0 and p["ok"] is True
+
+
+def test_payload_classifies_all_structural_debt_without_mutating_inputs():
+    kpis = [
+        {"kpi": name, "score": 0, "detail": "fixture",
+         "defects": [f"{name}-1", f"{name}-2"], "soft": []}
+        for name in cq.KPI_DEBT_CATEGORIES
+    ]
+    original = copy.deepcopy(kpis)
+
+    payload = cq.build_payload(workspace="/x", kpis=kpis)
+
+    assert kpis == original
+    assert set(payload["corpus"]["debt_categories"]) == {
+        "modularity", "internal_consistency", "internal_coherence",
+    }
+    assert payload["corpus"]["debt_by_category"] == {
+        "modularity": 2, "internal_consistency": 8, "internal_coherence": 8,
+    }
+    assert {kpi["kpi"]: kpi["debt_categories"] for kpi in payload["kpis"]} == {
+        name: list(categories) for name, categories in cq.KPI_DEBT_CATEGORIES.items()
+    }
+    assert [kpi["defects"] for kpi in payload["kpis"]] == [
+        kpi["defects"] for kpi in original
+    ]
+
+
+def test_clean_text_render_names_all_debt_categories_with_zero_counts():
+    payload = cq.build_payload(workspace="/x", kpis=[
+        cq.kpi_build(True, ""), cq.kpi_format([]),
+    ])
+
+    text = cq.render(payload)
+    for category in ("modularity", "internal_consistency", "internal_coherence"):
+        assert f"{category}: 0" in text
+
+
+def test_human_renderers_name_all_debt_categories():
+    payload = cq.build_payload(workspace="/x", kpis=[
+        cq.kpi_architecture([{"path": "huge.go", "n_lines": 1600, "long_funcs": []}]),
+        cq.kpi_format(["messy.go"]),
+        cq.kpi_tests(["internal/orphan"], 1),
+    ])
+
+    text = cq.render(payload)
+    markdown = cq.render_markdown(payload)
+    for category in ("modularity", "internal_consistency", "internal_coherence"):
+        assert category in text
+        assert f"`{category}`" in markdown
 
 
 # --- the brace-depth scanner ----------------------------------------------

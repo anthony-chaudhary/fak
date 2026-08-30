@@ -8,6 +8,7 @@ var Commands = []Command{
 	{Name: "blast", Owner: "dev", Handler: "devcmd.RunBlast", SourceOrigin: "internal/devcmd/blast.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "borrow-provenance", Owner: "dev", Handler: "devcmd.RunBorrowProvenance", SourceOrigin: "internal/devcmd/borrow_provenance.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "boundary", Owner: "dev", Handler: "devcmd.RunBoundary", SourceOrigin: "internal/devcmd/boundary.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "build", Owner: "dev", Handler: "devcmd.RunBuild", SourceOrigin: "internal/devcmd/build.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "buildcheck", Owner: "dev", Handler: "devcmd.RunBuildCheck", SourceOrigin: "internal/devcmd/buildcheck.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "catchup", Owner: "dev", Handler: "devcmd.RunCatchUpScore", SourceOrigin: "internal/devcmd/catchupscore.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "checkpoint", Owner: "dev", Handler: "devcmd.RunCheckpoint", SourceOrigin: "internal/devcmd/checkpoint.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

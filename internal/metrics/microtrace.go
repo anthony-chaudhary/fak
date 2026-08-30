@@ -39,6 +39,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -78,17 +79,28 @@ const (
 	SpanVerdict   MicroSpanKind = "verdict"   // an adjudication verdict
 )
 
+// MicroSpanEvent marks the lifecycle record emitted by a scoped duration.
+// Empty remains valid for existing one-record spans.
+type MicroSpanEvent string
+
+const (
+	MicroSpanStart MicroSpanEvent = "span_start"
+	MicroSpanEnd   MicroSpanEvent = "span_end"
+)
+
 // MicroSpan is one leg of a per-agent trace timeline. Seq is assigned by the
 // tracer in record order within a trace; the remaining fields are populated by
 // kind (a step carries Tokens, a seat carries Seat, a verdict carries Verdict).
 type MicroSpan struct {
-	Seq     int           `json:"seq"`
-	Kind    MicroSpanKind `json:"kind"`
-	Label   string        `json:"label,omitempty"`
-	Tokens  int           `json:"tokens,omitempty"`
-	Seat    string        `json:"seat,omitempty"`
-	Verdict string        `json:"verdict,omitempty"`
-	Dur     time.Duration `json:"dur_ns,omitempty"`
+	Seq     int            `json:"seq"`
+	Kind    MicroSpanKind  `json:"kind"`
+	Event   MicroSpanEvent `json:"event,omitempty"`
+	SpanID  uint64         `json:"span_id,omitempty"`
+	Label   string         `json:"label,omitempty"`
+	Tokens  int            `json:"tokens,omitempty"`
+	Seat    string         `json:"seat,omitempty"`
+	Verdict string         `json:"verdict,omitempty"`
+	Dur     time.Duration  `json:"dur_ns,omitempty"`
 }
 
 // MicroTrace is one microagent's ordered span timeline, keyed by its trace id
@@ -237,11 +249,23 @@ type MicroTracer struct {
 	mu     sync.Mutex
 	traces map[string]*MicroTrace
 	order  []string // first-seen trace ids, for a stable listing
+	now    func() time.Time
 }
 
 // NewMicroTracer returns an empty tracer.
 func NewMicroTracer() *MicroTracer {
-	return &MicroTracer{traces: map[string]*MicroTrace{}}
+	return newMicroTracerWithClock(time.Now)
+}
+
+func newMicroTracerWithClock(now func() time.Time) *MicroTracer {
+	return &MicroTracer{traces: map[string]*MicroTrace{}, now: now}
+}
+
+func (t *MicroTracer) nowTime() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
 }
 
 // Record appends one span to the trace named by id, assigning it the next Seq in
@@ -257,6 +281,70 @@ func (t *MicroTracer) Record(id string, span MicroSpan) {
 	}
 	span.Seq = len(tr.Spans)
 	tr.Spans = append(tr.Spans, span)
+}
+
+var nextMicroSpanID atomic.Uint64
+
+// MicroSpanScope emits one start record immediately and one terminal record from
+// End. It adapts the paired-lifecycle contract from Modular SpanGuard
+// (Support/include/Support/SpanGuard.h@1c9fd2e0) to MicroTracer records.
+type MicroSpanScope struct {
+	tracer  *MicroTracer
+	traceID string
+	span    MicroSpan
+	started time.Time
+	once    sync.Once
+}
+
+// Scope starts a paired duration span. The returned scope is intended for:
+//
+//	scope := tracer.Scope(traceID, span)
+//	defer scope.End()
+//
+// End is idempotent, so explicit cleanup plus a deferred fallback still emits
+// exactly one terminal record. IDs are process-wide and safe under concurrency.
+func (t *MicroTracer) Scope(traceID string, span MicroSpan) *MicroSpanScope {
+	started := t.nowTime()
+	span.Event = MicroSpanStart
+	span.SpanID = nextMicroSpanID.Add(1)
+	if span.SpanID == 0 {
+		span.SpanID = nextMicroSpanID.Add(1)
+	}
+	span.Dur = 0
+	t.Record(traceID, span)
+	return &MicroSpanScope{
+		tracer:  t,
+		traceID: traceID,
+		span:    span,
+		started: started,
+	}
+}
+
+// ID returns the identifier shared by this scope's start and terminal records.
+func (s *MicroSpanScope) ID() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.span.SpanID
+}
+
+// End records the terminal half of the pair. time.Now carries a monotonic clock
+// reading in normal operation; the defensive clamp also keeps injected or
+// platform clocks from producing a negative duration.
+func (s *MicroSpanScope) End() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() {
+		dur := s.tracer.nowTime().Sub(s.started)
+		if dur < 0 {
+			dur = 0
+		}
+		span := s.span
+		span.Event = MicroSpanEnd
+		span.Dur = dur
+		s.tracer.Record(s.traceID, span)
+	})
 }
 
 // Trace returns a copy of one agent's timeline and whether it exists.
@@ -316,6 +404,12 @@ func (t MicroTrace) Render() string {
 			line += " " + s.Label
 		}
 		var tags []string
+		if s.Event != "" {
+			tags = append(tags, "event="+string(s.Event))
+		}
+		if s.SpanID != 0 {
+			tags = append(tags, fmt.Sprintf("span_id=%d", s.SpanID))
+		}
 		if s.Tokens != 0 {
 			tags = append(tags, fmt.Sprintf("tokens=%d", s.Tokens))
 		}

@@ -56,7 +56,9 @@ func TestGuardChildResourceMonitorReapsOwnedTreeAndReceipts(t *testing.T) {
 	}
 
 	stopGuardChild(cmd, wait, 0)
-	t.Setenv("FAK_CHILD_RESOURCE_JOURNAL", journal)
+	oldConfig := guardResourceConfigured
+	setGuardResourceConfig(guardResourceConfig{ReceiptPath: journal})
+	t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
 	guardWriteResourceReceipt(ev, "trace-witness", "codex", cmd.Process.Pid)
 
 	assertWitnessPIDsGone(t, 3*time.Second, cmd.Process.Pid, descendantPID, grandchildPID)

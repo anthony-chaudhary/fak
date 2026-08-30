@@ -36,6 +36,16 @@ func TestCapturedPageRendersOperatingStatesAndSecondSkin(t *testing.T) {
 		"body[data-skin=\"minimal\"]",
 		"p.text",
 		"p.summary",
+		"id=\"gateway-startup\"",
+		"Gateway startup",
+		"Startup phases",
+		"Model load",
+		"Startup messages",
+		"legacy gateway fallback",
+		"Structured startup state is unavailable on this older gateway",
+		"copy.textContent=message.text",
+		"inspect typed startup messages",
+		"@media(max-width:600px){.startup-summary{grid-template-columns:1fr}}",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("captured browser render missing %q", want)
@@ -126,6 +136,16 @@ func TestStatusProjectsAgentStatsGoalsAndLiveDashboardLinks(t *testing.T) {
 				{"trace_id": "agent-review", "run": "paused", "turns_left": 4},
 			},
 			"fleet": map[string]any{"machines": 3, "sessions": 7},
+			"startup": map[string]any{
+				"status": "ready", "started_at": "2026-08-29T12:00:00Z", "ready_at": "2026-08-29T12:00:04Z",
+				"time_to_ready_seconds": 4.25, "unaccounted_seconds": 0.15,
+				"phases": []map[string]any{{"name": "listener-bind", "seconds": 0.125, "provenance": "measured", "stage": "gateway-boot"}},
+				"model_load": map[string]any{
+					"source": "qwen3.8.gguf", "mode": "native", "total_seconds": 3.5, "bytes": 1048576, "tensors": 24, "bottleneck": "upload",
+					"load_paths": []map[string]any{{"quant_type": "Q4_K", "class": "resident", "resident_tensors": 22, "resident_bytes": 900000, "dequant_tensors": 2, "dequant_bytes": 148576}},
+				},
+				"messages": []map[string]any{{"source": "model", "kind": "load", "level": "warn", "text": "weights & cache <pending>"}},
+			},
 		})
 	}))
 	defer gateway.Close()
@@ -157,6 +177,12 @@ func TestStatusProjectsAgentStatsGoalsAndLiveDashboardLinks(t *testing.T) {
 	if got.Gateway.FleetMachines != 3 || got.Gateway.FleetSessions != 7 || len(got.Agents.LiveSessions) != 2 {
 		t.Fatalf("live overview gateway=%+v agents=%+v", got.Gateway, got.Agents)
 	}
+	if got.Gateway.Startup == nil || got.Gateway.Startup.Status != "ready" || len(got.Gateway.Startup.Phases) != 1 || got.Gateway.Startup.ModelLoad == nil || len(got.Gateway.Startup.Messages) != 1 {
+		t.Fatalf("typed gateway startup not projected: %+v", got.Gateway.Startup)
+	}
+	if got.Gateway.Startup.ModelLoad.Mode != "native" || got.Gateway.Startup.ModelLoad.LoadPaths[0].QuantType != "Q4_K" || got.Gateway.Startup.Messages[0].Text != "weights & cache <pending>" {
+		t.Fatalf("startup detail lost: %+v", got.Gateway.Startup)
+	}
 	if got.Agents.TotalRuns != 3 || got.Agents.Completed != 1 || got.Agents.Failed != 1 || got.Agents.AwaitingApproval != 1 {
 		t.Fatalf("run stats=%+v", got.Agents)
 	}
@@ -165,6 +191,21 @@ func TestStatusProjectsAgentStatsGoalsAndLiveDashboardLinks(t *testing.T) {
 	}
 	if len(got.Dashboards) != 8 || got.Dashboards[0].Label != "Web gateway" || got.Dashboards[0].URL != gateway.URL+"/" {
 		t.Fatalf("dashboards=%+v", got.Dashboards)
+	}
+}
+
+func TestLiveAdapterPreservesOlderGatewayStartupFallback(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/debug/vars" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"sessions":[],"startup_report":"legacy prose remains at the gateway"}`)
+	}))
+	defer gateway.Close()
+	got, sessions := (&liveAdapter{baseURL: gateway.URL, client: gateway.Client()}).overview(context.Background())
+	if !got.Reachable || got.Startup != nil || len(sessions) != 0 {
+		t.Fatalf("legacy gateway fallback changed: gateway=%+v sessions=%+v", got, sessions)
 	}
 }
 

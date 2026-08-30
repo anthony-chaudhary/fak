@@ -4,7 +4,7 @@ import "testing"
 
 func TestGuardControlFlagsHaveHelpGroups(t *testing.T) {
 	want := map[string]bool{
-		"fleet-bus": false, "fleet-bus-dir": false, "fleet-bus-id": false, "fleet-bus-interval": false,
+		"fleet-bus":      false,
 		"output-profile": false, "work-profile": false,
 	}
 	for _, group := range guardFlagGroups {

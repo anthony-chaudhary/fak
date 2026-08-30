@@ -11,7 +11,7 @@ func TestRenderSystemdSystemUnitIsPID1OwnedAndHardened(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"DynamicUser=yes", "ExecStart=\"/opt/fak/bin/fak\" service run --interval 15s",
+		"DynamicUser=yes", "ExecStart=\"/opt/fak/bin/fak\" service run --interval 15s --notify systemd",
 		"Restart=always", "KillMode=control-group", "NoNewPrivileges=yes", "ProtectSystem=strict",
 		"ReadWritePaths=\"/var/lib/fak\"", "MemoryMax=1G", "TasksMax=256", "CPUQuota=50%",
 		"WantedBy=multi-user.target", "FAK_SERVICE_MANAGER=systemd-system",
@@ -20,7 +20,7 @@ func TestRenderSystemdSystemUnitIsPID1OwnedAndHardened(t *testing.T) {
 			t.Fatalf("unit missing %q:\n%s", want, u)
 		}
 	}
-	for _, forbidden := range []string{"WantedBy=default.target", "DISPLAY=", "graphical-session.target", "--user", "StateDirectory=fak"} {
+	for _, forbidden := range []string{"WantedBy=default.target", "DISPLAY=", "graphical-session.target", "--user", "StateDirectory=fak", "FAK_SERVICE_NOTIFY"} {
 		if strings.Contains(u, forbidden) {
 			t.Fatalf("PID-1 control-plane unit contains user/UI ownership %q: %s", forbidden, u)
 		}

@@ -56,7 +56,7 @@ func TestAuditRejectsUnclassifiedGuardExample(t *testing.T) {
 
 func TestCurrentGuardPosturesAreClassified(t *testing.T) {
 	want := map[string]string{
-		"README.md":             "`fak guard` remains the",
+		"README.md":             "fak guard -- codex",
 		"docs/cli-reference.md": "also append automatically",
 		"docs/generated/disambiguation-index.json": "optionally wraps it with fak guard",
 		"docs/integrations/session-new.md":         "always starts behind `fak guard`",

@@ -1,8 +1,12 @@
 package gateway
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
@@ -148,5 +152,49 @@ func TestCompactionContractTakeIsOnce(t *testing.T) {
 	s.noteCompactionContract("t2", first)
 	if got := s.takeCompactionContract("t3"); got != nil {
 		t.Errorf("take on an unrelated trace = %+v, want nil", got)
+	}
+}
+
+func TestCompactionContractProjectsBoundedRetentionEffects(t *testing.T) {
+	pages := []ctxplan.Page{
+		{ID: "keep", Kind: ctxplan.KindTranscriptProse, Retention: []ctxplan.RetentionAnnotation{{Intent: ctxplan.RetentionKeep, Source: "deterministic:needle", ReasonCode: "private_reason"}}},
+		{ID: "drop", Kind: ctxplan.KindTranscriptProse, Retention: []ctxplan.RetentionAnnotation{{Intent: ctxplan.RetentionDrop, Source: "agent:ranker", ReasonCode: "private_reason"}}},
+	}
+	plan := ctxplan.EvictionPlan{Keep: []string{"keep"}, Evict: []string{"drop"}}
+	contract := compactionContractFrom(pages, [][]byte{[]byte("secret keep content"), []byte("secret drop content")}, plan)
+	if contract == nil {
+		t.Fatal("contract = nil, want a projected eviction")
+	}
+	want := []RetentionEffect{
+		{PageID: "keep", Intent: "keep", Source: "deterministic:needle", Outcome: "kept"},
+		{PageID: "drop", Intent: "drop", Source: "agent:ranker", Outcome: "evicted"},
+	}
+	if !reflect.DeepEqual(contract.RetentionEffects, want) {
+		t.Fatalf("RetentionEffects = %+v, want %+v", contract.RetentionEffects, want)
+	}
+	wire, err := json.Marshal(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"secret keep content", "secret drop content", "private_reason"} {
+		if bytes.Contains(wire, []byte(forbidden)) {
+			t.Fatalf("contract leaked %q: %s", forbidden, wire)
+		}
+	}
+}
+
+func TestCompactionContractCapsRetentionEffects(t *testing.T) {
+	pages := make([]ctxplan.Page, maxRetentionEffects+5)
+	els := make([][]byte, len(pages))
+	plan := ctxplan.EvictionPlan{}
+	for i := range pages {
+		id := fmt.Sprintf("p%d", i)
+		pages[i] = ctxplan.Page{ID: id, Kind: ctxplan.KindTranscriptProse, Retention: []ctxplan.RetentionAnnotation{{Intent: ctxplan.RetentionDrop, Source: "agent:ranker"}}}
+		els[i] = []byte(id)
+		plan.Evict = append(plan.Evict, id)
+	}
+	contract := compactionContractFrom(pages, els, plan)
+	if got := len(contract.RetentionEffects); got != maxRetentionEffects {
+		t.Fatalf("retention effects = %d, want cap %d", got, maxRetentionEffects)
 	}
 }

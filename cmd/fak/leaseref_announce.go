@@ -79,11 +79,29 @@ func reportAmbientLeaserefAnnounce(stderr io.Writer, message, outcome string) {
 // one public-safe outcome on stderr, and no configuration or transport failure is returned
 // to the lease operation. The key itself is read only from a file; it is never accepted in
 // argv or environment.
-func ambientLeaserefAnnounce(stderr io.Writer, dir, action string, rec leaseref.Record) {
-	mode, configured := os.LookupEnv("FAK_LEASEREF_ANNOUNCE")
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if !configured || mode == "" || mode == "0" || mode == "off" || mode == "false" || mode == "no" || mode == "disabled" {
-		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: public-safe issue announcement disabled (set FAK_LEASEREF_ANNOUNCE=on to opt in)", ambientAnnounceRefusal)
+type ambientLeaserefConfig struct {
+	Mode  string
+	Issue int
+	Repo  string
+}
+
+var ambientLeaserefDefaultConfig ambientLeaserefConfig
+
+func resolveAmbientLeaserefConfig(mode string, issue int, repo string) ambientLeaserefConfig {
+	if strings.TrimSpace(mode) == "" && issue == 0 && strings.TrimSpace(repo) == "" {
+		return ambientLeaserefDefaultConfig
+	}
+	return ambientLeaserefConfig{Mode: mode, Issue: issue, Repo: repo}
+}
+
+func ambientLeaserefAnnounce(stderr io.Writer, dir, action string, rec leaseref.Record, configs ...ambientLeaserefConfig) {
+	config := ambientLeaserefDefaultConfig
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	mode := strings.ToLower(strings.TrimSpace(config.Mode))
+	if mode == "" || mode == "0" || mode == "off" || mode == "false" || mode == "no" || mode == "disabled" {
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: public-safe issue announcement disabled (pass --announce=on to opt in)", ambientAnnounceRefusal)
 		return
 	}
 	if mode == "offline" {
@@ -91,18 +109,18 @@ func ambientLeaserefAnnounce(stderr io.Writer, dir, action string, rec leaseref.
 		return
 	}
 	if mode != "1" && mode != "on" && mode != "true" && mode != "yes" && mode != "enabled" {
-		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement disabled by an unrecognized FAK_LEASEREF_ANNOUNCE value", ambientAnnounceRefusal)
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement disabled by an unrecognized --announce value", ambientAnnounceRefusal)
 		return
 	}
 
-	issue, err := strconv.Atoi(strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_ISSUE")))
-	if err != nil || issue <= 0 {
-		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_ISSUE is missing or invalid", ambientAnnounceRefusal)
+	issue := config.Issue
+	if issue <= 0 {
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: --announce-issue is missing or invalid", ambientAnnounceRefusal)
 		return
 	}
-	repo := strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_REPO"))
+	repo := strings.TrimSpace(config.Repo)
 	if repo == "" {
-		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_REPO is missing", ambientAnnounceRefusal)
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: --announce-repo is missing", ambientAnnounceRefusal)
 		return
 	}
 	keyFile := strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_KEY_FILE"))

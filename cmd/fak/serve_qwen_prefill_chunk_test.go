@@ -29,12 +29,12 @@ func TestServeNativeQwenQ4KPrefillChunkDefaultAndBounds(t *testing.T) {
 
 	for _, tokens := range []int{minNativeQwenQ4KPrefillChunk, defaultNativeQwenQ4KPrefillChunk, maxNativeQwenQ4KPrefillChunk} {
 		t.Run(strconv.Itoa(tokens), func(t *testing.T) {
-			t.Setenv(nativeQwenQ4KPrefillChunkEnv, "ambient")
-			if err := applyServeNativeQwenQ4KPrefillChunk(tokens); err != nil {
+			t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "ambient")
+			if err := validateNativeQwenQ4KPrefillChunk(tokens); err != nil {
 				t.Fatalf("apply %d: %v", tokens, err)
 			}
-			if got := os.Getenv(nativeQwenQ4KPrefillChunkEnv); got != strconv.Itoa(tokens) {
-				t.Fatalf("%s = %q, want %q", nativeQwenQ4KPrefillChunkEnv, got, strconv.Itoa(tokens))
+			if got := os.Getenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS"); got != "ambient" {
+				t.Fatalf("legacy environment mutated to %q", got)
 			}
 		})
 	}
@@ -44,16 +44,16 @@ func TestServeNativeQwenQ4KPrefillChunkRefusesOutOfRangeBeforePropagation(t *tes
 	for _, tokens := range []int{minNativeQwenQ4KPrefillChunk - 1, -1, 0, maxNativeQwenQ4KPrefillChunk + 1} {
 		t.Run(strconv.Itoa(tokens), func(t *testing.T) {
 			const ambient = "do-not-overwrite"
-			t.Setenv(nativeQwenQ4KPrefillChunkEnv, ambient)
-			err := applyServeNativeQwenQ4KPrefillChunk(tokens)
+			t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", ambient)
+			err := validateNativeQwenQ4KPrefillChunk(tokens)
 			if err == nil {
 				t.Fatalf("apply %d succeeded, want refusal", tokens)
 			}
-			if got := os.Getenv(nativeQwenQ4KPrefillChunkEnv); got != ambient {
+			if got := os.Getenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS"); got != ambient {
 				t.Fatalf("refusal propagated %q, want ambient %q preserved", got, ambient)
 			}
-			want := "want 128..4096"
-			if !strings.Contains(err.Error(), serveNativeQwenQ4KPrefillChunkFlag) || !strings.Contains(err.Error(), want) {
+			want := "want 128..8192"
+			if !strings.Contains(err.Error(), nativeQwenQ4KPrefillChunkFlag) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error = %q, want flag and %q", err, want)
 			}
 		})
@@ -62,11 +62,11 @@ func TestServeNativeQwenQ4KPrefillChunkRefusesOutOfRangeBeforePropagation(t *tes
 
 func TestServeNativeQwenQ4KPrefillChunkRefusesAtStartupBeforeLoad(t *testing.T) {
 	if value := os.Getenv("FAK_TEST_NATIVE_QWEN_Q4K_PREFILL_CHUNK_TOKENS"); value != "" {
-		cmdServe([]string{"--" + serveNativeQwenQ4KPrefillChunkFlag, value, "--gguf", "must-not-load.gguf", "--print-effective-config"})
+		cmdServe([]string{"--" + nativeQwenQ4KPrefillChunkFlag, value, "--gguf", "must-not-load.gguf", "--print-effective-config"})
 		return
 	}
 
-	for _, value := range []string{"127", "4097"} {
+	for _, value := range []string{"127", "8193"} {
 		t.Run(value, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestServeNativeQwenQ4KPrefillChunkRefusesAtStartupBeforeLoad$")
 			cmd.Env = append(os.Environ(), "FAK_TEST_NATIVE_QWEN_Q4K_PREFILL_CHUNK_TOKENS="+value)
@@ -75,7 +75,7 @@ func TestServeNativeQwenQ4KPrefillChunkRefusesAtStartupBeforeLoad(t *testing.T) 
 			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
 				t.Fatalf("startup with %s exit = %v; output:\n%s", value, err, output)
 			}
-			want := fmt.Sprintf("--%s=%s: want 128..4096", serveNativeQwenQ4KPrefillChunkFlag, value)
+			want := fmt.Sprintf("--%s=%s: want 128..8192", nativeQwenQ4KPrefillChunkFlag, value)
 			if !strings.Contains(string(output), want) {
 				t.Fatalf("startup with %s omitted pre-load refusal %q:\n%s", value, want, output)
 			}
@@ -88,14 +88,14 @@ func TestServeNativeQwenQ4KPrefillChunkRefusesAtStartupBeforeLoad(t *testing.T) 
 
 func TestServeNativeQwenQ4KPrefillChunkReceiptEvidence(t *testing.T) {
 	fs, sf := newServeFlagSet()
-	if err := fs.Parse([]string{"--" + serveNativeQwenQ4KPrefillChunkFlag, "2048"}); err != nil {
+	if err := fs.Parse([]string{"--" + nativeQwenQ4KPrefillChunkFlag, "2048"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyServeNativeQwenQ4KPrefillChunk(*sf.nativeQwenQ4KPrefillChunk); err != nil {
+	if err := validateNativeQwenQ4KPrefillChunk(*sf.nativeQwenQ4KPrefillChunk); err != nil {
 		t.Fatal(err)
 	}
-	if got := os.Getenv(nativeQwenQ4KPrefillChunkEnv); got != "2048" {
-		t.Fatalf("strict agent contract = %q, want 2048", got)
+	if got := serveNativePlannerConfig(sf).QwenQ4KPrefillChunkTokens; got != 2048 {
+		t.Fatalf("typed planner contract = %d, want 2048", got)
 	}
 
 	report := effectiveServeConfigWithQwen38Runtime(sf, deploymanifest.Manifest{}, false, explicitFlagNames(fs))

@@ -34,8 +34,8 @@ func TestInKernelPlannerCoalescesRealQwenMetalTurns(t *testing.T) {
 		}
 	})
 
-	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "on")
-	p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-qwen35-metal-cohort", true, nil, true)
+	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "off")
+	p := NewInKernelPlannerWithConfig(m, loadProbeTok(t), "synthetic-qwen35-metal-cohort", true, nil, true, InKernelPlannerConfig{Qwen35MetalGDNSequence: true})
 	p.maxNew = 2
 	p.batchDecode = true
 

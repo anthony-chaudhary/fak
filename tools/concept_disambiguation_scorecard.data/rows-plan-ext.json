@@ -993,7 +993,8 @@
       "distinction": "It is an issue-candidate REVIEW gate, NOT a dispatch execution plan and NOT a human code review.",
       "distinct_from": [
         "BuildPlanWithOptions (dogfood issue planner)",
-        "ExecutionPlan (dispatch wave)"
+        "ExecutionPlan (dispatch wave)",
+        "issue10231-studyadjacency-validate-candidate"
       ],
       "aliases": [
         "reviewcandidate"

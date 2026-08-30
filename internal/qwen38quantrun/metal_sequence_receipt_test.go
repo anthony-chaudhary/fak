@@ -27,6 +27,8 @@ func TestValidateQwenMetalSequencePairAdversarialMatrix(t *testing.T) {
 		{"control receipt absent", func(control, _ *QwenMetalSequenceArm) { control.Receipt = nil }, QwenMetalSequenceControl, HoldQwenMetalReceiptMissing},
 		{"control sequence unexpected", func(control, _ *QwenMetalSequenceArm) {
 			control.Receipt.Qwen35MetalForwardSequence = validQwenMetalSequenceReceipt()
+			control.Receipt.Qwen35MetalForwardSequence.SelectorState = model.Qwen35MetalSequenceSelectorOff
+			control.Receipt.Qwen35MetalForwardSequence.EvidenceState = model.Qwen35MetalSequenceEvidenceNotSelected
 		}, QwenMetalSequenceControl, HoldQwenMetalSequenceUnexpected},
 		{"candidate receipt absent", func(_, candidate *QwenMetalSequenceArm) { candidate.Receipt = nil }, QwenMetalSequenceCandidate, HoldQwenMetalReceiptMissing},
 		{"candidate sequence absent", func(_, candidate *QwenMetalSequenceArm) { candidate.Receipt.Qwen35MetalForwardSequence = nil }, QwenMetalSequenceCandidate, HoldQwenMetalSequenceMissing},
@@ -38,6 +40,18 @@ func TestValidateQwenMetalSequencePairAdversarialMatrix(t *testing.T) {
 		}, QwenMetalSequenceCandidate, HoldQwenMetalSequencePath},
 		{"selector off", func(_, candidate *QwenMetalSequenceArm) { candidate.SelectorEnabled = false }, QwenMetalSequenceCandidate, HoldQwenMetalSelectorOff},
 		{"selector path disagreement", func(_, candidate *QwenMetalSequenceArm) { candidate.Receipt.ForwardPath = qwenMetalControlForwardPath }, QwenMetalSequenceCandidate, HoldQwenMetalForwardPath},
+		{"selector receipt disagreement", func(_, candidate *QwenMetalSequenceArm) {
+			candidate.Receipt.Qwen35MetalForwardSequence.SelectorState = model.Qwen35MetalSequenceSelectorOff
+		}, QwenMetalSequenceCandidate, HoldQwenMetalSelectorReceipt},
+		{"execution evidence disagreement", func(_, candidate *QwenMetalSequenceArm) {
+			candidate.Receipt.Qwen35MetalForwardSequence.EvidenceState = model.Qwen35MetalSequenceEvidenceUnsupported
+		}, QwenMetalSequenceCandidate, HoldQwenMetalEvidenceState},
+		{"intermediate wait", func(_, candidate *QwenMetalSequenceArm) {
+			candidate.Receipt.Qwen35MetalForwardSequence.IntermediateWaits = 1
+		}, QwenMetalSequenceCandidate, HoldQwenMetalIntermediateWaits},
+		{"intermediate readback", func(_, candidate *QwenMetalSequenceArm) {
+			candidate.Receipt.Qwen35MetalForwardSequence.IntermediateReadbacks = 1
+		}, QwenMetalSequenceCandidate, HoldQwenMetalIntermediateReads},
 		{"zero tokens", func(_, candidate *QwenMetalSequenceArm) { candidate.Receipt.Qwen35MetalForwardSequence.Tokens = 0 }, QwenMetalSequenceCandidate, HoldQwenMetalSequenceTokens},
 		{"negative tokens", func(_, candidate *QwenMetalSequenceArm) { candidate.Receipt.Qwen35MetalForwardSequence.Tokens = -1 }, QwenMetalSequenceCandidate, HoldQwenMetalSequenceTokens},
 		{"zero command buffers", func(_, candidate *QwenMetalSequenceArm) {
@@ -152,6 +166,10 @@ func validQwenMetalSequencePair() (QwenMetalSequenceArm, QwenMetalSequenceArm) {
 		Receipt: &model.NativeInferenceReceipt{
 			Model: artifact.Model, Engine: qwen38quant.EngineFakNative, Backend: qwenMetalBackend,
 			ForwardPath: qwenMetalControlForwardPath, Q4K: true,
+			Qwen35MetalForwardSequence: &model.Qwen35MetalForwardSequenceReceipt{
+				SelectorState: model.Qwen35MetalSequenceSelectorOff,
+				EvidenceState: model.Qwen35MetalSequenceEvidenceNotSelected,
+			},
 		},
 	}
 	candidate := QwenMetalSequenceArm{
@@ -171,6 +189,7 @@ func validQwenMetalSequencePair() (QwenMetalSequenceArm, QwenMetalSequenceArm) {
 func validQwenMetalSequenceReceipt() *model.Qwen35MetalForwardSequenceReceipt {
 	return &model.Qwen35MetalForwardSequenceReceipt{
 		Path: model.Qwen35MetalGDNSequenceForwardPath, Available: true, Tokens: 32,
+		SelectorState: model.Qwen35MetalSequenceSelectorOn, EvidenceState: model.Qwen35MetalSequenceEvidenceExecuted,
 		CommandBuffers: 1, Encoders: 7, TerminalWaits: 1, TerminalReadbacks: 1,
 		HostUploadBytes: 65536, HostReadbackBytes: 16384, Committed: true, CompletedWait: true,
 	}

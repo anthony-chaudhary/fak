@@ -8,7 +8,7 @@ package headlesslint
 // doing" while the run filed zero gh issues is a doctrine breach even though each
 // line, read alone, is just prose. AGENTS.md makes the rule explicit —
 //
-//	End of run: file the leftovers, don't narrate them.
+//	At run end, dedupe and file every real leftover as an open issue; otherwise say nothing remains.
 //
 // — and #3670 asks for the enforcement that was missing: detect a run whose final
 // summary narrates deferred / out-of-scope follow-ups AND cross-check whether the
@@ -37,7 +37,7 @@ import (
 // code and doctrine stay coupled — TestLeftoversDoctrineBindsAgentsMd asserts
 // AGENTS.md still carries this exact line, so if the doctrine text moves the fold's
 // binding reds instead of silently drifting.
-const Doctrine = "End of run: file the leftovers, don't narrate them."
+const Doctrine = "At run end, dedupe and file every real leftover as an open issue; otherwise say nothing remains."
 
 // LeftoversSchema is the versioned envelope tag for a LeftoversReport.
 const LeftoversSchema = "fak-leftovers-fold/1"

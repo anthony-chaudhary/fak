@@ -10,8 +10,10 @@ package devindex
 // non-repo root must error rather than read as clean.
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,4 +112,57 @@ func TestCheckFreshnessAgainstHEADErrorsOutsideGit(t *testing.T) {
 	if _, err := c.CheckFreshnessAgainstHEAD(); err == nil {
 		t.Fatal("CheckFreshnessAgainstHEAD outside a git repo returned nil error; a failed HEAD read must never masquerade as link-clean")
 	}
+}
+
+// TestLiveInternalGoPackagesResolveToExplicitLaneTrees is the committed/live-tree
+// parity proof for #9326. It enumerates the current package census from disk, then
+// resolves a real Go file through the authored [lanes.trees] prefixes. The usual
+// LaneForPath convention fallback is intentionally excluded: this must fail when a
+// future package lands without a deliberate taxonomy entry.
+func TestLiveInternalGoPackagesResolveToExplicitLaneTrees(t *testing.T) {
+	root := FindRoot(".")
+	cat, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "internal"))
+	if err != nil {
+		t.Fatalf("read internal package census: %v", err)
+	}
+	denominator := 0
+	var unresolved []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, "internal", entry.Name()))
+		if err != nil {
+			t.Fatalf("read internal/%s: %v", entry.Name(), err)
+		}
+		goFile := ""
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".go") {
+				goFile = file.Name()
+				break
+			}
+		}
+		if goFile == "" {
+			continue
+		}
+		denominator++
+		path := filepath.ToSlash(filepath.Join("internal", entry.Name(), goFile))
+		if cat.ExplicitTreeLaneForPath(path) == "" {
+			unresolved = append(unresolved, strings.ToLower(entry.Name()))
+		}
+	}
+	if denominator == 0 {
+		t.Fatal("internal Go package census is empty")
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("%d/%d top-level internal Go packages have no explicit [lanes.trees] owner: %v", len(unresolved), denominator, unresolved)
+	}
+	if drift := cat.UndeclaredLeaves(); len(drift) != 0 {
+		t.Fatalf("explicit tree parity passed but undeclared-leaf detector still reports: %v", drift)
+	}
+	t.Logf("all %d top-level internal Go packages resolve through explicit [lanes.trees] ownership", denominator)
 }

@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,11 +15,64 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
+func TestProfileWelchSignificanceWitnesses(t *testing.T) {
+	t.Run("equal distributions hold", func(t *testing.T) {
+		got := compareProfiles([]float64{99, 100, 101}, []float64{99, 100, 101}).WelchSignificance
+		if got.Verdict != "HOLD" || got.Direction != "none" || got.PValue != 1 {
+			t.Fatalf("Welch significance = %+v, want HOLD/not significant", got)
+		}
+	})
+
+	t.Run("clear speedup is significant in the correct direction", func(t *testing.T) {
+		control := []float64{90, 100, 110}
+		candidate := []float64{60, 70, 80}
+		comparison := compareProfiles(control, candidate)
+		got := comparison.WelchSignificance
+		wantP := oracleWelchTwoSidedP(t, control, candidate)
+		if comparison.Verdict != "KEEP" || got.Verdict != "SIGNIFICANT" || got.Direction != "candidate-faster" ||
+			got.Alpha != nativeProfileWelchAlpha || math.Abs(got.PValue-wantP) > 1e-10 {
+			t.Fatalf("Welch significance = %+v, want significant candidate-faster with p=%g", got, wantP)
+		}
+	})
+
+	t.Run("high variance median gain remains advisory", func(t *testing.T) {
+		got := compareProfiles([]float64{100, 101, 300}, []float64{70, 80, 90})
+		if got.Verdict != "KEEP" {
+			t.Fatalf("authoritative comparison verdict = %q, want unchanged KEEP", got.Verdict)
+		}
+		if got.WelchSignificance.Verdict != "HOLD" || got.WelchSignificance.Direction != "none" || got.WelchSignificance.PValue <= nativeProfileWelchAlpha {
+			t.Fatalf("Welch significance = %+v, want HOLD/not significant", got.WelchSignificance)
+		}
+	})
+
+	t.Run("insufficient samples fail closed", func(t *testing.T) {
+		got := welchSignificance([]float64{100}, []float64{80})
+		if got.Verdict != "HOLD" || got.Direction != "none" || !strings.Contains(got.Reason, "at least two") {
+			t.Fatalf("Welch significance = %+v, want safe insufficient-sample HOLD", got)
+		}
+	})
+
+	t.Run("invalid samples fail closed", func(t *testing.T) {
+		got := welchSignificance([]float64{99, math.NaN(), 101}, []float64{70, 80, 90})
+		if got.Verdict != "HOLD" || got.Direction != "none" || got.PValue != 1 || !strings.Contains(got.Reason, "finite and positive") {
+			t.Fatalf("Welch significance = %+v, want safe invalid-sample HOLD", got)
+		}
+	})
+
+	t.Run("degenerate variance fails closed", func(t *testing.T) {
+		got := welchSignificance([]float64{100, 100, 100}, []float64{80, 80, 80})
+		if got.Verdict != "HOLD" || got.Direction != "none" || !strings.Contains(got.Reason, "variance") {
+			t.Fatalf("Welch significance = %+v, want safe degenerate-variance HOLD", got)
+		}
+	})
+}
+
 func TestCompareProfilesUsesControlMedianForEveryCandidate(t *testing.T) {
 	// Paired-row comparison would admit the 105 ms candidate against its 110 ms
 	// control. The campaign contract compares it with the 100 ms control median.
 	r := compareProfiles([]float64{90, 100, 110}, []float64{80, 105, 70})
-	if r.Verdict != "REJECT" || r.EveryCandidateBelowControlMedian {
+	if r.Verdict != "REJECT" || r.EveryCandidateBelowControlMedian || r.Phase != profileComparisonPhasePrefill ||
+		len(r.ControlPhaseMilliseconds) != 0 || len(r.CandidatePhaseMilliseconds) != 0 {
 		t.Fatalf("comparison = %+v, want REJECT against control median", r)
 	}
 	if got := compareProfiles([]float64{90}, []float64{70}); got.Verdict != "HOLD" {
@@ -78,6 +133,203 @@ func TestNativeProfileCampaignKeepRejectAndDeterministicJSON(t *testing.T) {
 	rejectPaths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{90, 91, 92})
 	if got := compareNativeProfileCampaign(strings.Join(rejectPaths, ",")); got.Verdict != "REJECT" {
 		t.Fatalf("below-threshold campaign = %+v, want REJECT", got)
+	}
+}
+
+func TestNativeProfileComparisonSelectsSteadyDecode(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{100, 102, 98})
+	setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 198}, []float64{150, 152, 151})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode)
+	if got.Verdict != "KEEP" || got.Phase != profileComparisonPhaseSteadyDecode ||
+		!reflect.DeepEqual(got.ControlPhaseMilliseconds, []float64{200, 202, 198}) ||
+		!reflect.DeepEqual(got.CandidatePhaseMilliseconds, []float64{150, 152, 151}) ||
+		len(got.ControlPrefillMilliseconds) != 0 || len(got.CandidatePrefillMilliseconds) != 0 {
+		t.Fatalf("steady-decode comparison = %+v, want typed KEEP", got)
+	}
+}
+
+func TestNativeProfileComparisonM3DecodeHandoffRequiresExactRoutes(t *testing.T) {
+	writeCampaign := func(t *testing.T) []string {
+		paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{100, 102, 98})
+		setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 198}, []float64{150, 152, 151})
+		for i, path := range paths {
+			rewriteComparisonPair(t, path, func(p *nativeperf.ProfileBundle, r *nativeProfileReceipt) {
+				p.Execution.ForwardPath = model.Qwen35MetalGDNSequenceForwardPath
+				r.Controls[nativeProfileSequenceSelector] = nativeProfileSelectorOn
+				mode := model.Qwen35DecodeHandoffControl
+				handoff := model.Qwen35DecodeHandoffReceipt{Mode: mode, ResidentGDNAcceptedCalls: 48 * 64}
+				if i >= nativeProfileArmRuns {
+					mode = model.Qwen35DecodeHandoffMixer
+					handoff = model.Qwen35DecodeHandoffReceipt{Mode: mode, MixerAcceptedCalls: 48 * 64}
+				}
+				r.Controls[nativeProfileDecodeHandoffControl] = mode.String()
+				r.Qwen35DecodeHandoff = &handoff
+			})
+		}
+		return paths
+	}
+	paths := writeCampaign(t)
+
+	got := compareNativeProfileCampaignPhaseAxis(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode, profileComparisonAxisM3DecodeHandoff)
+	if got.Verdict != "KEEP" || got.Selector != nativeProfileDecodeHandoffControl ||
+		got.ControlSelector != model.Qwen35DecodeHandoffControl.String() || got.CandidateSelector != model.Qwen35DecodeHandoffMixer.String() {
+		t.Fatalf("M3 decode-handoff comparison = %+v, want typed KEEP", got)
+	}
+
+	tests := []struct {
+		name   string
+		pair   int
+		edit   func(*nativeProfileReceipt)
+		reason string
+	}{
+		{name: "sequence off", pair: 0, edit: func(r *nativeProfileReceipt) { r.Controls[nativeProfileSequenceSelector] = nativeProfileSelectorOff }, reason: "sequence"},
+		{name: "control mixer call", pair: 1, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.MixerAcceptedCalls = 1 }, reason: "handoff"},
+		{name: "mixer block call", pair: 3, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.BlockAcceptedCalls = 1 }, reason: "handoff"},
+		{name: "mixer missing calls", pair: 4, edit: func(r *nativeProfileReceipt) { r.Qwen35DecodeHandoff.MixerAcceptedCalls = 0 }, reason: "handoff"},
+		{name: "wrong order", pair: 2, edit: func(r *nativeProfileReceipt) {
+			r.Controls[nativeProfileDecodeHandoffControl] = model.Qwen35DecodeHandoffMixer.String()
+			r.Qwen35DecodeHandoff = &model.Qwen35DecodeHandoffReceipt{Mode: model.Qwen35DecodeHandoffMixer, MixerAcceptedCalls: 1}
+		}, reason: "selector"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bad := writeCampaign(t)
+			rewriteComparisonPair(t, bad[test.pair], func(_ *nativeperf.ProfileBundle, r *nativeProfileReceipt) { test.edit(r) })
+			got := compareNativeProfileCampaignPhaseAxis(strings.Join(bad, ","), profileComparisonPhaseSteadyDecode, profileComparisonAxisM3DecodeHandoff)
+			if got.Verdict != "HOLD" || !strings.Contains(strings.ToLower(got.Reason), test.reason) {
+				t.Fatalf("M3 mismatch = %+v, want HOLD containing %q", got, test.reason)
+			}
+		})
+	}
+}
+
+func TestNativeProfileComparisonSelectsDecodeEndToEnd(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 101, 102}, []float64{80, 81, 82})
+	setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 204}, []float64{120, 121, 122})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseEndToEnd)
+	if got.Verdict != "KEEP" || got.Phase != profileComparisonPhaseEndToEnd {
+		t.Fatalf("end-to-end comparison = %+v, want typed KEEP", got)
+	}
+	// The four other canonical phases are 1 ms each, so the full wall includes
+	// load setup, first-token, verification, and teardown around the two arms.
+	if !reflect.DeepEqual(got.ControlPhaseMilliseconds, []float64{304, 307, 310}) ||
+		!reflect.DeepEqual(got.CandidatePhaseMilliseconds, []float64{204, 206, 208}) {
+		t.Fatalf("end-to-end durations = control %v candidate %v", got.ControlPhaseMilliseconds, got.CandidatePhaseMilliseconds)
+	}
+}
+
+func TestNativeProfileComparisonDecodeEndToEndRequiresContiguousCanonicalWall(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{80, 82, 81})
+	rewriteComparisonPair(t, paths[1], func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) {
+		for i := 3; i < len(p.Phases); i++ {
+			p.Phases[i].StartMilliseconds++
+		}
+	})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseEndToEnd)
+	if got.Verdict != "HOLD" || got.Phase != profileComparisonPhaseEndToEnd || !strings.Contains(got.Reason, "contiguous") {
+		t.Fatalf("non-contiguous end-to-end comparison = %+v, want typed HOLD", got)
+	}
+}
+
+func TestNativeProfileComparisonDecodePhaseFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*nativeperf.ProfileBundle)
+	}{
+		{name: "missing", edit: func(p *nativeperf.ProfileBundle) { p.Phases = p.Phases[:3] }},
+		{name: "duplicate", edit: func(p *nativeperf.ProfileBundle) { p.Phases[0].Name = "steady-decode" }},
+		{name: "mismatched", edit: func(p *nativeperf.ProfileBundle) { p.Phases[3].Name = "decode" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{80, 82, 81})
+			rewriteComparisonPair(t, paths[2], func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) { test.edit(p) })
+			got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode)
+			if got.Verdict != "HOLD" || got.Phase != profileComparisonPhaseSteadyDecode || !strings.Contains(strings.ToLower(got.Reason), "phase") {
+				t.Fatalf("%s selected phase = %+v, want typed HOLD phase reason", test.name, got)
+			}
+		})
+	}
+
+	got := compareNativeProfileCampaignPhase("unused", profileComparisonPhase("decode"))
+	if got.Verdict != "HOLD" || !strings.Contains(got.Reason, "invalid") {
+		t.Fatalf("invalid typed selector = %+v, want HOLD", got)
+	}
+}
+
+func TestProfileComparisonDecodePhaseFlagIsTyped(t *testing.T) {
+	phase := profileComparisonPhasePrefill
+	if err := phase.Set("steady-decode"); err != nil || phase != profileComparisonPhaseSteadyDecode {
+		t.Fatalf("set steady-decode = %q, err=%v", phase, err)
+	}
+	if err := phase.Set("position-3"); err == nil || phase != profileComparisonPhaseSteadyDecode {
+		t.Fatalf("invalid phase changed selection to %q, err=%v", phase, err)
+	}
+	axis := profileComparisonAxisSequence
+	if err := axis.Set("m3-decode-handoff"); err != nil || axis != profileComparisonAxisM3DecodeHandoff {
+		t.Fatalf("set M3 axis = %q, err=%v", axis, err)
+	}
+	if err := axis.Set("mixed"); err == nil || axis != profileComparisonAxisM3DecodeHandoff {
+		t.Fatalf("invalid axis changed selection to %q, err=%v", axis, err)
+	}
+}
+
+func TestWriteProfileComparisonStampsCanonicalLineageReceipt(t *testing.T) {
+	t.Setenv("FAK_BENCH_UTC", "2026-08-29T12:34:56Z")
+	t.Setenv("FAK_BENCH_COMMIT", strings.Repeat("a", 40))
+	t.Setenv("FAK_BENCH_NODE", "modelbench-test-node")
+	t.Setenv("FAK_BENCH_RUN_ID", "profile-comparison-test")
+	t.Setenv("FAK_BENCH_HARNESS_NAME", "modelbench")
+	t.Setenv("FAK_BENCH_ARTIFACT", "")
+
+	out := filepath.Join(t.TempDir(), "profile-comparison.json")
+	f := testCompleteBenchFlags()
+	*f.out = out
+	want := compareProfiles([]float64{100, 102, 98}, []float64{80, 82, 81})
+	if err := writeProfileComparison(f, want); err != nil {
+		t.Fatalf("writeProfileComparison: %v", err)
+	}
+
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Schema  string `json:"schema"`
+		Verdict string `json:"verdict"`
+		Lineage struct {
+			Schema    string `json:"lineage_schema"`
+			Commit    string `json:"git_commit"`
+			Node      string `json:"node"`
+			Timestamp string `json:"utc"`
+		} `json:"lineage"`
+		Artifact struct {
+			Schema  string `json:"schema"`
+			RunID   string `json:"run_id"`
+			Lineage struct {
+				SourceArtifact string `json:"source_artifact"`
+			} `json:"lineage"`
+		} `json:"benchmark_artifact"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("decode stamped comparison: %v\n%s", err, b)
+	}
+	if got.Schema != profileComparisonSchema || got.Verdict != want.Verdict {
+		t.Fatalf("comparison payload changed: schema=%q verdict=%q", got.Schema, got.Verdict)
+	}
+	if got.Lineage.Schema != "fak-bench-lineage/1" ||
+		got.Lineage.Commit != strings.Repeat("a", 40) ||
+		got.Lineage.Node != "modelbench-test-node" ||
+		got.Lineage.Timestamp != "2026-08-29T12:34:56Z" {
+		t.Fatalf("lineage = %+v, want canonical fixed test stamp", got.Lineage)
+	}
+	if got.Artifact.Schema != "fak-benchmark-artifact/1" ||
+		got.Artifact.RunID != "profile-comparison-test" ||
+		got.Artifact.Lineage.SourceArtifact != filepath.ToSlash(out) {
+		t.Fatalf("benchmark artifact receipt = %+v, want source %q", got.Artifact, filepath.ToSlash(out))
 	}
 }
 
@@ -174,6 +426,54 @@ func TestNativeProfileCampaignRequiresExactCardinality(t *testing.T) {
 	}
 }
 
+// oracleWelchTwoSidedP intentionally uses direct numerical integration of the
+// Student-t density rather than the implementation's incomplete-beta path.
+func oracleWelchTwoSidedP(t *testing.T, control, candidate []float64) float64 {
+	t.Helper()
+	meanVariance := func(xs []float64) (float64, float64) {
+		var sum float64
+		for _, x := range xs {
+			sum += x
+		}
+		mean := sum / float64(len(xs))
+		var squared float64
+		for _, x := range xs {
+			delta := x - mean
+			squared += delta * delta
+		}
+		return mean, squared / float64(len(xs)-1)
+	}
+	controlMean, controlVariance := meanVariance(control)
+	candidateMean, candidateVariance := meanVariance(candidate)
+	controlTerm := controlVariance / float64(len(control))
+	candidateMeanVariance := candidateVariance / float64(len(candidate))
+	tStatistic := math.Abs(controlMean-candidateMean) / math.Sqrt(controlTerm+candidateMeanVariance)
+	degreesFreedom := (controlTerm + candidateMeanVariance) * (controlTerm + candidateMeanVariance) /
+		(controlTerm*controlTerm/float64(len(control)-1) + candidateMeanVariance*candidateMeanVariance/float64(len(candidate)-1))
+
+	logCoefficient, _ := math.Lgamma((degreesFreedom + 1) / 2)
+	denominator, _ := math.Lgamma(degreesFreedom / 2)
+	coefficient := math.Exp(logCoefficient-denominator) / math.Sqrt(degreesFreedom*math.Pi)
+	density := func(x float64) float64 {
+		return coefficient * math.Pow(1+x*x/degreesFreedom, -(degreesFreedom+1)/2)
+	}
+	const intervals = 20000 // even, deterministic, and ample for this bounded fixture.
+	width := tStatistic / intervals
+	sum := density(0) + density(tStatistic)
+	for i := 1; i < intervals; i++ {
+		weight := 2.0
+		if i%2 == 1 {
+			weight = 4
+		}
+		sum += weight * density(float64(i)*width)
+	}
+	p := 1 - 2*sum*width/3
+	if p < 0 || p > 1 || math.IsNaN(p) {
+		t.Fatalf("oracle produced invalid p-value %g", p)
+	}
+	return p
+}
+
 func writeComparisonCampaign(t *testing.T, control, candidate []float64) []string {
 	t.Helper()
 	if len(control) != nativeProfileArmRuns || len(candidate) != nativeProfileArmRuns {
@@ -198,7 +498,28 @@ func writeComparisonCampaign(t *testing.T, control, candidate []float64) []strin
 }
 
 func setComparisonPrefillDuration(profile *nativeperf.ProfileBundle, duration float64) {
-	profile.Phases[1].DurationMilliseconds = duration
+	setComparisonPhaseDuration(profile, "prefill", duration)
+}
+
+func setComparisonCampaignPhaseDurations(t *testing.T, paths []string, phase string, control, candidate []float64) {
+	t.Helper()
+	durations := append(append([]float64(nil), control...), candidate...)
+	if len(paths) != nativeProfileCampaignRuns || len(durations) != nativeProfileCampaignRuns {
+		t.Fatal("test campaign phase edit requires 6 paths and 3+3 durations")
+	}
+	for i, path := range paths {
+		rewriteComparisonPair(t, path, func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) {
+			setComparisonPhaseDuration(p, phase, durations[i])
+		})
+	}
+}
+
+func setComparisonPhaseDuration(profile *nativeperf.ProfileBundle, phaseName string, duration float64) {
+	for i := range profile.Phases {
+		if profile.Phases[i].Name == phaseName {
+			profile.Phases[i].DurationMilliseconds = duration
+		}
+	}
 	start := 0.0
 	for i := range profile.Phases {
 		profile.Phases[i].StartMilliseconds = start

@@ -67,6 +67,9 @@ func TestRunAccountsDiscoverAndList(t *testing.T) {
 // explicit forensic escape hatch over the canonical registry.
 func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
 	home := t.TempDir()
+	// Codex discovery is intentionally independent of --home. Pin its user-home
+	// seam so this fixture cannot absorb the operator's real ~/.codex seat.
+	t.Setenv("FLEET_USER_HOME", home)
 	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
 	needs := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
 
@@ -191,6 +194,8 @@ func TestRunAccountsListJSONRoster(t *testing.T) {
 
 func TestRunAccountsStatusReport(t *testing.T) {
 	home := t.TempDir()
+	// Keep automatic Codex discovery inside the fixture rather than the host home.
+	t.Setenv("FLEET_USER_HOME", home)
 	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
 	needsLogin := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
 

@@ -560,6 +560,7 @@ func (s *NativeScheduler) newLaneSession(q4k bool) *model.Session {
 	if q4k {
 		sess.Quant = true
 		sess.Q4K = true
+		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
 	}
 	return sess
 }
@@ -616,6 +617,7 @@ func (s *NativeScheduler) sessionFromCache(cache *model.KVCache, q4k bool) *mode
 	if q4k {
 		sess.Quant = true
 		sess.Q4K = true
+		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
 	}
 	return sess
 }

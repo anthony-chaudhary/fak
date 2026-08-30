@@ -215,7 +215,7 @@
       "kind": "metric",
       "definition": "The fak_gateway_inference_cached_prompt_tokens_total Prometheus counter is the normalized, provider-agnostic count of prompt (input) tokens the upstream PROVIDER served from its own prompt cache across served turns, reading 0 on the in-kernel path (no provider).",
       "distinction": "It is the PROVIDER-SIDE cache_read token counter, not CacheableTokens (the fak-side eligibility count) and not the KV cache (local tensor storage that needs no provider).",
-      "distinct_from": ["x4-cache-cacheabletokens", "kv-cache"],
+      "distinct_from": ["x4-cache-cacheabletokens", "kv-cache", "issue9909-cached-prompt-hit-ratio"],
       "aliases": ["fak_gateway_inference_cached_prompt_tokens_total", "cachedTok"],
       "grounding": "fakgatewayinferencecachedprompttokenstotal",
       "grounding_kind": "metric",

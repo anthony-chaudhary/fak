@@ -40,6 +40,7 @@ func runChatModel(argv []string) {
 		fs.PrintDefaults()
 	}
 	backendName := fs.String("backend", "", "compute backend for decode: empty = the CPU reference path; a registered device like 'cuda' runs through the GPU HAL (needs a -tags cuda build + a reachable GPU)")
+	runNativeFlags := registerRunNativeControlFlags(fs)
 	system := fs.String("system", "", "optional system prompt prepended to the conversation")
 	maxTokens := fs.Int("max-tokens", 512, "maximum number of tokens to generate per turn")
 	temp := fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
@@ -60,12 +61,16 @@ func runChatModel(argv []string) {
 	if err := fs.Parse(argv[1:]); err != nil {
 		os.Exit(2)
 	}
+	if err := validateNativeQwenQ4KPrefillChunk(*runNativeFlags.prefillChunk); err != nil {
+		fmt.Fprintln(os.Stderr, "fak run:", err)
+		os.Exit(2)
+	}
 	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	planner := buildRunPlanner(ctx, modelRef, *backendName)
+	planner := buildRunPlanner(ctx, modelRef, *backendName, runNativeFlags.config())
 
 	opts := runSampleOpts(*maxTokens, *temp, *topP, *topK, *frequencyPenalty, *presencePenalty)
 	if prompt != "" {
@@ -134,7 +139,11 @@ func cacheTurnLine(before, after cacheobs.Stats, show bool) string {
 // buildRunPlanner resolves the model ref, loads the weights + tokenizer through the
 // shared serve loaders, and returns a ready in-kernel planner. It exits the process
 // with a clear message on any load failure — there is no daemon to keep alive.
-func buildRunPlanner(ctx context.Context, modelRef, backendName string) *agent.InKernelPlanner {
+func registerRunNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
+	return registerNativeControlFlags(fs)
+}
+
+func buildRunPlanner(ctx context.Context, modelRef, backendName string, nativeConfig nativeControlConfig) *agent.InKernelPlanner {
 	ref, expanded := modelreg.Resolve(modelRef)
 	if expanded {
 		fmt.Fprintf(os.Stderr, "fak run: %s → %s\n", modelRef, ref)
@@ -158,6 +167,10 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string) *agent.I
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
 		os.Exit(2)
 	}
+	if err := applyNativeControls(backend, nativeConfig); err != nil {
+		fmt.Fprintln(os.Stderr, "fak run:", err)
+		os.Exit(2)
+	}
 	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil, 1)
 	if model == nil {
 		fmt.Fprintf(os.Stderr, "fak run: failed to load %q into the in-kernel engine\n", ref)
@@ -170,7 +183,7 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string) *agent.I
 	}
 	// metal=false: `fak run`'s first cut targets the CPU reference path and the cuda
 	// HAL; the Apple-Metal session forward is reachable through `fak serve --metal`.
-	return agent.NewInKernelPlanner(model, tok, modelRef, q4k, backend, false)
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelRef, q4k, backend, false, nativeConfig.Planner)
 }
 
 // runSampleOpts folds the CLI sampling flags into planner SampleOpts. Sampling and

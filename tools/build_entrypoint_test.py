@@ -10,7 +10,11 @@ the stamp again instead of routing through the script — WITHOUT building anyth
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -48,7 +52,7 @@ class BuildEntrypointExistsTest(unittest.TestCase):
     def test_is_parameterized_by_env(self) -> None:
         # Callers vary these; a missed knob silently changes a shipped binary's name,
         # stamp, or tag set, so pin that the seams the consumers rely on exist.
-        for knob in ("OUT", "VERSION", "TAGS"):
+        for knob in ("OUT", "VERSION", "TAGS", "PGO"):
             self.assertIn(knob, self.text, f"build.sh must honor ${knob}")
 
     def test_cgo_agnostic(self) -> None:
@@ -103,6 +107,93 @@ class ProfileSelectorTest(unittest.TestCase):
                       "`make build` must emit ./fak through the dev profile of the entrypoint")
         self.assertIn("PROFILE=race sh scripts/build.sh", mk,
                       "`make build-race` must build through the race profile of the entrypoint")
+
+
+class PGOSelectorTest(unittest.TestCase):
+    """#10179 — PGO is one explicit, pinned release-build input with `off` rollback."""
+
+    def setUp(self) -> None:
+        self.sh = shutil.which("sh")
+        if self.sh is None:
+            self.skipTest("sh is required to exercise scripts/build.sh")
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.root = Path(self.tempdir.name)
+        fake_go = self.root / "go"
+        fake_go.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@"\n', encoding="utf-8")
+        fake_go.chmod(0o755)
+
+    def run_build(self, profile: str, pgo: str | None = None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update({
+            "PATH": str(self.root) + os.pathsep + env.get("PATH", ""),
+            "OUT": str(self.root / "unused-fak"),
+            "PROFILE": profile,
+            "VERSION": "test-version",
+        })
+        if pgo is None:
+            env.pop("PGO", None)
+        else:
+            env["PGO"] = pgo
+        return subprocess.run(
+            [self.sh, str(BUILD_SH)],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    @staticmethod
+    def argv(result: subprocess.CompletedProcess[str]) -> list[str]:
+        return result.stdout.splitlines()
+
+    def test_release_defaults_to_one_explicit_pgo_off_argument(self) -> None:
+        result = self.run_build("release")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = self.argv(result)
+        self.assertEqual(argv.count("-pgo"), 1, argv)
+        self.assertEqual(argv[argv.index("-pgo") + 1], "off", argv)
+
+    def test_release_propagates_one_explicit_profile_path_without_word_splitting(self) -> None:
+        profile = self.root / "representative profile.pgo"
+        profile.write_bytes(b"profile fixture")
+        result = self.run_build("release", str(profile))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = self.argv(result)
+        self.assertEqual(argv.count("-pgo"), 1, argv)
+        self.assertEqual(argv[argv.index("-pgo") + 1], str(profile), argv)
+
+    def test_dev_and_race_preserve_ordinary_build_but_refuse_nonoff_pgo(self) -> None:
+        profile = self.root / "representative.pgo"
+        profile.write_bytes(b"profile fixture")
+        for build_profile in ("dev", "race"):
+            with self.subTest(profile=build_profile, pgo="unset"):
+                ordinary = self.run_build(build_profile)
+                self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+                self.assertNotIn("-pgo", self.argv(ordinary))
+            with self.subTest(profile=build_profile, pgo="profile"):
+                refused = self.run_build(build_profile, str(profile))
+                self.assertEqual(refused.returncode, 2, refused.stderr)
+                self.assertEqual(refused.stdout, "", "go must not run after refusal")
+                self.assertIn("release-only", refused.stderr)
+
+    def test_release_refuses_ambiguous_or_missing_profile_before_go_build(self) -> None:
+        empty_profile = self.root / "empty.pgo"
+        empty_profile.write_bytes(b"")
+        profile_directory = self.root / "profile-directory"
+        profile_directory.mkdir()
+        for pgo in (
+            "",
+            "auto",
+            str(self.root / "missing.pgo"),
+            str(empty_profile),
+            str(profile_directory),
+        ):
+            with self.subTest(pgo=pgo):
+                result = self.run_build("release", pgo)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "", "go must not run after refusal")
 
 
 class MakeBuildGraphTest(unittest.TestCase):
@@ -170,6 +261,14 @@ class NoInlineRecipeDriftTest(unittest.TestCase):
                 STAMP,
                 path.read_text(encoding="utf-8"),
                 f"{name} re-inlined the stamp recipe; route it through scripts/build.sh (#3709)",
+            )
+
+    def test_no_consumer_reinlines_the_pgo_input(self) -> None:
+        for name, path in CONSUMERS.items():
+            self.assertNotIn(
+                "-pgo",
+                path.read_text(encoding="utf-8"),
+                f"{name} re-inlined PGO flags; route them through scripts/build.sh (#10179)",
             )
 
     def test_wired_into_ci(self) -> None:

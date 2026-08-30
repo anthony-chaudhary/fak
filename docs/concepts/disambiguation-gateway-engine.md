@@ -19,3 +19,10 @@ This map positions the current `gateway-engine` coverage backlog. Each entry nam
 - **`resolvetoolengine`** — the exact `gateway-engine` symbol `resolvetoolengine`; use this spelling for that operation rather than the undifferentiated family name.
 - **`sessiongateway`** — the exact `gateway-engine` symbol `sessiongateway`; use this spelling for that operation rather than the undifferentiated family name.
 - **`startgatewayusagesnapshotloop`** — the exact `gateway-engine` symbol `startgatewayusagesnapshotloop`; use this spelling for that operation rather than the undifferentiated family name.
+
+
+### fak_gateway_inference_output_tokens_per_second (blended generation throughput)
+
+fak_gateway_inference_output_tokens_per_second is the gateway Prometheus gauge for cumulative completion tokens divided by full inference wall-clock across served turns, including prefill time.
+
+**Distinct from:** It is blended model generation throughput over full inference time, not the tool vDSO hit path and not decode-only throughput, which subtracts prefill before dividing.

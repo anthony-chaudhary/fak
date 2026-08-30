@@ -61,7 +61,13 @@ func loadTokenDefaultSources(root string) tokenDefaultSources {
 		s.read("internal/gateway/config.go"),
 		s.read("internal/gateway/server_state.go"),
 	}, "\n")
-	s.tui = s.read("cmd/fak/tui.go")
+	// The console agent launcher was split from the TUI coordinator in #10049.
+	// Inspect both concern-aligned files so a source move cannot be mistaken for
+	// disabled token-saving behavior.
+	s.tui = strings.Join([]string{
+		s.read("cmd/fak/tui.go"),
+		s.read("cmd/fak/tui_agent.go"),
+	}, "\n")
 	s.messages = s.read("internal/gateway/messages.go")
 	s.agentSeam = s.read("internal/agent/ctxplan_seam.go")
 	return s
@@ -230,9 +236,9 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 	// that daemon's observability is /metrics + /debug/vars + the access log, not a per-turn
 	// stderr line. Lock both on-by-default front doors so the visible layer cannot silently regress.
 	require(strings.Contains(guard, `fs.Bool("debug-stats", true`), "guard.go must default --debug-stats ON so the observable cache/token-value debug layer is visible by default on the Claude-OAuth path")
-	require(strings.Contains(tui, `fs.Bool("debug-stats", true`), "tui.go must default --debug-stats to true in the console agent launcher (native per-turn token-usage overlay)")
-	require(strings.Contains(tui, `"--debug-stats"`), "tui.go must wire --debug-stats into the guard command for the console launcher overlay")
-	require(strings.Contains(tui, "gateway.DefaultCompactHistoryBudget") && strings.Contains(tui, "gateway.DefaultElideResultBytes"), "tui.go must pass the active token-saving guard defaults explicitly so they appear in dry-run output")
+	require(strings.Contains(tui, `fs.Bool("debug-stats", true`), "console agent source must default --debug-stats to true (native per-turn token-usage overlay)")
+	require(strings.Contains(tui, `"--debug-stats"`), "console agent source must wire --debug-stats into the guard command for the launcher overlay")
+	require(strings.Contains(tui, "gateway.DefaultCompactHistoryBudget") && strings.Contains(tui, "gateway.DefaultElideResultBytes"), "console agent source must pass the active token-saving guard defaults explicitly so they appear in dry-run output")
 
 	// ---- effective-context envelope provenance (#2947) ----
 	// Budget SIZE is governed by the long-context defaults doctrine (docs/long-context-defaults.md):

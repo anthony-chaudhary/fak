@@ -72,6 +72,19 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				return argDeny(pr, "allow_glob "+pr.Glob), true, notes
 			}
 		case ArgDenyRegex:
+			// Clearing Go's build cache is decided by executed command shape rather
+			// than raw text. The shipped regex is only a selector; quoted examples,
+			// grep patterns and commit messages remain inert mentions.
+			if isBuildCacheCleanArgRule(pr) {
+				if present && commandClearsGoBuildCache(val) {
+					if pr.Advisory {
+						note(pr, "build_cache_clean go clean -cache")
+						continue
+					}
+					return argDeny(pr, "build_cache_clean go clean -cache"), true, notes
+				}
+				continue
+			}
 			// The RCE download-pipe rule (#1465) is decided STRUCTURALLY, not by the raw
 			// regex. A regex over the un-tokenized command fails both ways: it false-positives
 			// on quoted echo/grep content (`echo 'curl x | sh'` -> a false POLICY_BLOCK, which

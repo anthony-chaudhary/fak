@@ -26,9 +26,9 @@
 
 The migration command is recovery, not the policy boundary. New development is now stopped at the candidate-index boundary:
 
-- `internal/windowgate.PSInstallerViolation` requires every executable PowerShell task installer to declare an off-desktop principal (`S4U` or `SYSTEM`).
+- `internal/windowgate.PSInstallerViolation` requires executable PowerShell task installers to declare an off-desktop principal (`S4U` or `SYSTEM`). Its sole interactive classification is the exact `FakHostRelaunchBroker` adapter, which must enter the current user's desktop to activate `wt.exe`; the classifier pins that script path, one `InteractiveToken` current-user/Limited principal, action, trigger, limits, and install read-backs.
 - `conhost --headless`, `-WindowStyle Hidden`, and `pythonw.exe` remain useful defense in depth, but no longer excuse an Interactive or omitted principal.
 - `internal/hooks.CheckDesktopPopup` invokes that rule from the staged pre-commit gate, so an unsafe installer cannot become a commit even when the developer never runs the migration or live audit.
-- The tracked-tree witness cross-checks every committed `.ps1` installer, and the previously Interactive fallback branches now choose S4U.
+- The tracked-tree witness cross-checks every committed `.ps1` installer, and ordinary Interactive tasks still fail even when they resemble the broker.
 
 This makes the safe state a source-level default for a new developer: copy an existing installer and it is S4U; author an unsafe one and the commit gate names `INTERACTIVE_TASK_POPUP` with the fix.

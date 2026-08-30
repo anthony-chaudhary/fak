@@ -1,0 +1,85 @@
+{
+  "rows": [
+    {
+      "id": "issue10049-guard-session-start-install",
+      "canonical": "guardSessionStartInstall (guard SessionStart hook install receipt)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardSessionStartInstall is the typed receipt returned while fak guard installs a provider-native SessionStart affordance hook; it records whether the hook was applied, how it is managed, and which settings/state paths own it.",
+      "distinction": "The INSTALL RECEIPT describing one launch-time hook mutation, not guardsessionstart (the hook command that later emits the first-turn hint) and not a running session record.",
+      "distinct_from": [
+        "guardsessionstart",
+        "issue10225-route-guard-operator-subcommand"
+      ],
+      "aliases": [],
+      "grounding": "guardSessionStartInstall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10049-load-tui-sessions",
+      "canonical": "loadTUISessions (TUI session-list loader)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "loadTUISessions is the cmd/fak input adapter that loads a gateway SessionListResponse either from an operator-provided JSON snapshot or from the live /v1/fak/sessions endpoint for TUI rendering and control selection.",
+      "distinction": "The INPUT LOADER for the TUI session view, not tuiSessionReport (the derived render model), tuiSessionsSchema (its JSON schema tag), or the gateway session runtime itself.",
+      "distinct_from": [
+        "x-session-runtime-tuisessionreport",
+        "x-session-runtime-tuisessionsschema",
+        "issue10049-tui-sessions-json-input"
+      ],
+      "aliases": [],
+      "grounding": "loadTUISessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10049-tui-guard-json-input",
+      "canonical": "guardJSON (--guard-json TUI artifact inputs)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "guardJSON is the repeatable cmd/fak flag binding that carries operator-supplied guard artifact JSON paths into the standalone guard pane or the overview guard card.",
+      "distinction": "The INPUT PATH LIST for TUI rendering, not tuiGuardReport (the parsed pane model), tuiGuardSchema (its payload schema), or a live guard gate.",
+      "distinct_from": [
+        "x2-guard-gate-tuiguardreport",
+        "x-goal-guard-gate-tui-guard-schema"
+      ],
+      "aliases": [],
+      "grounding": "guardJSON",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10049-tui-sessions-json-input",
+      "canonical": "sessionsJSON (--sessions-json TUI snapshot input)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "sessionsJSON is the cmd/fak flag binding that carries an operator-supplied SessionListResponse snapshot path into the standalone sessions view or the overview sessions card.",
+      "distinction": "The INPUT FILE PATH selecting a read-only session snapshot, not loadTUISessions (the adapter that reads it or calls the live gateway), tuiSessionReport (the derived render model), or tuiSessionsSchema (the output schema tag).",
+      "distinct_from": [
+        "issue10049-load-tui-sessions",
+        "x-session-runtime-tuisessionreport",
+        "x-session-runtime-tuisessionsschema"
+      ],
+      "aliases": [],
+      "grounding": "sessionsJSON",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

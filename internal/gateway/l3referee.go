@@ -7,7 +7,7 @@ package gateway
 // of the real Claude API — a byte-exact passthrough hop where fak rules on the metadata
 // and never mutates the forwarded bytes (memory fak-api-passthrough-first-class).
 //
-// THE COMPOSITION. The external L3 tier (CAMA-complete is the reference target) is a
+// THE COMPOSITION. The external L3 tier is represented by a private remote-KV system: a
 // world-class build of the three layers fak does NOT change — routing, addressing,
 // fusion — and is SEMANTICS-FREE by its own design: it "does NOT verify content;
 // assumes the client hash is the source of truth; no checksums, no re-validation"
@@ -91,8 +91,8 @@ type L3PageMeta struct {
 }
 
 // L3Backend is the minimal external L3 tier the sidecar rides: a content-addressed
-// get/set keyed by the page's content digest. The CAMA-complete store is the named real
-// integration target (talking to it over its wire protocol is follow-on); MockL3Backend
+// get/set keyed by the page's content digest. A private remote-KV store is the real integration
+// target (talking to it over its wire protocol is follow-on); MockL3Backend
 // is the local exemplar the acceptance gate runs against with no network dependency. The
 // backend moves bytes and holds opaque meta; it makes NO trust decision — that is the
 // sidecar's job on the control path.
@@ -186,8 +186,8 @@ func (s *RefereeSidecar) Get(pageKey, readerTag string) (payload []byte, meta L3
 
 // MockL3Backend is the LOCAL exemplar L3 tier the acceptance gate runs against: an
 // in-memory map keyed by the page's content digest — the same content-addressing the
-// real CAMA-complete store uses — standing in for the external pool reached over RDMA in
-// production (no CAMA, no network). On Set it keeps its OWN copy of the bytes, as a real
+// real external store uses — standing in for the pool reached over RDMA in production
+// (no remote service, no network). On Set it keeps its OWN copy of the bytes, as a real
 // L3 pool holds the bytes independently of the caller's buffer; on Get it returns that
 // SAME stored slice, so a sidecar that forwards it unmodified hands the caller a slice
 // identity-equal to the tier's — the §6.5 control-path-only witness. Not concurrency-safe

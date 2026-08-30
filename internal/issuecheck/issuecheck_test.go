@@ -12,7 +12,7 @@ func TestCatalogIsVersionedClosedAndImmutable(t *testing.T) {
 		t.Fatalf("catalog version = %q", CatalogVersion)
 	}
 	checks := Catalog()
-	if len(checks) != 30 {
+	if len(checks) != 30 { //boundarylint:ignore CHANGE_DETECTOR_TEST the canonical issue checklist currently defines exactly 30 required checks
 		t.Fatalf("catalog has %d checks, want 30", len(checks))
 	}
 	seen := map[string]bool{}

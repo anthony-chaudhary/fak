@@ -58,13 +58,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	completed := false
 	defer func() {
 		if !completed {
-			p.finishRequest(id)
+			p.completeObservation(&obs, started)
 		}
 	}()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		message := fmt.Sprintf("read inbound request body: %v; retry with a readable request body", err)
+		obs.Error = message
+		http.Error(w, message, http.StatusBadRequest)
 		return
 	}
 	var envelope requestEnvelope
@@ -74,7 +76,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := p.Backend.ResolveReference(r.URL)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		message := fmt.Sprintf("construct backend request: %v; retry with a valid HTTP method and request target", err)
+		obs.Error = message
+		http.Error(w, message, http.StatusBadGateway)
 		return
 	}
 	req.Header = r.Header.Clone()
@@ -85,10 +89,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		obs.Error = err.Error()
+		message := fmt.Sprintf("reach backend: %v; verify the backend URL and availability, then retry", err)
+		obs.Error = message
 		p.completeObservation(&obs, started)
 		completed = true
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, message, http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

@@ -8,7 +8,7 @@ description: "A hash-pinned local study of how TensorBuild represents build iden
 **Observed:** 2026-08-15
 **Source:** local snapshot at `C:\work\tb\tensor-build-main`
 **Snapshot identity:** SHA-256 `bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288` over 6,358 sorted path/content digests (218,328,563 bytes)
-**Module declaration:** `github.com/anthony-saronic/tensor-build`
+**Module declaration:** owner-qualified private path, redacted from the public copy
 **Revision caveat:** this copy is an uncommitted snapshot nested inside an unrelated enclosing `C:\work` Git checkout. Its source repository is unavailable through the current GitHub credentials, so no trustworthy source commit, issue, PR, release, or blame history could be recovered. File hashes and the whole-snapshot digest above are the reproducibility pin.
 **License disposition:** no root `LICENSE`, `COPYING`, or `NOTICE` was present and the declared GitHub repository was unavailable. This pass borrows concepts only; it copies no TensorBuild implementation or prose.
 

@@ -32,6 +32,11 @@ func ConfigureDetachedCommand(_ *exec.Cmd) {}
 // *JobObject uniformly across build tags.
 type JobObject struct{}
 
+// ManagedJobConfig mirrors the Windows aggregate Job Object limit input.
+type ManagedJobConfig struct {
+	MemoryLimitBytes uint64
+}
+
 // Close is a no-op off Windows.
 func (j *JobObject) Close() error { return nil }
 
@@ -50,7 +55,7 @@ func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
 }
 
 // StartManagedAgentInNewJob preserves the ordinary process lifecycle off Windows.
-func StartManagedAgentInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+func StartManagedAgentInNewJob(cmd *exec.Cmd, _ ManagedJobConfig) (*JobObject, error) {
 	return StartInNewJob(cmd)
 }
 

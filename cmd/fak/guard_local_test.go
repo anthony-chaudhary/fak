@@ -1,10 +1,43 @@
 package main
 
 import (
+	"flag"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestGuardNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
+	for name, value := range map[string]string{
+		"FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS": "4096",
+		"FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE":     "0",
+		"FAK_Q4K_GATEUP_SLAB":                        "0",
+		"FAK_PREFIX_PROFILE":                         "ambient.jsonl",
+		"FAK_VULKAN_Q4K_PROFILE":                     "0",
+		"FAK_VULKAN_STAGE_Q4K":                       "0",
+	} {
+		t.Setenv(name, value)
+	}
+	fs := flag.NewFlagSet("guard-native", flag.ContinueOnError)
+	flags := registerGuardNativeControlFlags(fs)
+	if err := fs.Parse([]string{
+		"--native-qwen-q4k-prefill-chunk-tokens=8192",
+		"--native-qwen35-metal-gdn-sequence",
+		"--native-q4k-gateup-slab",
+		"--native-prefix-profile=guard.jsonl",
+		"--vulkan-q4k-profile",
+		"--vulkan-stage-q4k",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeQwenQ4KPrefillChunk(*flags.prefillChunk); err != nil {
+		t.Fatalf("guard rejected the established explicit 8192 contract: %v", err)
+	}
+	got := flags.config()
+	if got.Planner.QwenQ4KPrefillChunkTokens != 8192 || !got.Planner.Qwen35MetalGDNSequence || !got.Planner.Q4KGateUpOutputSlab || got.PrefixProfile != "guard.jsonl" || !got.VulkanQ4KProfile || !got.VulkanStageQ4K {
+		t.Fatalf("guard native config did not preserve explicit flags: %+v", got)
+	}
+}
 
 // mkResults builds an ordered probe-result slice over the real guardLocalBackends() list,
 // marking which backends are live and what models each reports, so the precedence tests

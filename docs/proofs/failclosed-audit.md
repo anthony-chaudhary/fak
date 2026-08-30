@@ -145,7 +145,7 @@ cross-checked against the live registry in code.
 | MICROHARNESS_WITNESS | warn | fail-open | advisory; nudges bounded harness changes toward a staged test or typed receipt |
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
 | CART_BEFORE_HORSE | warn | fail-open | advisory by design (#2521); new leaves establish an applied spine before downstream proof/performance breadth |
-| GOFMT | warn | fail-open | advisory; commit-boundary twin of make ci gofmt-check |
+| GOFMT | block | fail-open | blocking commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
 | COMMENT_QUALITY | warn | fail-open | advisory; changed-lines-only comments should explain durable why |
 
@@ -176,6 +176,7 @@ reds, and a row naming no live reason reds.
 
 | Entry | Default severity | Fail mode | Note |
 |---|---|---|---|
+| BUILD_CACHE_CLEAN_RACE | deny | fail-closed | ambient Go build-cache deletion is blocked while peer builds may consume it |
 | FOREGROUND_NETWORK_LOOP | warn | fail-open | hint returned, call proceeds |
 | FOREGROUND_POWERSHELL_INVENTORY | warn | fail-open | hint returned, call proceeds |
 | FOREGROUND_SLEEP | warn | fail-open | hint returned, call proceeds |
@@ -217,6 +218,7 @@ above.
 | BLOCKED_BY_KNOWN_BAD | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BLOCKED_BY_OPEN_PREREQ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BROADCAST_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| BUILD_CACHE_CLEAN_RACE | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | DEPTH_NOT_CARRIED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
@@ -226,6 +228,7 @@ above.
 | CONTROL_SESSION_TERMINAL | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CORE_SELF_MODIFY | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | CRASH_RESTART_EXHAUSTED | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
+| DISAMBIGUATION_TIMEOUT | refusal | floor-absent | no enforcing floor declared — bounded timeout refusal vocabulary |
 | DOOM_LOOP | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | FILE_ADMISSION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | FLEETBUS_APPLY_REFUSED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
@@ -288,11 +291,13 @@ above.
 | STALE_BASE_DELETION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | STALE_RECALL | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | STEER_NO_OWNED_LOOP | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| SYSTEM_COMMIT_HEADROOM | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | TABULAR_ELIGIBILITY_LOW | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | TICK_BUSY | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
 | TICK_LOCK_ERROR | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | UNAUTHENTICATED_OFF_HOST_BIND | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | UNTIERED_LEAF | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| VALUECHAIN_UNWITNESSED | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
 | VOLATILE_SPAN | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | WEBHOOK_URL_NOT_ALLOWLISTED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | WORKSPACE_PATH_UNMAPPED | advisory | floor-declared | `Floor:` cite in the dos.toml block |

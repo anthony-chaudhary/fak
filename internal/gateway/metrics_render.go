@@ -745,6 +745,9 @@ func writeBlobMetrics(b *strings.Builder) {
 // proxy workload (no in-kernel model) the tap is never fed and these series stay 0.
 func writeKVPrefixMetrics(b *strings.Builder) {
 	s := cacheobs.Default.Snapshot()
+	writeHelpType(b, "fak_gateway_kv_prefix_tier_accesses_rejected_total",
+		"Invalid KV-prefix tier observations rejected before attribution because a tier, operation, outcome, or backend fell outside its closed vocabulary.", "counter")
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_accesses_rejected_total %d\n", s.RejectedTierAccesses)
 	writeCounter(b, "fak_gateway_kv_prefix_turns_total",
 		"In-kernel model turns observed for KV-prefix reuse (the planner reported a prompt-token count).", int64(s.Turns))
 	writeCounter(b, "fak_gateway_kv_prefix_prompt_tokens_total",

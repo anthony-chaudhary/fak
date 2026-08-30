@@ -391,7 +391,8 @@
       "definition": "The versioned schema-identifier constant tuiGuardSchema = \"fak.tui.guard.v1\" that tags the guard pane's data-model version: it is passed as the Pane.Schema in the TUI plugin registry and stamped on every emitted tuiGuardReport.",
       "distinction": "tuiGuardSchema is a versioned schema-TAG string (a constant, not a field description); tuiGuardReport is the actual data-model struct (Schema/Counts/Rows/Sources) that carries that tag in its Schema field.",
       "distinct_from": [
-        "x2-guard-gate-tuiguardreport"
+        "x2-guard-gate-tuiguardreport",
+        "issue10049-tui-guard-json-input"
       ],
       "aliases": [],
       "grounding": "tuiguardschema",

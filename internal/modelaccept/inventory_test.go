@@ -124,11 +124,26 @@ func TestReadinessInventoryExactLadderJoinIsScopedAndReadbackStable(t *testing.T
 		t.Fatalf("row=%+v", row)
 	}
 	evidence := row.LadderEvidence
-	if evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Runtime != "vLLM 0.27.1" || evidence.CapturedAt != "2026-08-22T14:12:32.298303-07:00" || row.DeclaredAt != evidence.CapturedAt || evidence.RuntimePair.BaselineSHA != qwen38ExactBaselineRuntime || evidence.RuntimePair.CandidateSHA != qwen38ExactCandidateRuntime || evidence.CorpusSHA256 != qwen38ExactCorpusSHA || evidence.EnvironmentSHA256 != qwen38ExactEnvironmentSHA || evidence.Correctness != (CorrectnessPair{BaselinePassed: 3, CandidatePassed: 3, Trials: 3}) || evidence.P95.BaselineMetric != qwen38ExactBaselineP95MS || evidence.P95.CandidateMetric != qwen38ExactCandidateP95MS || evidence.P95.Improvement != qwen38ExactImprovementPct || len(evidence.ArtifactHashes) != 6 {
+	if evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Runtime != "vLLM 0.27.1" || evidence.CapturedAt != "2026-08-22T14:12:32.298303-07:00" || row.DeclaredAt != evidence.CapturedAt || evidence.RuntimePair.BaselineSHA != qwen38ExactBaselineRuntime || evidence.RuntimePair.CandidateSHA != qwen38ExactCandidateRuntime || evidence.CorpusSHA256 != qwen38ExactCorpusSHA || evidence.EnvironmentSHA256 != qwen38ExactEnvironmentSHA || evidence.Correctness != (CorrectnessPair{BaselinePassed: 3, CandidatePassed: 3, Trials: 3}) || evidence.P95.BaselineMetric != qwen38ExactBaselineP95MS || evidence.P95.CandidateMetric != qwen38ExactCandidateP95MS || evidence.P95.Improvement != qwen38ExactImprovementPct {
 		t.Fatalf("evidence=%+v", evidence)
 	}
+	if len(evidence.ArtifactHashes) != len(qwen38ExactArtifactHashes) {
+		t.Fatalf("artifact hashes = %+v, want one per exact artifact", evidence.ArtifactHashes)
+	}
+	for _, artifact := range evidence.ArtifactHashes {
+		if want, ok := qwen38ExactArtifactHashes[artifact.Path]; !ok || !strings.EqualFold(artifact.SHA256, want) {
+			t.Fatalf("artifact hash is not bound to exact profile: %+v", artifact)
+		}
+	}
+	wantCells := qwen38ReadinessCells(ReadinessCellPass)
 	passCells := 0
-	for _, cell := range row.ReadinessCells {
+	if len(row.ReadinessCells) != len(wantCells) {
+		t.Fatalf("readiness cells=%+v, want canonical cells=%+v", row.ReadinessCells, wantCells)
+	}
+	for i, cell := range row.ReadinessCells {
+		if cell != wantCells[i] {
+			t.Fatalf("readiness cell[%d]=%+v, want %+v", i, cell, wantCells[i])
+		}
 		if cell.Owner == "" || !strings.HasPrefix(cell.Owner, "https://github.com/anthony-chaudhary/fak/issues/") {
 			t.Fatalf("cell has no owning issue: %+v", cell)
 		}
@@ -142,7 +157,7 @@ func TestReadinessInventoryExactLadderJoinIsScopedAndReadbackStable(t *testing.T
 			t.Fatalf("unsupported cell status=%+v", cell)
 		}
 	}
-	if len(row.ReadinessCells) != 8 || passCells != 1 {
+	if passCells != 1 {
 		t.Fatalf("readiness cells=%+v", row.ReadinessCells)
 	}
 	if got.Semantics == nil || !strings.Contains(got.Semantics.Default, "explicitly selected") || !strings.Contains(got.Semantics.Replacement, "code-pinned identity") || !strings.Contains(got.Semantics.Rollback, "no serving") {

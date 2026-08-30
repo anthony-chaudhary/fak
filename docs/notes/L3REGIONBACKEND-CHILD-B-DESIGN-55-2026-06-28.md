@@ -17,7 +17,7 @@ description: "Design artifact for #55 specifying L3RegionBackend, an L3-backed d
 
 ## 0. The one-paragraph thesis
 
-The external L3 KV-cache tier (the cama-complete reference: a Go cache server + vLLM/SGLang connectors
+The external L3 KV-cache tier (represented by a private Go cache server with vLLM/SGLang connectors
 over a remote DRAM pool, content-addressed by `SHA256(prefix)`, slab-allocated, W-TinyLFU-evicted) is a
 world-class router/addresser/fusion engine that is **semantics-free by design** — it places opaque cells
 by a client-supplied hash and never verifies, evicts-by-content, or attests. A control-path-only

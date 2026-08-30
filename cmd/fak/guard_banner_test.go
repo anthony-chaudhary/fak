@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -85,6 +88,33 @@ func TestGuardDefaultLaunchFailureSpillsFullReport(t *testing.T) {
 				t.Fatalf("default launch failure did not spill full report: %q", out.String())
 			}
 		})
+	}
+}
+
+// TestGuardHealthyDefaultLaunchKeepsStructuredProfilesOffStderr is the captured-render
+// witness for #10187. The real guard entry point still resolves and injects the default
+// profiles into a supported child, but a healthy AUTO launch must not dump their structured
+// JSON capture into the child's terminal scrollback.
+func TestGuardHealthyDefaultLaunchKeepsStructuredProfilesOffStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the helper needs a basename recognized as claude; Windows batch shims retain .bat")
+	}
+	childDir := t.TempDir()
+	child := filepath.Join(childDir, "claude")
+	if err := os.WriteFile(child, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, out, timedOut := runGuardE2E(t,
+		"--provider openai --base-url http://127.0.0.1:9 --audit off --lease mode=off --precompact-hook off --deny-all-continue off --toolproc-hooks off --task-handoff off --operator-directed off --mcp-register=false --fleet-bus=false --resource-stats=false --debug-stats=false -- "+child,
+		map[string]string{"CLAUDE_CONFIG_DIR": t.TempDir(), "FAK_USAGE_LOG": "off"},
+	)
+	if timedOut || code != 0 {
+		t.Fatalf("healthy default guard launch code=%d timedOut=%v\n%s", code, timedOut, out)
+	}
+	for _, unwanted := range []string{"response-profile {", `"schema": "fak.guard-profiles.v2"`} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("healthy default launch leaked raw profile capture %q:\n%s", unwanted, out)
+		}
 	}
 }
 

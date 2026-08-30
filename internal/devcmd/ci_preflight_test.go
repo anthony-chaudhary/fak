@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
+	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
 func TestCIPreflightGoArgsArePathPortable(t *testing.T) {
@@ -213,6 +214,119 @@ func TestCIPreflightAcceptsFreshCommittedDisambiguationArtifact(t *testing.T) {
 	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
 	if code != 0 || !res.OK {
 		t.Fatalf("code=%d result=%+v", code, res)
+	}
+}
+
+func TestCIPreflightRejectsStaleCommittedStudySelfInventory(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "seed", map[string]string{"README.md": "one\n"})
+	manifest, err := studymonitor.BuildSelfInventory(repo, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data bytes.Buffer
+	if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, repo, git, "manifest", map[string]string{studymonitor.DefaultSelfInventoryPath: data.String()})
+	commitFiles(t, repo, git, "tracked mutation", map[string]string{"README.md": "two\n"})
+
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 1 || res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+	for _, failure := range res.Failures {
+		if failure.Step == "study-self-inventory" && strings.Contains(failure.Detail, "[content_changed] README.md") {
+			return
+		}
+	}
+	t.Fatalf("missing typed study-self-inventory failure: %+v", res.Failures)
+}
+
+func TestCIPreflightAcceptsFreshCommittedStudySelfInventory(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "seed", map[string]string{"README.md": "one\n"})
+	manifest, err := studymonitor.BuildSelfInventory(repo, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data bytes.Buffer
+	if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, repo, git, "manifest", map[string]string{studymonitor.DefaultSelfInventoryPath: data.String()})
+
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 0 || !res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+}
+
+func TestCIPreflightStudySelfInventoryMutationDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+		want   []string
+	}{
+		{
+			name: "add", mutate: func(t *testing.T, root string) {
+				writeStudySelfFile(t, root, "b.go", "package b\n")
+			},
+			want: []string{"[path_added] b.go"},
+		},
+		{
+			name: "delete", mutate: func(t *testing.T, root string) {
+				if err := os.Remove(filepath.Join(root, "a.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []string{"[path_removed] a.md"},
+		},
+		{
+			name: "rename", mutate: func(t *testing.T, root string) {
+				if err := os.Rename(filepath.Join(root, "a.md"), filepath.Join(root, "z.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []string{"[path_removed] a.md", "[path_added] z.md"},
+		},
+		{
+			name: "reclassification", mutate: func(t *testing.T, root string) {
+				mutateStudySelfManifestClass(t, root, "runtime_source")
+			},
+			want: []string{"[classification_changed] a.md"},
+		},
+		{
+			name: "unknown class", mutate: func(t *testing.T, root string) {
+				mutateStudySelfManifestClass(t, root, "unknown_future_class")
+			},
+			want: []string{"[classification_changed] a.md"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeStudySelfFile(t, root, "a.md", "original\n")
+			manifest, err := studymonitor.BuildSelfInventory(root, "anthony-chaudhary/fak", studymonitor.DefaultSelfInventoryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var data bytes.Buffer
+			if err := studymonitor.WriteSelfInventory(&data, manifest); err != nil {
+				t.Fatal(err)
+			}
+			writeStudySelfFile(t, root, studymonitor.DefaultSelfInventoryPath, data.String())
+			tt.mutate(t, root)
+			detail, checked, ok := checkStudySelfInventory(root)
+			if !checked || ok {
+				t.Fatalf("checked=%v ok=%v detail=%q", checked, ok, detail)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(detail, want) {
+					t.Fatalf("detail=%q missing %q", detail, want)
+				}
+			}
+		})
 	}
 }
 

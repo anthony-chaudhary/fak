@@ -125,7 +125,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
-		job, startErr := windowgate.StartManagedAgentInNewJob(child)
+		resourcePolicy := guardResourcePolicyConfigured()
+		job, startErr := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if startErr != nil {
 			startupProgress.Abort()
 			terminalGuardChild(child, startErr, "launch_failed")
@@ -147,7 +148,6 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		go func() { wait <- child.Wait() }()
 		var runErr error
 		resourceStop := make(chan struct{})
-		resourcePolicy := guardResourcePolicyFromEnv()
 		resourcePolicy.Stop = resourceStop
 		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
 		select {
@@ -352,7 +352,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
-		job, err := windowgate.StartManagedAgentInNewJob(child)
+		resourcePolicy := guardResourcePolicyConfigured()
+		job, err := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if err != nil {
 			startupProgress.Abort()
 			// Start/containment failing IS a launch failure: either the child never ran, or
@@ -380,7 +381,6 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			wait <- runErr
 		}()
 		resourceStop := make(chan struct{})
-		resourcePolicy := guardResourcePolicyFromEnv()
 		resourcePolicy.Stop = resourceStop
 		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
 		event := waitGuardChild(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {

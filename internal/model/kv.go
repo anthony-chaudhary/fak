@@ -50,6 +50,12 @@ type PrefixSnapshot struct {
 	qwen35     *qwen35HALState
 	Backend    compute.Backend
 	Tokens     int
+	// Native MTP consumes the exact pre-final-norm residual history. It is part of
+	// session state just as surely as KV: restoring one without the other can make
+	// a rejected draft visible to the next proposal even though attention rolled back.
+	captureTargetHidden bool
+	targetHidden        [][]float32
+	targetHiddenTokens  []int
 }
 
 // PrefixSnapshot captures a deep clone suitable for shared-prefix admission.
@@ -67,6 +73,11 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 		tokens = s.halKV.Len()
 	}
 	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens}
+	s.targetHiddenMu.RLock()
+	out.captureTargetHidden = s.captureTargetHidden
+	out.targetHidden = cloneTargetHidden(s.targetHidden)
+	out.targetHiddenTokens = append([]int(nil), s.targetHiddenTokens...)
+	s.targetHiddenMu.RUnlock()
 	if s.Backend == nil {
 		return out, nil
 	}
@@ -90,7 +101,12 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
-	out := &PrefixSnapshot{owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens}
+	out := &PrefixSnapshot{
+		owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens,
+		captureTargetHidden: p.captureTargetHidden,
+		targetHidden:        cloneTargetHidden(p.targetHidden),
+		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
+	}
 	if p.Backend == nil {
 		return out, nil
 	}
@@ -137,6 +153,11 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	s.Cache = p.Cache
 	p.Cache = nil
 	p.halLineage = tokenLineage{}
+	s.targetHiddenMu.Lock()
+	s.captureTargetHidden = p.captureTargetHidden
+	s.targetHidden, s.targetHiddenTokens = p.targetHidden, p.targetHiddenTokens
+	s.targetHiddenMu.Unlock()
+	p.targetHidden, p.targetHiddenTokens = nil, nil
 	return nil
 }
 
@@ -154,6 +175,15 @@ func (p *PrefixSnapshot) Close() {
 		p.qwen35 = nil
 	}
 	p.Cache = nil
+	p.targetHidden, p.targetHiddenTokens = nil, nil
+}
+
+func cloneTargetHidden(in [][]float32) [][]float32 {
+	out := make([][]float32, len(in))
+	for i := range in {
+		out[i] = append([]float32(nil), in[i]...)
+	}
+	return out
 }
 
 const q4kMLPOutputSlabReceiptSchema = "fak-q4k-gateup-slab/v1"
@@ -174,9 +204,12 @@ type Session struct {
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
-	Backend    compute.Backend
-	halKV      compute.KVStore
-	halLineage tokenLineage
+	Backend compute.Backend
+	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
+	// gate/up output slab. The default remains off until the measured KEEP gate lands.
+	Q4KGateUpOutputSlab bool
+	halKV               compute.KVStore
+	halLineage          tokenLineage
 	// halW memoizes weights staged onto Backend so a device session uploads each weight
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)

@@ -54,10 +54,18 @@ func TestRunSessionHistoryAggregateAndDrillDown(t *testing.T) {
 	}
 }
 
-func TestRunSessionHistoryRequiresIndex(t *testing.T) {
+func TestRunSessionHistoryMissingDefaultIndexUsesRuntimeBehavior(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	var out, errOut bytes.Buffer
-	if code := runSessionHistory(&out, &errOut, nil); code != 2 || !strings.Contains(errOut.String(), "--index is required") {
+	if code := runSessionHistory(&out, &errOut, nil); code != 0 || strings.Contains(errOut.String(), "--index is required") {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report sessionmine.HistoryReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Schema != "fak-session-history/1" || report.Metrics.Sessions != 0 || len(report.Sessions) != 0 {
+		t.Fatalf("missing default index should use the empty-index runtime contract, got %+v", report)
 	}
 }
 

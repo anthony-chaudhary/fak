@@ -143,9 +143,11 @@ type QwenEmptyUsageAssessment struct {
 
 // AssessQwenEmptyUsage defines the exact launch window as the half-open
 // interval [StartedAt, StartedAt+Window). Provider usage makes the launch
-// healthy immediately, but no zero-usage observation is terminal before the
-// configured end: event and process state may still be followed by buffered
-// usage evidence. At the end, a completed turn, exited process, or still-live
+// healthy immediately. A structurally completed turn is also terminal: when
+// its readable, parseable event stream contains no provider counters it settles
+// as explicitly empty without manufacturing usage. Other zero-usage observations
+// remain pending until the configured end because process state may still be
+// followed by buffered usage evidence. At the end, an exited process or still-live
 // launch without usage is empty. Structurally non-applicable launches,
 // explicitly usage-not-expected workers (such as preflight-only workers), and
 // launches that never started are the closed valid exclusions. Missing or
@@ -194,14 +196,14 @@ func AssessQwenEmptyUsage(in QwenEmptyUsageInput) QwenEmptyUsageAssessment {
 		out.Reason = QwenUsageReasonEvidenceUnobservable
 		return out
 	}
-	if windowOpen {
-		out.State = QwenUsageStatePending
-		out.Reason = QwenUsageReasonWindowOpen
-		return out
-	}
 	if in.Usage.TurnsStarted > 0 && in.Usage.TurnsCompleted >= in.Usage.TurnsStarted {
 		out.State = QwenUsageStateEmpty
 		out.Reason = QwenUsageReasonTurnCompletedWithoutUsage
+		return out
+	}
+	if windowOpen {
+		out.State = QwenUsageStatePending
+		out.Reason = QwenUsageReasonWindowOpen
 		return out
 	}
 	if !in.ProcessAlive {

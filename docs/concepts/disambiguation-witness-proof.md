@@ -26,3 +26,10 @@ This map positions the current `witness-proof` coverage backlog. Each entry name
 ### Native performance graph vocabulary
 
 - **`ClassWitnessed`** — the exact `witness-proof` symbol `ClassWitnessed`; marks an observed throughput value backed by the named benchmark receipt or issue evidence; projected floors and roofs remain `ClassHypothesis` and cannot use this class.
+
+
+### DisambiguationWitnesses (worker-land scorecard proof bundle)
+
+DisambiguationWitnesses is the workerworktree landing receipt that groups the before, isolated-worktree, and post-apply concept-scorecard witnesses under one shared timeout authority.
+
+**Distinct from:** It is the typed three-view proof bundle consumed by managed worker landing, not worktreewitness, which runs an arbitrary command in a detached trunk worktree.

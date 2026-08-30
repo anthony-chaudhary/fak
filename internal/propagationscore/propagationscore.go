@@ -79,6 +79,7 @@ var Family = []Member{
 	{Verb: "dogfood-score", CmdFile: "cmd/fak/dogfoodscore.go", PkgDir: "internal/dogfoodscore", DebtKey: "dogfood_debt"},
 	{Verb: "concept-usage-score", CmdFile: "cmd/fak/conceptusagescore.go", PkgDir: "internal/conceptusage", DebtKey: "concept_usage_debt"},
 	{Verb: "support-maturity-scorecard", CmdFile: "cmd/fak/supportmaturityscore.go", PkgDir: "internal/supportmaturityscore", DebtKey: "support_maturity_debt"},
+	{Verb: "performance-rsi-scorecard", CmdFile: "cmd/fak/perfrsiscore.go", PkgDir: "internal/perfrsiscore", DebtKey: "performance_rsi_debt"},
 	{Verb: "token-defaults-scorecard", CmdFile: "cmd/fak/token_defaults.go", PkgDir: "internal/defaultvaluescore", DebtKey: "token_defaults_debt"},
 	{Verb: "guard-rsi-scorecard", CmdFile: "cmd/fak/guardrsi.go", PkgDir: "internal/guardrsi", DebtKey: "guard_rsi_debt"},
 	{Verb: "loop-index-scorecard", CmdFile: "cmd/fak/loopscore.go", PkgDir: "internal/loopscore", DebtKey: "loopindex_debt"},

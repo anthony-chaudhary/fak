@@ -71,7 +71,6 @@ This map positions the current `guard-gate` coverage backlog. Each entry names t
 - **`skippedgates`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
 - **`startguardlifecycleserver`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
 - **`watchdogguards`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
-- **`breathgate`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
 - **`guardactiveenv`** — the exact guard-gate symbol, not the broader family label.
 - **`guardcodexoauthplaceholderapikey`** — the exact guard-gate symbol, not the broader family label.
 - **`guardalloweffectivereadlayers`** — the exact guard-gate symbol, not the broader family label.
@@ -229,3 +228,10 @@ splitPackedQueryGate separates each packed query projection head into its query 
 shared_expert_gate is the hidden-to-one sigmoid projection that scales Qwen3.5 shared_expert output before that always-on feed-forward contribution is added to routed expert output.
 
 **Distinct from:** It gates the singular Qwen3.5 shared expert in the MoE feed-forward path. It is not splitPackedQueryGate or the per-head attention output gate, and it is not the plural ungated shared_experts layout used by GLM.
+
+
+### guardrailClusters (agent-readiness rule catalog)
+
+guardrailClusters is the agent-readiness catalog of labeled rule-token alternatives used to measure whether AGENTS.md surfaces each required shared-trunk operating guardrail.
+
+**Distinct from:** It is a documentation-analysis catalog for detecting rule coverage, not a guardrail safety boundary and not a runtime gate that admits or refuses an action.

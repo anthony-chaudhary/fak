@@ -2,7 +2,9 @@ package workdelivery
 
 import (
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func compileUnit(id string, admission AdmissionState, paths ...string) WorkUnit {
@@ -50,6 +52,39 @@ func TestDeriveCompileSetRejectsConflictingArtifact(t *testing.T) {
 	})
 	var admissionErr *CompileAdmissionError
 	if !errors.As(err, &admissionErr) || admissionErr.Code != "CONFLICTING_DECLARATION" {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestDeriveCompileSetAtIsDeterministicAndUsesOneObservationTime(t *testing.T) {
+	observedAt := time.Date(2026, 8, 17, 18, 30, 0, 0, time.FixedZone("fixture", -7*60*60))
+	units := []WorkUnit{
+		compileUnit("recorded", AdmissionExcluded, "fixture/recorded.go"),
+		compileUnit("active", AdmissionAdmitted, "fixture/active.go"),
+	}
+	first, err := DeriveCompileSetAt(units, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := DeriveCompileSetAt(units, observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same explicit-time producer input drifted:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+	wantTime := observedAt.UTC()
+	for _, receipt := range first.Receipts {
+		if !receipt.ObservedAt.Equal(wantTime) || receipt.ObservedAt.Location() != time.UTC {
+			t.Fatalf("receipt %q observed_at=%s, want UTC %s", receipt.UnitID, receipt.ObservedAt, wantTime)
+		}
+	}
+}
+
+func TestDeriveCompileSetAtRejectsMissingObservationTime(t *testing.T) {
+	_, err := DeriveCompileSetAt([]WorkUnit{compileUnit("active", AdmissionAdmitted, "fixture/active.go")}, time.Time{})
+	var admissionErr *CompileAdmissionError
+	if !errors.As(err, &admissionErr) || admissionErr.Code != "MISSING_OBSERVED_AT" {
 		t.Fatalf("error = %#v", err)
 	}
 }

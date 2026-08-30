@@ -610,7 +610,8 @@ func TestStageWindowsServiceExecutableCapturedACLPlanIsOrderedAndIdempotent(t *t
 		"acl-dir:" + machineDir,
 		"acl-dir:" + binaryDir,
 	}
-	if len(events) != 5 || !reflect.DeepEqual(events[:3], wantFirst) || !strings.HasPrefix(events[3], "acl-binary:") || events[4] != "publish:"+target {
+	terminalEvents := len(wantFirst)
+	if len(events) != terminalEvents+2 || !reflect.DeepEqual(events[:terminalEvents], wantFirst) || !strings.HasPrefix(events[terminalEvents], "acl-binary:") || events[terminalEvents+1] != "publish:"+target {
 		t.Fatalf("captured first-install plan=%v", events)
 	}
 

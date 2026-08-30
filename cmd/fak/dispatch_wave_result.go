@@ -167,6 +167,15 @@ func renderDispatchWave(rec map[string]any) string {
 	if reason := dispatchMapString(rec, "stop_reason"); reason != "" {
 		fmt.Fprintf(&b, "  stop: %s\n", reason)
 	}
+	if admission, ok := rec["finish_first_admission"].(dispatchFinishFirstAdmission); ok {
+		fmt.Fprintf(&b, "  finish_first: state=%s fresh_allowed=%d fresh_denied=%d finishers_allowed=%d override=%t recovery=%d/%d\n",
+			admission.State, admission.AllowedFreshStarts, admission.DeniedFreshStarts,
+			admission.AllowedFinishers, admission.Override,
+			admission.Recovery.ObservedConvergingWindows, admission.Recovery.RequiredConvergingWindows)
+		if admission.Reason != "" {
+			fmt.Fprintf(&b, "    reason=%s\n", admission.Reason)
+		}
+	}
 	if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok {
 		fmt.Fprintf(&b, "  prelaunch_gate: action=%s ready=%d refused=%d errors=%d target_count=%d\n",
 			gate.Action, gate.ReadyCount, gate.RefusedCount, gate.ErrorCount, gate.TargetCount)
