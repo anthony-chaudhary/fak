@@ -910,3 +910,115 @@ func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
 		t.Fatalf("progress routing: stdout=%q stderr=%q", stdout.String(), got)
 	}
 }
+
+func TestRunBuildWorktreeGCDefaultsToPlanAndEmitsStableReceipt(t *testing.T) {
+	previous := collectBuildWorktreeGC
+	t.Cleanup(func() { collectBuildWorktreeGC = previous })
+
+	var got selfinstall.BuildGCOptions
+	collectBuildWorktreeGC = func(_ context.Context, _ selfinstall.Runner, root string, opts selfinstall.BuildGCOptions) selfinstall.BuildGCReport {
+		if root != "/repo" {
+			t.Fatalf("repo root = %q, want /repo", root)
+		}
+		got = opts
+		return selfinstall.BuildGCReport{
+			Mode:      "dry-run",
+			MinAgeSec: 1800,
+			Worktrees: []selfinstall.BuildGCWorktree{{Path: "/tmp/fak-selfupdate-build-41", Eligible: true, Reason: "eligible"}},
+			Failures:  []selfinstall.BuildGCFailure{{Path: "/tmp/fak-selfupdate-build-42", Reason: "kept"}},
+			WouldReap: 1,
+			Reaped:    0,
+		}
+	}
+
+	var out strings.Builder
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	if err := runBuildWorktreeGC(context.Background(), &out, "/repo", false, now); err != nil {
+		t.Fatal(err)
+	}
+	if got.Apply {
+		t.Fatal("dry-run unexpectedly enabled apply")
+	}
+	if got.Now != now || got.MinAge != selfinstall.DefaultBuildGCMinAge || got.BaseRef != "origin/main" {
+		t.Fatalf("collector options = %+v", got)
+	}
+
+	var receipt buildWorktreeGCReceipt
+	if err := json.Unmarshal([]byte(out.String()), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v\n%s", err, out.String())
+	}
+	if receipt.Schema != buildWorktreeGCReceiptSchema || receipt.Mode != "plan" {
+		t.Fatalf("receipt context = schema %q mode %q", receipt.Schema, receipt.Mode)
+	}
+	if receipt.Report.Mode != "dry-run" || receipt.Report.MinAgeSec != 1800 || receipt.Report.WouldReap != 1 || receipt.Report.Reaped != 0 || len(receipt.Report.Worktrees) != 1 || len(receipt.Report.Failures) != 1 {
+		t.Fatalf("receipt report lost BuildGCReport fields: %+v", receipt.Report)
+	}
+}
+
+func TestRunBuildWorktreeGCApplyReachesExistingCollector(t *testing.T) {
+	previous := collectBuildWorktreeGC
+	t.Cleanup(func() { collectBuildWorktreeGC = previous })
+
+	collectBuildWorktreeGC = func(_ context.Context, _ selfinstall.Runner, _ string, opts selfinstall.BuildGCOptions) selfinstall.BuildGCReport {
+		if !opts.Apply {
+			t.Fatal("apply mode did not reach GarbageCollectStaleBuilds options")
+		}
+		return selfinstall.BuildGCReport{Mode: "apply", Worktrees: []selfinstall.BuildGCWorktree{}, Failures: []selfinstall.BuildGCFailure{}, Reaped: 1}
+	}
+
+	var out strings.Builder
+	if err := runBuildWorktreeGC(context.Background(), &out, "/repo", true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var receipt buildWorktreeGCReceipt
+	if err := json.Unmarshal([]byte(out.String()), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Mode != "apply" || receipt.Report.Mode != "apply" || receipt.Report.Reaped != 1 {
+		t.Fatalf("apply receipt = %+v", receipt)
+	}
+}
+
+func TestSelfUpdateBuildGCModeReturnsBeforeUpdatePipeline(t *testing.T) {
+	previousCollector := collectBuildWorktreeGC
+	previousStdout := os.Stdout
+	t.Cleanup(func() {
+		collectBuildWorktreeGC = previousCollector
+		os.Stdout = previousStdout
+	})
+
+	called := 0
+	collectBuildWorktreeGC = func(_ context.Context, _ selfinstall.Runner, root string, opts selfinstall.BuildGCOptions) selfinstall.BuildGCReport {
+		called++
+		if root != "/repo" || opts.Apply {
+			t.Fatalf("collector call root=%q apply=%v", root, opts.Apply)
+		}
+		return selfinstall.BuildGCReport{Mode: "dry-run", Worktrees: []selfinstall.BuildGCWorktree{}, Failures: []selfinstall.BuildGCFailure{}}
+	}
+
+	stdout, err := os.CreateTemp(t.TempDir(), "self-update-build-gc-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = stdout
+	Run([]string{"--build-gc", "--root", "/repo"})
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = previousStdout
+
+	if called != 1 {
+		t.Fatalf("collector calls = %d, want 1", called)
+	}
+	data, err := os.ReadFile(stdout.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt buildWorktreeGCReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatalf("GC-only output is not the stable JSON receipt: %v\n%s", err, data)
+	}
+	if receipt.Schema != buildWorktreeGCReceiptSchema || receipt.Mode != "plan" {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+}
