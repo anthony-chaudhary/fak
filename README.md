@@ -4,17 +4,36 @@
 
 # fak — configure your agents for the task at hand
 
-fak is an agent kernel: one Go binary that manages context, models, tools, policy, and receipts.
+**One binary puts a fast, enforceable boundary between your agent and every tool call.**
 
-> In short: see the latest Mac, AMD, and NVIDIA evidence first; open the indexes for history.
+> **In short:** run the offline proof, then wrap your existing agent with a capability floor.
 
-[Try fak](#try-fak), or see the [interactive showcase](docs/showcase.html) for the guided tour.
+## Try fak
+
+Run the offline proof with no key, model, or GPU:
+
+```bash
+go build -o fak ./cmd/fak
+./fak agent --offline  # -> task completed (booked)
+```
+
+The poisoned result and destructive operation are blocked; the safe task still completes.
+
+Or wrap the agent you already use. In this example, fak forwards Codex's existing subscription credential and blocks tools outside the configured capability allow-list. The floor limits what the agent can do without stopping the safe task:
+
+```bash
+fak guard -- codex
+```
+
+The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
 ## Latest hardware results — 2026-08-28
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be
-historical or held when no newer quality-complete measurement exists.
+historical or held when no newer quality-complete measurement exists. The table reports measured
+throughput, for example 2.3–2.9 decode tok/s on Mac, with claim boundaries beside each result
+and links to its receipt.
 
 | Platform | Latest witnessed result | Status | Details |
 |---|---|---|---|
@@ -22,28 +41,11 @@ historical or held when no newer quality-complete measurement exists.
 | AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
 | NVIDIA | Native Qwen3.8-27B CUDA: the cold arm produced 5/5 exact outputs at 11.8–12.1 decode tok/s; confirmed cache hits produced 0/5 exact at about 0.2 tok/s, captured 2026-08-25. | Hold: failed cache-hit quality excludes this from parity or improvement claims. | [NVIDIA result](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
 
+Read the status column before comparing rates: the held NVIDIA cache-hit path measured about 0.2 tok/s, but failed exact-output quality.
+
 Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
 results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
 receipts.
-
-## Try fak
-
-Wrap the Codex session you already use. fak forwards the existing subscription credential and
-applies a capability allow-list, so tools outside the configured floor are blocked by default:
-
-```bash
-fak guard -- codex
-```
-
-Or run the offline proof with no key, model, or GPU:
-
-```bash
-go build -o fak ./cmd/fak
-./fak agent --offline
-```
-
-Expected result: `task completed (booked)` while the poisoned result and destructive operation
-are blocked.
 
 ## What fak manages
 
@@ -80,7 +82,7 @@ Balanced defaults are `ponytail:medium` and `caveman:medium`. See
 [work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or the
 [harness guide](docs/harness-init.md) to build a named agent around the same boundary.
 
-## Documentation
+## Going deeper
 
 | If you want to… | Start here |
 |---|---|
@@ -93,4 +95,4 @@ Balanced defaults are `ponytail:medium` and `caveman:medium`. See
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-28 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-28 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-08-30 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-30 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
