@@ -157,6 +157,87 @@ func TestSpecDecodeGreedyQwen35MTPOptInMatchesTargetGreedy(t *testing.T) {
 	}
 }
 
+func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	depth := 3
+
+	for _, tc := range []struct {
+		name     string
+		accepted int
+	}{
+		{name: "zero", accepted: 0},
+		{name: "partial", accepted: 1},
+		{name: "full", accepted: depth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := m.NewSession()
+			target.captureTargetHidden = true
+			t.Cleanup(target.Close)
+			before := target.Prefill(prompt)
+			tx, err := beginQwen35MTPTargetTransaction(target, before)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			draft := make([]int, depth)
+			targetArgmax := make([]int, depth+1)
+			targetArgmax[0] = argmaxF32(before)
+			logits := append([]float32(nil), before...)
+			for i := range draft {
+				if i < tc.accepted {
+					draft[i] = argmaxF32(logits)
+				} else {
+					draft[i] = (argmaxF32(logits) + 1) % m.Cfg.VocabSize
+				}
+				logits = target.Step(draft[i])
+				targetArgmax[i+1] = argmaxF32(logits)
+			}
+			if err := tx.Abort(); err != nil {
+				t.Fatal(err)
+			}
+
+			tx, err = beginQwen35MTPTargetTransaction(target, before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Verify(draft); err != nil {
+				t.Fatal(err)
+			}
+			res := polymodel.AcceptGreedy(draft, targetArgmax)
+			if res.Accepted != tc.accepted {
+				t.Fatalf("accepted = %d, want %d", res.Accepted, tc.accepted)
+			}
+			if res.Accepted+res.EvictKV != len(draft) {
+				t.Fatalf("accepted %d + rejected %d != proposed %d", res.Accepted, res.EvictKV, len(draft))
+			}
+			if _, err := tx.Commit(res.Accepted); err != nil {
+				t.Fatal(err)
+			}
+
+			correction := targetArgmax[res.Accepted]
+			got := append(append([]int(nil), draft[:res.Accepted]...), correction)
+			wantSession := m.NewSession()
+			wantSession.captureTargetHidden = true
+			t.Cleanup(wantSession.Close)
+			wantLogits := wantSession.Prefill(prompt)
+			want := make([]int, 0, len(got))
+			for range got {
+				token := argmaxF32(wantLogits)
+				want = append(want, token)
+				wantLogits = wantSession.Step(token)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("emitted block = %v, want target-only %v", got, want)
+			}
+			if next := argmaxF32(target.Step(correction)); next != argmaxF32(wantLogits) {
+				t.Fatalf("next-token continuation = %d, want %d", next, argmaxF32(wantLogits))
+			}
+			assertQwen35MTPTargetStateEqual(t, target, wantSession)
+		})
+	}
+}
+
 func TestQwen35MTPSpeculativeTargetTransaction(t *testing.T) {
 	m := qwen35MTPEnabledSyntheticModel(t)
 	prompt := []int{0, 1}
@@ -237,6 +318,90 @@ func assertQwen35MTPTargetStateEqual(t *testing.T, got, want *Session) {
 		!reflect.DeepEqual(got.targetHiddenTokens, want.targetHiddenTokens) {
 		t.Fatalf("target state differs: cache len %d/%d hidden %d/%d hidden tokens %v/%v", got.Cache.Len(), want.Cache.Len(), len(got.targetHidden), len(want.targetHidden), got.targetHiddenTokens, want.targetHiddenTokens)
 	}
+}
+
+func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	panicErr := "injected transaction failure"
+	seed := m.NewSession()
+	seed.captureTargetHidden = true
+	logits := seed.Prefill(prompt)
+	draft := make([]int, 3)
+	for i := range draft {
+		draft[i] = argmaxF32(logits)
+		logits = seed.Step(draft[i])
+	}
+	seed.Close()
+
+	t.Run("verifier panic restores before returning", func(t *testing.T) {
+		target := m.NewSession()
+		target.captureTargetHidden = true
+		t.Cleanup(target.Close)
+		before := target.Prefill(prompt)
+		want := m.NewSession()
+		want.captureTargetHidden = true
+		t.Cleanup(want.Close)
+		want.Prefill(prompt)
+
+		tx, err := beginQwen35MTPTargetTransaction(target, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.verify = func(draft []int) [][]float32 {
+			target.VerifyForward(draft, nil, nil)
+			panic(panicErr)
+		}
+		rows, err := tx.Verify(draft)
+		if err == nil {
+			t.Fatal("verifier panic was not surfaced")
+		}
+		if rows != nil {
+			t.Fatalf("failed verification exposed logits: %v", rows)
+		}
+		if !tx.closed || tx.snapshot != nil || tx.closeCount != 1 {
+			t.Fatalf("failed verify ownership = closed:%v snapshot:%p closes:%d, want closed/nil/1", tx.closed, tx.snapshot, tx.closeCount)
+		}
+		assertQwen35MTPTargetStateEqual(t, target, want)
+	})
+
+	t.Run("commit replay panic restores whole block", func(t *testing.T) {
+		target := m.NewSession()
+		target.captureTargetHidden = true
+		t.Cleanup(target.Close)
+		before := target.Prefill(prompt)
+		want := m.NewSession()
+		want.captureTargetHidden = true
+		t.Cleanup(want.Close)
+		want.Prefill(prompt)
+
+		tx, err := beginQwen35MTPTargetTransaction(target, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Verify(draft); err != nil {
+			t.Fatal(err)
+		}
+		steps := 0
+		tx.step = func(token int) []float32 {
+			steps++
+			if steps == 2 {
+				panic(panicErr)
+			}
+			return target.Step(token)
+		}
+		got, err := tx.Commit(len(draft))
+		if err == nil {
+			t.Fatal("commit replay panic was not surfaced")
+		}
+		if got != nil {
+			t.Fatalf("failed commit exposed logits: %v", got)
+		}
+		if !tx.closed || tx.snapshot != nil || tx.closeCount != 1 {
+			t.Fatalf("failed commit ownership = closed:%v snapshot:%p closes:%d, want closed/nil/1", tx.closed, tx.snapshot, tx.closeCount)
+		}
+		assertQwen35MTPTargetStateEqual(t, target, want)
+	})
 }
 
 func TestSpecDecodeGreedyQwen35MTPPassesPromptAndRefreshesEvaluatedHiddenHistory(t *testing.T) {

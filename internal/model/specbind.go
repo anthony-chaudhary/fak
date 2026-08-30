@@ -68,6 +68,7 @@ type qwen35MTPTargetTransaction struct {
 	beforeLogits []float32
 	draft        []int
 	verify       func([]int) [][]float32
+	step         func(int) []float32
 	closed       bool
 	closeCount   int
 }
@@ -83,6 +84,7 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	return &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
 		verify: func(draft []int) [][]float32 { return target.VerifyForward(draft, nil, nil) },
+		step:   target.Step,
 	}, nil
 }
 
@@ -94,29 +96,55 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			rows = nil
-			err = fmt.Errorf("model: verify Qwen3.8 MTP target transaction: %v", recovered)
+			err = tx.rollbackFailure("verify", fmt.Errorf("%v", recovered))
 		}
 	}()
 	return tx.verify(draft), nil
 }
 
-func (tx *qwen35MTPTargetTransaction) Commit(accepted int) ([]float32, error) {
+func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, err error) {
 	if tx == nil || tx.closed || tx.snapshot == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
 	}
 	if accepted < 0 || accepted > len(tx.draft) {
-		return nil, fmt.Errorf("model: Qwen3.8 MTP accepted prefix %d outside draft length %d", accepted, len(tx.draft))
+		return nil, tx.rollbackFailure("commit", fmt.Errorf("accepted prefix %d outside draft length %d", accepted, len(tx.draft)))
+	}
+	rollback, err := tx.snapshot.Clone()
+	if err != nil {
+		tx.finish()
+		return nil, fmt.Errorf("model: preserve Qwen3.8 MTP commit rollback: %w", err)
 	}
 	if err := tx.restore(); err != nil {
+		rollback.Close()
 		tx.finish()
 		return nil, err
 	}
-	logits := append([]float32(nil), tx.beforeLogits...)
+	// Restore transfers the original snapshot into the live session. Retain the
+	// independent clone until replay succeeds so a mid-block failure can undo
+	// every accepted token rather than exposing a partially committed prefix.
+	tx.snapshot.Close()
+	tx.snapshot = rollback
+	logits = append([]float32(nil), tx.beforeLogits...)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logits = nil
+			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
+		}
+	}()
 	for _, token := range tx.draft[:accepted] {
-		logits = tx.target.Step(token)
+		logits = tx.step(token)
 	}
 	tx.finish()
 	return logits, nil
+}
+
+func (tx *qwen35MTPTargetTransaction) rollbackFailure(stage string, cause error) error {
+	restoreErr := tx.restore()
+	tx.finish()
+	if restoreErr != nil {
+		return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %v; rollback failed: %w", stage, cause, restoreErr)
+	}
+	return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %w", stage, cause)
 }
 
 func (tx *qwen35MTPTargetTransaction) Abort() error {
