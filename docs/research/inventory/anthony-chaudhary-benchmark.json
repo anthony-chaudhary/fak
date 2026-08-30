@@ -1,0 +1,1457 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "anthony-chaudhary/Benchmark",
+  "url": "https://github.com/anthony-chaudhary/Benchmark",
+  "indexed_revision": "b60f2f05e23ec38ae4f50ca19717c2f615ed419a",
+  "observed_at": "2026-08-29T23:00:00-07:00",
+  "totals": {
+    "files": 9516,
+    "directories": 986,
+    "bytes": 4862125342,
+    "runtime_files": 2758,
+    "test_files": 1102,
+    "docs_files": 1282,
+    "text_lines": 1847800
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        ".claude/skills/actually-test/manifests/README.md",
+        ".venv-test/Lib/site-packages/numpy/ma/README.rst",
+        ".venv-test/Lib/site-packages/pip/_vendor/README.rst",
+        "README.md",
+        "amo_prof-amoprof-kv$/README.md",
+        "amo_prof-amoprof-kv$/kvssd_trace_tool/README.md",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/README.md",
+        "campaign_presets/README.md",
+        "docs/_audits/bench_debug_wsl_smoke_2026-05-27.zip",
+        "docs/_audits/bundle-wsl-debug-launch.py",
+        "docs/_audits/bundle-wsl-smoke-2026-05-27.py",
+        "docs/_audits/fanout-context-audit-2026-05-12.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        ".venv-test/Lib/site-packages/fontTools/designspaceLib/__init__.py",
+        ".venv-test/Lib/site-packages/fontTools/designspaceLib/__main__.py",
+        ".venv-test/Lib/site-packages/fontTools/designspaceLib/split.py",
+        ".venv-test/Lib/site-packages/fontTools/designspaceLib/statNames.py",
+        ".venv-test/Lib/site-packages/fontTools/designspaceLib/types.py",
+        "docs/architecture/01-system-overview.md",
+        "docs/architecture/02-test-execution.md",
+        "docs/architecture/03-loading-phase.md",
+        "docs/architecture/04-probing-phase.md",
+        "docs/architecture/05-hit-miss-classification.md",
+        "docs/architecture/06-cache-layer-classification.md",
+        "docs/architecture/07-concurrent-clients.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".cama-complete-install-dgx3.json",
+        ".claude/settings.local.json",
+        ".claude/skills/actually-test/judge.py",
+        ".claude/skills/actually-test/manifests/amoprof-charts.yaml",
+        ".claude/skills/actually-test/manifests/amoprof-kvb.yaml",
+        ".claude/skills/actually-test/manifests/blktrace-e2e.yaml",
+        ".claude/skills/actually-test/manifests/blktrace-smoke.yaml",
+        ".claude/skills/actually-test/manifests/dgx-static-shims.yaml",
+        ".claude/skills/actually-test/manifests/iostat-since-boot-fix.yaml",
+        ".claude/skills/actually-test/manifests/iostat-since-boot.yaml",
+        ".claude/skills/actually-test/manifests/monitor-export.yaml",
+        ".claude/skills/actually-test/manifests/paramiko-invariant.yaml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".scratch/test_paramiko.py",
+        ".scratch/test_persistent_shell.py",
+        ".venv-test/Lib/site-packages/colorama/tests/__init__.py",
+        ".venv-test/Lib/site-packages/colorama/tests/ansi_test.py",
+        ".venv-test/Lib/site-packages/colorama/tests/ansitowin32_test.py",
+        ".venv-test/Lib/site-packages/colorama/tests/initialise_test.py",
+        ".venv-test/Lib/site-packages/colorama/tests/isatty_test.py",
+        ".venv-test/Lib/site-packages/colorama/tests/utils.py",
+        ".venv-test/Lib/site-packages/colorama/tests/winterm_test.py",
+        ".venv-test/Lib/site-packages/numpy/_core/tests/_locales.py",
+        ".venv-test/Lib/site-packages/numpy/_core/tests/_natype.py",
+        ".venv-test/Lib/site-packages/numpy/_core/tests/data/astype_copy.pkl"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".claude/skills/release/release-runbook.md",
+        ".venv-test/Lib/site-packages/numpy/ma/API_CHANGES.txt",
+        ".venv-test/Lib/site-packages/pip/_internal/models/release_control.py",
+        "docs/guides/release-validation-playbook.md",
+        "docs/version-history-archive.md",
+        "docs/version-history.md",
+        "presets/connection_history.py",
+        "release.py",
+        "scripts/release_bump.py",
+        "scripts/release_context.py",
+        "tests/test_release_windows_agent_manifest.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "note": "requires forge API or exported issue/PR/discussion data; local tree scan cannot prove it"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        ".venv-test/Lib/site-packages/bcrypt-5.0.0.dist-info/LICENSE",
+        ".venv-test/Lib/site-packages/certifi-2026.4.22.dist-info/licenses/LICENSE",
+        ".venv-test/Lib/site-packages/charset_normalizer-3.4.7.dist-info/licenses/LICENSE",
+        ".venv-test/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt",
+        ".venv-test/Lib/site-packages/cycler-0.12.1.dist-info/LICENSE",
+        ".venv-test/Lib/site-packages/fonttools-4.62.1.dist-info/licenses/LICENSE",
+        ".venv-test/Lib/site-packages/fonttools-4.62.1.dist-info/licenses/LICENSE.external",
+        ".venv-test/Lib/site-packages/hypothesis-6.152.6.dist-info/licenses/LICENSE.txt",
+        ".venv-test/Lib/site-packages/idna-3.14.dist-info/licenses/LICENSE.md",
+        ".venv-test/Lib/site-packages/iniconfig-2.3.0.dist-info/licenses/LICENSE",
+        ".venv-test/Lib/site-packages/invoke-3.0.3.dist-info/licenses/LICENSE",
+        ".venv-test/Lib/site-packages/kiwisolver-1.5.0.dist-info/licenses/LICENSE"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": ".venv-test",
+      "files": 3159,
+      "directories": 395,
+      "bytes": 65494867,
+      "runtime_files": 1972,
+      "test_files": 601,
+      "docs_files": 76,
+      "text_lines": 1008366,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 2271
+        },
+        {
+          "language": "Docs",
+          "files": 76
+        },
+        {
+          "language": "C",
+          "files": 39
+        },
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "C++",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".venv-test/Lib/site-packages/PIL/AvifImagePlugin.py",
+        ".venv-test/Lib/site-packages/PIL/BdfFontFile.py",
+        ".venv-test/Lib/site-packages/PIL/BlpImagePlugin.py",
+        ".venv-test/Lib/site-packages/PIL/BmpImagePlugin.py",
+        ".venv-test/Lib/site-packages/PIL/BufrStubImagePlugin.py",
+        ".venv-test/Lib/site-packages/PIL/ContainerIO.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".hypothesis",
+      "files": 2331,
+      "directories": 10,
+      "bytes": 2439748,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "replay-data",
+      "files": 1182,
+      "directories": 206,
+      "bytes": 480179766,
+      "runtime_files": 205,
+      "test_files": 0,
+      "docs_files": 18,
+      "text_lines": 138709,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 181
+        },
+        {
+          "language": "Docs",
+          "files": 18
+        },
+        {
+          "language": "Shell",
+          "files": 17
+        },
+        {
+          "language": "Python",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "replay-data/_AUDIT_A_pipeline.md",
+        "replay-data/_AUDIT_B_monitor_parity.md",
+        "replay-data/_AUDIT_C_charts.md",
+        "replay-data/_AUDIT_D_replay.md",
+        "replay-data/_AUDIT_E_pending_plans.md",
+        "replay-data/_AUDIT_L2L3.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 1092,
+      "directories": 181,
+      "bytes": 204872722,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 1092,
+      "text_lines": 166544,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 672
+        },
+        {
+          "language": "Config",
+          "files": 151
+        },
+        {
+          "language": "Python",
+          "files": 4
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "docs/_audits/bench_debug_wsl_smoke_2026-05-27.zip",
+        "docs/_audits/bundle-wsl-debug-launch.py",
+        "docs/_audits/bundle-wsl-smoke-2026-05-27.py",
+        "docs/_audits/fanout-context-audit-2026-05-12.md",
+        "docs/_audits/kv-disagg-routing-20260527T153914Z/00p_kv_disagg_routing.png",
+        "docs/_audits/kv-disagg-routing-20260527T153914Z/logs/backend_backend0.log"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "tests",
+      "files": 498,
+      "directories": 78,
+      "bytes": 8329358,
+      "runtime_files": 0,
+      "test_files": 498,
+      "docs_files": 34,
+      "text_lines": 190983,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 378
+        },
+        {
+          "language": "Config",
+          "files": 69
+        },
+        {
+          "language": "Docs",
+          "files": 34
+        }
+      ],
+      "example_paths": [
+        "tests/__init__.py",
+        "tests/conftest.py",
+        "tests/e2e/__init__.py",
+        "tests/e2e/adapter.py",
+        "tests/e2e/cassettes/README.md",
+        "tests/e2e/cassettes/__init__.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "releases",
+      "files": 242,
+      "directories": 0,
+      "bytes": 3714156092,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": ".",
+      "files": 128,
+      "directories": 45,
+      "bytes": 206695780,
+      "runtime_files": 48,
+      "test_files": 0,
+      "docs_files": 11,
+      "text_lines": 62637,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 24
+        },
+        {
+          "language": "Python",
+          "files": 21
+        },
+        {
+          "language": "Docs",
+          "files": 11
+        },
+        {
+          "language": "Shell",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        ".cama-complete-install-dgx3.json",
+        "CLAUDE.md",
+        "README.md",
+        "bench-vs-aiwasp-audit.md",
+        "benchmark.py",
+        "bootstrap-samsung-ssh.ps1"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 73,
+      "directories": 0,
+      "bytes": 1188543,
+      "runtime_files": 72,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 29117,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 62
+        },
+        {
+          "language": "Shell",
+          "files": 10
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "scripts/README.md",
+        "scripts/_installer_slack.py",
+        "scripts/_l3_restart_backend.py",
+        "scripts/_l3_restart_probe.py",
+        "scripts/_l3_restart_probe.sh",
+        "scripts/_local_blktrace_driver.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "qwen36run",
+      "files": 69,
+      "directories": 1,
+      "bytes": 22979957,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 728,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "qwen36run/_csv_manifest.json",
+        "qwen36run/results_monitor_dgx1-qwen36-27b-dense__combo_02_workers1_20260423_110148.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "outputdata",
+      "files": 64,
+      "directories": 1,
+      "bytes": 34261540,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "outputdata/results_monitor_swebench-verified-20260416-1647_20260416_164721.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".claude",
+      "files": 56,
+      "directories": 11,
+      "bytes": 343367,
+      "runtime_files": 21,
+      "test_files": 0,
+      "docs_files": 35,
+      "text_lines": 5884,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 35
+        },
+        {
+          "language": "Config",
+          "files": 19
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".claude/settings.local.json",
+        ".claude/skills/actually-test/SKILL.md",
+        ".claude/skills/actually-test/judge.py",
+        ".claude/skills/actually-test/manifests/README.md",
+        ".claude/skills/actually-test/manifests/_deferred-ai-ops-report.md",
+        ".claude/skills/actually-test/manifests/amoprof-charts.yaml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "charts",
+      "files": 53,
+      "directories": 0,
+      "bytes": 1421778,
+      "runtime_files": 53,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 31767,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 53
+        }
+      ],
+      "example_paths": [
+        "charts/__init__.py",
+        "charts/_chart_data.py",
+        "charts/_device_split.py",
+        "charts/_kv_disagg_routing.py",
+        "charts/_l3_restart.py",
+        "charts/_pooled_amplification.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "charts_L3_CXL_256_20260205-1712_4",
+      "files": 49,
+      "directories": 0,
+      "bytes": 6410034,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "test_sweep_real",
+      "files": 46,
+      "directories": 4,
+      "bytes": 29181052,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 2077,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "test_sweep_real/combo-0001_workers=2/results_20260417_225437.json",
+        "test_sweep_real/combo-0002_workers=4/results_20260418_014824.json",
+        "test_sweep_real/combo-0003_workers=8/results_20260418_033705.json",
+        "test_sweep_real/comparison/_chart_manifest.json",
+        "test_sweep_real/sweep_rollup.json",
+        "test_sweep_real/sweep_rollup.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "commands",
+      "files": 44,
+      "directories": 0,
+      "bytes": 1438221,
+      "runtime_files": 44,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 30957,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 44
+        }
+      ],
+      "example_paths": [
+        "commands/__init__.py",
+        "commands/_background.py",
+        "commands/_bundle.py",
+        "commands/_cache.py",
+        "commands/_campaign.py",
+        "commands/_campaign_compare.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "engine",
+      "files": 42,
+      "directories": 0,
+      "bytes": 843515,
+      "runtime_files": 42,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 18060,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 42
+        }
+      ],
+      "example_paths": [
+        "engine/__init__.py",
+        "engine/_aiops_mixin.py",
+        "engine/_biolatency_mixin.py",
+        "engine/_biolatency_parser.py",
+        "engine/_biopattern_mixin.py",
+        "engine/_biopattern_parser.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "publish",
+      "files": 42,
+      "directories": 0,
+      "bytes": 905320,
+      "runtime_files": 42,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 21517,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 42
+        }
+      ],
+      "example_paths": [
+        "publish/__init__.py",
+        "publish/_amoprof_blkio_cards.py",
+        "publish/_amoprof_bottleneck.py",
+        "publish/_amoprof_formula_table.py",
+        "publish/_amoprof_kvb_events.py",
+        "publish/_amoprof_methodology.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "amo_prof-amoprof",
+      "files": 41,
+      "directories": 4,
+      "bytes": 2497080,
+      "runtime_files": 37,
+      "test_files": 0,
+      "docs_files": 3,
+      "text_lines": 48959,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 30
+        },
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/.gitlab-ci.yml",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/INSTALL.md",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/README.md",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/__init__.py",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/_agent.py",
+        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/aggregator.py"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "ui",
+      "files": 31,
+      "directories": 10,
+      "bytes": 25615074,
+      "runtime_files": 18,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1566,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 17
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "ui/Makefile",
+        "ui/cmd/bench-ui/main.go",
+        "ui/internal/api/handler.go",
+        "ui/internal/api/routes.go",
+        "ui/internal/config/config.go",
+        "ui/internal/config/display.go"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "models",
+      "files": 30,
+      "directories": 0,
+      "bytes": 724490,
+      "runtime_files": 30,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 16035,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 30
+        }
+      ],
+      "example_paths": [
+        "models/__init__.py",
+        "models/_collection.py",
+        "models/_constants.py",
+        "models/_shell.py",
+        "models/_timing.py",
+        "models/aiops.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "charts_monitor_parse-test_20260504_152511",
+      "files": 29,
+      "directories": 2,
+      "bytes": 528858,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 8442,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "charts_monitor_parse-test_20260504_152511/_chart_manifest.json",
+        "charts_monitor_parse-test_20260504_152511/csv/_csv_manifest.json",
+        "charts_monitor_parse-test_20260504_152511/llm_summary_monitor_parse-test_20260504_152511.txt",
+        "charts_monitor_parse-test_20260504_152511/results_monitor_parse-test_20260504_152511.json",
+        "charts_monitor_parse-test_20260504_152511/results_monitor_parse-test_20260504_152511.meta.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "server",
+      "files": 26,
+      "directories": 0,
+      "bytes": 585428,
+      "runtime_files": 26,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 14048,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 26
+        }
+      ],
+      "example_paths": [
+        "server/__init__.py",
+        "server/_already_up.py",
+        "server/_base.py",
+        "server/_config.py",
+        "server/_connection_mixin.py",
+        "server/_docker.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".scratch",
+      "files": 20,
+      "directories": 0,
+      "bytes": 77041,
+      "runtime_files": 18,
+      "test_files": 2,
+      "docs_files": 0,
+      "text_lines": 1317,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 16
+        },
+        {
+          "language": "Python",
+          "files": 3
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".scratch/check_mem.sh",
+        ".scratch/find_default_storage_dir.sh",
+        ".scratch/find_file_backend.sh",
+        ".scratch/find_install_logs.sh",
+        ".scratch/full_ps.sh",
+        ".scratch/install_check.sh"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "csv",
+      "files": 20,
+      "directories": 0,
+      "bytes": 88132,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2867,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "csv/_csv_manifest.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "export",
+      "files": 19,
+      "directories": 0,
+      "bytes": 423502,
+      "runtime_files": 19,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 9612,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 19
+        }
+      ],
+      "example_paths": [
+        "export/__init__.py",
+        "export/_bucketing.py",
+        "export/_companions.py",
+        "export/_core.py",
+        "export/_crash_detect.py",
+        "export/_csv.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "outputexample",
+      "files": 18,
+      "directories": 2,
+      "bytes": 38474778,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2009,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "outputexample/monitor/confluence_xhtml_snippet.xml",
+        "outputexample/page_534168410_results_monitor_swebench-verified-mini-workers-sweep__co_20260417_175433.json",
+        "outputexample/page_534168511_results_monitor_swebench-verified-mini-workers-sweep__co_20260417_225437.json",
+        "outputexample/page_534168611_results_monitor_swebench-verified-mini-workers-sweep__co_20260418_014824.json",
+        "outputexample/sweep_charts/confluence_xhtml_snippet.xml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "amo_prof-amoprof-kv$",
+      "files": 13,
+      "directories": 2,
+      "bytes": 830038,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 3,
+      "text_lines": 15845,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 5
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        },
+        {
+          "language": "Python",
+          "files": 3
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "amo_prof-amoprof-kv$/.gitlab-ci.yml",
+        "amo_prof-amoprof-kv$/README.md",
+        "amo_prof-amoprof-kv$/amoprof/ai_metrics_dict.py",
+        "amo_prof-amoprof-kv$/amoprof/amoprof.py",
+        "amo_prof-amoprof-kv$/amoprof/install.sh",
+        "amo_prof-amoprof-kv$/amoprof/report_gen.sh"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "campaign_presets",
+      "files": 13,
+      "directories": 0,
+      "bytes": 102063,
+      "runtime_files": 12,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 2018,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 11
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "campaign_presets/README.md",
+        "campaign_presets/__init__.py",
+        "campaign_presets/kv-disagg-routing-sweep.yaml",
+        "campaign_presets/l3-restart-survival-sweep.yaml",
+        "campaign_presets/llama70b-longctx-cache-breakdown-smoke.yaml",
+        "campaign_presets/llama70b-longctx-cache-breakdown.yaml"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "data",
+      "files": 12,
+      "directories": 1,
+      "bytes": 65414,
+      "runtime_files": 7,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2130,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "data/__init__.py",
+        "data/aiops_taxonomy.json",
+        "data/config_map.json",
+        "data/profiling/pooled_share_probe.json",
+        "data/swebench_verified_difficulty.json",
+        "data/swebench_verified_l3_smoke.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "presets",
+      "files": 11,
+      "directories": 0,
+      "bytes": 59715,
+      "runtime_files": 11,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1412,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 11
+        }
+      ],
+      "example_paths": [
+        "presets/__init__.py",
+        "presets/_paths.py",
+        "presets/cli_args.py",
+        "presets/connection_history.py",
+        "presets/core.py",
+        "presets/data.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "health",
+      "files": 10,
+      "directories": 0,
+      "bytes": 250467,
+      "runtime_files": 10,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 5704,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 10
+        }
+      ],
+      "example_paths": [
+        "health/__init__.py",
+        "health/_basic.py",
+        "health/_cama_go.py",
+        "health/_coherence.py",
+        "health/_hardware.py",
+        "health/_integrity.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "loader",
+      "files": 8,
+      "directories": 0,
+      "bytes": 103318,
+      "runtime_files": 8,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2544,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 8
+        }
+      ],
+      "example_paths": [
+        "loader/__init__.py",
+        "loader/_companion.py",
+        "loader/_export.py",
+        "loader/_fairness.py",
+        "loader/_loading.py",
+        "loader/_migration.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "cache_benchmark.egg-info",
+      "files": 6,
+      "directories": 0,
+      "bytes": 12418,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 483,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "cache_benchmark.egg-info/SOURCES.txt",
+        "cache_benchmark.egg-info/dependency_links.txt",
+        "cache_benchmark.egg-info/entry_points.txt",
+        "cache_benchmark.egg-info/requires.txt",
+        "cache_benchmark.egg-info/top_level.txt"
+      ]
+    },
+    {
+      "path": "dataset_scripts",
+      "files": 6,
+      "directories": 0,
+      "bytes": 19598,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 534,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "dataset_scripts/__init__.py",
+        "dataset_scripts/build_loogle_wiki_qa_short.py",
+        "dataset_scripts/download_loogle.py",
+        "dataset_scripts/download_mooncake_trace.py",
+        "dataset_scripts/download_openorca.py",
+        "dataset_scripts/download_sharegpt.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "_vendor",
+      "files": 5,
+      "directories": 1,
+      "bytes": 24379,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 645,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "_vendor/__init__.py",
+        "_vendor/_dos_evidence.py",
+        "_vendor/_slack_helpers/__init__.py",
+        "_vendor/_slack_helpers/client.py",
+        "_vendor/_slack_helpers/live.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "campaigns",
+      "files": 5,
+      "directories": 5,
+      "bytes": 34101,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 927,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "campaigns/kv-disagg-routing-sweep_20260527T121827_p37780/campaign_plan_dryrun.json",
+        "campaigns/kv-disagg-routing-sweep_20260527T122238_p40484/campaign_plan_dryrun.json",
+        "campaigns/kv-disagg-routing-sweep_20260527T122556_p8916/campaign_plan_dryrun.json",
+        "campaigns/swebench-vs-longctx_20260520T151001_p42096/campaign_plan_dryrun.json",
+        "campaigns/swebench-vs-longctx_20260520T151008_p37420/campaign_plan_dryrun.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "monitoring",
+      "files": 5,
+      "directories": 0,
+      "bytes": 86057,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1875,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "monitoring/__init__.py",
+        "monitoring/replay_trace.py",
+        "monitoring/router_metrics.py",
+        "monitoring/schema.py",
+        "monitoring/strategies.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "dos_verify",
+      "files": 4,
+      "directories": 0,
+      "bytes": 29204,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 620,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "dos_verify/__init__.py",
+        "dos_verify/__main__.py",
+        "dos_verify/verdict.py",
+        "dos_verify/witnesses.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "sinks",
+      "files": 4,
+      "directories": 0,
+      "bytes": 7675,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 216,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "sinks/__init__.py",
+        "sinks/base.py",
+        "sinks/metrics_service.py",
+        "sinks/snapshot_dir.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 4,
+      "directories": 1,
+      "bytes": 21405,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 517,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Go",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tools/enable-ssh/README.md",
+        "tools/enable-ssh/main.go"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "MagicMock",
+      "files": 3,
+      "directories": 25,
+      "bytes": 0,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "MagicMock/CapacityTest().chart_generator.output_dir/1459306545520/capability.json",
+        "MagicMock/CapacityTest().chart_generator.output_dir/2305971322512/capability.json",
+        "MagicMock/CapacityTest().chart_generator.output_dir/2855803535088/capability.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 1,
+      "directories": 1,
+      "bytes": 340,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 16,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/workflows/python-syntax.yml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "datasets",
+      "files": 1,
+      "directories": 0,
+      "bytes": 10319156,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "datasets/loogle_wiki_qa.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "test_charts_bg",
+      "files": 1,
+      "directories": 0,
+      "bytes": 3951,
+      "runtime_files": 0,
+      "test_files": 1,
+      "docs_files": 0,
+      "text_lines": 113,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "test_charts_bg/test_png_suite.py"
+      ],
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".claude/skills/actually-test/__pycache__",
+    ".git",
+    ".pytest_cache",
+    ".venv",
+    ".venv-test/Lib/site-packages/hypothesis/vendor",
+    ".venv-test/Lib/site-packages/invoke/vendor",
+    "__pycache__",
+    "amo_prof-amoprof-kv$/amoprof/__pycache__",
+    "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/report/__pycache__",
+    "campaign_presets/__pycache__",
+    "charts/__pycache__",
+    "commands/__pycache__",
+    "dataset_scripts/__pycache__",
+    "engine/__pycache__",
+    "export/__pycache__",
+    "health/__pycache__",
+    "loader/__pycache__",
+    "models/__pycache__",
+    "monitoring/__pycache__",
+    "presets/__pycache__",
+    "publish/__pycache__",
+    "scripts/__pycache__",
+    "server/__pycache__",
+    "sinks/__pycache__",
+    "tests/__pycache__",
+    "tests/e2e/__pycache__",
+    "tests/factories/__pycache__",
+    "tests/smoke/__pycache__",
+    "vendor"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .claude/skills/actually-test/__pycache__, .git, .pytest_cache, .venv, .venv-test/Lib/site-packages/hypothesis/vendor, .venv-test/Lib/site-packages/invoke/vendor, __pycache__, amo_prof-amoprof-kv$/amoprof/__pycache__, amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/report/__pycache__, campaign_presets/__pycache__, charts/__pycache__, commands/__pycache__, dataset_scripts/__pycache__, engine/__pycache__, export/__pycache__, health/__pycache__, loader/__pycache__, models/__pycache__, monitoring/__pycache__, presets/__pycache__, publish/__pycache__, scripts/__pycache__, server/__pycache__, sinks/__pycache__, tests/__pycache__, tests/e2e/__pycache__, tests/factories/__pycache__, tests/smoke/__pycache__, vendor; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking"
+}
