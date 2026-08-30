@@ -1132,6 +1132,76 @@
           "category": "incidental",
           "reason": "local cached-manifest authentication error",
           "token": "cacheAuthErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "setSelfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDisabled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheEntryPresent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheMiss"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheHit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheRejected"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheReasonMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDispositionSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "candidateCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "deriveSelfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "boundedSelfUpdateCandidateCacheReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local pre-attempt observation flag; not a distinct cache concept.",
+          "token": "cacheEntryPresent"
         }
       ],
       "id": "cache",
@@ -1213,6 +1283,7 @@
         "applyCacheControl",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
+        "boundedSelfUpdateCandidateCacheReason",
         "builtinCacheLevers",
         "cacheActivity",
         "cacheAmbiguous",
@@ -1221,6 +1292,7 @@
         "cacheAuthenticated",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheEntryPresent",
         "cacheMissing",
         "cachePrompt",
         "cacheRatio",
@@ -1291,6 +1363,7 @@
         "cachevalue_test",
         "cachewritemult",
         "caching",
+        "candidateCache",
         "canonicalDogfoodCacheLedgerPath",
         "canonicalDogfoodCacheWitnessPath",
         "claudeKeychainCache",
@@ -1307,6 +1380,7 @@
         "cuda_arch_matrix_test",
         "defaultcacheandresidency",
         "defaultcachesize",
+        "deriveSelfUpdateCandidateCacheDisposition",
         "detectCacheWarmReplay",
         "dogfoodCacheLedgerRow",
         "dogfoodCacheWitnessMaxAge",
@@ -1400,6 +1474,16 @@
         "runVCacheCalibrationStatus",
         "runtime_cache_tokens",
         "selectorCacheKey",
+        "selfUpdateCandidateCacheDisabled",
+        "selfUpdateCandidateCacheDisposition",
+        "selfUpdateCandidateCacheDispositionSnapshot",
+        "selfUpdateCandidateCacheEntryPresent",
+        "selfUpdateCandidateCacheHit",
+        "selfUpdateCandidateCacheMiss",
+        "selfUpdateCandidateCacheReasonMax",
+        "selfUpdateCandidateCacheRejected",
+        "selfUpdateCandidateCacheState",
+        "setSelfUpdateCandidateCacheDisposition",
         "shared_prefix_provider_cache_only",
         "strongMatrixCache",
         "summarizeTurnCache",
@@ -13268,6 +13352,71 @@
           "category": "incidental",
           "reason": "Typed execution value scoped to MSIX delivery, not a project or phased plan",
           "token": "MSIXPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "setSelfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDisabled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheEntryPresent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheMiss"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheHit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheRejected"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheReasonMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "selfUpdateCandidateCacheDispositionSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "candidateCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "deriveSelfUpdateCandidateCacheDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
+          "token": "boundedSelfUpdateCandidateCacheReason"
         }
       ],
       "exclude": [
@@ -13385,9 +13534,11 @@
         "auditDispatchWaveExecutionPlanWithFallback",
         "auditedPlan",
         "bound_planning",
+        "boundedSelfUpdateCandidateCacheReason",
         "buildMainPlan",
         "buildreconciledissueplan",
         "bytes_per_candidate",
+        "candidateCache",
         "candidateConsoleTools",
         "candidateData",
         "candidateEphemeral",
@@ -13410,6 +13561,7 @@
         "componentPlan",
         "dedupCandidate",
         "defaultsCheckPlanner",
+        "deriveSelfUpdateCandidateCacheDisposition",
         "dispatchWaveExecutionPlanWithSize",
         "fitandplanserveggufexpertparallelpathondevice",
         "fixturePlanner",
@@ -13461,7 +13613,17 @@
         "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
+        "selfUpdateCandidateCacheDisabled",
+        "selfUpdateCandidateCacheDisposition",
+        "selfUpdateCandidateCacheDispositionSnapshot",
+        "selfUpdateCandidateCacheEntryPresent",
+        "selfUpdateCandidateCacheHit",
+        "selfUpdateCandidateCacheMiss",
+        "selfUpdateCandidateCacheReasonMax",
+        "selfUpdateCandidateCacheRejected",
+        "selfUpdateCandidateCacheState",
         "servenativeplannerconfig",
+        "setSelfUpdateCandidateCacheDisposition",
         "stablePlanID",
         "validateGroupedPlan",
         "watchdogCandidates",

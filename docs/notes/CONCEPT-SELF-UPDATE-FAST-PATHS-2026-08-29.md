@@ -57,7 +57,7 @@ Verdicts are about the tree observed on 2026-08-29, not the issue backlog.
 
 ### PARTIAL
 
-- `cmd/fak/selfupdate_install.go:selfUpdateAttemptOptions` now supplies
+- `internal/selfupdate/cmd/selfupdate_install.go:selfUpdateAttemptOptions` now supplies
   `selfinstall.Options.CacheDir` from the repository's resolved Git common directory,
   making the existing verified cache a clone-shared live retry path. The real-Git test
   proves selected linked worktrees from the same clone share a cache, independent clones

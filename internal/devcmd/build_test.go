@@ -2,6 +2,8 @@ package devcmd
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -60,8 +62,10 @@ func withRunBuildSeams(t *testing.T) {
 func TestRunBuildSuccessRendersOrderedTimingsAndReceipt(t *testing.T) {
 	withRunBuildSeams(t)
 	var gotCommand buildCommand
-	buildExecute = func(command buildCommand, stderr io.Writer) (int, error) {
-		gotCommand = command
+	var gotExecutionEnvironment map[string]string
+	buildExecute = func(execution buildExecution, stderr io.Writer) (int, error) {
+		gotCommand = execution.command
+		gotExecutionEnvironment = execution.environment
 		_, _ = io.WriteString(stderr, "compiler child output\n")
 		return 0, nil
 	}
@@ -82,6 +86,9 @@ func TestRunBuildSuccessRendersOrderedTimingsAndReceipt(t *testing.T) {
 	if gotCommand.Profile != "dev" || gotCommand.Environment["PROFILE"] != "dev" || gotCommand.Environment["OUT"] != gotCommand.Output {
 		t.Fatalf("canonical command did not carry exact profile/output: %+v", gotCommand)
 	}
+	if gotCommand.Environment["PGO"] != "off" || gotExecutionEnvironment["PGO"] != "off" {
+		t.Fatalf("default PGO was not recorded and executed as off: command=%q execution=%q", gotCommand.Environment["PGO"], gotExecutionEnvironment["PGO"])
+	}
 	if gotCommand.Output != filepath.Join(repoRoot(), defaultBuildOutput()) || filepath.Dir(gotCommand.Output) != filepath.Join(repoRoot(), ".fak", "bin") {
 		t.Fatalf("output = %q, want non-self repository artifact path", gotCommand.Output)
 	}
@@ -93,6 +100,9 @@ func TestRunBuildSuccessRendersOrderedTimingsAndReceipt(t *testing.T) {
 	}
 	if persisted.CacheState != "inherited_uncontrolled" || persisted.PackageCount != 699 {
 		t.Fatalf("cache/package provenance missing: %+v", persisted)
+	}
+	if persisted.PGO != (buildPGO{Mode: "off"}) {
+		t.Fatalf("default PGO receipt = %+v, want mode off only", persisted.PGO)
 	}
 	var phaseNames []string
 	for _, phase := range persisted.Phases {
@@ -123,7 +133,7 @@ func TestRunBuildDefaultOutputUsesExeForWindowsTarget(t *testing.T) {
 
 func TestRunBuildJSONStdoutIsOneCleanObject(t *testing.T) {
 	withRunBuildSeams(t)
-	buildExecute = func(_ buildCommand, stderr io.Writer) (int, error) {
+	buildExecute = func(_ buildExecution, stderr io.Writer) (int, error) {
 		_, _ = io.WriteString(stderr, "child-only\n")
 		return 0, nil
 	}
@@ -134,7 +144,8 @@ func TestRunBuildJSONStdoutIsOneCleanObject(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("RunBuild code = %d; stderr=%s", code, stderr.String())
 	}
-	dec := json.NewDecoder(&stdout)
+	rawStdout := append([]byte(nil), stdout.Bytes()...)
+	dec := json.NewDecoder(bytes.NewReader(rawStdout))
 	var got buildReceipt
 	if err := dec.Decode(&got); err != nil {
 		t.Fatalf("decode stdout object: %v\n%s", err, stdout.String())
@@ -149,14 +160,286 @@ func TestRunBuildJSONStdoutIsOneCleanObject(t *testing.T) {
 	if got.Command.Environment["VERSION"] != "v1.2.3" || got.Command.Environment["TAGS"] != "cuda" || got.Command.Environment["GCFLAGS"] != "all=-N -l" {
 		t.Fatalf("explicit build settings not recorded: %+v", got.Command.Environment)
 	}
-	if strings.Contains(stdout.String(), "child-only") || !strings.Contains(stderr.String(), "child-only") {
+	if strings.Contains(string(rawStdout), "child-only") || !strings.Contains(stderr.String(), "child-only") {
 		t.Fatalf("child output leaked onto JSON stdout; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	type legacyReceipt struct {
+		Schema  string       `json:"schema"`
+		Outcome string       `json:"outcome"`
+		Command buildCommand `json:"command"`
+	}
+	var legacy legacyReceipt
+	if err := json.Unmarshal(rawStdout, &legacy); err != nil {
+		t.Fatalf("legacy receipt consumer rejected additive PGO field: %v", err)
+	}
+	if legacy.Schema != buildReceiptSchema || legacy.Outcome != "success" {
+		t.Fatalf("legacy receipt fields changed: %+v", legacy)
+	}
+}
+
+func TestRunBuildExplicitPGOUsesPrivateSnapshotAndScrubsReceipt(t *testing.T) {
+	withRunBuildSeams(t)
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "customer-secret-profile-name.pprof")
+	original := []byte("raw-private-profile-label:original-bytes")
+	mutated := []byte("raw-private-profile-label:mutated-after-validation")
+	if err := os.WriteFile(sourcePath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	baseGather := buildGatherProvenance
+	buildGatherProvenance = func(root string) (buildProvenance, error) {
+		if err := os.WriteFile(sourcePath, mutated, 0o600); err != nil {
+			return buildProvenance{}, err
+		}
+		return baseGather(root)
+	}
+	var snapshotPath string
+	buildExecute = func(execution buildExecution, _ io.Writer) (int, error) {
+		if got := execution.command.Environment["PGO"]; got != "profile" {
+			t.Errorf("serialized command PGO = %q, want scrubbed profile mode", got)
+		}
+		snapshotPath = execution.environment["PGO"]
+		if snapshotPath == "" || snapshotPath == sourcePath {
+			t.Errorf("execution PGO = %q, want private snapshot distinct from source", snapshotPath)
+			return 1, nil
+		}
+		got, err := os.ReadFile(snapshotPath)
+		if err != nil {
+			return 1, err
+		}
+		if !bytes.Equal(got, original) {
+			t.Errorf("compiled PGO snapshot = %q, want pre-mutation bytes %q", got, original)
+		}
+		return 0, nil
+	}
+	var persisted buildReceipt
+	buildWriteReceipt = func(_ string, receipt buildReceipt) error {
+		persisted = receipt
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := RunBuild(&stdout, &stderr, []string{
+		"--json", "--profile", "release", "--pgo", sourcePath,
+		"--out", filepath.Join(dir, "fak"), "--receipt", filepath.Join(dir, "receipt.json"),
+	})
+	if code != 0 {
+		t.Fatalf("RunBuild code = %d; stderr=%s", code, stderr.String())
+	}
+	sum := sha256.Sum256(original)
+	wantDigest := hex.EncodeToString(sum[:])
+	wantPGO := buildPGO{Mode: "profile", Identity: "sha256:" + wantDigest, SHA256: wantDigest, SizeBytes: int64(len(original))}
+	if persisted.PGO != wantPGO {
+		t.Fatalf("persisted PGO = %+v, want %+v", persisted.PGO, wantPGO)
+	}
+	if snapshotPath == "" {
+		t.Fatal("build did not receive a private PGO snapshot")
+	}
+	if _, err := os.Stat(snapshotPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("private PGO snapshot was not cleaned up: stat err=%v", err)
+	}
+
+	persistedJSON, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, raw := range map[string][]byte{"JSON stdout": stdout.Bytes(), "persisted receipt": persistedJSON} {
+		for _, secret := range []string{sourcePath, filepath.Base(sourcePath), snapshotPath, string(original), string(mutated)} {
+			if strings.Contains(string(raw), secret) {
+				t.Errorf("%s disclosed private PGO source/snapshot data %q: %s", label, secret, raw)
+			}
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	var emitted buildReceipt
+	if err := dec.Decode(&emitted); err != nil {
+		t.Fatalf("decode JSON stdout: %v", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		t.Fatalf("JSON stdout contains more than one object: err=%v output=%q", err, stdout.String())
+	}
+}
+
+func TestRunBuildPGOIdentityDependsOnlyOnBytes(t *testing.T) {
+	withRunBuildSeams(t)
+	buildExecute = func(execution buildExecution, _ io.Writer) (int, error) {
+		_, err := os.ReadFile(execution.environment["PGO"])
+		return 0, err
+	}
+	var persisted buildReceipt
+	buildWriteReceipt = func(_ string, receipt buildReceipt) error {
+		persisted = receipt
+		return nil
+	}
+
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "first-private-name.pprof")
+	secondPath := filepath.Join(dir, "different-private-name.pprof")
+	changedPath := filepath.Join(dir, "third-private-name.pprof")
+	for path, contents := range map[string][]byte{
+		firstPath:   []byte("same-profile-bytes"),
+		secondPath:  []byte("same-profile-bytes"),
+		changedPath: []byte("changed-profile-bytes"),
+	} {
+		if err := os.WriteFile(path, contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(source, suffix string) buildPGO {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := RunBuild(&stdout, &stderr, []string{
+			"--json", "--profile", "release", "--pgo", source,
+			"--out", filepath.Join(dir, "fak-"+suffix), "--receipt", filepath.Join(dir, "receipt-"+suffix+".json"),
+		})
+		if code != 0 {
+			t.Fatalf("RunBuild(%s) code = %d; stderr=%s", suffix, code, stderr.String())
+		}
+		return persisted.PGO
+	}
+
+	first := run(firstPath, "first")
+	second := run(secondPath, "second")
+	changed := run(changedPath, "changed")
+	if first != second {
+		t.Fatalf("same bytes under different filenames changed PGO identity: first=%+v second=%+v", first, second)
+	}
+	if first.Identity == changed.Identity || first.SHA256 == changed.SHA256 {
+		t.Fatalf("changed bytes did not change PGO identity: first=%+v changed=%+v", first, changed)
+	}
+}
+
+func TestRunBuildRejectsInvalidPGOBeforeMutation(t *testing.T) {
+	withRunBuildSeams(t)
+	dir := t.TempDir()
+	validPath := filepath.Join(dir, "private-valid-profile.pprof")
+	emptyPath := filepath.Join(dir, "private-empty-profile.pprof")
+	directoryPath := filepath.Join(dir, "private-profile-directory")
+	missingPath := filepath.Join(dir, "private-missing-profile.pprof")
+	if err := os.WriteFile(validPath, []byte("profile"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(emptyPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(directoryPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		profile string
+		pgo     string
+	}{
+		{name: "dev profile", profile: "dev", pgo: validPath},
+		{name: "race profile", profile: "race", pgo: validPath},
+		{name: "release missing", profile: "release", pgo: missingPath},
+		{name: "release empty", profile: "release", pgo: emptyPath},
+		{name: "release directory", profile: "release", pgo: directoryPath},
+		{name: "release auto", profile: "release", pgo: "auto"},
+		{name: "release explicit empty", profile: "release", pgo: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			buildGatherProvenance = func(string) (buildProvenance, error) {
+				called = true
+				return buildProvenance{}, nil
+			}
+			buildPrepareOutput = func(string) error {
+				called = true
+				return nil
+			}
+			buildExecute = func(buildExecution, io.Writer) (int, error) {
+				called = true
+				return 0, nil
+			}
+			buildWriteReceipt = func(string, buildReceipt) error {
+				called = true
+				return nil
+			}
+			output := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "-")+"-output")
+			receipt := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "-")+"-receipt.json")
+			var stdout, stderr bytes.Buffer
+			code := RunBuild(&stdout, &stderr, []string{
+				"--json", "--profile", tt.profile, "--pgo", tt.pgo,
+				"--out", output, "--receipt", receipt,
+			})
+			if code != 2 {
+				t.Fatalf("RunBuild code = %d, want usage error 2; stderr=%s", code, stderr.String())
+			}
+			if called {
+				t.Fatal("provenance, output preparation, build execution, or receipt write ran for invalid PGO")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("invalid PGO emitted JSON stdout: %q", stdout.String())
+			}
+			for _, path := range []string{output, receipt} {
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("invalid PGO mutated %s: stat err=%v", path, err)
+				}
+			}
+			if tt.pgo != "" && tt.pgo != "auto" {
+				for _, secret := range []string{tt.pgo, filepath.Base(tt.pgo)} {
+					if strings.Contains(stderr.String(), secret) {
+						t.Fatalf("invalid PGO error disclosed private path/name %q: %s", secret, stderr.String())
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRunBuildRejectsPGOOutputOrReceiptCollisionBeforeMutation(t *testing.T) {
+	withRunBuildSeams(t)
+	for _, collision := range []string{"output", "receipt"} {
+		t.Run(collision, func(t *testing.T) {
+			dir := t.TempDir()
+			profilePath := filepath.Join(dir, "private-collision-profile.pprof")
+			profileBytes := []byte("must-not-be-mutated")
+			if err := os.WriteFile(profilePath, profileBytes, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(dir, "fak")
+			receipt := filepath.Join(dir, "receipt.json")
+			if collision == "output" {
+				output = profilePath
+			} else {
+				receipt = profilePath
+			}
+			called := false
+			buildGatherProvenance = func(string) (buildProvenance, error) { called = true; return buildProvenance{}, nil }
+			buildPrepareOutput = func(string) error { called = true; return nil }
+			buildExecute = func(buildExecution, io.Writer) (int, error) { called = true; return 0, nil }
+			buildWriteReceipt = func(string, buildReceipt) error { called = true; return nil }
+
+			var stdout, stderr bytes.Buffer
+			code := RunBuild(&stdout, &stderr, []string{
+				"--json", "--profile", "release", "--pgo", profilePath,
+				"--out", output, "--receipt", receipt,
+			})
+			if code != 2 {
+				t.Fatalf("RunBuild code = %d, want usage error 2; stderr=%s", code, stderr.String())
+			}
+			if called || stdout.Len() != 0 {
+				t.Fatalf("collision reached a mutation seam or JSON output: called=%v stdout=%q", called, stdout.String())
+			}
+			got, err := os.ReadFile(profilePath)
+			if err != nil || !bytes.Equal(got, profileBytes) {
+				t.Fatalf("colliding PGO source was mutated: bytes=%q err=%v", got, err)
+			}
+			if strings.Contains(stderr.String(), profilePath) || strings.Contains(stderr.String(), filepath.Base(profilePath)) {
+				t.Fatalf("collision error disclosed private PGO path/name: %s", stderr.String())
+			}
+		})
 	}
 }
 
 func TestRunBuildFailureWritesPartialTerminalReceipt(t *testing.T) {
 	withRunBuildSeams(t)
-	buildExecute = func(buildCommand, io.Writer) (int, error) { return 7, nil }
+	buildExecute = func(buildExecution, io.Writer) (int, error) { return 7, nil }
 	inspectCalled := false
 	buildInspectArtifact = func(string) (buildArtifact, error) {
 		inspectCalled = true
@@ -193,7 +476,7 @@ func TestRunBuildFailureWritesPartialTerminalReceipt(t *testing.T) {
 
 func TestRunBuildReceiptWriteFailureIsReported(t *testing.T) {
 	withRunBuildSeams(t)
-	buildExecute = func(buildCommand, io.Writer) (int, error) { return 0, nil }
+	buildExecute = func(buildExecution, io.Writer) (int, error) { return 0, nil }
 	buildWriteReceipt = func(string, buildReceipt) error { return errors.New("disk full") }
 
 	var stdout, stderr bytes.Buffer
@@ -213,7 +496,7 @@ func TestRunBuildOutputPrepareFailureWritesReceiptWithoutBuild(t *testing.T) {
 	withRunBuildSeams(t)
 	buildPrepareOutput = func(string) error { return errors.New("permission denied") }
 	buildCalled := false
-	buildExecute = func(buildCommand, io.Writer) (int, error) {
+	buildExecute = func(buildExecution, io.Writer) (int, error) {
 		buildCalled = true
 		return 0, nil
 	}
@@ -277,7 +560,7 @@ func TestRunBuildRejectsCollidingOutputAndReceiptBeforeMutation(t *testing.T) {
 		called = true
 		return buildProvenance{}, nil
 	}
-	buildExecute = func(buildCommand, io.Writer) (int, error) {
+	buildExecute = func(buildExecution, io.Writer) (int, error) {
 		called = true
 		return 0, nil
 	}

@@ -138,9 +138,9 @@ func TestSelfUpdateCandidateCacheOutcomeReadout(t *testing.T) {
 	})
 
 	cacheDir := t.TempDir()
-	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true, Reused: true}, cacheDir)
-	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true}, cacheDir)
-	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Stage: selfinstall.StageSmoke}, cacheDir)
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true, Reused: true}, cacheDir, true)
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Installed: true}, cacheDir, true)
+	reportSelfUpdateCandidateCacheOutcome(selfinstall.Result{Stage: selfinstall.StageSmoke}, cacheDir, true)
 
 	want := "self-update: candidate-cache outcomes success=1 refusal=0 error=0\n" +
 		"self-update: candidate-cache outcomes success=1 refusal=1 error=0\n" +
@@ -149,6 +149,59 @@ func TestSelfUpdateCandidateCacheOutcomeReadout(t *testing.T) {
 		t.Fatalf("candidate-cache outcome readout = %q, want %q", got, want)
 	}
 	t.Log(strings.TrimSpace(out.String()))
+}
+
+func TestSelfUpdateCandidateCacheDispositions(t *testing.T) {
+	cacheDir := t.TempDir()
+	tests := []struct {
+		name         string
+		result       selfinstall.Result
+		cacheDir     string
+		entryPresent bool
+		wantState    selfUpdateCandidateCacheState
+		wantReason   bool
+	}{
+		{name: "disabled", result: selfinstall.Result{Installed: true}, wantState: selfUpdateCandidateCacheDisabled},
+		{name: "miss cold population", result: selfinstall.Result{Installed: true}, cacheDir: cacheDir, wantState: selfUpdateCandidateCacheMiss},
+		{name: "hit", result: selfinstall.Result{Installed: true, Reused: true}, cacheDir: cacheDir, entryPresent: true, wantState: selfUpdateCandidateCacheHit},
+		{name: "rejected stale", result: selfinstall.Result{Installed: true}, cacheDir: cacheDir, entryPresent: true, wantState: selfUpdateCandidateCacheRejected, wantReason: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveSelfUpdateCandidateCacheDisposition(tc.result, tc.cacheDir, tc.entryPresent)
+			if got.State != tc.wantState {
+				t.Fatalf("state = %q, want %q", got.State, tc.wantState)
+			}
+			if (got.Reason != "") != tc.wantReason {
+				t.Fatalf("reason = %q, want present=%t", got.Reason, tc.wantReason)
+			}
+			if len(got.Reason) > selfUpdateCandidateCacheReasonMax {
+				t.Fatalf("reason length = %d, want <= %d", len(got.Reason), selfUpdateCandidateCacheReasonMax)
+			}
+		})
+	}
+}
+
+func TestSelfUpdateReceiptCandidateCacheHitJSONIsReadable(t *testing.T) {
+	setSelfUpdateCandidateCacheDisposition(selfUpdateCandidateCacheDisposition{State: selfUpdateCandidateCacheHit})
+	t.Cleanup(resetSelfUpdateCandidateCacheOutcomesForTest)
+
+	encoded, err := json.Marshal(newSelfUpdateReceipt(outcomeInstalled, "bin/fak", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		CandidateCache selfUpdateCandidateCacheDisposition `json:"candidate_cache"`
+	}
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("receipt is not readable JSON: %v: %s", err, encoded)
+	}
+	if envelope.CandidateCache.State != selfUpdateCandidateCacheHit || envelope.CandidateCache.Reason != "" {
+		t.Fatalf("candidate_cache = %+v, want readable hit without reason", envelope.CandidateCache)
+	}
+	if !strings.Contains(string(encoded), `"candidate_cache":{"state":"hit"}`) {
+		t.Fatalf("candidate-cache hit is not human-readable in receipt JSON: %s", encoded)
+	}
 }
 
 func TestSelfUpdateAttemptRejectsUnpinnedSelection(t *testing.T) {
