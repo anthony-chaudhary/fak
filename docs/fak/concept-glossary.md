@@ -2564,3 +2564,10 @@ InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an expli
 kvSpanEvict is the planner-scoped enablement bit set only when FAK_INKERNEL_KVMMU opts in on the CPU model path; guarded eviction code checks it before rebuilding a session and evicting a quarantined tool-result K/V span.
 
 **Distinct from:** The ENABLEMENT GATE for the live planner bridge, not KVSpanEvictor (the public quarantine-bridge interface) and not KVCache.Evict (the model cache mutation it eventually invokes).
+
+
+### PerformanceRSIDebt (performance-RSI unresolved-dimension debt)
+
+PerformanceRSIDebt is the perfrsiscore report metric counting canonical performance dimensions that remain BEHIND or UNKNOWN. Build derives it as Behind plus Unknown, uses zero as the clean condition, and passes the already-computed value to human and Markdown renderers.
+
+**Distinct from:** Use PerformanceRSIDebt for the unresolved-dimension COUNT computed by the performance-RSI scorecard. Unlike performance-rsi-scorecard, it is the metric emitted by that evaluator; unlike the generic scorecard renderer, it is computed before presentation and RenderHuman or RenderMarkdown only project it.
