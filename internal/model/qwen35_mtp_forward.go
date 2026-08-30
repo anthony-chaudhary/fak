@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Qwen35MTPForwardError reports a typed contract failure in the retained
 // Qwen3.8 MTP path. It never permits substituting target-layer tensors or fake
@@ -244,7 +247,7 @@ func (m *Model) qwen35MTPF32Tensor(name string, wantShape []int) ([]float32, err
 	if !ok {
 		return nil, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "present", Got: "missing"}
 	}
-	if meta.Dtype != "F32" {
+	if !strings.EqualFold(meta.Dtype, "F32") {
 		return nil, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32", Got: meta.Dtype}
 	}
 	if !sameIntShape(meta.Shape, wantShape) {

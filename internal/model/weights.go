@@ -353,6 +353,9 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := materializeQwen35Tensors(cfg, man); err != nil {
 		return nil, err
 	}
+	if err := validateQwen35MTPLoadArtifact(cfg, man, raw); err != nil {
+		return nil, err
+	}
 	// Segregate the retained inline vision tower (model.visual.*) into Model.Vision
 	// BEFORE any other pass sees it, so the decoder manifest below holds only text
 	// weights. Only reached when RetainVision is set (the --mmproj flag, #4032);
