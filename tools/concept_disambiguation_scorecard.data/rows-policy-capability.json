@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "The in-memory decision table compiled from a manifest, holding allow-lists, deny maps, arg predicates, posture, and secret patterns the adjudicator consults.",
       "distinction": "The COMPILED in-memory table - NOT the manifest (the on-disk JSON) and NOT the adjudicator (the enforcer that reads it).",
-      "distinct_from": ["policy-manifest", "adjudicator", "policy-capability-t-policy"],
+      "distinct_from": ["policy-manifest", "adjudicator", "policy-capability-t-policy", "admissionpolicy"],
       "aliases": ["compiled policy"],
       "grounding": "policy",
       "grounding_kind": "symbol",
@@ -55,7 +55,7 @@
       "kind": "subsystem",
       "definition": "The in-process DOS reference monitor: the rung that folds a decision chain to prove a tool call allowed, denied, or deferred under the loaded policy.",
       "distinction": "The ENFORCER - NOT policy (the rule table it consults) and NOT a verdict (the decision it returns).",
-      "distinct_from": ["policy-loaded", "verdict", "preflight-ladder", "x-issue1420-policy-capability-adjudicat"],
+      "distinct_from": ["policy-loaded", "verdict", "preflight-ladder", "x-issue1420-policy-capability-adjudicat", "admissionpolicy"],
       "aliases": ["reference monitor"],
       "grounding": "adjudicator",
       "grounding_kind": "path",
@@ -71,7 +71,7 @@
       "kind": "symbol",
       "definition": "The discriminated-union decision an adjudicator returns, keyed by kind (Allow, Deny, Defer, Transform, Quarantine, RequireWitness) with typed payloads.",
       "distinction": "The full DECISION (kind + payload + reason) - NOT a reason code (only the WHY of a deny) and NOT session.Verdict (the per-turn boundary gate).",
-      "distinct_from": ["reason-code", "adjudicator", "abi-verdict", "session-verdict"],
+      "distinct_from": ["reason-code", "adjudicator", "abi-verdict", "session-verdict", "admissionpolicy"],
       "aliases": [],
       "grounding": "verdict",
       "grounding_kind": "symbol",
@@ -127,6 +127,30 @@
       "parent": "",
       "verdict": "defined",
       "gaps": ["preflight ladder vs adjudicator vs rung not yet fully in the glossary"]
+    }
+  ,
+    {
+      "id": "admissionpolicy",
+      "canonical": "gateway admission policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The gateway scheduler configuration that independently bounds running sequence count, aggregate running-token budget, waiting-queue depth, and starvation aging.",
+      "distinction": "Controls gateway batch admission capacity and fairness - NOT the capability policy that authorizes tool calls, NOT the adjudicator that enforces authorization, and NOT a per-request admission verdict.",
+      "distinct_from": [
+        "policy-loaded",
+        "adjudicator",
+        "verdict"
+      ],
+      "aliases": [
+        "AdmissionPolicy",
+        "batch admission policy"
+      ],
+      "grounding": "admissionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
