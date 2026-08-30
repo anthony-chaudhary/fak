@@ -728,9 +728,8 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 // cone. A package is omitted only when its archived-tip metadata proves that exact shape;
 // command failures, malformed output, and packages absent from the output remain in the build.
 func listTestOnlyPackages(root string, packages []string) map[string]bool {
-	testOnly := make(map[string]bool)
 	if len(packages) == 0 {
-		return testOnly
+		return map[string]bool{}
 	}
 
 	args := append([]string{"list", "-e", "-json"}, packages...)
@@ -740,15 +739,28 @@ func listTestOnlyPackages(root string, packages []string) map[string]bool {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
-	_ = cmd.Run() // Decode any complete objects; unreported packages stay selected fail-safe.
+	_ = cmd.Run() // Parse any complete objects; unreported packages stay selected fail-safe.
+	return parseTestOnlyPackages(&out, packages)
+}
 
-	dec := json.NewDecoder(&out)
+// parseTestOnlyPackages is deliberately allowlist-based: metadata can remove a package only
+// when it names one of the exact selected import paths and proves the test-only shape. A decode
+// failure stops classification, leaving the malformed object and every unlisted package in the
+// compile cone.
+func parseTestOnlyPackages(r io.Reader, selected []string) map[string]bool {
+	wanted := make(map[string]bool, len(selected))
+	for _, pkg := range selected {
+		wanted[pkg] = true
+	}
+	testOnly := make(map[string]bool)
+
+	dec := json.NewDecoder(r)
 	for {
 		var p goPkg
 		if err := dec.Decode(&p); err != nil {
 			break
 		}
-		if p.ImportPath != "" && len(p.GoFiles) == 0 && len(p.CgoFiles) == 0 &&
+		if wanted[p.ImportPath] && len(p.GoFiles) == 0 && len(p.CgoFiles) == 0 &&
 			(len(p.TestGoFiles) > 0 || len(p.XTestGoFiles) > 0) {
 			testOnly[p.ImportPath] = true
 		}
