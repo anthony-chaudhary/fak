@@ -697,6 +697,8 @@ complete target for this host/component set, self-update preserves the full pris
 build, vet, provenance-smoke, and transactional activation fallback. A present matching target
 that fails authentication or verification is a hard refusal, never a reason to build different
 bytes from source.
+
+Signed targets may also advertise per-source zstd deltas. Self-update selects one only when the installed artifact SHA-256 exactly matches the delta source and the patch is below the transfer-ratio threshold. Patch size/SHA-256 and patched target size/SHA-256 are verified before the existing smoke/activation gate. Wrong source, corrupt patch, unavailable zstd, patch failure, or poor ratio falls back to the independently signed full artifact. The receipt's `transfer` object records chosen path, delta/full bytes, total time, verification, fallback reason, and fallback bytes/time cost.
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```

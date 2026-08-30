@@ -13253,6 +13253,11 @@
           "category": "incidental",
           "reason": "local cleanup flag",
           "token": "removeCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "local error from preparing a patched artifact candidate",
+          "token": "candidateErr"
         }
       ],
       "exclude": [
@@ -13374,6 +13379,7 @@
         "candidateConsoleTools",
         "candidateData",
         "candidateEphemeral",
+        "candidateErr",
         "candidateFingerprint",
         "candidateID",
         "candidateNote",

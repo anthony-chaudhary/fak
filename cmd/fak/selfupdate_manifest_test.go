@@ -157,10 +157,15 @@ func TestSelfUpdateManifestAuthenticatesFullArtifactTarget(t *testing.T) {
 	p.TargetVersion = "2.0.0"
 	p.TargetRevision = strings.Repeat("a", 40)
 	p.Targets = []selfUpdateArtifactTarget{validArtifactTarget(artifactServer.URL, artifact, p)}
+	p.Targets[0].Deltas = []selfUpdateArtifactDelta{{
+		URL: artifactServer.URL, Format: selfUpdateDeltaFormat, SourceSHA256: strings.Repeat("b", 64),
+		SHA256: digestManifestFixture(artifact), Size: int64(len(artifact)),
+	}}
 	srv := serveManifest(t, http.StatusOK, signedManifestEnvelope(t, priv, p), nil)
 	defer srv.Close()
 	s, err := selfUpdateManifestSelect(context.Background(), manifestRequest(srv.URL, filepath.Join(t.TempDir(), "m.json")))
-	if err != nil || s.Artifact == nil || s.MetadataGeneration != p.MetadataGeneration {
+	if err != nil || s.Artifact == nil || s.MetadataGeneration != p.MetadataGeneration || len(s.Artifact.Deltas) != 1 ||
+		s.Artifact.Deltas[0].SourceSHA256 != strings.Repeat("b", 64) {
 		t.Fatalf("artifact selection = %+v, %v", s, err)
 	}
 	path, err := downloadSelfUpdateArtifact(context.Background(), *s.Artifact, t.TempDir())
@@ -169,6 +174,31 @@ func TestSelfUpdateManifestAuthenticatesFullArtifactTarget(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(path); string(got) != string(artifact) {
 		t.Fatalf("downloaded artifact = %q", got)
+	}
+}
+
+func TestSelfUpdateManifestRejectsTamperedDeltaMetadata(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	withManifestTrust(t, pub)
+	p := validManifestPayload(selfUpdateManifestNow().UTC())
+	body := []byte("release artifact")
+	p.Targets = []selfUpdateArtifactTarget{validArtifactTarget("https://updates.example/full", body, p)}
+	p.Targets[0].Deltas = []selfUpdateArtifactDelta{{
+		URL: "https://updates.example/delta", Format: selfUpdateDeltaFormat,
+		SourceSHA256: strings.Repeat("b", 64), SHA256: strings.Repeat("c", 64), Size: 7,
+	}}
+	env := signedManifestEnvelope(t, priv, p)
+	var payload selfUpdateManifestPayload
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.Targets[0].Deltas[0].Size++
+	env.Payload, _ = json.Marshal(payload)
+	srv := serveManifest(t, http.StatusOK, env, nil)
+	defer srv.Close()
+	if _, err := selfUpdateManifestSelect(context.Background(), manifestRequest(srv.URL, filepath.Join(t.TempDir(), "m.json"))); err == nil ||
+		!strings.Contains(err.Error(), "signature verification failed") {
+		t.Fatalf("tampered signed delta accepted: %v", err)
 	}
 }
 

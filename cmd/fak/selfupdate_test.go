@@ -559,6 +559,23 @@ func TestSelfUpdateReceiptCarriesReusedBuildProvenance(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateReceiptCarriesArtifactTransfer(t *testing.T) {
+	selfUpdateReceiptTransfer = &selfUpdateTransferReceipt{
+		ChosenPath: "full", DeltaBytes: 17, FullBytes: 100, TotalMS: 45,
+		Verification: "signed_full_size_sha256_verified", FallbackReason: "zstd_patch_failed",
+		FallbackBytes: 100, FallbackMS: 20,
+	}
+	t.Cleanup(func() { selfUpdateReceiptTransfer = nil })
+	receipt := newSelfUpdateReceipt(outcomeInstalled, "bin/fak", "")
+	if receipt.Transfer == nil || receipt.Transfer.ChosenPath != "full" ||
+		receipt.Transfer.DeltaBytes != 17 || receipt.Transfer.FullBytes != 100 ||
+		receipt.Transfer.FallbackReason != "zstd_patch_failed" ||
+		receipt.Transfer.FallbackBytes != 100 || receipt.Transfer.FallbackMS != 20 ||
+		receipt.Transfer.TotalMS != 45 || receipt.Transfer.Verification != "signed_full_size_sha256_verified" {
+		t.Fatalf("artifact transfer receipt = %+v", receipt.Transfer)
+	}
+}
+
 func TestSelfUpdateMetadataOnlyReceiptDoesNotSignalBinaryUpdate(t *testing.T) {
 	selfUpdateReceiptChanged = 0
 	receipt := newSelfUpdateReceipt(outcomeMetadataOnly, "bin/fak", "selected-source metadata advanced")

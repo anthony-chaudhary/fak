@@ -150,10 +150,11 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	candidateEphemeral := false
 	var res selfinstall.Result
 	if artifact != nil {
-		fmt.Fprintf(selfUpdateProgress, "self-update: downloading signed artifact for %d target(s) …\n", 1+len(staleSiblings))
-		stopHeartbeat = startSelfUpdateHeartbeat(55, "downloading signed fak artifact")
-		downloaded, err := downloadSelfUpdateArtifact(ctx, *artifact, os.TempDir())
+		fmt.Fprintf(selfUpdateProgress, "self-update: acquiring signed artifact for %d target(s) …\n", 1+len(staleSiblings))
+		stopHeartbeat = startSelfUpdateHeartbeat(55, "acquiring signed fak artifact")
+		downloaded, transfer, err := acquireSelfUpdateArtifact(ctx, selfinstall.RealRunner, installTarget, *artifact, os.TempDir())
 		stopHeartbeat()
+		selfUpdateReceiptTransfer = &transfer
 		if err == nil {
 			defer os.Remove(downloaded)
 			stopHeartbeat = startSelfUpdateHeartbeat(78, "provenance-verifying signed fak artifact")
@@ -176,7 +177,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 				Installed: true, Stage: selfinstall.StageSmoke, Detail: "verified signed artifact target",
 				SourceCommit: artifact.SourceRevision, ArtifactSourceCommit: artifact.SourceRevision,
 				BuildInputDigest: selfUpdateArtifactBindingDigest(*artifact, metadataGeneration),
-				BuildEnvelope:    map[string]string{"acquisition": "signed_artifact", "metadata_generation": fmt.Sprint(metadataGeneration)},
+				BuildEnvelope:    map[string]string{"acquisition": "signed_artifact_" + transfer.ChosenPath, "metadata_generation": fmt.Sprint(metadataGeneration)},
 				ArtifactDigest:   artifact.SHA256, ArtifactSize: artifact.Size, AppVersion: artifact.AppVersion,
 			}
 		}

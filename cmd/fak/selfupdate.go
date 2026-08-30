@@ -518,6 +518,7 @@ type selfUpdateReceipt struct {
 	NextCommand     string                     `json:"next_command"`
 	Detail          string                     `json:"detail,omitempty"`
 	BuildProvenance *selfUpdateBuildProvenance `json:"build_provenance,omitempty"`
+	Transfer        *selfUpdateTransferReceipt `json:"transfer,omitempty"`
 	Handoff         *selfUpdateHandoffReceipt  `json:"handoff,omitempty"`
 	TotalMS         int64                      `json:"total_ms"`
 	PhaseMS         selfUpdatePhaseMS          `json:"phase_ms"`
@@ -635,6 +636,7 @@ var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
 var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
 var selfUpdateReceiptBuildProvenance *selfUpdateBuildProvenance
+var selfUpdateReceiptTransfer *selfUpdateTransferReceipt
 
 // selfUpdateTimingNow is the deterministic wall-clock seam for timing receipts. It is kept
 // separate from outcome timestamps and cleanup-age decisions so tests can control cost
@@ -823,6 +825,7 @@ func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateReceiptChanged = 0
 	selfUpdateReceiptHandoff = nil
 	selfUpdateReceiptBuildProvenance = nil
+	selfUpdateReceiptTransfer = nil
 	beginSelfUpdateTiming()
 	if enabled {
 		selfUpdateJSON = os.Stdout
@@ -894,6 +897,7 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
 		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
 		BuildProvenance: selfUpdateReceiptBuildProvenance,
+		Transfer:        selfUpdateReceiptTransfer,
 		Detail:          strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
 	}
 }

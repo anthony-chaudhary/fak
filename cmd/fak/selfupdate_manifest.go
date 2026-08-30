@@ -51,13 +51,22 @@ type selfUpdateManifestPayload struct {
 }
 
 type selfUpdateArtifactTarget struct {
-	URL            string `json:"url"`
-	Platform       string `json:"platform"`
-	Architecture   string `json:"architecture"`
-	SHA256         string `json:"sha256"`
-	Size           int64  `json:"size"`
-	AppVersion     string `json:"app_version"`
-	SourceRevision string `json:"source_revision"`
+	URL            string                    `json:"url"`
+	Platform       string                    `json:"platform"`
+	Architecture   string                    `json:"architecture"`
+	SHA256         string                    `json:"sha256"`
+	Size           int64                     `json:"size"`
+	AppVersion     string                    `json:"app_version"`
+	SourceRevision string                    `json:"source_revision"`
+	Deltas         []selfUpdateArtifactDelta `json:"deltas,omitempty"`
+}
+
+type selfUpdateArtifactDelta struct {
+	URL          string `json:"url"`
+	Format       string `json:"format"`
+	SourceSHA256 string `json:"source_sha256"`
+	SHA256       string `json:"sha256"`
+	Size         int64  `json:"size"`
 }
 
 type selfUpdateManifestEnvelope struct {
@@ -269,6 +278,10 @@ func authenticateSelfUpdateManifest(env selfUpdateManifestEnvelope, q selfUpdate
 			return selfUpdateManifestSelection{}, err
 		}
 		target.SHA256 = strings.ToLower(target.SHA256)
+		for j := range target.Deltas {
+			target.Deltas[j].SourceSHA256 = strings.ToLower(target.Deltas[j].SourceSHA256)
+			target.Deltas[j].SHA256 = strings.ToLower(target.Deltas[j].SHA256)
+		}
 		artifact = &target
 	}
 	var retry time.Time
@@ -303,6 +316,29 @@ func validateSelfUpdateArtifactTarget(target selfUpdateArtifactTarget, payload s
 	if _, err := selfupdate.CompareReleaseVersions(target.AppVersion, target.AppVersion); err != nil {
 		return fmt.Errorf("manifest artifact app version: %w", err)
 	}
+	sources := make(map[string]struct{}, len(target.Deltas))
+	for _, delta := range target.Deltas {
+		source := strings.ToLower(strings.TrimSpace(delta.SourceSHA256))
+		if delta.Format != selfUpdateDeltaFormat || !validSelfUpdateSHA256(source) ||
+			!validSelfUpdateSHA256(delta.SHA256) || delta.Size < 1 {
+			return errors.New("manifest artifact delta identity invalid")
+		}
+		if _, exists := sources[source]; exists {
+			return errors.New("manifest has multiple deltas for one source artifact")
+		}
+		sources[source] = struct{}{}
+		if err := validateSelfUpdateArtifactURL(delta.URL); err != nil {
+			return fmt.Errorf("manifest artifact delta URL: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateSelfUpdateArtifactURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost"))) {
+		return errors.New("must be HTTPS")
+	}
 	return nil
 }
 
@@ -316,24 +352,29 @@ func validSelfUpdateSHA256(value string) bool {
 }
 
 func downloadSelfUpdateArtifact(ctx context.Context, target selfUpdateArtifactTarget, dir string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
+	path, _, err := downloadSelfUpdateBlob(ctx, target.URL, target.SHA256, target.Size, dir, "fak-self-update-artifact-*", true)
+	return path, err
+}
+
+func downloadSelfUpdateBlob(ctx context.Context, rawURL, wantDigest string, wantSize int64, dir, pattern string, executable bool) (string, int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	resp, err := selfUpdateManifestHTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("artifact HTTP status %s", resp.Status)
+		return "", 0, fmt.Errorf("artifact HTTP status %s", resp.Status)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	out, err := os.CreateTemp(dir, "fak-self-update-artifact-*")
+	out, err := os.CreateTemp(dir, pattern)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	path := out.Name()
 	ok := false
@@ -344,27 +385,29 @@ func downloadSelfUpdateArtifact(ctx context.Context, target selfUpdateArtifactTa
 		}
 	}()
 	hash := sha256.New()
-	n, err := io.Copy(io.MultiWriter(out, hash), io.LimitReader(resp.Body, target.Size+1))
+	n, err := io.Copy(io.MultiWriter(out, hash), io.LimitReader(resp.Body, wantSize+1))
 	if err != nil {
-		return "", err
+		return "", n, err
 	}
-	if n != target.Size {
-		return "", fmt.Errorf("artifact size mismatch: got %d want %d", n, target.Size)
+	if n != wantSize {
+		return "", n, fmt.Errorf("artifact size mismatch: got %d want %d", n, wantSize)
 	}
-	if digest := hex.EncodeToString(hash.Sum(nil)); !strings.EqualFold(digest, target.SHA256) {
-		return "", errors.New("artifact SHA-256 mismatch")
+	if digest := hex.EncodeToString(hash.Sum(nil)); !strings.EqualFold(digest, wantDigest) {
+		return "", n, errors.New("artifact SHA-256 mismatch")
 	}
 	if err := out.Sync(); err != nil {
-		return "", err
+		return "", n, err
 	}
-	if err := out.Chmod(0o755); err != nil {
-		return "", err
+	if executable {
+		if err := out.Chmod(0o755); err != nil {
+			return "", n, err
+		}
 	}
 	if err := out.Close(); err != nil {
-		return "", err
+		return "", n, err
 	}
 	ok = true
-	return path, nil
+	return path, n, nil
 }
 
 func selfUpdateArtifactBindingDigest(target selfUpdateArtifactTarget, generation uint64) string {
