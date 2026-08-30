@@ -13,7 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 )
 
-func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
+func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, artifact *selfUpdateArtifactTarget, metadataGeneration uint64, signedVersion string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
 	reportSelfUpdateProgress(20, "acquiring self-update lock")
 	installTarget := strings.TrimSpace(*target)
 	if installTarget == "" {
@@ -45,6 +45,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
+	var stopHeartbeat func()
 	reportSelfUpdateProgress(25, "cleaning stale self-update artifacts")
 
 	// Self-heal first: collect build worktrees leaked by PRIOR self-update ticks that
@@ -88,26 +89,34 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
 	// A per-invocation temp dir under the OS temp root satisfies both. BuildDirName encodes
 	// our PID so a future run's reaper can tell a live build from a leaked corpse.
-	buildDir := filepath.Join(os.TempDir(), selfinstall.BuildDirName(os.Getpid()))
-	stopHeartbeat := startSelfUpdateHeartbeat(30, "preparing pristine selected-commit worktree")
-	_, cleanup, perr := prepareSelfUpdateAttempt(ctx, selfinstall.RealRunner, repoRoot, headRev, buildDir)
-	stopHeartbeat()
-	if perr != nil {
-		fmt.Fprintln(os.Stderr, "self-update:", perr)
-		emitSelfUpdateOutcome(outcomePrepareFailed, installTarget, perr.Error())
-		os.Exit(1)
-	}
-	defer cleanup()
+	buildDir := ""
+	cleanup := func() {}
+	buildRunner := selfinstall.RealRunner
+	cleanupBuildCache := func() {}
+	if artifact == nil {
+		buildDir = filepath.Join(os.TempDir(), selfinstall.BuildDirName(os.Getpid()))
+		stopHeartbeat := startSelfUpdateHeartbeat(30, "preparing pristine selected-commit worktree")
+		_, preparedCleanup, perr := prepareSelfUpdateAttempt(ctx, selfinstall.RealRunner, repoRoot, headRev, buildDir)
+		stopHeartbeat()
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, "self-update:", perr)
+			emitSelfUpdateOutcome(outcomePrepareFailed, installTarget, perr.Error())
+			os.Exit(1)
+		}
+		cleanup = preparedCleanup
+		defer cleanup()
 
-	buildRunner, cleanupBuildCache, cacheErr := selfinstall.NewSelfUpdateRunner()
-	if cacheErr != nil {
-		detail := "prepare update-owned Go build cache: " + cacheErr.Error()
-		fmt.Fprintln(os.Stderr, "self-update:", detail)
-		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
-		cleanup()
-		os.Exit(1)
+		var cacheErr error
+		buildRunner, cleanupBuildCache, cacheErr = selfinstall.NewSelfUpdateRunner()
+		if cacheErr != nil {
+			detail := "prepare update-owned Go build cache: " + cacheErr.Error()
+			fmt.Fprintln(os.Stderr, "self-update:", detail)
+			emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
+			cleanup()
+			os.Exit(1)
+		}
+		defer cleanupBuildCache()
 	}
-	defer cleanupBuildCache()
 	cleanupAttempt := func() {
 		cleanupBuildCache()
 		cleanup()
@@ -137,12 +146,53 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		}
 	}
 
-	fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
 	candidate := ""
-	res := selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
-		candidate = source
-		return nil
-	}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
+	candidateEphemeral := false
+	var res selfinstall.Result
+	if artifact != nil {
+		fmt.Fprintf(selfUpdateProgress, "self-update: downloading signed artifact for %d target(s) …\n", 1+len(staleSiblings))
+		stopHeartbeat = startSelfUpdateHeartbeat(55, "downloading signed fak artifact")
+		downloaded, err := downloadSelfUpdateArtifact(ctx, *artifact, os.TempDir())
+		stopHeartbeat()
+		if err == nil {
+			defer os.Remove(downloaded)
+			stopHeartbeat = startSelfUpdateHeartbeat(78, "provenance-verifying signed fak artifact")
+			err = selfinstall.VerifyTarget(ctx, selfinstall.RealRunner, downloaded, repoRoot, selfinstall.VerifiedTarget{
+				MetadataGeneration: metadataGeneration, SourceCommit: artifact.SourceRevision,
+				ArtifactDigest: artifact.SHA256, ArtifactSize: artifact.Size, AppVersion: artifact.AppVersion,
+			})
+			stopHeartbeat()
+		}
+		if err == nil {
+			candidate, err = selfinstall.StoreVerifiedSlot(installTarget, downloaded, selfinstall.VerifiedTarget{
+				MetadataGeneration: metadataGeneration, SourceCommit: artifact.SourceRevision,
+				ArtifactDigest: artifact.SHA256, ArtifactSize: artifact.Size, AppVersion: artifact.AppVersion,
+			})
+		}
+		if err != nil {
+			res = selfinstall.Result{Stage: selfinstall.StageSmoke, Detail: err.Error()}
+		} else {
+			res = selfinstall.Result{
+				Installed: true, Stage: selfinstall.StageSmoke, Detail: "verified signed artifact target",
+				SourceCommit: artifact.SourceRevision, ArtifactSourceCommit: artifact.SourceRevision,
+				BuildInputDigest: selfUpdateArtifactBindingDigest(*artifact, metadataGeneration),
+				BuildEnvelope:    map[string]string{"acquisition": "signed_artifact", "metadata_generation": fmt.Sprint(metadataGeneration)},
+				ArtifactDigest:   artifact.SHA256, ArtifactSize: artifact.Size, AppVersion: artifact.AppVersion,
+			}
+		}
+	} else {
+		fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+		res = selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
+			candidate = source
+			return nil
+		}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
+		candidateEphemeral = true
+	}
+	if res.Installed {
+		if metadataGeneration != 0 && strings.TrimSpace(res.AppVersion) != strings.TrimSpace(signedVersion) {
+			res = selfinstall.Result{Stage: selfinstall.StageSmoke, Detail: fmt.Sprintf("signed app version mismatch: candidate reports %q want %q", res.AppVersion, signedVersion)}
+		}
+	}
 	if res.Installed {
 		selfUpdateReceiptBuildProvenance = &selfUpdateBuildProvenance{
 			SourceCommit: res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
@@ -159,7 +209,14 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		cleanupAttempt() // os.Exit skips deferred functions; owned cache/source cleanup must run first.
 		os.Exit(1)
 	}
-	defer os.Remove(candidate)
+	if candidateEphemeral {
+		defer os.Remove(candidate)
+	}
+	removeCandidate := func() {
+		if candidateEphemeral {
+			_ = os.Remove(candidate)
+		}
+	}
 	identityPath := selfinstall.IdentityStatePath(installTarget)
 	priorIdentity, identityErr := selfinstall.ReadInstallIdentity(identityPath)
 	if identityErr != nil {
@@ -205,7 +262,12 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	if len(copies) > 0 && primaryEqual {
 		transactionLaunchTarget = copies[0].Target
 	}
-	transaction := selfinstall.RunLaunchTransaction(copies, transactionLaunchTarget, selfinstall.OSSwap)
+	var transaction selfinstall.TransactionResult
+	if len(copies) == 0 {
+		transaction = selfinstall.Updated{Attempted: len(componentPlan)}
+	} else {
+		transaction = selfinstall.RunLaunchTransaction(copies, transactionLaunchTarget, selfinstall.OSSwap)
+	}
 	stopHeartbeat()
 	switch result := transaction.(type) {
 	case selfinstall.Updated:
@@ -215,7 +277,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
 		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
 		emitSelfUpdateOutcome(outcomeRolledBack, installTarget, detail)
-		_ = os.Remove(candidate)
+		removeCandidate()
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
@@ -225,7 +287,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
 		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
 		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, detail)
-		_ = os.Remove(candidate)
+		removeCandidate()
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
@@ -233,18 +295,23 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		os.Exit(1)
 	default:
 		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, "unknown transaction result")
-		_ = os.Remove(candidate)
+		removeCandidate()
 		if companionBinary != "" {
 			_ = os.Remove(companionBinary)
 		}
 		cleanupAttempt()
 		os.Exit(1)
 	}
+	activeIdentityPath := installTarget
+	if artifact != nil {
+		activeIdentityPath = candidate
+	}
 	_, identityErr = selfinstall.AdvanceInstallIdentity(identityPath, priorIdentity, selfinstall.StateUpdate{
-		SelectedSourceCommit: res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
+		SignedMetadataGeneration: metadataGeneration,
+		SelectedSourceCommit:     res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
 		BuildInputDigest: res.BuildInputDigest, ArtifactDigest: res.ArtifactDigest,
 		ArtifactSize: res.ArtifactSize, AppVersion: res.AppVersion,
-	}, installTarget, selfinstall.LaunchPriorPath(installTarget), !primaryEqual)
+	}, activeIdentityPath, selfinstall.LaunchPriorPath(installTarget), !primaryEqual)
 	if identityErr != nil {
 		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget, "binary transaction completed but identity persistence failed: "+identityErr.Error())
 		return

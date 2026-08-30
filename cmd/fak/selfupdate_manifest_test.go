@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -39,7 +42,7 @@ func TestSelfUpdateManifestAuthenticatedSelectionAndCache(t *testing.T) {
 	q.URL = server.URL
 
 	s, err := selfUpdateManifestSelect(context.Background(), q)
-	if err != nil || s.Disposition != "update" || s.TargetRevision != "target-r2" {
+	if err != nil || s.Disposition != "update" || s.TargetRevision != strings.Repeat("a", 40) {
 		t.Fatalf("authenticated 200 = %+v, %v", s, err)
 	}
 	cached, err := loadSelfUpdateManifestState(cache)
@@ -78,8 +81,11 @@ func TestSelfUpdateManifest304RequiresValidCache(t *testing.T) {
 				t.Fatal(err)
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("If-None-Match") != `"x"` {
-					t.Errorf("If-None-Match missing")
+				if tc.name == "valid" && r.Header.Get("If-None-Match") != `"x"` {
+					t.Errorf("If-None-Match missing for authenticated cache")
+				}
+				if tc.name != "valid" && r.Header.Get("If-None-Match") != "" {
+					t.Errorf("invalid cache was used conditionally")
 				}
 				w.WriteHeader(http.StatusNotModified)
 			}))
@@ -135,6 +141,130 @@ func TestSelfUpdateManifestHoldDispositionsAndForgedSignature(t *testing.T) {
 	defer srv.Close()
 	if _, err := selfUpdateManifestSelect(context.Background(), manifestRequest(srv.URL, filepath.Join(t.TempDir(), "m.json"))); err == nil {
 		t.Fatal("forged signature accepted")
+	}
+}
+
+func TestSelfUpdateManifestAuthenticatesFullArtifactTarget(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	withManifestTrust(t, pub)
+	now := selfUpdateManifestNow().UTC()
+	artifact := []byte("release artifact")
+	artifactServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(artifact)
+	}))
+	defer artifactServer.Close()
+	p := validManifestPayload(now)
+	p.TargetVersion = "2.0.0"
+	p.TargetRevision = strings.Repeat("a", 40)
+	p.Targets = []selfUpdateArtifactTarget{validArtifactTarget(artifactServer.URL, artifact, p)}
+	srv := serveManifest(t, http.StatusOK, signedManifestEnvelope(t, priv, p), nil)
+	defer srv.Close()
+	s, err := selfUpdateManifestSelect(context.Background(), manifestRequest(srv.URL, filepath.Join(t.TempDir(), "m.json")))
+	if err != nil || s.Artifact == nil || s.MetadataGeneration != p.MetadataGeneration {
+		t.Fatalf("artifact selection = %+v, %v", s, err)
+	}
+	path, err := downloadSelfUpdateArtifact(context.Background(), *s.Artifact, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(artifact) {
+		t.Fatalf("downloaded artifact = %q", got)
+	}
+}
+
+func TestSelfUpdateManifestRejectsRollbackFreezeAndMixMatch(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	withManifestTrust(t, pub)
+	now := selfUpdateManifestNow().UTC()
+	cache := filepath.Join(t.TempDir(), "m.json")
+	base := validManifestPayload(now)
+	base.MetadataGeneration = 9
+	base.TargetVersion = "2.0.0"
+	base.TargetRevision = strings.Repeat("a", 40)
+	body := []byte("artifact")
+	base.Targets = []selfUpdateArtifactTarget{validArtifactTarget("https://updates.example/fak", body, base)}
+	if err := saveSelfUpdateManifestState(cache, selfUpdateManifestState{Envelope: signedManifestEnvelope(t, priv, base)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*selfUpdateManifestPayload)
+	}{
+		{"generation rollback", func(p *selfUpdateManifestPayload) { p.MetadataGeneration = 8 }},
+		{"version rollback", func(p *selfUpdateManifestPayload) {
+			p.MetadataGeneration = 10
+			p.TargetVersion = "1.9.9"
+			p.Targets[0].AppVersion = p.TargetVersion
+		}},
+		{"freeze", func(p *selfUpdateManifestPayload) { p.Targets[0].URL = "https://updates.example/changed" }},
+		{"mix-match version", func(p *selfUpdateManifestPayload) {
+			p.MetadataGeneration = 10
+			p.Targets[0].AppVersion = "9.9.9"
+		}},
+		{"mix-match revision", func(p *selfUpdateManifestPayload) {
+			p.MetadataGeneration = 10
+			p.Targets[0].SourceRevision = strings.Repeat("b", 40)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := base
+			p.Targets = append([]selfUpdateArtifactTarget(nil), base.Targets...)
+			tc.edit(&p)
+			srv := serveManifest(t, http.StatusOK, signedManifestEnvelope(t, priv, p), nil)
+			defer srv.Close()
+			q := manifestRequest(srv.URL, cache)
+			q.Force = true
+			q.InstalledVersion = "2.0.0"
+			q.InstalledGeneration = 9
+			if _, err := selfUpdateManifestSelect(context.Background(), q); err == nil {
+				t.Fatal("rollback/freeze/mix-match manifest accepted")
+			}
+		})
+	}
+}
+
+func TestSelfUpdateManifestCarriesGenerationAcrossInstalledIdentityChange(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	withManifestTrust(t, pub)
+	now := selfUpdateManifestNow().UTC()
+	cache := filepath.Join(t.TempDir(), "m.json")
+	prior := validManifestPayload(now)
+	prior.MetadataGeneration = 9
+	prior.InstalledIdentity = "old-installed-revision"
+	if err := saveSelfUpdateManifestState(cache, selfUpdateManifestState{ETag: `"old"`, Envelope: signedManifestEnvelope(t, priv, prior)}); err != nil {
+		t.Fatal(err)
+	}
+	next := prior
+	next.MetadataGeneration = 10
+	next.InstalledIdentity = "new-installed-revision"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != "" {
+			t.Error("identity-mismatched cache was used for a conditional request")
+		}
+		_ = json.NewEncoder(w).Encode(signedManifestEnvelope(t, priv, next))
+	}))
+	defer srv.Close()
+	q := manifestRequest(srv.URL, cache)
+	q.InstalledIdentity = next.InstalledIdentity
+	q.InstalledGeneration = 9
+	s, err := selfUpdateManifestSelect(context.Background(), q)
+	if err != nil || s.MetadataGeneration != 10 {
+		t.Fatalf("identity rollover selection = %+v, %v", s, err)
+	}
+}
+
+func TestDownloadSelfUpdateArtifactRejectsCorruption(t *testing.T) {
+	body := []byte("corrupt artifact")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	defer srv.Close()
+	target := selfUpdateArtifactTarget{URL: srv.URL, SHA256: strings.Repeat("0", 64), Size: int64(len(body))}
+	if _, err := downloadSelfUpdateArtifact(context.Background(), target, t.TempDir()); err == nil {
+		t.Fatal("corrupt artifact accepted")
+	}
+	target.SHA256 = digestManifestFixture(body)
+	target.Size--
+	if _, err := downloadSelfUpdateArtifact(context.Background(), target, t.TempDir()); err == nil {
+		t.Fatal("wrong artifact size accepted")
 	}
 }
 
@@ -226,7 +356,20 @@ func TestSelfUpdateManifestOfflineZeroRequest(t *testing.T) {
 }
 
 func validManifestPayload(now time.Time) selfUpdateManifestPayload {
-	return selfUpdateManifestPayload{Schema: selfUpdateManifestSchema, ManifestID: "m1", Channel: "stable", Cohort: "c1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, InstalledIdentity: "installed-r1", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339), Disposition: "update", TargetVersion: "v2", TargetRevision: "target-r2"}
+	return selfUpdateManifestPayload{Schema: selfUpdateManifestSchema, ManifestID: "m1", Channel: "stable", Cohort: "c1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, InstalledIdentity: "installed-r1", MetadataGeneration: 2, ExpiresAt: now.Add(time.Hour).Format(time.RFC3339), Disposition: "update", TargetVersion: "v2", TargetRevision: strings.Repeat("a", 40)}
+}
+
+func validArtifactTarget(url string, body []byte, p selfUpdateManifestPayload) selfUpdateArtifactTarget {
+	return selfUpdateArtifactTarget{
+		URL: url, Platform: p.Platform, Architecture: p.Architecture,
+		SHA256: digestManifestFixture(body), Size: int64(len(body)),
+		AppVersion: p.TargetVersion, SourceRevision: p.TargetRevision,
+	}
+}
+
+func digestManifestFixture(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 func signedManifestEnvelope(t *testing.T, priv ed25519.PrivateKey, p selfUpdateManifestPayload) selfUpdateManifestEnvelope {
 	t.Helper()

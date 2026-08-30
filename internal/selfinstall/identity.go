@@ -18,12 +18,13 @@ const installIdentitySchema = "fak.selfinstall.identity/v1"
 // source may advance while ArtifactSourceCommit and ArtifactDigest continue to name reused
 // bytes.
 type StateUpdate struct {
-	SelectedSourceCommit string
-	ArtifactSourceCommit string
-	BuildInputDigest     string
-	ArtifactDigest       string
-	ArtifactSize         int64
-	AppVersion           string
+	SignedMetadataGeneration uint64
+	SelectedSourceCommit     string
+	ArtifactSourceCommit     string
+	BuildInputDigest         string
+	ArtifactDigest           string
+	ArtifactSize             int64
+	AppVersion               string
 }
 
 // ArtifactRecord is a verified activation or rollback unit. ID is always the artifact digest;
@@ -39,14 +40,15 @@ type ArtifactRecord struct {
 
 // InstallIdentity is the persisted identity contract for one installed binary.
 type InstallIdentity struct {
-	Schema               string           `json:"schema"`
-	MetadataGeneration   uint64           `json:"metadata_generation"`
-	SelectedSourceCommit string           `json:"selected_source_commit"`
-	BuildInputDigest     string           `json:"build_input_digest"`
-	ArtifactDigest       string           `json:"artifact_digest"`
-	AppVersion           string           `json:"app_version"`
-	CurrentDigest        string           `json:"current_artifact_digest"`
-	Artifacts            []ArtifactRecord `json:"slots"`
+	Schema                   string           `json:"schema"`
+	MetadataGeneration       uint64           `json:"metadata_generation"`
+	SignedMetadataGeneration uint64           `json:"signed_metadata_generation,omitempty"`
+	SelectedSourceCommit     string           `json:"selected_source_commit"`
+	BuildInputDigest         string           `json:"build_input_digest"`
+	ArtifactDigest           string           `json:"artifact_digest"`
+	AppVersion               string           `json:"app_version"`
+	CurrentDigest            string           `json:"current_artifact_digest"`
+	Artifacts                []ArtifactRecord `json:"slots"`
 }
 
 // IdentityStatePath is owned by selfinstall and stays beside the binary whose identity it
@@ -100,6 +102,23 @@ func AdvanceInstallIdentity(path string, prior InstallIdentity, candidate StateU
 			return InstallIdentity{}, err
 		}
 	}
+	if candidate.SignedMetadataGeneration != 0 {
+		if candidate.SignedMetadataGeneration < prior.SignedMetadataGeneration {
+			return InstallIdentity{}, fmt.Errorf("signed metadata generation rollback: got %d, installed %d", candidate.SignedMetadataGeneration, prior.SignedMetadataGeneration)
+		}
+		if candidate.SignedMetadataGeneration == prior.SignedMetadataGeneration && prior.SignedMetadataGeneration != 0 {
+			if prior.SelectedSourceCommit == strings.ToLower(strings.TrimSpace(candidate.SelectedSourceCommit)) &&
+				prior.ArtifactDigest == strings.ToLower(strings.TrimSpace(candidate.ArtifactDigest)) &&
+				prior.AppVersion == strings.TrimSpace(candidate.AppVersion) {
+				return prior, nil
+			}
+			return InstallIdentity{}, fmt.Errorf("signed metadata generation freeze mismatch at %d", candidate.SignedMetadataGeneration)
+		}
+	}
+	signedGeneration := candidate.SignedMetadataGeneration
+	if signedGeneration == 0 {
+		signedGeneration = prior.SignedMetadataGeneration
+	}
 
 	appVersion := strings.TrimSpace(candidate.AppVersion)
 	artifactSource := strings.ToLower(strings.TrimSpace(candidate.ArtifactSourceCommit))
@@ -114,9 +133,15 @@ func AdvanceInstallIdentity(path string, prior InstallIdentity, candidate StateU
 				artifactSource = active.ArtifactSourceCommit
 			}
 		}
-	} else if active, ok := VerifiedArtifact(prior, prior.CurrentDigest); ok && recordMatchesPath(active, rollbackPath) {
-		active.Path = filepath.Clean(rollbackPath)
-		records = append(records, active)
+	} else if active, ok := VerifiedArtifact(prior, prior.CurrentDigest); ok {
+		switch {
+		case recordMatchesPath(active, active.Path):
+			// A persistent verified slot is already independently recoverable.
+			records = append(records, active)
+		case recordMatchesPath(active, rollbackPath):
+			active.Path = filepath.Clean(rollbackPath)
+			records = append(records, active)
+		}
 	}
 
 	active := ArtifactRecord{
@@ -129,14 +154,15 @@ func AdvanceInstallIdentity(path string, prior InstallIdentity, candidate StateU
 	}
 	records = append(records, active)
 	state := InstallIdentity{
-		Schema:               installIdentitySchema,
-		MetadataGeneration:   prior.MetadataGeneration + 1,
-		SelectedSourceCommit: strings.ToLower(strings.TrimSpace(candidate.SelectedSourceCommit)),
-		BuildInputDigest:     candidate.BuildInputDigest,
-		ArtifactDigest:       candidate.ArtifactDigest,
-		AppVersion:           appVersion,
-		CurrentDigest:        active.ID,
-		Artifacts:            dedupeRecords(records),
+		Schema:                   installIdentitySchema,
+		MetadataGeneration:       prior.MetadataGeneration + 1,
+		SignedMetadataGeneration: signedGeneration,
+		SelectedSourceCommit:     strings.ToLower(strings.TrimSpace(candidate.SelectedSourceCommit)),
+		BuildInputDigest:         candidate.BuildInputDigest,
+		ArtifactDigest:           candidate.ArtifactDigest,
+		AppVersion:               appVersion,
+		CurrentDigest:            active.ID,
+		Artifacts:                dedupeRecords(records),
 	}
 	if err := validateInstallIdentity(state); err != nil {
 		return InstallIdentity{}, err

@@ -567,6 +567,20 @@ func TestSelfUpdateMetadataOnlyReceiptDoesNotSignalBinaryUpdate(t *testing.T) {
 	}
 }
 
+func TestUsableSelfUpdateArtifactFallsBackWhenCatalogHasNoCompleteTarget(t *testing.T) {
+	target := &selfUpdateArtifactTarget{URL: "https://updates.example/fak"}
+	selection := selfUpdateManifestSelection{Disposition: "update", Artifact: target}
+	if got := usableSelfUpdateArtifact(selection, nil); got != target {
+		t.Fatalf("usable signed target = %p, want %p", got, target)
+	}
+	if got := usableSelfUpdateArtifact(selfUpdateManifestSelection{Disposition: "update"}, nil); got != nil {
+		t.Fatal("missing catalog target did not fall back to source build")
+	}
+	if got := usableSelfUpdateArtifact(selection, []string{"fak-dev"}); got != nil {
+		t.Fatal("incomplete component catalog bypassed source-build fallback")
+	}
+}
+
 func TestSelfUpdateCheckOnlyReceiptReportsStaleRevision(t *testing.T) {
 	selfUpdateReceiptOldRevision = "oldrev"
 	selfUpdateReceiptNewRevision = "newrev"

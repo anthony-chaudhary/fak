@@ -1122,6 +1122,16 @@
           "category": "incidental",
           "reason": "ReasonBuildCacheCleanRace is the structured refusal token for an operation on the existing GOCACHE concept, not a separate cache implementation or data store.",
           "token": "reasonbuildcachecleanrace"
+        },
+        {
+          "category": "incidental",
+          "reason": "local cached-manifest authentication result",
+          "token": "cacheAuthenticated"
+        },
+        {
+          "category": "incidental",
+          "reason": "local cached-manifest authentication error",
+          "token": "cacheAuthErr"
         }
       ],
       "id": "cache",
@@ -1207,6 +1217,8 @@
         "cacheActivity",
         "cacheAmbiguous",
         "cacheAttributed",
+        "cacheAuthErr",
+        "cacheAuthenticated",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheMissing",
@@ -5743,6 +5755,21 @@
           "category": "false-positive",
           "reason": "This symbol is a launch-time guard hook installation receipt positioned in guard-gate, not a live session runtime object.",
           "token": "guardsessionstartinstall"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go helper persisting a verified artifact slot",
+          "token": "StoreVerifiedSlot"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON schema constant for verified slot metadata",
+          "token": "verifiedSlotSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "private JSON persistence struct for verified artifact slots",
+          "token": "verifiedSlotMetadata"
         }
       ],
       "exclude": [
@@ -5872,6 +5899,7 @@
         "SessionSupport",
         "SessionTerminalView",
         "SetSessionAffinity",
+        "StoreVerifiedSlot",
         "UNSUPPORTED_SESSION_KIND",
         "VerifySessionMoveDestinationReceipt",
         "WatchdogExcludeKind",
@@ -6131,6 +6159,8 @@
         "totalslots",
         "tuisessionrow",
         "validSessionRelayURL",
+        "verifiedSlotMetadata",
+        "verifiedSlotSchema",
         "verifyFilterToolScheduler",
         "verifyFilterToolSchedulerPath",
         "wipPeerCheckpointSessions",
@@ -13213,6 +13243,16 @@
           "category": "incidental",
           "reason": "Go helper deriving component convergence rows; not a project plan primitive",
           "token": "PlanComponents"
+        },
+        {
+          "category": "incidental",
+          "reason": "local candidate lifetime flag",
+          "token": "candidateEphemeral"
+        },
+        {
+          "category": "incidental",
+          "reason": "local cleanup flag",
+          "token": "removeCandidate"
         }
       ],
       "exclude": [
@@ -13333,6 +13373,7 @@
         "bytes_per_candidate",
         "candidateConsoleTools",
         "candidateData",
+        "candidateEphemeral",
         "candidateFingerprint",
         "candidateID",
         "candidateNote",
@@ -13390,6 +13431,7 @@
         "recoveryJournalCandidates",
         "register_bench_plan_doc",
         "relationCandidates",
+        "removeCandidate",
         "reportFromSessions",
         "requestedExecutionPlan",
         "rollbackCodexMarketplaceCandidate",

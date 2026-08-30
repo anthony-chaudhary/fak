@@ -682,6 +682,21 @@ unexpired identity-matched cache and never extends signed expiry. `429`/`503` Re
 bounded to 24 hours and cached. `--force` contacts the server despite cache freshness/backoff,
 but never bypasses signature, identity, or expiry checks. Without `--manifest-url`, behavior
 is unchanged.
+
+Manifest v2 may also carry a full executable target for the selected OS/architecture. The
+signature binds the artifact URL, platform, architecture, SHA-256, byte size, app version,
+source revision, expiry, and monotonic metadata generation as one identity. Self-update
+rejects corrupt signatures or bytes, expired metadata, generation or app-version rollback,
+same-generation changed payloads (freeze/mirror equivocation), duplicate usable targets, and
+version/revision mix-and-match. A usable target is downloaded with a strict size bound and
+SHA-256 check, then must pass `version --json` smoke and attest the signed app version plus
+exact source commit before activation. Verified bytes are copied into immutable
+generation+digest slots; activation reads from that slot and never deletes older verified
+slots, so the prior artifact remains recoverable. When the authenticated catalog has no
+complete target for this host/component set, self-update preserves the full pristine-source
+build, vet, provenance-smoke, and transactional activation fallback. A present matching target
+that fails authentication or verification is a hard refusal, never a reason to build different
+bytes from source.
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```

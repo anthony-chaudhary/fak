@@ -104,3 +104,36 @@ func TestAdvanceInstallIdentityActivationKeepsRollbackAsVerifiedSlot(t *testing.
 		t.Fatal("ambiguous app version resolved as a rollback slot")
 	}
 }
+
+func TestAdvanceInstallIdentityRejectsSignedGenerationRollbackAndFreeze(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "identity.json")
+	activePath := filepath.Join(dir, "slot")
+	body := []byte("verified slot")
+	if err := os.WriteFile(activePath, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := StateUpdate{
+		SignedMetadataGeneration: 5, SelectedSourceCommit: cacheTestCommitA, ArtifactSourceCommit: cacheTestCommitA,
+		BuildInputDigest: digestBytes([]byte("inputs")), ArtifactDigest: digestBytes(body),
+		ArtifactSize: int64(len(body)), AppVersion: "2.0.0",
+	}
+	state, err := AdvanceInstallIdentity(statePath, InstallIdentity{}, base, activePath, filepath.Join(dir, "prior"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback := base
+	rollback.SignedMetadataGeneration = 4
+	if _, err := AdvanceInstallIdentity(statePath, state, rollback, activePath, filepath.Join(dir, "prior"), false); err == nil {
+		t.Fatal("metadata generation rollback accepted")
+	}
+	freeze := base
+	freeze.AppVersion = "2.0.1"
+	if _, err := AdvanceInstallIdentity(statePath, state, freeze, activePath, filepath.Join(dir, "prior"), false); err == nil {
+		t.Fatal("same-generation changed identity accepted")
+	}
+	replay, err := AdvanceInstallIdentity(statePath, state, base, activePath, filepath.Join(dir, "prior"), false)
+	if err != nil || replay.SignedMetadataGeneration != 5 || replay.MetadataGeneration != 1 {
+		t.Fatalf("identical generation replay = %+v, %v", replay, err)
+	}
+}

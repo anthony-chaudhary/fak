@@ -81,19 +81,30 @@ func cmdSelfUpdate(argv []string) {
 
 	// Conditional selection is intentionally before any git fetch/build/install. With no
 	// manifest URL configured this block is skipped, preserving the legacy path byte-for-byte.
+	var manifestSelection selfUpdateManifestSelection
 	if strings.TrimSpace(*manifestURL) != "" {
 		installed := selfUpdateInstalledIdentity(strings.TrimSpace(*target))
-		proceed, disposition, err := selfUpdateManifestBeforeFetch(context.Background(), selfUpdateManifestRequest{
+		installedState, err := selfinstall.ReadInstallIdentity(selfinstall.IdentityStatePath(installTargetOr(*target)))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: installed identity refused:", err)
+			return
+		}
+		installedVersion := installedState.AppVersion
+		if strings.TrimSpace(installedVersion) == "" {
+			installedVersion = selfUpdateBinaryVersion(installTargetOr(*target))
+		}
+		manifestSelection, err = selfUpdateManifestSelect(context.Background(), selfUpdateManifestRequest{
 			URL: *manifestURL, ManifestID: *manifestID, CachePath: *manifestStatePath, Channel: *manifestChannel,
 			Cohort: *manifestCohort, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
-			InstalledIdentity: installed, Offline: *offline, Force: *force,
+			InstalledIdentity: installed, InstalledVersion: installedVersion,
+			InstalledGeneration: installedState.SignedMetadataGeneration, Offline: *offline, Force: *force,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "self-update: signed manifest refused:", err)
 			return
 		}
-		if !proceed {
-			fmt.Fprintln(os.Stderr, "self-update:", disposition)
+		if manifestSelection.Disposition != "update" {
+			fmt.Fprintln(os.Stderr, "self-update:", manifestSelection.Disposition)
 			return
 		}
 	}
@@ -101,9 +112,17 @@ func cmdSelfUpdate(argv []string) {
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
 	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
 	// line we actually want guards converged on.
-	reportSelfUpdateProgress(10, "reading origin/main revision")
-	selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
-	headRev := repoRevOf(repoRoot, "origin/main")
+	reportSelfUpdateProgress(10, "reading selected revision")
+	headRev := ""
+	if strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update" {
+		headRev = manifestSelection.TargetRevision
+		if manifestSelection.Artifact == nil {
+			selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+		}
+	} else {
+		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+		headRev = repoRevOf(repoRoot, "origin/main")
+	}
 
 	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
 	// case: a dev fak invokes self-update to converge the FLEET binary), read the TARGET's
@@ -163,8 +182,15 @@ func cmdSelfUpdate(argv []string) {
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
 	// already-current fak must still run the cycle when its installed fak-dev companion lags.
 	companionPaths := selfUpdateFakDevTargets(repoRoot, installTargetOr(*target))
+	selectedArtifact := usableSelfUpdateArtifact(manifestSelection, companionPaths)
+	if manifestSelection.Artifact != nil && selectedArtifact == nil {
+		fmt.Fprintln(selfUpdateProgress, "self-update: signed catalog has no fak-dev companion target; using full source-build fallback")
+		selectedArtifact = nil
+		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+	}
 	companionStale := selfUpdateFakDevNeedsConverge(companionPaths, headRev, selfUpdateProbe)
-	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
+	manifestSelectedUpdate := strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update"
+	proceed := manifestSelectedUpdate || selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
 	if !proceed {
 		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
 		switch {
@@ -182,7 +208,14 @@ func cmdSelfUpdate(argv []string) {
 		return
 	}
 
-	performSelfUpdate(repoRoot, headRev, target, companionPaths, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+	performSelfUpdate(repoRoot, headRev, target, companionPaths, selectedArtifact, manifestSelection.MetadataGeneration, manifestSelection.TargetVersion, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+}
+
+func usableSelfUpdateArtifact(selection selfUpdateManifestSelection, companionPaths []string) *selfUpdateArtifactTarget {
+	if selection.Disposition != "update" || selection.Artifact == nil || len(companionPaths) != 0 {
+		return nil
+	}
+	return selection.Artifact
 }
 
 func selfUpdateInstalledIdentity(target string) string {
@@ -192,6 +225,23 @@ func selfUpdateInstalledIdentity(target string) string {
 		}
 	}
 	return binstamp.Self().Revision
+}
+
+func selfUpdateBinaryVersion(target string) string {
+	if strings.TrimSpace(target) == "" {
+		return ""
+	}
+	out, ok := selfinstall.RealRunner(context.Background(), "", target, "version", "--json")
+	if !ok {
+		return ""
+	}
+	var identity struct {
+		AppVersion string `json:"app_version"`
+	}
+	if json.Unmarshal([]byte(out), &identity) != nil {
+		return ""
+	}
+	return strings.TrimSpace(identity.AppVersion)
 }
 
 // selfUpdateFetchOrigin refreshes the remote-tracking ref only for an update run. A fetch writes
