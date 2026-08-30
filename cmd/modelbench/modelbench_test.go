@@ -52,6 +52,7 @@ func testCompleteBenchFlags() *benchFlags {
 		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
 		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
 		nativeProfileCompare: testString(""), nativeDecodeHandoff: testDecodeHandoff(model.Qwen35DecodeHandoffAuto),
+		qwenSwapOut: testString(""), qwenSwapReadback: testString(""),
 	}
 }
 

@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "setkvpreemptionpolicy",
+      "canonical": "SetKVPreemptionPolicy (scheduler mutator)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "SetKVPreemptionPolicy installs a normalized NativePreemptionPolicy on a NativeScheduler and initializes or reconfigures its paged-KV block capacity before execution.",
+      "distinction": "It is the scheduler mutation that applies a preemption configuration, not the NativePreemptionPolicy value that describes swap or recompute behavior and not an authorization policy.",
+      "distinct_from": [
+        "x2-policy-capability-nativepreemptionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "setkvpreemptionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

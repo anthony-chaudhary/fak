@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -130,10 +131,11 @@ func TestNativeSchedulerQ4KSlabConfigReachesNewAndRestoredSessions(t *testing.T)
 	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
 	s.SetQ4KGateUpOutputSlab(true)
 
-	fresh := s.newLaneSession(true)
+	s.SetResidentQ4K(true)
+	fresh := s.newLaneSession(true, NativeSessionFresh)
 	defer fresh.Close()
-	if !fresh.Q4KGateUpOutputSlab {
-		t.Fatal("explicit scheduler Q4_K slab setting did not reach fresh session")
+	if !fresh.Q4KGateUpOutputSlab || fresh.Quant || !fresh.Q4K || !fresh.MetalQ4K {
+		t.Fatal("explicit scheduler Q4_K/Metal/slab settings did not reach fresh session")
 	}
 
 	seed := s.m.NewSession()
@@ -142,9 +144,95 @@ func TestNativeSchedulerQ4KSlabConfigReachesNewAndRestoredSessions(t *testing.T)
 	seed.Close()
 	restored := s.sessionFromCache(cache, true)
 	defer restored.Close()
-	if !restored.Q4KGateUpOutputSlab {
-		t.Fatal("explicit scheduler Q4_K slab setting did not reach restored session")
+	if !restored.Q4KGateUpOutputSlab || restored.Quant || !restored.Q4K || !restored.MetalQ4K {
+		t.Fatal("explicit scheduler Q4_K/Metal/slab settings did not reach restored session")
 	}
+}
+
+func TestNativeSchedulerForcedSwapReadmissionCreatesRestoredSession(t *testing.T) {
+	m := nativeSchedulerQwenSwapModel()
+	prompts := [][]int{
+		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+		{32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1},
+	}
+	control := NewNativeScheduler(m)
+	want := drainExactTokenRequests(t, control, prompts)
+	if err := control.CloseAndWait(context.Background()); err != nil {
+		t.Fatalf("control teardown: %v", err)
+	}
+
+	s := NewNativeScheduler(m)
+	var lifecycles []NativeSessionLifecycle
+	var lifecycleMu sync.Mutex
+	s.SetSessionProfilerFactory(func(lifecycle NativeSessionLifecycle) *model.PhaseProfiler {
+		lifecycleMu.Lock()
+		lifecycles = append(lifecycles, lifecycle)
+		lifecycleMu.Unlock()
+		return model.NewPhaseProfiler()
+	})
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 1, BlockTokens: 16})
+
+	got := drainExactTokenRequests(t, s, prompts)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("forced swap outputs changed:\n got %v\nwant %v", got, want)
+	}
+	stats := s.KVPreemptionStats()
+	if stats.SwapPreemptions == 0 || stats.Readmitted == 0 || stats.SwapBytes == 0 || stats.SwapRestoredBytes != stats.SwapBytes || stats.RecomputeCount != 0 {
+		t.Fatalf("forced swap stats=%+v", stats)
+	}
+	if peak := s.MaxObservedRunning(); peak != 2 {
+		t.Fatalf("forced swap peak running=%d, want overlapping two-request admission", peak)
+	}
+	if err := s.CloseAndWait(context.Background()); err != nil {
+		t.Fatalf("forced swap teardown: %v", err)
+	}
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+	if len(lifecycles) < 3 || lifecycles[0] != NativeSessionFresh || lifecycles[1] != NativeSessionFresh {
+		t.Fatalf("session lifecycles=%v, want two fresh then restored", lifecycles)
+	}
+	restored := 0
+	for _, lifecycle := range lifecycles {
+		if lifecycle == NativeSessionRestored {
+			restored++
+		}
+	}
+	if restored == 0 {
+		t.Fatalf("session lifecycles=%v, want observed restored owner", lifecycles)
+	}
+}
+
+func drainExactTokenRequests(t *testing.T, s *NativeScheduler, prompts [][]int) [][]int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reqs := make([]abi.EngineRequest, 0, len(prompts))
+	for i, prompt := range prompts {
+		req, err := s.AdmitTokenIDs(ctx, fmt.Sprintf("request-%d", i+1), prompt)
+		if err != nil {
+			t.Fatalf("AdmitTokenIDs %d: %v", i, err)
+		}
+		reqs = append(reqs, req)
+	}
+	out := make([][]int, len(reqs))
+	var wg sync.WaitGroup
+	for i, req := range reqs {
+		wg.Add(1)
+		go func(i int, req abi.EngineRequest) {
+			defer wg.Done()
+			for token := range req.Tokens() {
+				out[i] = append(out[i], token.ID)
+			}
+		}(i, req)
+	}
+	wg.Wait()
+	for i, req := range reqs {
+		result, err := req.Result()
+		if err != nil || result == nil || result.Status != abi.StatusOK {
+			t.Fatalf("Result %d=%+v err=%v", i, result, err)
+		}
+	}
+	return out
 }
 
 func TestNativeSchedulerPreemptionMetrics(t *testing.T) {

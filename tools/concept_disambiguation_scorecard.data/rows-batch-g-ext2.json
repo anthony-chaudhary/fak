@@ -142,7 +142,8 @@
       "distinction": "It is a KV-memory scheduling/preemption policy for the engine, NOT a tool-authorization policy — unlike the loaded adjudication Policy that decides tool admission.",
       "distinct_from": [
         "Policy (loaded)",
-        "adjudicator"
+        "adjudicator",
+        "setkvpreemptionpolicy"
       ],
       "aliases": [],
       "grounding": "nativepreemptionpolicy",

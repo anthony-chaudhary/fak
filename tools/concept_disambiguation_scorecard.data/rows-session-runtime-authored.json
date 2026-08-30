@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "nativesessionlifecycle",
+      "canonical": "NativeSessionLifecycle (scheduler session origin)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "NativeSessionLifecycle is the modelengine enum type that labels whether a scheduler-created model session is fresh or restored so profiling and receipts can distinguish its construction path.",
+      "distinction": "It records model-session construction origin, not the cache-value SessionType workload-reporting tag and not mutable runtime session state.",
+      "distinct_from": [
+        "x2-session-runtime-sessiontype",
+        "nativesessionrestored"
+      ],
+      "aliases": [],
+      "grounding": "nativesessionlifecycle",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "nativesessionrestored",
+      "canonical": "NativeSessionRestored (readmitted-session lifecycle)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "NativeSessionRestored is the NativeSessionLifecycle value assigned when the scheduler rebuilds a model session during swap readmission and imports the preserved KV state.",
+      "distinction": "It identifies the restored member of the lifecycle enum, not the NativeSessionLifecycle type itself and not a fresh or recomputed session.",
+      "distinct_from": [
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "nativesessionrestored",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
