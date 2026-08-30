@@ -154,13 +154,17 @@ func cmdManageCommand(commandName string, argv []string) {
 	piExtension := fs.Bool("pi-extension", true, "when wrapping Pi (earendil-works), prepend a session-scoped -e extension that calls pi.registerProvider(\"anthropic\", {baseUrl}) so Pi talks to the in-process gateway. Pi-only; Pi's Anthropic client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint alone cannot route it. Pass --pi-extension=false if you already registered the fak provider yourself.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
-	fleetBus := fs.Bool("fleet-bus", true, "JOIN THE FLEET CONTROL BUS (#5953, epic #5599): announce this guard as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak dev fleet control send` reaches every live guard at once instead of none of them. ON BY DEFAULT, unlike `fak serve`'s: a guard is the process that is already running unattended in bulk, and a fleet-control instance nobody remembered to arm is worth exactly as much as no fleet control. What a guard applies is REAL and bounded: pause/resume/cancel/terminate/throttle ride the same session.Table.Transition write the single-session verbs use, and seat-refresh re-reads the accounts registry and retires the goal parks holding this box's workers once a seat can serve again. What it CANNOT do it declares rather than discovering at fan-out time — a guard wraps somebody else's agent and owns no session loop, so it announces steer as unsupported and `instances` reports \"0 of N can steer\" up front. Pass --fleet-bus=false for a total opt-out: no announce, no directory, no filesystem touch.")
-	fleetBusDir := fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
-	fleetBusID := fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: guard-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
-	fleetBusInterval := fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live guard flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
+	fleetBus := newGuardFleetBusFlag()
+	fs.Var(&fleetBus, "fleet-bus", "JOIN THE FLEET CONTROL BUS (#5953, epic #5599), on by default. Use off for a total opt-out, or compose its bounded settings as on,dir=DIR,id=NAME,interval=DURATION. A guard can apply pause/resume/cancel/terminate/throttle and seat-refresh; steer remains unsupported because guard owns no session loop.")
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
 	argv = rewriteLegacyDenyAllArgs(argv)
+	var fleetBusRewriteErr error
+	argv, fleetBusRewriteErr = rewriteLegacyGuardFleetBusArgs(argv)
+	if fleetBusRewriteErr != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", fleetBusRewriteErr)
+		os.Exit(2)
+	}
 	_ = fs.Parse(argv)
 	if err := validateNativeQwenQ4KPrefillChunk(*guardNativeFlags.prefillChunk); err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", err)
@@ -1024,7 +1028,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// before ready ages out of the roster within one TTL, and until it does it folds as
 	// OUTSTANDING — "addressed, never answered" — never as an apply.
 	// --fleet-bus=false makes this a total no-op.
-	stopGuardFleetBus := startGuardFleetBus(ctx, *fleetBus, *fleetBusDir, *fleetBusID, *fleetBusInterval, bannerMode != guardBannerFull)
+	stopGuardFleetBus := startGuardFleetBus(ctx, fleetBus.enabled, fleetBus.dir, fleetBus.id, fleetBus.interval, bannerMode != guardBannerFull)
 	defer stopGuardFleetBus()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()

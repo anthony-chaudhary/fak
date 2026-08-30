@@ -105,7 +105,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile", "output-profile", "work-profile",
 	}},
 	{"Fleet control bus", []string{
-		"fleet-bus", "fleet-bus-dir", "fleet-bus-id", "fleet-bus-interval",
+		"fleet-bus",
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
