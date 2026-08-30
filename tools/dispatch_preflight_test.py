@@ -1642,7 +1642,7 @@ class SeatRefusalTest(unittest.TestCase):
 
 
 class RaisedDefaultCeilingTest(unittest.TestCase):
-    """The raised static ceiling (DEFAULT_MAX_WORKERS ->20, env-tunable via
+    """The raised static ceiling (DEFAULT_MAX_WORKERS -> Darwin 30, env-tunable via
     FAK_MAX_WORKERS) is safe iff it stays strictly bounded by the adaptive gates.
     These tests pin the new default, prove the env knob retunes it both ways, and
     prove the raise can never exceed host_cap or the seat pool â€” i.e. raising the
@@ -1653,32 +1653,38 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
         whatever the real box exports â€” the constant is resolved at import time."""
         return load(FAK_MAX_WORKERS=value)
 
-    def test_default_ceiling_is_raised(self) -> None:
-        # The ceiling itself: pin 20 so a later silent revert is caught.
-        self.assertEqual(self._load_with_env(None).DEFAULT_MAX_WORKERS, 20)
+    def test_platform_defaults_are_deterministic(self) -> None:
+        mod = self._load_with_env(None)
+        self.assertEqual(mod._built_in_max_workers("darwin"), 30)
+        self.assertEqual(mod._built_in_max_workers("linux"), 20)
+        self.assertEqual(mod._built_in_max_workers("win32"), 20)
+
+    def test_live_platform_default_matches_policy(self) -> None:
+        mod = self._load_with_env(None)
+        self.assertEqual(mod.DEFAULT_MAX_WORKERS, mod._built_in_max_workers())
 
     def test_env_knob_retunes_the_ceiling(self) -> None:
         # FAK_MAX_WORKERS is the dynamic half: retune per host, no code change;
         # garbage / non-positive values fall back to the built-in ceiling.
         self.assertEqual(self._load_with_env("12").DEFAULT_MAX_WORKERS, 12)
         self.assertEqual(self._load_with_env("1").DEFAULT_MAX_WORKERS, 1)
-        self.assertEqual(self._load_with_env("garbage").DEFAULT_MAX_WORKERS, 20)
-        self.assertEqual(self._load_with_env("0").DEFAULT_MAX_WORKERS, 20)
+        self.assertEqual(self._load_with_env("garbage").DEFAULT_MAX_WORKERS, self._load_with_env(None)._built_in_max_workers())
+        self.assertEqual(self._load_with_env("0").DEFAULT_MAX_WORKERS, self._load_with_env(None)._built_in_max_workers())
 
     def test_default_ceiling_fills_on_a_roomy_box_with_seats(self) -> None:
-        # The win: a roomy box with >=20 free session slots and no dos throttle lets
-        # the default ceiling fill to 20 â€” governed only by the adaptive gates.
+        # The win: a roomy box with enough free session slots and no dos throttle lets
+        # the live platform default ceiling fill â€” governed only by the adaptive gates.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
                      seat={"total": 20, "free": 20, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 20)              # min(20, host_cap=32, seats=20)
+        self.assertEqual(p["cap"], min(mod.DEFAULT_MAX_WORKERS, 20))
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_default_ceiling_still_throttles_on_a_loaded_box(self) -> None:
         # Safety: raising the ceiling cannot saturate a loaded host â€” host_cap pulls
-        # the effective cap back below 20 (here to the floor), exactly as before.
+        # the effective cap back below the static ceiling (here to the floor), exactly as before.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 8, "free_ram_mb": 64_000, "total_threads": 200_000},
@@ -1690,13 +1696,13 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
 
     def test_default_ceiling_still_bounded_by_a_smaller_seat_pool(self) -> None:
         # Safety: raising the ceiling cannot overbook accounts â€” a 3-slot roster
-        # caps the raised ceiling at 3, not 20.
+        # caps the raised ceiling at 3, not the static ceiling.
         mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
                      seat={"total": 3, "free": 3, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 3)               # min(20, host_cap=32, seats=3)
+        self.assertEqual(p["cap"], 3)               # lower seat bound remains binding
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_host_budget_env_knobs_retune_the_gradient(self) -> None:
@@ -2209,7 +2215,7 @@ class AmbientKnobHermeticityTest(unittest.TestCase):
             mod = load()
         self.assertEqual(mod.HOST_CORES_PER_WORKER, 2)
         self.assertEqual(mod.HOST_THREADS_PER_CORE, 400)
-        self.assertEqual(mod.DEFAULT_MAX_WORKERS, 20)
+        self.assertEqual(mod.DEFAULT_MAX_WORKERS, mod._built_in_max_workers())
         # ... and therefore the derived host_cap every verdict test leans on: the roomy
         # 64-core box is worth 32 workers, not the 64 the host's knobs would claim.
         self.assertEqual(mod.host_capacity(cores=64, free_ram_mb=128_000,

@@ -16,9 +16,15 @@ import (
 
 const AppleMemoryCurrentProviderSchema = "fak-apple-memory-current-provider/1"
 
+const appleMemoryProviderProbeTimeout = 5 * time.Second
+
+var errAppleMemoryProviderProbeTimeout = errors.New("Apple memory provider probe timed out")
+
 const (
 	AppleMemoryUnavailableUnsupported      = "unsupported"
 	AppleMemoryUnavailablePermissionDenied = "permission-denied"
+	AppleMemoryUnavailableCanceled         = "canceled"
+	AppleMemoryUnavailableTimeout          = "timeout"
 	AppleMemoryUnavailableMalformed        = "malformed"
 	AppleMemoryUnavailableAmbiguous        = "ambiguous"
 )
@@ -68,13 +74,23 @@ type appleMemoryProviderRunner func(context.Context, string, ...string) ([]byte,
 // documented unified-memory byte sampler, so the current truthful result is an
 // explicit unsupported error rather than inferred telemetry.
 func CollectCurrentAppleMemoryBandwidth(ctx context.Context, o AppleMemoryImportOptions) (BandwidthCollection, error) {
-	return collectCurrentAppleMemoryBandwidth(ctx, o, runAppleMemoryProviderCommand, time.Now)
+	return collectCurrentAppleMemoryBandwidth(ctx, o, runAppleMemoryProviderCommand, time.Now, appleMemoryProviderProbeTimeout)
 }
 
-func collectCurrentAppleMemoryBandwidth(ctx context.Context, o AppleMemoryImportOptions, run appleMemoryProviderRunner, now func() time.Time) (BandwidthCollection, error) {
+func collectCurrentAppleMemoryBandwidth(ctx context.Context, o AppleMemoryImportOptions, run appleMemoryProviderRunner, now func() time.Time, probeTimeout time.Duration) (BandwidthCollection, error) {
 	evidence := newAppleMemoryProviderEvidence(o, now())
-	help, err := run(ctx, "/usr/bin/powermetrics", "--help")
+	probeCtx, cancel := context.WithTimeoutCause(ctx, probeTimeout, errAppleMemoryProviderProbeTimeout)
+	defer cancel()
+	help, err := run(probeCtx, "/usr/bin/powermetrics", "--help")
 	if err != nil {
+		if errors.Is(context.Cause(probeCtx), errAppleMemoryProviderProbeTimeout) {
+			return BandwidthCollection{}, unavailableAppleMemoryProvider(evidence, AppleMemoryUnavailableTimeout,
+				"Apple powermetrics sampler-contract probe exceeded its provider-owned timeout", context.DeadlineExceeded)
+		}
+		if parentErr := ctx.Err(); parentErr != nil {
+			return BandwidthCollection{}, unavailableAppleMemoryProvider(evidence, AppleMemoryUnavailableCanceled,
+				"Apple powermetrics sampler-contract probe was canceled by its caller", parentErr)
+		}
 		reason := AppleMemoryUnavailableUnsupported
 		if isAppleProviderPermissionError(err, help) {
 			reason = AppleMemoryUnavailablePermissionDenied

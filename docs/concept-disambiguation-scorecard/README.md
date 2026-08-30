@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **10** (clarity 2 + coverage 8) |
-| **Crystal-clear concepts (and climbing)** | **991** crystal of 2705 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2824 / 2832** (99.7% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **994** crystal of 2708 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2827 / 2835** (99.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 209 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **81** of 3831 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **81** of 3834 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 99.1/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2705 concepts - score 99.1/100 (grade A) - disambiguation-debt 10
+concept-disambiguation chart - 2708 concepts - score 99.1/100 (grade A) - disambiguation-debt 10
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 991
+  * crystal       ################............ 994
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -51,11 +51,11 @@ clarity mix by family (each cell = one concept):
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
   plan             *************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (349 concept(s); 109 crystal)
-  policy-capability ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (193 concept(s); 88 crystal)
+  policy-capability *****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (194 concept(s); 89 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
   score-debt       ***************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 15 crystal)
-  session-runtime  ********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (242 concept(s); 80 crystal)
+  session-runtime  **********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 82 crystal)
   support-maturity ***********************************oooooooooooooooooooooo (57 concept(s); 35 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   guard-gate       ############################ 502/504
   plan             ############################ 408/410
   cache            ############################ 304/305
-  policy-capability ############################ 212/213
+  policy-capability ############################ 213/214
   attention        ############################ 85/85
   context-ctx      ############################ 237/237
   cross-cluster    ............................ 0/0
@@ -78,13 +78,13 @@ coverage by family (positioned / discovered):
   pool             ############################ 40/40
   render-materialize ############################ 209/209
   score-debt       ############################ 93/93
-  session-runtime  ############################ 271/271
+  session-runtime  ############################ 273/273
   support-maturity ############################ 64/64
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 163/163
 
-namespace coverage  [################################] 99.7%  (2824/2832 confusable tokens positioned)
+namespace coverage  [################################] 99.7%  (2827/2835 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 209
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 209/209
 
-name index: 3831 lookup name(s) -> 2705 concept(s), 81 ambiguous
+name index: 3834 lookup name(s) -> 2708 concept(s), 81 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **209 / 209** (209 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1850 / 4840 |
+| Boundaries drawn (mutual / total) | 1856 / 4846 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3831 over 2705 concepts |
+| Lookup names indexed | 3834 over 2708 concepts |
 | Lookup names landing on several concepts | 81 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2705 |
+| Concepts carrying a contrast set | 2708 |
 
 ## The concepts (best verdict first)
 
@@ -817,6 +817,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **policyRef (attestation policy digest)** - policyRef is the attestation wire object that binds the exact capability-floor manifest path to its SHA-256 digest so a compliance proof can be rechecked against the same policy bytes. |
 | * | crystal | symbol | policy-capability | **FP4HardwareCapability** - What the producer says the target device can do natively for FP4: the runtime and accelerator names plus separate native-decode and native-GEMM bits. The two bits are separate because a device can unpack FP4 into a wider type without owning an FP4 tensor-core GEMM, and only the PAIR licenses in-kernel execution. |
 | * | crystal | symbol | policy-capability | **AdjudicateFP4Metadata** - The function that turns an already-parsed FP4 metadata document into one of four typed dispositions -- accept, delegate, abstain, refuse -- with a stable machine-readable reason. It adjudicates against the published NVFP4 and OCP-MXFP4 definitions rather than fak preferences, and there is no fifth implicit 'assume it is fine' path. |
+| * | crystal | symbol | policy-capability | **SetKVPreemptionPolicy (scheduler mutator)** - SetKVPreemptionPolicy installs a normalized NativePreemptionPolicy on a NativeScheduler and initializes or reconfigures its paged-KV block capacity before execution. |
 | * | crystal | symbol | policy-capability | **AdjudicateMemoryWrite (memq)** - memq.AdjudicateMemoryWrite is the deny-by-structure rule set (#2912) that judges a candidate durable memory write by structure alone - size, transient-error phrasing, negative tool-claim, one-off narrative - and returns an AdmissionVerdict whose Reason is from a closed vocabulary, with no model call, clock, or I/O. |
 | * | crystal | config | policy-capability | **ContainmentPolicy (toolprocgate)** - toolprocgate.ContainmentPolicy bounds the blast radius of a console/terminal crash - the per-surface live-agent cap, the surface-quarantine fault threshold, and the fleet-breaker storm thresholds - that DecideContainment folds into a closed containment verdict (ADMIT / REFUSE_COLOCATION / QUARANTINE_SURFACE / BREAKER_OPEN) for a proposed spawn. |
 | * | crystal | config | policy-capability | **AuditIndependencePolicy (modelroute)** - modelroute.AuditIndependencePolicy is the versioned admission policy EvaluateAuditIndependence folds to decide whether an AUDITOR may audit an AUTHOR - its required identity axes, family/provider/harness/endpoint/account diversity knobs, and alias roster - returning a closed ADMIT/REFUSE/UNKNOWN verdict with a closed reason vocabulary. |
@@ -949,6 +950,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionPolicy (corrupt-registry quarantine retention)** - How long, and how many, quarantined copies of a corrupt session registry are kept after RecoverCorruptRegistry moves the bad file aside — read from the sessionQuarantineRetentionEnv knob, falling back to the default policy when the knob is unparseable. |
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionEnv** - The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself. |
 | * | crystal | config | session-runtime | **FAK_SESSION_QUARANTINE_RETENTION** - The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup. |
+| * | crystal | symbol | session-runtime | **NativeSessionLifecycle (scheduler session origin)** - NativeSessionLifecycle is the modelengine enum type that labels whether a scheduler-created model session is fresh or restored so profiling and receipts can distinguish its construction path. |
+| * | crystal | symbol | session-runtime | **NativeSessionRestored (readmitted-session lifecycle)** - NativeSessionRestored is the NativeSessionLifecycle value assigned when the scheduler rebuilds a model session during swap readmission and imports the preserved KV state. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessiondiag** - `sessiondiag` is the session-runtime symbol declared or used at `cmd/fak/resume_watchdog_candidates.go:12` as `"github.com/anthony-chaudhary/fak/internal/sessiondiag"`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for validsession** - `ValidSession` is the session-runtime symbol declared or used at `cmd/fak/wip.go:376` as `if !wipref.ValidSession(sess) {`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionresume** - `SessionResume` is the session-runtime symbol declared or used at `internal/executionroute/compat.go:295` as `dec.Action = SessionResume`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2979,7 +2982,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2990/4840 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2990/4846 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2987,7 +2990,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3831 lookup name(s) resolves - 81 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3834 lookup name(s) resolves - 81 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2998,7 +3001,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 502 | 504 | 2 |
 | plan | 408 | 410 | 2 |
 | cache | 304 | 305 | 1 |
-| policy-capability | 212 | 213 | 1 |
+| policy-capability | 213 | 214 | 1 |
 | attention | 85 | 85 | 0 |
 | context-ctx | 237 | 237 | 0 |
 | cross-cluster | 0 | 0 | 0 |
@@ -3010,7 +3013,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 40 | 40 | 0 |
 | render-materialize | 209 | 209 | 0 |
 | score-debt | 93 | 93 | 0 |
-| session-runtime | 271 | 271 | 0 |
+| session-runtime | 273 | 273 | 0 |
 | support-maturity | 64 | 64 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |

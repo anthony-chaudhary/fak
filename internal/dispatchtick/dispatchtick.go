@@ -33,6 +33,7 @@ const (
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
 	FallbackMaxWorkers     = 20
+	DarwinMaxWorkers       = 30
 	DefaultCooldownMinutes = 120
 	DefaultWorkerTimeoutS  = 1800
 	DefaultSpawnProbeS     = 5.0
@@ -50,7 +51,7 @@ const (
 // the box and the account pool can actually carry and no further. Resolved once
 // at startup from FAK_MAX_WORKERS so the fleet-wide ceiling is an env knob shared
 // with the Python launchers, not a rebuild.
-var DefaultMaxWorkers = envPosInt("FAK_MAX_WORKERS", FallbackMaxWorkers)
+var DefaultMaxWorkers = defaultMaxWorkers(runtime.GOOS)
 
 // WaveHint is the dispatch-computed workflow signal consumed by downstream schedulers.
 // It carries a ready-set decision, not graph edges, so consumers cannot rederive a DAG.
@@ -65,6 +66,17 @@ type WaveHint struct {
 // NewWaveHint stamps a workflow decision at the dispatch boundary.
 func NewWaveHint(agent, node, wave string, stepsToExecution, worker int) WaveHint {
 	return WaveHint{Agent: agent, Node: node, Wave: wave, StepsToExecution: stepsToExecution, Worker: worker}
+}
+
+// defaultMaxWorkers returns the platform ceiling unless FAK_MAX_WORKERS sets a
+// positive explicit override. Lower host, resource, account, seat, and target gates
+// remain independently binding during preflight.
+func defaultMaxWorkers(goos string) int {
+	fallback := FallbackMaxWorkers
+	if goos == "darwin" {
+		fallback = DarwinMaxWorkers
+	}
+	return envPosInt("FAK_MAX_WORKERS", fallback)
 }
 
 // envPosInt returns the positive-int value of the named env var, or fallback on

@@ -2303,19 +2303,19 @@ def render_escape(doc: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _default_max_workers() -> int:
-    """The default worker ceiling, mirrored from dispatch_preflight.DEFAULT_MAX_WORKERS
-    (mirrored, not imported — same rationale as _pid_is_alive): the built-in 20 with the
-    FAK_MAX_WORKERS env knob applied. Keeping the tick's default equal to the gate's
-    means the launcher no longer under-asks (the old static 2 sat below every adaptive
-    gate); the preflight's min(host_cap, dos target, seats) still bounds every spawn."""
+def _default_max_workers(platform_name: str = sys.platform) -> int:
+    """Return the gate-mirrored worker ceiling, with Darwin defaulting to 30.
+
+    FAK_MAX_WORKERS remains the explicit override. The preflight's lower host, RAM,
+    thread, seat, account, and target bounds still constrain every spawn.
+    """
     raw = os.environ.get("FAK_MAX_WORKERS", "").strip()
     try:
         if raw and int(raw) > 0:
             return int(raw)
     except ValueError:
         pass
-    return 20
+    return 30 if platform_name == "darwin" else 20
 
 
 def main(argv: list[str] | None = None) -> int:

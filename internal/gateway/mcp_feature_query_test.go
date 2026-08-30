@@ -5,10 +5,42 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
+
+func TestMCPCapabilitiesRanksWIPAdministrationFirst(t *testing.T) {
+	srv := newTestServer(t)
+	for _, query := range []string{"WIP", "worktree", "unlanded work"} {
+		t.Run(query, func(t *testing.T) {
+			resp := callMCPTool[selfquery.CapabilitiesResponse](t, srv, "fak_capabilities", map[string]any{
+				"query": query,
+				"limit": 3,
+			})
+			if len(resp.Cards) == 0 {
+				t.Fatalf("fak_capabilities query %q returned no cards", query)
+			}
+			got := resp.Cards[0]
+			if got.Name != "Administer worktrees and unlanded WIP" {
+				t.Fatalf("fak_capabilities query %q ranked %q first; want WIP administration", query, got.Name)
+			}
+			wantCommand := []string{"fak", "wip", "queue", "--json"}
+			if !reflect.DeepEqual(got.Request.Command, wantCommand) {
+				t.Fatalf("WIP administration command = %#v, want %#v", got.Request.Command, wantCommand)
+			}
+			if got.Request.Executed {
+				t.Fatal("fak_capabilities must return an unexecuted exact command")
+			}
+			for _, want := range []string{"fak wip inventory --json", "fak worktree worker list --json", "fak-wip-action-queue/1"} {
+				if !strings.Contains(got.DetailRef, want) {
+					t.Errorf("WIP administration detail %q missing %q", got.DetailRef, want)
+				}
+			}
+		})
+	}
+}
 
 func TestMCPFeatureQueryMemoryCards(t *testing.T) {
 	srv := newTestServer(t)

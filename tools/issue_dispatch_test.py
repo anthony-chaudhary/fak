@@ -2200,5 +2200,20 @@ class SpawnDetachedWorktreeTest(unittest.TestCase):
             self.assertEqual(wt_side[0].read_text(encoding="utf-8"), seen["cwd"])
 
 
+class DefaultMaxWorkersTest(unittest.TestCase):
+    def test_darwin_defaults_to_30_without_changing_other_platforms(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(mod._default_max_workers("darwin"), 30)
+            self.assertEqual(mod._default_max_workers("linux"), 20)
+            self.assertEqual(mod._default_max_workers("win32"), 20)
+
+    def test_env_override_preserves_explicit_lower_ceiling(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {"FAK_MAX_WORKERS": "7"}, clear=True):
+            self.assertEqual(mod._default_max_workers("darwin"), 7)
+
+
+
 if __name__ == "__main__":
     unittest.main()

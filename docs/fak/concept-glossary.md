@@ -2585,3 +2585,17 @@ internal/studyadjacency.validateCandidate validates one recorded study candidate
 internal/placementtax.validateCandidate validates one PlanCandidate against its topology contract: nonblank identity and rationales, fak-native engine ownership, valid parallelism strategy, nonempty hierarchy, measured or estimated provenance, SLO validity, and consistent cross-domain provenance.
 
 **Distinct from:** Use this package-local validateCandidate for PLACEMENT-TAX plan feasibility before scoring alternatives. Unlike studyadjacency validateCandidate, it does not validate study receipts or repository ownership; unlike placementCandidates, it validates one fully formed native plan rather than building an ungraded model pool.
+
+
+### SetKVPreemptionPolicy (scheduler mutator)
+
+SetKVPreemptionPolicy installs a normalized NativePreemptionPolicy on a NativeScheduler and initializes or reconfigures its paged-KV block capacity before execution.
+
+**Distinct from:** It is the scheduler mutation that applies a preemption configuration, not the NativePreemptionPolicy value that describes swap or recompute behavior and not an authorization policy.
+
+
+### NativeSessionRestored (readmitted-session lifecycle)
+
+NativeSessionRestored is the NativeSessionLifecycle value assigned when the scheduler rebuilds a model session during swap readmission and imports the preserved KV state.
+
+**Distinct from:** It identifies the restored member of the lifecycle enum, not the NativeSessionLifecycle type itself and not a fresh or recomputed session.
