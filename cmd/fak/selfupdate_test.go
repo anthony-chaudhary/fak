@@ -541,6 +541,23 @@ func TestSelfUpdateReceiptPostures(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateReceiptCarriesReusedBuildProvenance(t *testing.T) {
+	selfUpdateReceiptBuildProvenance = &selfUpdateBuildProvenance{
+		SourceCommit:         "89abcdef0123456789abcdef0123456789abcdef",
+		ArtifactSourceCommit: "0123456789abcdef0123456789abcdef01234567",
+		BuildInputDigest:     "sha256:inputs", BuildEnvelope: map[string]string{"GOVERSION": "go1.26.7"},
+		ArtifactDigest: "artifact", ArtifactSize: 42, Reused: true,
+	}
+	t.Cleanup(func() { selfUpdateReceiptBuildProvenance = nil })
+	receipt := newSelfUpdateReceipt(outcomeInstalled, "bin/fak", "")
+	if receipt.BuildProvenance == nil || !receipt.BuildProvenance.Reused ||
+		receipt.BuildProvenance.SourceCommit == receipt.BuildProvenance.ArtifactSourceCommit ||
+		receipt.BuildProvenance.BuildInputDigest == "" || receipt.BuildProvenance.ArtifactDigest == "" ||
+		receipt.BuildProvenance.BuildEnvelope["GOVERSION"] == "" {
+		t.Fatalf("reused build provenance = %+v", receipt.BuildProvenance)
+	}
+}
+
 func TestSelfUpdateCheckOnlyReceiptReportsStaleRevision(t *testing.T) {
 	selfUpdateReceiptOldRevision = "oldrev"
 	selfUpdateReceiptNewRevision = "newrev"

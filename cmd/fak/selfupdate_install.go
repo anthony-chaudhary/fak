@@ -143,6 +143,13 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		candidate = source
 		return nil
 	}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
+	if res.Installed {
+		selfUpdateReceiptBuildProvenance = &selfUpdateBuildProvenance{
+			SourceCommit: res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
+			BuildInputDigest: res.BuildInputDigest, BuildEnvelope: res.BuildEnvelope,
+			ArtifactDigest: res.ArtifactDigest, ArtifactSize: res.ArtifactSize, Reused: res.Reused,
+		}
+	}
 	if !res.Installed || candidate == "" {
 		detail := string(res.Stage) + ": " + res.Detail
 		if candidate == "" && res.Installed {

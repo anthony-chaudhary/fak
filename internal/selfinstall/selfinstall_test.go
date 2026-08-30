@@ -739,6 +739,15 @@ func runCompleteCacheTransaction(t *testing.T, r *candidateCacheRunner, opts Opt
 
 func seedCacheTransactionTargets(t *testing.T, dir string, n int) []string {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/candidate-cache\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "fak", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	targets := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		target := filepath.Join(dir, "stale-"+string(rune('a'+i)))
@@ -770,7 +779,7 @@ func TestInstallVerifiedCandidateCacheCompleteTransactionCutsSameEnvelopeFivefol
 	before = r.elapsed
 	got := runCompleteCacheTransaction(t, r, opts, targets...)
 	warm := r.elapsed - before
-	if !got.Installed || !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
+	if !got.Installed || !strings.Contains(got.Detail, "build-input verified candidate cache") {
 		t.Fatalf("warm transaction: %+v", got)
 	}
 	if r.builds != 1 || r.vets != 1 || r.smokes != 2 {
@@ -806,13 +815,13 @@ func TestInstallCorruptCandidateCacheFallsBackAndAtomicallyRefreshes(t *testing.
 		t.Fatal(err)
 	}
 
-	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from build-input") {
 		t.Fatalf("corrupt-cache fallback transaction: %+v", got)
 	}
 	if r.builds != 2 || r.vets != 2 {
 		t.Fatalf("builds=%d vets=%d, corrupt cache must rerun the complete build+vet gate", r.builds, r.vets)
 	}
-	if got := runCompleteCacheTransaction(t, r, opts, targets...); !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !strings.Contains(got.Detail, "build-input verified candidate cache") {
 		t.Fatalf("transaction after atomic refresh: %+v", got)
 	}
 	if r.builds != 2 || r.vets != 2 {
@@ -829,37 +838,85 @@ func TestInstallCorruptCandidateCacheFallsBackAndAtomicallyRefreshes(t *testing.
 	}
 }
 
-func TestInstallCandidateCacheIdentityBindsCommitToolchainPlatformAndBuildInputs(t *testing.T) {
+func TestInstallCandidateCacheIdentityBindsRuntimeInputsAndReusesAcrossCommits(t *testing.T) {
 	dir := t.TempDir()
 	r := newCandidateCacheRunner()
 	targets := seedCacheTransactionTargets(t, dir, 1)
 	opts := Options{RepoRoot: dir, Target: targets[0], BuildTmp: filepath.Join(dir, "candidate"), CacheDir: filepath.Join(dir, "cache"), ExpectedCommit: cacheTestCommitA}
-	assertRebuilt := func(label string) {
-		t.Helper()
-		beforeBuilds, beforeVets := r.builds, r.vets
-		if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
-			t.Fatalf("%s mismatch transaction: %+v", label, got)
-		}
-		if r.builds != beforeBuilds+1 || r.vets != beforeVets+1 {
-			t.Fatalf("%s mismatch builds/vets = %d/%d, want %d/%d", label, r.builds, r.vets, beforeBuilds+1, beforeVets+1)
-		}
+
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || got.Reused {
+		t.Fatalf("cold transaction: %+v", got)
+	}
+	if r.builds != 1 || r.vets != 1 {
+		t.Fatalf("cold builds/vets = %d/%d, want 1/1", r.builds, r.vets)
 	}
 
-	assertRebuilt("empty cache")
-	r.goEnv = strings.Replace(r.goEnv, "go1.26.0", "go1.27.0", 1)
-	assertRebuilt("toolchain")
-	r.goEnv = strings.Replace(r.goEnv, "windows\namd64\n", "linux\narm64\n", 1)
-	assertRebuilt("platform")
+	// A different selected source commit with the same executable graph reuses the
+	// already-verified artifact while preserving both provenance identities.
 	r.commit = cacheTestCommitB
+	r.smokeCommits = []string{cacheTestCommitA}
 	opts.ExpectedCommit = cacheTestCommitB
-	assertRebuilt("exact commit")
+	got := runCompleteCacheTransaction(t, r, opts, targets...)
+	if !got.Installed || !got.Reused || got.SourceCommit != cacheTestCommitB || got.ArtifactSourceCommit != cacheTestCommitA {
+		t.Fatalf("cross-commit reuse provenance: %+v", got)
+	}
+	if r.builds != 1 || r.vets != 1 {
+		t.Fatalf("cross-commit reuse builds/vets = %d/%d, want 1/1", r.builds, r.vets)
+	}
+	if got.BuildInputDigest == "" || got.ArtifactDigest == "" || got.ArtifactSize == 0 || got.BuildEnvelope["GOVERSION"] == "" {
+		t.Fatalf("cross-commit reuse omitted identities: %+v", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "fak", "main.go"), []byte("package main\nfunc main() { println(\"changed\") }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = runCompleteCacheTransaction(t, r, opts, targets...)
+	if !got.Installed || got.Reused || r.builds != 2 || r.vets != 2 {
+		t.Fatalf("runtime source change did not rebuild: %+v builds/vets=%d/%d", got, r.builds, r.vets)
+	}
+
+	// VERSION participates through the linker envelope, so it invalidates reuse.
 	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("9.9.2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertRebuilt("build arguments")
+	got = runCompleteCacheTransaction(t, r, opts, targets...)
+	if !got.Installed || got.Reused {
+		t.Fatalf("VERSION change transaction: %+v", got)
+	}
+	if r.builds != 3 || r.vets != 3 {
+		t.Fatalf("VERSION change builds/vets = %d/%d, want 3/3", r.builds, r.vets)
+	}
+}
 
-	if got := runCompleteCacheTransaction(t, r, opts, targets...); !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
-		t.Fatalf("unchanged bound identity should hit cache: %+v", got)
+func TestInstallCandidateCacheToolchainChangeRebuilds(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 1)
+	opts := Options{RepoRoot: dir, Target: targets[0], BuildTmp: filepath.Join(dir, "candidate"), CacheDir: filepath.Join(dir, "cache"), ExpectedCommit: cacheTestCommitA}
+	original := runBuildInputCommand
+	t.Cleanup(func() { runBuildInputCommand = original })
+	toolchain := "go1.26.7"
+	runBuildInputCommand = func(ctx context.Context, workDir string, env []string, args ...string) ([]byte, error) {
+		out, err := original(ctx, workDir, env, args...)
+		if err != nil || len(args) == 0 || args[0] != "env" {
+			return out, err
+		}
+		var values map[string]string
+		if err := json.Unmarshal(out, &values); err != nil {
+			return nil, err
+		}
+		values["GOVERSION"] = toolchain
+		return json.Marshal(values)
+	}
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || got.Reused {
+		t.Fatalf("cold toolchain transaction: %+v", got)
+	}
+	toolchain = "go1.27.0"
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || got.Reused {
+		t.Fatalf("toolchain change reused stale artifact: %+v", got)
+	}
+	if r.builds != 2 || r.vets != 2 {
+		t.Fatalf("toolchain change builds/vets = %d/%d, want 2/2", r.builds, r.vets)
 	}
 }
 
@@ -875,7 +932,7 @@ func TestInstallCandidateCacheProvenanceFailureFallsBackToFullGate(t *testing.T)
 	// The first identity belongs to the restored cache candidate and must be rejected. The
 	// second belongs to the newly built candidate and permits activation only after build+vet.
 	r.smokeCommits = []string{cacheTestCommitB, cacheTestCommitA}
-	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from build-input") {
 		t.Fatalf("cached provenance fallback: %+v", got)
 	}
 	if r.builds != 2 || r.vets != 2 || r.smokes != 3 {

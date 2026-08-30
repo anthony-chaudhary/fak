@@ -452,28 +452,39 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 const selfUpdateReceiptSchema = "fak.self-update.receipt/v1"
 
 type selfUpdateReceipt struct {
-	Schema          string                    `json:"schema"`
-	SchemaVersion   int                       `json:"schema_version"`
-	CorrelationID   string                    `json:"correlation_id"`
-	Status          string                    `json:"status"`
-	OldRevision     *string                   `json:"old_revision"`
-	NewRevision     *string                   `json:"new_revision"`
-	Targets         []selfUpdateReceiptTarget `json:"targets"`
-	Attempted       int                       `json:"attempted"`
-	Changed         int                       `json:"changed"`
-	RollbackStatus  string                    `json:"rollback_status"`
-	RollbackErrors  []string                  `json:"rollback_errors"`
-	RestartRequired bool                      `json:"restart_required"`
-	NextCommand     string                    `json:"next_command"`
-	Detail          string                    `json:"detail,omitempty"`
-	Handoff         *selfUpdateHandoffReceipt `json:"handoff,omitempty"`
-	TotalMS         int64                     `json:"total_ms"`
-	PhaseMS         selfUpdatePhaseMS         `json:"phase_ms"`
+	Schema          string                     `json:"schema"`
+	SchemaVersion   int                        `json:"schema_version"`
+	CorrelationID   string                     `json:"correlation_id"`
+	Status          string                     `json:"status"`
+	OldRevision     *string                    `json:"old_revision"`
+	NewRevision     *string                    `json:"new_revision"`
+	Targets         []selfUpdateReceiptTarget  `json:"targets"`
+	Attempted       int                        `json:"attempted"`
+	Changed         int                        `json:"changed"`
+	RollbackStatus  string                     `json:"rollback_status"`
+	RollbackErrors  []string                   `json:"rollback_errors"`
+	RestartRequired bool                       `json:"restart_required"`
+	NextCommand     string                     `json:"next_command"`
+	Detail          string                     `json:"detail,omitempty"`
+	BuildProvenance *selfUpdateBuildProvenance `json:"build_provenance,omitempty"`
+	Handoff         *selfUpdateHandoffReceipt  `json:"handoff,omitempty"`
+	TotalMS         int64                      `json:"total_ms"`
+	PhaseMS         selfUpdatePhaseMS          `json:"phase_ms"`
 }
 
 type selfUpdateReceiptTarget struct {
 	Role string `json:"role"`
 	Path string `json:"path"`
+}
+
+type selfUpdateBuildProvenance struct {
+	SourceCommit         string            `json:"source_commit"`
+	ArtifactSourceCommit string            `json:"artifact_source_commit"`
+	BuildInputDigest     string            `json:"build_input_digest"`
+	BuildEnvelope        map[string]string `json:"build_envelope"`
+	ArtifactDigest       string            `json:"artifact_digest"`
+	ArtifactSize         int64             `json:"artifact_size"`
+	Reused               bool              `json:"reused"`
 }
 
 // selfUpdatePhaseMS is a fixed-shape object rather than a map so receipt consumers always see
@@ -565,6 +576,7 @@ var selfUpdateReceiptTargets []selfUpdateReceiptTarget
 var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
 var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
+var selfUpdateReceiptBuildProvenance *selfUpdateBuildProvenance
 
 // selfUpdateTimingNow is the deterministic wall-clock seam for timing receipts. It is kept
 // separate from outcome timestamps and cleanup-age decisions so tests can control cost
@@ -752,6 +764,7 @@ func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateReceiptAttempted = 0
 	selfUpdateReceiptChanged = 0
 	selfUpdateReceiptHandoff = nil
+	selfUpdateReceiptBuildProvenance = nil
 	beginSelfUpdateTiming()
 	if enabled {
 		selfUpdateJSON = os.Stdout
@@ -820,7 +833,8 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
 		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
-		Detail: strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
+		BuildProvenance: selfUpdateReceiptBuildProvenance,
+		Detail:          strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
 	}
 }
 
