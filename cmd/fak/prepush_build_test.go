@@ -234,6 +234,25 @@ func TestParseTestOnlyPackagesRetainsEveryUnprovenShape(t *testing.T) {
 	}
 }
 
+func TestGoBuildPackageArgsAddsExactlyOneTrimpathBeforePackages(t *testing.T) {
+	packages := []string{"example.com/mod/a", "example.com/mod/b", "./cmd/..."}
+	got := goBuildPackageArgs(packages)
+	want := []string{"build", "-trimpath", "example.com/mod/a", "example.com/mod/b", "./cmd/..."}
+
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("go build argv = %q, want %q", got, want)
+	}
+	var trimpaths int
+	for _, arg := range got {
+		if arg == "-trimpath" {
+			trimpaths++
+		}
+	}
+	if trimpaths != 1 {
+		t.Fatalf("go build argv contains %d -trimpath arguments, want exactly one: %q", trimpaths, got)
+	}
+}
+
 func writePrepushFixtureFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
