@@ -168,20 +168,26 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	}
 	argvOut := buildCodexLaunchArgv(fakBin, launch)
 
-	fmt.Fprintln(stderr, "fak codex: launching Codex through fak guard")
-	fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
-	if launch.skipPermissions {
-		fmt.Fprintln(stderr, "  permissions = Codex full approval/sandbox bypass explicitly requested; fak gates remain active")
-	} else {
-		fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox (default); fak gates remain active")
-	}
-	fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 	if launch.dryRun {
-		fmt.Fprintln(stderr, "  (dry-run - not launching)")
+		fmt.Fprintln(stderr, "fak codex: dry-run - not launching")
+		fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
+		if launch.skipPermissions {
+			fmt.Fprintln(stderr, "  permissions = Codex full approval/sandbox bypass explicitly requested; fak gates remain active")
+		} else {
+			fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox (default); fak gates remain active")
+		}
+		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
 	}
-	return codexLaunchRun(stdout, stderr, argvOut, os.Environ())
+
+	started := time.Now()
+	fmt.Fprintln(stderr, "fak codex: launching Codex through fak guard ...")
+	code := codexLaunchRun(stdout, stderr, argvOut, os.Environ())
+	if code == 0 {
+		fmt.Fprintf(stderr, "fak codex: Codex completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
+	}
+	return code
 }
 
 func validateCodexLaunchSplit(mode, where string) error {

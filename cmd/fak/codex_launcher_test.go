@@ -824,3 +824,46 @@ func codexLauncherCurrentThreadFixture(t *testing.T) (string, string) {
 	})
 	return home, threadID
 }
+
+func TestRunCodexSuccessfulLaunchUsesConciseTimedStatus(t *testing.T) {
+	orig := codexLaunchRun
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int { return 0 }
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
+	if rc != 0 {
+		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
+	}
+	got := errb.String()
+	for _, unwanted := range []string{"  view        =", "  permissions =", "  command     ="} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("normal launch stderr contains verbose preamble %q:\n%s", unwanted, got)
+		}
+	}
+	for _, want := range []string{
+		"fak codex: launching Codex through fak guard ...",
+		"fak codex: Codex completed successfully in ",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("normal launch stderr missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunCodexDryRunRetainsCommandDetails(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{"--dry-run", "--split", "off", "--", "exec", "do x"})
+	if rc != 0 {
+		t.Fatalf("runCodex rc=%d, want 0; stderr=%s", rc, errb.String())
+	}
+	got := errb.String()
+	for _, want := range []string{"dry-run - not launching", "  view        =", "  permissions =", "  command     ="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dry-run stderr missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(out.String(), " guard ") || !strings.Contains(out.String(), " exec do x") {
+		t.Fatalf("dry-run stdout did not retain runnable command: %q", out.String())
+	}
+}
