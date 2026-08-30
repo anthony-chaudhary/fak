@@ -284,6 +284,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [OpenAI prompt-caching watchlist — 2026-08-30](docs/notes/OPENAI-PROMPT-CACHING-WATCHLIST-2026-08-30.md) -- auto-indexed dated note.
 - [Bench: evidence mechanisms worth adapting, not a benchmark contract to import (2026-08-29)](docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md) — pinned exhaustive study of benchmark orchestration, methodology, license posture, and FAK overlap; files watcher-safe snapshots, workload/telemetry correlation receipts, and parser-completeness receipts as #10302-#10304.
 
 - [Remote-KV reference v1.5.7: borrow the control loops around remote KV, not the cache server (2026-08-29)](docs/notes/CONCEPT-STUDY-REMOTE-KV-CONTROL-LOOPS-2026-08-29.md) — exhaustive pinned tree/forge/history study; preserves FAK-native ownership, records the absent root license and vLLM correctness warnings, deduplicates existing transport/admission work, and files five bounded remote-cache control gaps as #10273-#10277.
