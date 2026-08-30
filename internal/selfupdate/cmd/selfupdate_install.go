@@ -1,4 +1,4 @@
-package main
+package selfupdatecmd
 
 import (
 	"context"
@@ -47,7 +47,43 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	ctx := context.Background()
 	var stopHeartbeat func()
 	reportSelfUpdateProgress(25, "cleaning stale self-update artifacts")
-	cleanSelfUpdateArtifacts(ctx, repoRoot, installTarget)
+
+	// Self-heal first: collect build worktrees leaked by PRIOR self-update ticks that
+	// were killed before their source cleanup ran. This is an explicit apply of a
+	// dry-run-by-default GC: exact temp-root shape + old age + dead owner + no process
+	// command line + clean tree + no unpushed commit are all rechecked immediately
+	// before directory-first removal. That preserves #6510's external-process rule:
+	// an active or undeleted tree is never unregistered.
+	buildGC := selfinstall.GarbageCollectStaleBuilds(ctx, selfinstall.RealRunner, repoRoot, selfinstall.BuildGCOptions{
+		Now:          time.Now(),
+		MinAge:       selfinstall.DefaultBuildGCMinAge,
+		Apply:        true,
+		SelfPID:      os.Getpid(),
+		TempRoot:     os.TempDir(),
+		BaseRef:      "origin/main",
+		ProcessAlive: safecommit.ProcessAlive,
+	})
+	if buildGC.Reaped > 0 {
+		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
+	}
+	if len(buildGC.Failures) > 0 {
+		fmt.Fprintf(selfUpdateProgress, "self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
+	}
+
+	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
+	// old binary was still handle-locked at swap time. Nothing else reclaims them, so one leaks
+	// per tick (a real host accumulated 211 of them, ~9 GB). We delete only asides whose owning
+	// PID is provably dead — so the old .exe is no longer mapped and the file is safe to remove.
+	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
+		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
+	}
+	// After reaping, report any REMAINING footprint: asides pinned by still-live owners that we
+	// could not reclaim. A large surviving count is the early signal that swaps are outrunning
+	// exits (the leak's leading edge) — visible now instead of after it reaches gigabytes.
+	if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
+		fmt.Fprintf(selfUpdateProgress, "self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
+			fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
+	}
 
 	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
 	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
@@ -325,48 +361,6 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
 	}
 
-}
-
-// cleanSelfUpdateArtifacts reaps only artifacts whose owners are proven dead and
-// reports the remaining swap-aside footprint before a fresh build starts.
-func cleanSelfUpdateArtifacts(ctx context.Context, repoRoot, installTarget string) {
-
-	// Self-heal first: collect build worktrees leaked by PRIOR self-update ticks that
-	// were killed before their source cleanup ran. This is an explicit apply of a
-	// dry-run-by-default GC: exact temp-root shape + old age + dead owner + no process
-	// command line + clean tree + no unpushed commit are all rechecked immediately
-	// before directory-first removal. That preserves #6510's external-process rule:
-	// an active or undeleted tree is never unregistered.
-	buildGC := selfinstall.GarbageCollectStaleBuilds(ctx, selfinstall.RealRunner, repoRoot, selfinstall.BuildGCOptions{
-		Now:          time.Now(),
-		MinAge:       selfinstall.DefaultBuildGCMinAge,
-		Apply:        true,
-		SelfPID:      os.Getpid(),
-		TempRoot:     os.TempDir(),
-		BaseRef:      "origin/main",
-		ProcessAlive: safecommit.ProcessAlive,
-	})
-	if buildGC.Reaped > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
-	}
-	if len(buildGC.Failures) > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
-	}
-
-	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
-	// old binary was still handle-locked at swap time. Nothing else reclaims them, so one leaks
-	// per tick (a real host accumulated 211 of them, ~9 GB). We delete only asides whose owning
-	// PID is provably dead — so the old .exe is no longer mapped and the file is safe to remove.
-	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
-	}
-	// After reaping, report any REMAINING footprint: asides pinned by still-live owners that we
-	// could not reclaim. A large surviving count is the early signal that swaps are outrunning
-	// exits (the leak's leading edge) — visible now instead of after it reaches gigabytes.
-	if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
-			fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
-	}
 }
 
 // prepareSelfUpdateAttempt materializes the immutable commit selected by the admission

@@ -1,7 +1,8 @@
-package main
+package selfupdatecmd
 
 import (
 	"context"
+	"debug/buildinfo"
 	"encoding/json"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ import (
 
 const selfUpdateProbeHelperEnv = "GO_WANT_SELFUPDATE_PROBE_HELPER"
 const selfUpdateProbeHelperRev = "1234567890abcdef1234567890abcdef12345678"
+const selfUpdateProbeMarkerEnv = "GO_SELFUPDATE_PROBE_MARKER"
 
 func TestSelfUpdateAttemptPinsSelectionAcrossMovingOrigin(t *testing.T) {
 	const (
@@ -216,6 +218,9 @@ func mustSelfUpdateGit(t *testing.T, ctx context.Context, dir string, args ...st
 func init() {
 	if os.Getenv(selfUpdateProbeHelperEnv) != "1" {
 		return
+	}
+	if marker := os.Getenv(selfUpdateProbeMarkerEnv); marker != "" {
+		_ = os.WriteFile(marker, []byte("executed"), 0o600)
 	}
 	_, _ = os.Stdout.WriteString("fak test helper\nbuild: " + selfUpdateProbeHelperRev + "\n")
 	os.Exit(0)
@@ -451,12 +456,23 @@ func TestSelfUpdateFakDevTargetsFindsOnlyInstalledCompanions(t *testing.T) {
 // TestSelfUpdateProbeReadsOwnPathAfterSwap reproduces the Windows post-swap audit bug. The
 // running process still has its old embedded stamp, but invoking its path starts the new bytes.
 // The census must read the deployed path or it reports a successful update as divergent.
-func TestSelfUpdateProbeReadsOwnPathAfterSwap(t *testing.T) {
+func TestSelfUpdateProbeInspectsTargetWithoutExecutingIt(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "executed")
 	t.Setenv(selfUpdateProbeHelperEnv, "1")
+	t.Setenv(selfUpdateProbeMarkerEnv, marker)
+
+	wantInfo, err := buildinfo.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatalf("read helper build info: %v", err)
+	}
+	want := binstamp.FromBuildInfo(wantInfo)
 	revision, dirty, attested := selfUpdateProbe(os.Args[0])
-	if !attested || dirty || revision != selfUpdateProbeHelperRev {
-		t.Fatalf("selfUpdateProbe(own path) = (%q, dirty=%v, attested=%v), want deployed helper stamp %q",
-			revision, dirty, attested, selfUpdateProbeHelperRev)
+	if revision != want.Revision || dirty != want.Dirty || attested != want.HasVCS {
+		t.Fatalf("selfUpdateProbe(own path) = (%q, dirty=%v, attested=%v), want (%q, dirty=%v, attested=%v)",
+			revision, dirty, attested, want.Revision, want.Dirty, want.HasVCS)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("inspection executed stale target; marker err=%v", err)
 	}
 }
 

@@ -660,6 +660,7 @@ fak attest    --policy FILE [--probes FILE] [--json]        # compliance attesta
 fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
+fak-selfupdate [same flags]                                      # thin standalone bootstrap; shares the exact updater, receipt schema, cache, transaction, rollback, and source-selection implementation
 fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
 fak self-update --installer msix --msix-appinstaller-uri HTTPS_URL --msix-package PACKAGE --msix-publisher SUBJECT --msix-artifact-digest SHA256 --msix-source-revision REV [--msix-full-fallback-uri HTTPS_URL --msix-full-artifact-digest SHA256] [--msix-repair|--msix-uninstall]
 
@@ -1378,6 +1379,8 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 `fak launch install [--provider claude|codex|all] [--default NAME] [--no-path]`
 installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
 for supported PowerShell/POSIX startup files. Uninstall removes only that block.
+
+The standalone `fak-selfupdate` executable is a recovery-sized entry point over the same package implementation as `fak self-update`. It accepts the same flags and emits the same `fak.self-update.receipt/v1` JSON. In particular, `fak-selfupdate --check --target PATH` inspects the target's embedded Go build metadata without executing that potentially stale or partially replaced binary.
 
 The managed `fak-launch` target remains runnable while `fak self-update` replaces the
 deployed binary. During that bounded transaction it defaults to `prior`, immediately
