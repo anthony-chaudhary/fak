@@ -290,6 +290,20 @@ func gatewayQwen35MetalReceiptConfig() model.Config {
 	}
 }
 
+func assertUnavailableMetalSequenceRefusal(t *testing.T, rr *httptest.ResponseRecorder) bool {
+	t.Helper()
+	if model.Qwen35MetalGDNPreprojectedSequenceAvailable() {
+		return false
+	}
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("platform-unavailable Metal sequence status=%d body=%s, want fail-closed 502", rr.Code, rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte(`"native_inference_receipt"`)) || bytes.Contains(rr.Body.Bytes(), []byte(`"fallback_active"`)) {
+		t.Fatalf("platform-unavailable Metal sequence forged execution/fallback evidence: %s", rr.Body.String())
+	}
+	return true
+}
+
 func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
@@ -309,6 +323,9 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalSequenceRequest(t *testing.T) {
 	// With the generic hybrid renderer and thinking enabled, the thirteen-byte
 	// user payload makes the real model prompt exactly P32.
 	rr := postNativeReceipt(t, srv, `{"messages":[{"role":"user","content":"receipt-proof"}],"max_tokens":1,"temperature":0,"fak":{"native_inference_receipt":true}}`)
+	if assertUnavailableMetalSequenceRefusal(t, rr) {
+		return
+	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
@@ -356,6 +373,9 @@ func TestNativeInferenceReceiptMetalSequenceRouteAccountingWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := postNativeReceipt(t, srv, `{"messages":[{"role":"user","content":"receipt-proof"}],"max_tokens":1,"temperature":0,"fak":{"native_inference_receipt":true}}`)
+	if assertUnavailableMetalSequenceRefusal(t, rr) {
+		return
+	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
@@ -441,7 +461,11 @@ func TestNativeInferenceReceiptBackendNilQ4KMetalControlAndTypedAbsence(t *testi
 	if native.Backend != "metal" || native.ForwardPath != "metal/qwen35-hybrid-session-v1" || !native.Q4K || native.FallbackActive {
 		t.Fatalf("control execution identity=%+v", native)
 	}
-	if sequence == nil || sequence.Available || sequence.SelectorState != model.Qwen35MetalSequenceSelectorOff || sequence.EvidenceState != model.Qwen35MetalSequenceEvidenceNotSelected {
+	wantEvidence := model.Qwen35MetalSequenceEvidenceNotSelected
+	if !model.Qwen35MetalGDNPreprojectedSequenceAvailable() {
+		wantEvidence = model.Qwen35MetalSequenceEvidenceUnavailable
+	}
+	if sequence == nil || sequence.Available || sequence.SelectorState != model.Qwen35MetalSequenceSelectorOff || sequence.EvidenceState != wantEvidence {
 		t.Fatalf("control selector/evidence=%+v", sequence)
 	}
 	if sequence.CommandBuffers != 0 || sequence.Encoders != 0 || sequence.IntermediateWaits != 0 || sequence.IntermediateReadbacks != 0 || sequence.TerminalWaits != 0 || sequence.TerminalReadbacks != 0 {

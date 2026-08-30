@@ -92,6 +92,14 @@ const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequenc
 // The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
 var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
 
+// Qwen35MetalGDNPreprojectedSequenceAvailable reports whether this build owns
+// the native Metal sequence backend. Callers use this capability readback to
+// distinguish an unselected supported route from a platform-unavailable route;
+// it does not admit a fallback implementation.
+func Qwen35MetalGDNPreprojectedSequenceAvailable() bool {
+	return newQwen35MetalGDNSequenceBackend != nil
+}
+
 // Qwen35MetalSequenceSelectorState is model-authored selection provenance. It
 // reflects whether this Session admitted the native sequence owner; callers do
 // not supply or override it when the public receipt is assembled.
