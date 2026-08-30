@@ -48,14 +48,31 @@ type launchDoctorEntryPoint struct {
 	Action   string   `json:"action,omitempty"`
 }
 
+const installedLaunchQualificationSchema = "fak.installed-launch-qualification.v1"
+
+type installedLaunchQualificationProvider struct {
+	Provider string   `json:"provider"`
+	Harness  string   `json:"harness"`
+	Chain    []string `json:"resolved_executable_chain,omitempty"`
+	Status   string   `json:"status"`
+	Failure  string   `json:"failure,omitempty"`
+}
+
+type installedLaunchQualificationReceipt struct {
+	Schema    string                                 `json:"schema"`
+	Qualified bool                                   `json:"qualified"`
+	Providers []installedLaunchQualificationProvider `json:"providers"`
+}
+
 type launchDoctorReport struct {
-	Schema      string                   `json:"schema"`
-	ConfigPath  string                   `json:"config_path"`
-	ShimDir     string                   `json:"shim_dir"`
-	Default     string                   `json:"default_provider,omitempty"`
-	Binary      binaryIdentity           `json:"binary"`
-	Rows        []launchDoctorRow        `json:"providers"`
-	EntryPoints []launchDoctorEntryPoint `json:"entry_points"`
+	Schema        string                              `json:"schema"`
+	ConfigPath    string                              `json:"config_path"`
+	ShimDir       string                              `json:"shim_dir"`
+	Default       string                              `json:"default_provider,omitempty"`
+	Binary        binaryIdentity                      `json:"binary"`
+	Rows          []launchDoctorRow                   `json:"providers"`
+	EntryPoints   []launchDoctorEntryPoint            `json:"entry_points"`
+	Qualification installedLaunchQualificationReceipt `json:"installed_launch_qualification"`
 }
 
 func runLaunchDoctor(stdout, stderr io.Writer, argv []string) int {
@@ -189,7 +206,39 @@ func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir s
 	}
 	sort.Slice(report.Rows, func(i, j int) bool { return report.Rows[i].Provider < report.Rows[j].Provider })
 	report.EntryPoints = buildLaunchDoctorEntryPoints(report.Rows)
+	report.Qualification = buildInstalledLaunchQualification(report.Rows)
 	return report
+}
+
+func validateInstalledLaunchQualification(receipt *installedLaunchQualificationReceipt) error {
+	if receipt == nil {
+		return nil
+	}
+	if receipt.Schema != installedLaunchQualificationSchema {
+		return fmt.Errorf("installed launch qualification schema %q, want %q", receipt.Schema, installedLaunchQualificationSchema)
+	}
+	if !receipt.Qualified {
+		return fmt.Errorf("installed launch qualification is not ready")
+	}
+	return nil
+}
+func buildInstalledLaunchQualification(rows []launchDoctorRow) installedLaunchQualificationReceipt {
+	receipt := installedLaunchQualificationReceipt{Schema: installedLaunchQualificationSchema, Qualified: true}
+	for _, row := range rows {
+		provider := installedLaunchQualificationProvider{
+			Provider: row.Provider,
+			Harness:  "fak-launch/" + row.Provider,
+			Status:   row.Reason,
+		}
+		if row.InterceptReady && row.PathWinner != "" && row.Underlying != "" {
+			provider.Chain = []string{row.PathWinner, "fak guard", row.Underlying}
+		} else {
+			receipt.Qualified = false
+			provider.Failure = row.Reason
+		}
+		receipt.Providers = append(receipt.Providers, provider)
+	}
+	return receipt
 }
 
 func buildLaunchDoctorEntryPoints(rows []launchDoctorRow) []launchDoctorEntryPoint {
