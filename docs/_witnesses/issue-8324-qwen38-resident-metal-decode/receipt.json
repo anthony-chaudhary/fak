@@ -1,0 +1,190 @@
+{
+  "schema": "fak.issue-8324-qwen38-resident-metal-decode-hold/1",
+  "issue": 8324,
+  "epic": {
+    "issue": 10193,
+    "row": 6
+  },
+  "base_revision": "8fbba932b8128700aef41dd52ab548664a919003",
+  "verdict": "HOLD_CAPACITY_AND_CLAIM_TOPOLOGY_UNPROVEN",
+  "evidence_class": "TYPED_HOLD",
+  "reason": "The exact artifact is available and verified, but the observed 36 GiB host is below the sanctioned >=64 GiB requirement, no public verified >=64 GiB Apple target is bound, the private bridge is NOT_READY, and current receipts cannot prove periodic full-attention whole-token residency or exact multi-token cosine and greedy-token parity.",
+  "stability": {
+    "typed": true,
+    "performance_credit": false,
+    "quality_credit": false,
+    "default_credit": false,
+    "supersede_only_when": [
+      "a sanctioned darwin/arm64 Apple node has at least 64 GiB and the exact verified artifact",
+      "one exact matched A/B receipt proves whole-token resident dense GDN plus periodic full attention across all layers",
+      "the same receipt proves exact multi-token cosine and greedy-token parity with inclusive accounting"
+    ]
+  },
+  "artifact": {
+    "model": "Qwen3.8-27B",
+    "repository": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "status": "AVAILABLE_VERIFIED",
+    "path_disclosed": false,
+    "verification_source": "independent readback supplied to the issue worker"
+  },
+  "required_execution": {
+    "engine": "fak-native",
+    "runtime": "inkernel",
+    "backend": "metal",
+    "fallback_count": 0,
+    "external_runtime_allowed": false
+  },
+  "target": {
+    "os": "darwin",
+    "arch": "arm64",
+    "accelerator": "Apple Metal",
+    "minimum_memory_gib": 64,
+    "observed_local_memory_gib": 36,
+    "observed_local_eligible": false,
+    "public_verified_target_available": false,
+    "private_bridge_status": "NOT_READY"
+  },
+  "workload": {
+    "prompt_tokens": 32,
+    "decode_tokens": 64,
+    "repetitions_per_arm": 3,
+    "arms": 6,
+    "batch": 1,
+    "temperature": 0,
+    "sampling": "greedy"
+  },
+  "current_mechanisms": [
+    {
+      "issue": 9486,
+      "commit": "46fdd8a52fd70b3e29345cd311be3cc89443e8fc",
+      "present_at_base": true,
+      "scope": "one-buffer Qwen P=1 linear-attention projection, resident GDN, gated normalization, and output projection",
+      "linear_attention_through_mlp": false,
+      "periodic_full_attention_resident": false,
+      "whole_token_all_layers_resident": false
+    },
+    {
+      "issue": 9488,
+      "commit": "99ea660ae222dd6a75dd661c54778f470904f9e7",
+      "present_at_base": true,
+      "scope": "one linear-attention block from input RMSNorm through resident GDN, residual, post-attention RMSNorm, SwiGLU MLP, and next hidden output",
+      "linear_attention_through_mlp": true,
+      "periodic_full_attention_resident": false,
+      "whole_token_all_layers_resident": false
+    }
+  ],
+  "current_receipt_topology": {
+    "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+    "envelope_memory_gib": 36,
+    "supports_required_64gib_target": false,
+    "exports_stage_timing": true,
+    "exports_periodic_full_attention_residency": false,
+    "exports_exact_multi_token_cosine": false,
+    "exports_matching_greedy_tokens": false,
+    "exports_distinct_recovery_accounting": false
+  },
+  "acceptance": {
+    "exact_artifact_required": true,
+    "stage_timing_required": true,
+    "resident_dense_gdn_all_layers_required": true,
+    "periodic_full_attention_all_layers_required": true,
+    "whole_token_residency_required": true,
+    "cosine_minimum": 0.9999,
+    "exact_multi_token_cosine_required": true,
+    "matching_greedy_tokens_required": true,
+    "baseline": {
+      "full_prefill_tokens_per_second": 2.9,
+      "cached_min_tokens_per_second": 0.4,
+      "cached_max_tokens_per_second": 1.3,
+      "exact_matched_ab_required": true,
+      "evidence_available": false
+    },
+    "target_tokens_per_second_minimum": 5,
+    "before_default_required": true,
+    "unsupported_geometry_logged_decline_required": true,
+    "unsupported_geometry_claim_allowed": false,
+    "evidence_available": false
+  },
+  "accounting": {
+    "inclusive": true,
+    "required_categories": [
+      "setup",
+      "recovery",
+      "inference",
+      "verification",
+      "teardown"
+    ],
+    "required_phases": [
+      "setup",
+      "recovery",
+      "prefill",
+      "first-token",
+      "steady-decode",
+      "verification",
+      "teardown"
+    ],
+    "wall_clock_binding_required": true,
+    "evidence_available": false
+  },
+  "missing_evidence": [
+    "public verified sanctioned darwin/arm64 Apple target with at least 64 GiB",
+    "claim-grade receipt support for the sanctioned >=64 GiB host geometry",
+    "whole-token residency across dense GDN and periodic full-attention layers",
+    "exact multi-token cosine >=0.9999 and matching greedy-token capture",
+    "exact matched six-arm A/B against both frozen baselines with inclusive accounting",
+    "logged unsupported-geometry decline from the claim-grade route"
+  ],
+  "claims": {
+    "performance": false,
+    "quality": false,
+    "default": false,
+    "resident_hybrid_topology": false,
+    "unsupported_geometry_support": false
+  },
+  "prior_art": [
+    {
+      "project": "llama.cpp",
+      "revision": "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0",
+      "route": "BORROW_INVARIANTS_ONLY",
+      "invariant": "Qwen graph and recurrent-state ordering",
+      "runtime_dependency": false
+    },
+    {
+      "project": "MLX",
+      "revision": "43d2f06cb87e76895bf9a152bade4fee83408643",
+      "route": "BORROW_INVARIANTS_ONLY",
+      "invariant": "caller-owned Metal CommandEncoder lifetime",
+      "runtime_dependency": false
+    },
+    {
+      "project": "MLX-LM",
+      "revision": "cc8521569694a3240b52c98acffd100d59b4c755",
+      "route": "BORROW_INVARIANTS_ONLY",
+      "invariant": "GDN semantics and state transitions",
+      "runtime_dependency": false
+    }
+  ],
+  "route": {
+    "probe": "route-probe.json",
+    "script": "sanctioned-rerun.sh",
+    "command": "FAK_SANCTIONED_APPLE_NODE=YES GGUF_PATH=<absolute-exact-artifact> OUT_DIR=<absolute-output-dir> ./docs/_witnesses/issue-8324-qwen38-resident-metal-decode/sanctioned-rerun.sh",
+    "command_ready": true,
+    "performance_acceptance_ready": false
+  },
+  "scope": {
+    "write_root": "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/",
+    "changed_paths": [
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/README.md",
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/go.mod",
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/receipt.json",
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/route-probe.json",
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/sanctioned-rerun.sh",
+      "docs/_witnesses/issue-8324-qwen38-resident-metal-decode/witness_test.go"
+    ]
+  }
+}
