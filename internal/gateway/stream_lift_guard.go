@@ -1,6 +1,9 @@
 package gateway
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // stream_lift_guard.go keeps a text-form tool-call dialect from ever reaching the
 // client on the LIVE token stream. The buffered path runs agent.LiftTextToolCalls,
@@ -52,6 +55,52 @@ type liftGuard struct {
 
 func newLiftGuard(emit func(string) error) *liftGuard {
 	return &liftGuard{emit: emit}
+}
+
+// utf8FragmentBuffer joins only the incomplete UTF-8 suffix of one upstream
+// fragment to the next. Complete malformed bytes remain visible to encoding/json,
+// which preserves the gateway's established replacement-rune fallback instead of
+// silently dropping model output.
+type utf8FragmentBuffer struct {
+	emit    func(string) error
+	pending []byte
+}
+
+func newUTF8FragmentBuffer(emit func(string) error) *utf8FragmentBuffer {
+	return &utf8FragmentBuffer{emit: emit}
+}
+
+func (b *utf8FragmentBuffer) write(frag string) error {
+	if frag == "" && len(b.pending) == 0 {
+		return nil
+	}
+	buf := append(b.pending, frag...)
+	b.pending = nil
+
+	flush := len(buf)
+	start := len(buf) - 1
+	for start >= 0 && len(buf)-start <= utf8.UTFMax && !utf8.RuneStart(buf[start]) {
+		start--
+	}
+	if start >= 0 && len(buf)-start <= utf8.UTFMax && !utf8.FullRune(buf[start:]) {
+		flush = start
+	}
+	if flush < len(buf) {
+		b.pending = append(b.pending, buf[flush:]...)
+	}
+	if flush == 0 {
+		return nil
+	}
+	return b.emit(string(buf[:flush]))
+}
+
+func (b *utf8FragmentBuffer) flush() error {
+	if len(b.pending) == 0 {
+		return nil
+	}
+	out := string(b.pending)
+	b.pending = nil
+	return b.emit(out)
 }
 
 // write feeds one upstream content fragment through the guard, streaming as much as is

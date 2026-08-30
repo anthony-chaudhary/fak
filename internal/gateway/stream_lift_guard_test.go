@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -195,5 +196,65 @@ func TestLiftRemainderReconciliation(t *testing.T) {
 		if got := liftRemainder(c.streamed, c.cleaned); got != c.want {
 			t.Errorf("%s: liftRemainder(%q,%q) = %q, want %q", c.name, c.streamed, c.cleaned, got, c.want)
 		}
+	}
+}
+
+func TestUTF8FragmentBufferJoinsSplitRunes(t *testing.T) {
+	var got strings.Builder
+	b := newUTF8FragmentBuffer(func(s string) error {
+		if !utf8.ValidString(s) {
+			t.Fatalf("emitted invalid UTF-8 fragment %x", []byte(s))
+		}
+		got.WriteString(s)
+		return nil
+	})
+
+	want := "A🙂界B"
+	for _, frag := range []string{"A\xf0", "\x9f\x99", "\x82\xe7\x95", "\x8cB"} {
+		if err := b.write(frag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != want {
+		t.Fatalf("reassembled %q, want %q", got.String(), want)
+	}
+}
+
+func TestUTF8FragmentBufferPreservesMalformedInputFallback(t *testing.T) {
+	var got strings.Builder
+	b := newUTF8FragmentBuffer(func(s string) error { got.WriteString(s); return nil })
+	for _, frag := range []string{"ok", "\xff", "done"} {
+		if err := b.write(frag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "ok\xffdone" {
+		t.Fatalf("emitted bytes %x, want %x", []byte(got.String()), []byte("ok\xffdone"))
+	}
+}
+
+func TestUTF8FragmentBufferFlushesIncompleteFinalRune(t *testing.T) {
+	var emissions []string
+	b := newUTF8FragmentBuffer(func(s string) error {
+		emissions = append(emissions, s)
+		return nil
+	})
+	if err := b.write("tail\xe2\x82"); err != nil {
+		t.Fatal(err)
+	}
+	if len(emissions) != 1 || emissions[0] != "tail" {
+		t.Fatalf("pre-flush emissions = %q, want [tail]", emissions)
+	}
+	if err := b.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if len(emissions) != 2 || emissions[1] != "\xe2\x82" {
+		t.Fatalf("post-flush emissions = %q, want trailing incomplete bytes", emissions)
 	}
 }

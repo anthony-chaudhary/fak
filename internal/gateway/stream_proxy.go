@@ -80,6 +80,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
 	guard := newLiftGuard(emitContent)
+	utf8Fragments := newUTF8FragmentBuffer(guard.write)
 	opts := []agent.SampleOpt{
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
@@ -102,7 +103,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer lease.Release()
 
 	began := time.Now()
-	comp, err := sp.CompleteStream(ctx, guard.write, req.Messages, req.Tools, opts...)
+	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()
@@ -168,6 +169,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		finish = "stop"
 	}
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false)
+
+	// A final incomplete rune has no later fragment to complete it. Feed it through
+	// the existing JSON fallback before reconciling the buffered completion.
+	if err := utf8Fragments.flush(); err != nil {
+		return true
+	}
 
 	// Open the stream even for an empty turn (zero content, zero kept calls) so the
 	// client always gets a well-formed role → finish → [DONE] sequence.
