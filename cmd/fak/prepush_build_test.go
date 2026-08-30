@@ -202,6 +202,38 @@ func TestListTestOnlyPackagesUsesExactGoMetadata(t *testing.T) {
 	}
 }
 
+func TestParseTestOnlyPackagesRetainsEveryUnprovenShape(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+	}{
+		{name: "unknown", json: `{"ImportPath":"mod/unknown"}`},
+		{name: "production go", json: `{"ImportPath":"mod/unknown","GoFiles":["real.go"],"TestGoFiles":["real_test.go"]}`},
+		{name: "production cgo", json: `{"ImportPath":"mod/unknown","CgoFiles":["real.go"],"XTestGoFiles":["real_test.go"]}`},
+		{name: "ignored only", json: `{"ImportPath":"mod/unknown","IgnoredGoFiles":["platform.go"]}`},
+		{name: "malformed", json: `{"ImportPath":"mod/unknown","GoFiles":"not-an-array","TestGoFiles":["real_test.go"]}`},
+		{name: "different package", json: `{"ImportPath":"mod/not-selected","TestGoFiles":["only_test.go"]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTestOnlyPackages(strings.NewReader(tt.json), []string{"mod/unknown"})
+			if got["mod/unknown"] {
+				t.Fatalf("unproven package was classified test-only: %v", got)
+			}
+		})
+	}
+
+	got := parseTestOnlyPackages(strings.NewReader(
+		`{"ImportPath":"mod/only","TestGoFiles":["only_test.go"]}`),
+		[]string{"mod/only", "mod/unlisted"})
+	if !got["mod/only"] {
+		t.Fatalf("exact positively proven test-only package not classified: %v", got)
+	}
+	if got["mod/unlisted"] {
+		t.Fatalf("package absent from metadata must stay selected: %v", got)
+	}
+}
+
 func writePrepushFixtureFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
