@@ -541,3 +541,139 @@ func assertQwen35DecodeBlockParity(t *testing.T, label string, want, got []float
 		t.Fatalf("%s cosine=%g relativeL2=%g", label, cosine, relativeL2)
 	}
 }
+
+func TestQwen35DecodeCallerOwnedGraphParityAndSingleSubmission(t *testing.T) {
+	f := newQwen35DecodeBlockFixture(t)
+	defer f.close()
+
+	wrapperState, err := metalgemm.NewGDNState(f.geom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapperState.Close()
+	cpu := f.m.NewSession()
+	defer cpu.Close()
+	seedQwen35DecodeBlockStates(t, f, wrapperState, cpu)
+	convSeed, recurrentSeed, err := wrapperState.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	graphState, err := metalgemm.NewGDNState(f.geom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graphState.Close()
+	if err := graphState.Seed(convSeed, recurrentSeed); err != nil {
+		t.Fatal(err)
+	}
+
+	input := randomVecF(f.m.Cfg.HiddenSize, 95100)
+	want, wrapperReceipt, accepted, err := metalgemm.RunQwen35Decode(metalgemm.Qwen35DecodeRequest{
+		Input: input, Weights: f.weights, State: wrapperState, Panel: f.panel, Block: &f.block,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("compatibility wrapper accepted=%v err=%v", accepted, err)
+	}
+	assertQwen35DecodeBlockReceipt(t, wrapperReceipt)
+
+	graph, err := metalgemm.BeginProjectionGraph(input, nil, nil, 1, len(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graph.Free()
+	graphInput, err := graph.Input(len(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, encodeReceipt, err := metalgemm.EncodeQwen35Decode(graph, graphInput, metalgemm.Qwen35DecodeRequest{
+		Weights: f.weights, State: graphState, Panel: f.panel, Block: &f.block,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encodeReceipt.CommandBuffers != 0 || encodeReceipt.Commits != 0 || encodeReceipt.CompletionWaits != 0 ||
+		encodeReceipt.InputUploads != 0 || encodeReceipt.FinalReadbacks != 0 || encodeReceipt.Committed || encodeReceipt.CompletedWait {
+		t.Fatalf("caller-owned encoder crossed submission boundary: %+v", encodeReceipt)
+	}
+	if encodeReceipt.Encoders != 16 || encodeReceipt.ProjectionDispatches != 8 || encodeReceipt.GDNEncoders != 1 ||
+		encodeReceipt.RMSNormEncoders != 2 || encodeReceipt.ResidualAddEncoders != 2 || encodeReceipt.SwiGLUEncoders != 1 {
+		t.Fatalf("caller-owned encoder receipt=%+v", encodeReceipt)
+	}
+	outputs, graphReceipt, err := graph.FinishRead(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outputs) != 1 {
+		t.Fatalf("terminal results=%d want 1", len(outputs))
+	}
+	if !graphReceipt.Committed || !graphReceipt.CompletedWait || graphReceipt.Encoders != 16 ||
+		graphReceipt.HostReadbacks != 1 || graphReceipt.IntermediateReadbacks != 0 || graphReceipt.IntermediateWaits != 0 {
+		t.Fatalf("caller-owned graph receipt=%+v", graphReceipt)
+	}
+	assertQwen35DecodeBlockParity(t, "caller-owned wrapper parity", want, outputs[0])
+	wantConv, wantRecurrent, err := wrapperState.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotConv, gotRecurrent, err := graphState.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertQwen35DecodeMixerParity(t, "caller-owned convolution state", wantConv, gotConv)
+	assertQwen35DecodeMixerParity(t, "caller-owned recurrent state", wantRecurrent, gotRecurrent)
+}
+
+func TestQwen35DecodeCallerOwnedGraphDeclinesBeforeEncodingOrStateMutation(t *testing.T) {
+	f := newQwen35DecodeBlockFixture(t)
+	defer f.close()
+	state, err := metalgemm.NewGDNState(f.geom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	cpu := f.m.NewSession()
+	defer cpu.Close()
+	seedQwen35DecodeBlockStates(t, f, state, cpu)
+	wantConv, wantRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := randomVecF(f.m.Cfg.HiddenSize, 95101)
+	graph, err := metalgemm.BeginProjectionGraph(input, nil, nil, 1, len(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graph.Free()
+	graphInput, err := graph.Input(len(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := f.weights
+	missing.MLPUp = nil
+	if _, receipt, err := metalgemm.EncodeQwen35Decode(graph, graphInput, metalgemm.Qwen35DecodeRequest{
+		Weights: missing, State: state, Panel: f.panel, Block: &f.block,
+	}); err == nil {
+		t.Fatal("caller-owned encoder accepted missing MLP weight")
+	} else if receipt != (metalgemm.Qwen35DecodeReceipt{}) {
+		t.Fatalf("declined encoder receipt=%+v, want zero", receipt)
+	}
+	gotConv, gotRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertQwen35DecodeMixerParity(t, "declined convolution state", wantConv, gotConv)
+	assertQwen35DecodeMixerParity(t, "declined recurrent state", wantRecurrent, gotRecurrent)
+
+	result, err := graph.RMSNorm(graphInput, f.block.InputNorm, f.block.RMSNormEpsilon, f.block.NormGain1p)
+	if err != nil {
+		t.Fatalf("decline poisoned caller-owned graph: %v", err)
+	}
+	_, graphReceipt, err := graph.FinishRead(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graphReceipt.Encoders != 1 || graphReceipt.HostReadbacks != 1 {
+		t.Fatalf("decline appended graph work: %+v", graphReceipt)
+	}
+}

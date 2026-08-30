@@ -1,0 +1,44 @@
+{
+  "provider": "apple-powermetrics",
+  "provider_version": "macOS 26.6.2 (25G83)",
+  "platform": {
+    "architecture": "arm64",
+    "hardware": "Apple Silicon (scrubbed)",
+    "operating_system": "macOS 26.6.2",
+    "build": "25G83"
+  },
+  "command": [
+    "/usr/bin/powermetrics",
+    "--help"
+  ],
+  "raw_help": "The following samplers are supported by --samplers:\n\n    tasks             per task cpu usage and wakeup stats\n    battery           battery and backlight info\n    network           network usage info\n    disk              disk usage info\n    interrupts        interrupt distribution\n    cpu_power         cpu power and frequency info\n    thermal           thermal pressure notifications\n    sfi               selective forced idle information\n    gpu_power         gpu power and frequency info\n    ane_power         dedicated rail ane power and frequency info\n\nand the following sampler groups are supported by --samplers:\n",
+  "expected": {
+    "schema": "fak-apple-memory-current-provider/1",
+    "provider": "apple-powermetrics",
+    "provider_version": "macOS 26.6.2 (25G83)",
+    "status": "unavailable",
+    "unavailable_reason": "unsupported",
+    "detail": "powermetrics exposes no documented package/system unified-memory read/write byte-rate or monotonic-byte-counter sampler",
+    "scope": {
+      "kind": "system"
+    },
+    "interval_ns": 100000000,
+    "rate_or_delta": "unavailable",
+    "reset_semantics": "unavailable; no byte counter was accepted",
+    "advertised_samplers": [
+      "ane_power",
+      "battery",
+      "cpu_power",
+      "disk",
+      "gpu_power",
+      "interrupts",
+      "network",
+      "sfi",
+      "tasks",
+      "thermal"
+    ],
+    "raw_fields": [],
+    "raw_units": [],
+    "observed_at": "2026-08-30T19:00:00Z"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schema": "fak-wip-inventory-scale-witness/1",
+  "issue": 10360,
+  "observed_date": "2026-08-30",
+  "base_sha": "a5bc520e9e0d5bec806ee99649d51cd58623de16",
+  "command": "fak wip inventory --json",
+  "environment": {
+    "description": "sanctioned detached worker worktree on the live local fleet checkout",
+    "registered_worker_worktrees_returned": 165,
+    "stale_worker_residue_returned": 166
+  },
+  "before": {
+    "source": "temporary binary built from the worker base commit before the change",
+    "timeout_reproduction": {
+      "timeout_seconds": 15,
+      "elapsed_seconds": 15.007826,
+      "timed_out": true,
+      "stdout_bytes": 0
+    },
+    "completed_baseline": {
+      "elapsed_seconds": 42.505487,
+      "exit_code": 0,
+      "returned_worktree_count": 165,
+      "schema_returned": "fak-wip-inventory/1",
+      "errors_returned": 0
+    }
+  },
+  "after": {
+    "source": "binary built from the same worker worktree after the change",
+    "elapsed_seconds": 18.800042,
+    "exit_code": 0,
+    "returned_worktree_count": 165,
+    "schema_returned": "fak-wip-inventory/1",
+    "errors_returned": 0,
+    "fixed_checkout_probe_concurrency": 16
+  },
+  "comparison": {
+    "elapsed_seconds_reduction": 23.705445,
+    "speedup_ratio": 2.260925
+  },
+  "method": {
+    "build": "go build -o <temporary-path> ./cmd/fak",
+    "timing": "Python time.perf_counter around subprocess completion with JSON captured to a temporary file",
+    "privacy": "Temporary paths and checkout-specific worktree names are omitted."
+  },
+  "tests": [
+    {
+      "command": "go test ./internal/wipinventory -run TestCollectProbesLargeWorktreeFleetInBoundedParallel -count=3",
+      "outcome": "pass"
+    },
+    {
+      "command": "go test -race ./internal/wipinventory -count=1",
+      "outcome": "pass"
+    },
+    {
+      "command": "go test ./internal/wipinventory -count=1",
+      "outcome": "pass"
+    },
+    {
+      "command": "fak validate --mine internal/wipinventory/inventory.go internal/wipinventory/inventory_test.go docs/_witnesses/wip-inventory-scale-2026-08-30.json",
+      "outcome": "pass"
+    }
+  ]
+}

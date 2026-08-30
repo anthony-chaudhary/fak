@@ -212,7 +212,8 @@ type BuildGCReport struct {
 //   - exact direct-child path under the allowlisted temp root;
 //   - exact fak-selfupdate-build-<pid> shape, with a matching owner stamp when present;
 //   - old enough, owner PID dead, and no process command line referencing the path;
-//   - clean working tree and HEAD already contained by BaseRef (no unpushed commit).
+//   - when the directory exists, a clean tree whose HEAD is contained by BaseRef;
+//   - when only the Git admin record remains, a valid owner stamp is mandatory.
 //
 // Apply re-runs every gate immediately before deletion. It removes the directory
 // first and prunes the git admin record only after absence is verified, preserving
@@ -279,7 +280,7 @@ func GarbageCollectStaleBuilds(ctx context.Context, run Runner, repoRoot string,
 			report.Failures = append(report.Failures, BuildGCFailure{Path: planned.Path, Reason: "directory_remove_failed: " + err.Error()})
 			continue
 		}
-		if _, err := os.Stat(planned.Path); !os.IsNotExist(err) {
+		if _, err := os.Lstat(planned.Path); !os.IsNotExist(err) {
 			report.Failures = append(report.Failures, BuildGCFailure{Path: planned.Path, Reason: "directory_remains"})
 			continue
 		}
@@ -324,8 +325,12 @@ func staleBuildEntry(ctx context.Context, run Runner, repoRoot, path string, opt
 	if pid == opts.SelfPID {
 		return row, false, "owner_is_current_process"
 	}
-	info, err := os.Stat(clean)
-	if err != nil || !info.IsDir() {
+	info, statErr := os.Lstat(clean)
+	missing := os.IsNotExist(statErr)
+	if statErr != nil && !missing {
+		return row, false, "worktree_unreadable"
+	}
+	if !missing && !info.IsDir() {
 		return row, false, "worktree_unreadable"
 	}
 
@@ -337,6 +342,10 @@ func staleBuildEntry(ctx context.Context, run Runner, repoRoot, path string, opt
 		if stamp.PID != pid {
 			return row, false, "owner_stamp_pid_mismatch"
 		}
+	} else if missing {
+		// A missing legacy directory has neither a sidecar nor filesystem
+		// metadata from which to derive durable owner/age evidence.
+		return row, false, "missing_worktree_owner_unknown"
 	} else {
 		// Legacy build worktrees predate owner sidecars. The PID encoded by the
 		// creator is still ownership evidence, but every other gate remains required.
@@ -374,6 +383,12 @@ func staleBuildEntry(ctx context.Context, run Runner, repoRoot, path string, opt
 	if active {
 		return row, false, "process_command_line_active"
 	}
+	if missing {
+		row.Eligible = true
+		row.Reason = fmt.Sprintf("gc: registered path absent, stamped owner pid %d dead, age %s past floor %s, and no active command line",
+			pid, age.Round(time.Second), opts.MinAge.Round(time.Second))
+		return row, true, ""
+	}
 	if cleanOut, ok := run(ctx, clean, "git", "status", "--porcelain=v1", "--untracked-files=all"); !ok {
 		return row, false, "working_tree_unreadable"
 	} else if strings.TrimSpace(cleanOut) != "" {
@@ -399,7 +414,15 @@ func directChildOf(path, root string) bool {
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	return strings.EqualFold(filepath.Dir(pathAbs), rootAbs)
+	// Resolve the parent rather than the candidate itself: dangling Git admin records
+	// intentionally point at a missing leaf, but their existing temp parent can still be
+	// canonicalized (for example macOS /var -> /private/var) without weakening the boundary.
+	pathParent, err1 := filepath.EvalSymlinks(filepath.Dir(pathAbs))
+	rootCanonical, err2 := filepath.EvalSymlinks(rootAbs)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.EqualFold(pathParent, rootCanonical)
 }
 
 func buildProcessCommandLineActive(path string) (bool, error) {

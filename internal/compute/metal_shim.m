@@ -321,6 +321,59 @@ int fmetal_command_encode_matmul_f32(void *opaque, void *dW, void *dX, void *dY,
     }
 }
 
+static int fmetal_command_encode_1d(fmetal_command_owner *owner,
+                                     id<MTLComputePipelineState> pso,
+                                     NSUInteger gridN,
+                                     void (^bind)(id<MTLComputeCommandEncoder>)) {
+    if (owner == NULL || owner->terminal || owner->command_buffer == nil || pso == nil) return 0;
+    @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = [owner->command_buffer computeCommandEncoder];
+        if (enc == nil) return 0;
+        [enc setComputePipelineState:pso];
+        bind(enc);
+        NSUInteger g = gridN == 0 ? 1 : gridN;
+        NSUInteger tw = pso.maxTotalThreadsPerThreadgroup;
+        if (tw > g) tw = g;
+        if (tw == 0) tw = 1;
+        [enc dispatchThreads:MTLSizeMake(g, 1, 1) threadsPerThreadgroup:MTLSizeMake(tw, 1, 1)];
+        [enc endEncoding];
+        owner->encoders++;
+        return 1;
+    }
+}
+
+int fmetal_command_encode_rmsnorm_f32(void *opaque, void *dX, void *dW, void *dY,
+                                      int rows, int n, float eps) {
+    if (dX == NULL || dW == NULL || dY == NULL || rows <= 0 || n <= 0) return 0;
+    return fmetal_command_encode_1d(opaque, g_rmsnorm, (NSUInteger)rows,
+        ^(id<MTLComputeCommandEncoder> enc) {
+            [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
+            [enc setBuffer:(id<MTLBuffer>)dW offset:0 atIndex:1];
+            [enc setBuffer:(id<MTLBuffer>)dY offset:0 atIndex:2];
+            [enc setBytes:&n length:sizeof(int) atIndex:3];
+            [enc setBytes:&eps length:sizeof(float) atIndex:4];
+        });
+}
+
+int fmetal_command_encode_swiglu_f32(void *opaque, void *dG, void *dU, void *dY, int n) {
+    if (dG == NULL || dU == NULL || dY == NULL || n <= 0) return 0;
+    return fmetal_command_encode_1d(opaque, g_swiglu, (NSUInteger)n,
+        ^(id<MTLComputeCommandEncoder> enc) {
+            [enc setBuffer:(id<MTLBuffer>)dG offset:0 atIndex:0];
+            [enc setBuffer:(id<MTLBuffer>)dU offset:0 atIndex:1];
+            [enc setBuffer:(id<MTLBuffer>)dY offset:0 atIndex:2];
+        });
+}
+
+int fmetal_command_encode_add_f32(void *opaque, void *dDst, void *dSrc, int n) {
+    if (dDst == NULL || dSrc == NULL || n <= 0) return 0;
+    return fmetal_command_encode_1d(opaque, g_add, (NSUInteger)n,
+        ^(id<MTLComputeCommandEncoder> enc) {
+            [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
+            [enc setBuffer:(id<MTLBuffer>)dSrc offset:0 atIndex:1];
+        });
+}
+
 int fmetal_command_finish(void *opaque, fmetal_command_receipt *receipt) {
     fmetal_command_owner *owner = opaque;
     if (receipt != NULL) memset(receipt, 0, sizeof(*receipt));

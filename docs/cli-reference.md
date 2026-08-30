@@ -664,6 +664,8 @@ fak attest    --policy FILE [--probes FILE] [--json]        # compliance attesta
 fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
+fak self-update --build-gc [--root DIR]                              # emit a JSON dry-run plan for stale self-update build worktrees; no fetch/build/gate/swap
+fak self-update --build-gc --apply [--root DIR]                      # revalidate and remove only eligible stale self-update build worktrees, then emit the JSON receipt
 fak-selfupdate [same flags]                                      # thin standalone bootstrap; shares the exact updater, receipt schema, cache, transaction, rollback, and source-selection implementation
 fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
 fak self-update --installer msix --msix-appinstaller-uri HTTPS_URL --msix-package PACKAGE --msix-publisher SUBJECT --msix-artifact-digest SHA256 --msix-source-revision REV [--msix-full-fallback-uri HTTPS_URL --msix-full-artifact-digest SHA256] [--msix-repair|--msix-uninstall]
@@ -678,6 +680,10 @@ differential updates; `--offline` selects `--msix-full-fallback-uri` (or the pri
 separate full bundle is supplied). A distinct full fallback requires its own `--msix-full-artifact-digest`; the receipt reports the selected delivery and whether fallback ran. Downgrades are refused unless `--msix-allow-downgrade` is
 explicitly set. Repair and uninstall are explicit, mutually exclusive operations. PowerShell
 runs non-interactively in a hidden process; selecting `msix` on a non-Windows host is refused.
+
+Source self-update normally removes its detached pristine build worktree when the run finishes. If a run is killed before deferred cleanup, the next mutating source update invokes the same owner-aware collector automatically. Operators can inspect that lifecycle without starting an update using `fak self-update --build-gc`; it is always JSON and dry-run by default. Add `--apply` to mutate. Both modes enforce the collector's 30-minute grace floor plus owner, process-reference, clean-tree, ancestry, and exact-path gates. `--check` remains a separate strictly read-only freshness check and cannot be combined with `--build-gc`.
+
+Exact `fak-selfupdate-build-<pid>` worktrees belong to this owner-aware collector. Generic `fak tree-doctor` cleanup intentionally defers them rather than applying a weaker generic age rule. The receipt schema is `fak.self-update.build-gc/v1`; its top-level `mode` is `plan` or `apply`, and `report` retains every `selfinstall.BuildGCReport` field, including per-worktree reasons and apply failures.
 
 Source self-update derives a deterministic digest from Go's complete non-standard dependency graph for `./cmd/fak`, including generated/runtime source files, `go:embed` assets, native inputs, module metadata, toolchain/platform/CGO architecture knobs, tags, and build/link flags. A docs-only or test-only source revision can therefore reuse the prior digest-verified artifact without compiling again; any graph or build-envelope uncertainty falls back to the full build, vet, and smoke gates. JSON update receipts expose `build_provenance` with the selected source commit, the source commit that originally built reused bytes, build-input and artifact digests, artifact size, build envelope, and reuse decision.
 

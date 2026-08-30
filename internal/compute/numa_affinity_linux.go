@@ -4,7 +4,9 @@ package compute
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -19,21 +21,59 @@ import (
 // words, the glibc CPU_SETSIZE default and comfortably above this box's 256 threads.
 const cpuSetWords = 1024 / 64
 
+type cpuAffinityMask [cpuSetWords]uint64
+
 // PinCurrentThreadToCPUs wires the CALLING goroutine to its OS thread and restricts that thread
 // to cpus via sched_setaffinity(2). It must be called from inside the worker goroutine whose
-// placement it enforces, and the caller keeps the thread locked for the worker's lifetime —
-// hence it does NOT unlock: returning the thread to the pool would drop the affinity that the
-// whole node-local read path depends on. The returned unpin releases the OS thread when the
-// worker retires.
+// placement it enforces. The returned idempotent unpin restores the exact mask observed after
+// LockOSThread and only then releases the OS thread; UnlockOSThread does not reset affinity.
 //
-// A refusal is never fatal to decode: on error the caller keeps running unpinned, reads stay
-// byte-correct, and only the locality claim is forfeited (the same fail-visible discipline the
-// replica allocator uses for a failed bind).
+// If restoring affinity fails, unpin panics without unlocking. Releasing a thread with a stale
+// NUMA mask would make it unsafe for unrelated goroutines; the panic makes that poisoned-thread
+// state visible while keeping the thread locked until its goroutine exits.
+//
+// A refusal is never fatal to decode: on an apply error the original mask is restored before the
+// thread is unlocked. If that cleanup itself fails, the thread remains locked and the returned
+// error reports both failures. In either case byte correctness is preserved and only the locality
+// claim is forfeited.
 func PinCurrentThreadToCPUs(cpus []int) (unpin func(), err error) {
-	if len(cpus) == 0 {
-		return func() {}, errors.New("compute: empty CPU set — nothing to pin to")
+	mask, err := affinityMaskForCPUs(cpus)
+	if err != nil {
+		return func() {}, err
 	}
-	var mask [cpuSetWords]uint64
+
+	runtime.LockOSThread()
+	var prior cpuAffinityMask
+	if err := getCurrentThreadAffinity(&prior); err != nil {
+		runtime.UnlockOSThread()
+		return func() {}, err
+	}
+	if err := setCurrentThreadAffinity(&mask); err != nil {
+		if restoreErr := setCurrentThreadAffinity(&prior); restoreErr != nil {
+			// Keep the modified or otherwise unknown thread locked. When this goroutine exits,
+			// the runtime terminates the locked OS thread instead of returning it to the pool.
+			return func() {}, errors.Join(err, fmt.Errorf("compute: restore affinity after apply failure: %w", restoreErr))
+		}
+		runtime.UnlockOSThread()
+		return func() {}, err
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if err := setCurrentThreadAffinity(&prior); err != nil {
+				panic(fmt.Sprintf("compute: restore thread affinity before unlock: %v", err))
+			}
+			runtime.UnlockOSThread()
+		})
+	}, nil
+}
+
+func affinityMaskForCPUs(cpus []int) (cpuAffinityMask, error) {
+	if len(cpus) == 0 {
+		return cpuAffinityMask{}, errors.New("compute: empty CPU set — nothing to pin to")
+	}
+	var mask cpuAffinityMask
 	set := 0
 	for _, c := range cpus {
 		if c < 0 || c >= cpuSetWords*64 {
@@ -43,11 +83,25 @@ func PinCurrentThreadToCPUs(cpus []int) (unpin func(), err error) {
 		set++
 	}
 	if set == 0 {
-		return func() {}, errors.New("compute: no representable CPU ids in set")
+		return cpuAffinityMask{}, errors.New("compute: no representable CPU ids in set")
 	}
+	return mask, nil
+}
 
-	runtime.LockOSThread()
-	// tid 0 means "the calling thread", which is exactly the thread LockOSThread just pinned us to.
+func getCurrentThreadAffinity(mask *cpuAffinityMask) error {
+	_, _, errno := syscall.RawSyscall(
+		syscall.SYS_SCHED_GETAFFINITY,
+		0,
+		uintptr(len(mask)*8),
+		uintptr(unsafe.Pointer(&mask[0])),
+	)
+	if errno != 0 {
+		return fmt.Errorf("compute: read current thread affinity: %w", errno)
+	}
+	return nil
+}
+
+func setCurrentThreadAffinity(mask *cpuAffinityMask) error {
 	_, _, errno := syscall.RawSyscall(
 		syscall.SYS_SCHED_SETAFFINITY,
 		0,
@@ -55,8 +109,7 @@ func PinCurrentThreadToCPUs(cpus []int) (unpin func(), err error) {
 		uintptr(unsafe.Pointer(&mask[0])),
 	)
 	if errno != 0 {
-		runtime.UnlockOSThread()
-		return func() {}, errno
+		return fmt.Errorf("compute: set current thread affinity: %w", errno)
 	}
-	return runtime.UnlockOSThread, nil
+	return nil
 }

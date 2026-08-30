@@ -12,11 +12,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const Schema = "fak-wip-inventory/1"
 const sampleLimit = 20
+const checkoutWorkerLimit = 16
 
 const (
 	workerRootEnv = "FLEET_WORKER_WORKTREE_ROOT"
@@ -129,7 +131,10 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	}
 	rep := Report{Schema: Schema, ObservedAt: now.UTC(), Repository: filepath.ToSlash(root)}
 	rep.HEAD = one(root, r, &rep, "rev-parse", "HEAD")
-	rep.Main = checkout(root, rep.HEAD, "main", now, r, &rep)
+	rep.Main, err = checkout(root, rep.HEAD, "main", now, r)
+	if err != nil {
+		rep.Errors = append(rep.Errors, "checkout "+rep.Main.Path+": "+err.Error())
+	}
 	rep.Ignored = populationZ(root, r, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
 	recordPopulationError(&rep, "ignored_generated", &rep.Ignored)
 	workerRoot := defaultWorkerRoot()
@@ -173,14 +178,13 @@ func recordPopulationError(rep *Report, name string, p *Population) {
 		rep.Errors = append(rep.Errors, name+": "+p.Error)
 	}
 }
-func checkout(path, head, branch string, now time.Time, r Runner, rep *Report) Checkout {
+func checkout(path, head, branch string, now time.Time, r Runner) (Checkout, error) {
 	c := Checkout{Path: filepath.ToSlash(path), HEAD: head, Branch: branch, Tracked: Population{Known: true}, Untracked: Population{Known: true}}
 	out, err := r.Run(path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		c.Tracked = unknownPopulation(err)
 		c.Untracked = unknownPopulation(err)
-		rep.Errors = append(rep.Errors, "checkout "+c.Path+": "+err.Error())
-		return c
+		return c, err
 	}
 	for _, raw := range bytes.Split(out, []byte{0}) {
 		if len(raw) < 4 {
@@ -195,7 +199,7 @@ func checkout(path, head, branch string, now time.Time, r Runner, rep *Report) C
 			addSample(&c.Tracked, name)
 		}
 	}
-	return c
+	return c, nil
 }
 func addSample(p *Population, path string) {
 	p.Count++
@@ -229,7 +233,7 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 		return nil, []StaleWorker{{Kind: "unknown", Detail: err.Error()}}
 	}
 	registered := map[string]bool{}
-	var live []Checkout
+	var pending []checkoutSpec
 	var stale []StaleWorker
 	for _, block := range strings.Split(strings.TrimSpace(string(out)), "\n\n") {
 		path, head, branch, prunable := "", "", "detached", ""
@@ -257,8 +261,10 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 			stale = append(stale, StaleWorker{Path: filepath.ToSlash(path), Kind: "registered-missing", Detail: statErr.Error()})
 			continue
 		}
-		live = append(live, checkout(path, head, branch, rep.ObservedAt, r, rep))
+		pending = append(pending, checkoutSpec{path: path, head: head, branch: branch})
 	}
+	live, checkoutErrors := probeCheckouts(pending, rep.ObservedAt, r)
+	rep.Errors = append(rep.Errors, checkoutErrors...)
 	entries, readErr := os.ReadDir(workerRoot)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		rep.Errors = append(rep.Errors, "stale_worker_residue: "+readErr.Error())
@@ -281,6 +287,56 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 		return stale[i].Path < stale[j].Path
 	})
 	return live, stale
+}
+
+type checkoutSpec struct {
+	path   string
+	head   string
+	branch string
+}
+
+type checkoutResult struct {
+	checkout Checkout
+	err      error
+}
+
+func probeCheckouts(specs []checkoutSpec, now time.Time, r Runner) ([]Checkout, []string) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+
+	// Git status can be slow on large worktree fleets. A fixed ceiling bounds the
+	// process and filesystem pressure independently of the number of registrations.
+	workerCount := min(checkoutWorkerLimit, len(specs))
+	jobs := make(chan int)
+	results := make([]checkoutResult, len(specs))
+	var wg sync.WaitGroup
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				spec := specs[index]
+				c, err := checkout(spec.path, spec.head, spec.branch, now, r)
+				results[index] = checkoutResult{checkout: c, err: err}
+			}
+		}()
+	}
+	for index := range specs {
+		jobs <- index
+	}
+	close(jobs)
+	wg.Wait()
+
+	checkouts := make([]Checkout, 0, len(results))
+	var errors []string
+	for _, result := range results {
+		checkouts = append(checkouts, result.checkout)
+		if result.err != nil {
+			errors = append(errors, "checkout "+result.checkout.Path+": "+result.err.Error())
+		}
+	}
+	return checkouts, errors
 }
 func pathKey(path string) string {
 	abs, _ := filepath.Abs(path)

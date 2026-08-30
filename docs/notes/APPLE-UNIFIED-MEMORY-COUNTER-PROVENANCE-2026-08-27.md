@@ -97,3 +97,45 @@ integers. They are schema witnesses only—not captures, benchmark results, or
 claims about Apple hardware. The tests mutate those fixtures to prove the
 refusal and host/device-isolation boundaries above while retaining the existing
 Darwin memory-pressure fields independently.
+
+## 2026-08-30 current-provider audit
+
+**Result: Apple unified-memory bandwidth remains explicitly unavailable on the
+current sanctioned Apple Silicon probe.** The implementation now probes the
+bundled `/usr/bin/powermetrics --help` contract and emits typed evidence instead
+of silently returning zero or deriving traffic from an adjacent signal.
+
+The scrubbed arm64 capture in
+`docs/_witnesses/modelperfobs/apple-unified-memory-2026-08-30.json` records macOS
+26.6.2 (build 25G83). Its advertised samplers are tasks, battery, network, disk,
+interrupts, cpu_power, thermal, sfi, gpu_power, and ane_power. None is a
+documented package/system unified-memory read/write byte-rate or monotonic byte
+counter. A one-shot `gpu_power` probe was permission-gated and, regardless,
+power/frequency is not byte traffic. The provider result is therefore
+`unsupported`; permission failures, malformed help/output, and a future but
+insufficiently specified memory sampler have distinct `permission-denied`,
+`malformed`, and `ambiguous` results.
+
+The audit also examined SiliconScope v4.1.3 as a current reproducible IOReport
+consumer. It is useful prior art, but its public `BandwidthSample` reports
+requestor totals in GB/s rather than package read and write separately, and it
+can fall back to a PMP DCS bandwidth residency histogram marked `isEstimated`.
+That fallback is an estimate from residency buckets, not accepted byte-counter
+evidence under this contract. Consequently fak does not ingest SiliconScope's
+combined/estimated signal as read/write memory bandwidth.
+
+A future provider becomes admissible only when a fixture binds all of the
+following to a current version and machine-readable output:
+
+- exact package/system read and write raw field names;
+- byte or byte-per-second units, without capacity or roofline conversion;
+- the measured interval and whether values are direct rates or counter deltas;
+- monotonic counter reset/wrap semantics, or explicit direct-rate semantics;
+- package/system scope rather than process, storage, or device-only traffic.
+
+When those facts exist, provider output must still be translated into
+`fak-apple-memory-counter-import/1` and accepted by the existing strict importer.
+Raw powermetrics plist/text remains unsupported; the current-provider seam does
+not weaken the importer or infer telemetry from capacity, pressure, residency,
+process/storage I/O, power, utilization, GPU occupancy, or theoretical
+rooflines.

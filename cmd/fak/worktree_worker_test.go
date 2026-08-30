@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -662,6 +663,87 @@ func TestWorktreeWorkerLifecycleUnknownProbeIsNeverReapable(t *testing.T) {
 	if row.Lifecycle != worktreeLifecycleUnknown || row.ReapReadiness.Reapable ||
 		row.ReapReadiness.Reason != "LEASE_LIVENESS_UNKNOWN" {
 		t.Fatalf("unknown lease evidence must be kept: %+v", row)
+	}
+}
+
+func TestWorktreeWorkerLifecycleInventoryIsBoundedParallelAndDeterministic(t *testing.T) {
+	const pathCount = 205
+	const probeDelay = 10 * time.Millisecond
+
+	root := t.TempDir()
+	paths := make([]string, pathCount)
+	for i := range paths {
+		// Reverse input order so stable output cannot be an artifact of dispatch order.
+		pathIndex := pathCount - 1 - i
+		paths[i] = filepath.Join(root, fmt.Sprintf("fak-worker-wt-lane-%03d-%012x", pathIndex, pathIndex))
+	}
+	errorPath := paths[pathCount/2]
+
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	probes := worktreeWorkerLifecycleProbes{
+		ReadOwner: func(path string) (workerworktree.OwnerStamp, error) {
+			return workerworktree.OwnerStamp{
+				Schema: worktreeOwnerStampSchema, PID: 42, LeaseID: "resolve-" + workerworktree.LaneOf(path),
+				CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
+			}, nil
+		},
+		ProcessAlive: func(int) (bool, error) { return false, nil },
+		LeaseLive:    func(string) (bool, error) { return false, nil },
+		Inspect: func(_, path string) (worktreeWorkerRevisionEvidence, error) {
+			now := active.Add(1)
+			for old := maxActive.Load(); now > old && !maxActive.CompareAndSwap(old, now); old = maxActive.Load() {
+			}
+			time.Sleep(probeDelay)
+			active.Add(-1)
+			if path == errorPath {
+				return worktreeWorkerRevisionEvidence{}, os.ErrPermission
+			}
+			return worktreeWorkerRevisionEvidence{
+				HeadSHA: "head-" + filepath.Base(path), BaseSHA: "base",
+				Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{},
+			}, nil
+		},
+	}
+
+	started := time.Now()
+	rows := worktreeWorkerLifecycleInventory(root, paths, probes)
+	elapsed := time.Since(started)
+	serialDuration := pathCount * probeDelay
+	if elapsed >= serialDuration/2 {
+		t.Fatalf("inventory elapsed=%s, want actual parallel speedup below %s (serial=%s)", elapsed, serialDuration/2, serialDuration)
+	}
+	if got := maxActive.Load(); got != worktreeWorkerLifecycleConcurrency {
+		t.Fatalf("max concurrent probes=%d, want fixed ceiling %d", got, worktreeWorkerLifecycleConcurrency)
+	}
+	if len(rows) != pathCount {
+		t.Fatalf("rows=%d, want %d", len(rows), pathCount)
+	}
+
+	wantPaths := append([]string(nil), paths...)
+	sort.Slice(wantPaths, func(i, j int) bool {
+		left := strings.ToLower(filepath.ToSlash(wantPaths[i]))
+		right := strings.ToLower(filepath.ToSlash(wantPaths[j]))
+		if left == right {
+			return wantPaths[i] < wantPaths[j]
+		}
+		return left < right
+	})
+	for i, row := range rows {
+		if row.Path != wantPaths[i] {
+			t.Fatalf("row[%d].path=%q, want deterministic order %q", i, row.Path, wantPaths[i])
+		}
+		if row.Path == errorPath {
+			if row.Lifecycle != worktreeLifecycleUnknown || row.ReapReadiness.Reapable ||
+				row.ReapReadiness.Reason != "REVISION_UNKNOWN" {
+				t.Fatalf("failed probe must stay attributed and fail closed: %+v", row)
+			}
+			continue
+		}
+		if row.Lifecycle != worktreeLifecycleCold || !row.ReapReadiness.Reapable ||
+			row.ReapReadiness.Reason != "COLD_CLEAN" {
+			t.Fatalf("healthy row %q inherited another path's error: %+v", row.Path, row)
+		}
 	}
 }
 

@@ -79,6 +79,34 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Planner != "inkernel" || receipt.Owner != "fak" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
+	wantSelection := model.NativeSelectionIdentity{
+		Schema:              model.NativeSelectionIdentitySchemaV1,
+		ModelRef:            "synthetic-live",
+		Backend:             "cpu-ref",
+		ForwardPath:         "cpu/reference",
+		Quantization:        model.NativeSelectionQuantizationQ8_0,
+		PrefillChunkTokens:  0,
+		CPUOffloadExperts:   0,
+		Q4KGateUpOutputSlab: false,
+	}
+	if receipt.NativeSelection != wantSelection {
+		t.Fatalf("kernel selection = %+v, want %+v", receipt.NativeSelection, wantSelection)
+	}
+	wantDigest, err := receipt.NativeSelection.Digest()
+	if err != nil {
+		t.Fatalf("wire kernel selection is invalid: %v", err)
+	}
+	if receipt.NativeSelectionDigest != wantDigest {
+		t.Fatalf("kernel selection digest = %q, recomputed %q", receipt.NativeSelectionDigest, wantDigest)
+	}
+	for _, want := range []string{`"kernel_selection":`, `"kernel_selection_digest":"sha256:`} {
+		if !bytes.Contains(rr.Body.Bytes(), []byte(want)) {
+			t.Fatalf("wire receipt missing %s: %s", want, rr.Body.String())
+		}
+	}
+	if bytes.Contains(bytes.ToLower(rr.Body.Bytes()), []byte("llama.cpp")) {
+		t.Fatalf("native receipt substituted an external engine: %s", rr.Body.String())
+	}
 	metrics := srv.renderMetrics()
 	for _, want := range []string{
 		`fak_native_runtime_info{engine="inkernel",backend="other",forward_path="other",model="synthetic",planner="inkernel",owner="fak"} 1`,

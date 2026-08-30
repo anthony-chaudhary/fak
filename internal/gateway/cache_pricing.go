@@ -263,10 +263,10 @@ func (s AdjudicationSummary) ProviderCacheSavingsUSD(inputPerMTokUSD float64) fl
 //
 // PROVENANCE: every input is OBSERVED (provider-relayed); the saving is a realized
 // rebate, never a fak trust claim. The result is in INPUT-TOKEN-EQUIVALENTS (the $ dual
-// is ProviderCacheSavingsUSD). Note the InputTokens axis is the uncached remainder under
-// the Anthropic convention this gateway's Claude path reports; on an OpenAI-style upstream
-// whose prompt_tokens already fold in cached tokens, saved-token-equiv stays exact (the
-// input cancels in baseline-minus-actual) while hit_rate/multiplier read conservatively.
+// is ProviderCacheSavingsUSD). InputTokens is the provider-normalized uncached remainder:
+// the live Usage ingestion seam peels OpenAI/Codex cached_tokens out of their inclusive
+// input_tokens, while Anthropic's already-disjoint input/cache_read pair passes through.
+// Thus savings, hit_rate, and multiplier all read from the same disjoint axes.
 func (s AdjudicationSummary) ProviderCacheNetSavings() vcachegov.TelemetrySavingsProof {
 	return vcacheProofFromCountersWithUpgrade(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens, s.CacheCreationTokensUpgraded)
 }

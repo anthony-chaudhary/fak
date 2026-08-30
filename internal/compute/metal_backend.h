@@ -64,6 +64,10 @@ typedef struct {
 void *fmetal_command_begin(void);
 int fmetal_command_encode_matmul_f32(void *owner, void *dW, void *dX, void *dY,
                                     int out, int in, int P);
+int fmetal_command_encode_rmsnorm_f32(void *owner, void *dX, void *dW, void *dY,
+                                      int rows, int n, float eps);
+int fmetal_command_encode_swiglu_f32(void *owner, void *dG, void *dU, void *dY, int n);
+int fmetal_command_encode_add_f32(void *owner, void *dDst, void *dSrc, int n);
 int fmetal_command_finish(void *owner, fmetal_command_receipt *receipt);
 void fmetal_command_abort(void *owner);
 

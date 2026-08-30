@@ -102,6 +102,19 @@ func makeBuildWorktree(t *testing.T, tempRoot string, pid int, created time.Time
 	return path
 }
 
+func makeMissingBuildRecord(t *testing.T, tempRoot string, pid int, created time.Time) string {
+	t.Helper()
+	path := filepath.Join(tempRoot, BuildDirName(pid))
+	if err := writeBuildOwnerStamp(path, BuildOwnerStamp{
+		PID:       pid,
+		LeaseID:   "self-update-single-flight",
+		CreatedAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func buildGCOptions(now time.Time, tempRoot string) BuildGCOptions {
 	return BuildGCOptions{
 		Now:          now,
@@ -111,6 +124,59 @@ func buildGCOptions(now time.Time, tempRoot string) BuildGCOptions {
 		BaseRef:      "origin/main",
 		ProcessAlive: func(pid int) bool { return pid == 2000 },
 		PathActive:   func(string) (bool, error) { return false, nil },
+	}
+}
+
+func TestStaleBuildGCMissingRegisteredPathKeepsConservativeOwnerGates(t *testing.T) {
+	tempRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+	now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
+
+	safe := makeMissingBuildRecord(t, tempRoot, 3000, now.Add(-2*time.Hour))
+	liveOwner := makeMissingBuildRecord(t, tempRoot, 2000, now.Add(-2*time.Hour))
+	young := makeMissingBuildRecord(t, tempRoot, 4000, now.Add(-10*time.Minute))
+	active := makeMissingBuildRecord(t, tempRoot, 5000, now.Add(-2*time.Hour))
+	malformedPath := filepath.Join(tempRoot, "peer-worktree")
+	if err := writeBuildOwnerStamp(malformedPath, BuildOwnerStamp{
+		PID:       6000,
+		LeaseID:   "self-update-single-flight",
+		CreatedAt: now.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	malformedStamp := filepath.Join(tempRoot, BuildDirName(7000))
+	if err := os.MkdirAll(filepath.Dir(BuildOwnerStampPath(malformedStamp)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(BuildOwnerStampPath(malformedStamp), []byte("{not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacyWithoutStamp := filepath.Join(tempRoot, BuildDirName(8000))
+	outside := makeMissingBuildRecord(t, outsideRoot, 9000, now.Add(-2*time.Hour))
+
+	r := &buildGCRunner{
+		list: porcelain(safe, liveOwner, young, active, malformedPath, malformedStamp, legacyWithoutStamp, outside),
+	}
+	opts := buildGCOptions(now, tempRoot)
+	opts.PathActive = func(path string) (bool, error) {
+		return filepath.Clean(path) == filepath.Clean(active), nil
+	}
+
+	report := GarbageCollectStaleBuilds(context.Background(), r.run, "/repo", opts)
+	if report.WouldReap != 1 || len(report.Worktrees) != 1 ||
+		filepath.Clean(report.Worktrees[0].Path) != filepath.Clean(safe) {
+		t.Fatalf("missing-path candidates = %+v, want only %q", report, safe)
+	}
+	if !report.Worktrees[0].OwnerStamped || report.Worktrees[0].Owner.PID != 3000 {
+		t.Fatalf("missing-path owner evidence = %+v", report.Worktrees[0])
+	}
+	if r.prunes() != 0 {
+		t.Fatalf("dry-run pruned missing records: %v", r.ran)
+	}
+	for _, path := range []string{safe, liveOwner, young, active, malformedPath, malformedStamp, outside} {
+		if _, err := os.Stat(BuildOwnerStampPath(path)); err != nil {
+			t.Fatalf("dry-run removed owner evidence for %q: %v", path, err)
+		}
 	}
 }
 
@@ -209,6 +275,94 @@ func TestStaleBuildGCApplyRechecksProcessCommandLine(t *testing.T) {
 	}
 }
 
+func TestPrepareOriginCleanupPruneFailureRetainsOwnerForMissingPathGCRepair(t *testing.T) {
+	tempRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
+	const ownerPID = 3000
+	wt := filepath.Join(tempRoot, BuildDirName(ownerPID))
+
+	registered := false
+	pruneAttempts := 0
+	run := func(_ context.Context, _ string, name string, args ...string) (string, bool) {
+		if name != "git" || len(args) == 0 {
+			return "", true
+		}
+		switch args[0] {
+		case "fetch":
+			return "", true
+		case "worktree":
+			if len(args) < 2 {
+				return "", true
+			}
+			switch args[1] {
+			case "add":
+				if err := os.MkdirAll(wt, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				registered = true
+				return "", true
+			case "remove":
+				// Model Git removing the directory but failing before its
+				// administrative record is cleaned up.
+				if err := os.RemoveAll(wt); err != nil {
+					t.Fatal(err)
+				}
+				return "administrative cleanup incomplete", false
+			case "list":
+				if registered {
+					return porcelain(wt), true
+				}
+				return "", true
+			case "prune":
+				pruneAttempts++
+				if pruneAttempts == 1 {
+					return "transient prune failure", false
+				}
+				registered = false
+				return "", true
+			}
+		}
+		return "", true
+	}
+
+	_, cleanup, err := PrepareOrigin(context.Background(), run, repoRoot, "origin/main", wt)
+	if err != nil {
+		t.Fatalf("PrepareOrigin: %v", err)
+	}
+	if err := writeBuildOwnerStamp(wt, BuildOwnerStamp{
+		PID:       ownerPID,
+		LeaseID:   "self-update-single-flight",
+		CreatedAt: now.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanup()
+	if _, err := os.Lstat(wt); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left directory: %v", err)
+	}
+	if _, err := os.Stat(BuildOwnerStampPath(wt)); err != nil {
+		t.Fatalf("cleanup discarded owner evidence after prune failure: %v", err)
+	}
+	if !registered || pruneAttempts != 1 {
+		t.Fatalf("cleanup state registered=%v pruneAttempts=%d, want dangling record after one failed prune", registered, pruneAttempts)
+	}
+
+	opts := buildGCOptions(now, tempRoot)
+	opts.Apply = true
+	report := GarbageCollectStaleBuilds(context.Background(), run, repoRoot, opts)
+	if report.WouldReap != 1 || report.Reaped != 1 || len(report.Failures) != 0 {
+		t.Fatalf("repair report = %+v, want one planned and applied admin repair", report)
+	}
+	if registered || pruneAttempts != 2 {
+		t.Fatalf("repair state registered=%v pruneAttempts=%d, want successful second prune", registered, pruneAttempts)
+	}
+	if _, err := os.Stat(BuildOwnerStampPath(wt)); !os.IsNotExist(err) {
+		t.Fatalf("repair left owner evidence after successful prune: %v", err)
+	}
+}
+
 func TestStaleBuildGCApplyRemovesDirectoryBeforePruneAndOwnerStamp(t *testing.T) {
 	tempRoot := t.TempDir()
 	now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
@@ -283,5 +437,61 @@ func TestBuildDirNameRoundTrips(t *testing.T) {
 		if pid, ok := pidFromBuildDir(bad); ok {
 			t.Fatalf("pidFromBuildDir(%q) = (%d,true), want not-ok", bad, pid)
 		}
+	}
+}
+
+func TestDirectChildOfCanonicalizesTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	worktree := filepath.Join(canonicalRoot, BuildDirName(3000))
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if !directChildOf(worktree, aliasRoot) {
+		t.Fatalf("canonical worktree %q not recognized below alias root %q", worktree, aliasRoot)
+	}
+	if directChildOf(filepath.Join(worktree, "nested"), aliasRoot) {
+		t.Fatal("canonicalization weakened the exact direct-child boundary")
+	}
+}
+
+func TestStaleBuildGCPlansCanonicalWorktreeBelowTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	now := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
+	wt := makeBuildWorktree(t, canonicalRoot, 3000, now.Add(-2*time.Hour), true)
+	r := &buildGCRunner{
+		list:      porcelain(wt),
+		status:    map[string]string{},
+		heads:     map[string]string{filepath.Clean(wt): "safe-head"},
+		ancestors: map[string]bool{"safe-head": true},
+	}
+
+	report := GarbageCollectStaleBuilds(context.Background(), r.run, "/repo", buildGCOptions(now, aliasRoot))
+	if report.WouldReap != 1 || len(report.Worktrees) != 1 || !report.Worktrees[0].Eligible {
+		t.Fatalf("canonical alias candidate = %+v, want one eligible plan row", report)
+	}
+}
+
+func TestDirectChildOfCanonicalizesMissingWorktreeBelowTempRootAlias(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	aliasParent := t.TempDir()
+	aliasRoot := filepath.Join(aliasParent, "temp-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	missing := filepath.Join(canonicalRoot, BuildDirName(3001))
+
+	if !directChildOf(missing, aliasRoot) {
+		t.Fatalf("missing canonical worktree %q not recognized below alias root %q", missing, aliasRoot)
 	}
 }

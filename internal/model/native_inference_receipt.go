@@ -5,20 +5,22 @@ package model
 // are log_softmax over the unmodified model logits, so receipt capture is supported
 // only for greedy sampling without bias or repetition penalties.
 type NativeInferenceReceipt struct {
-	TokenIDs           []int     `json:"token_ids"`
-	TokenLogprobs      []float64 `json:"token_logprobs"`
-	PrefillSeconds     float64   `json:"prefill_seconds"`
-	TTFTSeconds        float64   `json:"ttft_seconds"`
-	DecodeSeconds      float64   `json:"decode_seconds"`
-	Model              string    `json:"model"`
-	Engine             string    `json:"engine"`
-	Planner            string    `json:"planner"`
-	Owner              string    `json:"owner"`
-	Backend            string    `json:"backend"`
-	ForwardPath        string    `json:"forward_path"`
-	Q4K                bool      `json:"q4k"`
-	FallbackActive     bool      `json:"fallback_active"`
-	PrefillChunkTokens int       `json:"prefill_chunk_tokens"`
+	TokenIDs              []int                   `json:"token_ids"`
+	TokenLogprobs         []float64               `json:"token_logprobs"`
+	PrefillSeconds        float64                 `json:"prefill_seconds"`
+	TTFTSeconds           float64                 `json:"ttft_seconds"`
+	DecodeSeconds         float64                 `json:"decode_seconds"`
+	Model                 string                  `json:"model"`
+	Engine                string                  `json:"engine"`
+	Planner               string                  `json:"planner"`
+	Owner                 string                  `json:"owner"`
+	Backend               string                  `json:"backend"`
+	ForwardPath           string                  `json:"forward_path"`
+	Q4K                   bool                    `json:"q4k"`
+	FallbackActive        bool                    `json:"fallback_active"`
+	PrefillChunkTokens    int                     `json:"prefill_chunk_tokens"`
+	NativeSelection       NativeSelectionIdentity `json:"kernel_selection"`
+	NativeSelectionDigest string                  `json:"kernel_selection_digest"`
 	// Qwen35MetalForwardSequence is present only when the model session produced
 	// terminal evidence for the native whole-sequence Metal graph.
 	Qwen35MetalForwardSequence *Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`

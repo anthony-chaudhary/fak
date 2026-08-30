@@ -38,10 +38,43 @@ import (
 // --check reports the freshness verdict and exits without building. --force installs even
 // when freshness is Unknown/Fresh (e.g. to pick up an uncommitted local build) but STILL
 // runs the full gate — force bypasses the staleness check, never the green gate.
+const buildWorktreeGCReceiptSchema = "fak.self-update.build-gc/v1"
+
+type buildWorktreeGCReceipt struct {
+	Schema string                    `json:"schema"`
+	Mode   string                    `json:"mode"`
+	Report selfinstall.BuildGCReport `json:"report"`
+}
+
+var collectBuildWorktreeGC = selfinstall.GarbageCollectStaleBuilds
+
+func runBuildWorktreeGC(ctx context.Context, out io.Writer, repoRoot string, apply bool, now time.Time) error {
+	mode := "plan"
+	if apply {
+		mode = "apply"
+	}
+	report := collectBuildWorktreeGC(ctx, selfinstall.RealRunner, repoRoot, selfinstall.BuildGCOptions{
+		Now:          now,
+		MinAge:       selfinstall.DefaultBuildGCMinAge,
+		Apply:        apply,
+		SelfPID:      os.Getpid(),
+		TempRoot:     os.TempDir(),
+		BaseRef:      "origin/main",
+		ProcessAlive: safecommit.ProcessAlive,
+	})
+	return json.NewEncoder(out).Encode(buildWorktreeGCReceipt{
+		Schema: buildWorktreeGCReceiptSchema,
+		Mode:   mode,
+		Report: report,
+	})
+}
+
 func Run(argv []string) {
 	fs := flag.NewFlagSet("self-update", flag.ExitOnError)
 	verbFlagUsage(fs, "self-update") // #2232: overview verb -> deep help above the flag dump
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
+	buildGC := fs.Bool("build-gc", false, "plan stale self-update build-worktree GC and exit (JSON; dry-run by default)")
+	applyBuildGC := fs.Bool("apply", false, "apply --build-gc removals after conservative revalidation")
 	manifestURL := fs.String("manifest-url", "", "opt in to signed conditional update selection from this HTTPS endpoint")
 	manifestID := fs.String("manifest-id", "fak-stable", "expected signed manifest identity")
 	manifestStatePath := fs.String("manifest-cache", defaultSelfUpdateManifestStatePath(), "authenticated manifest cache path")
@@ -70,6 +103,28 @@ func Run(argv []string) {
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
 	beginSelfUpdateOutput(*jsonMode)
+	if *applyBuildGC && !*buildGC {
+		fmt.Fprintln(os.Stderr, "self-update: --apply requires --build-gc")
+		return
+	}
+	if *buildGC {
+		if *check {
+			fmt.Fprintln(os.Stderr, "self-update: --build-gc and --check are mutually exclusive")
+			return
+		}
+		repoRoot := strings.TrimSpace(*root)
+		if repoRoot == "" {
+			repoRoot = discoverRepoRoot()
+		}
+		if repoRoot == "" {
+			fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
+			return
+		}
+		if err := runBuildWorktreeGC(context.Background(), os.Stdout, repoRoot, *applyBuildGC, time.Now()); err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: build-worktree GC:", err)
+		}
+		return
+	}
 	if handled, err := runSelfUpdateMSIX(selfUpdateMSIXOptions{
 		CLIInstaller: *installer, ConfigInstaller: os.Getenv("FAK_SELF_UPDATE_INSTALLER"),
 		AppInstallerURI: *msixURI, FullFallbackURI: *msixFullFallback,

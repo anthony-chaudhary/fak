@@ -1052,11 +1052,19 @@ func safeArchiveJoin(root, name string) (string, error) {
 	return filepath.Join(root, rel), nil
 }
 
-// goBuildPackages runs `go build <pkgs>` in dir (the archive tip). Returns (detail, ok); on
+// goBuildPackageArgs constructs the verification-only build argv. -trimpath keeps Go's cache
+// identities stable when the same committed source is materialized under disposable roots.
+func goBuildPackageArgs(pkgs []string) []string {
+	args := make([]string, 0, len(pkgs)+2)
+	args = append(args, "build", "-trimpath")
+	return append(args, pkgs...)
+}
+
+// goBuildPackages runs `go build -trimpath <pkgs>` in dir (the archive tip). Returns (detail, ok); on
 // failure detail is the trimmed compiler output so the exact `undefined: X` is visible without
 // re-running anything. The package-list generalization of ci_preflight's goBuildAll("./...").
 func goBuildPackages(dir string, pkgs []string) (string, bool) {
-	cmd := windowgate.Command("go", append([]string{"build"}, pkgs...)...)
+	cmd := windowgate.Command("go", goBuildPackageArgs(pkgs)...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()

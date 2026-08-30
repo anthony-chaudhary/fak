@@ -17,6 +17,19 @@ const (
 
 // threeSpanBackend wires a stagerKV (with byte-sources for three spans) through the
 // durable l3kv tier, plus the spans and the store so a test can reap or fault a record.
+type compliantRestoreBackend struct{ abi.KVBackend }
+
+func (b compliantRestoreBackend) RestoreSpans(ctx context.Context, requests []abi.KVResidencyRequest) []abi.KVResidency {
+	out := make([]abi.KVResidency, len(requests))
+	for i, req := range requests {
+		out[i], _ = b.KVBackend.RestoreSpan(ctx, req.Digest)
+		if out[i].Outcome == abi.KVResidencyOK {
+			out[i].Positions = req.Positions
+		}
+	}
+	return out
+}
+
 func threeSpanBackend() (abi.KVBackend, *memStore, []Span) {
 	spans := []Span{
 		{Digest: digestP0, From: 0, Positions: 100},
@@ -29,7 +42,7 @@ func threeSpanBackend() (abi.KVBackend, *memStore, []Span) {
 		{160, 40}: spanBytes(1024),
 	}, n: 200}
 	store := newMemStore()
-	return New(stager, store), store, spans
+	return compliantRestoreBackend{KVBackend: New(stager, store)}, store, spans
 }
 
 func assertSumsToTotal(t *testing.T, r ResumeReport) {
@@ -178,7 +191,7 @@ func TestRestoreFaultCountsCold(t *testing.T) {
 		{100, 60}: spanBytes(2048),
 	}, n: 160}
 	store := &faultyStore{inner: newMemStore(), faultKey: digestP1}
-	backend := New(stager, store)
+	backend := compliantRestoreBackend{KVBackend: New(stager, store)}
 
 	m, err := PersistPrefix(ctx, backend, spans)
 	if err != nil {
@@ -199,5 +212,142 @@ func TestRestoreFaultCountsCold(t *testing.T) {
 func TestPersistNilBackendErrors(t *testing.T) {
 	if _, err := PersistPrefix(context.Background(), nil, []Span{{Digest: digestP0, Positions: 10}}); err == nil {
 		t.Fatal("PersistPrefix(nil backend) returned no error")
+	}
+}
+
+type warmBatchBackend struct {
+	stageBatch    []abi.KVResidency
+	restoreBatch  []abi.KVResidency
+	stageCalls    int
+	restoreCalls  int
+	legacyStage   int
+	legacyRestore int
+}
+
+func (*warmBatchBackend) Len() int                { return 0 }
+func (*warmBatchBackend) Prefill([]int) []float32 { return nil }
+func (*warmBatchBackend) Evict(int, int) int      { return 0 }
+func (*warmBatchBackend) ModelID() string         { return "warm-batch-test" }
+func (b *warmBatchBackend) StageSpan(context.Context, string, int, int) (abi.KVResidency, error) {
+	b.legacyStage++
+	return abi.KVResidency{}, errors.New("legacy stage must not be called")
+}
+func (b *warmBatchBackend) RestoreSpan(context.Context, string) (abi.KVResidency, error) {
+	b.legacyRestore++
+	return abi.KVResidency{}, errors.New("legacy restore must not be called")
+}
+func (b *warmBatchBackend) StageSpans(_ context.Context, _ []abi.KVResidencyRequest) []abi.KVResidency {
+	b.stageCalls++
+	return b.stageBatch
+}
+func (b *warmBatchBackend) RestoreSpans(_ context.Context, _ []abi.KVResidencyRequest) []abi.KVResidency {
+	b.restoreCalls++
+	return b.restoreBatch
+}
+
+type warmSerialBackend struct {
+	stage   map[string]abi.KVResidency
+	restore map[string]abi.KVResidency
+}
+
+func (*warmSerialBackend) Len() int                { return 0 }
+func (*warmSerialBackend) Prefill([]int) []float32 { return nil }
+func (*warmSerialBackend) Evict(int, int) int      { return 0 }
+func (*warmSerialBackend) ModelID() string         { return "warm-serial-test" }
+func (b *warmSerialBackend) StageSpan(_ context.Context, digest string, _, _ int) (abi.KVResidency, error) {
+	return b.stage[digest], nil
+}
+func (b *warmSerialBackend) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
+	return b.restore[digest], nil
+}
+
+func warmReceipt(sp Span, outcome abi.KVResidencyOutcome) abi.KVResidency {
+	return abi.KVResidency{Outcome: outcome, Digest: sp.Digest, Positions: sp.Positions}
+}
+
+func TestPersistPrefixNativeBatchFiltersMixedReceiptsInOrder(t *testing.T) {
+	spans := []Span{{Digest: digestP0, From: 0, Positions: 100}, {Digest: digestP1, From: 100, Positions: 60}, {Digest: digestP2, From: 160, Positions: 40}}
+	b := &warmBatchBackend{stageBatch: []abi.KVResidency{
+		warmReceipt(spans[0], abi.KVResidencyOK), warmReceipt(spans[1], abi.KVResidencyFault), warmReceipt(spans[2], abi.KVResidencyOK),
+	}}
+	m, err := PersistPrefix(context.Background(), b, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.stageCalls != 1 || b.legacyStage != 0 {
+		t.Fatalf("batch/legacy calls = %d/%d, want 1/0", b.stageCalls, b.legacyStage)
+	}
+	if m.TotalPositions != 200 || len(m.Spans) != 2 || m.Spans[0].Digest != digestP0 || m.Spans[1].Digest != digestP2 {
+		t.Fatalf("manifest = %+v, want ordered OK spans and total 200", m)
+	}
+}
+
+func TestRestorePrefixNativeBatchAccountsMixedReceipts(t *testing.T) {
+	m := PrefixManifest{TotalPositions: 240, Spans: []ManifestSpan{
+		{Digest: digestP0, Positions: 100}, {Digest: digestP1, Positions: 60}, {Digest: digestP2, Positions: 40},
+	}}
+	b := &warmBatchBackend{restoreBatch: []abi.KVResidency{
+		{Outcome: abi.KVResidencyOK, Digest: digestP0, Positions: 100},
+		{Outcome: abi.KVResidencyMiss, Digest: digestP1, Positions: 60},
+		{Outcome: abi.KVResidencyFault, Digest: digestP2, Positions: 40},
+	}}
+	got := RestorePrefix(context.Background(), b, m)
+	assertSumsToTotal(t, got)
+	if b.restoreCalls != 1 || b.legacyRestore != 0 {
+		t.Fatalf("batch/legacy calls = %d/%d, want 1/0", b.restoreCalls, b.legacyRestore)
+	}
+	if got.RestoredPositions != 100 || got.MissedPositions != 100 || got.FaultedPositions != 40 {
+		t.Fatalf("report = %+v, want restored/missed/faulted 100/100/40", got)
+	}
+}
+
+func TestWarmResumeSerialAndBatchAreStructurallyEquivalent(t *testing.T) {
+	spans := []Span{{Digest: digestP0, From: 0, Positions: 100}, {Digest: digestP1, From: 100, Positions: 60}}
+	stage := []abi.KVResidency{warmReceipt(spans[0], abi.KVResidencyOK), warmReceipt(spans[1], abi.KVResidencyMiss)}
+	restore := []abi.KVResidency{warmReceipt(spans[0], abi.KVResidencyOK)}
+	serial := &warmSerialBackend{
+		stage:   map[string]abi.KVResidency{digestP0: stage[0], digestP1: stage[1]},
+		restore: map[string]abi.KVResidency{digestP0: restore[0]},
+	}
+	batch := &warmBatchBackend{stageBatch: stage, restoreBatch: restore}
+	serialManifest, _ := PersistPrefix(context.Background(), serial, spans)
+	batchManifest, _ := PersistPrefix(context.Background(), batch, spans)
+	if len(serialManifest.Spans) != len(batchManifest.Spans) || serialManifest.TotalPositions != batchManifest.TotalPositions || serialManifest.Spans[0] != batchManifest.Spans[0] {
+		t.Fatalf("serial manifest %+v != batch manifest %+v", serialManifest, batchManifest)
+	}
+	if serialReport, batchReport := RestorePrefix(context.Background(), serial, serialManifest), RestorePrefix(context.Background(), batch, batchManifest); serialReport != batchReport {
+		t.Fatalf("serial report %+v != batch report %+v", serialReport, batchReport)
+	}
+}
+
+func TestRestorePrefixMalformedBatchCannotInflateRestoredPositions(t *testing.T) {
+	m := PrefixManifest{TotalPositions: 160, Spans: []ManifestSpan{{Digest: digestP0, Positions: 100}, {Digest: digestP1, Positions: 60}}}
+	b := &warmBatchBackend{restoreBatch: []abi.KVResidency{
+		{Outcome: abi.KVResidencyOK, Digest: digestP0, Positions: 1000},
+		{Outcome: abi.KVResidencyOK, Digest: digestP1, Positions: 60},
+	}}
+	got := RestorePrefix(context.Background(), b, m)
+	assertSumsToTotal(t, got)
+	if got.RestoredPositions != 60 || got.FaultedPositions != 100 {
+		t.Fatalf("report = %+v, malformed receipt inflated restoration", got)
+	}
+}
+
+func TestWarmResumeCancellationAccountsEveryPosition(t *testing.T) {
+	spans := []Span{{Digest: digestP0, From: 0, Positions: 100}, {Digest: digestP1, From: 100, Positions: 60}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b := &warmSerialBackend{}
+	m, err := PersistPrefix(ctx, b, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Spans) != 0 || m.TotalPositions != 160 {
+		t.Fatalf("canceled persist manifest = %+v", m)
+	}
+	report := RestorePrefix(ctx, b, PrefixManifest{TotalPositions: 160, Spans: []ManifestSpan{{Digest: digestP0, Positions: 100}, {Digest: digestP1, Positions: 60}}})
+	assertSumsToTotal(t, report)
+	if report.FaultedPositions != 160 {
+		t.Fatalf("canceled restore report = %+v, want all faulted", report)
 	}
 }
