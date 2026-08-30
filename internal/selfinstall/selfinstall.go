@@ -555,11 +555,11 @@ func InstallVerifiedCopy(swap Swapper, source, target string) Result {
 // origin/main, never a contaminated local build.
 //
 // It is best-effort and self-cleaning: the cleanup removes the worktree (git worktree
-// remove --force), prunes the admin entry, and removes the out-of-tree owner stamp.
-// The cleanup is idempotent so callers may invoke it explicitly before os.Exit (which
-// skips deferred functions) while still deferring it for ordinary returns. A partial
-// `worktree add` failure is cleaned immediately, but only after proving the target did
-// not exist before the add attempt.
+// remove --force), prunes the admin entry, and removes the out-of-tree owner stamp only
+// after both steps are proven. The cleanup is idempotent so callers may invoke it
+// explicitly before os.Exit (which skips deferred functions) while still deferring it
+// for ordinary returns. A partial `worktree add` failure is cleaned immediately, but
+// only after proving the target did not exist before the add attempt.
 func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (string, func(), error) {
 	noop := func() {}
 	if strings.TrimSpace(ref) == "" {
@@ -599,12 +599,18 @@ func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (
 // cleanupOriginWorktree is the one source-cleanup path for PrepareOrigin. Git removal
 // is preferred because it removes the administrative record and directory together.
 // If it fails, direct removal is safe here because PrepareOrigin proved the target was
-// absent before creating it; prune then clears any dangling admin entry.
+// absent before creating it. The owner stamp survives any incomplete cleanup so a later
+// owner-aware GC can repair a directory-gone administrative record without guessing.
 func cleanupOriginWorktree(ctx context.Context, run Runner, repoRoot, dir string) {
 	if _, ok := run(ctx, repoRoot, "git", "worktree", "remove", "--force", dir); !ok {
 		_ = os.RemoveAll(dir)
 	}
-	_, _ = run(ctx, repoRoot, "git", "worktree", "prune")
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		return
+	}
+	if _, ok := run(ctx, repoRoot, "git", "worktree", "prune"); !ok {
+		return
+	}
 	removeBuildOwnerStamp(dir)
 }
 
