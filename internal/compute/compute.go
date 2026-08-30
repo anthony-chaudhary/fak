@@ -639,3 +639,59 @@ func Default() Backend {
 // bit-identity scoping is mechanically enforced: an Approx (device/Q8) backend is never
 // held to bit-identity, and a device can never be silently treated as the reference.
 func RequireReference(b Backend) bool { return b != nil && b.Class() == Reference }
+
+// RegionSlotKind is one operation in the small structured graph used by the
+// graph-local mutable-slot promotion pass.
+type RegionSlotKind string
+
+const (
+	RegionSlotConst   RegionSlotKind = "const"
+	RegionSlotDeclare RegionSlotKind = "declare"
+	RegionSlotLoad    RegionSlotKind = "load"
+	RegionSlotStore   RegionSlotKind = "store"
+	RegionSlotIf      RegionSlotKind = "if"
+	RegionSlotLoop    RegionSlotKind = "loop"
+	RegionSlotUnknown RegionSlotKind = "unknown"
+)
+
+// RegionSlotCarry names one slot threaded through a structured region. Argument
+// is populated for loop block arguments; Output is the region result.
+type RegionSlotCarry struct {
+	Slot     string `json:"slot"`
+	Input    string `json:"input"`
+	Argument string `json:"argument,omitempty"`
+	Output   string `json:"output"`
+	Debug    string `json:"debug,omitempty"`
+}
+
+// RegionSlotOp represents either a leaf operation or a structured region.
+// Then/Else are used by if; Body is used by loop and unknown regions.
+type RegionSlotOp struct {
+	Kind    RegionSlotKind    `json:"kind"`
+	Name    string            `json:"name,omitempty"`
+	Slot    string            `json:"slot,omitempty"`
+	Value   string            `json:"value,omitempty"`
+	Then    []RegionSlotOp    `json:"then,omitempty"`
+	Else    []RegionSlotOp    `json:"else,omitempty"`
+	Body    []RegionSlotOp    `json:"body,omitempty"`
+	Debug   string            `json:"debug,omitempty"`
+	Carries []RegionSlotCarry `json:"carries,omitempty"`
+}
+
+// RegionSlotGraph is the minimal structured graph contract shared by model
+// transforms and compute lowering.
+type RegionSlotGraph struct {
+	Ops []RegionSlotOp `json:"ops"`
+}
+
+// RegionSlotPromotion records one promoted slot or why it remained memory-backed.
+type RegionSlotPromotion struct {
+	Slot   string `json:"slot"`
+	Action string `json:"action"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// RegionSlotReceipt is a deterministic witness for mutable-slot promotion.
+type RegionSlotReceipt struct {
+	Promotions []RegionSlotPromotion `json:"promotions"`
+}

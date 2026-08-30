@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/codegraph"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // GraphInlineInstruction is one operation in the small callable model graph IR.
@@ -683,4 +684,197 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// PromoteRegionSlots replaces eligible graph-local load/store temporaries with
+// SSA values carried explicitly through structured regions. Unknown regions
+// fail closed: any slot they touch remains memory-backed.
+func PromoteRegionSlots(graph compute.RegionSlotGraph) (compute.RegionSlotGraph, compute.RegionSlotReceipt, error) {
+	declared := make(map[string]bool)
+	blocked := make(map[string]bool)
+	if err := inspectRegionSlots(graph.Ops, declared, blocked, false); err != nil {
+		return compute.RegionSlotGraph{}, compute.RegionSlotReceipt{}, err
+	}
+
+	names := make([]string, 0, len(declared))
+	for name := range declared {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	receipt := compute.RegionSlotReceipt{Promotions: make([]compute.RegionSlotPromotion, 0, len(names))}
+	promoted := make(map[string]bool, len(names))
+	for _, name := range names {
+		promotion := compute.RegionSlotPromotion{Slot: name, Action: "promote"}
+		if blocked[name] {
+			promotion.Action = "keep"
+			promotion.Reason = "unknown-region-use"
+		} else {
+			promoted[name] = true
+		}
+		receipt.Promotions = append(receipt.Promotions, promotion)
+	}
+
+	state := make(map[string]string, len(promoted))
+	debug := make(map[string]string, len(promoted))
+	for name := range promoted {
+		state[name] = "undef." + name
+	}
+	ops, _, _ := promoteRegionOps(graph.Ops, state, debug, promoted)
+	return compute.RegionSlotGraph{Ops: ops}, receipt, nil
+}
+
+func inspectRegionSlots(ops []compute.RegionSlotOp, declared, blocked map[string]bool, unknown bool) error {
+	for _, op := range ops {
+		if op.Slot != "" && unknown {
+			blocked[op.Slot] = true
+		}
+		switch op.Kind {
+		case compute.RegionSlotDeclare:
+			if op.Slot == "" {
+				return fmt.Errorf("slot declaration is missing a name")
+			}
+			if declared[op.Slot] {
+				return fmt.Errorf("duplicate slot %q", op.Slot)
+			}
+			declared[op.Slot] = true
+		case compute.RegionSlotLoad, compute.RegionSlotStore:
+			if op.Slot == "" {
+				return fmt.Errorf("%s is missing a slot", op.Kind)
+			}
+		case compute.RegionSlotIf:
+			if err := inspectRegionSlots(op.Then, declared, blocked, unknown); err != nil {
+				return err
+			}
+			if err := inspectRegionSlots(op.Else, declared, blocked, unknown); err != nil {
+				return err
+			}
+		case compute.RegionSlotLoop:
+			if err := inspectRegionSlots(op.Body, declared, blocked, unknown); err != nil {
+				return err
+			}
+		case compute.RegionSlotUnknown:
+			if err := inspectRegionSlots(op.Body, declared, blocked, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func promoteRegionOps(ops []compute.RegionSlotOp, state, debug map[string]string, promoted map[string]bool) ([]compute.RegionSlotOp, map[string]string, map[string]string) {
+	out := make([]compute.RegionSlotOp, 0, len(ops))
+	for _, op := range ops {
+		switch op.Kind {
+		case compute.RegionSlotDeclare:
+			if promoted[op.Slot] {
+				state[op.Slot] = "undef." + op.Slot
+				if op.Debug != "" {
+					debug[op.Slot] = op.Debug
+				}
+				continue
+			}
+		case compute.RegionSlotStore:
+			if promoted[op.Slot] {
+				state[op.Slot] = op.Value
+				if op.Debug != "" {
+					debug[op.Slot] = op.Debug
+				}
+				continue
+			}
+		case compute.RegionSlotLoad:
+			if promoted[op.Slot] {
+				slot := op.Slot
+				op.Kind = compute.RegionSlotConst
+				op.Value = state[slot]
+				op.Slot = ""
+				if op.Debug == "" {
+					op.Debug = debug[slot]
+				}
+			}
+		case compute.RegionSlotIf:
+			thenState, thenDebug := cloneRegionState(state), cloneRegionState(debug)
+			elseState, elseDebug := cloneRegionState(state), cloneRegionState(debug)
+			op.Then, thenState, thenDebug = promoteRegionOps(op.Then, thenState, thenDebug, promoted)
+			op.Else, elseState, elseDebug = promoteRegionOps(op.Else, elseState, elseDebug, promoted)
+			for _, slot := range sortedChangedSlots(state, thenState, elseState) {
+				input := state[slot]
+				result := nextRegionValue(op.Name, slot)
+				binding := firstRegionDebug(thenDebug[slot], elseDebug[slot], debug[slot])
+				op.Then = append(op.Then, compute.RegionSlotOp{Kind: compute.RegionSlotConst, Name: "yield." + slot, Value: thenState[slot], Debug: thenDebug[slot]})
+				op.Else = append(op.Else, compute.RegionSlotOp{Kind: compute.RegionSlotConst, Name: "yield." + slot, Value: elseState[slot], Debug: elseDebug[slot]})
+				op.Carries = append(op.Carries, compute.RegionSlotCarry{Slot: slot, Input: input, Output: result, Debug: binding})
+				state[slot], debug[slot] = result, binding
+			}
+		case compute.RegionSlotLoop:
+			before := cloneRegionState(state)
+			bodyState, bodyDebug := cloneRegionState(state), cloneRegionState(debug)
+			op.Body, bodyState, bodyDebug = promoteRegionOps(op.Body, bodyState, bodyDebug, promoted)
+			for _, slot := range sortedChangedSlots(before, bodyState) {
+				result := nextRegionValue(op.Name, slot)
+				argument := result + ".arg"
+				rewriteRegionValue(op.Body, before[slot], argument)
+				op.Body = append(op.Body, compute.RegionSlotOp{Kind: compute.RegionSlotConst, Name: "yield." + slot, Value: bodyState[slot], Debug: bodyDebug[slot]})
+				binding := firstRegionDebug(bodyDebug[slot], debug[slot])
+				op.Carries = append(op.Carries, compute.RegionSlotCarry{Slot: slot, Input: before[slot], Argument: argument, Output: result, Debug: binding})
+				state[slot], debug[slot] = result, binding
+			}
+		}
+		out = append(out, op)
+	}
+	return out, state, debug
+}
+
+func cloneRegionState(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func sortedChangedSlots(base map[string]string, variants ...map[string]string) []string {
+	changed := make([]string, 0)
+	for slot, value := range base {
+		for _, variant := range variants {
+			if variant[slot] != value {
+				changed = append(changed, slot)
+				break
+			}
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+func nextRegionValue(region, slot string) string {
+	if region == "" {
+		region = "region"
+	}
+	return region + "." + slot
+}
+
+func firstRegionDebug(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func rewriteRegionValue(ops []compute.RegionSlotOp, from, to string) {
+	for i := range ops {
+		if ops[i].Value == from {
+			ops[i].Value = to
+		}
+		for carry := range ops[i].Carries {
+			if ops[i].Carries[carry].Input == from {
+				ops[i].Carries[carry].Input = to
+			}
+		}
+		rewriteRegionValue(ops[i].Then, from, to)
+		rewriteRegionValue(ops[i].Else, from, to)
+		rewriteRegionValue(ops[i].Body, from, to)
+	}
 }
