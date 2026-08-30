@@ -1148,7 +1148,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 		return nil, err
 	}
-	s.metrics.observeInferenceServed(s.servedLocalityOf(opts), comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, dur)
+	s.metrics.observeInferenceUsageServed(s.servedLocalityOf(opts), comp.Usage, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
 	// the colder tier instead of dropping it (#1073, the live serve-path call site for the

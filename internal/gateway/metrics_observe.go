@@ -759,19 +759,38 @@ func (m *gatewayMetrics) toolFeedbackSnapshot() (turns, consecutive uint64) {
 	return m.toolFeedbackTurns, m.toolFeedbackConsecutive
 }
 
-// observeInference records one served model-generation turn: its token accounting,
-// why decode stopped, and the wall-clock the planner spent producing it. promptTok /
-// complTok / cachedTok come straight from the planner's reported Usage; dur is the
-// time spent inside planner.Complete. Negative/zero values are ignored so a planner
-// that omits a count never corrupts the running totals. This is the signal that makes
-// a busy gateway look busy: fak_kernel_*/fak_vdso_* stay 0 on a pure chat workload
-// (no syscall, no fast-path lookup), so without this family every panel reads 0 while
-// the box is in fact decoding tokens.
+// observeInference records one served model-generation turn: its disjoint uncached
+// input, cached input, output, and cache-write accounting; why decode stopped; and the
+// wall-clock the planner spent producing it. Negative/zero values are ignored so a
+// planner that omits a count never corrupts the running totals. Provider-shaped Usage
+// must enter through observeInferenceUsageServed, which normalizes providers such as
+// Codex/OpenAI whose input_tokens already includes cached_input_tokens. Direct callers
+// supply the already-disjoint axes used by tests and internal vcache folds. This is the
+// signal that makes a busy gateway look busy: fak_kernel_*/fak_vdso_* stay 0 on a pure
+// chat workload (no syscall, no fast-path lookup), so without this family every panel
+// reads 0 while the box is in fact decoding tokens.
 func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
 	// A buffered turn cannot observe the first-token boundary, so prefill is "not
 	// measured": ttft<=0 routes the whole duration into the decode-total accumulator
 	// and leaves the prefill split untouched (it stays an honest 0, never a phantom).
 	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
+}
+
+// observeInferenceUsageServed is the provider-Usage ingestion seam for the cumulative
+// inference counters that back /debug/vars and `fak info`. Usage keeps the provider's
+// wire semantics: Codex/OpenAI input_tokens includes cached_input_tokens, while
+// Anthropic input_tokens is already the uncached remainder. Normalize exactly here so
+// inferPromptTokens and inferCachedTokens remain disjoint without changing Usage,
+// response forwarding, context-window accounting, or the internal vcache row contract.
+func (m *gatewayMetrics) observeInferenceUsageServed(loc servingLocality, usage agent.Usage, finishReason string, dur time.Duration) {
+	m.observeInferenceServed(loc,
+		usage.UncachedPromptTokens(),
+		usage.CompletionTokens,
+		usage.CachedPromptTokens(),
+		usage.CacheCreationInputTokens,
+		finishReason,
+		dur,
+	)
 }
 
 // observeInferenceServed is observeInference plus WHO SERVED THE TURN — the

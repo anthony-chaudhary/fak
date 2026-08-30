@@ -362,7 +362,7 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 // actually served the turn. Deliberately not the model the response reported: a
 // local decode may not echo one back, and an empty id would then be read as vendor.
 func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time, reqModel string) {
-	s.metrics.observeInferenceServed(s.servedLocality(reqModel), comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, time.Since(began))
+	s.metrics.observeInferenceUsageServed(s.servedLocality(reqModel), comp.Usage, comp.FinishReason, time.Since(began))
 	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 }

@@ -1,11 +1,42 @@
 package gateway
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+// TestCodexCacheHitStaysDisjointInInfoCounters pins the provider-shaped usage seam
+// that feeds /debug/vars and, through it, the `fak info` cache pane. Codex reports
+// input_tokens as the FULL prompt, including cached_input_tokens. The gateway's
+// internal counters are disjoint, so it must peel the cached span off before booking
+// InputTokens; otherwise the cache denominator double-counts 45,312 tokens and renders
+// about 49% reuse instead of the observed ~97%.
+func TestCodexCacheHitStaysDisjointInInfoCounters(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	u := agent.Usage{
+		PromptTokens:        46_799,
+		PromptTokensDetails: &agent.UsageTokenDetails{CachedTokens: 45_312},
+	}
+
+	m.observeInferenceUsageServed(localityVendor, u, "stop", time.Second)
+
+	sum := m.adjudicationSummary()
+	if sum.InputTokens != 1_487 || sum.CachedPromptTokens != 45_312 {
+		t.Fatalf("disjoint Codex counters = input %d cached %d, want 1487/45312",
+			sum.InputTokens, sum.CachedPromptTokens)
+	}
+	v := vcacheVarsFromSnapshot(m.inferenceSnapshotData())
+	if v == nil {
+		t.Fatal("Codex cache activity must produce the info vcache block")
+	}
+	wantReuse := float64(45_312) / float64(46_799)
+	if math.Abs(v.HitRate-wantReuse) > 1e-12 {
+		t.Fatalf("info reuse = %.12f, want %.12f (~97%%, not ~49%%)", v.HitRate, wantReuse)
+	}
+}
 
 // TestCodexCacheHitIsVisibleInObservePlane is the witness that provider prompt-cache
 // value is really recorded for the OpenAI Responses (codex) and chat wires, not only for
