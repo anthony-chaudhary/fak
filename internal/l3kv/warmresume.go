@@ -99,12 +99,16 @@ func PersistPrefix(ctx context.Context, backend abi.KVBackend, spans []Span) (Pr
 		return PrefixManifest{}, errors.New("l3kv: PersistPrefix nil backend")
 	}
 	var m PrefixManifest
-	for _, sp := range spans {
+	requests := make([]abi.KVResidencyRequest, len(spans))
+	for i, sp := range spans {
 		m.TotalPositions += sp.Positions
-		res, err := backend.StageSpan(ctx, sp.Digest, sp.From, sp.Positions)
-		if err != nil || res.Outcome != abi.KVResidencyOK {
+		requests[i] = abi.KVResidencyRequest{Digest: sp.Digest, From: sp.From, Positions: sp.Positions}
+	}
+	for i, res := range abi.StageSpans(ctx, backend, requests) {
+		if res.Outcome != abi.KVResidencyOK {
 			continue // not durably held — wake will re-prefill these positions cold.
 		}
+		sp := spans[i]
 		m.Spans = append(m.Spans, ManifestSpan{Digest: sp.Digest, Positions: sp.Positions})
 	}
 	return m, nil
@@ -144,16 +148,20 @@ func (r ResumeReport) CacheReadFraction() float64 {
 func RestorePrefix(ctx context.Context, backend abi.KVBackend, m PrefixManifest) ResumeReport {
 	rep := ResumeReport{TotalPositions: m.TotalPositions}
 	accounted := 0
-	for _, sp := range m.Spans {
+	requests := make([]abi.KVResidencyRequest, len(m.Spans))
+	for i, sp := range m.Spans {
 		accounted += sp.Positions
-		res, err := backend.RestoreSpan(ctx, sp.Digest)
-		switch {
-		case err == nil && res.Outcome == abi.KVResidencyOK:
-			rep.RestoredPositions += sp.Positions
-		case err == nil && res.Outcome == abi.KVResidencyMiss:
-			rep.MissedPositions += sp.Positions
+		requests[i] = abi.KVResidencyRequest{Digest: sp.Digest, Positions: sp.Positions}
+	}
+	for i, res := range abi.RestoreSpans(ctx, backend, requests) {
+		positions := m.Spans[i].Positions
+		switch res.Outcome {
+		case abi.KVResidencyOK:
+			rep.RestoredPositions += positions
+		case abi.KVResidencyMiss:
+			rep.MissedPositions += positions
 		default:
-			rep.FaultedPositions += sp.Positions
+			rep.FaultedPositions += positions
 		}
 	}
 	if rem := m.TotalPositions - accounted; rem > 0 {
