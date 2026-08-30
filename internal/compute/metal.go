@@ -32,8 +32,10 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
@@ -301,36 +303,6 @@ func (o *metalCommandOwner) encodeMatMul(w, x, y unsafe.Pointer, out, in, p int)
 	return o.lifecycle.encode()
 }
 
-func (o *metalCommandOwner) encodeRMSNorm(x, weight, y unsafe.Pointer, rows, n int, eps float32) error {
-	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
-		return errMetalOwnerTerminal
-	}
-	if C.fmetal_command_encode_rmsnorm_f32(o.ptr, x, weight, y, C.int(rows), C.int(n), C.float(eps)) == 0 {
-		return errors.New("compute: Metal RMSNorm encode failed")
-	}
-	return o.lifecycle.encode()
-}
-
-func (o *metalCommandOwner) encodeSwiGLU(gate, up, y unsafe.Pointer, n int) error {
-	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
-		return errMetalOwnerTerminal
-	}
-	if C.fmetal_command_encode_swiglu_f32(o.ptr, gate, up, y, C.int(n)) == 0 {
-		return errors.New("compute: Metal SwiGLU encode failed")
-	}
-	return o.lifecycle.encode()
-}
-
-func (o *metalCommandOwner) encodeAdd(dst, src unsafe.Pointer, n int) error {
-	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
-		return errMetalOwnerTerminal
-	}
-	if C.fmetal_command_encode_add_f32(o.ptr, dst, src, C.int(n)) == 0 {
-		return errors.New("compute: Metal add encode failed")
-	}
-	return o.lifecycle.encode()
-}
-
 func (o *metalCommandOwner) finish() (metalCommandReceipt, error) {
 	if o == nil || o.ptr == nil {
 		return metalCommandReceipt{}, errMetalOwnerTerminal
@@ -361,25 +333,64 @@ func (o *metalCommandOwner) abort() error {
 	return nil
 }
 
-func (o *metalCommandOwner) finishExactly(wantEncoders int) error {
+func (o *metalCommandOwner) finishExactly(wantEncoders int) (metalCommandReceipt, error) {
 	receipt, err := o.finish()
 	if err != nil {
-		return err
+		return metalCommandReceipt{}, err
 	}
 	if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != wantEncoders {
-		return fmt.Errorf("compute: invalid Metal command receipt: committed=%t completed_wait=%t encoders=%d want=%d", receipt.Committed, receipt.CompletedWait, receipt.Encoders, wantEncoders)
+		return metalCommandReceipt{}, fmt.Errorf("compute: invalid Metal command receipt: committed=%t completed_wait=%t encoders=%d want=%d", receipt.Committed, receipt.CompletedWait, receipt.Encoders, wantEncoders)
 	}
-	return nil
+	return receipt, nil
+}
+
+func metalMatMulTraceEvent(started time.Time, receipt metalCommandReceipt, w, x, y Tensor, out, in, p int) computetrace.Event {
+	e := computetrace.Event{
+		Operation:        "matmul",
+		Phase:            "kernel",
+		Backend:          "metal",
+		Device:           "metal:0",
+		Kernel:           "mps_f32_matmul",
+		Route:            "device",
+		StartedAt:        started.UTC(),
+		DurationNS:       int64(receipt.WaitMilliseconds * 1e6),
+		TimerDomain:      "host_monotonic",
+		InputDType:       x.Dtype.String(),
+		WeightDType:      w.Dtype.String(),
+		OutputDType:      y.Dtype.String(),
+		BytesRead:        int64(w.Numel()*w.Dtype.Bytes() + x.Numel()*x.Dtype.Bytes()),
+		BytesWritten:     int64(y.Numel() * y.Dtype.Bytes()),
+		EstimatedFLOPs:   int64(2 * out * in * p),
+		Shapes:           [][]int{w.Shape, x.Shape},
+		ProvenanceDigest: computetrace.Digest("metal", "mps_f32_matmul"),
+	}
+	if receipt.TimingAvailable && receipt.GPUMilliseconds > 0 {
+		e.DeviceDurationNS = int64(receipt.GPUMilliseconds * 1e6)
+		e.TimerDomain = "metal_command_buffer"
+	}
+	return e
+}
+
+func recordMetalMatMulTrace(started time.Time, receipt metalCommandReceipt, w, x, y Tensor, out, in, p int) {
+	if !computetrace.Enabled() {
+		return
+	}
+	computetrace.Record(metalMatMulTraceEvent(started, receipt, w, x, y, out, in, p))
+}
+
+func requireMetalMatMulF32(operation string, w, x Tensor) {
+	if w.Dtype != F32 || x.Dtype != F32 {
+		panic(fmt.Sprintf("compute: metal %s supports only F32 inputs today (weight=%s input=%s)", operation, w.Dtype, x.Dtype))
+	}
 }
 
 func (c *metalBackend) MatMul(w, x Tensor) Tensor {
+	requireMetalMatMulF32("MatMul", w, x)
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: metal MatMul supports only F32 weights today (got " + w.Dtype.String() + "); quantized device GEMM is a tracked follow-up")
-	}
 	y, _ := c.devTr([]int{out}, F32)
+	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
 		panic(err)
@@ -388,22 +399,23 @@ func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 		_ = owner.abort()
 		panic(err)
 	}
-	if err := owner.finishExactly(1); err != nil {
+	receipt, err := owner.finishExactly(1)
+	if err != nil {
 		panic(err)
 	}
+	recordMetalMatMulTrace(started, receipt, w, x, y, out, in, 1)
 	return y
 }
 
 // BatchedMatMul is the prefill GEMM Y = X @ Wᵀ over P rows on the MPS path; it refuses
-// non-F32 weights (quantized device GEMM is a tracked follow-up).
+// non-F32 inputs (quantized device GEMM is a tracked follow-up).
 func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
+	requireMetalMatMulF32("BatchedMatMul", w, X)
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: metal BatchedMatMul supports only F32 weights today (got " + w.Dtype.String() + ")")
-	}
 	y, _ := c.devTr([]int{P, out}, F32)
+	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
 		panic(err)
@@ -412,9 +424,11 @@ func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		_ = owner.abort()
 		panic(err)
 	}
-	if err := owner.finishExactly(1); err != nil {
+	receipt, err := owner.finishExactly(1)
+	if err != nil {
 		panic(err)
 	}
+	recordMetalMatMulTrace(started, receipt, w, X, y, out, in, P)
 	return y
 }
 
