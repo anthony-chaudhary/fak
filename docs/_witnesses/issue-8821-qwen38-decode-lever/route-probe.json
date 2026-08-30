@@ -1,0 +1,39 @@
+{
+  "schema": "fak.issue-8821-sanctioned-route-probe/1",
+  "issue": 8821,
+  "epic": {
+    "issue": 10193,
+    "row": 1
+  },
+  "base_revision": "97ab1e4e3b34b26fd9f901c0a7d12f55b6bd3722",
+  "observed_at_utc": "2026-08-30T03:35:12Z",
+  "private_bridge": {
+    "status": "NOT_READY",
+    "eligible": false,
+    "detail": "The scrubbed sanctioned private-bridge route did not yield a qualifying CUDA session."
+  },
+  "gcp": {
+    "status": "STALE_AUTH",
+    "eligible": false,
+    "all_tiers_requested": true,
+    "tiers": [],
+    "recommended": null,
+    "detail": "Credential refresh was required before quota or tier eligibility could be observed."
+  },
+  "dry_run": {
+    "status": "RENDERED",
+    "tier": "a2-high-a100-40gb-1g",
+    "engine": "fak-cuda",
+    "artifact": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+    "provisioning_only": true,
+    "qualifying_witness": false
+  },
+  "decision": "HOLD_NO_QUALIFYING_CUDA_EVIDENCE",
+  "privacy": {
+    "account_included": false,
+    "project_included": false,
+    "hostname_included": false,
+    "private_path_included": false,
+    "raw_log_included": false
+  }
+}

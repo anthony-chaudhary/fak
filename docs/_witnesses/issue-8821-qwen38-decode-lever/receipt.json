@@ -1,0 +1,86 @@
+{
+  "schema": "fak.issue-8821-qwen38-decode-lever-hold/1",
+  "issue": 8821,
+  "epic": {
+    "issue": 10193,
+    "row": 1
+  },
+  "base_revision": "97ab1e4e3b34b26fd9f901c0a7d12f55b6bd3722",
+  "decision": "HOLD_NO_QUALIFYING_CUDA_EVIDENCE",
+  "selected_lever": "",
+  "evidence_class": "TYPED_HOLD",
+  "artifact": {
+    "model": "Qwen3.8-27B",
+    "repository": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "target": {
+    "hardware": "NVIDIA A100 40GB",
+    "compute_capability": "sm_80",
+    "backend": "cuda"
+  },
+  "workload": {
+    "prompt_tokens": 22,
+    "context_tokens": 22,
+    "output_tokens": 6,
+    "batch": 1,
+    "temperature": 0,
+    "sampling": "greedy"
+  },
+  "required_execution": {
+    "engine": "fak-native",
+    "runtime": "inkernel",
+    "forward_path": "cuda/qwen35-gdn-ssm-decode-v1",
+    "fallback_count": 0,
+    "llama_cpp_role": "comparator-reference-only"
+  },
+  "quality_gate": {
+    "cosine_minimum": 0.995,
+    "argmax_exact": true,
+    "max_abs_strictly_less_than": 0.02,
+    "evidence_available": false
+  },
+  "accounting": {
+    "inclusive": true,
+    "required_phases": [
+      "setup",
+      "recovery",
+      "prefill",
+      "first-token",
+      "steady-decode",
+      "verification",
+      "teardown"
+    ],
+    "wall_clock_binding_required": true,
+    "evidence_available": false
+  },
+  "prior_witness": {
+    "issue": 8819,
+    "path": "docs/_witnesses/issue-8819-qwen38-a100-roofline/",
+    "quality": "FAILED",
+    "cuda_counter_state": "zero counters documented as placeholders; attribution prohibited",
+    "usable_for_lever_selection": false
+  },
+  "route_probe": "route-probe.json",
+  "rerun_script": "sanctioned-rerun.sh",
+  "ablation": {
+    "maximum_changed_levers": 1,
+    "performed": false,
+    "reason": "No quality-valid real-counter CUDA profile exists from which to select one lever."
+  },
+  "missing_evidence": [
+    "quality-valid exact-artifact full-model CUDA run",
+    "per-stage GDN CUDA-event timings with operation and device attribution",
+    "strict cosine, exact-argmax, and maximum-absolute-logit comparison",
+    "wall-clock binding across setup, recovery, inference, verification, and teardown"
+  ],
+  "claims": {
+    "performance_gain": false,
+    "quality_pass": false,
+    "lever_attributed": false
+  }
+}
