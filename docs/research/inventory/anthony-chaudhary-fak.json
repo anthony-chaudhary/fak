@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:e0817549189eda40e8017292e96e68882c0f63d6c6e42f4b7e8f50850327903b",
-  "tracked_files": 18486,
-  "tracked_bytes": 421470449,
+  "content_root": "sha256:7611c809399bf83d49b4dcca5dfea4e43f3418fd47d615b676f30420079bcd25",
+  "tracked_files": 18488,
+  "tracked_bytes": 421507045,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -35516,8 +35516,8 @@
     },
     {
       "path": "docs/benchmarks/NATIVE-PERFORMANCE-CURRENT.md",
-      "content_sha256": "sha256:28094880ed871f7637d5fd4d74f8f318163f1c0d3578ed3b6a09fde3c644c53d",
-      "bytes": 27138,
+      "content_sha256": "sha256:90ae835fca2f130bf46d8beb654279cf33d4b3b47d961027cd25b40509eef9fe",
+      "bytes": 27140,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -44000,6 +44000,15 @@
       ]
     },
     {
+      "path": "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md",
+      "content_sha256": "sha256:b8cea459d9f08c7e54e7998110442cd23567c9ba566aa2f18ecbe66fab3b9583",
+      "bytes": 14520,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/notes/CONCEPT-STUDY-TENSORRT-LLM-2026-07-18.md",
       "content_sha256": "sha256:a566e22c6b18b6e42fd52bd304d0bd033158edefafee4f2e0e46ec04f58751f7",
       "bytes": 13378,
@@ -51183,6 +51192,15 @@
       ]
     },
     {
+      "path": "docs/research/inventory/local-tensor-build-2026-08-29.json",
+      "content_sha256": "sha256:826f50fb68d89addb38228e3f0fa15f46978e821aeb924c3301166f11139a723",
+      "bytes": 21819,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/research/inventory/local-tensor-build.json",
       "content_sha256": "sha256:b6433575eb800b295f3a3666751f0c813a27912da0faa7944eb9e96727c1e911",
       "bytes": 27143,
@@ -51778,8 +51796,8 @@
     },
     {
       "path": "docs/research/monitored-repositories.json",
-      "content_sha256": "sha256:8b20d8873474d6090db5831e9a63edf294d8ac5d6db23554dce70ec7f7f1c7d1",
-      "bytes": 185577,
+      "content_sha256": "sha256:2e59011be76e2cbd7f9cf0cbd3264abcede36be237c69e2fb98583ce492df55f",
+      "bytes": 185805,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -120718,8 +120736,8 @@
     },
     {
       "path": "internal/nativeperf/current.go",
-      "content_sha256": "sha256:a1c0166ccc65a20de01ca97fa1120800c697f7270364d7de885877fb846e9905",
-      "bytes": 52370,
+      "content_sha256": "sha256:fe14c8d9acf383edd89c99aa965651a9182c460657b53fd5092ec557bf1111a0",
+      "bytes": 52372,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -120727,8 +120745,8 @@
     },
     {
       "path": "internal/nativeperf/current_test.go",
-      "content_sha256": "sha256:73de2de2aa2598c80107f4f2dc9d9454e753e1d479f13d431d88ac8134aa019f",
-      "bytes": 6080,
+      "content_sha256": "sha256:7d55afcb01386e2f5a1c82d819caeb1068ecd77d2823be4cd5c615d6983b6603",
+      "bytes": 6105,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
