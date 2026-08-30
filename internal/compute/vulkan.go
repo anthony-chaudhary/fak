@@ -860,6 +860,27 @@ func (v *vulkanBackend) VulkanDebugQ4KStageSnapshot() (enabled bool, capacity, c
 	return v.q4kStage, v.q4kStageBytes, v.q4kStagedCalls, v.q4kStagedBytes, v.q4kStageFallbacks
 }
 
+func (v *vulkanBackend) VulkanDebugBatchActive() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return bool(C.fvk_batch_active())
+}
+
+func (v *vulkanBackend) VulkanDebugResetQ4KStage() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	C.fvk_batch_flush()
+	if v.q4kStagePtr != nil {
+		C.fvk_free(v.q4kStagePtr)
+		v.dlUsed -= v.q4kStageBytes
+		v.q4kStagePtr = nil
+		v.q4kStageBytes = 0
+	}
+	v.q4kStagedCalls = 0
+	v.q4kStagedBytes = 0
+	v.q4kStageFallbacks = 0
+}
+
 func (v *vulkanBackend) ensureQ4KStageLocked(bytes int) unsafe.Pointer {
 	need := int64(bytes)
 	if v.q4kStagePtr != nil && v.q4kStageBytes >= need {
@@ -869,6 +890,10 @@ func (v *vulkanBackend) ensureQ4KStageLocked(bytes int) unsafe.Pointer {
 	if v.budgetBytes > 0 && v.dlUsed-old+need > v.budgetBytes {
 		v.q4kStageFallbacks++
 		return nil
+	}
+	resumeBatch := C.fvk_batch_active()
+	if resumeBatch {
+		defer C.fvk_batch_begin()
 	}
 	// Growth is rare and must not release storage referenced by pending commands.
 	C.fvk_batch_flush()
