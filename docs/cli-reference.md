@@ -661,6 +661,29 @@ fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail co
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
 fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
+fak self-update --installer msix --msix-appinstaller-uri HTTPS_URL --msix-package PACKAGE --msix-publisher SUBJECT --msix-artifact-digest SHA256 --msix-source-revision REV [--msix-full-fallback-uri HTTPS_URL --msix-full-artifact-digest SHA256] [--msix-repair|--msix-uninstall]
+
+Windows MSIX/App Installer delivery is explicit opt-in. `--installer` has precedence over
+`FAK_SELF_UPDATE_INSTALLER`; when neither is set, `native` remains the default. The adapter
+requires the package identity `Name` from `AppxManifest.xml`, separate app (`fak`),
+artifact-digest, and source-revision identities plus
+the expected signing-certificate subject. It validates the downloaded package signature and
+publisher before invoking App Installer. Online `.appinstaller` delivery uses Windows block-map
+differential updates; `--offline` selects `--msix-full-fallback-uri` (or the primary URI when no
+separate full bundle is supplied). A distinct full fallback requires its own `--msix-full-artifact-digest`; the receipt reports the selected delivery and whether fallback ran. Downgrades are refused unless `--msix-allow-downgrade` is
+explicitly set. Repair and uninstall are explicit, mutually exclusive operations. PowerShell
+runs non-interactively in a hidden process; selecting `msix` on a non-Windows host is refused.
+
+Source self-update derives a deterministic digest from Go's complete non-standard dependency graph for `./cmd/fak`, including generated/runtime source files, `go:embed` assets, native inputs, module metadata, toolchain/platform/CGO architecture knobs, tags, and build/link flags. A docs-only or test-only source revision can therefore reuse the prior digest-verified artifact without compiling again; any graph or build-envelope uncertainty falls back to the full build, vet, and smoke gates. JSON update receipts expose `build_provenance` with the selected source commit, the source commit that originally built reused bytes, build-input and artifact digests, artifact size, build envelope, and reuse decision.
+
+Self-update keeps these identities separate: Git owns the selected/source commits (exact
+40-hex comparison), the build-input walker owns its SHA-256, the verified file bytes own the
+artifact SHA-256 and slot ID, `VERSION`/linker provenance owns app version, and selfinstall
+owns the monotonic metadata generation. A digest-equal candidate refreshes selected-source
+metadata but does not copy, swap, activate, or change app version. Persisted rollback state
+selects a verified artifact slot by digest, never by an ambiguous app-version string.
+
+Self-update also emits a deterministic per-component plan. Every `targets[]` row names the desired and installed artifact digests, acquisition (`reuse` or `transfer_or_build`), activation (`no_op` or `activate`), compatibility group, and rollback action. Already-current components are excluded from activation; compatibility-coupled stale components remain one staged transaction, so an activation failure restores every component moved by that transaction.
 `--manifest-url` opts into conditional selection before any git fetch, build, or install. The
 server returns a canonical JSON payload signed by the public Ed25519 key pinned in the binary.
 The signature is verified before schema, manifest ID, channel, cohort, OS, architecture,
@@ -671,6 +694,23 @@ unexpired identity-matched cache and never extends signed expiry. `429`/`503` Re
 bounded to 24 hours and cached. `--force` contacts the server despite cache freshness/backoff,
 but never bypasses signature, identity, or expiry checks. Without `--manifest-url`, behavior
 is unchanged.
+
+Manifest v2 may also carry a full executable target for the selected OS/architecture. The
+signature binds the artifact URL, platform, architecture, SHA-256, byte size, app version,
+source revision, expiry, and monotonic metadata generation as one identity. Self-update
+rejects corrupt signatures or bytes, expired metadata, generation or app-version rollback,
+same-generation changed payloads (freeze/mirror equivocation), duplicate usable targets, and
+version/revision mix-and-match. A usable target is downloaded with a strict size bound and
+SHA-256 check, then must pass `version --json` smoke and attest the signed app version plus
+exact source commit before activation. Verified bytes are copied into immutable
+generation+digest slots; activation reads from that slot and never deletes older verified
+slots, so the prior artifact remains recoverable. When the authenticated catalog has no
+complete target for this host/component set, self-update preserves the full pristine-source
+build, vet, provenance-smoke, and transactional activation fallback. A present matching target
+that fails authentication or verification is a hard refusal, never a reason to build different
+bytes from source.
+
+Signed targets may also advertise per-source zstd deltas. Self-update selects one only when the installed artifact SHA-256 exactly matches the delta source and the patch is below the transfer-ratio threshold. Patch size/SHA-256 and patched target size/SHA-256 are verified before the existing smoke/activation gate. Wrong source, corrupt patch, unavailable zstd, patch failure, or poor ratio falls back to the independently signed full artifact. The receipt's `transfer` object records chosen path, delta/full bytes, total time, verification, fallback reason, and fallback bytes/time cost.
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```

@@ -47,6 +47,19 @@ func cmdSelfUpdate(argv []string) {
 	manifestChannel := fs.String("manifest-channel", "stable", "signed manifest channel identity")
 	manifestCohort := fs.String("manifest-cohort", "default", "signed manifest cohort identity")
 	offline := fs.Bool("offline", false, "use only a valid authenticated manifest cache; perform no manifest HTTP request")
+	installer := fs.String("installer", "", "update installer: native (default) or msix; FAK_SELF_UPDATE_INSTALLER is used when omitted")
+	msixURI := fs.String("msix-appinstaller-uri", "", "signed HTTPS .appinstaller URI (requires --installer msix)")
+	msixPackage := fs.String("msix-package", "", "MSIX package identity Name from AppxManifest.xml")
+	msixPublisher := fs.String("msix-publisher", "", "expected signed package publisher")
+	msixArtifact := fs.String("msix-artifact-digest", "", "FAK artifact digest carried by signed package provenance")
+	msixFullArtifact := fs.String("msix-full-artifact-digest", "", "full-fallback artifact digest carried by signed package provenance")
+	msixSource := fs.String("msix-source-revision", "", "FAK source revision carried by signed package provenance")
+	msixInstalledVersion := fs.String("msix-installed-version", "", "installed package version used for downgrade policy")
+	msixTargetVersion := fs.String("msix-target-version", "", "signed target package version used for downgrade policy")
+	msixFullFallback := fs.String("msix-full-fallback-uri", "", "signed HTTPS full-package URI when differential delivery is unavailable")
+	msixRepair := fs.Bool("msix-repair", false, "repair the installed MSIX package instead of updating it")
+	msixUninstall := fs.Bool("msix-uninstall", false, "uninstall the installed MSIX package")
+	msixAllowDowngrade := fs.Bool("msix-allow-downgrade", false, "allow an explicitly signed MSIX downgrade")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	jsonMode := fs.Bool("json", false, "emit one versioned JSON receipt")
 	handoffSession := fs.String("handoff-session", "", "after installation, launch the successor with this stable session identity")
@@ -56,6 +69,20 @@ func cmdSelfUpdate(argv []string) {
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
 	beginSelfUpdateOutput(*jsonMode)
+	if handled, err := runSelfUpdateMSIX(selfUpdateMSIXOptions{
+		CLIInstaller: *installer, ConfigInstaller: os.Getenv("FAK_SELF_UPDATE_INSTALLER"),
+		AppInstallerURI: *msixURI, FullFallbackURI: *msixFullFallback,
+		PackageIdentity: *msixPackage, Publisher: *msixPublisher,
+		ArtifactIdentity: *msixArtifact, FullArtifactIdentity: *msixFullArtifact, SourceIdentity: *msixSource,
+		InstalledVersion: *msixInstalledVersion, TargetVersion: *msixTargetVersion,
+		Repair: *msixRepair, Uninstall: *msixUninstall, Check: *check,
+		AllowDowngrade: *msixAllowDowngrade, Offline: *offline, JSON: *jsonMode,
+	}); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: MSIX adapter refused:", err)
+		}
+		return
+	}
 	reportSelfUpdateProgress(5, "checking installed binary provenance")
 
 	// Scheduled-task provenance skew, checked BEFORE anything else: the task pinned one
@@ -81,19 +108,30 @@ func cmdSelfUpdate(argv []string) {
 
 	// Conditional selection is intentionally before any git fetch/build/install. With no
 	// manifest URL configured this block is skipped, preserving the legacy path byte-for-byte.
+	var manifestSelection selfUpdateManifestSelection
 	if strings.TrimSpace(*manifestURL) != "" {
 		installed := selfUpdateInstalledIdentity(strings.TrimSpace(*target))
-		proceed, disposition, err := selfUpdateManifestBeforeFetch(context.Background(), selfUpdateManifestRequest{
+		installedState, err := selfinstall.ReadInstallIdentity(selfinstall.IdentityStatePath(installTargetOr(*target)))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: installed identity refused:", err)
+			return
+		}
+		installedVersion := installedState.AppVersion
+		if strings.TrimSpace(installedVersion) == "" {
+			installedVersion = selfUpdateBinaryVersion(installTargetOr(*target))
+		}
+		manifestSelection, err = selfUpdateManifestSelect(context.Background(), selfUpdateManifestRequest{
 			URL: *manifestURL, ManifestID: *manifestID, CachePath: *manifestStatePath, Channel: *manifestChannel,
 			Cohort: *manifestCohort, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
-			InstalledIdentity: installed, Offline: *offline, Force: *force,
+			InstalledIdentity: installed, InstalledVersion: installedVersion,
+			InstalledGeneration: installedState.SignedMetadataGeneration, Offline: *offline, Force: *force,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "self-update: signed manifest refused:", err)
 			return
 		}
-		if !proceed {
-			fmt.Fprintln(os.Stderr, "self-update:", disposition)
+		if manifestSelection.Disposition != "update" {
+			fmt.Fprintln(os.Stderr, "self-update:", manifestSelection.Disposition)
 			return
 		}
 	}
@@ -101,9 +139,17 @@ func cmdSelfUpdate(argv []string) {
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
 	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
 	// line we actually want guards converged on.
-	reportSelfUpdateProgress(10, "reading origin/main revision")
-	selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
-	headRev := repoRevOf(repoRoot, "origin/main")
+	reportSelfUpdateProgress(10, "reading selected revision")
+	headRev := ""
+	if strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update" {
+		headRev = manifestSelection.TargetRevision
+		if manifestSelection.Artifact == nil {
+			selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+		}
+	} else {
+		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+		headRev = repoRevOf(repoRoot, "origin/main")
+	}
 
 	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
 	// case: a dev fak invokes self-update to converge the FLEET binary), read the TARGET's
@@ -163,8 +209,15 @@ func cmdSelfUpdate(argv []string) {
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
 	// already-current fak must still run the cycle when its installed fak-dev companion lags.
 	companionPaths := selfUpdateFakDevTargets(repoRoot, installTargetOr(*target))
+	selectedArtifact := usableSelfUpdateArtifact(manifestSelection, companionPaths)
+	if manifestSelection.Artifact != nil && selectedArtifact == nil {
+		fmt.Fprintln(selfUpdateProgress, "self-update: signed catalog has no fak-dev companion target; using full source-build fallback")
+		selectedArtifact = nil
+		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
+	}
 	companionStale := selfUpdateFakDevNeedsConverge(companionPaths, headRev, selfUpdateProbe)
-	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
+	manifestSelectedUpdate := strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update"
+	proceed := manifestSelectedUpdate || selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
 	if !proceed {
 		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
 		switch {
@@ -182,7 +235,14 @@ func cmdSelfUpdate(argv []string) {
 		return
 	}
 
-	performSelfUpdate(repoRoot, headRev, target, companionPaths, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+	performSelfUpdate(repoRoot, headRev, target, companionPaths, selectedArtifact, manifestSelection.MetadataGeneration, manifestSelection.TargetVersion, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+}
+
+func usableSelfUpdateArtifact(selection selfUpdateManifestSelection, companionPaths []string) *selfUpdateArtifactTarget {
+	if selection.Disposition != "update" || selection.Artifact == nil || len(companionPaths) != 0 {
+		return nil
+	}
+	return selection.Artifact
 }
 
 func selfUpdateInstalledIdentity(target string) string {
@@ -192,6 +252,23 @@ func selfUpdateInstalledIdentity(target string) string {
 		}
 	}
 	return binstamp.Self().Revision
+}
+
+func selfUpdateBinaryVersion(target string) string {
+	if strings.TrimSpace(target) == "" {
+		return ""
+	}
+	out, ok := selfinstall.RealRunner(context.Background(), "", target, "version", "--json")
+	if !ok {
+		return ""
+	}
+	var identity struct {
+		AppVersion string `json:"app_version"`
+	}
+	if json.Unmarshal([]byte(out), &identity) != nil {
+		return ""
+	}
+	return strings.TrimSpace(identity.AppVersion)
 }
 
 // selfUpdateFetchOrigin refreshes the remote-tracking ref only for an update run. A fetch writes
@@ -368,6 +445,7 @@ type selfUpdateOutcome string
 
 const (
 	outcomeInstalled      selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
+	outcomeMetadataOnly   selfUpdateOutcome = "metadata_only"  // selected provenance advanced; binary bytes did not
 	outcomeTargetCurrent  selfUpdateOutcome = "target-current" // --target already at origin/main
 	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
 	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
@@ -452,28 +530,47 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 const selfUpdateReceiptSchema = "fak.self-update.receipt/v1"
 
 type selfUpdateReceipt struct {
-	Schema          string                    `json:"schema"`
-	SchemaVersion   int                       `json:"schema_version"`
-	CorrelationID   string                    `json:"correlation_id"`
-	Status          string                    `json:"status"`
-	OldRevision     *string                   `json:"old_revision"`
-	NewRevision     *string                   `json:"new_revision"`
-	Targets         []selfUpdateReceiptTarget `json:"targets"`
-	Attempted       int                       `json:"attempted"`
-	Changed         int                       `json:"changed"`
-	RollbackStatus  string                    `json:"rollback_status"`
-	RollbackErrors  []string                  `json:"rollback_errors"`
-	RestartRequired bool                      `json:"restart_required"`
-	NextCommand     string                    `json:"next_command"`
-	Detail          string                    `json:"detail,omitempty"`
-	Handoff         *selfUpdateHandoffReceipt `json:"handoff,omitempty"`
-	TotalMS         int64                     `json:"total_ms"`
-	PhaseMS         selfUpdatePhaseMS         `json:"phase_ms"`
+	Schema          string                     `json:"schema"`
+	SchemaVersion   int                        `json:"schema_version"`
+	CorrelationID   string                     `json:"correlation_id"`
+	Status          string                     `json:"status"`
+	OldRevision     *string                    `json:"old_revision"`
+	NewRevision     *string                    `json:"new_revision"`
+	Targets         []selfUpdateReceiptTarget  `json:"targets"`
+	Attempted       int                        `json:"attempted"`
+	Changed         int                        `json:"changed"`
+	RollbackStatus  string                     `json:"rollback_status"`
+	RollbackErrors  []string                   `json:"rollback_errors"`
+	RestartRequired bool                       `json:"restart_required"`
+	NextCommand     string                     `json:"next_command"`
+	Detail          string                     `json:"detail,omitempty"`
+	BuildProvenance *selfUpdateBuildProvenance `json:"build_provenance,omitempty"`
+	Transfer        *selfUpdateTransferReceipt `json:"transfer,omitempty"`
+	Handoff         *selfUpdateHandoffReceipt  `json:"handoff,omitempty"`
+	TotalMS         int64                      `json:"total_ms"`
+	PhaseMS         selfUpdatePhaseMS          `json:"phase_ms"`
 }
 
 type selfUpdateReceiptTarget struct {
-	Role string `json:"role"`
-	Path string `json:"path"`
+	Role                    string `json:"role"`
+	Path                    string `json:"path"`
+	CompatibilityGroup      string `json:"compatibility_group,omitempty"`
+	DesiredArtifactDigest   string `json:"desired_artifact_digest,omitempty"`
+	InstalledArtifactDigest string `json:"installed_artifact_digest,omitempty"`
+	Acquisition             string `json:"acquisition,omitempty"`
+	Activation              string `json:"activation,omitempty"`
+	Rollback                string `json:"rollback,omitempty"`
+}
+
+type selfUpdateBuildProvenance struct {
+	SourceCommit         string            `json:"source_commit"`
+	ArtifactSourceCommit string            `json:"artifact_source_commit"`
+	BuildInputDigest     string            `json:"build_input_digest"`
+	BuildEnvelope        map[string]string `json:"build_envelope"`
+	ArtifactDigest       string            `json:"artifact_digest"`
+	ArtifactSize         int64             `json:"artifact_size"`
+	AppVersion           string            `json:"app_version"`
+	Reused               bool              `json:"reused"`
 }
 
 // selfUpdatePhaseMS is a fixed-shape object rather than a map so receipt consumers always see
@@ -565,6 +662,8 @@ var selfUpdateReceiptTargets []selfUpdateReceiptTarget
 var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
 var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
+var selfUpdateReceiptBuildProvenance *selfUpdateBuildProvenance
+var selfUpdateReceiptTransfer *selfUpdateTransferReceipt
 
 // selfUpdateTimingNow is the deterministic wall-clock seam for timing receipts. It is kept
 // separate from outcome timestamps and cleanup-age decisions so tests can control cost
@@ -752,6 +851,8 @@ func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateReceiptAttempted = 0
 	selfUpdateReceiptChanged = 0
 	selfUpdateReceiptHandoff = nil
+	selfUpdateReceiptBuildProvenance = nil
+	selfUpdateReceiptTransfer = nil
 	beginSelfUpdateTiming()
 	if enabled {
 		selfUpdateJSON = os.Stdout
@@ -778,6 +879,8 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 	switch cause {
 	case outcomeInstalled:
 		status = "updated"
+	case outcomeMetadataOnly:
+		status = "current"
 	case outcomeGateFailed:
 		status, nextCommand = "gate_failed", "fak self-update"
 	case outcomePrepareFailed:
@@ -820,7 +923,9 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
 		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
-		Detail: strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
+		BuildProvenance: selfUpdateReceiptBuildProvenance,
+		Transfer:        selfUpdateReceiptTransfer,
+		Detail:          strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
 	}
 }
 

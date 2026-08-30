@@ -100,6 +100,13 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 	}()
 
 	for _, item := range ordered {
+		equal, err := ArtifactsEqual(item.Source, item.Target)
+		if err != nil {
+			return RolledBack{Err: fmt.Errorf("compare %q: %w", item.Target, err)}
+		}
+		if equal {
+			continue
+		}
 		candidate, err := stageCopy(item.Source, item.Target, "stage")
 		if err != nil {
 			return RolledBack{Err: fmt.Errorf("stage %q: %w", item.Target, err)}
@@ -113,7 +120,7 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 		prepared[len(prepared)-1].snapshot = snapshot
 	}
 
-	if launchTarget != "" {
+	if launchTarget != "" && len(prepared) > 0 {
 		finish, err := BeginLaunchTransaction(launchTarget)
 		if err != nil {
 			return RolledBack{Err: fmt.Errorf("publish launch transaction: %w", err)}
@@ -140,7 +147,7 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 		changed++
 	}
 
-	return Updated{Attempted: len(prepared), Changed: changed}
+	return Updated{Attempted: len(ordered), Changed: changed}
 }
 
 func sameTransactionPath(a, b string) bool {

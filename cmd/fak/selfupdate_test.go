@@ -541,6 +541,63 @@ func TestSelfUpdateReceiptPostures(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateReceiptCarriesReusedBuildProvenance(t *testing.T) {
+	selfUpdateReceiptBuildProvenance = &selfUpdateBuildProvenance{
+		SourceCommit:         "89abcdef0123456789abcdef0123456789abcdef",
+		ArtifactSourceCommit: "0123456789abcdef0123456789abcdef01234567",
+		BuildInputDigest:     "sha256:inputs", BuildEnvelope: map[string]string{"GOVERSION": "go1.26.7"},
+		ArtifactDigest: "artifact", ArtifactSize: 42, AppVersion: "1.2.3", Reused: true,
+	}
+	t.Cleanup(func() { selfUpdateReceiptBuildProvenance = nil })
+	receipt := newSelfUpdateReceipt(outcomeInstalled, "bin/fak", "")
+	if receipt.BuildProvenance == nil || !receipt.BuildProvenance.Reused ||
+		receipt.BuildProvenance.SourceCommit == receipt.BuildProvenance.ArtifactSourceCommit ||
+		receipt.BuildProvenance.BuildInputDigest == "" || receipt.BuildProvenance.ArtifactDigest == "" ||
+		receipt.BuildProvenance.BuildEnvelope["GOVERSION"] == "" ||
+		receipt.BuildProvenance.AppVersion != "1.2.3" {
+		t.Fatalf("reused build provenance = %+v", receipt.BuildProvenance)
+	}
+}
+
+func TestSelfUpdateReceiptCarriesArtifactTransfer(t *testing.T) {
+	selfUpdateReceiptTransfer = &selfUpdateTransferReceipt{
+		ChosenPath: "full", DeltaBytes: 17, FullBytes: 100, TotalMS: 45,
+		Verification: "signed_full_size_sha256_verified", FallbackReason: "zstd_patch_failed",
+		FallbackBytes: 100, FallbackMS: 20,
+	}
+	t.Cleanup(func() { selfUpdateReceiptTransfer = nil })
+	receipt := newSelfUpdateReceipt(outcomeInstalled, "bin/fak", "")
+	if receipt.Transfer == nil || receipt.Transfer.ChosenPath != "full" ||
+		receipt.Transfer.DeltaBytes != 17 || receipt.Transfer.FullBytes != 100 ||
+		receipt.Transfer.FallbackReason != "zstd_patch_failed" ||
+		receipt.Transfer.FallbackBytes != 100 || receipt.Transfer.FallbackMS != 20 ||
+		receipt.Transfer.TotalMS != 45 || receipt.Transfer.Verification != "signed_full_size_sha256_verified" {
+		t.Fatalf("artifact transfer receipt = %+v", receipt.Transfer)
+	}
+}
+
+func TestSelfUpdateMetadataOnlyReceiptDoesNotSignalBinaryUpdate(t *testing.T) {
+	selfUpdateReceiptChanged = 0
+	receipt := newSelfUpdateReceipt(outcomeMetadataOnly, "bin/fak", "selected-source metadata advanced")
+	if receipt.Status != "current" || receipt.RestartRequired {
+		t.Fatalf("metadata-only receipt = %+v", receipt)
+	}
+}
+
+func TestUsableSelfUpdateArtifactFallsBackWhenCatalogHasNoCompleteTarget(t *testing.T) {
+	target := &selfUpdateArtifactTarget{URL: "https://updates.example/fak"}
+	selection := selfUpdateManifestSelection{Disposition: "update", Artifact: target}
+	if got := usableSelfUpdateArtifact(selection, nil); got != target {
+		t.Fatalf("usable signed target = %p, want %p", got, target)
+	}
+	if got := usableSelfUpdateArtifact(selfUpdateManifestSelection{Disposition: "update"}, nil); got != nil {
+		t.Fatal("missing catalog target did not fall back to source build")
+	}
+	if got := usableSelfUpdateArtifact(selection, []string{"fak-dev"}); got != nil {
+		t.Fatal("incomplete component catalog bypassed source-build fallback")
+	}
+}
+
 func TestSelfUpdateCheckOnlyReceiptReportsStaleRevision(t *testing.T) {
 	selfUpdateReceiptOldRevision = "oldrev"
 	selfUpdateReceiptNewRevision = "newrev"
