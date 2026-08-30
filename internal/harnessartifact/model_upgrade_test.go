@@ -343,7 +343,9 @@ func setDifference(before, after []string) []string {
 func TestModelUpgradeHashFixtureIsIndependent(t *testing.T) {
 	data := []byte("fixture")
 	sum := sha256.Sum256(data)
-	if got := hex.EncodeToString(sum[:]); len(got) != 64 {
-		t.Fatalf("digest=%s", got)
+	encoded := hex.EncodeToString(sum[:])
+	decoded, err := hex.DecodeString(encoded)
+	if err != nil || !bytes.Equal(decoded, sum[:]) {
+		t.Fatalf("digest round trip: encoded=%q decoded=%x err=%v", encoded, decoded, err)
 	}
 }
