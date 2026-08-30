@@ -16,9 +16,9 @@ import (
 // fak codex is the short, operator-facing Codex launcher. It intentionally does not
 // reimplement guard: it builds the same `fak guard -- codex` argv the long form uses, then
 // lets guard own the in-process gateway, Codex provider injection, audit journal, and 80/20
-// fak-info split pane. Interactive launches retain Codex's native approval and sandbox layer
-// by default. An operator can explicitly request Codex's full bypass mode without bypassing
-// fak's independent routing, capacity, policy, hook, or loop gates.
+// fak-info split pane. Managed launches default to Codex's non-interactive approval/sandbox
+// bypass while fak's independent routing, capacity, policy, hook, and loop gates remain active.
+// Operators can explicitly restore Codex's native approval and sandbox layer.
 
 type codexLaunchOptions struct {
 	dryRun          bool
@@ -77,7 +77,8 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dryRun := fs.Bool("dry-run", false, "print the guarded Codex command and exit without launching")
 	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
-	skipPermissions := fs.Bool("skip-permissions", false, "explicitly pass Codex's --dangerously-bypass-approvals-and-sandbox for a full native approval/sandbox bypass; fak routing, capacity, policy, hook, and loop gates still apply (default false: native Codex approvals + sandbox)")
+	skipPermissions := fs.Bool("skip-permissions", true, "legacy explicit opt-in for Codex's full approval/sandbox bypass (default true for managed launches); fak routing, capacity, policy, hook, and loop gates still apply")
+	nativePermissions := fs.Bool("native-permissions", false, "restore Codex's native approval prompts and sandbox; Codex subagents inherit this parent permission mode")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: fak-info refresh interval")
@@ -126,7 +127,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fakBin := tuiExecutable()
 	launch := codexLaunchOptions{
 		dryRun:          *dryRun,
-		skipPermissions: *skipPermissions,
+		skipPermissions: *skipPermissions && !*nativePermissions,
 		splitMode:       *splitMode,
 		splitWhere:      *splitWhere,
 		splitInterval:   *splitInterval,
@@ -172,9 +173,9 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak codex: dry-run - not launching")
 		fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
 		if launch.skipPermissions {
-			fmt.Fprintln(stderr, "  permissions = Codex full approval/sandbox bypass explicitly requested; fak gates remain active")
+			fmt.Fprintln(stderr, "  permissions = Codex approval/sandbox bypass (managed default); fak gates remain active; Codex subagents inherit this mode")
 		} else {
-			fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox (default); fak gates remain active")
+			fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox explicitly restored; Codex subagents inherit this mode; fak gates remain active")
 		}
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
