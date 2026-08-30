@@ -102,6 +102,16 @@ func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok
 		return qkK, blockQ6KBytes, true
 	case TensorIQ3_XXS:
 		return qkK, blockIQ3XXSBytes, true
+	case TensorIQ2_XXS:
+		return qkK, blockIQ2XXSBytes, true
+	case TensorIQ2_XS:
+		return qkK, blockIQ2XSBytes, true
+	case TensorIQ1_S:
+		return qkK, blockIQ1SBytes, true
+	case TensorIQ2_S:
+		return qkK, blockIQ2SBytes, true
+	case TensorIQ1_M:
+		return qkK, blockIQ1MBytes, true
 	case TensorIQ4_XS:
 		return qkK, blockIQ4XSBytes, true
 	case TensorQ2_0:
