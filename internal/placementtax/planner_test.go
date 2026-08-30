@@ -15,7 +15,7 @@ func TestPlannerStrategyVocabulary(t *testing.T) {
 		strategy(ParallelismData, 2),
 		strategy(ParallelismSequence, 2),
 		strategy(ParallelismContext, 2),
-		{Kind: ParallelismHybrid, TensorDegree: 2, PipelineStages: 2, ExpertDegree: 1, DataReplicas: 1, SequenceDegree: 1, ContextDegree: 1},
+		strategy(ParallelismHybrid, 2),
 	}
 	for _, got := range strategies {
 		if err := validateStrategy(got); err != nil {
@@ -728,6 +728,11 @@ func strategy(kind ParallelismKind, degree int) ParallelismStrategy {
 		s.SequenceDegree = degree
 	case ParallelismContext:
 		s.ContextDegree = degree
+	case ParallelismHybrid:
+		// The fixture's hybrid strategy spans two decomposition axes, matching
+		// validateStrategy's requirement that hybrid never aliases a single axis.
+		s.TensorDegree = degree
+		s.PipelineStages = degree
 	}
 	return s
 }
