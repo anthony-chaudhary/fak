@@ -35,6 +35,8 @@ func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) 
 		return &fakeLoopCommand{pid: 9777}
 	}
 	t.Setenv(perfrsiscore.LoopTurnInputEnv, filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json"))
+	usageLedger := filepath.Join(t.TempDir(), "performance-rsi-usage.jsonl")
+	t.Setenv(perfrsiscore.UsageLedgerEnv, usageLedger)
 
 	var stdout, stderr bytes.Buffer
 	code := runLoop(&stdout, &stderr, []string{
@@ -60,6 +62,13 @@ func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) 
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("loop-turn receipt missing %q:\n%s", want, stderr.String())
 		}
+	}
+	fold, err := perfrsiscore.FoldUsage(usageLedger)
+	if err != nil {
+		t.Fatalf("fold performance RSI usage: %v", err)
+	}
+	if len(fold.Weeks) != 1 || fold.Weeks[0].Invocations != 1 || fold.Weeks[0].Scored != 1 || fold.Weeks[0].InvocationOutcomes.Success != 1 {
+		t.Fatalf("performance RSI usage fold = %+v", fold)
 	}
 }
 
@@ -146,6 +155,8 @@ func TestLoopRunPreservesDispatchWhenPerformanceRSIInputUnavailable(t *testing.T
 		return &fakeLoopCommand{pid: 9777}
 	}
 	t.Setenv(perfrsiscore.LoopTurnInputEnv, "")
+	usageLedger := filepath.Join(t.TempDir(), "performance-rsi-usage.jsonl")
+	t.Setenv(perfrsiscore.UsageLedgerEnv, usageLedger)
 
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var stdout, stderr bytes.Buffer
@@ -187,6 +198,13 @@ func TestLoopRunPreservesDispatchWhenPerformanceRSIInputUnavailable(t *testing.T
 	receipt := loopPerformanceRSIReceipt(t, stderr.String())
 	if receipt.InvocationOutcomes.Total() != 1 || receipt.InvocationOutcomes.Refusal != 1 {
 		t.Fatalf("missing output invocation outcomes = %+v", receipt.InvocationOutcomes)
+	}
+	fold, err := perfrsiscore.FoldUsage(usageLedger)
+	if err != nil {
+		t.Fatalf("fold unavailable performance RSI usage: %v", err)
+	}
+	if len(fold.Weeks) != 1 || fold.Weeks[0].Invocations != 1 || fold.Weeks[0].Unavailable != 1 || fold.Weeks[0].InvocationOutcomes.Refusal != 1 {
+		t.Fatalf("unavailable performance RSI usage fold = %+v", fold)
 	}
 }
 

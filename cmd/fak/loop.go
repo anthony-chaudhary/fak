@@ -390,6 +390,9 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	if performanceRSIInput == "" {
 		performanceRSIReceipt = scoreAutomaticLoopPerformanceRSI(performanceRSIOutput, *runID, performanceRSIPrepErr)
 	}
+	if err := perfrsiscore.RecordLoopTurnUsage(performanceRSIReceipt); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: record performance-rsi usage: %v\n", err)
+	}
 	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
 
 	if *asJSON {
