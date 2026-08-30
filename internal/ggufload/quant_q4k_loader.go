@@ -604,6 +604,26 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				if err := add(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
+			case TensorIQ2_XXS:
+				if err := builder.AddResidentIQ2XXS(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ2_XS:
+				if err := builder.AddResidentIQ2XS(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ1_S:
+				if err := builder.AddResidentIQ1S(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ2_S:
+				if err := builder.AddResidentIQ2S(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorIQ1_M:
+				if err := builder.AddResidentIQ1M(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
 			case TensorIQ4_XS:
 				if err := builder.AddResidentIQ4XS(pt.name, pt.shape, pt.raw); err != nil {
 					return err

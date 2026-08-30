@@ -46,103 +46,134 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	payload := func(units, bytesPerUnit uint64) (uint64, error) {
+		if units > math.MaxUint64/bytesPerUnit {
+			return 0, fmt.Errorf("gguf: tensor %s type %s payload size overflows uint64", t.Name, t.Type)
+		}
+		return units * bytesPerUnit, nil
+	}
 	switch t.Type {
 	case TensorF32:
-		return elems * 4, nil
+		return payload(elems, 4)
 	case TensorF16, TensorBF16:
-		return elems * 2, nil
+		return payload(elems, 2)
 	case TensorQ4_0:
 		if elems%qk4 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q4_0 element count %d is not a multiple of %d", t.Name, elems, qk4)
 		}
-		return elems / qk4 * blockQ4_0Bytes, nil
+		return payload(elems/qk4, blockQ4_0Bytes)
 	case TensorQ4_1:
 		if elems%qk4 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q4_1 element count %d is not a multiple of %d", t.Name, elems, qk4)
 		}
-		return elems / qk4 * blockQ4_1Bytes, nil
+		return payload(elems/qk4, blockQ4_1Bytes)
 	case TensorQ5_0:
 		if elems%qk5 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q5_0 element count %d is not a multiple of %d", t.Name, elems, qk5)
 		}
-		return elems / qk5 * blockQ5_0Bytes, nil
+		return payload(elems/qk5, blockQ5_0Bytes)
 	case TensorQ5_1:
 		if elems%qk5 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q5_1 element count %d is not a multiple of %d", t.Name, elems, qk5)
 		}
-		return elems / qk5 * blockQ5_1Bytes, nil
+		return payload(elems/qk5, blockQ5_1Bytes)
 	case TensorQ8_0:
 		if elems%qk8_0 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q8_0 element count %d is not a multiple of %d", t.Name, elems, qk8_0)
 		}
-		return elems / qk8_0 * blockQ8_0Bytes, nil
+		return payload(elems/qk8_0, blockQ8_0Bytes)
 	case TensorQ2_K:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q2_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockQ2KBytes, nil
+		return payload(elems/qkK, blockQ2KBytes)
 	case TensorQ3_K:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q3_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockQ3KBytes, nil
+		return payload(elems/qkK, blockQ3KBytes)
 	case TensorQ4_K:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q4_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockQ4KBytes, nil
+		return payload(elems/qkK, blockQ4KBytes)
 	case TensorQ5_K:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q5_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockQ5KBytes, nil
+		return payload(elems/qkK, blockQ5KBytes)
 	case TensorQ6_K:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q6_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockQ6KBytes, nil
+		return payload(elems/qkK, blockQ6KBytes)
+	case TensorIQ2_XXS:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ2_XXS element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return payload(elems/qkK, blockIQ2XXSBytes)
+	case TensorIQ2_XS:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ2_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return payload(elems/qkK, blockIQ2XSBytes)
+	case TensorIQ1_S:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ1_S element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return payload(elems/qkK, blockIQ1SBytes)
+	case TensorIQ2_S:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ2_S element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return payload(elems/qkK, blockIQ2SBytes)
+	case TensorIQ1_M:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ1_M element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return payload(elems/qkK, blockIQ1MBytes)
 	case TensorMXFP4:
 		if elems%qkMXFP4 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s MXFP4 element count %d is not a multiple of %d", t.Name, elems, qkMXFP4)
 		}
-		return elems / qkMXFP4 * blockMXFP4Bytes, nil
+		return payload(elems/qkMXFP4, blockMXFP4Bytes)
 	case TensorIQ4_NL:
 		if elems%qkIQ4NL != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s IQ4_NL element count %d is not a multiple of %d", t.Name, elems, qkIQ4NL)
 		}
-		return elems / qkIQ4NL * blockIQ4NLBytes, nil
+		return payload(elems/qkIQ4NL, blockIQ4NLBytes)
 	case TensorIQ3_S:
 		if elems%qkIQ3S != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s IQ3_S element count %d is not a multiple of %d", t.Name, elems, qkIQ3S)
 		}
-		return elems / qkIQ3S * blockIQ3SBytes, nil
+		return payload(elems/qkIQ3S, blockIQ3SBytes)
 	case TensorIQ4_XS:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockIQ4XSBytes, nil
+		return payload(elems/qkK, blockIQ4XSBytes)
 	case TensorIQ3_XXS:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s IQ3_XXS element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
-		return elems / qkK * blockIQ3XXSBytes, nil
+		return payload(elems/qkK, blockIQ3XXSBytes)
 	case TensorQ2_0:
 		if elems%128 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q2_0 element count %d is not a multiple of 128", t.Name, elems)
 		}
-		return elems / 128 * blockQ2_0Bytes, nil
+		return payload(elems/128, blockQ2_0Bytes)
 	case TensorQ1_0:
 		if elems%128 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q1_0 element count %d is not a multiple of 128", t.Name, elems)
 		}
-		return elems / 128 * blockQ1_0Bytes, nil
+		return payload(elems/128, blockQ1_0Bytes)
 	case TensorHQQ4:
 		if elems%qkHQQ4 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s HQQ4 element count %d is not a multiple of %d", t.Name, elems, qkHQQ4)
 		}
-		return elems / qkHQQ4 * blockHQQ4Bytes, nil
+		return payload(elems/qkHQQ4, blockHQQ4Bytes)
 	default:
-		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
+		return 0, fmt.Errorf("gguf: tensor %s type %s does not have a simple payload", t.Name, t.Type)
 	}
 }
 
@@ -368,6 +399,31 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantQ6K(out, raw)
+	case TensorIQ2_XXS:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2XXSBytes, "IQ2_XXS"); err != nil {
+			return nil, err
+		}
+		dequantIQ2XXS(out, raw)
+	case TensorIQ2_XS:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2XSBytes, "IQ2_XS"); err != nil {
+			return nil, err
+		}
+		dequantIQ2XS(out, raw)
+	case TensorIQ1_S:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ1SBytes, "IQ1_S"); err != nil {
+			return nil, err
+		}
+		dequantIQ1S(out, raw)
+	case TensorIQ2_S:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2SBytes, "IQ2_S"); err != nil {
+			return nil, err
+		}
+		dequantIQ2S(out, raw)
+	case TensorIQ1_M:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ1MBytes, "IQ1_M"); err != nil {
+			return nil, err
+		}
+		dequantIQ1M(out, raw)
 	case TensorMXFP4:
 		if _, err := checkQuantPayload(t, elems, raw, qkMXFP4, blockMXFP4Bytes, "MXFP4"); err != nil {
 			return nil, err
@@ -483,6 +539,14 @@ func dequantHQQ4Scalar(out []float32, raw []byte) {
 		}
 	}
 }
+
+// IQ1/IQ2 decoding is owned by internal/model so GGUF load-time dequantization and the
+// resident QuantBuilder matvec path share one pinned, fak-native implementation.
+func dequantIQ2XXS(out []float32, raw []byte) { model.DequantIQ2XXS(out, raw) }
+func dequantIQ2XS(out []float32, raw []byte)  { model.DequantIQ2XS(out, raw) }
+func dequantIQ2S(out []float32, raw []byte)   { model.DequantIQ2S(out, raw) }
+func dequantIQ1S(out []float32, raw []byte)   { model.DequantIQ1S(out, raw) }
+func dequantIQ1M(out []float32, raw []byte)   { model.DequantIQ1M(out, raw) }
 
 func dequantQ4_0(out []float32, raw []byte) {
 	dequantBlocks(out, raw, qk4, blockQ4_0Bytes, dequantQ4_0Scalar)
