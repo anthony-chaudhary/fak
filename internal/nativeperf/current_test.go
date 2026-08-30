@@ -132,6 +132,7 @@ func TestRenderCurrentMarkdownIsDeterministicAndExplicit(t *testing.T) {
 		"active-native-lane-collision",
 		"55.73 GiB startup",
 		"cuda-cache-correctness",
+		"on `A100-SXM4-40GB`",
 		"36 GiB laptop placement",
 		"Divide-and-conquer execution",
 		"mac.m1-streamed-q4k-no-copy",
