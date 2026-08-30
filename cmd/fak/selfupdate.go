@@ -41,6 +41,12 @@ func cmdSelfUpdate(argv []string) {
 	fs := flag.NewFlagSet("self-update", flag.ExitOnError)
 	verbFlagUsage(fs, "self-update") // #2232: overview verb -> deep help above the flag dump
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
+	manifestURL := fs.String("manifest-url", "", "opt in to signed conditional update selection from this HTTPS endpoint")
+	manifestID := fs.String("manifest-id", "fak-stable", "expected signed manifest identity")
+	manifestStatePath := fs.String("manifest-cache", defaultSelfUpdateManifestStatePath(), "authenticated manifest cache path")
+	manifestChannel := fs.String("manifest-channel", "stable", "signed manifest channel identity")
+	manifestCohort := fs.String("manifest-cohort", "default", "signed manifest cohort identity")
+	offline := fs.Bool("offline", false, "use only a valid authenticated manifest cache; perform no manifest HTTP request")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	jsonMode := fs.Bool("json", false, "emit one versioned JSON receipt")
 	handoffSession := fs.String("handoff-session", "", "after installation, launch the successor with this stable session identity")
@@ -71,6 +77,25 @@ func cmdSelfUpdate(argv []string) {
 	if repoRoot == "" {
 		fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
 		os.Exit(2)
+	}
+
+	// Conditional selection is intentionally before any git fetch/build/install. With no
+	// manifest URL configured this block is skipped, preserving the legacy path byte-for-byte.
+	if strings.TrimSpace(*manifestURL) != "" {
+		installed := selfUpdateInstalledIdentity(strings.TrimSpace(*target))
+		proceed, disposition, err := selfUpdateManifestBeforeFetch(context.Background(), selfUpdateManifestRequest{
+			URL: *manifestURL, ManifestID: *manifestID, CachePath: *manifestStatePath, Channel: *manifestChannel,
+			Cohort: *manifestCohort, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+			InstalledIdentity: installed, Offline: *offline, Force: *force,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: signed manifest refused:", err)
+			return
+		}
+		if !proceed {
+			fmt.Fprintln(os.Stderr, "self-update:", disposition)
+			return
+		}
 	}
 
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
@@ -158,6 +183,15 @@ func cmdSelfUpdate(argv []string) {
 	}
 
 	performSelfUpdate(repoRoot, headRev, target, companionPaths, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+}
+
+func selfUpdateInstalledIdentity(target string) string {
+	if target != "" && !sameBinary(target) {
+		if stamp, ok := stampOfBinary(target); ok && strings.TrimSpace(stamp.Revision) != "" {
+			return stamp.Revision
+		}
+	}
+	return binstamp.Self().Revision
 }
 
 // selfUpdateFetchOrigin refreshes the remote-tracking ref only for an update run. A fetch writes

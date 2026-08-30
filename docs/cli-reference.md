@@ -660,6 +660,17 @@ fak attest    --policy FILE [--probes FILE] [--json]        # compliance attesta
 fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
+fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
+`--manifest-url` opts into conditional selection before any git fetch, build, or install. The
+server returns a canonical JSON payload signed by the public Ed25519 key pinned in the binary.
+The signature is verified before schema, manifest ID, channel, cohort, OS, architecture,
+installed revision identity, expiry, disposition, target version/revision, or optional retry
+time is trusted. `no-update` and `cohort-hold` stop without changing the installed binary.
+Authenticated envelopes and ETags are cached; a `304` or `--offline` may reuse only an
+unexpired identity-matched cache and never extends signed expiry. `429`/`503` Retry-After is
+bounded to 24 hours and cached. `--force` contacts the server despite cache freshness/backoff,
+but never bypasses signature, identity, or expiry checks. Without `--manifest-url`, behavior
+is unchanged.
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
