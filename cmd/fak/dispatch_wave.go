@@ -224,7 +224,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	preflightResult, preflightErr := dispatchWaveDependencyRetry(3*dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
+	preflightResult, preflightErr := dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
 		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
 		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, err
 	})
