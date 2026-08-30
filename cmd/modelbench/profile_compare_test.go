@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,58 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
+
+func TestProfileWelchSignificanceWitnesses(t *testing.T) {
+	t.Run("equal distributions hold", func(t *testing.T) {
+		got := compareProfiles([]float64{99, 100, 101}, []float64{99, 100, 101}).WelchSignificance
+		if got.Verdict != "HOLD" || got.Direction != "none" || got.PValue != 1 {
+			t.Fatalf("Welch significance = %+v, want HOLD/not significant", got)
+		}
+	})
+
+	t.Run("clear speedup is significant in the correct direction", func(t *testing.T) {
+		control := []float64{90, 100, 110}
+		candidate := []float64{60, 70, 80}
+		comparison := compareProfiles(control, candidate)
+		got := comparison.WelchSignificance
+		wantP := oracleWelchTwoSidedP(t, control, candidate)
+		if comparison.Verdict != "KEEP" || got.Verdict != "SIGNIFICANT" || got.Direction != "candidate-faster" ||
+			got.Alpha != nativeProfileWelchAlpha || math.Abs(got.PValue-wantP) > 1e-10 {
+			t.Fatalf("Welch significance = %+v, want significant candidate-faster with p=%g", got, wantP)
+		}
+	})
+
+	t.Run("high variance median gain remains advisory", func(t *testing.T) {
+		got := compareProfiles([]float64{100, 101, 300}, []float64{70, 80, 90})
+		if got.Verdict != "KEEP" {
+			t.Fatalf("authoritative comparison verdict = %q, want unchanged KEEP", got.Verdict)
+		}
+		if got.WelchSignificance.Verdict != "HOLD" || got.WelchSignificance.Direction != "none" || got.WelchSignificance.PValue <= nativeProfileWelchAlpha {
+			t.Fatalf("Welch significance = %+v, want HOLD/not significant", got.WelchSignificance)
+		}
+	})
+
+	t.Run("insufficient samples fail closed", func(t *testing.T) {
+		got := welchSignificance([]float64{100}, []float64{80})
+		if got.Verdict != "HOLD" || got.Direction != "none" || !strings.Contains(got.Reason, "at least two") {
+			t.Fatalf("Welch significance = %+v, want safe insufficient-sample HOLD", got)
+		}
+	})
+
+	t.Run("invalid samples fail closed", func(t *testing.T) {
+		got := welchSignificance([]float64{99, math.NaN(), 101}, []float64{70, 80, 90})
+		if got.Verdict != "HOLD" || got.Direction != "none" || got.PValue != 1 || !strings.Contains(got.Reason, "finite and positive") {
+			t.Fatalf("Welch significance = %+v, want safe invalid-sample HOLD", got)
+		}
+	})
+
+	t.Run("degenerate variance fails closed", func(t *testing.T) {
+		got := welchSignificance([]float64{100, 100, 100}, []float64{80, 80, 80})
+		if got.Verdict != "HOLD" || got.Direction != "none" || !strings.Contains(got.Reason, "variance") {
+			t.Fatalf("Welch significance = %+v, want safe degenerate-variance HOLD", got)
+		}
+	})
+}
 
 func TestCompareProfilesUsesControlMedianForEveryCandidate(t *testing.T) {
 	// Paired-row comparison would admit the 105 ms candidate against its 110 ms
@@ -371,6 +424,54 @@ func TestNativeProfileCampaignRequiresExactCardinality(t *testing.T) {
 	if got.Verdict != "HOLD" || !strings.Contains(got.Reason, "exactly 6") {
 		t.Fatalf("five-pair campaign = %+v, want cardinality HOLD", got)
 	}
+}
+
+// oracleWelchTwoSidedP intentionally uses direct numerical integration of the
+// Student-t density rather than the implementation's incomplete-beta path.
+func oracleWelchTwoSidedP(t *testing.T, control, candidate []float64) float64 {
+	t.Helper()
+	meanVariance := func(xs []float64) (float64, float64) {
+		var sum float64
+		for _, x := range xs {
+			sum += x
+		}
+		mean := sum / float64(len(xs))
+		var squared float64
+		for _, x := range xs {
+			delta := x - mean
+			squared += delta * delta
+		}
+		return mean, squared / float64(len(xs)-1)
+	}
+	controlMean, controlVariance := meanVariance(control)
+	candidateMean, candidateVariance := meanVariance(candidate)
+	controlTerm := controlVariance / float64(len(control))
+	candidateMeanVariance := candidateVariance / float64(len(candidate))
+	tStatistic := math.Abs(controlMean-candidateMean) / math.Sqrt(controlTerm+candidateMeanVariance)
+	degreesFreedom := (controlTerm + candidateMeanVariance) * (controlTerm + candidateMeanVariance) /
+		(controlTerm*controlTerm/float64(len(control)-1) + candidateMeanVariance*candidateMeanVariance/float64(len(candidate)-1))
+
+	logCoefficient, _ := math.Lgamma((degreesFreedom + 1) / 2)
+	denominator, _ := math.Lgamma(degreesFreedom / 2)
+	coefficient := math.Exp(logCoefficient-denominator) / math.Sqrt(degreesFreedom*math.Pi)
+	density := func(x float64) float64 {
+		return coefficient * math.Pow(1+x*x/degreesFreedom, -(degreesFreedom+1)/2)
+	}
+	const intervals = 20000 // even, deterministic, and ample for this bounded fixture.
+	width := tStatistic / intervals
+	sum := density(0) + density(tStatistic)
+	for i := 1; i < intervals; i++ {
+		weight := 2.0
+		if i%2 == 1 {
+			weight = 4
+		}
+		sum += weight * density(float64(i)*width)
+	}
+	p := 1 - 2*sum*width/3
+	if p < 0 || p > 1 || math.IsNaN(p) {
+		t.Fatalf("oracle produced invalid p-value %g", p)
+	}
+	return p
 }
 
 func writeComparisonCampaign(t *testing.T, control, candidate []float64) []string {

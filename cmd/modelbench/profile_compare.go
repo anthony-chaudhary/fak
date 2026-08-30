@@ -24,6 +24,7 @@ const (
 	nativeProfileCampaignRuns     = 6
 	nativeProfileArmRuns          = 3
 	nativeProfileMinimumGain      = 15.0
+	nativeProfileWelchAlpha       = 0.05
 )
 
 type profileComparisonPhase string
@@ -72,25 +73,36 @@ func (p profileComparisonPhase) valid() bool {
 }
 
 type profileComparison struct {
-	Schema                           string                 `json:"schema"`
-	Verdict                          string                 `json:"verdict"`
-	Reason                           string                 `json:"reason"`
-	Phase                            profileComparisonPhase `json:"phase"`
-	EnvelopeID                       string                 `json:"envelope_id,omitempty"`
-	Selector                         string                 `json:"selector"`
-	ControlSelector                  string                 `json:"control_selector"`
-	CandidateSelector                string                 `json:"candidate_selector"`
-	ControlForwardPath               string                 `json:"control_forward_path,omitempty"`
-	CandidateForwardPath             string                 `json:"candidate_forward_path,omitempty"`
-	ControlPrefillMilliseconds       []float64              `json:"control_prefill_milliseconds,omitempty"`
-	CandidatePrefillMilliseconds     []float64              `json:"candidate_prefill_milliseconds,omitempty"`
-	ControlPhaseMilliseconds         []float64              `json:"control_phase_milliseconds,omitempty"`
-	CandidatePhaseMilliseconds       []float64              `json:"candidate_phase_milliseconds,omitempty"`
-	ControlMedianMilliseconds        float64                `json:"control_median_milliseconds,omitempty"`
-	CandidateMedianMilliseconds      float64                `json:"candidate_median_milliseconds,omitempty"`
-	MedianImprovementPercent         float64                `json:"median_improvement_percent,omitempty"`
-	MinimumMedianImprovementPercent  float64                `json:"minimum_median_improvement_percent"`
-	EveryCandidateBelowControlMedian bool                   `json:"every_candidate_below_control_median"`
+	Schema                           string                   `json:"schema"`
+	Verdict                          string                   `json:"verdict"`
+	Reason                           string                   `json:"reason"`
+	Phase                            profileComparisonPhase   `json:"phase"`
+	EnvelopeID                       string                   `json:"envelope_id,omitempty"`
+	Selector                         string                   `json:"selector"`
+	ControlSelector                  string                   `json:"control_selector"`
+	CandidateSelector                string                   `json:"candidate_selector"`
+	ControlForwardPath               string                   `json:"control_forward_path,omitempty"`
+	CandidateForwardPath             string                   `json:"candidate_forward_path,omitempty"`
+	ControlPrefillMilliseconds       []float64                `json:"control_prefill_milliseconds,omitempty"`
+	CandidatePrefillMilliseconds     []float64                `json:"candidate_prefill_milliseconds,omitempty"`
+	ControlPhaseMilliseconds         []float64                `json:"control_phase_milliseconds,omitempty"`
+	CandidatePhaseMilliseconds       []float64                `json:"candidate_phase_milliseconds,omitempty"`
+	ControlMedianMilliseconds        float64                  `json:"control_median_milliseconds,omitempty"`
+	CandidateMedianMilliseconds      float64                  `json:"candidate_median_milliseconds,omitempty"`
+	MedianImprovementPercent         float64                  `json:"median_improvement_percent,omitempty"`
+	WelchSignificance                profileWelchSignificance `json:"welch_significance"`
+	MinimumMedianImprovementPercent  float64                  `json:"minimum_median_improvement_percent"`
+	EveryCandidateBelowControlMedian bool                     `json:"every_candidate_below_control_median"`
+}
+
+// profileWelchSignificance is advisory. The quality, operating-envelope, and
+// median acceptance gates remain the only inputs to profileComparison.Verdict.
+type profileWelchSignificance struct {
+	Verdict   string  `json:"verdict"`
+	Direction string  `json:"direction"`
+	PValue    float64 `json:"p_value"`
+	Alpha     float64 `json:"alpha"`
+	Reason    string  `json:"reason"`
 }
 
 type nativeProfileComparisonInput struct {
@@ -122,7 +134,18 @@ func newProfileComparisonForPhaseAxis(phase profileComparisonPhase, axis profile
 		Selector:                        selector,
 		ControlSelector:                 control,
 		CandidateSelector:               candidate,
+		WelchSignificance:               newProfileWelchSignificance(),
 		MinimumMedianImprovementPercent: nativeProfileMinimumGain,
+	}
+}
+
+func newProfileWelchSignificance() profileWelchSignificance {
+	return profileWelchSignificance{
+		Verdict:   "HOLD",
+		Direction: "none",
+		PValue:    1,
+		Alpha:     nativeProfileWelchAlpha,
+		Reason:    "not evaluated",
 	}
 }
 
@@ -401,6 +424,9 @@ func compareProfilePhase(phase profileComparisonPhase, control, candidate []floa
 	r.ControlMedianMilliseconds = median(control)
 	r.CandidateMedianMilliseconds = median(candidate)
 	r.MedianImprovementPercent = (r.ControlMedianMilliseconds - r.CandidateMedianMilliseconds) / r.ControlMedianMilliseconds * 100
+	// Significance is deliberately reported but never consulted below: quality,
+	// envelope eligibility, and the existing median gates stay authoritative.
+	r.WelchSignificance = welchSignificance(control, candidate)
 	r.EveryCandidateBelowControlMedian = true
 	for _, duration := range candidate {
 		if duration >= r.ControlMedianMilliseconds {
@@ -420,6 +446,177 @@ func compareProfilePhase(phase profileComparisonPhase, control, candidate []floa
 	r.Verdict = "KEEP"
 	r.Reason = "acceptance gate passed"
 	return r
+}
+
+func welchSignificance(control, candidate []float64) profileWelchSignificance {
+	r := newProfileWelchSignificance()
+	if len(control) < 2 || len(candidate) < 2 {
+		r.Reason = "Welch significance requires at least two samples per arm"
+		return r
+	}
+	controlMean, controlVariance, ok := sampleMeanVariance(control)
+	if !ok {
+		r.Reason = "control samples must be finite and positive"
+		return r
+	}
+	candidateMean, candidateVariance, ok := sampleMeanVariance(candidate)
+	if !ok {
+		r.Reason = "candidate samples must be finite and positive"
+		return r
+	}
+	// Welch's degrees-of-freedom estimate is undefined when either arm has no
+	// observed variance. Treat that as absent evidence rather than significance.
+	if controlVariance == 0 || candidateVariance == 0 {
+		r.Reason = "Welch significance requires non-degenerate variance in both arms"
+		return r
+	}
+
+	controlTerm := controlVariance / float64(len(control))
+	candidateMeanVariance := candidateVariance / float64(len(candidate))
+	standardErrorSquared := controlTerm + candidateMeanVariance
+	degreesFreedomDenominator := controlTerm*controlTerm/float64(len(control)-1) +
+		candidateMeanVariance*candidateMeanVariance/float64(len(candidate)-1)
+	if !positiveFinite(standardErrorSquared) || !positiveFinite(degreesFreedomDenominator) {
+		r.Reason = "Welch significance could not establish finite variance"
+		return r
+	}
+	degreesFreedom := standardErrorSquared * standardErrorSquared / degreesFreedomDenominator
+	tStatistic := math.Abs(controlMean-candidateMean) / math.Sqrt(standardErrorSquared)
+	if math.IsNaN(tStatistic) || math.IsInf(tStatistic, 0) || !positiveFinite(degreesFreedom) {
+		r.Reason = "Welch significance could not establish a finite statistic"
+		return r
+	}
+	p, ok := studentTTwoSidedP(tStatistic, degreesFreedom)
+	if !ok {
+		r.Reason = "Welch significance could not establish a finite p-value"
+		return r
+	}
+	r.PValue = p
+	if p >= nativeProfileWelchAlpha {
+		r.Reason = "Welch difference is not statistically significant"
+		return r
+	}
+	if candidateMean < controlMean {
+		r.Direction = "candidate-faster"
+	} else if candidateMean > controlMean {
+		r.Direction = "candidate-slower"
+	} else {
+		r.Reason = "Welch significance has no directional mean difference"
+		return r
+	}
+	r.Verdict = "SIGNIFICANT"
+	r.Reason = "Welch difference is statistically significant"
+	return r
+}
+
+func sampleMeanVariance(xs []float64) (mean, variance float64, ok bool) {
+	var sumSquares float64
+	for i, x := range xs {
+		if !positiveFinite(x) {
+			return 0, 0, false
+		}
+		delta := x - mean
+		mean += delta / float64(i+1)
+		sumSquares += delta * (x - mean)
+	}
+	variance = sumSquares / float64(len(xs)-1)
+	if variance < 0 || math.IsNaN(variance) || math.IsInf(variance, 0) {
+		return 0, 0, false
+	}
+	return mean, variance, true
+}
+
+// studentTTwoSidedP evaluates the two-sided Student-t tail using the regularized
+// incomplete beta identity. Its boolean result lets callers fail closed if the
+// bounded continued fraction cannot produce finite evidence.
+func studentTTwoSidedP(tStatistic, degreesFreedom float64) (float64, bool) {
+	if tStatistic < 0 || math.IsNaN(tStatistic) || math.IsInf(tStatistic, 0) || !positiveFinite(degreesFreedom) {
+		return 0, false
+	}
+	if tStatistic == 0 {
+		return 1, true
+	}
+	x := degreesFreedom / (degreesFreedom + tStatistic*tStatistic)
+	p, ok := regularizedIncompleteBeta(x, degreesFreedom/2, 0.5)
+	if !ok || p < 0 || p > 1 || math.IsNaN(p) || math.IsInf(p, 0) {
+		return 0, false
+	}
+	return p, true
+}
+
+func regularizedIncompleteBeta(x, a, b float64) (float64, bool) {
+	if x < 0 || x > 1 || !positiveFinite(a) || !positiveFinite(b) {
+		return 0, false
+	}
+	if x == 0 {
+		return 0, true
+	}
+	if x == 1 {
+		return 1, true
+	}
+	logGammaAB, _ := math.Lgamma(a + b)
+	logGammaA, _ := math.Lgamma(a)
+	logGammaB, _ := math.Lgamma(b)
+	factor := math.Exp(logGammaAB - logGammaA - logGammaB + a*math.Log(x) + b*math.Log1p(-x))
+	if math.IsNaN(factor) || math.IsInf(factor, 0) {
+		return 0, false
+	}
+	if x < (a+1)/(a+b+2) {
+		fraction, ok := incompleteBetaContinuedFraction(a, b, x)
+		return factor * fraction / a, ok
+	}
+	fraction, ok := incompleteBetaContinuedFraction(b, a, 1-x)
+	return 1 - factor*fraction/b, ok
+}
+
+func incompleteBetaContinuedFraction(a, b, x float64) (float64, bool) {
+	const (
+		maxIterations = 200
+		epsilon       = 3e-14
+		minimum       = 1e-300
+	)
+	qab := a + b
+	qap := a + 1
+	qam := a - 1
+	c := 1.0
+	d := 1 - qab*x/qap
+	if math.Abs(d) < minimum {
+		d = minimum
+	}
+	d = 1 / d
+	h := d
+	for iteration := 1; iteration <= maxIterations; iteration++ {
+		m := float64(iteration)
+		m2 := 2 * m
+		aa := m * (b - m) * x / ((qam + m2) * (a + m2))
+		d = 1 + aa*d
+		if math.Abs(d) < minimum {
+			d = minimum
+		}
+		c = 1 + aa/c
+		if math.Abs(c) < minimum {
+			c = minimum
+		}
+		d = 1 / d
+		h *= d * c
+
+		aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+		d = 1 + aa*d
+		if math.Abs(d) < minimum {
+			d = minimum
+		}
+		c = 1 + aa/c
+		if math.Abs(c) < minimum {
+			c = minimum
+		}
+		d = 1 / d
+		delta := d * c
+		h *= delta
+		if math.Abs(delta-1) < epsilon {
+			return h, !math.IsNaN(h) && !math.IsInf(h, 0)
+		}
+	}
+	return 0, false
 }
 
 func positiveFinite(value float64) bool {
