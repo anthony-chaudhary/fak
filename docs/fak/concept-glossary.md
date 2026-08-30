@@ -2571,3 +2571,17 @@ kvSpanEvict is the planner-scoped enablement bit set only when FAK_INKERNEL_KVMM
 PerformanceRSIDebt is the perfrsiscore report metric counting canonical performance dimensions that remain BEHIND or UNKNOWN. Build derives it as Behind plus Unknown, uses zero as the clean condition, and passes the already-computed value to human and Markdown renderers.
 
 **Distinct from:** Use PerformanceRSIDebt for the unresolved-dimension COUNT computed by the performance-RSI scorecard. Unlike performance-rsi-scorecard, it is the metric emitted by that evaluator; unlike the generic scorecard renderer, it is computed before presentation and RenderHuman or RenderMarkdown only project it.
+
+
+### validateCandidate (study-adjacency candidate receipt validator)
+
+internal/studyadjacency.validateCandidate validates one recorded study candidate: required identity and rationale, a vLLM mechanism link or frontier-changing contrast, nonempty repository links, declared repositories, duplicate-link rejection, and inclusion of the owning study member.
+
+**Distinct from:** Use this package-local validateCandidate for STUDY-ADJACENCY receipt and repository-link integrity. Unlike issuecontract ReviewCandidate, it does not score dispatchability; unlike placementtax validateCandidate, it does not judge a native execution plan against topology, SLO, or provenance constraints.
+
+
+### validateCandidate (placement-tax plan feasibility validator)
+
+internal/placementtax.validateCandidate validates one PlanCandidate against its topology contract: nonblank identity and rationales, fak-native engine ownership, valid parallelism strategy, nonempty hierarchy, measured or estimated provenance, SLO validity, and consistent cross-domain provenance.
+
+**Distinct from:** Use this package-local validateCandidate for PLACEMENT-TAX plan feasibility before scoring alternatives. Unlike studyadjacency validateCandidate, it does not validate study receipts or repository ownership; unlike placementCandidates, it validates one fully formed native plan rather than building an ungraded model pool.

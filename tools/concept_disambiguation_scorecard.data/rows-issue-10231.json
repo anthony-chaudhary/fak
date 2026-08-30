@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "issue10231-studyadjacency-validate-candidate",
+      "canonical": "validateCandidate (study-adjacency candidate receipt validator)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/studyadjacency.validateCandidate validates one recorded study candidate: required identity and rationale, a vLLM mechanism link or frontier-changing contrast, nonempty repository links, declared repositories, duplicate-link rejection, and inclusion of the owning study member.",
+      "distinction": "Use this package-local validateCandidate for STUDY-ADJACENCY receipt and repository-link integrity. Unlike issuecontract ReviewCandidate, it does not score dispatchability; unlike placementtax validateCandidate, it does not judge a native execution plan against topology, SLO, or provenance constraints.",
+      "distinct_from": [
+        "x-plan-reviewcandidate",
+        "issue10231-placementtax-validate-candidate"
+      ],
+      "aliases": [],
+      "grounding": "validateCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10231-placementtax-validate-candidate",
+      "canonical": "validateCandidate (placement-tax plan feasibility validator)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/placementtax.validateCandidate validates one PlanCandidate against its topology contract: nonblank identity and rationales, fak-native engine ownership, valid parallelism strategy, nonempty hierarchy, measured or estimated provenance, SLO validity, and consistent cross-domain provenance.",
+      "distinction": "Use this package-local validateCandidate for PLACEMENT-TAX plan feasibility before scoring alternatives. Unlike studyadjacency validateCandidate, it does not validate study receipts or repository ownership; unlike placementCandidates, it validates one fully formed native plan rather than building an ungraded model pool.",
+      "distinct_from": [
+        "issue10231-studyadjacency-validate-candidate",
+        "c729-placement-candidates"
+      ],
+      "aliases": [],
+      "grounding": "validateCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
