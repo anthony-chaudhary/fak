@@ -1,3 +1,8 @@
+---
+title: "runtime - runtime:model-serving identity"
+description: "The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn. Scope: runtime:model-serving. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # runtime
 
 **Meaning:** The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn.

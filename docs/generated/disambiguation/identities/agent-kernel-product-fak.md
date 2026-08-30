@@ -1,3 +1,8 @@
+---
+title: "agent kernel - product:fak identity"
+description: "The fak management boundary that governs model traffic, tool effects, context, and recovery. Scope: product:fak. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # agent kernel
 
 **Meaning:** The fak management boundary that governs model traffic, tool effects, context, and recovery.

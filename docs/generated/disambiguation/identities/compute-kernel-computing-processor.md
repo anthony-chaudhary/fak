@@ -1,3 +1,8 @@
+---
+title: "compute kernel - computing:processor identity"
+description: "An arithmetic routine executed by a processor. Scope: computing:processor. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # compute kernel
 
 **Meaning:** An arithmetic routine executed by a processor.

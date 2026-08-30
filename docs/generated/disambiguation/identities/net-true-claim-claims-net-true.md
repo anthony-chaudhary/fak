@@ -1,3 +1,8 @@
+---
+title: "net-true claim - claims:net-true identity"
+description: "A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status. Scope: claims:net-true. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # net-true claim
 
 **Meaning:** A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.

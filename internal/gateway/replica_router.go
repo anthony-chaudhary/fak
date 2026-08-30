@@ -327,10 +327,6 @@ func (r *ReplicaRouter) reserve(prefix []string, skip map[string]struct{}) (rese
 	return r.reserveWithDecode(prefix, skip, decodeFootprintRouteRequest{})
 }
 
-func (r *ReplicaRouter) reserveOnEngine(prefix []string, skip map[string]struct{}, engine EngineKind) (reservedPlannerReplica, error) {
-	return r.reserveOnEngineWithDecode(prefix, skip, engine, decodeFootprintRouteRequest{})
-}
-
 func (r *ReplicaRouter) reserveWithDecode(prefix []string, skip map[string]struct{}, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
 	return r.reserveOnEngineWithDecode(prefix, skip, "", req)
 }
@@ -490,15 +486,6 @@ func (r *ReplicaRouter) roundRobinCandidate(candidates map[string]int) (string, 
 		}
 	}
 	return "", false
-}
-
-// pickForMessages derives the request's shared prefix from its messages (only when a
-// cache-aware policy is attached — otherwise it is wasted work) and picks a replica.
-func (r *ReplicaRouter) pickForMessages(messages []agent.Message) (PlannerReplica, error) {
-	if r != nil && r.policy != nil {
-		return r.pick(prefixSegments(messages))
-	}
-	return r.pick(nil)
 }
 
 func (r *ReplicaRouter) pick(prefix []string) (PlannerReplica, error) {

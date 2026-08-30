@@ -166,6 +166,10 @@ type Arm struct {
 	ID           string   `json:"id"`
 	Kind         ArmKind  `json:"kind"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	// GPUIndex optionally assigns this arm one host-local CUDA device. A pointer
+	// keeps device zero distinct from an omitted assignment and lets legacy
+	// manifests retain their byte shape and identity.
+	GPUIndex *int `json:"gpu_index,omitempty"`
 	// PromptHash pins the system/skill prompt this arm installs. It is
 	// identity-bearing: a changed prompt is a changed experiment.
 	PromptHash string `json:"prompt_hash"`
@@ -230,6 +234,12 @@ const (
 	// ReasonDuplicateTrial — a ledger contains the same manifest/arm/task/trial
 	// key more than once, so resume or reporting would silently double count it.
 	ReasonDuplicateTrial = "DUPLICATE_TRIAL"
+	// ReasonGPUAssignmentUnknown — concurrent execution was requested without a
+	// usable explicit GPU assignment for every arm.
+	ReasonGPUAssignmentUnknown = "GPU_ASSIGNMENT_UNKNOWN"
+	// ReasonGPUAssignmentDuplicate — two arms claim the same host-local GPU, so
+	// launching them together could silently oversubscribe one device.
+	ReasonGPUAssignmentDuplicate = "GPU_ASSIGNMENT_DUPLICATE"
 )
 
 // Validate refuses a manifest that is not fully pinned. Every check here exists
@@ -362,6 +372,7 @@ func (m *Manifest) validateArms() error {
 		sources[s.Name] = true
 	}
 	seen := map[string]bool{}
+	devices := map[int]string{}
 	baselines := 0
 	for i, a := range m.Arms {
 		if strings.TrimSpace(a.ID) == "" {
@@ -371,6 +382,15 @@ func (m *Manifest) validateArms() error {
 			return refuse(ReasonManifestInvalid, "arms[%d].id %q is declared twice", i, a.ID)
 		}
 		seen[a.ID] = true
+		if a.GPUIndex != nil {
+			if *a.GPUIndex < 0 {
+				return refuse(ReasonGPUAssignmentUnknown, "arms[%d] (%s).gpu_index is %d, want a host-local index >= 0", i, a.ID, *a.GPUIndex)
+			}
+			if owner, exists := devices[*a.GPUIndex]; exists {
+				return refuse(ReasonGPUAssignmentDuplicate, "arms[%d] (%s).gpu_index %d is already assigned to arm %s", i, a.ID, *a.GPUIndex, owner)
+			}
+			devices[*a.GPUIndex] = a.ID
+		}
 		if !validSHA256(a.PromptHash) {
 			return refuse(ReasonManifestInvalid, "arms[%d] (%s).prompt_hash %q is not sha256:<64 lowercase hex>", i, a.ID, a.PromptHash)
 		}
@@ -492,6 +512,11 @@ func (m *Manifest) identityFields() []ComparabilityField {
 		add(prefix+"kind", string(a.Kind))
 		add(prefix+"prompt_hash", a.PromptHash)
 		add(prefix+"source_name", a.SourceName)
+		// Omitted assignments are deliberately absent from the canonical stream,
+		// preserving every manifest/1 identity published before gpu_index existed.
+		if a.GPUIndex != nil {
+			add(prefix+"gpu_index", strconv.Itoa(*a.GPUIndex))
+		}
 		caps := append([]string(nil), a.Capabilities...)
 		sort.Strings(caps)
 		add(prefix+"capabilities", strings.Join(caps, ","))

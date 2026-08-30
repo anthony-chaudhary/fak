@@ -1,3 +1,8 @@
+---
+title: "model-mediated check - policy:model-mediated identity"
+description: "A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold. Scope: policy:model-mediated. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # model-mediated check
 
 **Meaning:** A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.

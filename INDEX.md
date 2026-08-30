@@ -362,6 +362,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Agents' Last Exam study: official artifact-scored work as a FAK benchmark lane (2026-08-20; inventory refreshed 2026-08-25)](docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md) -- exhaustive pinned tree/forge/history inventory at upstream 0b6465b; the official raw-vs-fak spine remains #8223 and ALE trajectory evidence remains with #6629.
 - [Scoped guard-disable dogfood — 2026-08-20](docs/notes/GUARD-DISABLE-DOGFOOD-2026-08-20.md) -- auto-indexed dated note.
 - [Codex `exec_command` guard recovery (2026-08-19)](docs/notes/2026-08-19-guard-codex-exec-command-default-deny.md) -- auto-indexed dated note.
+- [Meta-work from 2,000 recent operator sessions](docs/notes/META-WORK-SESSION-CLUSTERS-2026-08-30.md) — privacy-safe demand map and ranked portfolio of recurring loops and event-triggered automation.
 - [Harness-independent server builder research decision — 2026-08-19](docs/notes/HARNESS-INDEPENDENT-SERVER-BUILDER-RESEARCH-2026-08-19.md) -- auto-indexed dated note.
 - [Harness-bundled model serving research decision — 2026-08-19](docs/notes/HARNESS-BUNDLED-MODEL-SERVING-RESEARCH-2026-08-19.md) -- auto-indexed dated note.
 - [Harness model-set dependencies and compatibility resolution research](docs/notes/HARNESS-MODEL-SET-DEPENDENCIES-RESEARCH-2026-08-19.md) -- auto-indexed dated note.

@@ -1,3 +1,8 @@
+---
+title: "compute fleet - dispatch:fleet identity"
+description: "A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core. Scope: dispatch:fleet. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # compute fleet
 
 **Meaning:** A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core.

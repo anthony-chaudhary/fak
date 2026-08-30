@@ -1,3 +1,8 @@
+---
+title: "simulated evidence - claims:simulated identity"
+description: "Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement. Scope: claims:simulated. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # simulated evidence
 
 **Meaning:** Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.

@@ -1,7 +1,9 @@
 package nativeperf
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -120,6 +122,26 @@ func TestValidateReceiptSchemaCompatibilityAndAggregateAmbient(t *testing.T) {
 	if err := ValidateReceipt(ActiveGraph(), legacy); err != nil {
 		t.Fatalf("legacy v1: %v", err)
 	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyFields map[string]json.RawMessage
+	if err := json.Unmarshal(legacyJSON, &legacyFields); err != nil {
+		t.Fatal(err)
+	}
+	delete(legacyFields, "comparison")
+	legacyJSON, err = json.Marshal(legacyFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preComparisonV1 ExperimentReceipt
+	if err := json.Unmarshal(legacyJSON, &preComparisonV1); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReceipt(ActiveGraph(), preComparisonV1); err != nil {
+		t.Fatalf("pre-comparison v1: %v", err)
+	}
 	legacy.SystemBaselines = []systembaseline.Report{baselineAttestation(systembaseline.VerdictClean, true)}
 	if err := ValidateReceipt(ActiveGraph(), legacy); err == nil || !strings.Contains(err.Error(), "v1 receipts cannot carry") {
 		t.Fatalf("legacy ambient err=%v", err)
@@ -228,6 +250,15 @@ func TestCompareReceiptsDeterministicAndRejectsDrift(t *testing.T) {
 	if first != second || math.Abs(first.DeltaTokensPerS-1) > 1e-12 {
 		t.Fatalf("comparison drift: %+v %+v", first, second)
 	}
+	if first.CriterionDigest != b.Comparison.CriterionDigest {
+		t.Fatalf("comparison digest=%q, want %q", first.CriterionDigest, b.Comparison.CriterionDigest)
+	}
+	originalComparison := c.Comparison
+	c.Comparison.CriterionDigest = strings.Repeat("f", 64)
+	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "comparison identity") {
+		t.Fatalf("comparison identity drift err=%v", err)
+	}
+	c.Comparison = originalComparison
 	c.Controls.Batch = 2
 	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "undeclared control axis drifted") {
 		t.Fatalf("drift err=%v", err)
@@ -236,5 +267,60 @@ func TestCompareReceiptsDeterministicAndRejectsDrift(t *testing.T) {
 	c.Execution.FallbackCount = 1
 	if _, err := CompareReceipts(ActiveGraph(), b, c); err == nil || !strings.Contains(err.Error(), "fallback count must be zero") {
 		t.Fatalf("fallback drift err=%v", err)
+	}
+}
+
+func TestDecodePortableReceiptBindsExactBytesAndArtifactSeparately(t *testing.T) {
+	r := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	r.Execution.Engine = "fak-native"
+	r.Execution.FallbackCount = 0
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodePortableReceipt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	if got.ReceiptSHA256 != wantDigest {
+		t.Fatalf("receipt digest=%q want %q", got.ReceiptSHA256, wantDigest)
+	}
+	if got.ModelArtifactSHA256 != r.ArtifactSHA256 || got.ModelArtifactSHA256 == got.ReceiptSHA256 {
+		t.Fatalf("artifact identities conflated: %+v", got)
+	}
+	tampered := append(append([]byte(nil), raw...), '\n')
+	tamperedGot, err := DecodePortableReceipt(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tamperedGot.ReceiptSHA256 == got.ReceiptSHA256 || tamperedGot.ModelArtifactSHA256 != got.ModelArtifactSHA256 {
+		t.Fatalf("exact-byte binding failed: original=%+v tampered=%+v", got, tamperedGot)
+	}
+}
+
+func TestDecodePortableReceiptRejectsInvalidStructureAndRuntimeFallback(t *testing.T) {
+	base := validReceipt(t, RoleCandidate, "cuda.q8_1-activation-quant")
+	base.Execution.Engine = "fak-native"
+	for _, tc := range []struct {
+		name string
+		edit func(*ExperimentReceipt)
+		want string
+	}{
+		{"structure", func(r *ExperimentReceipt) { r.Controls.Repetitions = 0 }, "controls contain invalid dimensions"},
+		{"comparator", func(r *ExperimentReceipt) { r.Execution.Engine = "llama.cpp" }, "fak-native"},
+		{"fallback", func(r *ExperimentReceipt) { r.Execution.FallbackCount = 1 }, "fallback count must be zero"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base
+			tc.edit(&r)
+			raw, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodePortableReceipt(raw); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want %q", err, tc.want)
+			}
+		})
 	}
 }

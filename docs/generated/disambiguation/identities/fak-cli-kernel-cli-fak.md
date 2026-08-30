@@ -1,3 +1,8 @@
+---
+title: "fak CLI kernel - cli:fak identity"
+description: "The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. Scope: cli:fak. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # fak CLI kernel
 
 **Meaning:** The fak command-line product surface, named as a contrast target for the package-scoped kernel entry.

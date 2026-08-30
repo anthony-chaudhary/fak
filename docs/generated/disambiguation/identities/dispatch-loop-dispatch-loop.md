@@ -1,3 +1,8 @@
+---
+title: "dispatch loop - dispatch:loop identity"
+description: "A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs. Scope: dispatch:loop. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # dispatch loop
 
 **Meaning:** A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs.

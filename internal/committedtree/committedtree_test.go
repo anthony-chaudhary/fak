@@ -207,6 +207,16 @@ func TestCommittedTreeSlowHelperProcess(t *testing.T) {
 func TestCommittedTreeProcessTreeHelper(t *testing.T) {
 	mode := os.Getenv("GO_WANT_COMMITTEDTREE_PROCESS_HELPER")
 	if mode == "" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCommittedTreeProcessTreeHelper$")
+		cmd.Env = append(os.Environ(), "GO_WANT_COMMITTEDTREE_PROCESS_HELPER=ls-cat-block")
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("ls-tree helper failed: %v", err)
+		}
+		want := []byte("100644 blob " + strings.Repeat("a", 40) + "\tfile.bin\x00")
+		if !bytes.Equal(output, want) {
+			t.Fatalf("ls-tree helper output = %q, want %q", output, want)
+		}
 		return
 	}
 	switch mode {

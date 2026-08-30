@@ -28,6 +28,8 @@ const (
 	CodeUnavailable         RejectionCode = "MODEL_SET_INVENTORY_ENTRY_UNAVAILABLE"
 	CodeFactUnknown         RejectionCode = "MODEL_SET_FACT_UNKNOWN"
 	CodeFactType            RejectionCode = "MODEL_SET_FACT_TYPE_MISMATCH"
+	CodeFamily              RejectionCode = "MODEL_SET_FAMILY_MISMATCH"
+	CodeQuantization        RejectionCode = "MODEL_SET_QUANTIZATION_MISMATCH"
 	CodeToolCalling         RejectionCode = "MODEL_SET_TOOL_CALLING_REQUIRED"
 	CodeStructuredOutput    RejectionCode = "MODEL_SET_STRUCTURED_OUTPUT_REQUIRED"
 	CodeToolProtocol        RejectionCode = "MODEL_SET_TOOL_PROTOCOL_MISMATCH"

@@ -78,7 +78,7 @@ concurrent = [
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "studyreceipt", "turnbench",
   "vdso", "witness",
-  "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
+  "cmd", "experiments", "docs", "tools", "scripts", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
   "rulesynth", "wirescreen",
@@ -465,7 +465,7 @@ autopick = [
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
   "vdso", "witness",
-  "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
+  "cmd", "experiments", "docs", "tools", "scripts", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
   "rulesynth", "wirescreen",
@@ -1489,7 +1489,8 @@ examples    = ["examples/**"]
 # entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
 # so the shared tree never fully drains through `fak sweep --apply --lane docs`.
 docs        = ["docs/**", "README.md", "INDEX.md", "llms.txt", "llms-full.txt", "llms-updates.txt"]
-tools       = ["tools/**", "scripts/**"]
+tools       = ["tools/**"]
+scripts     = ["scripts/**"]
 visuals     = ["visuals/**"]
 claude      = [".claude/**"]
 ci          = [".github/**"]

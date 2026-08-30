@@ -212,7 +212,48 @@ demo and benchmark command. Use the explicit `make build-all` target when the qu
 whether the complete package tree builds. `make ci` names both targets as direct
 prerequisites, so separating the fast artifact build does not narrow the green-bar gate.
 
-### Build profiles
+### Runtime, developer tooling, and local outputs
+
+`fak` and `fak-dev` are two executables from the same Go module, not two
+repositories and not two independently versioned source packages:
+
+- `cmd/fak` is the adopter-facing runtime and guard. Its dependency graph stays
+  free of repository-maintenance code.
+- `cmd/fak-dev` links the tracked implementation in `internal/devcmd`. Keeping
+  that graph behind a process boundary prevents release/runtime installs from
+  carrying CI, worktree, issue, and maintainer-only machinery.
+- `tools/` is tracked legacy repository automation. New durable tooling belongs
+  in a Go leaf/verb; it is not installed by copying `tools/`.
+- Root names beginning with `_` are ignored scratch by `/_*` in `.gitignore`.
+  For example, `_tooling.json` is a regenerable tooling-quality scorecard
+  output. It is neither a package manifest nor input to new-machine setup.
+  Compiled `*.exe` files are ignored for the same reason: source is authoritative.
+
+A clean clone therefore has no local binary or `_tooling.json`, by design. For a
+maintainer setup with the checkout's exact source revision:
+
+```bash
+go install ./cmd/fak
+go install ./cmd/fak-dev
+fak dev availability --json
+```
+
+`go install` writes both executables to `GOBIN` (or `GOPATH/bin`); put that
+directory on `PATH`. The availability probe reports whether `fak-dev` resolves
+as a sibling of `fak`, elsewhere on `PATH`, or is missing. From outside a source
+checkout, install a released matching pair explicitly:
+
+```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+go install github.com/anthony-chaudhary/fak/cmd/fak-dev@latest
+```
+
+Runtime-only users install only `fak`. Commands under the compatibility spelling
+`fak dev ...` deliberately hand off to `fak-dev`; they do not silently relink,
+download, or regenerate developer tooling. Release packaging for the companion
+artifact is tracked separately in issue #6024.
+
+## Build profiles
 
 Every shipping build routes through **one** entrypoint, `scripts/build.sh`, so the
 `-trimpath`/`-ldflags`/version-stamp flags live in a single place and cannot drift apart

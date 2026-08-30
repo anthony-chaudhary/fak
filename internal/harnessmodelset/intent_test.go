@@ -3,6 +3,7 @@ package harnessmodelset_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -42,6 +43,29 @@ func TestTwoRoleIntentRoundTripsCanonicalJSON(t *testing.T) {
 	}
 	if !reflect.DeepEqual(roundTrip, intent) {
 		t.Fatalf("semantic round trip changed:\nfirst=%+v\nsecond=%+v", intent, roundTrip)
+	}
+}
+
+func TestParserAcceptsGenericFamilyAndQuantizationConstraints(t *testing.T) {
+	raw := []byte(`{"schema":"fak-harness-model-set-intent/1","roles":[{"id":"executor","required":true,"alternatives":[{"id":"native","capabilities":{"family":"Qwen3.8","quantization":"Q4_K_M"}}],"evidence":{"max_age_hours":24}}]}`)
+	intent, err := harnessmodelset.ParseJSON(raw)
+	if err != nil {
+		t.Fatalf("ParseJSON: %v", err)
+	}
+	got := intent.Roles[0].Alternatives[0].Capabilities
+	if got.Family != "Qwen3.8" || got.Quantization != "Q4_K_M" {
+		t.Fatalf("capabilities = %+v", got)
+	}
+}
+
+func TestParserRejectsWhitespaceFamilyAndQuantizationTokens(t *testing.T) {
+	for _, field := range []string{"family", "quantization"} {
+		raw := []byte(fmt.Sprintf(`{"schema":"fak-harness-model-set-intent/1","roles":[{"id":"executor","required":true,"alternatives":[{"id":"native","capabilities":{"%s":" q4 "}}],"evidence":{"max_age_hours":24}}]}`, field))
+		_, err := harnessmodelset.ParseJSON(raw)
+		diagnostics := harnessmodelset.Diagnostics(err)
+		if len(diagnostics) != 1 || diagnostics[0].Code != harnessmodelset.CodeValueInvalid || diagnostics[0].Path != "$.roles[0].alternatives[0].capabilities."+field {
+			t.Fatalf("%s diagnostics = %+v", field, diagnostics)
+		}
 	}
 }
 

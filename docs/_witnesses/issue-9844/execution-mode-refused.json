@@ -1,0 +1,99 @@
+{
+  "schema": "fak-execution-mode-receipt/1",
+  "mode": "refused",
+  "health": "refused",
+  "control_plane_owner": "fak-local",
+  "binary": {
+    "goos": "windows",
+    "goarch": "amd64",
+    "runnable": true,
+    "build_tags": null
+  },
+  "status": {
+    "mode": "refused",
+    "health": "refused",
+    "evidence": "unwitnessed"
+  },
+  "audit": {
+    "mode": "refused",
+    "health": "refused",
+    "evidence": "unwitnessed"
+  },
+  "model_backed": false,
+  "native_performance": false,
+  "identity": {
+    "engine": "unknown",
+    "backend": "unknown",
+    "device": "unknown",
+    "provider": "unknown",
+    "model": "unknown"
+  },
+  "fallback_reason": {
+    "code": "unsupported_backend",
+    "detail": "the requested backend name is not recognized or registered",
+    "remediation": "choose an exact name from registered_backends; fak will not silently substitute another backend"
+  },
+  "offline": "unknown",
+  "egress": "unknown",
+  "operating_envelope": "unknown",
+  "prerequisite_witness": "unknown",
+  "witness": {
+    "status": "observed",
+    "source": "runtime-capabilities",
+    "certification": "pre-payload-observation"
+  },
+  "transitions": [
+    {
+      "from": [
+        "control_only",
+        "offline_control_mock"
+      ],
+      "to": "local_accelerator",
+      "trigger": "local_accelerator_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator"
+      ],
+      "to": "local_cpu_degraded",
+      "trigger": "explicit_cpu_fallback_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator",
+        "local_cpu_degraded"
+      ],
+      "to": "remote_backed",
+      "trigger": "explicit_remote_fallback_admitted"
+    },
+    {
+      "from": [
+        "control_only"
+      ],
+      "to": "offline_control_mock",
+      "trigger": "offline_mock_selected"
+    },
+    {
+      "from": [
+        "control_only",
+        "offline_control_mock"
+      ],
+      "to": "offline_model_backed",
+      "trigger": "offline_model_admitted"
+    },
+    {
+      "from": [
+        "local_accelerator",
+        "local_cpu_degraded",
+        "remote_backed",
+        "offline_control_mock",
+        "offline_model_backed",
+        "control_only"
+      ],
+      "to": "refused",
+      "trigger": "policy_or_capability_refusal"
+    }
+  ],
+  "valid": true,
+  "validation_reason": null
+}

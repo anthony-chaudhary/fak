@@ -1,3 +1,8 @@
+---
+title: "disambiguation package - package:internal/disambiguation identity"
+description: "The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry. Scope: package:internal/disambiguation. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # disambiguation package
 
 **Meaning:** The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry.

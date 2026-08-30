@@ -1,0 +1,484 @@
+{
+  "schema": "fak.learning-mesh-candidates/1",
+  "input_digest": "76a14789171a3bbe9cbf15013d215eb04b2ab5060e1f90fe99c9837c301b49f8",
+  "candidate_count": 9,
+  "candidates": [
+    {
+      "id": "lm-26eaccb4024d4918fb74",
+      "mechanism_id": "shared-unified-memory-residency",
+      "mechanism": "shared.unified-memory-residency",
+      "source": {
+        "id": "qwen38-apple-metal-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "target": {
+        "id": "apple-native-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": null,
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "record_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/apple-metal.json",
+            "revision": "3333333333333333333333333333333333333333",
+            "path": "docs/_witnesses/issue-9886/apple-metal.json",
+            "exact": true,
+            "record_digest": "669570ac7d89b20e5da486d22c1007a73cec67fdd9c060a98ab198220eb0b755"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_1aaaa15fc20db5096bbbe715fb6d6e3e",
+        "kind": "candidate",
+        "source": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "content": "{\"candidate_id\":\"lm-26eaccb4024d4918fb74\",\"mechanism_id\":\"shared-unified-memory-residency\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"apple-native-serving\",\"hardware\":\"apple\",\"backend\":\"metal\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-27af2bb44aa02b0f6099",
+      "mechanism_id": "shared-unified-memory-residency",
+      "mechanism": "shared.unified-memory-residency",
+      "source": {
+        "id": "qwen38-apple-metal-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "record_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/apple-metal.json",
+            "revision": "3333333333333333333333333333333333333333",
+            "path": "docs/_witnesses/issue-9886/apple-metal.json",
+            "exact": true,
+            "record_digest": "669570ac7d89b20e5da486d22c1007a73cec67fdd9c060a98ab198220eb0b755"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_2f9f1aebfce83e0ef8f57400e7ca191f",
+        "kind": "candidate",
+        "source": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "content": "{\"candidate_id\":\"lm-27af2bb44aa02b0f6099\",\"mechanism_id\":\"shared-unified-memory-residency\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"vulkan\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-3876c9f38d7e8043489c",
+      "mechanism_id": "shared-kv-block-layout",
+      "mechanism": "shared.kv-block-layout",
+      "source": {
+        "id": "qwen38-amd-vulkan-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "apple-native-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "record_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "revision": "1111111111111111111111111111111111111111",
+            "path": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "exact": true,
+            "record_digest": "5f5562182a4210887edaf85147bd962cf3ecd12bf9100bbcbc8bb5849bb4613e"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_77aa4bb0f6e971b363e0885d0d6aad7c",
+        "kind": "candidate",
+        "source": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": "{\"candidate_id\":\"lm-3876c9f38d7e8043489c\",\"mechanism_id\":\"shared-kv-block-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"apple-native-serving\",\"hardware\":\"apple\",\"backend\":\"metal\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-3d97f6e0b06216a6fd10",
+      "mechanism_id": "shared-kv-block-layout",
+      "mechanism": "shared.kv-block-layout",
+      "source": {
+        "id": "qwen38-amd-vulkan-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "nvidia-native-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "record_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "revision": "1111111111111111111111111111111111111111",
+            "path": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "exact": true,
+            "record_digest": "5f5562182a4210887edaf85147bd962cf3ecd12bf9100bbcbc8bb5849bb4613e"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_fad8800f022cfccf7ef3c7224a567106",
+        "kind": "candidate",
+        "source": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": "{\"candidate_id\":\"lm-3d97f6e0b06216a6fd10\",\"mechanism_id\":\"shared-kv-block-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-prefill\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"prefill\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-53aa2bec7330bb061ad9",
+      "mechanism_id": "shared-paged-prefill-scheduler",
+      "mechanism": "shared.paged-prefill-scheduler",
+      "source": {
+        "id": "qwen38-nvidia-cuda-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "record_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "revision": "2222222222222222222222222222222222222222",
+            "path": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "exact": true,
+            "record_digest": "379dd882c702a0753a96990266bab9d3c88145df81658ca35e1b20c04d1dfab0"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_95a11d32ca0f4adc0032b31ea20958c5",
+        "kind": "candidate",
+        "source": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "content": "{\"candidate_id\":\"lm-53aa2bec7330bb061ad9\",\"mechanism_id\":\"shared-paged-prefill-scheduler\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"vulkan\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-72a9aca0be34beb8b7c4",
+      "mechanism_id": "shared-kv-block-layout",
+      "mechanism": "shared.kv-block-layout",
+      "source": {
+        "id": "qwen38-amd-vulkan-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "vulkan",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": null,
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "record_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "revision": "1111111111111111111111111111111111111111",
+            "path": "docs/_witnesses/issue-9886/amd-vulkan.json",
+            "exact": true,
+            "record_digest": "5f5562182a4210887edaf85147bd962cf3ecd12bf9100bbcbc8bb5849bb4613e"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_246d2283bcba4e6e9c8e3000f0ee4211",
+        "kind": "candidate",
+        "source": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": "{\"candidate_id\":\"lm-72a9aca0be34beb8b7c4\",\"mechanism_id\":\"shared-kv-block-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"vulkan\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-d2b4c2305748efee0c26",
+      "mechanism_id": "shared-unified-memory-residency",
+      "mechanism": "shared.unified-memory-residency",
+      "source": {
+        "id": "qwen38-apple-metal-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "target": {
+        "id": "nvidia-native-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "record_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/apple-metal.json",
+            "revision": "3333333333333333333333333333333333333333",
+            "path": "docs/_witnesses/issue-9886/apple-metal.json",
+            "exact": true,
+            "record_digest": "669570ac7d89b20e5da486d22c1007a73cec67fdd9c060a98ab198220eb0b755"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_8b05305976fe2004c0fc298cb5f134ad",
+        "kind": "candidate",
+        "source": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "content": "{\"candidate_id\":\"lm-d2b4c2305748efee0c26\",\"mechanism_id\":\"shared-unified-memory-residency\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-prefill\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"prefill\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-d523c56069debd9ae939",
+      "mechanism_id": "shared-paged-prefill-scheduler",
+      "mechanism": "shared.paged-prefill-scheduler",
+      "source": {
+        "id": "qwen38-nvidia-cuda-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "target": {
+        "id": "nvidia-native-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "transfer_axes": null,
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "record_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "revision": "2222222222222222222222222222222222222222",
+            "path": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "exact": true,
+            "record_digest": "379dd882c702a0753a96990266bab9d3c88145df81658ca35e1b20c04d1dfab0"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_7ace707b4f405150387a47a7e58cd61e",
+        "kind": "candidate",
+        "source": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "content": "{\"candidate_id\":\"lm-d523c56069debd9ae939\",\"mechanism_id\":\"shared-paged-prefill-scheduler\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-prefill\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"prefill\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-fb899987644f79123ceb",
+      "mechanism_id": "shared-paged-prefill-scheduler",
+      "mechanism": "shared.paged-prefill-scheduler",
+      "source": {
+        "id": "qwen38-nvidia-cuda-prefill",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "prefill",
+        "role": "product"
+      },
+      "target": {
+        "id": "apple-native-serving",
+        "hardware": "apple",
+        "backend": "metal",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen38",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "mechanism default disposition",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "model-artifact",
+            "id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "record_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "kind": "nativeperf-receipt",
+            "id": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "revision": "2222222222222222222222222222222222222222",
+            "path": "docs/_witnesses/issue-9886/nvidia-cuda.json",
+            "exact": true,
+            "record_digest": "379dd882c702a0753a96990266bab9d3c88145df81658ca35e1b20c04d1dfab0"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_faee8873fa74ec20bcf5a137bc041e12",
+        "kind": "candidate",
+        "source": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "content": "{\"candidate_id\":\"lm-fb899987644f79123ceb\",\"mechanism_id\":\"shared-paged-prefill-scheduler\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"apple-native-serving\",\"hardware\":\"apple\",\"backend\":\"metal\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen38\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    }
+  ]
+}

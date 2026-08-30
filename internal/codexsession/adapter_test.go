@@ -1,11 +1,13 @@
 package codexsession
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -111,6 +113,24 @@ func writeFakeServer(t *testing.T, interrupt bool) string { t.Helper(); return o
 
 func TestFakeAppServer(t *testing.T) {
 	if len(os.Args) < 2 || os.Args[len(os.Args)-1] != "--" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestFakeAppServer$", "--")
+		cmd.Stdin = bytes.NewBufferString("{\"id\":7,\"method\":\"initialize\"}\n")
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("fake app server initialize failed: %v", err)
+		}
+		var response struct {
+			ID     int `json:"id"`
+			Result struct {
+				UserAgent string `json:"userAgent"`
+			} `json:"result"`
+		}
+		if err := json.NewDecoder(bytes.NewReader(output)).Decode(&response); err != nil {
+			t.Fatalf("decode initialize response %q: %v", output, err)
+		}
+		if response.ID != 7 || response.Result.UserAgent != "codex-cli 1.2.3" {
+			t.Fatalf("initialize response = %+v", response)
+		}
 		return
 	}
 	dec := json.NewDecoder(os.Stdin)

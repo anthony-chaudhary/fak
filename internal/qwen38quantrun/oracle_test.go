@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -295,6 +296,15 @@ func TestMatchesPinnedLlamaCPPRevision(t *testing.T) {
 
 func TestOracleHelperProcess(t *testing.T) {
 	if len(os.Args) < 3 || os.Args[len(os.Args)-3] != "--" {
+		command := oracleHelperCommand("revision", "")
+		output, err := exec.Command(command[0], command[1:]...).Output()
+		if err != nil {
+			t.Fatalf("revision helper failed: %v", err)
+		}
+		wantRevision := PinnedLlamaCPPBuild + " (" + PinnedLlamaCPPRevision[:9] + ")"
+		if text := string(output); !strings.Contains(text, wantRevision) || !strings.Contains(text, "Darwin arm64") {
+			t.Fatalf("revision output = %q, want revision %q and platform", text, wantRevision)
+		}
 		return
 	}
 	mode, path := os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]

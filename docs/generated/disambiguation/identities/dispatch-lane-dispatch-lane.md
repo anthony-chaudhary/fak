@@ -1,3 +1,8 @@
+---
+title: "dispatch lane - dispatch:lane identity"
+description: "A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy. Scope: dispatch:lane. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # dispatch lane
 
 **Meaning:** A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy.

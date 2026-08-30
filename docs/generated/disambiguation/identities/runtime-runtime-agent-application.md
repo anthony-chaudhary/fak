@@ -1,3 +1,8 @@
+---
+title: "runtime - runtime:agent-application identity"
+description: "The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam. Scope: runtime:agent-application. Includes its nearest contrasts, owner, lifecycle, freshness, and exact fak query command."
+---
+
 # runtime
 
 **Meaning:** The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam.

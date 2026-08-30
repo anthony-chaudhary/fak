@@ -68,6 +68,12 @@ func validateAlternative(alternative Alternative, path string, diagnostics *[]Di
 			CodeConstraintsEmpty, path, "alternative has no hard constraints", "declare at least one capability or operational constraint",
 		))
 	}
+	if capabilities.Family != "" {
+		validateToken(capabilities.Family, path+".capabilities.family", "model family", diagnostics)
+	}
+	if capabilities.Quantization != "" {
+		validateToken(capabilities.Quantization, path+".capabilities.quantization", "quantization scheme", diagnostics)
+	}
 	validatePositiveRequirement(capabilities.ToolCalling, path+".capabilities.tool_calling", diagnostics)
 	validatePositiveRequirement(capabilities.StructuredOutput, path+".capabilities.structured_output", diagnostics)
 	if capabilities.ToolProtocol != "" && !oneOf(string(capabilities.ToolProtocol), string(ToolProtocolOpenAI), string(ToolProtocolAnthropic), string(ToolProtocolMCP)) {
@@ -179,7 +185,8 @@ func validatePositiveRequirement(value *bool, path string, diagnostics *[]Diagno
 }
 
 func hasModelRequirement(capabilities ModelRequirements) bool {
-	return capabilities.ToolCalling != nil || capabilities.StructuredOutput != nil || capabilities.ToolProtocol != "" ||
+	return capabilities.Family != "" || capabilities.Quantization != "" || capabilities.ToolCalling != nil ||
+		capabilities.StructuredOutput != nil || capabilities.ToolProtocol != "" ||
 		capabilities.MinimumInputTokens != nil || len(capabilities.Modalities) > 0
 }
 

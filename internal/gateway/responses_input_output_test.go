@@ -40,6 +40,12 @@ func TestDecodeResponsesFunctionCallOutputStringOrTextArray(t *testing.T) {
 	}
 }
 
+func TestDecodeResponsesFunctionCallOutputRejectsEmptyArray(t *testing.T) {
+	_, err := decodeResponsesFunctionCallOutput(json.RawMessage(`[]`))
+	if err == nil || !strings.Contains(err.Error(), "content array must not be empty") {
+		t.Fatalf("err=%v", err)
+	}
+}
 func TestDecodeResponsesFunctionCallOutputRejectsUnsupportedOrMalformedArrays(t *testing.T) {
 	tests := []struct {
 		name   string

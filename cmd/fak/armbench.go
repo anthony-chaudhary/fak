@@ -10,7 +10,7 @@ package main
 //	fak armbench import-fixtures [--suite all]           # pinned Caveman/Ponytail input importer
 //	fak armbench validate --manifest <m> [--json]       # refuse an unpinned manifest
 //	fak armbench identity --manifest <m> [--json]       # the sha256 that decides comparability
-//	fak armbench run --manifest <m> --corpus <c> --out <run.json> [--resume <prior.json>]
+//	fak armbench run --manifest <m> --corpus <c> --out <run.json> [--resume <prior.json>] [--max-parallel N]
 //	fak armbench report --run <run.json> [--json]       # per-arm rollup, human or strict JSON
 //	fak armbench compare --a <run.json> --b <run.json>  # refuse incomparable runs
 //
@@ -308,10 +308,15 @@ func armbenchRun(stdout, stderr io.Writer, argv []string) int {
 	corpusPath := fs.String("corpus", "", "path to the corpus JSON (required)")
 	out := fs.String("out", "", "path to write the raw trial ledger (required)")
 	resume := fs.String("resume", "", "path to a prior ledger to resume from (completed trials are carried, not re-run)")
+	maxParallel := fs.Int("max-parallel", 1, "maximum arm launches in flight (default 1; values >1 require unique gpu_index assignments)")
 	provider := fs.String("provider", "", "provider to execute (default: manifest.model.provider; an override must match it)")
 	setupMS := fs.Float64("fake-setup-ms", 0, "one-time per-arm setup cost the fake provider charges")
 	asJSON := fs.Bool("json", false, "emit the run rollup as strict JSON instead of the human summary")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *maxParallel < 1 {
+		fmt.Fprintln(stderr, "fak armbench run: --max-parallel must be >= 1")
 		return 2
 	}
 	if *corpusPath == "" || *out == "" {
@@ -351,7 +356,7 @@ func armbenchRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "refused (%s): provider %q is not wired; the deterministic 'fake' spine is the only provider this runner registers today (live provider arms land under epic #6674)\n", armbench.ReasonProviderUnknown, selectedProvider)
 		return 3
 	}
-	opts := armbench.Options{}
+	opts := armbench.Options{MaxParallel: *maxParallel}
 	if *resume != "" {
 		prior, code := loadRun(stderr, *resume)
 		if code != 0 {
@@ -452,7 +457,7 @@ func armbenchCompare(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "refused (%s): second run: %s\n", refusalReason(err), err)
 		return 3
 	}
-	fields, err := armbench.CheckComparable(a.Manifest, b.Manifest)
+	fields, err := armbench.CheckRunsComparable(a, b)
 	if *asJSON {
 		out := map[string]any{
 			"comparable": err == nil,
