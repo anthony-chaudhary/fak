@@ -12,7 +12,10 @@ import (
 	"strings"
 )
 
-const installIdentitySchema = "fak.selfinstall.identity/v1"
+const (
+	installIdentitySchema  = "fak.selfinstall.identity/v1"
+	buildInputDigestPrefix = "sha256:"
+)
 
 // StateUpdate is the verified identity produced by the build gate. The selected
 // source may advance while ArtifactSourceCommit and ArtifactDigest continue to name reused
@@ -200,7 +203,7 @@ func validateStateUpdate(candidate StateUpdate) error {
 	if !validCommit(strings.ToLower(strings.TrimSpace(candidate.ArtifactSourceCommit))) {
 		return fmt.Errorf("artifact source commit is not a full Git object ID")
 	}
-	if !validSHA256(candidate.BuildInputDigest) {
+	if !validBuildInputDigest(candidate.BuildInputDigest) {
 		return fmt.Errorf("build-input digest is not SHA-256")
 	}
 	if !validSHA256(candidate.ArtifactDigest) || candidate.ArtifactSize < 1 {
@@ -219,7 +222,7 @@ func validateInstallIdentity(state InstallIdentity) error {
 	if state.MetadataGeneration == 0 {
 		return fmt.Errorf("install identity metadata generation must be positive")
 	}
-	if !validCommit(state.SelectedSourceCommit) || !validSHA256(state.BuildInputDigest) ||
+	if !validCommit(state.SelectedSourceCommit) || !validBuildInputDigest(state.BuildInputDigest) ||
 		!validSHA256(state.ArtifactDigest) || state.CurrentDigest != state.ArtifactDigest ||
 		strings.TrimSpace(state.AppVersion) == "" {
 		return fmt.Errorf("install identity metadata is malformed")
@@ -234,6 +237,11 @@ func validRecord(record ArtifactRecord) bool {
 	return validSHA256(record.ID) && record.ID == record.ArtifactDigest &&
 		validCommit(record.ArtifactSourceCommit) && record.ArtifactSize > 0 &&
 		strings.TrimSpace(record.Path) != "" && strings.TrimSpace(record.AppVersion) != ""
+}
+
+func validBuildInputDigest(digest string) bool {
+	return strings.HasPrefix(digest, buildInputDigestPrefix) &&
+		validSHA256(strings.TrimPrefix(digest, buildInputDigestPrefix))
 }
 
 func recordMatchesPath(record ArtifactRecord, path string) bool {
