@@ -62,6 +62,27 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 	}
 }
 
+func TestRejectedTierMetricDeterminism(t *testing.T) {
+	cacheobs.Default.ObserveTier(cacheobs.TierAccess{
+		Tier:    cacheobs.CacheTier(255),
+		Op:      cacheobs.OpRead,
+		Outcome: cacheobs.OutcomeHit,
+		Backend: cacheobs.BackendMemory,
+	})
+
+	render := func() string {
+		var b strings.Builder
+		writeKVPrefixMetrics(&b)
+		return b.String()
+	}
+
+	first := render()
+	second := render()
+	if first != second {
+		t.Fatalf("same rejected-tier input rendered different bytes:\n--- first ---\n%s--- second ---\n%s", first, second)
+	}
+}
+
 func TestMetricsExposesRejectedTierAccesses(t *testing.T) {
 	srv := newTestServer(t)
 	const metric = "fak_gateway_kv_prefix_tier_accesses_rejected_total"
