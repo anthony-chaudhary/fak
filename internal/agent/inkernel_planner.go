@@ -674,6 +674,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	var requestStarted time.Time
 	if sp.NativeInferenceReceipt {
+		if _, _, err := p.nativeSelectionIdentity(); err != nil {
+			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: err.Error()}
+		}
 		requestStarted = time.Now()
 	}
 	maxNew := p.maxNew
@@ -916,6 +919,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 
 func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *model.NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
+	nativeSelection, nativeSelectionDigest, _ := p.nativeSelectionIdentity()
 	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
 	if measurement.qwen35MetalForwardSequence.EvidenceState != "" || measurement.qwen35MetalForwardSequence.Available {
 		snapshot := measurement.qwen35MetalForwardSequence
@@ -955,10 +959,54 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		Q4K:                        p.q4k,
 		FallbackActive:             false,
 		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
+		NativeSelection:            nativeSelection,
+		NativeSelectionDigest:      nativeSelectionDigest,
 		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
 		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
 	}
+}
+
+func (p *InKernelPlanner) nativeSelectionIdentity() (model.NativeSelectionIdentity, string, error) {
+	backend, forwardPath := p.executionIdentity()
+	identity := model.NativeSelectionIdentity{
+		Schema:              model.NativeSelectionIdentitySchemaV1,
+		ModelRef:            p.modelID,
+		Backend:             backend,
+		ForwardPath:         forwardPath,
+		Quantization:        p.nativeSelectionQuantization(),
+		PrefillChunkTokens:  p.nativeInferencePrefillChunkTokens(),
+		CPUOffloadExperts:   p.nativeSelectionCPUOffloadExperts(),
+		Q4KGateUpOutputSlab: p.q4kGateUpOutputSlab,
+	}
+	digest, err := identity.Digest()
+	if err != nil {
+		return model.NativeSelectionIdentity{}, "", err
+	}
+	return identity, digest, nil
+}
+
+func (p *InKernelPlanner) nativeSelectionQuantization() string {
+	if p != nil && p.q4k {
+		return model.NativeSelectionQuantizationQ4K
+	}
+	if p != nil && p.quant {
+		return model.NativeSelectionQuantizationQ8_0
+	}
+	return model.NativeSelectionQuantizationF32
+}
+
+func (p *InKernelPlanner) nativeSelectionCPUOffloadExperts() int {
+	if p == nil {
+		return 0
+	}
+	if p.expertSpill != nil {
+		return p.expertSpill.Fit.SpillLayers
+	}
+	if p.cpuOffloadExperts && p.m != nil {
+		return len(p.m.MoEExpertLayers())
+	}
+	return 0
 }
 
 func cloneQwen35MetalStateIdentityReceipt(src model.Qwen35MetalStateIdentityReceipt) *model.Qwen35MetalStateIdentityReceipt {
