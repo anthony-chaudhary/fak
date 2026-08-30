@@ -451,6 +451,7 @@ concurrent = [
   "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer", "usagepreflight",
   "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplease", "wiplifecycle",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
+  "placementtax",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1071,7 +1072,6 @@ propagationscore = ["internal/propagationscore/**"]
 pythongate = ["internal/pythongate/**"]
 qaprocessscore = ["internal/qaprocessscore/**"]
 quality = ["internal/quality/**"]
-placementtax = ["internal/placementtax/**"]
 questionledger = ["internal/questionledger/**"]
 qwen36nodereports = ["internal/qwen36nodereports/**"]
 qwen36parity = ["internal/qwen36parity/**"]
@@ -1476,6 +1476,7 @@ workdelivery = ["internal/workdelivery/**"]
 workflowoutcomestudy = ["internal/workflowoutcomestudy/**"]
 workloadfit = ["internal/workloadfit/**"]
 workshape = ["internal/workshape/**"]
+placementtax = ["internal/placementtax/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
