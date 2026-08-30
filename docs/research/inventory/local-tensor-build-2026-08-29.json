@@ -1,0 +1,802 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "local/tensor-build",
+  "url": "local://tensor-build-main",
+  "indexed_revision": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d",
+  "observed_at": "2026-08-29T00:00:00-07:00",
+  "totals": {
+    "files": 5972,
+    "directories": 888,
+    "bytes": 215914591,
+    "runtime_files": 2309,
+    "test_files": 1619,
+    "docs_files": 825,
+    "text_lines": 1482541
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        ".githooks/README.md",
+        "README.md",
+        "deploy/nix/README.md",
+        "deploy/nix/capture-e2e-pin/README.md",
+        "deploy/nix/fixtures/pin-satisfiable/README.md",
+        "docs/INDEX.md",
+        "docs/agentic-data/R1-sam-onnx-artifacts.md",
+        "docs/agentic-data/R2-water-horizon-proxies.md",
+        "docs/agentic-data/R3-rfdetr-k1-recipe.md",
+        "docs/agentic-data/REPORT-agentic-data-pilot.pdf",
+        "docs/audits/ALIGNMENT-confluence-vs-plan.md",
+        "docs/audits/AUDIT-agent-token-spend-by-work-class.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "docs/deck-2026-07-24/01-architecture.svg",
+        "docs/design/DECISION-classifier-scope-in-ablate-v1.md",
+        "docs/design/DECISION-hosted-vlm-not-an-ablate-judge.md",
+        "docs/design/DECISION-mirror-datasets-s3-access.md",
+        "docs/design/DECISION-taxonomy-reconciliation.md",
+        "docs/design/DESIGN-agentic-ground-truth-engine.md",
+        "docs/design/DESIGN-bridge-operator-console.md",
+        "docs/design/DESIGN-claude-code-as-the-operator.md",
+        "docs/design/DESIGN-conn-control-interface.md",
+        "docs/design/DESIGN-dontcare-flag-and-obstacle-rollup.md",
+        "docs/design/DESIGN-gt-agent-tools.md",
+        "docs/design/DESIGN-ideal-class-structure.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/skills/maint-loop/maint-breath.sh",
+        ".agents/skills/maint-loop/maint-cron.sh",
+        ".agents/skills/maint-loop/maint-selftest.sh",
+        ".agents/skills/maint-loop/maint-sense.sh",
+        ".agents/skills/maint-loop/maint-shipgate.sh",
+        ".claude/hooks/closeout.sh",
+        ".claude/hooks/hooks-selftest.sh",
+        ".claude/hooks/lane-heartbeat.sh",
+        ".claude/hooks/lane-parse.sh",
+        ".claude/hooks/memory-index.sh",
+        ".claude/hooks/pretool-wrap.sh",
+        ".claude/hooks/resolve-workspace.sh"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".githooks/bootstrap_test.sh",
+        "cmd/tb/bandladder_test.go",
+        "cmd/tb/bench_armverb_test.go",
+        "cmd/tb/bench_axis_test.go",
+        "cmd/tb/bench_batchsweep_test.go",
+        "cmd/tb/bench_diff_test.go",
+        "cmd/tb/bench_evalset_test.go",
+        "cmd/tb/bench_liftverb_test.go",
+        "cmd/tb/bench_map_coverage_test.go",
+        "cmd/tb/bench_map_existence_test.go",
+        "cmd/tb/bench_map_normalize_test.go",
+        "cmd/tb/bench_map_split_test.go"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        "CHANGELOG.md",
+        "deploy/observe/grafana/dashboards/run-history.json",
+        "deploy/observe/screenshots/WALL-ops-1-obs-07-run-history.png",
+        "deploy/observe/screenshots/run-history.png",
+        "deploy/observe/snapshots/LIVE-run-history.png",
+        "deploy/observe/snapshots/run-history-anon.png",
+        "deploy/observe/snapshots/run-history.snapshot.json",
+        "internal/labelgen/testdata/climb-history-pilot44.jsonl"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/general-ticket.md",
+        ".github/ISSUE_TEMPLATE/measurement-ticket.md",
+        ".github/PULL_REQUEST_TEMPLATE.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "go.mod",
+        "tools/videogen/terminal/go.mod"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "results",
+      "files": 2768,
+      "directories": 692,
+      "bytes": 76602311,
+      "runtime_files": 1319,
+      "test_files": 0,
+      "docs_files": 315,
+      "text_lines": 257019,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1314
+        },
+        {
+          "language": "Docs",
+          "files": 315
+        },
+        {
+          "language": "Shell",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "results/INDEX.md",
+        "results/README.md",
+        "results/RESULTS-build-proveout.md",
+        "results/RESULTS-finetune-class-selection.md",
+        "results/RESULTS-l4-fleet-overnight-summary.md",
+        "results/ab35-arm-proveout-fw70-G07/README.md",
+        "results/ab35-arm-proveout-fw70-G07/comments/comment1.md",
+        "results/ab35-arm-proveout-fw70-G07/comments/comment2.md"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal",
+      "files": 2049,
+      "directories": 71,
+      "bytes": 35188318,
+      "runtime_files": 712,
+      "test_files": 1329,
+      "docs_files": 7,
+      "text_lines": 788709,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 1885
+        },
+        {
+          "language": "Config",
+          "files": 114
+        },
+        {
+          "language": "TypeScript",
+          "files": 10
+        },
+        {
+          "language": "Docs",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "internal/adjudicate/acceptquality.go",
+        "internal/adjudicate/acceptquality_test.go",
+        "internal/adjudicate/acquire.go",
+        "internal/adjudicate/acquire_test.go",
+        "internal/adjudicate/acquirechannel_test.go",
+        "internal/adjudicate/acquirerank_test.go",
+        "internal/adjudicate/acuity.go",
+        "internal/adjudicate/acuity_test.go"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 401,
+      "directories": 20,
+      "bytes": 31335788,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 401,
+      "text_lines": 164350,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 354
+        },
+        {
+          "language": "Config",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "docs/INDEX.md",
+        "docs/agentic-data/R1-sam-onnx-artifacts.md",
+        "docs/agentic-data/R2-water-horizon-proxies.md",
+        "docs/agentic-data/R3-rfdetr-k1-recipe.md",
+        "docs/agentic-data/REPORT-agentic-data-pilot.pdf",
+        "docs/audits/ALIGNMENT-confluence-vs-plan.md",
+        "docs/audits/AUDIT-agent-token-spend-by-work-class.md",
+        "docs/audits/AUDIT-boat-components-and-paths.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "cmd",
+      "files": 263,
+      "directories": 15,
+      "bytes": 4487951,
+      "runtime_files": 106,
+      "test_files": 157,
+      "docs_files": 0,
+      "text_lines": 106289,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 231
+        },
+        {
+          "language": "Config",
+          "files": 15
+        }
+      ],
+      "example_paths": [
+        "cmd/tb/bandladder.go",
+        "cmd/tb/bandladder_test.go",
+        "cmd/tb/bench.go",
+        "cmd/tb/bench_armverb.go",
+        "cmd/tb/bench_armverb_test.go",
+        "cmd/tb/bench_axis.go",
+        "cmd/tb/bench_axis_test.go",
+        "cmd/tb/bench_batchsweep.go"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 184,
+      "directories": 37,
+      "bytes": 2378003,
+      "runtime_files": 70,
+      "test_files": 84,
+      "docs_files": 9,
+      "text_lines": 55376,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 142
+        },
+        {
+          "language": "Docs",
+          "files": 9
+        },
+        {
+          "language": "Config",
+          "files": 7
+        },
+        {
+          "language": "Shell",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "tools/ciyaml/pipeline_test.go",
+        "tools/ciyaml/sameindent_test.go",
+        "tools/ciyaml/structural.go",
+        "tools/ciyaml/structural_test.go",
+        "tools/classmint/main.go",
+        "tools/classmint/main_test.go",
+        "tools/deckpdf/chrome_test.go",
+        "tools/deckpdf/main.go"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "deploy",
+      "files": 120,
+      "directories": 19,
+      "bytes": 51716363,
+      "runtime_files": 44,
+      "test_files": 6,
+      "docs_files": 30,
+      "text_lines": 53447,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 37
+        },
+        {
+          "language": "Docs",
+          "files": 30
+        },
+        {
+          "language": "Shell",
+          "files": 10
+        }
+      ],
+      "example_paths": [
+        "deploy/nix/GLOSSARY-engine-to-boat.md",
+        "deploy/nix/GUIDE-engine-to-boat.md",
+        "deploy/nix/PROOF-cache-2026-07-27.md",
+        "deploy/nix/PROOF-e2e-build-to-boat-2026-07-27.md",
+        "deploy/nix/PROOF-l4-fleet-2026-07-24.md",
+        "deploy/nix/PROOF-pin-satisfiable-2026-07-27.md",
+        "deploy/nix/PROOF-pin-satisfiable-check-2026-07-28.md",
+        "deploy/nix/PROOF-url-rung-2026-07-28.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".claude",
+      "files": 37,
+      "directories": 9,
+      "bytes": 564823,
+      "runtime_files": 14,
+      "test_files": 0,
+      "docs_files": 21,
+      "text_lines": 9310,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 21
+        },
+        {
+          "language": "Shell",
+          "files": 13
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".claude/hooks/closeout.sh",
+        ".claude/hooks/hooks-selftest.sh",
+        ".claude/hooks/lane-heartbeat.sh",
+        ".claude/hooks/lane-parse.sh",
+        ".claude/hooks/memory-index.sh",
+        ".claude/hooks/pretool-wrap.sh",
+        ".claude/hooks/resolve-workspace.sh",
+        ".claude/hooks/worktree-census.sh"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".agents",
+      "files": 27,
+      "directories": 7,
+      "bytes": 417399,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 20,
+      "text_lines": 6564,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 20
+        },
+        {
+          "language": "Shell",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        ".agents/skills/arm-campaign/SKILL.md",
+        ".agents/skills/corsair-pull/SKILL.md",
+        ".agents/skills/fleet-wave/BASELINE.md",
+        ".agents/skills/fleet-wave/NOTES-measured.md",
+        ".agents/skills/fleet-wave/RATIONALE.md",
+        ".agents/skills/fleet-wave/SKILL.md",
+        ".agents/skills/fleet-wave/debt.md",
+        ".agents/skills/fleet-wave/monitor.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 24,
+      "directories": 15,
+      "bytes": 563056,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 11,
+      "text_lines": 4793,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 11
+        },
+        {
+          "language": "Config",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        ".mcp.json",
+        "AGENT.md",
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "DISAMBIGUATION.md",
+        "GEMINI.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "nix",
+      "files": 23,
+      "directories": 0,
+      "bytes": 555995,
+      "runtime_files": 0,
+      "test_files": 17,
+      "docs_files": 1,
+      "text_lines": 10025,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 17
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "nix/README.md",
+        "nix/availability_test.go",
+        "nix/engine_optlevel_test.go",
+        "nix/engine_optlevel_witness_test.go",
+        "nix/engine_outputs_test.go",
+        "nix/engine_target_test.go",
+        "nix/evalset_test.go",
+        "nix/export_argv_test.go"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "timing-caches",
+      "files": 22,
+      "directories": 0,
+      "bytes": 407939,
+      "runtime_files": 7,
+      "test_files": 14,
+      "docs_files": 1,
+      "text_lines": 9083,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 21
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "timing-caches/README.md",
+        "timing-caches/advise.go",
+        "timing-caches/advise_test.go",
+        "timing-caches/blob.go",
+        "timing-caches/blob_test.go",
+        "timing-caches/hostfaultattribution_test.go",
+        "timing-caches/key.go",
+        "timing-caches/key_test.go"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "models",
+      "files": 19,
+      "directories": 0,
+      "bytes": 10951963,
+      "runtime_files": 7,
+      "test_files": 11,
+      "docs_files": 0,
+      "text_lines": 6446,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 11
+        },
+        {
+          "language": "Config",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "models/catalog_test.go",
+        "models/ckptpin_test.go",
+        "models/classset_test.go",
+        "models/codecoverage_test.go",
+        "models/corpuscoverage_test.go",
+        "models/crossref_test.go",
+        "models/cvmodels-source-catalog.json",
+        "models/export-manifest-rf-detr-large-704.json"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 14,
+      "directories": 2,
+      "bytes": 210105,
+      "runtime_files": 11,
+      "test_files": 0,
+      "docs_files": 3,
+      "text_lines": 3197,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 11
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/general-ticket.md",
+        ".github/ISSUE_TEMPLATE/measurement-ticket.md",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/buildkite-cache-regen.yml",
+        ".github/buildkite-trt-gates.yml",
+        ".github/issue-views.json",
+        ".github/labels.json"
+      ],
+      "source_classes": [
+        "open_closed_issues_prs_discussions",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".codex",
+      "files": 9,
+      "directories": 1,
+      "bytes": 106845,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2018,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 7
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".codex/config.toml",
+        ".codex/hooks/hooks-selftest.sh",
+        ".codex/hooks/lane-heartbeat.sh",
+        ".codex/hooks/lane-parse.sh",
+        ".codex/hooks/memory-index.sh",
+        ".codex/hooks/pretool-wrap.sh",
+        ".codex/hooks/resolve-workspace.sh",
+        ".codex/hooks/worktree-census.sh"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".githooks",
+      "files": 7,
+      "directories": 0,
+      "bytes": 172966,
+      "runtime_files": 1,
+      "test_files": 1,
+      "docs_files": 1,
+      "text_lines": 2598,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".githooks/README.md",
+        ".githooks/bootstrap.sh",
+        ".githooks/bootstrap_test.sh"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "third_party",
+      "files": 5,
+      "directories": 0,
+      "bytes": 254766,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 3317,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "third_party/licence-coverage.md",
+        "third_party/rfdetr-anchors.md",
+        "third_party/sam1-provenance.md",
+        "third_party/trt-classic-provenance.md",
+        "third_party/trt-rtx-provenance.md"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    "internal/build",
+    "internal/conn/web/dist"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: internal/build, internal/conn/web/dist; classes checked absent in local tree: roadmap_todos; classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions; non-tree completion is recorded below",
+  "non_tree_study": {
+    "raw_snapshot": {
+      "files": 6012,
+      "bytes": 216644047,
+      "identity": "snapshot-sha256:64986cf8ff942cdcd6178491d3d9af0199c354ce41f998b89ced2b0286f6772d"
+    },
+    "prior_snapshot_delta": {
+      "prior_identity": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+      "substantive_subsystems_changed": 0,
+      "absent_transient_files": 346,
+      "absent_transient_bytes": 1684516,
+      "paths": [
+        ".dos",
+        ".fak"
+      ]
+    },
+    "provenance": {
+      "source_git_history": "unavailable: the snapshot is not a trustworthy checkout and its enclosing Git history is unrelated",
+      "forge": "unavailable: the declared GitHub repository could not be resolved with authenticated or anonymous access",
+      "license": "no root LICENSE, COPYING, NOTICE, or CLA; INSPIRE-ONLY and no source or prose transfer"
+    },
+    "coverage": {
+      "worldview_scope": {
+        "files": 3174,
+        "bytes": 108356033,
+        "scope_sha256": "76b52a40616ddf26327b51587ec58007e3dba7863f549921eb683064045480fc"
+      },
+      "runtime_scope": {
+        "files": 2353,
+        "scope_sha256": "3f37fa97cce240d75d1fbdbd6f529778b4b6318b90d74ad1333dde907f7139b1"
+      },
+      "source_hashes_read_back": 32,
+      "source_hashes_matched": 32,
+      "generated_files_skipped": 40,
+      "generated_bytes_skipped": 729456
+    },
+    "fak_selfquery_witness": {
+      "study_receipt": "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4",
+      "candidate_count": 26,
+      "new_issue_count": 13,
+      "existing_owner_count": 7,
+      "present_no_issue_count": 2,
+      "watch_or_exclude_count": 4
+    },
+    "issue_tracking": {
+      "tracker": 8985,
+      "prior": [
+        6874,
+        6875,
+        6876
+      ],
+      "existing_owners": [
+        3978,
+        4032,
+        5601,
+        5645,
+        6874,
+        6875,
+        6876,
+        8635
+      ],
+      "new_leaves": [
+        10268,
+        10269,
+        10270,
+        10271,
+        10278,
+        10279,
+        10280,
+        10281,
+        10282,
+        10283,
+        10284,
+        10285,
+        10286
+      ]
+    }
+  }
+}

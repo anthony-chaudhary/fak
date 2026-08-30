@@ -408,6 +408,9 @@
               "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#provenance-and-license-fence",
               "source:.github/ISSUE_TEMPLATE/general-ticket.md",
               "source:.github/PULL_REQUEST_TEMPLATE.md",
+              "gh issue list --repo anthony-saronic/tensor-build --state all",
+              "gh pr list --repo anthony-saronic/tensor-build --state all",
+              "gh api graphql --raw-field query=repository-discussions",
               "gh repo view anthony-saronic/tensor-build",
               "git ls-remote https://github.com/anthony-saronic/tensor-build.git"
             ],
