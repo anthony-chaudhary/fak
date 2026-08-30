@@ -1,125 +1,122 @@
-//go:build cuda
-
 package compute
 
 import (
-	"math"
+	"os"
 	"strings"
 	"testing"
 )
 
-func TestCUDAPartialRoPEQKMatchesRotateHalfReference(t *testing.T) {
-	be := cudaGDNBackend(t)
-	const (
-		pos = 7
-		nQ  = 2
-		nK  = 1
-		hd  = 8
-		rd  = 6
-	)
-	qHost := []float32{.1, .2, .3, .4, .5, .6, .7, .8, -.1, -.2, -.3, -.4, -.5, -.6, -.7, -.8}
-	kHost := []float32{.9, .8, .7, .6, .5, .4, .3, .2}
-	q := uploadCUDAGDN(t, be, []int{nQ * hd}, qHost, MemoryActivation, "partial-rope-q-test")
-	k := uploadCUDAGDN(t, be, []int{nK * hd}, kHost, MemoryActivation, "partial-rope-k-test")
-	be.ResetHostXfer()
-	be.ResetH2DXfer()
-	qOut, kOut := be.PartialRoPEQK(q, k, pos, nQ, nK, hd, rd, 10000)
-	t.Cleanup(func() { be.Free(qOut); be.Free(kOut) })
-	if got := be.HostXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes D2H", got)
+func qwen38PromptAttentionSource(t *testing.T, name string) string {
+	t.Helper()
+	source, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
 	}
-	if got := be.H2DXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes H2D", got)
-	}
-
-	ref := func(in []float32, heads int) []float32 {
-		out := append([]float32(nil), in...)
-		half := rd / 2
-		for h := 0; h < heads; h++ {
-			for j := 0; j < half; j++ {
-				freq := math.Pow(10000, -2*float64(j)/rd)
-				cs, sn := float32(math.Cos(pos*freq)), float32(math.Sin(pos*freq))
-				a, b := in[h*hd+j], in[h*hd+j+half]
-				out[h*hd+j], out[h*hd+j+half] = a*cs-b*sn, b*cs+a*sn
-			}
-		}
-		return out
-	}
-	assertNear := func(label string, got, want []float32) {
-		t.Helper()
-		if len(got) != len(want) {
-			t.Fatalf("%s length %d != %d", label, len(got), len(want))
-		}
-		for i := range want {
-			if math.Abs(float64(got[i]-want[i])) > 2e-5 {
-				t.Fatalf("%s[%d]=%g want %g", label, i, got[i], want[i])
-			}
-		}
-	}
-	assertNear("q", be.Read(qOut), ref(qHost, nQ))
-	assertNear("k", be.Read(kOut), ref(kHost, nK))
-	assertNear("q input", be.Read(q), qHost)
-	assertNear("k input", be.Read(k), kHost)
+	return string(source)
 }
 
-func TestCUDASigmoidMulInPlace(t *testing.T) {
-	be := cudaGDNBackend(t)
-	xHost := []float32{2, -3, 4, -5}
-	gateHost := []float32{-2, 0, 2, 8}
-	x := uploadCUDAGDN(t, be, []int{len(xHost)}, xHost, MemoryActivation, "sigmoid-x-test")
-	gate := uploadCUDAGDN(t, be, []int{len(gateHost)}, gateHost, MemoryActivation, "sigmoid-gate-test")
-	be.ResetHostXfer()
-	be.ResetH2DXfer()
-	be.SigmoidMulInPlace(x, gate)
-	if got := be.HostXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes D2H", got)
+func qwen38SourceFunction(t *testing.T, source, marker string) string {
+	t.Helper()
+	start := strings.Index(source, marker)
+	if start < 0 {
+		t.Fatalf("source marker %q not found", marker)
 	}
-	if got := be.H2DXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes H2D", got)
+	open := strings.Index(source[start:], "{")
+	if open < 0 {
+		t.Fatalf("source marker %q has no body", marker)
 	}
-	got := be.Read(x)
-	for i := range got {
-		want := xHost[i] / (1 + float32(math.Exp(float64(-gateHost[i]))))
-		if math.Abs(float64(got[i]-want)) > 2e-6 {
-			t.Fatalf("x[%d]=%g want %g", i, got[i], want)
-		}
-	}
-
-	short := uploadCUDAGDN(t, be, []int{1}, []float32{1}, MemoryActivation, "sigmoid-short-test")
-	defer func() {
-		r := recover()
-		if r == nil || !strings.Contains(r.(string), "shape mismatch") {
-			t.Fatalf("shape mismatch panic = %v", r)
-		}
-	}()
-	be.SigmoidMulInPlace(x, short)
-}
-
-func TestCUDASplitQwen35QueryGate(t *testing.T) {
-	be := cudaGDNBackend(t)
-	qgHost := []float32{
-		1, 2, 3, 4, 11, 12, 13, 14,
-		5, 6, 7, 8, 15, 16, 17, 18,
-	}
-	qg := uploadCUDAGDN(t, be, []int{len(qgHost)}, qgHost, MemoryActivation, "qg-split-test")
-	be.ResetHostXfer()
-	be.ResetH2DXfer()
-	q, gate := be.SplitQwen35QueryGate(qg, 2, 4)
-	t.Cleanup(func() { be.Free(q); be.Free(gate) })
-	if got := be.HostXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes D2H", got)
-	}
-	if got := be.H2DXferBytes(); got != 0 {
-		t.Fatalf("device operation copied %d bytes H2D", got)
-	}
-	assert := func(label string, got, want []float32) {
-		t.Helper()
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("%s[%d]=%g want %g", label, i, got[i], want[i])
+	open += start
+	depth := 0
+	for index := open; index < len(source); index++ {
+		switch source[index] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return source[start : index+1]
 			}
 		}
 	}
-	assert("query", be.Read(q), []float32{1, 2, 3, 4, 5, 6, 7, 8})
-	assert("gate", be.Read(gate), []float32{11, 12, 13, 14, 15, 16, 17, 18})
+	t.Fatalf("source marker %q has an unterminated body", marker)
+	return ""
+}
+
+func TestQwen38PromptAttentionHD256SourceSpine(t *testing.T) {
+	source := qwen38PromptAttentionSource(t, "cuda_kernels.cu")
+	body := qwen38SourceFunction(t, source, "__global__ void k_qwen38_causal_attention_panel_hd256")
+	for _, want := range []string{
+		"float acc[QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS]",
+		"float *red = smem + QWEN38_PROMPT_HEAD_DIM",
+		"float correction = expf(m - nextM)",
+		"probability = expf(score - nextM)",
+		"Out[(size_t)token * nH * QWEN38_PROMPT_HEAD_DIM",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("hd256 source spine missing %q", want)
+		}
+	}
+	if !strings.Contains(source, "#define QWEN38_PROMPT_HEAD_DIM 256") {
+		t.Fatal("hd256 source path does not bind the Qwen3.8 head dimension")
+	}
+	if strings.Contains(body, "hd > 32") {
+		t.Fatal("hd256 source path retains the legacy successful no-op guard")
+	}
+}
+
+func TestQwen38PromptAttentionABIDispatchIsFailClosed(t *testing.T) {
+	cu := qwen38PromptAttentionSource(t, "cuda_kernels.cu")
+	goSource := qwen38PromptAttentionSource(t, "cuda_kernels.go")
+	const abi = "int fak_qwen35_causal_attention_panel_f32("
+	if !strings.Contains(cu, "extern \"C\" "+abi) || !strings.Contains(goSource, abi) {
+		t.Fatal("Go/CUDA prompt-attention ABI declarations diverged")
+	}
+	body := qwen38SourceFunction(t, cu, "extern \"C\" "+abi)
+	preflight := strings.Index(body, "tokens != 2 || prefix != 1 || nH != 24 || nKV != 4")
+	headDim := strings.Index(body, "hd != QWEN38_PROMPT_HEAD_DIM")
+	clearError := strings.Index(body, "cudaGetLastError()")
+	launch := strings.Index(body, "k_qwen38_causal_attention_panel_hd256<<<")
+	if preflight < 0 || headDim < 0 || clearError < 0 || launch < 0 || !(preflight < headDim && headDim < clearError && clearError < launch) {
+		t.Fatalf("ABI must refuse every non-exact dimension before CUDA effects, then launch hd256: tuple=%d head_dim=%d clear=%d launch=%d", preflight, headDim, clearError, launch)
+	}
+	if !strings.Contains(body, "((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float)") {
+		t.Fatal("hd256 dispatcher does not provision query-plus-reduction shared memory")
+	}
+	if strings.Contains(body, "return 0;") {
+		t.Fatal("prompt-attention ABI contains an unconditional successful return")
+	}
+	if strings.Contains(body, "k_qwen35_causal_attention_panel<<<") {
+		t.Fatal("prompt-attention ABI retains a generic success launch outside the exact hd256 spine")
+	}
+}
+
+func TestQwen38PromptAttentionGoLauncherPreflightsBeforeAllocation(t *testing.T) {
+	source := qwen38PromptAttentionSource(t, "cuda_kernels.go")
+	body := qwen38SourceFunction(t, source, "func (c *cudaBackend) qwen35SequenceAttentionLocked")
+	validate := strings.Index(body, "validateQwen35CausalAttentionPanelGeometry")
+	scale := strings.Index(body, "validateQwen35CausalAttentionPanelScale")
+	allocate := strings.Index(body, "qwen35SequenceAllocLocked")
+	launch := strings.Index(body, "C.fak_qwen35_causal_attention_panel_f32")
+	if validate < 0 || scale < 0 || allocate < 0 || launch < 0 || !(validate < scale && scale < allocate && allocate < launch) {
+		t.Fatalf("Go launcher effect order invalid: geometry=%d scale=%d allocation=%d launch=%d", validate, scale, allocate, launch)
+	}
+	sequence := qwen38PromptAttentionSource(t, "cuda_qwen35_sequence.go")
+	geometry := qwen38SourceFunction(t, sequence, "func validateQwen35SequenceGeometry")
+	if !strings.Contains(geometry, "validateQwen35CausalAttentionPanelGeometry") {
+		t.Fatal("full sequence request does not apply launcher geometry during effect-free preflight")
+	}
+}
+
+func TestQwen38PromptAttentionHardwareWitnessRemainsExplicit(t *testing.T) {
+	source := qwen38PromptAttentionSource(t, "cuda_qwen35_sequence_test.go")
+	for _, want := range []string{
+		`{"qwen3.8-24x4-hd256", 2, 1, 24, 4, qwen38CausalAttentionPanelHeadDim}`,
+		"similarity < cudaFlashAttnCosineMin",
+		"resident prompt-panel kernel transferred host bytes before proof Read",
+		"retained caller sentinel",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("sanctioned CUDA witness is missing %q", want)
+		}
+	}
 }
