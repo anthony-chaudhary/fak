@@ -56,6 +56,21 @@ type buildCommand struct {
 	Output      string            `json:"output"`
 }
 
+type buildPGO struct {
+	Mode      string `json:"mode"`
+	Identity  string `json:"identity,omitempty"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+// buildExecution carries values needed only by the child process. In particular,
+// an explicit PGO profile's private snapshot path must never enter buildCommand,
+// because buildCommand is serialized in the receipt and on JSON stdout.
+type buildExecution struct {
+	command     buildCommand
+	environment map[string]string
+}
+
 type buildSettings struct {
 	Version string
 	Tags    string
@@ -86,6 +101,7 @@ type buildReceipt struct {
 	ElapsedMS    int64             `json:"elapsed_ms"`
 	ReceiptPath  string            `json:"receipt_path"`
 	Command      buildCommand      `json:"command"`
+	PGO          buildPGO          `json:"pgo"`
 	Source       buildSource       `json:"source"`
 	Toolchain    buildToolchain    `json:"toolchain"`
 	CacheState   string            `json:"cache_state"`
@@ -125,6 +141,7 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	versionFlag := fs.String("version", "", "version stamped into the binary (default: repository VERSION file)")
 	tagsFlag := fs.String("tags", "", "space-separated Go build tags")
 	gcflagsFlag := fs.String("gcflags", "", "extra Go compiler flags for dev or race profiles")
+	pgoFlag := fs.String("pgo", "off", "release PGO input: off or an explicit non-empty profile path")
 	asJSON := fs.Bool("json", false, "write the receipt as one JSON object to stdout; progress and child output stay on stderr")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -149,6 +166,14 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak build: --out and --receipt resolve to the same path %s; choose distinct paths\n", output)
 		return 2
 	}
+	pgo, pgoSnapshot, err := prepareBuildPGO(root, output, receiptPath, *profile, *pgoFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak build: %v\n", err)
+		return 2
+	}
+	if pgoSnapshot != "" {
+		defer removeBuildPGOSnapshot(pgoSnapshot)
+	}
 	overallStart := buildNow()
 	settings := buildSettings{Version: *versionFlag, Tags: *tagsFlag, GCFlags: *gcflagsFlag}
 	receipt := buildReceipt{
@@ -156,7 +181,8 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		Outcome:     "running",
 		StartedAt:   overallStart.UTC().Format(time.RFC3339Nano),
 		ReceiptPath: receiptPath,
-		Command:     canonicalBuildCommand(root, output, *profile, buildToolchain{}, settings),
+		Command:     canonicalBuildCommand(root, output, *profile, buildToolchain{}, settings, pgo),
+		PGO:         pgo,
 		CacheState:  "inherited_uncontrolled",
 	}
 
@@ -174,7 +200,7 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	receipt.Source = provenance.Source
 	receipt.Toolchain = provenance.Toolchain
 	receipt.PackageCount = provenance.PackageCount
-	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain, settings)
+	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain, settings, pgo)
 
 	phaseStart = buildNow()
 	err = buildPrepareOutput(output)
@@ -188,7 +214,7 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak build: %s\n", renderBuildCommand(receipt.Command))
 	}
 	phaseStart = buildNow()
-	buildCode, runErr := buildExecute(receipt.Command, stderr)
+	buildCode, runErr := buildExecute(canonicalBuildExecution(receipt.Command, pgoSnapshot), stderr)
 	compileErr := runErr
 	if compileErr == nil && buildCode != 0 {
 		compileErr = fmt.Errorf("canonical build command exited %d", buildCode)
@@ -349,7 +375,7 @@ func formatBuildDuration(ms int64) string {
 	return (time.Duration(ms) * time.Millisecond).String()
 }
 
-func canonicalBuildCommand(root, output, profile string, toolchain buildToolchain, settings buildSettings) buildCommand {
+func canonicalBuildCommand(root, output, profile string, toolchain buildToolchain, settings buildSettings, pgo buildPGO) buildCommand {
 	version := settings.Version
 	if version == "" {
 		if raw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
@@ -370,8 +396,99 @@ func canonicalBuildCommand(root, output, profile string, toolchain buildToolchai
 			"GOFLAGS":     toolchain.GoFlags,
 			"CGO_ENABLED": toolchain.CGOEnabled,
 			"GOTOOLCHAIN": toolchain.GoToolchain,
+			"PGO":         pgo.Mode,
 		},
 	}
+}
+
+func canonicalBuildExecution(command buildCommand, pgoSnapshot string) buildExecution {
+	environment := make(map[string]string, len(command.Environment))
+	for key, value := range command.Environment {
+		environment[key] = value
+	}
+	if pgoSnapshot != "" {
+		environment["PGO"] = pgoSnapshot
+	}
+	return buildExecution{command: command, environment: environment}
+}
+
+func prepareBuildPGO(root, output, receiptPath, profile, rawPGO string) (buildPGO, string, error) {
+	if rawPGO == "off" {
+		return buildPGO{Mode: "off"}, "", nil
+	}
+	if strings.TrimSpace(rawPGO) == "" {
+		return buildPGO{}, "", errors.New("--pgo must be 'off' or an explicit non-empty profile path")
+	}
+	if rawPGO == "auto" {
+		return buildPGO{}, "", errors.New("--pgo auto is not pinned; use 'off' or an explicit profile path")
+	}
+	if profile != "release" {
+		return buildPGO{}, "", fmt.Errorf("--pgo profiles are release-only; --profile %s requires --pgo off", profile)
+	}
+
+	sourcePath := rootedBuildPath(root, rawPGO)
+	if buildPathsCollide(sourcePath, output) || buildPathsCollide(sourcePath, receiptPath) {
+		return buildPGO{}, "", errors.New("--pgo profile must not resolve to the output or receipt path")
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return buildPGO{}, "", errors.New("--pgo profile must be a readable non-empty regular file")
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return buildPGO{}, "", errors.New("--pgo profile must be a readable non-empty regular file")
+	}
+
+	snapshotDir, err := os.MkdirTemp("", "fak-build-pgo-*")
+	if err != nil {
+		return buildPGO{}, "", errors.New("create private --pgo snapshot: temporary storage unavailable")
+	}
+	removeSnapshot := true
+	defer func() {
+		if removeSnapshot {
+			removeBuildPGOSnapshot(filepath.Join(snapshotDir, "profile.pprof"))
+		}
+	}()
+	if err := os.Chmod(snapshotDir, 0o700); err != nil {
+		return buildPGO{}, "", errors.New("secure private --pgo snapshot: temporary storage unavailable")
+	}
+	snapshotPath := filepath.Join(snapshotDir, "profile.pprof")
+	snapshot, err := os.OpenFile(snapshotPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return buildPGO{}, "", errors.New("create private --pgo snapshot: temporary storage unavailable")
+	}
+	h := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(snapshot, h), source)
+	syncErr := snapshot.Sync()
+	closeErr := snapshot.Close()
+	if copyErr != nil || syncErr != nil || closeErr != nil || size == 0 {
+		return buildPGO{}, "", errors.New("copy --pgo profile into private snapshot: profile is unreadable or empty")
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	removeSnapshot = false
+	return buildPGO{
+		Mode:      "profile",
+		Identity:  "sha256:" + digest,
+		SHA256:    digest,
+		SizeBytes: size,
+	}, snapshotPath, nil
+}
+
+func removeBuildPGOSnapshot(snapshotPath string) {
+	_ = os.Remove(snapshotPath)
+	_ = os.Remove(filepath.Dir(snapshotPath))
+}
+
+func buildPathsCollide(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if left == right || (runtime.GOOS == "windows" && strings.EqualFold(left, right)) {
+		return true
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func renderBuildCommand(command buildCommand) string {
@@ -517,10 +634,11 @@ func countNonemptyLines(raw []byte) int {
 	return count
 }
 
-func executeCanonicalBuild(command buildCommand, stderr io.Writer) (int, error) {
+func executeCanonicalBuild(execution buildExecution, stderr io.Writer) (int, error) {
+	command := execution.command
 	cmd := windowgate.Command(command.Argv[0], command.Argv[1:]...)
 	cmd.Dir = command.Directory
-	cmd.Env = overriddenBuildEnv(os.Environ(), command.Environment)
+	cmd.Env = overriddenBuildEnv(os.Environ(), execution.environment)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 	windowgate.ConfigureBackgroundCommand(cmd)
