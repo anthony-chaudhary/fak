@@ -1048,5 +1048,12 @@
         "uncertainty": "The PR remains open and unapproved; later merge or closure would not change this mechanism-level assessment."
       }
     }
-  ]
+  ],
+  "ownership": {
+    "canonical_repo_leaf": "docs",
+    "tracked_issue": 10391,
+    "artifact_role": "dated public upstream evidence; observed facts and fak-authored judgments remain structurally separate",
+    "maintenance_rule": "future refreshes must preserve immutable upstream identities, capture bounds, uncertainty, and public-only provenance",
+    "commit_contract_note": "The repository recognizes docs/research artifacts under the (fak docs) commit trailer."
+  }
 }
