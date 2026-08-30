@@ -49,10 +49,18 @@ func (v *VDSO) SetNearDup(on bool) {
 // NearDupOf reports whether near-duplicate key collapsing is enabled.
 func (v *VDSO) NearDupOf() bool { return atomic.LoadInt32(&v.nearDup) == 1 }
 
-// argHashFor returns the content hash the tier-2 key binds: the near-dup-normalized hash
-// when near-dup is on, else the exact canonical-JSON hash. Keeping this one indirection in
-// keyLocked means the epoch-stamping and witness logic are identical in both modes.
-func (v *VDSO) argHashFor(args []byte) string {
+// argHashFor returns the content hash the tier-2 key binds. Tool-scoped
+// nonsemantic path fields are removed first; invalid declarations fail closed to
+// hashing the original bytes. Near-duplicate normalization then remains an
+// independent opt-in for arguments that passed that structural check.
+func (v *VDSO) argHashFor(tool string, args []byte) string {
+	normalized, declared, ok := v.normalizeNonsemanticPathFields(tool, args)
+	if !ok {
+		return rawArgHash(args)
+	}
+	if declared {
+		args = normalized
+	}
 	if v.NearDupOf() {
 		return nearDupArgHash(args)
 	}

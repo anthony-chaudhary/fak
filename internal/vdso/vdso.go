@@ -198,10 +198,11 @@ type VDSO struct {
 	// resultStore is the opt-in durable write-through delegate. All are opt-in
 	// (nil/empty = unchanged behavior) and invoked outside v.mu. regMu keeps their
 	// reads race-free without contending v.mu on the hot Lookup path.
-	regMu           sync.RWMutex
-	cacheSink       func(CacheEvent)
-	witnessAdapters map[string]WitnessFunc
-	resultStore     ResultStore
+	regMu                 sync.RWMutex
+	cacheSink             func(CacheEvent)
+	witnessAdapters       map[string]WitnessFunc
+	resultStore           ResultStore
+	nonsemanticPathFields map[string]map[string]struct{}
 
 	// emitDropped counts cachemeta emissions dropped because the tier-2 key could
 	// not be parsed by FromVDSOKey (#1939). Without this, a key-format regression
@@ -444,6 +445,10 @@ func argHash(b []byte) string {
 	if canon, ok := canonicalJSON(b); ok {
 		b = canon
 	}
+	return rawArgHash(b)
+}
+
+func rawArgHash(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])[:24]
 }
@@ -649,7 +654,7 @@ func (v *VDSO) served(ctx context.Context, c *abi.ToolCall, out []byte, tierN in
 // epoch of every node on the read's root->leaf chain, joined with '.' so distinct
 // chains can never alias (e.g. [1,2] -> "1.2" never collides with [12] -> "12").
 func (v *VDSO) keyLocked(c *abi.ToolCall, args []byte) string {
-	h := v.argHashFor(args)
+	h := v.argHashFor(c.Tool, args)
 	// Per-principal isolation (principal.go): scope the hash to the caller's principal
 	// so a DIFFERENT principal can neither be served nor fill this entry — closing the
 	// cross-tenant cache leak + the hit/miss timing oracle. A nil/empty principal or a
