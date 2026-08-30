@@ -15,9 +15,11 @@ package model
 // keeps it exact, which TestParallelMatchesSerial and the oracle suite both enforce.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 
@@ -91,6 +93,11 @@ type parSlot struct {
 	_        [40]byte // pad to a cache line, avoid false sharing between slots
 }
 
+var parWorkerLabelContext = pprof.WithLabels(
+	context.Background(),
+	pprof.Labels("fak.component", "model.parallel"),
+)
+
 var (
 	parPoolOnce   sync.Once
 	parDispatchMu sync.Mutex
@@ -148,6 +155,10 @@ func parGrab() {
 }
 
 func parWorkerLoop(w int) {
+	// Persistent workers must not retain request-, tenant-, or secret-bearing
+	// labels from the goroutine that first initializes the process-wide pool.
+	pprof.SetGoroutineLabels(parWorkerLabelContext)
+
 	sl := &parSlots[w]
 	var last uint64
 	var spun int64
