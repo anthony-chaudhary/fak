@@ -54,10 +54,22 @@ func TestHostCapacityBindingDeterministicOnTie(t *testing.T) {
 }
 
 func TestDefaultMaxWorkersFallbackPinned(t *testing.T) {
-	// Pin the raised ceiling (8->20) so a silent revert is caught; the adaptive
-	// gates (host_cap, seats, dos target) can only pull the effective cap DOWN.
-	if FallbackMaxWorkers != 20 {
-		t.Fatalf("FallbackMaxWorkers = %d, want 20", FallbackMaxWorkers)
+	// Platform defaults are aspirational; adaptive gates can only pull the
+	// effective cap down.
+	if got := defaultMaxWorkers("darwin"); got != 30 {
+		t.Fatalf("defaultMaxWorkers(darwin) = %d, want 30", got)
+	}
+	for _, goos := range []string{"linux", "windows"} {
+		if got := defaultMaxWorkers(goos); got != 20 {
+			t.Fatalf("defaultMaxWorkers(%s) = %d, want 20", goos, got)
+		}
+	}
+}
+
+func TestDefaultMaxWorkersEnvOverridePreservesLowerCeiling(t *testing.T) {
+	t.Setenv("FAK_MAX_WORKERS", "7")
+	if got := defaultMaxWorkers("darwin"); got != 7 {
+		t.Fatalf("defaultMaxWorkers(darwin) = %d, want explicit override 7", got)
 	}
 }
 
