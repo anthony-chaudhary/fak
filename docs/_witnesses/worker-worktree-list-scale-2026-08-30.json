@@ -1,0 +1,41 @@
+{
+  "schema": "fak-worker-worktree-list-scale-witness/1",
+  "issue": 10362,
+  "observed_date": "2026-08-30",
+  "base_sha": "a5bc520e9e0d5bec806ee99649d51cd58623de16",
+  "command": "fak worktree worker list --root /Users/anthony/Documents/GitHub/fak --json",
+  "before": {
+    "timeout_seconds": 30,
+    "timed_out": true,
+    "stdout_bytes": 0,
+    "source": "coordinator live reproduction before implementation"
+  },
+  "after": {
+    "elapsed_seconds": 20.46,
+    "exit_code": 0,
+    "stdout_bytes": 1463249,
+    "returned_worktree_count": 169,
+    "inventory_count": 169,
+    "schema_returned": "fak-worker-worktree-lifecycle/1",
+    "fixed_probe_concurrency": 16,
+    "source": "temporary binary built from the detached worker after implementation"
+  },
+  "behavioral_test": {
+    "fleet_size": 205,
+    "probe_delay_milliseconds": 10,
+    "assertions": [
+      "elapsed time proves parallel execution",
+      "maximum simultaneous probes equals the fixed concurrency ceiling",
+      "rows retain deterministic sorted order",
+      "a failed probe remains attached only to its originating worktree",
+      "unknown evidence remains non-reapable"
+    ]
+  },
+  "tests": [
+    {
+      "command": "go test ./cmd/fak -run '^TestWorktreeWorkerLifecycle(InventoryIsBoundedParallelAndDeterministic|InventoryDistinguishesSafeStates|UnknownProbeIsNeverReapable)$' -count=1",
+      "outcome": "pass"
+    }
+  ],
+  "privacy": "Temporary paths and individual checkout paths are omitted."
+}

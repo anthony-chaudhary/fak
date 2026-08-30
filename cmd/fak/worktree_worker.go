@@ -881,8 +881,9 @@ type worktreeWorkerListOut struct {
 }
 
 const (
-	worktreeWorkerLifecycleSchema = "fak-worker-worktree-lifecycle/1"
-	worktreeOwnerStampSchema      = "fak-worker-worktree-owner/1"
+	worktreeWorkerLifecycleSchema      = "fak-worker-worktree-lifecycle/1"
+	worktreeOwnerStampSchema           = "fak-worker-worktree-owner/1"
+	worktreeWorkerLifecycleConcurrency = 16
 )
 
 type worktreeWorkerEvidenceState string
@@ -1120,61 +1121,86 @@ func worktreeWorkerLifecycleInventory(repoRoot string, paths []string, probes wo
 		}
 		return left < right
 	})
-	rows := make([]worktreeWorkerLifecycleRow, 0, len(sortedPaths))
-	for _, path := range sortedPaths {
-		row := worktreeWorkerLifecycleRow{
-			Path: path,
-			Association: worktreeWorkerAssociation{
-				State: worktreeEvidenceUnknown,
-				Lane:  workerworktree.LaneOf(path),
-			},
-			Liveness: worktreeWorkerLiveness{
-				Owner: worktreeEvidenceUnknown,
-				Lease: worktreeEvidenceUnknown,
-			},
-			Cleanliness: worktreeWorkerCleanliness{
-				State:      worktreeEvidenceUnknown,
-				DirtyPaths: []string{},
-			},
-		}
-
-		stamp, ownerErr := probes.ReadOwner(path)
-		if ownerErr == nil {
-			row.Association.State = worktreeEvidenceAssociated
-			row.Association.OwnerPID = stamp.PID
-			row.Association.LeaseID = strings.TrimSpace(stamp.LeaseID)
-			if live, err := probes.ProcessAlive(stamp.PID); err == nil {
-				if live {
-					row.Liveness.Owner = worktreeEvidenceLive
-				} else {
-					row.Liveness.Owner = worktreeEvidenceDead
-				}
-			}
-			if live, err := probes.LeaseLive(stamp.LeaseID); err == nil {
-				if live {
-					row.Liveness.Lease = worktreeEvidenceLive
-				} else {
-					row.Liveness.Lease = worktreeEvidenceReleased
-				}
-			}
-		}
-
-		evidence, _ := probes.Inspect(repoRoot, path)
-		row.HeadSHA = strings.TrimSpace(evidence.HeadSHA)
-		row.BaseSHA = strings.TrimSpace(evidence.BaseSHA)
-		switch evidence.Cleanliness {
-		case worktreeEvidenceClean, worktreeEvidenceDirty:
-			row.Cleanliness.State = evidence.Cleanliness
-			row.Cleanliness.DirtyPaths = append([]string(nil), evidence.DirtyPaths...)
-			if row.Cleanliness.DirtyPaths == nil {
-				row.Cleanliness.DirtyPaths = []string{}
-			}
-			sort.Strings(row.Cleanliness.DirtyPaths)
-		}
-		row.Lifecycle, row.ReapReadiness = lifecycleVerdict(row)
-		rows = append(rows, row)
+	rows := make([]worktreeWorkerLifecycleRow, len(sortedPaths))
+	if len(sortedPaths) == 0 {
+		return rows
 	}
+
+	// Each worker owns one row index at a time. The fixed ceiling bounds git
+	// subprocess and file-descriptor pressure, while index-addressed writes make
+	// probe completion order irrelevant to the stable sorted output.
+	workers := min(worktreeWorkerLifecycleConcurrency, len(sortedPaths))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				rows[i] = worktreeWorkerLifecycleRowForPath(repoRoot, sortedPaths[i], probes)
+			}
+		}()
+	}
+	for i := range sortedPaths {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 	return rows
+}
+
+func worktreeWorkerLifecycleRowForPath(repoRoot, path string, probes worktreeWorkerLifecycleProbes) worktreeWorkerLifecycleRow {
+	row := worktreeWorkerLifecycleRow{
+		Path: path,
+		Association: worktreeWorkerAssociation{
+			State: worktreeEvidenceUnknown,
+			Lane:  workerworktree.LaneOf(path),
+		},
+		Liveness: worktreeWorkerLiveness{
+			Owner: worktreeEvidenceUnknown,
+			Lease: worktreeEvidenceUnknown,
+		},
+		Cleanliness: worktreeWorkerCleanliness{
+			State:      worktreeEvidenceUnknown,
+			DirtyPaths: []string{},
+		},
+	}
+
+	stamp, ownerErr := probes.ReadOwner(path)
+	if ownerErr == nil {
+		row.Association.State = worktreeEvidenceAssociated
+		row.Association.OwnerPID = stamp.PID
+		row.Association.LeaseID = strings.TrimSpace(stamp.LeaseID)
+		if live, err := probes.ProcessAlive(stamp.PID); err == nil {
+			if live {
+				row.Liveness.Owner = worktreeEvidenceLive
+			} else {
+				row.Liveness.Owner = worktreeEvidenceDead
+			}
+		}
+		if live, err := probes.LeaseLive(stamp.LeaseID); err == nil {
+			if live {
+				row.Liveness.Lease = worktreeEvidenceLive
+			} else {
+				row.Liveness.Lease = worktreeEvidenceReleased
+			}
+		}
+	}
+
+	evidence, _ := probes.Inspect(repoRoot, path)
+	row.HeadSHA = strings.TrimSpace(evidence.HeadSHA)
+	row.BaseSHA = strings.TrimSpace(evidence.BaseSHA)
+	switch evidence.Cleanliness {
+	case worktreeEvidenceClean, worktreeEvidenceDirty:
+		row.Cleanliness.State = evidence.Cleanliness
+		row.Cleanliness.DirtyPaths = append([]string(nil), evidence.DirtyPaths...)
+		if row.Cleanliness.DirtyPaths == nil {
+			row.Cleanliness.DirtyPaths = []string{}
+		}
+		sort.Strings(row.Cleanliness.DirtyPaths)
+	}
+	row.Lifecycle, row.ReapReadiness = lifecycleVerdict(row)
+	return row
 }
 
 func lifecycleVerdict(row worktreeWorkerLifecycleRow) (worktreeWorkerLifecycleState, worktreeWorkerReapReadiness) {
