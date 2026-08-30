@@ -663,6 +663,13 @@ fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a 
 fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
 
 Source self-update derives a deterministic digest from Go's complete non-standard dependency graph for `./cmd/fak`, including generated/runtime source files, `go:embed` assets, native inputs, module metadata, toolchain/platform/CGO architecture knobs, tags, and build/link flags. A docs-only or test-only source revision can therefore reuse the prior digest-verified artifact without compiling again; any graph or build-envelope uncertainty falls back to the full build, vet, and smoke gates. JSON update receipts expose `build_provenance` with the selected source commit, the source commit that originally built reused bytes, build-input and artifact digests, artifact size, build envelope, and reuse decision.
+
+Self-update keeps these identities separate: Git owns the selected/source commits (exact
+40-hex comparison), the build-input walker owns its SHA-256, the verified file bytes own the
+artifact SHA-256 and slot ID, `VERSION`/linker provenance owns app version, and selfinstall
+owns the monotonic metadata generation. A digest-equal candidate refreshes selected-source
+metadata but does not copy, swap, activate, or change app version. Persisted rollback state
+selects a verified artifact slot by digest, never by an ambiguous app-version string.
 `--manifest-url` opts into conditional selection before any git fetch, build, or install. The
 server returns a canonical JSON payload signed by the public Ed25519 key pinned in the binary.
 The signature is verified before schema, manifest ID, channel, cohort, OS, architecture,

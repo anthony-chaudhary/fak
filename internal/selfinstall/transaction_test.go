@@ -41,6 +41,31 @@ func TestRunTransactionSharedSourceUpdatesAllTargets(t *testing.T) {
 	assertNoTransactionDebris(t, dir)
 }
 
+func TestRunLaunchTransactionDigestEqualSkipsActivation(t *testing.T) {
+	dir := t.TempDir()
+	source := writeTransactionFile(t, dir, "source", "verified-identical")
+	target := writeTransactionFile(t, dir, "target", "verified-identical")
+	activations := 0
+
+	result := RunLaunchTransaction([]Copy{{Source: source, Target: target}}, target, func(source, target string) error {
+		activations++
+		return OSSwap(source, target)
+	})
+
+	updated, ok := result.(Updated)
+	if !ok {
+		t.Fatalf("result = %#v, want Updated", result)
+	}
+	if updated.Attempted != 1 || updated.Changed != 0 || activations != 0 {
+		t.Fatalf("result=%#v activations=%d, want one considered copy and zero activation", updated, activations)
+	}
+	if _, err := os.Stat(launchshim.UpdateStatePath(target)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("digest-equal no-op published launch state: %v", err)
+	}
+	assertTransactionContents(t, target, "verified-identical")
+	assertNoTransactionDebris(t, dir)
+}
+
 func TestRunTransactionSecondActivationFailureRestoresFirst(t *testing.T) {
 	dir := t.TempDir()
 	source := writeTransactionFile(t, dir, "source", "new")

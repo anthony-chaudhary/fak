@@ -72,6 +72,7 @@ type Result struct {
 	BuildEnvelope        map[string]string // toolchain/platform/options bound by BuildInputDigest
 	ArtifactDigest       string            // SHA-256 of the activated candidate
 	ArtifactSize         int64
+	AppVersion           string
 	Reused               bool
 }
 
@@ -99,9 +100,10 @@ type candidateCacheManifest struct {
 }
 
 type candidateVersionIdentity struct {
-	Commit  string `json:"commit"`
-	Dirty   bool   `json:"dirty"`
-	Stamped bool   `json:"stamped"`
+	AppVersion string `json:"app_version"`
+	Commit     string `json:"commit"`
+	Dirty      bool   `json:"dirty"`
+	Stamped    bool   `json:"stamped"`
 }
 
 // Options configures Install.
@@ -184,6 +186,7 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		strings.EqualFold(sourceCommit, expectedCommit)
 	cacheHit := false
 	artifactSourceCommit := sourceCommit
+	appVersion := ""
 	if cacheEligible {
 		identity, err := deriveBuildInputIdentity(ctx, opts.RepoRoot, "./cmd/fak", buildInputOptions{BuildFlags: identityBuildInputs})
 		if err == nil {
@@ -198,9 +201,10 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 				VetArgs:          append([]string{}, vetArgs...),
 			}
 			if manifest, err := restoreCandidateCache(cacheDir, cacheInput, tmp); err == nil {
-				if _, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, manifest.ArtifactSourceCommit); ok {
+				if identity, _, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, manifest.ArtifactSourceCommit); ok {
 					cacheHit = true
 					artifactSourceCommit = manifest.ArtifactSourceCommit
+					appVersion = identity.AppVersion
 				} else {
 					_ = os.Remove(tmp)
 				}
@@ -229,8 +233,10 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		// 3. smoke: the freshly-built binary must run and report its full machine-readable
 		//    provenance. When the caller selected an exact commit, the candidate must attest
 		//    that full commit and a clean build before it can be cached or swapped.
-		if out, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); !ok {
+		if identity, out, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); !ok {
 			return Result{Stage: StageSmoke, Detail: trim(out)}
+		} else {
+			appVersion = identity.AppVersion
 		}
 		if cacheEligible {
 			if err := refreshCandidateCache(cacheDir, cacheInput, tmp); err != nil {
@@ -258,7 +264,7 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	return Result{Installed: true, Stage: StageSwap, Detail: detail + cacheRefreshDetail,
 		SourceCommit: sourceCommit, ArtifactSourceCommit: artifactSourceCommit,
 		BuildInputDigest: cacheInput.BuildInputDigest, BuildEnvelope: cacheInput.BuildEnvelope,
-		ArtifactDigest: artifactDigest, ArtifactSize: artifactSize, Reused: cacheHit}
+		ArtifactDigest: artifactDigest, ArtifactSize: artifactSize, AppVersion: appVersion, Reused: cacheHit}
 }
 
 func emptyLabel(value string) string {
@@ -268,25 +274,25 @@ func emptyLabel(value string) string {
 	return value
 }
 
-func smokeCandidate(ctx context.Context, run Runner, repoRoot, candidate, expectedCommit string) (string, bool) {
+func smokeCandidate(ctx context.Context, run Runner, repoRoot, candidate, expectedCommit string) (candidateVersionIdentity, string, bool) {
 	out, ok := run(ctx, repoRoot, candidate, "version", "--json")
 	if !ok {
-		return out, false
+		return candidateVersionIdentity{}, out, false
 	}
 	var identity candidateVersionIdentity
 	if err := json.Unmarshal([]byte(out), &identity); err != nil {
 		if expectedCommit == "" && versionOutputStamped(out) {
-			return out, true
+			return candidateVersionIdentity{}, out, true
 		}
-		return "candidate provenance is not valid `version --json`: " + trim(out), false
+		return candidateVersionIdentity{}, "candidate provenance is not valid `version --json`: " + trim(out), false
 	}
 	if !identity.Stamped || identity.Dirty || !validCommit(identity.Commit) {
-		return "candidate binary is unstamped or dirty; refusing to swap: " + trim(out), false
+		return candidateVersionIdentity{}, "candidate binary is unstamped or dirty; refusing to swap: " + trim(out), false
 	}
 	if expectedCommit != "" && !strings.EqualFold(identity.Commit, expectedCommit) {
-		return fmt.Sprintf("candidate binary reports commit %s, want exact commit %s", identity.Commit, expectedCommit), false
+		return candidateVersionIdentity{}, fmt.Sprintf("candidate binary reports commit %s, want exact commit %s", identity.Commit, expectedCommit), false
 	}
-	return out, true
+	return identity, out, true
 }
 
 func candidateInputDigest(input candidateCacheInput) (string, error) {

@@ -368,6 +368,7 @@ type selfUpdateOutcome string
 
 const (
 	outcomeInstalled      selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
+	outcomeMetadataOnly   selfUpdateOutcome = "metadata_only"  // selected provenance advanced; binary bytes did not
 	outcomeTargetCurrent  selfUpdateOutcome = "target-current" // --target already at origin/main
 	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
 	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
@@ -484,6 +485,7 @@ type selfUpdateBuildProvenance struct {
 	BuildEnvelope        map[string]string `json:"build_envelope"`
 	ArtifactDigest       string            `json:"artifact_digest"`
 	ArtifactSize         int64             `json:"artifact_size"`
+	AppVersion           string            `json:"app_version"`
 	Reused               bool              `json:"reused"`
 }
 
@@ -791,6 +793,8 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 	switch cause {
 	case outcomeInstalled:
 		status = "updated"
+	case outcomeMetadataOnly:
+		status = "current"
 	case outcomeGateFailed:
 		status, nextCommand = "gate_failed", "fak self-update"
 	case outcomePrepareFailed:

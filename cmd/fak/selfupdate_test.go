@@ -546,15 +546,24 @@ func TestSelfUpdateReceiptCarriesReusedBuildProvenance(t *testing.T) {
 		SourceCommit:         "89abcdef0123456789abcdef0123456789abcdef",
 		ArtifactSourceCommit: "0123456789abcdef0123456789abcdef01234567",
 		BuildInputDigest:     "sha256:inputs", BuildEnvelope: map[string]string{"GOVERSION": "go1.26.7"},
-		ArtifactDigest: "artifact", ArtifactSize: 42, Reused: true,
+		ArtifactDigest: "artifact", ArtifactSize: 42, AppVersion: "1.2.3", Reused: true,
 	}
 	t.Cleanup(func() { selfUpdateReceiptBuildProvenance = nil })
 	receipt := newSelfUpdateReceipt(outcomeInstalled, "bin/fak", "")
 	if receipt.BuildProvenance == nil || !receipt.BuildProvenance.Reused ||
 		receipt.BuildProvenance.SourceCommit == receipt.BuildProvenance.ArtifactSourceCommit ||
 		receipt.BuildProvenance.BuildInputDigest == "" || receipt.BuildProvenance.ArtifactDigest == "" ||
-		receipt.BuildProvenance.BuildEnvelope["GOVERSION"] == "" {
+		receipt.BuildProvenance.BuildEnvelope["GOVERSION"] == "" ||
+		receipt.BuildProvenance.AppVersion != "1.2.3" {
 		t.Fatalf("reused build provenance = %+v", receipt.BuildProvenance)
+	}
+}
+
+func TestSelfUpdateMetadataOnlyReceiptDoesNotSignalBinaryUpdate(t *testing.T) {
+	selfUpdateReceiptChanged = 0
+	receipt := newSelfUpdateReceipt(outcomeMetadataOnly, "bin/fak", "selected-source metadata advanced")
+	if receipt.Status != "current" || receipt.RestartRequired {
+		t.Fatalf("metadata-only receipt = %+v", receipt)
 	}
 }
 

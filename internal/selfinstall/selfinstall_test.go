@@ -638,6 +638,7 @@ type candidateCacheRunner struct {
 	commit        string
 	goEnv         string
 	artifact      []byte
+	appVersion    string
 	builds        int
 	vets          int
 	smokes        int
@@ -657,7 +658,8 @@ amd64
 windows
 amd64
 `,
-		artifact: []byte("exact candidate bytes"),
+		artifact:   []byte("exact candidate bytes"),
+		appVersion: "1.2.3",
 	}
 }
 
@@ -698,7 +700,7 @@ func (r *candidateCacheRunner) run(_ context.Context, _ string, name string, arg
 			commit = r.smokeCommits[0]
 			r.smokeCommits = r.smokeCommits[1:]
 		}
-		out, err := json.Marshal(candidateVersionIdentity{Commit: commit, Stamped: true})
+		out, err := json.Marshal(candidateVersionIdentity{AppVersion: r.appVersion, Commit: commit, Stamped: true})
 		if err != nil {
 			return err.Error(), false
 		}
@@ -724,15 +726,23 @@ func runCompleteCacheTransaction(t *testing.T, r *candidateCacheRunner, opts Opt
 	defer os.Remove(candidate)
 
 	copies := make([]Copy, 0, len(targets))
+	expectedChanged := 0
 	for _, target := range targets {
 		copies = append(copies, Copy{Source: candidate, Target: target})
+		equal, err := ArtifactsEqual(candidate, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !equal {
+			expectedChanged++
+		}
 	}
 	transaction := RunTransaction(copies, func(src, dst string) error {
 		r.elapsed += 25 * time.Millisecond
 		return OSSwap(src, dst)
 	})
-	if got, ok := transaction.(Updated); !ok || got.Changed != len(targets) {
-		t.Fatalf("transaction = %#v, want Updated across %d targets", transaction, len(targets))
+	if got, ok := transaction.(Updated); !ok || got.Attempted != len(targets) || got.Changed != expectedChanged {
+		t.Fatalf("transaction = %#v, want Updated across %d targets with %d changed", transaction, len(targets), expectedChanged)
 	}
 	return res
 }
@@ -865,6 +875,9 @@ func TestInstallCandidateCacheIdentityBindsRuntimeInputsAndReusesAcrossCommits(t
 	}
 	if got.BuildInputDigest == "" || got.ArtifactDigest == "" || got.ArtifactSize == 0 || got.BuildEnvelope["GOVERSION"] == "" {
 		t.Fatalf("cross-commit reuse omitted identities: %+v", got)
+	}
+	if got.AppVersion != "1.2.3" {
+		t.Fatalf("cross-commit reuse app version = %q, want candidate provenance 1.2.3", got.AppVersion)
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "cmd", "fak", "main.go"), []byte("package main\nfunc main() { println(\"changed\") }\n"), 0o600); err != nil {

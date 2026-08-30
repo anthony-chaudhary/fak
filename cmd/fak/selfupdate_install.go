@@ -147,7 +147,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		selfUpdateReceiptBuildProvenance = &selfUpdateBuildProvenance{
 			SourceCommit: res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
 			BuildInputDigest: res.BuildInputDigest, BuildEnvelope: res.BuildEnvelope,
-			ArtifactDigest: res.ArtifactDigest, ArtifactSize: res.ArtifactSize, Reused: res.Reused,
+			ArtifactDigest: res.ArtifactDigest, ArtifactSize: res.ArtifactSize, AppVersion: res.AppVersion, Reused: res.Reused,
 		}
 	}
 	if !res.Installed || candidate == "" {
@@ -160,6 +160,21 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		os.Exit(1)
 	}
 	defer os.Remove(candidate)
+	identityPath := selfinstall.IdentityStatePath(installTarget)
+	priorIdentity, identityErr := selfinstall.ReadInstallIdentity(identityPath)
+	if identityErr != nil {
+		detail := "identity: " + identityErr.Error()
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
+		cleanupAttempt()
+		os.Exit(1)
+	}
+	primaryEqual, identityErr := selfinstall.ArtifactsEqual(candidate, installTarget)
+	if identityErr != nil {
+		detail := "identity: compare current artifact: " + identityErr.Error()
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
+		cleanupAttempt()
+		os.Exit(1)
+	}
 
 	copies := make([]selfinstall.Copy, 0, 1+len(staleSiblings)+len(companionPaths))
 	copies = append(copies, selfinstall.Copy{Source: candidate, Target: installTarget})
@@ -218,6 +233,18 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		cleanupAttempt()
 		os.Exit(1)
 	}
+	_, identityErr = selfinstall.AdvanceInstallIdentity(identityPath, priorIdentity, selfinstall.StateUpdate{
+		SelectedSourceCommit: res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
+		BuildInputDigest: res.BuildInputDigest, ArtifactDigest: res.ArtifactDigest,
+		ArtifactSize: res.ArtifactSize, AppVersion: res.AppVersion,
+	}, installTarget, selfinstall.LaunchPriorPath(installTarget), !primaryEqual)
+	if identityErr != nil {
+		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget, "binary transaction completed but identity persistence failed: "+identityErr.Error())
+		return
+	}
+	if primaryEqual {
+		res.Detail = strings.TrimSpace(res.Detail + "; selected-source metadata advanced without app-version change or primary activation")
+	}
 	// Re-census and AUDIT: every configured hot copy is either converged above or named here with
 	// the build it is stuck on. The audit-only role (the repo-root gate binary, a hand-build in a
 	// shared dirty checkout that may be held live) is never swapped unattended — so an explicit,
@@ -240,7 +267,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 			res.Detail = strings.TrimSpace(res.Detail) + "; " + attention
 		}
 	}
-	if handoffSession != "" {
+	if handoffSession != "" && !primaryEqual {
 		ctx, cancel := context.WithTimeout(context.Background(), handoffTimeout)
 		defer cancel()
 		stopHeartbeat = startSelfUpdateHeartbeat(97, "handing off to updated binary")
@@ -253,7 +280,11 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		}
 		res.Detail = strings.TrimSpace(res.Detail + "; session " + handoffSession + " handed off to " + headRev)
 	}
-	emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
+	if selfUpdateReceiptChanged == 0 {
+		emitSelfUpdateOutcome(outcomeMetadataOnly, installTarget, res.Detail)
+	} else {
+		emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
+	}
 
 }
 
