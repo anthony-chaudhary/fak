@@ -1,0 +1,158 @@
+{
+  "schema": "fak-performance-rsi-evidence/1",
+  "snapshot": "issue-10358-performance-rsi-debt-refresh-cycle-2026-08-30",
+  "target_multiplier": 100,
+  "dimensions": [
+    {
+      "id": "cycle_time",
+      "source": "cycle ledger",
+      "direction": "lower",
+      "target": 0.02,
+      "unit": "hours",
+      "next_action": "shorten the end-to-end learning cycle"
+    },
+    {
+      "id": "improvement_yield",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "ratio",
+      "next_action": "measure accepted improvements"
+    },
+    {
+      "id": "evaluation_latency",
+      "source": "cycle ledger",
+      "direction": "lower",
+      "target": 0.005,
+      "unit": "hours",
+      "next_action": "reduce evaluation latency"
+    },
+    {
+      "id": "receipt_coverage",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "attach receipts"
+    },
+    {
+      "id": "quality_gate_coverage",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "expand quality gates"
+    },
+    {
+      "id": "experiment_throughput",
+      "source": "cycle ledger",
+      "direction": "higher",
+      "target": 1200,
+      "unit": "experiments/day",
+      "next_action": "increase completed cycles"
+    },
+    {
+      "id": "hypothesis_calibration",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "calibrate hypotheses"
+    },
+    {
+      "id": "discovery_freshness",
+      "source": "scrubbed baseline",
+      "direction": "lower",
+      "current": 100,
+      "target": 1,
+      "unit": "hours",
+      "next_action": "refresh discovery inputs"
+    },
+    {
+      "id": "adaptation_speed",
+      "source": "scrubbed baseline",
+      "direction": "lower",
+      "current": 100,
+      "target": 1,
+      "unit": "hours",
+      "next_action": "shorten adaptation delay"
+    },
+    {
+      "id": "reuse_ratio",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "increase reuse"
+    },
+    {
+      "id": "learning_retention",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "retain learned outcomes"
+    },
+    {
+      "id": "production_transfer",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "transfer proven improvements"
+    },
+    {
+      "id": "hardware_utilization",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "improve utilization"
+    },
+    {
+      "id": "attribution_quality",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "strengthen attribution"
+    },
+    {
+      "id": "automation_coverage",
+      "source": "cycle ledger",
+      "direction": "higher",
+      "target": 99,
+      "unit": "percent",
+      "next_action": "reduce operator-active time"
+    },
+    {
+      "id": "compounding_rate",
+      "source": "scrubbed baseline",
+      "direction": "higher",
+      "current": 1,
+      "target": 100,
+      "unit": "ratio",
+      "next_action": "measure compounding"
+    }
+  ],
+  "cycle": {
+    "schema": "fak-performance-rsi-cycle/1",
+    "engine": "fak-native/qwen3.8",
+    "idea_at": "2026-08-30T11:28:02.7938953-07:00",
+    "queue_at": "2026-08-30T11:28:03.9092134-07:00",
+    "execution_at": "2026-08-30T11:28:05.0262582-07:00",
+    "evaluation_at": "2026-08-30T11:28:06.1631082-07:00",
+    "landing_at": "2026-08-30T11:28:07.3045364-07:00",
+    "learning_at": "2026-08-30T11:28:08.4237562-07:00",
+    "operator_active_seconds": 1
+  }
+}

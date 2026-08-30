@@ -1,0 +1,25 @@
+{
+  "schema": "fak-performance-rsi-refresh-cycle-result/1",
+  "issue": 10358,
+  "snapshot": "issue-10358-performance-rsi-debt-refresh-2026-08-30",
+  "retained_receipts": [
+    {
+      "path": "docs/_witnesses/issue-9781-performance-rsi-improvement.json",
+      "schema": "fak-performance-rsi-evidence/1",
+      "sha256": "ef63046d562eaf7f8c948464eca67c35bf663bdf4ed204cca809bceff06cf0c5"
+    },
+    {
+      "path": "docs/_witnesses/issue-9782-performance-rsi-provenance.json",
+      "schema": "fak-performance-rsi-evidence/1",
+      "sha256": "a4ec7818a6f9c9d0db6f9e1cd4968fff2ce17bfab9e1ff44d89a574ec7330f31"
+    },
+    {
+      "path": "docs/_witnesses/issue-9783-performance-rsi-learning.json",
+      "schema": "fak-performance-rsi-evidence/1",
+      "sha256": "95dde64dc09e03ab9c4e4c41c7e65e44d1602af9a02f3b8fd9a920ec52f6d45f"
+    }
+  ],
+  "retained_receipt_count": 3,
+  "hardware_receipt": "absent",
+  "finding": "retained receipts parsed and hashed; no hardware evidence introduced"
+}

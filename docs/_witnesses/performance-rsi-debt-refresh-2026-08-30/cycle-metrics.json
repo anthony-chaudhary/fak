@@ -1,0 +1,13 @@
+{
+  "schema": "fak-performance-rsi-refresh-cycle-metrics/1",
+  "cycle_seconds": 5.6298609,
+  "queue_seconds": 1.1153181,
+  "execution_to_evaluation_seconds": 1.13685,
+  "evaluation_to_landing_seconds": 1.1414282,
+  "landing_to_learning_seconds": 1.1192198,
+  "cycle_time_hours": 0.00156385025,
+  "throughput_experiments_per_day": 15346.737962921961,
+  "operator_active_seconds": 1.0,
+  "automation_coverage_percent": 82.23757180217366,
+  "ordering_verified": true
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "fak-performance-rsi-debt-refresh-manifest/1",
+  "issue": 10358,
+  "captured_at": "2026-08-30T11:28:08.4237562-07:00",
+  "baseline": {
+    "snapshot": "issue-9768-live-repository-dogfood-2026-08-28",
+    "debt": 9,
+    "health": {
+      "score": 62.6,
+      "grade": "D",
+      "clean": false,
+      "interpretation": "grade describes performance-RSI loop health; it does not prove the explicit target multiplier was achieved"
+    }
+  },
+  "current": {
+    "snapshot": "issue-10358-performance-rsi-debt-refresh-2026-08-30",
+    "debt": 6,
+    "health": {
+      "score": 80.7,
+      "grade": "B",
+      "clean": false,
+      "interpretation": "grade describes performance-RSI loop health; it does not prove the explicit target multiplier was achieved"
+    }
+  },
+  "reduction": {
+    "dimensions": 3,
+    "percent": 33.333333333333336
+  },
+  "files": {
+    "baseline.json": "be24b7a638891c45643f10f7452d608f3f5e72a0351833f87c21cf44715781e0",
+    "baseline.md": "6f92aa3c5750120e5ba91c1891d32f1e798d8a53a299e8c3c514a60d20d61826",
+    "cycle-evidence.json": "00500448f24390866ba5131c7e05dde0f4ab808b196649e4e969f49a8a23e53f",
+    "cycle-metrics.json": "939a298ce2071a997c9686cb1ed1cf8b7258cb6951b6b212f9ac6aa3f6f42f69",
+    "cycle-result.json": "3c60720106b0800f0efd24defc562b07c55c6bccfc71efcaa57cc18938e6f30e",
+    "cycle-trace.json": "9025de3d1a3de768ea034cfa7c5a666d23d5732219494d8fb73ddf067ddb057a",
+    "cycle.json": "fd652d0f39fe6198485a03663517f944f399a897f4c318d1881fd6bfa07d40fe",
+    "input.json": "c67bdb35035343b69df1b79c6cc2a87866e49f0145565c6ccf1aea389eccd17f",
+    "README.md": "ac90521270a5a7e56d534f778aae7c5c5b0b66aa5e5fdf0d7c10d8a0995a3452",
+    "scorecard.json": "848049f4ef0e2d3816c8ad04766b66b44d53778ffe5d9eca996e2c5a8cf6fe11",
+    "scorecard.md": "21261633081e679c5272c9c2f06a39541e9c64208d021f9f6cd2420773d1a540"
+  }
+}

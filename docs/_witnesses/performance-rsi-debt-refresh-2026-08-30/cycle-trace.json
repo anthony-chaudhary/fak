@@ -1,0 +1,16 @@
+{
+  "schema": "fak-performance-rsi-refresh-cycle-trace/1",
+  "issue": 10358,
+  "scope": "bounded automated receipt-refresh experiment",
+  "stages": {
+    "idea_at": "automation started",
+    "queue_at": "three retained receipts found",
+    "execution_at": "receipt parsing and SHA-256 hashing started",
+    "evaluation_at": "schemas and hashes evaluated",
+    "landing_at": "cycle-result.json persisted",
+    "learning_at": "persisted result read back and invariants confirmed"
+  },
+  "operator_active_seconds_basis": "one second charged for the single automation launch; all stage work ran in one script",
+  "cycle_receipt": "cycle.json",
+  "result": "cycle-result.json"
+}
