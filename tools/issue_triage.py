@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
@@ -118,6 +119,7 @@ Q_IDLE_DAYS = 30       # question idle this long => dormant close candidate
 LIST_LIMIT = 100_000   # explicit safety ceiling; ranking refuses below the live total
 SNAPSHOT_MAX_AGE_SECONDS = 15 * 60
 DEFAULT_REPAIR_BATCH_SIZE = 50
+LIVE_SNAPSHOT_ATTEMPTS = 3
 
 
 class IncompleteRankingError(RuntimeError):
@@ -229,27 +231,75 @@ def reconcile_census(*, scope: str, state: str, fetched_count: int,
     return out
 
 
-def fetch_issues(*, repo: str | None = None, state: str = "open",
-                 limit: int = LIST_LIMIT) -> tuple[list[dict], dict]:
-    """Fetch repository issues to a known total or return an unrankable census."""
-    repo = _resolve_repo(repo)
-    total_before = _fetch_issue_total(repo, state)
-    fetch_limit = max(1, min(limit, total_before))
-    fields = "number,title,url,state,labels,createdAt,updatedAt,author,assignees,milestone,comments"
-    raw = _run_gh([
-        "issue", "list", "--state", state, "--limit", str(fetch_limit),
-        "--json", fields, "--repo", repo,
-    ])
-    issues = json.loads(raw or "[]")
-    if not isinstance(issues, list):
-        raise RuntimeError("gh issue list returned a non-array payload")
-    total_after = _fetch_issue_total(repo, state)
-    snapshot_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    census = reconcile_census(
-        scope="repository_issues", state=state, fetched_count=len(issues),
-        total_count=total_after, snapshot_age_seconds=0,
-        includes_pull_requests=False, snapshot_at=snapshot_at,
+def _snapshot_id(issues: list[dict]) -> str:
+    """Return a stable identity for the exact fetched issue set."""
+    identity = sorted(
+        (int(issue.get("number", 0)), str(issue.get("updatedAt", "")),
+         str(issue.get("state", "")))
+        for issue in issues
     )
+    encoded = json.dumps(identity, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def fetch_issues(*, repo: str | None = None, state: str = "open",
+                 limit: int = LIST_LIMIT,
+                 max_attempts: int = LIVE_SNAPSHOT_ATTEMPTS) -> tuple[list[dict], dict]:
+    """Fetch one complete issue snapshot, retrying bounded live count races.
+
+    A live attempt is accepted only when the independently queried totals bracketing
+    the list fetch are equal and match the decoded issue count. Every attempt keeps
+    a digest of the exact issue set, so success and terminal refusal are auditable.
+    """
+    if max_attempts <= 0:
+        raise ValueError("max_attempts must be positive")
+    repo = _resolve_repo(repo)
+    fields = "number,title,url,state,labels,createdAt,updatedAt,author,assignees,milestone,comments"
+    attempts = []
+    issues: list[dict] = []
+    census: dict = {}
+    for attempt_number in range(1, max_attempts + 1):
+        total_before = _fetch_issue_total(repo, state)
+        fetch_limit = max(1, min(limit, total_before))
+        raw = _run_gh([
+            "issue", "list", "--state", state, "--limit", str(fetch_limit),
+            "--json", fields, "--repo", repo,
+        ])
+        issues = json.loads(raw or "[]")
+        if not isinstance(issues, list):
+            raise RuntimeError("gh issue list returned a non-array payload")
+        total_after = _fetch_issue_total(repo, state)
+        snapshot_at = (dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+                       .isoformat().replace("+00:00", "Z"))
+        snapshot_id = _snapshot_id(issues)
+        census = reconcile_census(
+            scope="repository_issues", state=state, fetched_count=len(issues),
+            total_count=total_after, snapshot_age_seconds=0,
+            includes_pull_requests=False, snapshot_at=snapshot_at,
+        )
+        stable_counts = total_before == total_after
+        if not stable_counts:
+            census["page_complete"] = False
+            census["reconciliation"] = "count_mismatch"
+        attempt = {
+            "attempt": attempt_number,
+            "total_before": total_before,
+            "fetched_count": len(issues),
+            "total_after": total_after,
+            "fetch_limit": fetch_limit,
+            "reconciliation": census["reconciliation"],
+            "snapshot_at": snapshot_at,
+            "snapshot_id": snapshot_id,
+        }
+        attempts.append(attempt)
+        census.update({
+            "attempt_count": attempt_number,
+            "max_attempts": max_attempts,
+            "snapshot_id": snapshot_id,
+            "attempts": list(attempts),
+        })
+        if stable_counts and census["reconciliation"] == "complete":
+            return issues, census
     return issues, census
 
 
@@ -517,7 +567,9 @@ def render_md(report: dict, as_of: str) -> str:
          f"{census['fetched_count']} / total {census['total_count']} · page-complete "
          f"{str(census['page_complete']).lower()} · snapshot-age "
          f"{census['snapshot_age_seconds']}s · reconciliation "
-         f"`{census['reconciliation']}`"),
+         f"`{census['reconciliation']}` · attempts "
+         f"{census.get('attempt_count', 1)} · snapshot "
+         f"`{census.get('snapshot_id', 'not-recorded')}`"),
         "",
         f"**Open issues:** {c['open']}  ·  needs-priority {c['needs_priority']}  "
         f"·  needs-kind {c['needs_kind']}  ·  needs-area {c['needs_area']}  ·  "

@@ -333,7 +333,70 @@ class ReportTest(unittest.TestCase):
             got_issues, census = m.fetch_issues()
         self.assertEqual(len(got_issues), 525)
         self.assertEqual(census["reconciliation"], "complete")
+        self.assertEqual(census["attempt_count"], 1)
+        self.assertTrue(census["snapshot_id"].startswith("sha256:"))
+        self.assertEqual(census["attempts"][0]["total_before"], 525)
         self.assertIn("525", commands[0])
+
+    def test_live_fetch_retries_moving_count_until_snapshot_is_consistent(self):
+        import json
+        from unittest import mock
+        first = [_issue(n) for n in range(1, 4)]
+        second = [_issue(n) for n in range(1, 5)]
+        payloads = iter((json.dumps(first), json.dumps(second)))
+
+        with mock.patch.object(m, "_resolve_repo", return_value="owner/repo"), \
+             mock.patch.object(m, "_fetch_issue_total", side_effect=[3, 4, 4, 4]), \
+             mock.patch.object(m, "_run_gh", side_effect=lambda _args: next(payloads)):
+            issues, census = m.fetch_issues(max_attempts=3)
+
+        self.assertEqual(len(issues), 4)
+        self.assertEqual(census["reconciliation"], "complete")
+        self.assertEqual(census["attempt_count"], 2)
+        self.assertEqual(
+            [attempt["reconciliation"] for attempt in census["attempts"]],
+            ["count_mismatch", "complete"],
+        )
+        report = m.build_report(issues, NOW, census=census)
+        self.assertEqual(report["census"]["snapshot_id"], m._snapshot_id(issues))
+        md = m.render_md(report, "2026-06-01")
+        self.assertIn("attempts 2", md)
+        self.assertIn(census["snapshot_id"], md)
+
+    def test_live_fetch_retries_transient_truncation_then_succeeds(self):
+        import json
+        from unittest import mock
+        truncated = [_issue(n) for n in range(1, 4)]
+        complete = [_issue(n) for n in range(1, 5)]
+        payloads = iter((json.dumps(truncated), json.dumps(complete)))
+
+        with mock.patch.object(m, "_resolve_repo", return_value="owner/repo"), \
+             mock.patch.object(m, "_fetch_issue_total", side_effect=[4, 4, 4, 4]), \
+             mock.patch.object(m, "_run_gh", side_effect=lambda _args: next(payloads)):
+            issues, census = m.fetch_issues(max_attempts=2)
+
+        self.assertEqual(len(issues), 4)
+        self.assertEqual(census["reconciliation"], "complete")
+        self.assertEqual(
+            [attempt["reconciliation"] for attempt in census["attempts"]],
+            ["pagination_truncated", "complete"],
+        )
+
+    def test_live_fetch_stable_truncation_refuses_after_bound(self):
+        import json
+        from unittest import mock
+        truncated = [_issue(n) for n in range(1, 4)]
+
+        with mock.patch.object(m, "_resolve_repo", return_value="owner/repo"), \
+             mock.patch.object(m, "_fetch_issue_total", side_effect=[4, 4, 4, 4]), \
+             mock.patch.object(m, "_run_gh", return_value=json.dumps(truncated)):
+            issues, census = m.fetch_issues(max_attempts=2)
+
+        self.assertEqual(census["reconciliation"], "pagination_truncated")
+        self.assertEqual(census["attempt_count"], 2)
+        self.assertEqual(len(census["attempts"]), 2)
+        with self.assertRaisesRegex(m.IncompleteRankingError, "pagination_truncated"):
+            m.build_report(issues, NOW, census=census)
 
 
 class InjectedIssuesTest(unittest.TestCase):
