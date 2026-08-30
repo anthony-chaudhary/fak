@@ -1,13 +1,9 @@
 package accounts
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
@@ -187,132 +183,4 @@ func TestDeriveIdentityForProfileClaudeUnchanged(t *testing.T) {
 	if got != want {
 		t.Errorf("DeriveIdentityForProfile(claude) = %+v, want DeriveIdentity = %+v", got, want)
 	}
-}
-
-func TestReadCodexHomeIdentityPrecedence(t *testing.T) {
-	jwtAccount := "acct-jwt-secret"
-	payload := `{"https://api.openai.com/auth":{"chatgpt_account_id":"` + jwtAccount + `"}}`
-	jwt := "h." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
-
-	cases := []struct {
-		name string
-		auth string
-		want string
-	}{
-		{
-			name: "tokens account wins",
-			auth: `{"account_id":"acct-top-secret","tokens":{"account_id":"acct-tokens-secret","id_token":"` + jwt + `"}}`,
-			want: "acct-tokens-secret",
-		},
-		{
-			name: "top level account wins over jwt",
-			auth: `{"account_id":"acct-top-secret","tokens":{"id_token":"` + jwt + `"}}`,
-			want: "acct-top-secret",
-		},
-		{
-			name: "jwt fallback",
-			auth: `{"tokens":{"id_token":"` + jwt + `"}}`,
-			want: jwtAccount,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, codexAuthFile), []byte(tc.auth), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			got, err := ReadCodexHomeIdentity(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !got.AuthPresent {
-				t.Fatal("AuthPresent = false, want true")
-			}
-			if want := testCodexAccountDigest(tc.want); got.AccountDigest != want {
-				t.Errorf("AccountDigest = %q, want %q", got.AccountDigest, want)
-			}
-		})
-	}
-}
-
-func TestReadCodexHomeIdentityDigestStableAndDomainSeparated(t *testing.T) {
-	const accountID = "acct-sensitive-value"
-	dir := t.TempDir()
-	auth := `{"tokens":{"account_id":"` + accountID + `"}}`
-	if err := os.WriteFile(filepath.Join(dir, codexAuthFile), []byte(auth), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	first, err := ReadCodexHomeIdentity(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := ReadCodexHomeIdentity(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.AccountDigest != second.AccountDigest {
-		t.Fatalf("digest changed across reads: %q != %q", first.AccountDigest, second.AccountDigest)
-	}
-	if first.AccountDigest != testCodexAccountDigest(accountID) {
-		t.Fatalf("AccountDigest = %q, want domain-separated digest", first.AccountDigest)
-	}
-	plain := sha256.Sum256([]byte(accountID))
-	if first.AccountDigest == "sha256:"+hex.EncodeToString(plain[:]) {
-		t.Fatal("AccountDigest equals an undomained SHA-256 digest")
-	}
-}
-
-func TestReadCodexHomeIdentityMissingAuthAndIdentity(t *testing.T) {
-	t.Run("missing auth", func(t *testing.T) {
-		got, err := ReadCodexHomeIdentity(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.AuthPresent || got.AccountDigest != "" {
-			t.Fatalf("identity = %+v, want zero value", got)
-		}
-	})
-
-	t.Run("auth without identity", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, codexAuthFile), []byte(`{"tokens":{"access_token":"token-secret"}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		got, err := ReadCodexHomeIdentity(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !got.AuthPresent || got.AccountDigest != "" {
-			t.Fatalf("identity = %+v, want auth present with no digest", got)
-		}
-	})
-}
-
-func TestReadCodexHomeIdentityDoesNotExposeRawIdentity(t *testing.T) {
-	const accountID = "acct-must-not-escape"
-	dir := t.TempDir()
-	auth := `{"account_id":"` + accountID + `","tokens":{"access_token":"token-must-not-escape"}}`
-	if err := os.WriteFile(filepath.Join(dir, codexAuthFile), []byte(auth), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadCodexHomeIdentity(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered := fmt.Sprintf("%+v", got)
-	for _, secret := range []string{accountID, "token-must-not-escape"} {
-		if strings.Contains(rendered, secret) {
-			t.Fatalf("credential-safe identity leaked %q in %q", secret, rendered)
-		}
-	}
-	if strings.Contains(got.AccountDigest, accountID) {
-		t.Fatalf("digest leaked raw account identity: %q", got.AccountDigest)
-	}
-}
-
-func testCodexAccountDigest(accountID string) string {
-	sum := sha256.Sum256([]byte("fak/codex-account-identity/v1\x00" + accountID))
-	return "sha256:" + hex.EncodeToString(sum[:])
 }

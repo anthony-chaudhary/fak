@@ -1,11 +1,8 @@
 package accounts
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -129,46 +126,6 @@ func deriveExistsOnlyIdentity(dir string) Identity {
 // presence with a live token is what makes a codex home LoginReady, and the ChatGPT account
 // id inside it is the rate-limit bucket key.
 const codexAuthFile = "auth.json"
-
-const codexAccountDigestDomain = "fak/codex-account-identity/v1"
-
-// CodexHomeIdentity is the credential-safe identity view of one CODEX_HOME.
-// AccountDigest is empty when auth.json does not identify an account. The raw
-// account ID and all credentials remain confined to the parser stack.
-type CodexHomeIdentity struct {
-	AuthPresent   bool
-	AccountDigest string
-}
-
-// ReadCodexHomeIdentity reports whether auth.json exists and, when it contains a
-// recognized account identity, a stable domain-separated digest. It never returns
-// auth contents, credentials, or the raw account identity.
-func ReadCodexHomeIdentity(dir string) (CodexHomeIdentity, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, codexAuthFile))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return CodexHomeIdentity{}, nil
-		}
-		return CodexHomeIdentity{AuthPresent: true}, err
-	}
-	accountID, _ := parseCodexAuthIdentity(raw)
-	return CodexHomeIdentity{
-		AuthPresent:   true,
-		AccountDigest: codexAccountDigest(accountID),
-	}, nil
-}
-
-func codexAccountDigest(accountID string) string {
-	accountID = strings.TrimSpace(accountID)
-	if accountID == "" {
-		return ""
-	}
-	h := sha256.New()
-	h.Write([]byte(codexAccountDigestDomain))
-	h.Write([]byte{0})
-	h.Write([]byte(accountID))
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
-}
 
 // deriveCodexIdentity reads <dir>/auth.json for a codex home: the ChatGPT account id becomes
 // the AccountUUID (so AccountKey() yields "uuid:<account-id>" and two homes on the same
