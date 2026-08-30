@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-30T02:20:00Z",
+  "updated_at": "2026-08-30T04:16:17Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -3599,6 +3599,89 @@
       "last_push_at_check": "2026-08-29T21:11:11Z",
       "study_note": "docs/notes/CONCEPT-CROSS-LAYER-SWEEPS-2026-08-29.md",
       "refresh_issue": "#10192"
+    },
+    {
+      "repository": "anthony-chaudhary/metrics-service",
+      "url": "https://github.com/anthony-chaudhary/metrics-service",
+      "status": "studied",
+      "priority": 73,
+      "why": "Private repository studied for aligned typed partial fleet evidence, component readiness with recovery actions, and registry-driven dashboard and alert drift auditing. No project license grant was found at the pinned revision, so follow-ons are clean-room adaptations only; refresh if licensing, release provenance, or the pinned mechanisms materially change.",
+      "last_checked": "2026-08-29",
+      "checked_revision": "df58aad21de603992fc7b4900ac814610092c6c3",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-05-12T01:20:46Z",
+      "study_note": "docs/research/metrics-service-study-2026-08-29.md",
+      "refresh_issue": "#10287",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthony-chaudhary-metrics-service.json",
+        "indexed_revision": "df58aad21de603992fc7b4900ac814610092c6c3",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 6,
+        "candidate_count": 6,
+        "filed_issue_count": 3,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "GitHub repository metadata at 2026-08-29",
+              "three historical pull requests",
+              "zero issues",
+              "tags through v0.21.16",
+              "GitHub Releases through v0.19.0"
+            ],
+            "note": "The pinned private repository had three historical pull requests and no issues; tags continued beyond the latest GitHub Release, and tags were unsigned."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "internal/metrics/device_spine_scrape.go:122-175",
+              "internal/metrics/device_spine_federate.go:55-72",
+              "internal/serverproduct/contract.go:97-235",
+              "internal/serverproduct/encoding.go:16-92",
+              "internal/metrics/openmetrics.go:13-344",
+              "internal/metrics/parity_dashboard.go:198-370"
+            ],
+            "note": "Exact FAK source anchors decided PRESENT/PARTIAL/ABSENT dispositions and bounded the clean-room follow-ons."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/metrics-service-study-2026-08-29.md#candidate-dispositions"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10287",
+              "https://github.com/anthony-chaudhary/fak/issues/10312",
+              "https://github.com/anthony-chaudhary/fak/issues/10313",
+              "https://github.com/anthony-chaudhary/fak/issues/10314"
+            ],
+            "note": "The tracker and three independently shippable follow-ons carry the immutable study receipt and pinned clean-room provenance constraint."
+          }
+        ],
+        "issue_refs": [
+          "#10287",
+          "#10312",
+          "#10313",
+          "#10314"
+        ],
+        "completeness_critic": "Covered the committed tree, runtime/config/collector/storage/API lifecycle, operator UI and Grafana surfaces, tracked tests and fixtures, complete local history and tags, releases, pull requests, issues and discussions, provenance and license searches, current FAK overlap, candidate dispositions, deduplication, and delegated reads independently rechecked by the coordinator. Untracked target files, dependency-by-dependency license audit, external production deployments, and private runtime logs are outside the decision denominator."
+      }
     }
   ]
 }

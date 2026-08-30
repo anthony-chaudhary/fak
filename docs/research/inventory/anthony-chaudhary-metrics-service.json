@@ -1,0 +1,91 @@
+{
+    "schema":  "fak-study/1",
+    "title":  "metrics-service observability and evidence mechanisms",
+    "observed":  "2026-08-29",
+    "sources":  [
+                    {
+                        "url":  "https://github.com/anthony-chaudhary/metrics-service",
+                        "revision":  "df58aad21de603992fc7b4900ac814610092c6c3",
+                        "license":  "NO PROJECT LICENSE GRANT FOUND AT PINNED REVISION"
+                    }
+                ],
+    "observations":  [
+                         "Pinned v0.21.16 is a Go metrics runtime whose main path is config -\u003e adapters -\u003e aligned collection -\u003e normalized snapshot -\u003e concurrent sinks -\u003e bounded query/operator surfaces.",
+                         "The target has 52 tracked test files spanning unit, property, fuzz, contract, smoke, and pipeline E2E styles; go test ./... passed in the local pinned checkout.",
+                         "GitHub metadata showed a private single-maintainer repository, three historical pull requests, no issues, unsigned tags, and GitHub Releases stopping at v0.19.0 while tags continue through v0.21.16.",
+                         "No LICENSE, NOTICE, COPYING, or GitHub license metadata exists at the pinned revision; direct code reuse or redistribution is excluded without separate permission.",
+                         "The strongest clean-room adaptations are aligned typed partial fleet evidence, component readiness with recovery actions, and registry-driven dashboard/alert drift auditing."
+                     ],
+    "candidates":  [
+                       {
+                           "effect":  "Align fleet observations under one deadline and retain typed complete, partial, or failed outcomes.",
+                           "status":  "PARTIAL",
+                           "disposition":  "DEFAULT",
+                           "evidence":  [
+                                            "metrics-service:internal/collector/alignment.go:20-67@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "metrics-service:internal/collector/collector_test.go:142-199@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "fak:internal/metrics/device_spine_scrape.go:122-175@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd",
+                                            "fak:internal/metrics/device_spine_federate.go:55-72@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd"
+                                        ],
+                           "issue":  "#10312",
+                           "outcome":  "Clean-room adaptation only: preserve successful peer witnesses, shared-window identity, stable ordering, and explicit completeness."
+                       },
+                       {
+                           "effect":  "Expose a typed component-readiness matrix with exact recovery actions on the native server path.",
+                           "status":  "PARTIAL",
+                           "disposition":  "DEFAULT",
+                           "evidence":  [
+                                            "metrics-service:internal/ui/page_status.go:20-80,181-248,279-291@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "metrics-service:internal/ui/ui.go:119-155@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "fak:internal/serverproduct/contract.go:97-235,311-345@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd",
+                                            "fak:internal/serverproduct/encoding.go:16-92@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd"
+                                        ],
+                           "issue":  "#10314",
+                           "outcome":  "Clean-room adaptation only: enforcement-critical failures block readiness; optional exporters may degrade; every bad row carries a scrubbed next action."
+                       },
+                       {
+                           "effect":  "Drive dashboards and alert audits from one typed metric registry with cardinality and provenance contracts.",
+                           "status":  "PARTIAL",
+                           "disposition":  "DEFAULT",
+                           "evidence":  [
+                                            "metrics-service:internal/grafana/generate.go:20-48,206-460@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "metrics-service:internal/grafana/audit.go:15-89@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "fak:internal/metrics/openmetrics.go:13-344@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd",
+                                            "fak:internal/metrics/parity_dashboard.go:198-370@7ce62aaf2e0019c025fb28e84bc98e84ab3945cd"
+                                        ],
+                           "issue":  "#10313",
+                           "outcome":  "Clean-room adaptation only: keep native operation independent from Grafana and audit dimensions, provenance, counter semantics, units, and recovery/runbook coverage."
+                       },
+                       {
+                           "effect":  "Use strict default-overlay configuration with warnings distinct from startup-blocking errors.",
+                           "status":  "PRESENT",
+                           "disposition":  "EXCLUDE",
+                           "evidence":  [
+                                            "metrics-service:internal/config/config.go:250-430@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "fak has mature typed configuration, preflight, policy, doctor, and refusal/recovery surfaces across existing leaves."
+                                        ],
+                           "outcome":  "No new issue: the general mechanism is already represented; unknown-field handling in the source is weaker than FAK should copy."
+                       },
+                       {
+                           "effect":  "Retain rich source-specific payloads through sink derivation, then compact before bounded storage.",
+                           "status":  "PARTIAL",
+                           "disposition":  "WATCH",
+                           "evidence":  [
+                                            "metrics-service:internal/collector/collector.go:339-370@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "metrics-service:internal/sink/memory/store.go:15-82@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "fak already journals, scrubs, compacts, and emits bounded evidence through multiple domain-specific receipt paths."
+                                        ],
+                           "outcome":  "Watch rather than file: the target pattern is useful, but a cross-kernel generic event store would risk conflating domain-specific retention and provenance contracts."
+                       },
+                       {
+                           "effect":  "Provide direct Grafana dashboard push from the service.",
+                           "status":  "ABSENT",
+                           "disposition":  "EXCLUDE",
+                           "evidence":  [
+                                            "metrics-service:internal/grafana/client.go:57-146@df58aad21de603992fc7b4900ac814610092c6c3",
+                                            "metrics-service:internal/api/handler_grafana.go:73-164@df58aad21de603992fc7b4900ac814610092c6c3"
+                                        ],
+                           "outcome":  "Exclude as a default: it expands credential and external-write authority; generation/download/audit should precede any separately guarded push capability."
+                       }
+                   ]
+}
