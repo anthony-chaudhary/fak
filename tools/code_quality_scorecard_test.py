@@ -209,6 +209,44 @@ def test_payload_clean_is_ok():
     assert p["corpus"]["code_debt"] == 0 and p["ok"] is True
 
 
+def test_payload_classifies_structural_debt_without_replacing_defects():
+    kpis = [
+        cq.kpi_architecture([{"path": "huge.go", "n_lines": 1600, "long_funcs": []}]),
+        cq.kpi_format(["messy.go"]),
+        cq.kpi_tests(["internal/orphan"], 1),
+    ]
+    original_defects = [list(kpi["defects"]) for kpi in kpis]
+
+    payload = cq.build_payload(workspace="/x", kpis=kpis)
+
+    assert set(payload["corpus"]["debt_categories"]) == {
+        "modularity", "internal_consistency", "internal_coherence",
+    }
+    assert payload["corpus"]["debt_by_category"] == {
+        "modularity": 1, "internal_consistency": 1, "internal_coherence": 1,
+    }
+    assert [kpi["defects"] for kpi in payload["kpis"]] == original_defects
+    assert {kpi["kpi"]: kpi["debt_categories"] for kpi in payload["kpis"]} == {
+        "architecture": ["modularity"],
+        "format": ["internal_consistency"],
+        "tests": ["internal_coherence"],
+    }
+
+
+def test_human_renderers_name_all_debt_categories():
+    payload = cq.build_payload(workspace="/x", kpis=[
+        cq.kpi_architecture([{"path": "huge.go", "n_lines": 1600, "long_funcs": []}]),
+        cq.kpi_format(["messy.go"]),
+        cq.kpi_tests(["internal/orphan"], 1),
+    ])
+
+    text = cq.render(payload)
+    markdown = cq.render_markdown(payload)
+    for category in ("modularity", "internal_consistency", "internal_coherence"):
+        assert category in text
+        assert f"`{category}`" in markdown
+
+
 # --- the brace-depth scanner ----------------------------------------------
 
 def test_scan_counts_function_length_and_exports():

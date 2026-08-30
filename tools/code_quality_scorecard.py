@@ -120,6 +120,34 @@ except Exception:  # noqa: BLE001 — stand-alone fallback
 
 SCHEMA = "fleet-code-quality-scorecard/1"
 
+# Stable cross-KPI debt vocabulary. KPI names continue to identify the detector; these
+# categories identify the structural quality concern so consumers can route and trend
+# related findings without parsing prose. Additive metadata preserves schema-v1 clients.
+DEBT_CATEGORIES: dict[str, str] = {
+    "modularity": "Boundaries or units are too large or coupled to change independently.",
+    "internal_consistency": "The implementation contradicts its own declared rules or conventions.",
+    "internal_coherence": "Related implementation pieces do not form a complete, intelligible whole.",
+}
+
+KPI_DEBT_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "architecture": ("modularity",),
+    "build": ("internal_coherence",),
+    "vet": ("internal_coherence",),
+    "format": ("internal_consistency",),
+    "deps": ("internal_consistency",),
+    "honesty": ("internal_consistency",),
+    "tests": ("internal_coherence",),
+    "assertion_strength": ("internal_coherence",),
+    "ship_integrity": ("internal_consistency",),
+}
+
+def _attach_debt_categories(kpi: dict[str, Any]) -> dict[str, Any]:
+    """Attach stable category IDs to a KPI's hard findings without changing defects."""
+    categories = KPI_DEBT_CATEGORIES.get(kpi.get("kpi", ""), ()) if kpi.get("defects") else ()
+    kpi["debt_categories"] = list(categories)
+    return kpi
+
+
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 GOMOD_REL = "go.mod"
 GOSUM_REL = "go.sum"
@@ -545,6 +573,7 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
             "next_action": "fix the read (run from repo ROOT), then re-run",
             "workspace": workspace, "corpus": {}, "kpis": [],
         }
+    kpis = [_attach_debt_categories(k) for k in kpis]
     by_name = {k["kpi"]: k for k in kpis}
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"]
                 for name in KPI_WEIGHTS if name in by_name)
@@ -558,6 +587,11 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
           "detail": k["detail"]} for k in kpis),
         key=lambda x: (-x["debt"], x["score"]))
 
+    debt_by_category = {category: 0 for category in DEBT_CATEGORIES}
+    for kpi in kpis:
+        for category in kpi["debt_categories"]:
+            debt_by_category[category] += len(kpi["defects"])
+
     corpus = {
         "score": score,
         "grade": grade,
@@ -565,6 +599,8 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "soft_signals": n_soft,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
+        "debt_categories": DEBT_CATEGORIES.copy(),
+        "debt_by_category": debt_by_category,
         "breakdown": breakdown,
     }
 
@@ -1157,7 +1193,8 @@ def render(payload: dict[str, Any]) -> str:
         if not k["defects"]:
             continue
         any_defect = True
-        lines.append(f"  {k['kpi']} ({len(k['defects'])}):")
+        categories = ", ".join(k.get("debt_categories", [])) or "uncategorized"
+        lines.append(f"  {k['kpi']} [{categories}] ({len(k['defects'])}):")
         for it in k["defects"][:12]:
             lines.append(f"      - {it}")
         if len(k["defects"]) > 12:
@@ -1216,6 +1253,15 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     for b in c.get("breakdown", []):
         out.append(f"| `{b['kpi']}` | {b['score']} | {b['debt']} | {b['detail']} |")
     out.append("")
+    out.append("## Debt categories")
+    out.append("")
+    out.append("Stable category identifiers group related HARD findings across detector KPIs.")
+    out.append("")
+    out.append("| Category | Debt | Meaning |")
+    out.append("|---|---:|---|")
+    for category, meaning in DEBT_CATEGORIES.items():
+        out.append(f"| `{category}` | {c.get('debt_by_category', {}).get(category, 0)} | {meaning} |")
+    out.append("")
     out.append("## Code-debt work-list")
     out.append("")
     any_defect = False
@@ -1223,7 +1269,9 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         if not k["defects"]:
             continue
         any_defect = True
-        out.append(f"### `{k['kpi']}` — {len(k['defects'])} defect(s), score {k['score']}")
+        categories = ", ".join(f"`{item}`" for item in k.get("debt_categories", []))
+        category_note = f"; categories: {categories}" if categories else ""
+        out.append(f"### `{k['kpi']}` — {len(k['defects'])} defect(s), score {k['score']}{category_note}")
         for it in k["defects"]:
             out.append(f"- {it}")
         out.append("")
