@@ -63,7 +63,10 @@ func TestRealGitTickReapsStaleLocksAndFoldsLooseObjects(t *testing.T) {
 	mustGit(t, root, "update-ref", "refs/fak/gitdaily-live-witness", commit)
 
 	common := filepath.Join(root, ".git")
-	now := time.Now()
+	// Keep the same-day dedupe witness independent of the wall-clock hour at
+	// which CI happens to run. A live time near midnight made now.Add(time.Hour)
+	// truthfully name the next day and invalidated the fixture's premise.
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.Local)
 	leaseDir := filepath.Join(common, "refs", "fak", "locks")
 	if err := os.MkdirAll(leaseDir, 0o755); err != nil {
 		t.Fatal(err)
