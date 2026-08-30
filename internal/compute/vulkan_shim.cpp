@@ -996,6 +996,7 @@ void fvk_d2d_off(void* dst, size_t dst_off, const void* src, size_t bytes) {
 // batch entry points (C ABI).
 void fvk_batch_begin(void) { batchBegin(); }
 void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
+bool fvk_batch_active(void) { return g_batching; }
 void fvk_retire_request(void) { batchFlush(); }
 
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }

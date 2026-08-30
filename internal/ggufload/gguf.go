@@ -27,6 +27,13 @@ const (
 	blockQ4KBytes  = 2 + 2 + kScaleSize + qkK/2
 	blockQ5KBytes  = 2 + 2 + kScaleSize + qkK/8 + qkK/2
 	blockQ6KBytes  = qkK/2 + qkK/4 + qkK/16 + 2
+	// The IQ1/IQ2 K-block layouts below are the canonical GGML layouts at
+	// llama.cpp revision 6fe74980162af0ed5e559870d5deccafaa034e7c.
+	blockIQ2XXSBytes = 2 + qkK/8*2
+	blockIQ2XSBytes  = 2 + qkK/8*2 + qkK/32
+	blockIQ2SBytes   = 2 + qkK/4 + qkK/32 + qkK/32
+	blockIQ1SBytes   = 2 + qkK/8 + qkK/32*2
+	blockIQ1MBytes   = qkK/8 + qkK/16 + qkK/32
 	// MXFP4 (gpt-oss): a 1-byte E8M0 shared scale + qkMXFP4/2 bytes of packed
 	// 4-bit E2M1 codes (two per byte) = 17 bytes per 32-element block.
 	blockMXFP4Bytes = 1 + qkMXFP4/2
@@ -106,10 +113,15 @@ const (
 	TensorQ4_K    TensorType = 12
 	TensorQ5_K    TensorType = 13
 	TensorQ6_K    TensorType = 14
+	TensorIQ2_XXS TensorType = 16
+	TensorIQ2_XS  TensorType = 17
 	TensorIQ3_XXS TensorType = 18
+	TensorIQ1_S   TensorType = 19
 	TensorIQ4_NL  TensorType = 20
 	TensorIQ3_S   TensorType = 21
+	TensorIQ2_S   TensorType = 22
 	TensorIQ4_XS  TensorType = 23
+	TensorIQ1_M   TensorType = 29
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
 	TensorQ2_0    TensorType = 42
@@ -172,14 +184,24 @@ func (t TensorType) String() string {
 		return "Q5_K"
 	case TensorQ6_K:
 		return "Q6_K"
+	case TensorIQ2_XXS:
+		return "IQ2_XXS"
+	case TensorIQ2_XS:
+		return "IQ2_XS"
 	case TensorIQ3_XXS:
 		return "IQ3_XXS"
+	case TensorIQ1_S:
+		return "IQ1_S"
 	case TensorIQ4_NL:
 		return "IQ4_NL"
 	case TensorIQ3_S:
 		return "IQ3_S"
+	case TensorIQ2_S:
+		return "IQ2_S"
 	case TensorIQ4_XS:
 		return "IQ4_XS"
+	case TensorIQ1_M:
+		return "IQ1_M"
 	case TensorBF16:
 		return "BF16"
 	case TensorMXFP4:

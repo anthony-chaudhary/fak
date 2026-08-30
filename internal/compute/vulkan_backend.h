@@ -173,6 +173,7 @@ int fvk_argmax_f32(const void *dLogits, int n);
  * begin() when already batching is a no-op; the model loop brackets each token. */
 void fvk_batch_begin(void);
 void fvk_batch_flush(void);
+bool fvk_batch_active(void);
 /* Request retirement uses the same completion fence without counting an extra public
  * FlushBatch call when the token path already closed its batch. */
 void fvk_retire_request(void);
