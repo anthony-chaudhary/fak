@@ -93739,7 +93739,7 @@
     },
     {
       "number": 75,
-      "title": "feat(l3): verified cross-tenant prefix-sharing — make CAMA's riskiest optimizati",
+      "title": "feat(l3): verified cross-tenant prefix-sharing — make external-cache's riskiest ",
       "state": "CLOSED",
       "state_reason": "COMPLETED",
       "bucket": "TRUE_RESOLVED",
