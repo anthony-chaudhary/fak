@@ -1,0 +1,1052 @@
+{
+  "schema": "fak/upstream-pr-queue-evidence/v1",
+  "issue": {
+    "repository": "anthony-chaudhary/fak",
+    "number": 10391,
+    "url": "https://github.com/anthony-chaudhary/fak/issues/10391"
+  },
+  "capture": {
+    "capture_date": "2026-08-30",
+    "captured_at_utc": "2026-08-30T20:43:43Z",
+    "upstream_repository": "vllm-project/vllm",
+    "observation_mode": "public GitHub API and gh CLI; no upstream writes or untrusted code execution",
+    "queue_query": "repo:vllm-project/vllm is:pr is:open updated:>=2026-08-23",
+    "queue_api_endpoint": "https://api.github.com/search/issues?q=repo:vllm-project/vllm+is:pr+is:open+updated:%3E=2026-08-23&sort=updated&order=desc&per_page=100",
+    "sort": "updated descending",
+    "declared_window": {
+      "maximum_rows_inspected": 100,
+      "updated_since": "2026-08-23T00:00:00Z",
+      "state": "OPEN"
+    },
+    "reported_total_matches": 1579,
+    "search_incomplete_results": false,
+    "window_rows_returned": 100,
+    "deep_study_limit": 6,
+    "deep_study_count": 6,
+    "selection_terms": [
+      "Qwen",
+      "Qwen3.8",
+      "GDN",
+      "prefix cache",
+      "speculative decode",
+      "attention",
+      "macOS"
+    ],
+    "selection_method": "Choose five direct Qwen/Qwen3.8, cache/scheduler, speculative-attention, or observability candidates from the declared 100-row recent window, then add the sole result from the separately declared Apple-platform title query. Selection and relevance are fak-authored and are not claimed exhaustive.",
+    "reproduction_commands": [
+      "gh api 'search/issues?q=repo:vllm-project/vllm+is:pr+is:open+updated:%3E=2026-08-23&sort=updated&order=desc&per_page=100'",
+      "gh api 'search/issues?q=repo:vllm-project/vllm+is:pr+is:open+updated:%3E=2026-08-23+in:title+%28metal+OR+apple+OR+macos%29&sort=updated&order=desc&per_page=20'",
+      "for pr in 54371 47842 50172 53827 53795 47341; do gh pr view \"$pr\" --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles; done"
+    ],
+    "queue_queries": [
+      {
+        "purpose": "recent-open-pr-window",
+        "query": "repo:vllm-project/vllm is:pr is:open updated:>=2026-08-23",
+        "api_endpoint": "https://api.github.com/search/issues?q=repo:vllm-project/vllm+is:pr+is:open+updated:%3E=2026-08-23&sort=updated&order=desc&per_page=100",
+        "reported_total_matches": 1579,
+        "rows_returned": 100,
+        "incomplete_results": false
+      },
+      {
+        "purpose": "apple-platform-supplement",
+        "query": "repo:vllm-project/vllm is:pr is:open updated:>=2026-08-23 in:title (metal OR apple OR macos)",
+        "api_endpoint": "https://api.github.com/search/issues?q=repo:vllm-project/vllm+is:pr+is:open+updated:%3E=2026-08-23+in:title+%28metal+OR+apple+OR+macos%29&sort=updated&order=desc&per_page=20",
+        "reported_total_matches": 1,
+        "rows_returned": 1,
+        "incomplete_results": false
+      }
+    ],
+    "queue_query_role": "primary recent-open-pr window; see queue_queries for the Apple supplement"
+  },
+  "coverage_and_limitations": {
+    "bounded_not_exhaustive": true,
+    "coverage_statement": "GitHub reported 1,579 open PRs updated on or after 2026-08-23. This artifact inspected the first 100 results ordered by updated time plus the one-result Apple-platform title supplement, and deeply captured six relevance-selected PRs.",
+    "omissions": [
+      "Rows 101 and later in the general matching queue, except the independently queried Apple-platform supplement",
+      "Comments, complete timelines, and complete diffs for non-selected PRs",
+      "Private data and private-control details",
+      "Any runtime reproduction or performance benchmark"
+    ],
+    "mutable_state_warning": "PR state, update time, checks, reviews, labels, and branch heads are observations at capture time. A later force-push can replace the moving branch head; a later merge, closure, reopening, review, or check result can change status. Recheck the moving PR URL and compare headRefOid before using a judgment.",
+    "immutable_identity_rule": "The full 40-hex head SHA and commit URL identify the captured code snapshot; the PR URL alone does not.",
+    "performance_claims": "None. Upstream titles and metadata are observations, not fak-verified gains."
+  },
+  "ranking_method": {
+    "authorship": "fak-authored; not an upstream fact",
+    "component_range": "0..3",
+    "total_range": "0..15",
+    "components": {
+      "fak_relevance": "Direct fit to a fak goal or subsystem.",
+      "novelty": "Mechanism appears distinct from current fak/prior research within this bounded pass.",
+      "evidence_maturity": "Visible tests, checks, reviews, measurements, and operating-envelope clarity.",
+      "activity": "Current author/reviewer/check movement.",
+      "integration_cost_reverse": "3 means small/separable; 0 means broad or incompatible."
+    },
+    "tie_break": "updated_at descending, then repository and PR number",
+    "decision_meanings": {
+      "STUDY": "Gather deeper evidence before classification.",
+      "WATCH": "Promising but awaiting stabilization or evidence.",
+      "REJECT": "No distinct applicable mechanism in this pass.",
+      "BORROW": "Would justify a bounded issue draft; none assigned in this artifact."
+    }
+  },
+  "summary": {
+    "repositories_queried": 1,
+    "queue_rows_observed": 101,
+    "open_rows_observed": 101,
+    "selected_prs": 6,
+    "decisions": {
+      "REJECT": 1,
+      "STUDY": 2,
+      "WATCH": 3
+    },
+    "borrow_decisions": 0,
+    "issue_drafts_produced": 0,
+    "live_issues_created": 0,
+    "next_refresh_trigger": "Refresh before relying on any item when headRefOid/state/check/review data differs, or after 2026-09-06.",
+    "query_result_rows_observed": 101,
+    "unique_selected_prs": 6
+  },
+  "ranked_selected_inventory": [
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 53827,
+        "url": "https://github.com/vllm-project/vllm/pull/53827",
+        "title": "[Spec Decode] Add bounded attention with full KV retention for EAGLE3 drafts",
+        "state": "OPEN",
+        "is_draft": false,
+        "head_sha": "658dce3a0c222af7185c7ae86ff74bf887a3acfb",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/658dce3a0c222af7185c7ae86ff74bf887a3acfb",
+        "base_ref": "main",
+        "updated_at": "2026-08-30T20:24:45Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "andyluo7",
+        "labels": [
+          "documentation",
+          "speculative-decoding",
+          "llama"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [
+          {
+            "author": "claude",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-30T03:17:27Z",
+            "reviewed_commit_sha": "658dce3a0c222af7185c7ae86ff74bf887a3acfb"
+          }
+        ],
+        "review_state_counts": {
+          "COMMENTED": 1
+        },
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33281416656/job/99177105614",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-29T23:37:43Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "approved",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33289924958/job/99199662567",
+            "workflow_name": "Record CI approval",
+            "completed_at": "2026-08-30T03:17:31Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33281416686/job/99177105611",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-29T23:37:41Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33281535898/job/99177412152",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-29T23:40:51Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33281629290/job/99177653258",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-29T23:43:22Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33281416656/job/99177116940",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-29T23:37:44Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-29T23:37:34Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-29T23:37:36Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=53827&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T03:17:58Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34294421/"
+          }
+        ],
+        "check_outcome_counts": {
+          "FAILURE": 1,
+          "SKIPPED": 2,
+          "SUCCESS": 7
+        },
+        "changed_files": 7,
+        "additions": 165,
+        "deletions": 2,
+        "touched_areas": [
+          "EAGLE3 speculative decoding",
+          "bounded draft attention",
+          "KV retention policy",
+          "configuration and docs",
+          "attention-window tests"
+        ],
+        "sample_paths": [
+          "docs/features/speculative_decoding/README.md",
+          "docs/features/speculative_decoding/eagle.md",
+          "tests/model_executor/test_eagle_attention_window.py",
+          "tests/test_config.py",
+          "vllm/config/speculative.py",
+          "vllm/model_executor/layers/attention/attention.py",
+          "vllm/model_executor/models/llama_eagle3.py"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 53827 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/53827",
+          "snapshot_identity": "vllm-project/vllm#53827@658dce3a0c222af7185c7ae86ff74bf887a3acfb"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 2,
+          "novelty": 2,
+          "evidence_maturity": 2,
+          "activity": 3,
+          "integration_cost_reverse": 2
+        },
+        "score_total_0_to_15": 11,
+        "decision": "STUDY",
+        "rationale": "Separating a bounded draft-attention window from full KV retention is a compact state-management concept relevant to fak-native speculative paths.",
+        "uncertainty": "The PR targets EAGLE3/Llama code paths, has no approval, and visible checks include a failure; applicability to Qwen3.8 is unproven."
+      }
+    },
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 53795,
+        "url": "https://github.com/vllm-project/vllm/pull/53795",
+        "title": "[Core][Frontend] Add per-request prefix cache telemetry",
+        "state": "OPEN",
+        "is_draft": false,
+        "head_sha": "c3032a953f3a20765ba7e518b5cf4f4c6d0abe7f",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/c3032a953f3a20765ba7e518b5cf4f4c6d0abe7f",
+        "base_ref": "main",
+        "updated_at": "2026-08-30T19:26:09Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "cook1e-0707",
+        "labels": [
+          "documentation",
+          "frontend",
+          "scheduler",
+          "kv-cache-manager"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [
+          {
+            "author": "claude",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-25T21:18:19Z",
+            "reviewed_commit_sha": "ab832c4ca7c9fc51fe3ce0d44a05f3f5c853965d"
+          },
+          {
+            "author": "depthfirst-app",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-25T21:26:13Z",
+            "reviewed_commit_sha": "ab832c4ca7c9fc51fe3ce0d44a05f3f5c853965d"
+          },
+          {
+            "author": "cook1e-0707",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-25T21:36:29Z",
+            "reviewed_commit_sha": "511ef8b4861da8b7e5ab5e293865586deb941038"
+          },
+          {
+            "author": "RichardoMrMu",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-29T07:39:11Z",
+            "reviewed_commit_sha": "aa9ce5e3f8025fbca214bbed37b83ef84c76fcce"
+          },
+          {
+            "author": "cook1e-0707",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-29T22:28:53Z",
+            "reviewed_commit_sha": "2258331e71ab2b8a3f339f841f5761a2dc2931b6"
+          },
+          {
+            "author": "RichardoMrMu",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-30T10:40:36Z",
+            "reviewed_commit_sha": "2258331e71ab2b8a3f339f841f5761a2dc2931b6"
+          },
+          {
+            "author": "cook1e-0707",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-30T19:26:09Z",
+            "reviewed_commit_sha": "c3032a953f3a20765ba7e518b5cf4f4c6d0abe7f"
+          }
+        ],
+        "review_state_counts": {
+          "COMMENTED": 7
+        },
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330851246/job/99309014169",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T19:26:04Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "approved",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330861562/job/99309043731",
+            "workflow_name": "Record CI approval",
+            "completed_at": "2026-08-30T19:26:11Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330851176/job/99309013995",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-30T19:26:03Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330851246/job/99309029796",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T19:26:04Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T19:25:55Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T19:25:57Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=53795&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T19:26:25Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34301895/"
+          }
+        ],
+        "check_outcome_counts": {
+          "FAILURE": 1,
+          "SKIPPED": 2,
+          "SUCCESS": 5
+        },
+        "changed_files": 20,
+        "additions": 803,
+        "deletions": 49,
+        "touched_areas": [
+          "prefix-cache observability",
+          "per-request metrics",
+          "scheduler/output plumbing",
+          "OpenAI serving surfaces",
+          "metrics and scheduler tests"
+        ],
+        "sample_paths": [
+          "docs/features/per_request_metrics.md",
+          "tests/entrypoints/openai/chat_completion/test_serving_chat.py",
+          "tests/entrypoints/openai/completion/test_completion_error.py",
+          "tests/v1/core/test_prefix_caching.py",
+          "tests/v1/core/test_scheduler.py",
+          "tests/v1/engine/test_output_processor.py",
+          "tests/v1/metrics/test_stats.py",
+          "tests/v1/streaming_input/test_scheduler_streaming.py",
+          "vllm/entrypoints/generate/base/serving.py",
+          "vllm/entrypoints/launchers/cli_args.py",
+          "vllm/entrypoints/openai/chat_completion/serving.py",
+          "vllm/entrypoints/openai/completion/serving.py"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 53795 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/53795",
+          "snapshot_identity": "vllm-project/vllm#53795@c3032a953f3a20765ba7e518b5cf4f4c6d0abe7f"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 2,
+          "novelty": 1,
+          "evidence_maturity": 2,
+          "activity": 3,
+          "integration_cost_reverse": 2
+        },
+        "score_total_0_to_15": 10,
+        "decision": "WATCH",
+        "rationale": "Per-request prefix-cache telemetry could inform fak cache observability and evidence receipts without changing execution ownership.",
+        "uncertainty": "The change is broad across serving surfaces, has commentary but no approval, and visible checks include a failure; metric semantics require independent validation."
+      }
+    },
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 47842,
+        "url": "https://github.com/vllm-project/vllm/pull/47842",
+        "title": "[ROCm][Perf] Avoid extra reshape kernel in Qwen GDN output norm",
+        "state": "OPEN",
+        "is_draft": false,
+        "head_sha": "e0ae89de37c9e7f32a56a5a4c21f1a4fd3c1ad7b",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/e0ae89de37c9e7f32a56a5a4c21f1a4fd3c1ad7b",
+        "base_ref": "main",
+        "updated_at": "2026-08-30T19:11:46Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "mjkvaak-amd",
+        "labels": [
+          "documentation",
+          "performance",
+          "new-model",
+          "rocm",
+          "structured-output",
+          "frontend",
+          "intel-gpu",
+          "speculative-decoding",
+          "torch.compile",
+          "ci/build",
+          "multi-modality",
+          "tool-calling",
+          "llama",
+          "qwen",
+          "deepseek",
+          "cpu",
+          "gpt-oss",
+          "kv-connector",
+          "nvidia",
+          "quantization",
+          "mrv2",
+          "mistral",
+          "rust",
+          "kimi",
+          "k3",
+          "cohere"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [
+          {
+            "author": "claude",
+            "state": "COMMENTED",
+            "submitted_at": "2026-07-07T08:44:43Z",
+            "reviewed_commit_sha": "11fbc72e56a2fc02a3f90fea35542c5f186d3529"
+          },
+          {
+            "author": "claude",
+            "state": "COMMENTED",
+            "submitted_at": "2026-08-30T19:11:46Z",
+            "reviewed_commit_sha": "e0ae89de37c9e7f32a56a5a4c21f1a4fd3c1ad7b"
+          }
+        ],
+        "review_state_counts": {
+          "COMMENTED": 2
+        },
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328204360/job/99301998489",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T18:29:25Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "approved",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330187272/job/99307263368",
+            "workflow_name": "Record CI approval",
+            "completed_at": "2026-08-30T19:11:50Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328204333/job/99301998333",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-30T18:31:21Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33330081721/job/99306973662",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-30T19:09:39Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328204360/job/99302013533",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T18:29:25Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:29:15Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:29:18Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=47842&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T19:12:19Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "buildkite/intel-ci",
+            "status": "SUCCESS",
+            "details_url": "https://buildkite.com/vllm/intel-ci/builds/10070"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34301334/"
+          }
+        ],
+        "check_outcome_counts": {
+          "FAILURE": 1,
+          "SKIPPED": 2,
+          "SUCCESS": 7
+        },
+        "changed_files": 4,
+        "additions": 68,
+        "deletions": 32,
+        "touched_areas": [
+          "Qwen GDN output normalization",
+          "ROCm AITER compiler fusion",
+          "Inductor pass plumbing",
+          "fusion tests"
+        ],
+        "sample_paths": [
+          "tests/compile/passes/test_fusion.py",
+          "vllm/compilation/passes/fusion/rocm_aiter_fusion.py",
+          "vllm/compilation/passes/vllm_inductor_pass.py",
+          "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 47842 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/47842",
+          "snapshot_identity": "vllm-project/vllm#47842@e0ae89de37c9e7f32a56a5a4c21f1a4fd3c1ad7b"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 2,
+          "novelty": 2,
+          "evidence_maturity": 1,
+          "activity": 3,
+          "integration_cost_reverse": 2
+        },
+        "score_total_0_to_15": 10,
+        "decision": "STUDY",
+        "rationale": "The small diff targets removal of an intermediate reshape around Qwen GDN normalization; the optimization principle may transfer to fak-owned graph/kernel planning even though the implementation is ROCm/AITER-specific.",
+        "uncertainty": "Visible checks include a failure and the available submitted review is commentary, not approval; no matched fak-native evidence exists."
+      }
+    },
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 50172,
+        "url": "https://github.com/vllm-project/vllm/pull/50172",
+        "title": "[Feature] Qwen3-Next (GDN): mamba_cache_mode=\"all\" prefix caching with speculative decoding (MTP) on V1",
+        "state": "OPEN",
+        "is_draft": true,
+        "head_sha": "42f72bfd9c9280ea65a02b741a438fc0d224c283",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/42f72bfd9c9280ea65a02b741a438fc0d224c283",
+        "base_ref": "main",
+        "updated_at": "2026-08-30T18:40:20Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "anuragdutt",
+        "labels": [
+          "v1",
+          "qwen",
+          "scheduler",
+          "kv-cache-manager"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [],
+        "review_state_counts": {},
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33310971544/job/99255835720",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T12:15:06Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33310971546/job/99255836452",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-30T12:15:05Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33310971544/job/99255850655",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T12:15:06Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "ACTION_REQUIRED",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T12:14:56Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T12:14:59Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=50172&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:40:21Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34298560/"
+          }
+        ],
+        "check_outcome_counts": {
+          "ACTION_REQUIRED": 1,
+          "FAILURE": 1,
+          "SKIPPED": 1,
+          "SUCCESS": 4
+        },
+        "changed_files": 31,
+        "additions": 3195,
+        "deletions": 138,
+        "touched_areas": [
+          "Qwen3-Next GDN state cache",
+          "prefix caching",
+          "MTP speculative decoding",
+          "GDN kernels and metadata",
+          "scheduler/cache tests"
+        ],
+        "sample_paths": [
+          "tests/kernels/mamba/test_fla_chunk_block_states.py",
+          "tests/kernels/mamba/test_fused_sigmoid_gating_dual_index.py",
+          "tests/kernels/mamba/test_gdn_all_mode_decode.py",
+          "tests/kernels/mamba/test_gdn_all_mode_prefill.py",
+          "tests/kernels/mamba/test_gdn_all_mode_spec_decode.py",
+          "tests/kernels/mamba/test_gdn_scatter.py",
+          "tests/models/test_qwen3_next_prefix_caching.py",
+          "tests/v1/attention/test_gdn_metadata_builder.py",
+          "tests/v1/core/prefix_cache/test_partial_prefix_cache_hits.py",
+          "tests/v1/core/test_mamba_all_mode_split.py",
+          "tests/v1/core/test_mamba_block_size_validation.py",
+          "tests/v1/core/test_mamba_chunk_size.py"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 50172 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/50172",
+          "snapshot_identity": "vllm-project/vllm#50172@42f72bfd9c9280ea65a02b741a438fc0d224c283"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 3,
+          "novelty": 3,
+          "evidence_maturity": 1,
+          "activity": 3,
+          "integration_cost_reverse": 0
+        },
+        "score_total_0_to_15": 10,
+        "decision": "WATCH",
+        "rationale": "The interaction between recurrent-state caches, prefix reuse, and speculative decoding is relevant to fak-owned cache and scheduling semantics, but the draft is broad and hardware/framework-specific.",
+        "uncertainty": "The head may change; visible checks include failure/action-required states and there are no submitted reviews in the captured response."
+      }
+    },
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 54371,
+        "url": "https://github.com/vllm-project/vllm/pull/54371",
+        "title": "support PLE-Offload for Qwen3.8-Flash-Next with UVA",
+        "state": "OPEN",
+        "is_draft": true,
+        "head_sha": "43d8dd4ff93401b4438b485c73c9478ce2283077",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/43d8dd4ff93401b4438b485c73c9478ce2283077",
+        "base_ref": "main",
+        "updated_at": "2026-08-30T18:38:48Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "peakcrosser7",
+        "labels": [
+          "new-model",
+          "speculative-decoding",
+          "ci/build",
+          "qwen",
+          "kv-connector",
+          "nvidia",
+          "quantization",
+          "mrv2",
+          "scheduler",
+          "kv-cache-manager"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [],
+        "review_state_counts": {},
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "Check format",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328667929/job/99303199523",
+            "workflow_name": "PR title",
+            "completed_at": "2026-08-30T18:38:58Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328667925/job/99303199961",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T18:39:00Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33328667925/job/99303213770",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-30T18:44:56Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "ACTION_REQUIRED",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:38:50Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:38:54Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=54371&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-30T18:39:24Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34301432/"
+          }
+        ],
+        "check_outcome_counts": {
+          "ACTION_REQUIRED": 1,
+          "FAILURE": 1,
+          "SUCCESS": 5
+        },
+        "changed_files": 131,
+        "additions": 21018,
+        "deletions": 318,
+        "touched_areas": [
+          "Qwen3.8-Flash-Next model integration",
+          "UVA/PLE expert offload",
+          "fused GDN decode CUDA kernel",
+          "distributed collectives",
+          "configuration and model tests"
+        ],
+        "sample_paths": [
+          ".buildkite/test_areas/lm_eval.yaml",
+          ".buildkite/test_areas/models_basic.yaml",
+          "csrc/libtorch_stable/gdn/fused_gdn_decode_kernel.cu",
+          "csrc/libtorch_stable/ops.h",
+          "csrc/libtorch_stable/torch_bindings.cpp",
+          "tests/config/test_config_utils.py",
+          "tests/config/test_speculative_draft_hf_overrides.py",
+          "tests/distributed/test_custom_all_reduce.py",
+          "tests/engine/test_arg_utils.py",
+          "tests/evals/qwen4_exp/README.md",
+          "tests/evals/qwen4_exp/__init__.py",
+          "tests/evals/qwen4_exp/configs/Qwen3.8-Flash-Next-FP8.yaml"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 54371 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/54371",
+          "snapshot_identity": "vllm-project/vllm#54371@43d8dd4ff93401b4438b485c73c9478ce2283077"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 3,
+          "novelty": 3,
+          "evidence_maturity": 1,
+          "activity": 3,
+          "integration_cost_reverse": 0
+        },
+        "score_total_0_to_15": 10,
+        "decision": "WATCH",
+        "rationale": "Directly names Qwen3.8-Flash-Next and explores unified-virtual-address expert offload, which maps to fak-owned offload planning and native memory accounting, but the draft is very large, has no submitted reviews, and its visible checks include failures/action-required states.",
+        "uncertainty": "The head may be force-pushed and the architecture is CUDA/vLLM-specific; no fak benefit is inferred until a bounded fak-native Qwen3.8 experiment measures quality, setup, transfer, recovery, verification, and steady-state costs.",
+        "fak_native_qwen3_8_relevance": {
+          "target": "Qwen3.8 native expert-offload planning and receipts",
+          "borrowable_principle_only": "Make offload placement explicit and observable at the model-execution boundary; retain fak ownership of kernels, memory, scheduling, cache, adaptation, and operations.",
+          "non_goal": "Do not copy code or introduce a llama.cpp fallback.",
+          "falsifier": "Reject the mechanism for fak if a matched Qwen3.8 receipt shows no net benefit after transfer, setup, recovery, verification, quality, and memory-pressure costs."
+        }
+      }
+    },
+    {
+      "observed_upstream": {
+        "repository": "vllm-project/vllm",
+        "number": 47341,
+        "url": "https://github.com/vllm-project/vllm/pull/47341",
+        "title": "fix(build): respect explicit VLLM_TARGET_DEVICE on macOS",
+        "state": "OPEN",
+        "is_draft": false,
+        "head_sha": "7c816574c96085adb340f519ee62e77680ecbe58",
+        "immutable_head_url": "https://github.com/vllm-project/vllm/commit/7c816574c96085adb340f519ee62e77680ecbe58",
+        "base_ref": "main",
+        "updated_at": "2026-08-28T01:17:17Z",
+        "merged_at": null,
+        "closed_at": null,
+        "author": "hclsys",
+        "labels": [
+          "ci/build"
+        ],
+        "review_decision": "REVIEW_REQUIRED",
+        "reviews": [
+          {
+            "author": "claude",
+            "state": "COMMENTED",
+            "submitted_at": "2026-07-01T20:49:55Z",
+            "reviewed_commit_sha": ""
+          }
+        ],
+        "review_state_counts": {
+          "COMMENTED": 1
+        },
+        "checks": [
+          {
+            "type": "CheckRun",
+            "name": "pre-run-check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33132395678/job/98724667937",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-28T01:17:28Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "pre-commit",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://github.com/vllm-project/vllm/actions/runs/33132395678/job/98724686243",
+            "workflow_name": "pre-commit",
+            "completed_at": "2026-08-28T01:23:08Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "DCO",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://probot.github.io/apps/dco/",
+            "workflow_name": "",
+            "completed_at": "2026-08-28T01:17:19Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Meta Internal-Only Changes Check",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://code.facebook.com",
+            "workflow_name": "",
+            "completed_at": "2026-08-28T01:17:22Z"
+          },
+          {
+            "type": "CheckRun",
+            "name": "Summary",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "details_url": "https://dashboard.mergify.com/event-logs?pullRequestNumber=47341&login=vllm-project&repository=vllm",
+            "workflow_name": "",
+            "completed_at": "2026-08-29T05:17:23Z"
+          },
+          {
+            "type": "StatusContext",
+            "name": "docs/readthedocs.org:vllm",
+            "status": "SUCCESS",
+            "details_url": "https://app.readthedocs.org/projects/vllm/builds/34268288/"
+          }
+        ],
+        "check_outcome_counts": {
+          "SUCCESS": 6
+        },
+        "changed_files": 1,
+        "additions": 1,
+        "deletions": 1,
+        "touched_areas": [
+          "macOS build target selection",
+          "Python package build configuration"
+        ],
+        "sample_paths": [
+          "setup.py"
+        ],
+        "provenance": {
+          "metadata_command": "gh pr view 47341 --repo vllm-project/vllm --json number,title,url,state,isDraft,headRefOid,baseRefName,updatedAt,mergedAt,closedAt,author,labels,reviewDecision,statusCheckRollup,files,reviews,commits,additions,deletions,changedFiles",
+          "moving_api_url": "https://api.github.com/repos/vllm-project/vllm/pulls/47341",
+          "snapshot_identity": "vllm-project/vllm#47341@7c816574c96085adb340f519ee62e77680ecbe58"
+        }
+      },
+      "fak_authored_judgment": {
+        "score_components_0_to_3": {
+          "fak_relevance": 1,
+          "novelty": 0,
+          "evidence_maturity": 2,
+          "activity": 1,
+          "integration_cost_reverse": 3
+        },
+        "score_total_0_to_15": 7,
+        "decision": "REJECT",
+        "rationale": "The one-line macOS build-target correction is relevant to upstream packaging hygiene but does not offer a distinct fak-native inference mechanism beyond existing explicit backend selection.",
+        "uncertainty": "The PR remains open and unapproved; later merge or closure would not change this mechanism-level assessment."
+      }
+    }
+  ]
+}
