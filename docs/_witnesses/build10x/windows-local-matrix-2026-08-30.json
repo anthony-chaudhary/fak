@@ -1,0 +1,2289 @@
+{
+  "schema": "fak-build10x-windows-local-matrix/1",
+  "observed_at": {
+    "started_at_utc": "2026-08-30T12:53:32.9031309Z",
+    "finished_at_utc": "2026-08-30T13:32:54.9355357Z",
+    "local_date": "2026-08-30",
+    "timezone": "America/Los_Angeles"
+  },
+  "issues": {
+    "result_tracker": 9661,
+    "dependent_sanctioned_completion_matrix": 9673,
+    "claim_boundary": "Additive local same-source concurrency/resource experiment only. This is not the sanctioned five-cold/five-warm matched Windows/amd64 completion matrix and cannot close #9673 or the <=6,555 ms requirement."
+  },
+  "source": {
+    "repository": "github.com/anthony-chaudhary/fak",
+    "commit": "092f3dafe4fb26c9867b3db7361aef16657b6bc8",
+    "tree": "7c9fcb310a2dde53e5ab96aed83d4f0edfe3f1f4",
+    "tracked_worktree_clean_before": true,
+    "tracked_worktree_clean_after": true,
+    "target": "./cmd/fak",
+    "package_count": 858
+  },
+  "host": {
+    "os": "Microsoft Windows 10.0.26200",
+    "goos": "windows",
+    "goarch": "amd64",
+    "physical_cores": 16,
+    "logical_processors": 32,
+    "available_value_used": 32,
+    "memory_bytes": 272252637184,
+    "power_plan": "High performance",
+    "security_state": {
+      "windows_defender_realtime_enabled": true,
+      "antivirus_enabled": true,
+      "changed_for_experiment": false
+    },
+    "quiescence": {
+      "accepted": true,
+      "reason": "Ten one-second pre-run samples had total CPU 1.934-6.793%, processor queue length 0 throughout, and 396 processes throughout; no system processes, security controls, services, priorities, affinity, or power settings were changed.",
+      "pre_run_counters": {
+        "\\\\<local-host>\\system\\processor queue length": {
+          "samples": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "min": 0.0,
+          "median": 0.0,
+          "max": 0.0
+        },
+        "\\\\<local-host>\\memory\\available mbytes": {
+          "samples": [
+            185968.0,
+            185977.0,
+            185977.0,
+            185978.0,
+            185980.0,
+            185981.0,
+            185982.0,
+            185982.0,
+            185984.0,
+            185986.0
+          ],
+          "min": 185968.0,
+          "median": 185980.5,
+          "max": 185986.0
+        },
+        "\\\\<local-host>\\processor(_total)\\% processor time": {
+          "samples": [
+            1.9344315957847136,
+            4.401853732497784,
+            4.5401060706190215,
+            4.605115892415901,
+            4.611154044089815,
+            4.795089982422263,
+            5.311812349049816,
+            5.368909379749343,
+            5.559085753489623,
+            6.792805682716563
+          ],
+          "min": 1.9344315957847136,
+          "median": 4.7031220132560385,
+          "max": 6.792805682716563
+        },
+        "\\\\<local-host>\\system\\processes": {
+          "samples": [
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0,
+            396.0
+          ],
+          "min": 396.0,
+          "median": 396.0,
+          "max": 396.0
+        }
+      }
+    }
+  },
+  "toolchain": {
+    "go_version": "go1.26.7",
+    "go_executable": "C:\\Program Files\\Go\\bin\\go.exe",
+    "goroot": "C:\\Program Files\\Go",
+    "goamd64": "v1",
+    "cgo_enabled": "0",
+    "gotoolchain": "local",
+    "gowork": "off",
+    "global_goflags_before": "",
+    "global_gocache_before": "<existing-user-gocache>",
+    "global_gomodcache_read_only_reuse": "<existing-user-gomodcache>",
+    "note": "GOTOOLCHAIN=local prevented a download or toolchain switch; each cold arm used a unique empty build cache while retaining the existing module download cache."
+  },
+  "method": {
+    "design": "Full Cartesian 3x3 matrix: go build scheduling parallelism -p in {1,2,32} crossed with GOMAXPROCS in {1,2,32}. Three independently cold repetitions per cell, each followed by one warm no-source-change repetition reusing only that cell/repetition cache.",
+    "repetitions_per_cell_per_cache_state": 3,
+    "total_builds": 54,
+    "round_orders": [
+      [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      [
+        8,
+        6,
+        4,
+        2,
+        0,
+        7,
+        5,
+        3,
+        1
+      ],
+      [
+        1,
+        3,
+        5,
+        7,
+        0,
+        2,
+        4,
+        6,
+        8
+      ]
+    ],
+    "exact_argv_template": [
+      "go",
+      "build",
+      "-p",
+      "<1|2|32>",
+      "-o",
+      "<isolated-temp>\\r<round>-p<p>-g<gomaxprocs>-<cold|warm>-fak.exe",
+      "./cmd/fak"
+    ],
+    "environment_template": {
+      "GOMAXPROCS": "<1|2|32>",
+      "GOCACHE": "<isolated-temp>\\cache-r<round>-p<p>-g<gomaxprocs>",
+      "GOTMPDIR": "<isolated-temp>\\tmp-r<round>-p<p>-g<gomaxprocs>\\<cold|warm>",
+      "GOWORK": "off",
+      "GOFLAGS": "",
+      "GOTOOLCHAIN": "local",
+      "CGO_ENABLED": "0"
+    },
+    "cache_definition": {
+      "cold": "new empty unique GOCACHE for the cell/repetition",
+      "warm": "immediately repeated with identical source/argv/env and the same populated GOCACHE",
+      "gomodcache": "existing read-only module-download inputs were reused; no dependency download was observed"
+    },
+    "measurement": {
+      "wall": "System.Diagnostics.Stopwatch around go.exe through exit",
+      "cpu": "go.exe TotalProcessorTime plus last sampled TotalProcessorTime for directly observed child processes; lower bound because short-lived children can exit between 100 ms polls",
+      "rss": "maximum sampled sum of go.exe WorkingSet64 and direct-child WorkingSetSize at 100 ms cadence",
+      "process": "maximum direct children of go.exe plus global process count",
+      "action": "maximum concurrent direct child executable names compile/link/asm/cgo; go child count was also sampled",
+      "limitations": "Windows process sampling was practical rather than kernel-accounted: CPU is explicitly a lower bound, RSS/process/action peaks may miss sub-100ms events, and descendants deeper than direct children were not separately walked."
+    }
+  },
+  "results": {
+    "summary": [
+      {
+        "p": 1,
+        "gomaxprocs": 1,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            153154.063,
+            154141.601,
+            154203.869
+          ],
+          "median": 154141.601,
+          "min": 153154.063,
+          "max": 154203.869,
+          "spread_percent_of_median": 0.681
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            97156.25,
+            100156.25,
+            100828.125
+          ],
+          "median": 100156.25,
+          "min": 97156.25,
+          "max": 100828.125,
+          "spread_percent_of_median": 3.666
+        },
+        "peak_rss_bytes": [
+          1993113600,
+          1977118720,
+          1988530176
+        ],
+        "peak_rss_bytes_max": 1993113600,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 1,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 2,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2586.955,
+            2856.597,
+            2922.255
+          ],
+          "median": 2856.597,
+          "min": 2586.955,
+          "max": 2922.255,
+          "spread_percent_of_median": 11.738
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2625.0,
+            2812.5,
+            3171.875
+          ],
+          "median": 2812.5,
+          "min": 2625.0,
+          "max": 3171.875,
+          "spread_percent_of_median": 19.444
+        },
+        "peak_rss_bytes": [
+          1293193216,
+          1316249600,
+          1150386176
+        ],
+        "peak_rss_bytes_max": 1316249600,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 2,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            51365.912,
+            51521.819,
+            53329.201
+          ],
+          "median": 51521.819,
+          "min": 51365.912,
+          "max": 53329.201,
+          "spread_percent_of_median": 3.811
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            77187.5,
+            78968.75,
+            84437.5
+          ],
+          "median": 78968.75,
+          "min": 77187.5,
+          "max": 84437.5,
+          "spread_percent_of_median": 9.181
+        },
+        "peak_rss_bytes": [
+          1945899008,
+          1928654848,
+          1947893760
+        ],
+        "peak_rss_bytes_max": 1947893760,
+        "direct_process_peaks": [
+          28,
+          27,
+          29
+        ],
+        "direct_process_peak_max": 29,
+        "action_peaks": {
+          "compile": 28,
+          "link": 1,
+          "asm": 4,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 1,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            3143.994,
+            3507.003,
+            3719.938
+          ],
+          "median": 3507.003,
+          "min": 3143.994,
+          "max": 3719.938,
+          "spread_percent_of_median": 16.423
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2828.125,
+            3187.5,
+            3375.0
+          ],
+          "median": 3187.5,
+          "min": 2828.125,
+          "max": 3375.0,
+          "spread_percent_of_median": 17.157
+        },
+        "peak_rss_bytes": [
+          1282125824,
+          1253359616,
+          1257197568
+        ],
+        "peak_rss_bytes_max": 1282125824,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 1,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            65055.248,
+            69456.199,
+            75273.454
+          ],
+          "median": 69456.199,
+          "min": 65055.248,
+          "max": 75273.454,
+          "spread_percent_of_median": 14.712
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            83390.625,
+            88390.625,
+            100046.875
+          ],
+          "median": 88390.625,
+          "min": 83390.625,
+          "max": 100046.875,
+          "spread_percent_of_median": 18.844
+        },
+        "peak_rss_bytes": [
+          2010542080,
+          1999351808,
+          2032529408
+        ],
+        "peak_rss_bytes_max": 2032529408,
+        "direct_process_peaks": [
+          25,
+          32,
+          28
+        ],
+        "direct_process_peak_max": 32,
+        "action_peaks": {
+          "compile": 31,
+          "link": 1,
+          "asm": 3,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 32,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2169.851,
+            2212.665,
+            2259.132
+          ],
+          "median": 2212.665,
+          "min": 2169.851,
+          "max": 2259.132,
+          "spread_percent_of_median": 4.035
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2953.125,
+            3234.375,
+            4171.875
+          ],
+          "median": 3234.375,
+          "min": 2953.125,
+          "max": 4171.875,
+          "spread_percent_of_median": 37.681
+        },
+        "peak_rss_bytes": [
+          1188904960,
+          1157373952,
+          1179840512
+        ],
+        "peak_rss_bytes_max": 1188904960,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 32,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            59629.269,
+            60454.334,
+            61122.496
+          ],
+          "median": 60454.334,
+          "min": 59629.269,
+          "max": 61122.496,
+          "spread_percent_of_median": 2.47
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            96312.5,
+            101015.625,
+            107468.75
+          ],
+          "median": 101015.625,
+          "min": 96312.5,
+          "max": 107468.75,
+          "spread_percent_of_median": 11.044
+        },
+        "peak_rss_bytes": [
+          2010468352,
+          1961521152,
+          2020057088
+        ],
+        "peak_rss_bytes_max": 2020057088,
+        "direct_process_peaks": [
+          3,
+          3,
+          3
+        ],
+        "direct_process_peak_max": 3,
+        "action_peaks": {
+          "compile": 2,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 2,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2394.955,
+            2420.951,
+            2693.623
+          ],
+          "median": 2420.951,
+          "min": 2394.955,
+          "max": 2693.623,
+          "spread_percent_of_median": 12.337
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2703.125,
+            2734.375,
+            2750.0
+          ],
+          "median": 2734.375,
+          "min": 2703.125,
+          "max": 2750.0,
+          "spread_percent_of_median": 1.714
+        },
+        "peak_rss_bytes": [
+          1177640960,
+          1177776128,
+          1214636032
+        ],
+        "peak_rss_bytes_max": 1214636032,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 2,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            72082.415,
+            72447.495,
+            74482.399
+          ],
+          "median": 72447.495,
+          "min": 72082.415,
+          "max": 74482.399,
+          "spread_percent_of_median": 3.313
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            88718.75,
+            90125.0,
+            92687.5
+          ],
+          "median": 90125.0,
+          "min": 88718.75,
+          "max": 92687.5,
+          "spread_percent_of_median": 4.404
+        },
+        "peak_rss_bytes": [
+          1967878144,
+          2011336704,
+          1965350912
+        ],
+        "peak_rss_bytes_max": 2011336704,
+        "direct_process_peaks": [
+          3,
+          3,
+          3
+        ],
+        "direct_process_peak_max": 3,
+        "action_peaks": {
+          "compile": 2,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 1,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            3368.533,
+            3379.61,
+            3440.842
+          ],
+          "median": 3379.61,
+          "min": 3368.533,
+          "max": 3440.842,
+          "spread_percent_of_median": 2.14
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2765.625,
+            2953.125,
+            3031.25
+          ],
+          "median": 2953.125,
+          "min": 2765.625,
+          "max": 3031.25,
+          "spread_percent_of_median": 8.995
+        },
+        "peak_rss_bytes": [
+          1311432704,
+          1252982784,
+          1297854464
+        ],
+        "peak_rss_bytes_max": 1311432704,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 2,
+        "gomaxprocs": 1,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            97949.481,
+            101080.09,
+            102642.318
+          ],
+          "median": 101080.09,
+          "min": 97949.481,
+          "max": 102642.318,
+          "spread_percent_of_median": 4.643
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            101437.5,
+            101781.25,
+            102546.875
+          ],
+          "median": 101781.25,
+          "min": 101437.5,
+          "max": 102546.875,
+          "spread_percent_of_median": 1.09
+        },
+        "peak_rss_bytes": [
+          2094424064,
+          2017103872,
+          2052255744
+        ],
+        "peak_rss_bytes_max": 2094424064,
+        "direct_process_peaks": [
+          3,
+          3,
+          3
+        ],
+        "direct_process_peak_max": 3,
+        "action_peaks": {
+          "compile": 2,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 1,
+        "gomaxprocs": 32,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2376.026,
+            2555.332,
+            2770.646
+          ],
+          "median": 2555.332,
+          "min": 2376.026,
+          "max": 2770.646,
+          "spread_percent_of_median": 15.443
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            3468.75,
+            3765.625,
+            4578.125
+          ],
+          "median": 3765.625,
+          "min": 3468.75,
+          "max": 4578.125,
+          "spread_percent_of_median": 29.461
+        },
+        "peak_rss_bytes": [
+          1190006784,
+          1283305472,
+          1233829888
+        ],
+        "peak_rss_bytes_max": 1283305472,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 1,
+        "gomaxprocs": 32,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            89485.827,
+            91709.16,
+            95233.932
+          ],
+          "median": 91709.16,
+          "min": 89485.827,
+          "max": 95233.932,
+          "spread_percent_of_median": 6.268
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            100390.625,
+            101921.875,
+            105296.875
+          ],
+          "median": 101921.875,
+          "min": 100390.625,
+          "max": 105296.875,
+          "spread_percent_of_median": 4.814
+        },
+        "peak_rss_bytes": [
+          1975484416,
+          2001358848,
+          1939329024
+        ],
+        "peak_rss_bytes_max": 2001358848,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 1,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 1,
+        "gomaxprocs": 2,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2669.636,
+            2816.678,
+            2930.714
+          ],
+          "median": 2816.678,
+          "min": 2669.636,
+          "max": 2930.714,
+          "spread_percent_of_median": 9.269
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2656.25,
+            2812.5,
+            3031.25
+          ],
+          "median": 2812.5,
+          "min": 2656.25,
+          "max": 3031.25,
+          "spread_percent_of_median": 13.333
+        },
+        "peak_rss_bytes": [
+          1168994304,
+          1303060480,
+          1288638464
+        ],
+        "peak_rss_bytes_max": 1303060480,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 1,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 1,
+        "gomaxprocs": 2,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            112659.034,
+            112754.612,
+            115072.907
+          ],
+          "median": 112754.612,
+          "min": 112659.034,
+          "max": 115072.907,
+          "spread_percent_of_median": 2.141
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            89718.75,
+            90656.25,
+            92015.625
+          ],
+          "median": 90656.25,
+          "min": 89718.75,
+          "max": 92015.625,
+          "spread_percent_of_median": 2.534
+        },
+        "peak_rss_bytes": [
+          1885655040,
+          1958006784,
+          2003574784
+        ],
+        "peak_rss_bytes_max": 2003574784,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 1,
+          "link": 1,
+          "asm": 1,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 1,
+        "gomaxprocs": 1,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            3186.608,
+            3438.918,
+            3605.329
+          ],
+          "median": 3438.918,
+          "min": 3186.608,
+          "max": 3605.329,
+          "spread_percent_of_median": 12.176
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            2890.625,
+            3125.0,
+            3203.125
+          ],
+          "median": 3125.0,
+          "min": 2890.625,
+          "max": 3203.125,
+          "spread_percent_of_median": 10.0
+        },
+        "peak_rss_bytes": [
+          1279152128,
+          1276928000,
+          1263665152
+        ],
+        "peak_rss_bytes_max": 1279152128,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 32,
+        "cache_state": "cold_empty_unique_cache",
+        "wall_ms": {
+          "samples": [
+            42572.526,
+            42928.3,
+            43947.52
+          ],
+          "median": 42928.3,
+          "min": 42572.526,
+          "max": 43947.52,
+          "spread_percent_of_median": 3.203
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            90578.125,
+            94265.625,
+            95734.375
+          ],
+          "median": 94265.625,
+          "min": 90578.125,
+          "max": 95734.375,
+          "spread_percent_of_median": 5.47
+        },
+        "peak_rss_bytes": [
+          2016780288,
+          2006417408,
+          1967058944
+        ],
+        "peak_rss_bytes_max": 2016780288,
+        "direct_process_peaks": [
+          32,
+          31,
+          29
+        ],
+        "direct_process_peak_max": 32,
+        "action_peaks": {
+          "compile": 31,
+          "link": 1,
+          "asm": 3,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      },
+      {
+        "p": 32,
+        "gomaxprocs": 32,
+        "cache_state": "warm_reused_same_cache",
+        "wall_ms": {
+          "samples": [
+            2183.999,
+            2200.902,
+            2251.248
+          ],
+          "median": 2200.902,
+          "min": 2183.999,
+          "max": 2251.248,
+          "spread_percent_of_median": 3.056
+        },
+        "cpu_ms_sampled_lower_bound": {
+          "samples": [
+            3406.25,
+            3859.375,
+            3890.625
+          ],
+          "median": 3859.375,
+          "min": 3406.25,
+          "max": 3890.625,
+          "spread_percent_of_median": 12.551
+        },
+        "peak_rss_bytes": [
+          1163280384,
+          1294442496,
+          1196081152
+        ],
+        "peak_rss_bytes_max": 1294442496,
+        "direct_process_peaks": [
+          2,
+          2,
+          2
+        ],
+        "direct_process_peak_max": 2,
+        "action_peaks": {
+          "compile": 0,
+          "link": 1,
+          "asm": 0,
+          "cgo": 0
+        },
+        "all_exit_zero": true,
+        "all_smokes_passed": true
+      }
+    ],
+    "reference_comparisons": {
+      "p1_g1_cold_median_ms": 154141.601,
+      "p2_g2_cold_median_ms": 72447.495,
+      "available_available_cold_median_ms": 42928.3,
+      "available_available_cold_speedup_vs_p1_g1": 3.591,
+      "best_warm_cell": {
+        "p": 32,
+        "gomaxprocs": 32,
+        "median_ms": 2200.902
+      },
+      "available_available_direct_process_peak": 32,
+      "available_available_peak_rss_bytes": 2016780288
+    },
+    "adjudication": {
+      "preserve_current_p1_safeguard": true,
+      "reason": "The p=32/GOMAXPROCS=32 arm was stable and materially faster on this quiescent 32-logical-CPU workstation, but it peaked at 32 direct children and about 1.92 GiB sampled root+direct-child RSS. The CI safeguard was introduced for a fixed two-core hosted-runner process ceiling; this high-capacity local envelope does not supply that resource witness. The p=2/GOMAXPROCS=2 cold median was 72.447 s, slower than the historical 65.555 s clean baseline under a different source/toolchain, so this receipt also cannot justify changing CI.",
+      "noise_rule": "No faster arm was within noise relative to p=1/GOMAXPROCS=1 locally, but cross-host/resource-envelope mismatch controls the decision."
+    },
+    "all_builds_exit_zero": true,
+    "all_smokes_passed": true
+  },
+  "artifact": {
+    "sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+    "bytes": 94729216,
+    "identical_hash_and_bytes_across_all_54_builds": true,
+    "profile": "plain go build development artifact; no -ldflags version stamp",
+    "smoke": {
+      "argv": [
+        "<artifact>",
+        "version"
+      ],
+      "exit_code": 0,
+      "stdout_lines": [
+        "dev",
+        "build: (no VCS stamp — built without module/VCS provenance; cannot confirm the commit)",
+        "go: go1.26.7  windows/amd64"
+      ],
+      "identity_limit": "The unstamped plain-go-build artifact reports dev/no VCS stamp. Identity is therefore bound by the clean source commit/tree recorded above plus byte-identical SHA-256, not by embedded BuildVersion."
+    }
+  },
+  "raw_samples": [
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T12:53:32.9031309Z",
+      "wall_ms": 153154.063,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 97156.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1993113600,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T12:56:06.293849Z",
+      "wall_ms": 3438.918,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3125.0,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1279152128,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T12:58:13.7737534Z",
+      "wall_ms": 115072.907,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 90656.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1885655040,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:00:09.0342007Z",
+      "wall_ms": 2930.714,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2812.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1168994304,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:03:55.4159451Z",
+      "wall_ms": 95233.932,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 101921.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1975484416,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:05:30.8279068Z",
+      "wall_ms": 2770.646,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 4578.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1190006784,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:00:12.1560918Z",
+      "wall_ms": 101080.09,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 102546.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2094424064,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:01:53.4216415Z",
+      "wall_ms": 3379.61,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2765.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1311432704,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T12:56:09.9341645Z",
+      "wall_ms": 74482.399,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 92687.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1967878144,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T12:57:24.6154204Z",
+      "wall_ms": 2394.955,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2750.0,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1177640960,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:01:56.9838204Z",
+      "wall_ms": 61122.496,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 107468.75,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2010468352,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:02:58.284174Z",
+      "wall_ms": 2259.132,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3234.375,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1188904960,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:05:33.8410843Z",
+      "wall_ms": 69456.199,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 88390.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2010542080,
+      "direct_process_peak": 25,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 2,
+        "link": 1,
+        "compile": 24
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:06:43.5208856Z",
+      "wall_ms": 3507.003,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3187.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1282125824,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:03:00.7286345Z",
+      "wall_ms": 51365.912,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 77187.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1945899008,
+      "direct_process_peak": 28,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 4,
+        "link": 1,
+        "compile": 27
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:03:52.296447Z",
+      "wall_ms": 2922.255,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3171.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1293193216,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T12:57:27.1882114Z",
+      "wall_ms": 43947.52,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 94265.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2016780288,
+      "direct_process_peak": 32,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 3,
+        "link": 1,
+        "compile": 31
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 1,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T12:58:11.306207Z",
+      "wall_ms": 2251.248,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3859.375,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1163280384,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:11:34.7908929Z",
+      "wall_ms": 154203.869,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 100828.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1977118720,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:14:09.1910853Z",
+      "wall_ms": 3605.329,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3203.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1276928000,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:16:48.4187338Z",
+      "wall_ms": 112659.034,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 89718.75,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1958006784,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:18:41.2808998Z",
+      "wall_ms": 2816.678,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2656.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1303060480,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:14:12.9759758Z",
+      "wall_ms": 89485.827,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 100390.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2001358848,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:15:42.6537249Z",
+      "wall_ms": 2555.332,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3765.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1283305472,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:09:03.1760052Z",
+      "wall_ms": 102642.318,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 101781.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2017103872,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:10:45.9787258Z",
+      "wall_ms": 3440.842,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2953.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1252982784,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:18:44.2954523Z",
+      "wall_ms": 72082.415,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 88718.75,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2011336704,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:19:56.5782137Z",
+      "wall_ms": 2420.951,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2734.375,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1177776128,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:15:45.4044558Z",
+      "wall_ms": 60454.334,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 101015.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1961521152,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:16:46.0277339Z",
+      "wall_ms": 2212.665,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2953.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1157373952,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:06:47.2231316Z",
+      "wall_ms": 75273.454,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 100046.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1999351808,
+      "direct_process_peak": 32,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 2,
+        "link": 1,
+        "compile": 31
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:08:02.7026194Z",
+      "wall_ms": 3719.938,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3375.0,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1253359616,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:08:06.621476Z",
+      "wall_ms": 53329.201,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 84437.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1928654848,
+      "direct_process_peak": 27,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 3,
+        "link": 1,
+        "compile": 26
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:09:00.1333288Z",
+      "wall_ms": 2856.597,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2625.0,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1316249600,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:10:49.6087869Z",
+      "wall_ms": 42572.526,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 95734.375,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2006417408,
+      "direct_process_peak": 31,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 3,
+        "link": 1,
+        "compile": 30
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 2,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:11:32.359454Z",
+      "wall_ms": 2200.902,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3890.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1294442496,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:25:47.0925777Z",
+      "wall_ms": 154141.601,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 100156.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1988530176,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:28:21.4263774Z",
+      "wall_ms": 3186.608,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2890.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1263665152,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:21:14.6830244Z",
+      "wall_ms": 112754.612,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 92015.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2003574784,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:23:07.6197604Z",
+      "wall_ms": 2669.636,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3031.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1288638464,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:24:12.6157335Z",
+      "wall_ms": 91709.16,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 105296.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1939329024,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 1
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 1,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:25:44.5068156Z",
+      "wall_ms": 2376.026,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3468.75,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1233829888,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:29:10.2448198Z",
+      "wall_ms": 97949.481,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 101437.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2052255744,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:30:48.3709066Z",
+      "wall_ms": 3368.533,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3031.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1297854464,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:19:59.1841494Z",
+      "wall_ms": 72447.495,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 90125.0,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1965350912,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:21:11.819871Z",
+      "wall_ms": 2693.623,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2703.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1214636032,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:23:10.4632695Z",
+      "wall_ms": 59629.269,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 96312.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2020057088,
+      "direct_process_peak": 3,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 2
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 2,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:24:10.2667394Z",
+      "wall_ms": 2169.851,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 4171.875,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1179840512,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:31:46.3817025Z",
+      "wall_ms": 65055.248,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 83390.625,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 2032529408,
+      "direct_process_peak": 28,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 3,
+        "link": 1,
+        "compile": 27
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 1,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:32:51.614456Z",
+      "wall_ms": 3143.994,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2828.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1257197568,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:30:51.9165601Z",
+      "wall_ms": 51521.819,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 78968.75,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1947893760,
+      "direct_process_peak": 29,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 4,
+        "link": 1,
+        "compile": 28
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 2,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:31:43.61507Z",
+      "wall_ms": 2586.955,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 2812.5,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1150386176,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "cold_empty_unique_cache",
+      "started_at_utc": "2026-08-30T13:28:24.7922916Z",
+      "wall_ms": 42928.3,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 90578.125,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1967058944,
+      "direct_process_peak": 29,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 1,
+        "link": 1,
+        "compile": 28
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    },
+    {
+      "round": 3,
+      "p": 32,
+      "gomaxprocs": 32,
+      "cache_state": "warm_reused_same_cache",
+      "started_at_utc": "2026-08-30T13:29:07.8841647Z",
+      "wall_ms": 2183.999,
+      "cpu_ms_sampled_root_plus_direct_children_lower_bound": 3406.25,
+      "peak_rss_bytes_sampled_root_plus_direct_children": 1196081152,
+      "direct_process_peak": 2,
+      "action_peak": {
+        "go": 0,
+        "cgo": 0,
+        "asm": 0,
+        "link": 1,
+        "compile": 0
+      },
+      "exit_code": 0,
+      "artifact_sha256": "adb3cf67db11566328a8459e1c720b6890457c49bb1f1144635550731935035c",
+      "artifact_bytes": 94729216,
+      "smoke_exit_code": 0
+    }
+  ],
+  "provenance": {
+    "collector": "PowerShell 7 script generated in isolated %TEMP%; no repository source/config/system-setting mutation",
+    "scratch": "<isolated-temp>\\fak-build10x-9661-20260830T125322Z",
+    "raw_capture": "raw-matrix.json retained in isolated scratch during this task; receipt contains every scalar sample needed for review",
+    "source_issue_assignment": "Issue #9661 comment observed 2026-08-29: measure safe -p x GOMAXPROCS matrix around {1,2,available} on quiescent Windows and preserve -p=1 if alternatives are unstable or within noise."
+  },
+  "limitations": [
+    "Only three cold and three warm repetitions per matrix cell; this is an exploratory local matrix, not #9673's required 5+5 completion evidence.",
+    "This host has 16 physical/32 logical CPUs and 253.55 GiB RAM, not the fixed two-core hosted CI envelope named by #9661.",
+    "The source/toolchain are commit 092f3daf and Go 1.26.7, so comparisons to the historical 65,555 ms receipt (older source and Go 1.26.5) are contextual, not matched before/after claims.",
+    "No source edit/invalidation experiment was run; the assigned work was the concurrency/resource matrix.",
+    "No system security, service, priority, affinity, or power-plan setting was changed.",
+    "No claim is made that #9673 is complete or that the <=6,555 ms target is met."
+  ]
+}
