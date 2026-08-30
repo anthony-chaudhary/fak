@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/gitbroker"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -118,9 +119,31 @@ var (
 		return context.WithTimeout(context.Background(), timeout)
 	}
 
-	// Injectable command seam for deterministic cancellation and producer-join
-	// tests. Production exposes stdout directly to the extractor and always uses
-	// CommandContext so an expired land deadline terminates git archive.
+	// These narrow seams keep tree resolution, enumeration, and object reads
+	// cancellable and let tests prove that irrelevant blobs are never fetched.
+	resolveDisambiguationTree = func(ctx context.Context, repo, tree string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", "rev-parse", tree+"^{tree}")
+		cmd.Dir = repo
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	listDisambiguationTree = func(ctx context.Context, repo, tree string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "-z", "-l", tree)
+		cmd.Dir = repo
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Output()
+	}
+	readDisambiguationObject = func(ctx context.Context, repo, objectID string) ([]byte, error) {
+		info, data, err := gitbroker.Shared().ObjectBytes(ctx, repo, objectID)
+		if err != nil {
+			return nil, err
+		}
+		if info.Type != "blob" {
+			return nil, fmt.Errorf("disambiguation object %s is %s, want blob", objectID, info.Type)
+		}
+		return data, nil
+	}
 	runDisambiguationArchive = func(ctx context.Context, repo, tree string) (disambiguationArchiveStream, error) {
 		cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", tree)
 		cmd.Dir = repo
@@ -161,7 +184,7 @@ var (
 		windowgate.ConfigureBackgroundCommand(cmd)
 		return cmd.Output()
 	}
-	disambiguationCacheSchema     = "disambiguation-witness-v1"
+	disambiguationCacheSchema     = "disambiguation-witness-v2"
 	disambiguationAnalyzerConfig  = "json+markdown;catalog-invariant-v1"
 	disambiguationAnalyzerVersion = "concept-disambiguation-scorecard-v1"
 	disambiguationCacheRoot       = func(repo string) (string, error) {
@@ -331,30 +354,24 @@ func coverageFamilyRegressed(before, after map[string]float64) bool {
 
 func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubphase func(string)) DisambiguationWitness {
 	w := DisambiguationWitness{Tree: tree}
-	setSubphase("scratch-tree")
-	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
+	setSubphase("git-tree")
+	treeID, err := resolveDisambiguationTree(ctx, repo, tree)
 	if err != nil {
 		w.Detail = err.Error()
 		return w
 	}
-	defer os.RemoveAll(tmp)
-	root := filepath.Join(tmp, "tree")
 
-	key, err := materializeDisambiguationArchive(ctx, repo, tree, root, setSubphase)
-	if err != nil {
-		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
-		return w
-	}
+	key := disambiguationCacheKey(treeID)
 	w.CacheIdentity = key
 	cacheRoot, cacheErr := disambiguationCacheRoot(repo)
 	if cacheErr != nil {
 		w.CacheState, w.CacheReason = "bypass", "git-common-dir-unavailable"
-		result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
+		result, _ := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
 		return result
 	}
 	if err := os.MkdirAll(cacheRoot, 0755); err != nil {
 		w.CacheState, w.CacheReason = "bypass", "cache-root-unavailable"
-		result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
+		result, _ := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
 		return result
 	}
 
@@ -365,7 +382,7 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 			break
 		} else if !errors.Is(err, os.ErrExist) {
 			w.CacheState, w.CacheReason = "bypass", "cache-lock-unavailable"
-			result, _ := computeDisambiguationWitness(ctx, w, root, setSubphase)
+			result, _ := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
 			return result
 		}
 		select {
@@ -387,18 +404,16 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 		w.CacheState, w.CacheReason = "miss", reason
 	}
 
-	w, complete := computeDisambiguationWitness(ctx, w, root, setSubphase)
+	w, complete := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
 	if complete {
 		setSubphase("cache-write")
-		_ = writeCachedDisambiguation(cachePath, key, w)
+		if err := writeCachedDisambiguation(cachePath, key, w); err != nil {
+			w.CacheReason = "write-error: " + err.Error()
+		}
 	}
 	return w
 }
 
-// materializeDisambiguationArchive extracts and hashes one git-archive stream
-// without retaining the archive in memory. The producer is always joined before
-// success or failure is returned, and the cache identity is published only when
-// extraction, the trailing-byte drain, and the producer itself all complete.
 func materializeDisambiguationArchive(ctx context.Context, repo, tree, dst string, setSubphase func(string)) (string, error) {
 	setSubphase("git-archive")
 	stream, err := runDisambiguationArchive(ctx, repo, tree)
@@ -415,7 +430,7 @@ func materializeDisambiguationArchive(ctx context.Context, repo, tree, dst strin
 		return "", errors.New("git archive returned an incomplete stream")
 	}
 
-	h := newDisambiguationCacheHash()
+	h := newDisambiguationArchiveHash()
 	tee := io.TeeReader(stream.Reader, h)
 	setSubphase("extract-archive")
 	extractErr := extractTarReaderBounded(ctx, tee, dst)
@@ -450,13 +465,13 @@ type disambiguationCacheEntry struct {
 	Witness DisambiguationWitness `json:"witness"`
 }
 
-func disambiguationCacheKey(archive []byte) string {
-	h := newDisambiguationCacheHash()
+func disambiguationArchiveCacheKey(archive []byte) string {
+	h := newDisambiguationArchiveHash()
 	h.Write(archive)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func newDisambiguationCacheHash() hash.Hash {
+func newDisambiguationArchiveHash() hash.Hash {
 	h := sha256.New()
 	io.WriteString(h, disambiguationCacheSchema)
 	h.Write([]byte{0})
@@ -465,6 +480,18 @@ func newDisambiguationCacheHash() hash.Hash {
 	io.WriteString(h, disambiguationAnalyzerVersion)
 	h.Write([]byte{0})
 	return h
+}
+
+func disambiguationCacheKey(treeID string) string {
+	h := sha256.New()
+	io.WriteString(h, disambiguationCacheSchema)
+	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerConfig)
+	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerVersion)
+	h.Write([]byte{0})
+	io.WriteString(h, treeID)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func readCachedDisambiguation(path, key string) (DisambiguationWitness, string, bool) {
@@ -511,9 +538,41 @@ func writeCachedDisambiguation(path, key string, witness DisambiguationWitness) 
 	return os.Rename(name, path)
 }
 
-func computeDisambiguationWitness(ctx context.Context, w DisambiguationWitness, root string, setSubphase func(string)) (DisambiguationWitness, bool) {
+type disambiguationTreeEntry struct {
+	Mode     string
+	ObjectID string
+	Size     int64
+	Path     string
+}
+
+var disambiguationSkipDir = map[string]bool{
+	".git": true, ".cache": true, "node_modules": true, "testdata": true,
+	"_registry": true, "__pycache__": true, ".pytest_cache": true,
+	".ruff_cache": true, "vendor": true, ".dispatch-runs": true,
+	".goal-runs": true,
+}
+
+const disambiguationMaxCorpusBytes = 512 * 1024
+
+func computeDisambiguationWitness(ctx context.Context, repo, treeID string, w DisambiguationWitness, setSubphase func(string)) (DisambiguationWitness, bool) {
+	setSubphase("scratch-tree")
+	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
+	if err != nil {
+		w.Detail = err.Error()
+		return w, false
+	}
+	defer os.RemoveAll(tmp)
+	out := filepath.Join(tmp, "tree")
+	// Keep the stable subphase name used by timeout diagnostics. The old
+	// implementation extracted every tracked blob from a whole-tree archive;
+	// this now projects only the scorecard's exact corpus from Git objects.
+	setSubphase("extract-archive")
+	if err = materializeDisambiguationTree(ctx, repo, treeID, out); err != nil {
+		w.Detail = fmt.Sprintf("materialize candidate tree: %v", err)
+		return w, false
+	}
 	setSubphase("concept-invariant")
-	inv, err := checkInvariantBounded(ctx, root, setSubphase)
+	inv, err := checkInvariantBounded(ctx, out, setSubphase)
 	if err != nil {
 		w.Detail = err.Error()
 		return w, false
@@ -527,6 +586,118 @@ func computeDisambiguationWitness(ctx context.Context, w DisambiguationWitness, 
 	w.FamilyCoverage = inv.FamilyCoverage
 	w.Detail = inv.Detail
 	return w, true
+}
+
+func materializeDisambiguationTree(ctx context.Context, repo, treeID, dst string) error {
+	listing, err := listDisambiguationTree(ctx, repo, treeID)
+	if err != nil {
+		return err
+	}
+	entries, err := parseDisambiguationTree(listing)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !disambiguationCorpusPath(entry.Path, entry.Size) {
+			continue
+		}
+		body, err := readDisambiguationObject(ctx, repo, entry.ObjectID)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", entry.Path, err)
+		}
+		if int64(len(body)) != entry.Size {
+			return fmt.Errorf("read %s: blob size %d, want %d", entry.Path, len(body), entry.Size)
+		}
+		target, err := disambiguationTarget(dst, entry.Path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		mode := os.FileMode(0644)
+		if entry.Mode == "100755" {
+			mode = 0755
+		}
+		if err := os.WriteFile(target, body, mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseDisambiguationTree(listing []byte) ([]disambiguationTreeEntry, error) {
+	records := bytes.Split(listing, []byte{0})
+	entries := make([]disambiguationTreeEntry, 0, len(records))
+	for _, record := range records {
+		if len(record) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(record, []byte{'\t'}, 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("malformed git ls-tree record %q", record)
+		}
+		meta := strings.Fields(string(parts[0]))
+		if len(meta) != 4 || meta[1] != "blob" {
+			continue
+		}
+		size, err := strconv.ParseInt(meta[3], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse git ls-tree size %q: %w", meta[3], err)
+		}
+		path := string(parts[1])
+		if _, err := disambiguationTarget(".", path); err != nil {
+			return nil, err
+		}
+		entries = append(entries, disambiguationTreeEntry{Mode: meta[0], ObjectID: meta[2], Size: size, Path: path})
+	}
+	return entries, nil
+}
+
+func disambiguationCorpusPath(path string, size int64) bool {
+	path = filepath.ToSlash(path)
+	freshness := path == filepath.ToSlash(conceptcatalog.GeneratedReadme) || path == filepath.ToSlash(conceptcatalog.GeneratedIndex)
+	if freshness {
+		return true
+	}
+	if size > disambiguationMaxCorpusBytes {
+		return false
+	}
+	parts := strings.Split(path, "/")
+	for _, part := range parts {
+		if disambiguationSkipDir[part] {
+			return false
+		}
+	}
+	if path == "tools/concept_disambiguation_scorecard.py" {
+		return true
+	}
+	if strings.HasPrefix(path, "tools/concept_disambiguation_scorecard.data/") && strings.HasSuffix(path, ".json") {
+		return true
+	}
+	if strings.HasPrefix(path, "docs/") && strings.HasSuffix(path, ".md") {
+		return true
+	}
+	switch path {
+	case "CLAIMS.md", "ARCHITECTURE.md", "README.md", "AGENTS.md", "INDEX.md", "GLOSSARY.md":
+		return true
+	}
+	return (strings.HasPrefix(path, "internal/") || strings.HasPrefix(path, "cmd/")) &&
+		strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
+}
+
+func disambiguationTarget(root, path string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe tree path %q", path)
+	}
+	return filepath.Join(root, clean), nil
 }
 
 // checkInvariantBounded is the context-aware equivalent of
@@ -628,10 +799,6 @@ func normalizeDisambiguationNewlines(b []byte) []byte {
 	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 }
 
-// extractTar unpacks a tar archive (as produced by `git archive --format=tar`)
-// into dst using the stdlib reader, so extraction is free of the external `tar`
-// binary and its platform quirks (notably GNU tar treating a Windows C:\ path as
-// a remote host). Path traversal outside dst is rejected.
 func extractTar(archive []byte, dst string) error {
 	return extractTarBounded(context.Background(), archive, dst)
 }
