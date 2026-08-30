@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -36,12 +38,23 @@ func TestDispatchWaveRouteIssuesBoundedReturnsTypedTimeout(t *testing.T) {
 	}
 }
 
-func TestDispatchWavePreflightBudgetExceedsPlanningBudget(t *testing.T) {
-	preflightBudget := 3 * dispatchWaveDependencyTimeout
-	// The live preflight has supported probes with a 60-second ceiling. The outer wave
-	// budget must not manufacture WAVE_EMPTY before those probes can return.
-	if preflightBudget <= 60*time.Second {
-		t.Fatalf("preflight timeout = %s, must cover supported 60s probes", preflightBudget)
+func TestDispatchWavePreflightRetryUsesDeclaredDependencyBudget(t *testing.T) {
+	if dispatchWaveDependencyTimeout != 30*time.Second {
+		t.Fatalf("dispatch dependency timeout = %s, want the declared 30s budget", dispatchWaveDependencyTimeout)
+	}
+
+	// Guard the live call site: retries share one declared dependency budget rather than
+	// multiplying it per attempt. This keeps the whole fail-closed preflight bounded.
+	source, err := os.ReadFile("dispatch_wave.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := `dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2,`
+	if !bytes.Contains(source, []byte(call)) {
+		t.Fatalf("dispatch preflight retry must use the single declared dependency budget")
+	}
+	if bytes.Contains(source, []byte(`dispatchWaveDependencyRetry(3*dispatchWaveDependencyTimeout, "dispatch preflight"`)) {
+		t.Fatalf("dispatch preflight retry still multiplies the declared dependency budget")
 	}
 }
 
