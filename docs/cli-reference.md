@@ -661,6 +661,18 @@ fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail co
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
 fak self-update --manifest-url HTTPS_URL [--manifest-channel stable] [--manifest-cohort NAME] [--manifest-cache PATH] [--offline]
+fak self-update --installer msix --msix-appinstaller-uri HTTPS_URL --msix-package PACKAGE --msix-publisher SUBJECT --msix-artifact-digest SHA256 --msix-source-revision REV [--msix-full-fallback-uri HTTPS_URL --msix-full-artifact-digest SHA256] [--msix-repair|--msix-uninstall]
+
+Windows MSIX/App Installer delivery is explicit opt-in. `--installer` has precedence over
+`FAK_SELF_UPDATE_INSTALLER`; when neither is set, `native` remains the default. The adapter
+requires the package identity `Name` from `AppxManifest.xml`, separate app (`fak`),
+artifact-digest, and source-revision identities plus
+the expected signing-certificate subject. It validates the downloaded package signature and
+publisher before invoking App Installer. Online `.appinstaller` delivery uses Windows block-map
+differential updates; `--offline` selects `--msix-full-fallback-uri` (or the primary URI when no
+separate full bundle is supplied). A distinct full fallback requires its own `--msix-full-artifact-digest`; the receipt reports the selected delivery and whether fallback ran. Downgrades are refused unless `--msix-allow-downgrade` is
+explicitly set. Repair and uninstall are explicit, mutually exclusive operations. PowerShell
+runs non-interactively in a hidden process; selecting `msix` on a non-Windows host is refused.
 
 Source self-update derives a deterministic digest from Go's complete non-standard dependency graph for `./cmd/fak`, including generated/runtime source files, `go:embed` assets, native inputs, module metadata, toolchain/platform/CGO architecture knobs, tags, and build/link flags. A docs-only or test-only source revision can therefore reuse the prior digest-verified artifact without compiling again; any graph or build-envelope uncertainty falls back to the full build, vet, and smoke gates. JSON update receipts expose `build_provenance` with the selected source commit, the source commit that originally built reused bytes, build-input and artifact digests, artifact size, build envelope, and reuse decision.
 

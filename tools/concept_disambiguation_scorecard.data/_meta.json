@@ -13258,6 +13258,16 @@
           "category": "incidental",
           "reason": "local error from preparing a patched artifact candidate",
           "token": "candidateErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constructor name scoped to the opt-in MSIX adapter, not a repository planning concept",
+          "token": "PlanMSIX"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed execution value scoped to MSIX delivery, not a project or phased plan",
+          "token": "MSIXPlan"
         }
       ],
       "exclude": [
@@ -13306,6 +13316,7 @@
         "KVPrefixPressuredCandidates",
         "KindCandidate",
         "ListPlanSchema",
+        "MSIXPlan",
         "MaintenanceSeconds",
         "MatMulCandidate",
         "MergePlan",
@@ -13326,6 +13337,7 @@
         "PlanIdentity",
         "PlanLog",
         "PlanLogEntry",
+        "PlanMSIX",
         "PlanPayload",
         "PlanReconciliation",
         "PlanRemoteDrain",

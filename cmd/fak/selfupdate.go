@@ -47,6 +47,19 @@ func cmdSelfUpdate(argv []string) {
 	manifestChannel := fs.String("manifest-channel", "stable", "signed manifest channel identity")
 	manifestCohort := fs.String("manifest-cohort", "default", "signed manifest cohort identity")
 	offline := fs.Bool("offline", false, "use only a valid authenticated manifest cache; perform no manifest HTTP request")
+	installer := fs.String("installer", "", "update installer: native (default) or msix; FAK_SELF_UPDATE_INSTALLER is used when omitted")
+	msixURI := fs.String("msix-appinstaller-uri", "", "signed HTTPS .appinstaller URI (requires --installer msix)")
+	msixPackage := fs.String("msix-package", "", "MSIX package identity Name from AppxManifest.xml")
+	msixPublisher := fs.String("msix-publisher", "", "expected signed package publisher")
+	msixArtifact := fs.String("msix-artifact-digest", "", "FAK artifact digest carried by signed package provenance")
+	msixFullArtifact := fs.String("msix-full-artifact-digest", "", "full-fallback artifact digest carried by signed package provenance")
+	msixSource := fs.String("msix-source-revision", "", "FAK source revision carried by signed package provenance")
+	msixInstalledVersion := fs.String("msix-installed-version", "", "installed package version used for downgrade policy")
+	msixTargetVersion := fs.String("msix-target-version", "", "signed target package version used for downgrade policy")
+	msixFullFallback := fs.String("msix-full-fallback-uri", "", "signed HTTPS full-package URI when differential delivery is unavailable")
+	msixRepair := fs.Bool("msix-repair", false, "repair the installed MSIX package instead of updating it")
+	msixUninstall := fs.Bool("msix-uninstall", false, "uninstall the installed MSIX package")
+	msixAllowDowngrade := fs.Bool("msix-allow-downgrade", false, "allow an explicitly signed MSIX downgrade")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	jsonMode := fs.Bool("json", false, "emit one versioned JSON receipt")
 	handoffSession := fs.String("handoff-session", "", "after installation, launch the successor with this stable session identity")
@@ -56,6 +69,20 @@ func cmdSelfUpdate(argv []string) {
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
 	beginSelfUpdateOutput(*jsonMode)
+	if handled, err := runSelfUpdateMSIX(selfUpdateMSIXOptions{
+		CLIInstaller: *installer, ConfigInstaller: os.Getenv("FAK_SELF_UPDATE_INSTALLER"),
+		AppInstallerURI: *msixURI, FullFallbackURI: *msixFullFallback,
+		PackageIdentity: *msixPackage, Publisher: *msixPublisher,
+		ArtifactIdentity: *msixArtifact, FullArtifactIdentity: *msixFullArtifact, SourceIdentity: *msixSource,
+		InstalledVersion: *msixInstalledVersion, TargetVersion: *msixTargetVersion,
+		Repair: *msixRepair, Uninstall: *msixUninstall, Check: *check,
+		AllowDowngrade: *msixAllowDowngrade, Offline: *offline, JSON: *jsonMode,
+	}); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "self-update: MSIX adapter refused:", err)
+		}
+		return
+	}
 	reportSelfUpdateProgress(5, "checking installed binary provenance")
 
 	// Scheduled-task provenance skew, checked BEFORE anything else: the task pinned one
