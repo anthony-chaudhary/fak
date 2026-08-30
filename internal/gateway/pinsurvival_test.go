@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -281,4 +282,170 @@ func truncateForLog(b []byte) string {
 		return string(b[:200]) + "…"
 	}
 	return string(b)
+}
+
+func TestAnthropicSurvivalPagesCarriesRetentionLabelsIntoPlan(t *testing.T) {
+	raw := []byte(`{"model":"claude","messages":[` +
+		`{"role":"assistant","content":"old valuable"},` +
+		`{"role":"assistant","content":"neutral"},` +
+		`{"role":"assistant","content":"known junk"},` +
+		`{"role":"user","content":"continue"}` +
+		`],"fak":{"retention":[` +
+		`{"page_id":"msg:0","intent":"keep","source":"deterministic:needle","reason_code":"needle"},` +
+		`{"page_id":"msg:2","intent":"drop","source":"agent:trash-filter","reason_code":"junk"}` +
+		`]}}`)
+	pages, _, ok := anthropicSurvivalPages(raw)
+	if !ok {
+		t.Fatal("anthropicSurvivalPages did not classify a valid body")
+	}
+	if got := pages[0].Retention; len(got) != 1 || got[0].Intent != ctxplan.RetentionKeep || got[0].Source != "deterministic:needle" {
+		t.Fatalf("msg:0 retention = %+v, want keep from deterministic:needle", got)
+	}
+	if got := pages[2].Retention; len(got) != 1 || got[0].Intent != ctxplan.RetentionDrop || got[0].Source != "agent:trash-filter" {
+		t.Fatalf("msg:2 retention = %+v, want drop from agent:trash-filter", got)
+	}
+
+	budget := pages[0].Tokens + pages[3].Tokens
+	plan := ctxplan.PlanEviction(pages, budget)
+	if plan.Refusal != "" {
+		t.Fatalf("Refusal = %q, want none", plan.Refusal)
+	}
+	if !reflect.DeepEqual(plan.Evict, []string{"msg:1", "msg:2"}) || !reflect.DeepEqual(plan.Keep, []string{"msg:0", "msg:3"}) {
+		t.Fatalf("plan = keep %v evict %v, want drop label first and older keep retained over neutral", plan.Keep, plan.Evict)
+	}
+}
+
+func TestAnthropicSurvivalPagesUnknownRetentionAddressFailsClosed(t *testing.T) {
+	raw := []byte(`{"messages":[{"role":"assistant","content":"old"},{"role":"user","content":"continue"}],` +
+		`"fak":{"retention":[{"page_id":"msg:99","intent":"drop","source":"agent:ranker"}]}}`)
+	pages, _, ok := anthropicSurvivalPages(raw)
+	if !ok {
+		t.Fatal("valid message envelope must remain classifiable")
+	}
+	plan := ctxplan.PlanEviction(pages, 0)
+	if plan.Refusal != ctxplan.ReasonRetentionAnnotationInvalid || len(plan.Evict) != 0 {
+		t.Fatalf("plan = %+v, want atomic invalid-annotation refusal", plan)
+	}
+}
+
+func TestCompactWithSurvivalClassesAppliesAnnotatedPlan(t *testing.T) {
+	raw := []byte(`{"model":"claude","messages":[` +
+		`{"role":"assistant","content":"valuable needle"},` +
+		`{"role":"assistant","content":"ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle ordinary middle"},` +
+		`{"role":"assistant","content":"known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk known junk"},` +
+		`{"role":"user","content":"continue task"}` +
+		`],"fak":{"retention":[` +
+		`{"page_id":"msg:0","intent":"keep","source":"deterministic:needle"},` +
+		`{"page_id":"msg:2","intent":"drop","source":"agent:ranker"}` +
+		`]}}`)
+	if _, _, ok := anthropicSurvivalPages(raw); !ok {
+		t.Fatal("fixture did not classify")
+	}
+	// Leave room for the two tombstone message frames while requiring both large middle pages
+	// to be evicted. The postcondition checks the actual serialized resident cost.
+	s := anthropicPassthroughServer(60)
+	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1}, "")
+	if outcome.Reason != agent.CompactReasonNone || outcome.Dropped != 2 {
+		t.Fatalf("outcome = %+v, want a two-page annotated compaction", outcome)
+	}
+	if !bytes.Contains(out, []byte("valuable needle")) || !bytes.Contains(out, []byte("continue task")) {
+		t.Fatalf("planned keep pages did not survive: %s", out)
+	}
+	if bytes.Contains(out, []byte("ordinary middle ordinary")) || bytes.Contains(out, []byte("known junk known")) {
+		t.Fatalf("planned evictions remained in provider body: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"retention"`)) || bytes.Contains(out, []byte(`"fak"`)) {
+		t.Fatalf("kernel-only retention transport leaked to provider body: %s", out)
+	}
+}
+
+func TestCompactWithSurvivalClassesMalformedRetentionFailsClosedAndStripsExtension(t *testing.T) {
+	tests := []struct {
+		name      string
+		retention string
+	}{
+		{name: "object instead of array", retention: `{}`},
+		{name: "non-object label", retention: `["drop"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(`{"model":"claude","messages":[` +
+				`{"role":"assistant","content":"old context"},` +
+				`{"role":"user","content":"continue"}` +
+				`],"fak":{"retention":` + tt.retention + `}}`)
+			s := anthropicPassthroughServer(1)
+			out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1}, "")
+			if outcome.Reason != ctxplan.ReasonRetentionAnnotationInvalid || outcome.Dropped != 0 {
+				t.Fatalf("outcome = %+v, want atomic %s refusal", outcome, ctxplan.ReasonRetentionAnnotationInvalid)
+			}
+			if bytes.Contains(out, []byte(`"retention"`)) || bytes.Contains(out, []byte(`"fak"`)) {
+				t.Fatalf("malformed kernel-only retention transport leaked: %s", out)
+			}
+			if !bytes.Contains(out, []byte("old context")) || !bytes.Contains(out, []byte("continue")) {
+				t.Fatalf("refusal changed message history: %s", out)
+			}
+		})
+	}
+}
+
+func TestCompactWithSurvivalClassesRejectsAnnotatedOutputOverActualBudget(t *testing.T) {
+	raw := []byte(`{"model":"claude","messages":[` +
+		`{"role":"assistant","content":"x"},` +
+		`{"role":"user","content":"continue"}` +
+		`],"fak":{"retention":[` +
+		`{"page_id":"msg:0","intent":"drop","source":"agent:ranker"}` +
+		`]}}`)
+	s := anthropicPassthroughServer(1)
+	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1}, "")
+	if outcome.Reason != agent.CompactReasonPinEvictRefused || outcome.Dropped != 0 {
+		t.Fatalf("outcome = %+v, want refusal when actual tombstoned output exceeds budget", outcome)
+	}
+	if !bytes.Contains(out, []byte(`"content":"x"`)) {
+		t.Fatalf("budget refusal must preserve the original message: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"retention"`)) || bytes.Contains(out, []byte(`"fak"`)) {
+		t.Fatalf("kernel-only retention transport leaked on budget refusal: %s", out)
+	}
+}
+
+func TestCompactWithSurvivalClassesRefusesIndependentToolHistoryTombstone(t *testing.T) {
+	raw := []byte(`{"model":"claude","messages":[` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"grep","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"rows"}]},` +
+		`{"role":"user","content":"continue"}` +
+		`],"fak":{"retention":[` +
+		`{"page_id":"msg:0","intent":"drop","source":"agent:ranker"}` +
+		`]}}`)
+	s := anthropicPassthroughServer(1)
+	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 1}, "")
+	if outcome.Reason != agent.CompactReasonPinEvictRefused || outcome.Dropped != 0 {
+		t.Fatalf("outcome = %+v, want atomic refusal for independently selected tool history", outcome)
+	}
+	if !bytes.Contains(out, []byte(`"type":"tool_use"`)) || !bytes.Contains(out, []byte(`"type":"tool_result"`)) {
+		t.Fatalf("tool history was partially rewritten: %s", out)
+	}
+	if bytes.Contains(out, []byte(`context page msg:0 evicted`)) {
+		t.Fatalf("tool history was tombstoned independently: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"retention"`)) || bytes.Contains(out, []byte(`"fak"`)) {
+		t.Fatalf("kernel-only retention transport leaked on tool-history refusal: %s", out)
+	}
+}
+
+func TestCompactWithSurvivalClassesStripsEmptyRetentionWithoutChangingLegacyHistory(t *testing.T) {
+	raw := []byte(`{"model":"claude","messages":[` +
+		`{"role":"assistant","content":"old context"},` +
+		`{"role":"user","content":"continue"}` +
+		`],"fak":{"retention":[]}}`)
+	s := anthropicPassthroughServer(100)
+	out, outcome := s.compactWithSurvivalClasses(raw, agent.CompactOptions{Budget: 0}, "")
+	if outcome.Reason != agent.CompactReasonUnderBudget || outcome.Dropped != 0 {
+		t.Fatalf("outcome = %+v, want legacy identity behavior", outcome)
+	}
+	if !bytes.Contains(out, []byte("old context")) || !bytes.Contains(out, []byte("continue")) {
+		t.Fatalf("empty retention changed legacy message history: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"retention"`)) || bytes.Contains(out, []byte(`"fak"`)) {
+		t.Fatalf("empty kernel-only retention transport leaked: %s", out)
+	}
 }

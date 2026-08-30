@@ -75,6 +75,7 @@ func anthropicSurvivalPages(raw []byte) (pages []ctxplan.Page, pinned [][]byte, 
 	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Messages) == 0 {
 		return nil, nil, false
 	}
+	labels, _, invalidRetention := anthropicRetentionMetadata(raw)
 	// The continuation seed is the LAST user turn — the state the next turn actually continues
 	// from. Resolved in a first pass because it is a property of the array, not of one element.
 	lastUser := -1
@@ -82,6 +83,21 @@ func anthropicSurvivalPages(raw []byte) (pages []ctxplan.Page, pinned [][]byte, 
 		if anthropicElementRole(el) == "user" {
 			lastUser = i
 		}
+	}
+	retentionByPage := make(map[string][]ctxplan.RetentionAnnotation, len(labels))
+	knownPage := make(map[string]bool, len(doc.Messages))
+	for i := range doc.Messages {
+		knownPage["msg:"+strconv.Itoa(i)] = true
+	}
+	invalidTarget := false
+	for _, label := range labels {
+		if !knownPage[label.PageID] {
+			invalidTarget = true
+			continue
+		}
+		retentionByPage[label.PageID] = append(retentionByPage[label.PageID], ctxplan.RetentionAnnotation{
+			Intent: label.Intent, Source: label.Source, ReasonCode: label.ReasonCode,
+		})
 	}
 	pages = make([]ctxplan.Page, 0, len(doc.Messages))
 	for i, el := range doc.Messages {
@@ -94,13 +110,55 @@ func anthropicSurvivalPages(raw []byte) (pages []ctxplan.Page, pinned [][]byte, 
 		case anthropicElementHasToolBlocks(el):
 			kind = ctxplan.KindCASResult
 		}
-		p := ctxplan.Page{ID: "msg:" + strconv.Itoa(i), Kind: kind, Tokens: (len(el) + 3) / 4}
+		id := "msg:" + strconv.Itoa(i)
+		p := ctxplan.Page{ID: id, Kind: kind, Tokens: (len(el) + 3) / 4, Retention: retentionByPage[id]}
 		pages = append(pages, p)
 		if p.Class() == ctxplan.ClassPinned {
 			pinned = append(pinned, el)
 		}
 	}
+	if invalidTarget || invalidRetention {
+		// Keep the parser signature compatible with the survival gate while making malformed
+		// metadata and unknown stable addresses fail closed in PlanEviction. The invalid marker is
+		// bounded metadata and never enters the provider body.
+		pages[0].Retention = append(pages[0].Retention, ctxplan.RetentionAnnotation{})
+	}
 	return pages, pinned, true
+}
+
+type anthropicRetentionLabel struct {
+	PageID     string                  `json:"page_id"`
+	Intent     ctxplan.RetentionIntent `json:"intent"`
+	Source     string                  `json:"source"`
+	ReasonCode string                  `json:"reason_code,omitempty"`
+}
+
+// anthropicRetentionMetadata locates the optional kernel-only transport without conflating a
+// malformed value with absence. Presence controls provider stripping; invalidity is projected as
+// a bounded planner annotation so malformed metadata refuses atomically before any eviction.
+func anthropicRetentionMetadata(raw []byte) (labels []anthropicRetentionLabel, present, invalid bool) {
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, false, false
+	}
+	fakRaw, ok := doc["fak"]
+	if !ok {
+		return nil, false, false
+	}
+	var fak map[string]json.RawMessage
+	if json.Unmarshal(fakRaw, &fak) != nil {
+		return nil, false, false
+	}
+	retentionRaw, ok := fak["retention"]
+	if !ok {
+		return nil, false, false
+	}
+	present = true
+	trimmed := bytes.TrimSpace(retentionRaw)
+	if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(retentionRaw, &labels) != nil {
+		return nil, true, true
+	}
+	return labels, true, false
 }
 
 // anthropicElementRole extracts a messages[] element's role, or "" when it does not parse.
@@ -122,6 +180,116 @@ func anthropicElementRole(el json.RawMessage) string {
 // pinned guarantee, because the pinned rules are checked first).
 func anthropicElementHasToolBlocks(el json.RawMessage) bool {
 	return bytes.Contains(el, []byte(`"tool_result"`)) || bytes.Contains(el, []byte(`"tool_use"`))
+}
+
+func pagesHaveRetention(pages []ctxplan.Page) bool {
+	for _, p := range pages {
+		if len(p.Retention) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// stripAnthropicRetention removes the kernel-only label transport before a body reaches the
+// provider. Unannotated requests never call it and retain the existing byte-for-byte path.
+func stripAnthropicRetention(raw []byte) []byte {
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(raw, &doc) != nil {
+		return raw
+	}
+	fakRaw, ok := doc["fak"]
+	if !ok {
+		return raw
+	}
+	var fak map[string]json.RawMessage
+	if json.Unmarshal(fakRaw, &fak) != nil {
+		return raw
+	}
+	delete(fak, "retention")
+	if len(fak) == 0 {
+		delete(doc, "fak")
+	} else if encoded, err := json.Marshal(fak); err == nil {
+		doc["fak"] = encoded
+	}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+// compactAnthropicByPlan applies the planner's exact stable page addresses. It keeps each
+// message's role and object position but replaces evicted content with a bounded tombstone, which
+// preserves Anthropic's role alternation while removing the resident page bytes. This path is
+// opt-in: only requests carrying retention metadata use it; unannotated callers retain the legacy
+// byte compactor unchanged.
+func compactAnthropicByPlan(raw []byte, plan ctxplan.EvictionPlan, budget int) ([]byte, agent.CompactOutcome, bool) {
+	if len(plan.Evict) == 0 {
+		return raw, agent.CompactOutcome{Reason: agent.CompactReasonUnderBudget}, true
+	}
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, agent.CompactOutcome{}, false
+	}
+	var messages []json.RawMessage
+	if json.Unmarshal(doc["messages"], &messages) != nil {
+		return nil, agent.CompactOutcome{}, false
+	}
+	evicted := make(map[string]bool, len(plan.Evict))
+	for _, id := range plan.Evict {
+		evicted[id] = true
+	}
+	for i, message := range messages {
+		id := "msg:" + strconv.Itoa(i)
+		if !evicted[id] {
+			continue
+		}
+		// Anthropic tool_use/tool_result blocks form a provider-validated history. The planner's
+		// message addresses do not yet encode those pair edges, so independently rewriting either
+		// side could manufacture an invalid request. Refuse this annotated compaction atomically.
+		if anthropicElementHasToolBlocks(message) {
+			return nil, agent.CompactOutcome{}, false
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(message, &object) != nil {
+			return nil, agent.CompactOutcome{}, false
+		}
+		tombstone, _ := json.Marshal("[fak: context page " + id + " evicted]")
+		object["content"] = tombstone
+		encoded, err := json.Marshal(object)
+		if err != nil {
+			return nil, agent.CompactOutcome{}, false
+		}
+		messages[i] = encoded
+	}
+	encodedMessages, err := json.Marshal(messages)
+	if err != nil {
+		return nil, agent.CompactOutcome{}, false
+	}
+	doc["messages"] = encodedMessages
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return nil, agent.CompactOutcome{}, false
+	}
+	// Enforce the budget against the body we will actually return. Tombstones retain message
+	// framing, so planned page-token removal is only a candidate calculation, not a postcondition.
+	outPages, _, ok := anthropicSurvivalPages(out)
+	if !ok {
+		return nil, agent.CompactOutcome{}, false
+	}
+	residentTokens := 0
+	for _, page := range outPages {
+		residentTokens += page.Tokens
+	}
+	if residentTokens > budget {
+		return nil, agent.CompactOutcome{}, false
+	}
+	shedTokens := 0
+	if len(raw) > len(out) {
+		shedTokens = (len(raw) - len(out) + 3) / 4
+	}
+	return out, agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: len(plan.Evict), ShedTokens: shedTokens}, true
 }
 
 // pinnedPagesSurvive reports whether every pinned page's verbatim bytes are still present in body.
@@ -172,9 +340,19 @@ func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOption
 	if !ok {
 		return agent.CompactAnthropicHistoryWithOptions(raw, opts)
 	}
+	_, retentionPresent, _ := anthropicRetentionMetadata(raw)
+	annotated := pagesHaveRetention(pages)
+	providerRaw := raw
+	if retentionPresent {
+		providerRaw = stripAnthropicRetention(raw)
+	}
 	plan := ctxplan.PlanEviction(pages, s.compactHistoryBudget)
 	if plan.Refusal != "" {
-		return raw, agent.CompactOutcome{Reason: agent.CompactReasonPinEvictRefused}
+		reason := plan.Refusal
+		if reason == ctxplan.ReasonPinEvictRefused {
+			reason = agent.CompactReasonPinEvictRefused
+		}
+		return providerRaw, agent.CompactOutcome{Reason: reason}
 	}
 	// announce records this boundary's continuation contract (#2422) for the next completed turn to
 	// report. It fires ONLY on a return that actually hands back a compacted body — a bail and a
@@ -184,7 +362,17 @@ func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOption
 	announce := func() {
 		s.noteCompactionContract(trace, compactionContractFrom(pages, anthropicMessageElements(raw), plan))
 	}
-	out, outcome := agent.CompactAnthropicHistoryWithOptions(raw, opts)
+	if annotated {
+		out, outcome, applied := compactAnthropicByPlan(providerRaw, plan, s.compactHistoryBudget)
+		if !applied {
+			return providerRaw, agent.CompactOutcome{Reason: agent.CompactReasonWindowNoDrop}
+		}
+		if outcome.Reason == agent.CompactReasonNone {
+			announce()
+		}
+		return out, outcome
+	}
+	out, outcome := agent.CompactAnthropicHistoryWithOptions(providerRaw, opts)
 	if outcome.Reason != agent.CompactReasonNone {
 		return out, outcome
 	}
@@ -194,9 +382,9 @@ func (s *Server) compactWithSurvivalClasses(raw []byte, opts agent.CompactOption
 	}
 	retry := opts
 	retry.Budget = opts.Budget + plan.PinnedTokens
-	if out2, outcome2 := agent.CompactAnthropicHistoryWithOptions(raw, retry); outcome2.Reason == agent.CompactReasonNone && pinnedPagesSurvive(out2, pinned) {
+	if out2, outcome2 := agent.CompactAnthropicHistoryWithOptions(providerRaw, retry); outcome2.Reason == agent.CompactReasonNone && pinnedPagesSurvive(out2, pinned) {
 		announce()
 		return out2, outcome2
 	}
-	return raw, agent.CompactOutcome{Reason: agent.CompactReasonPinEvictRefused}
+	return providerRaw, agent.CompactOutcome{Reason: agent.CompactReasonPinEvictRefused}
 }

@@ -142,10 +142,37 @@ func PageKinds() []string {
 // Page is one classifiable unit of resident context: a stable address, the kind that fixes its
 // class, and its resident token cost. It carries no bytes — the caller that owns them keeps
 // them, exactly as Span keeps only SAFE metadata.
+// RetentionIntent is the closed, advisory vocabulary used to order eviction candidates
+// inside one survival class. It never changes the class itself: keep is not pinning, and drop
+// cannot make a pinned page droppable.
+type RetentionIntent string
+
+const (
+	RetentionKeep    RetentionIntent = "keep"
+	RetentionNeutral RetentionIntent = "neutral"
+	RetentionDrop    RetentionIntent = "drop"
+)
+
+const (
+	maxRetentionAnnotations = 8
+	maxRetentionSourceLen   = 96
+	maxRetentionReasonLen   = 64
+)
+
+// RetentionAnnotation is bounded decision metadata, not prompt content. Source identifies either
+// a deterministic rule or a bounded agent; ReasonCode is an optional machine token and must not
+// contain arbitrary prose.
+type RetentionAnnotation struct {
+	Intent     RetentionIntent `json:"intent"`
+	Source     string          `json:"source"`
+	ReasonCode string          `json:"reason_code,omitempty"`
+}
+
 type Page struct {
-	ID     string `json:"id"`
-	Kind   string `json:"kind"`
-	Tokens int    `json:"tokens"`
+	ID        string                `json:"id"`
+	Kind      string                `json:"kind"`
+	Tokens    int                   `json:"tokens"`
+	Retention []RetentionAnnotation `json:"retention,omitempty"`
 }
 
 // Class is the page's survival class, derived from its kind.
@@ -157,6 +184,11 @@ func (p Page) Class() SurvivalClass { return ClassOf(p.Kind) }
 // compaction path returns, so one string names the refusal from the planner through the wire to
 // the operator.
 const ReasonPinEvictRefused = "PIN_EVICT_REFUSED"
+
+// ReasonRetentionAnnotationInvalid is the closed refusal token for malformed, unbounded, or
+// conflicting retention metadata. Planning validates every page before choosing any eviction,
+// so this refusal always carries an empty Evict set.
+const ReasonRetentionAnnotationInvalid = "RETENTION_ANNOTATION_INVALID"
 
 // EvictionPlan is the verdict of planning one eviction down to a token budget. A plan with a
 // non-empty Refusal evicted NOTHING: the refusal is the whole answer, and the caller must leave
@@ -187,6 +219,15 @@ type EvictionPlan struct {
 // non-pinned leaves exactly PinnedTokens, which the guard above already proved fits.
 func PlanEviction(pages []Page, budgetTokens int) EvictionPlan {
 	plan := EvictionPlan{}
+	intents := make([]RetentionIntent, len(pages))
+	for i, p := range pages {
+		intent, valid := pageRetentionIntent(p)
+		if !valid {
+			plan.Refusal = ReasonRetentionAnnotationInvalid
+			return plan
+		}
+		intents[i] = intent
+	}
 	total := 0
 	for _, p := range pages {
 		t := pageTokens(p)
@@ -209,15 +250,17 @@ func PlanEviction(pages []Page, budgetTokens int) EvictionPlan {
 	evicted := make(map[int]bool, len(pages))
 	kept := total
 	for _, class := range []SurvivalClass{ClassEvictable, ClassReplayable} {
-		for i, p := range pages {
-			if kept <= budgetTokens {
-				break
+		for _, intent := range []RetentionIntent{RetentionDrop, RetentionNeutral, RetentionKeep} {
+			for i, p := range pages {
+				if kept <= budgetTokens {
+					break
+				}
+				if evicted[i] || p.Class() != class || intents[i] != intent {
+					continue
+				}
+				evicted[i] = true
+				kept -= pageTokens(p)
 			}
-			if evicted[i] || p.Class() != class {
-				continue
-			}
-			evicted[i] = true
-			kept -= pageTokens(p)
 		}
 	}
 	for i, p := range pages {
@@ -229,6 +272,66 @@ func PlanEviction(pages []Page, budgetTokens int) EvictionPlan {
 	}
 	plan.KeptTokens = kept
 	return plan
+}
+
+func pageRetentionIntent(p Page) (RetentionIntent, bool) {
+	if len(p.Retention) == 0 {
+		return RetentionNeutral, true
+	}
+	if len(p.Retention) > maxRetentionAnnotations {
+		return "", false
+	}
+	intent := RetentionIntent("")
+	for _, annotation := range p.Retention {
+		if !validRetentionIntent(annotation.Intent) || !validRetentionSource(annotation.Source) ||
+			!validRetentionToken(annotation.ReasonCode, maxRetentionReasonLen, true) {
+			return "", false
+		}
+		if intent != "" && annotation.Intent != intent {
+			return "", false
+		}
+		intent = annotation.Intent
+	}
+	return intent, true
+}
+
+func validRetentionIntent(intent RetentionIntent) bool {
+	switch intent {
+	case RetentionKeep, RetentionNeutral, RetentionDrop:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRetentionSource(source string) bool {
+	const deterministic = "deterministic:"
+	const agentSource = "agent:"
+	switch {
+	case len(source) > len(deterministic) && len(source) <= maxRetentionSourceLen && source[:len(deterministic)] == deterministic:
+		return validRetentionToken(source[len(deterministic):], maxRetentionSourceLen-len(deterministic), false)
+	case len(source) > len(agentSource) && len(source) <= maxRetentionSourceLen && source[:len(agentSource)] == agentSource:
+		return validRetentionToken(source[len(agentSource):], maxRetentionSourceLen-len(agentSource), false)
+	default:
+		return false
+	}
+}
+
+func validRetentionToken(value string, maxLen int, optional bool) bool {
+	if value == "" {
+		return optional
+	}
+	if len(value) > maxLen {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '_' || r == '/' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // CheckEviction adjudicates a plan somebody ELSE produced: it reports ReasonPinEvictRefused when

@@ -184,3 +184,78 @@ func TestSurvivalClassStringsAreTheRefusalVocabulary(t *testing.T) {
 		t.Fatalf("ReasonPinEvictRefused = %q — the token is registered in dos.toml and returned on the wire; it cannot drift", ReasonPinEvictRefused)
 	}
 }
+
+func TestPlanEvictionOrdersRetentionWithinClass(t *testing.T) {
+	t.Run("drop before neutral and keep", func(t *testing.T) {
+		pages := []Page{
+			{ID: "old-keep", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep, Source: "deterministic:needle"}}},
+			{ID: "old-neutral", Kind: KindTranscriptProse, Tokens: 100},
+			{ID: "new-drop", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "agent:trash-filter"}}},
+		}
+		plan := PlanEviction(pages, 200)
+		if !reflect.DeepEqual(plan.Evict, []string{"new-drop"}) || !reflect.DeepEqual(plan.Keep, []string{"old-keep", "old-neutral"}) {
+			t.Fatalf("plan = keep %v evict %v, want the newer drop shed before older neutral/keep", plan.Keep, plan.Evict)
+		}
+	})
+	t.Run("older keep survives over newer neutral", func(t *testing.T) {
+		pages := []Page{
+			{ID: "old-keep", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep, Source: "deterministic:needle"}}},
+			{ID: "new-neutral", Kind: KindTranscriptProse, Tokens: 100},
+		}
+		plan := PlanEviction(pages, 100)
+		if !reflect.DeepEqual(plan.Evict, []string{"new-neutral"}) || !reflect.DeepEqual(plan.Keep, []string{"old-keep"}) {
+			t.Fatalf("plan = keep %v evict %v, want older keep to survive over newer neutral", plan.Keep, plan.Evict)
+		}
+	})
+	t.Run("stable input order within equal intent", func(t *testing.T) {
+		pages := []Page{
+			{ID: "drop-1", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "agent:ranker"}}},
+			{ID: "drop-2", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "agent:ranker"}}},
+			{ID: "drop-3", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "agent:ranker"}}},
+		}
+		plan := PlanEviction(pages, 100)
+		if !reflect.DeepEqual(plan.Evict, []string{"drop-1", "drop-2"}) || !reflect.DeepEqual(plan.Keep, []string{"drop-3"}) {
+			t.Fatalf("plan = keep %v evict %v, want equal-intent pages shed oldest-first", plan.Keep, plan.Evict)
+		}
+	})
+}
+
+func TestPlanEvictionKeepRemainsEvictableAndDropCannotOverridePin(t *testing.T) {
+	pages := []Page{
+		{ID: "pinned-drop", Kind: KindActiveSteer, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "agent:bad-advice"}}},
+		{ID: "keep-a", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep, Source: "deterministic:needle"}}},
+		{ID: "keep-b", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep, Source: "deterministic:needle"}}},
+	}
+	plan := PlanEviction(pages, 100)
+	if plan.Refusal != "" {
+		t.Fatalf("Refusal = %q, want none", plan.Refusal)
+	}
+	if !reflect.DeepEqual(plan.Evict, []string{"keep-a", "keep-b"}) || !reflect.DeepEqual(plan.Keep, []string{"pinned-drop"}) {
+		t.Fatalf("plan = keep %v evict %v, want both keep preferences eventually shed and pinned drop retained", plan.Keep, plan.Evict)
+	}
+}
+
+func TestPlanEvictionRejectsInvalidRetentionAtomically(t *testing.T) {
+	valid := Page{ID: "valid", Kind: KindTranscriptProse, Tokens: 100}
+	cases := map[string]Page{
+		"unknown intent":      {ID: "bad", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: "forever", Source: "agent:ranker"}}},
+		"missing source":      {ID: "bad", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep}}},
+		"invalid source kind": {ID: "bad", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionDrop, Source: "human:alice"}}},
+		"free form reason":    {ID: "bad", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{{Intent: RetentionKeep, Source: "agent:ranker", ReasonCode: "this is prose"}}},
+		"conflict": {ID: "bad", Kind: KindTranscriptProse, Tokens: 100, Retention: []RetentionAnnotation{
+			{Intent: RetentionKeep, Source: "agent:ranker"},
+			{Intent: RetentionDrop, Source: "deterministic:cleanup"},
+		}},
+	}
+	for name, bad := range cases {
+		t.Run(name, func(t *testing.T) {
+			plan := PlanEviction([]Page{valid, bad}, 50)
+			if plan.Refusal != ReasonRetentionAnnotationInvalid {
+				t.Fatalf("Refusal = %q, want %q", plan.Refusal, ReasonRetentionAnnotationInvalid)
+			}
+			if len(plan.Evict) != 0 || len(plan.Keep) != 0 || plan.KeptTokens != 0 || plan.PinnedTokens != 0 {
+				t.Fatalf("invalid annotation must refuse atomically, got %+v", plan)
+			}
+		})
+	}
+}

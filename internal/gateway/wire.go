@@ -616,10 +616,24 @@ type CompactionContract struct {
 	// cannot happen. Capped at maxReplayablePageDigests so a huge shed cannot inflate the
 	// response body it is meant to be shrinking.
 	ReplayablePageDigests []string `json:"replayable_page_digests,omitempty"`
+	// RetentionEffects reports bounded keep/drop metadata that participated in this plan. It
+	// contains stable page addresses and provenance tokens only — never transcript bytes or
+	// free-form reason text.
+	RetentionEffects []RetentionEffect `json:"retention_effects,omitempty"`
 	// Instruction is the closed continuation token (compactionContractInstruction): the
 	// boundary is a summarize-and-continue, so the turn after it must not treat the
 	// shortened transcript as a reason to wrap up.
 	Instruction string `json:"instruction"`
+}
+
+// RetentionEffect is the bounded wire projection of one retention annotation and the outcome
+// of the page it addressed. Reason codes stay internal; the contract exposes only stable IDs,
+// the closed intent, provenance, and whether the page was kept or evicted.
+type RetentionEffect struct {
+	PageID  string `json:"page_id"`
+	Intent  string `json:"intent"`
+	Source  string `json:"source"`
+	Outcome string `json:"outcome"`
 }
 
 // PreservedClassSplit is one survival class's outcome in an eviction plan: how many pages of

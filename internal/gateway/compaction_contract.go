@@ -61,6 +61,9 @@ const compactionContractInstruction = "continue-do-not-wrap-up"
 // truncated list never reads as a complete one.
 const maxReplayablePageDigests = 32
 
+// maxRetentionEffects bounds provenance metadata independently of transcript size.
+const maxRetentionEffects = 32
+
 // compactionContractFrom projects one eviction plan onto the wire contract, or returns nil when the
 // plan evicted nothing — a boundary that dropped no page is not a boundary worth announcing, and an
 // empty contract would train both readers to ignore the field.
@@ -104,6 +107,24 @@ func compactionContractFrom(pages []ctxplan.Page, els [][]byte, plan ctxplan.Evi
 		if class == ctxplan.ClassReplayable && len(contract.ReplayablePageDigests) < maxReplayablePageDigests {
 			sum := sha256.Sum256(els[i])
 			contract.ReplayablePageDigests = append(contract.ReplayablePageDigests, hex.EncodeToString(sum[:]))
+		}
+	}
+	evictedIDs := make(map[string]bool, len(plan.Evict))
+	for _, id := range plan.Evict {
+		evictedIDs[id] = true
+	}
+	for _, p := range pages {
+		outcome := "kept"
+		if evictedIDs[p.ID] {
+			outcome = "evicted"
+		}
+		for _, annotation := range p.Retention {
+			if annotation.Intent == ctxplan.RetentionNeutral || len(contract.RetentionEffects) >= maxRetentionEffects {
+				continue
+			}
+			contract.RetentionEffects = append(contract.RetentionEffects, RetentionEffect{
+				PageID: p.ID, Intent: string(annotation.Intent), Source: annotation.Source, Outcome: outcome,
+			})
 		}
 	}
 	// Resistance order, and only classes the page set actually held — an all-zero row for a class
