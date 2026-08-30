@@ -184,3 +184,36 @@ be decomposed without coupling all mechanisms into one risky updater rewrite:
 
 No follow-on ticket is implied to be shipped by this note. Fan-out belongs after the #10077
 spine lands and its real operating-envelope witness identifies the actual next bottleneck.
+
+## Live repository dogfood — August 30, 2026 (#10212)
+
+The shipped spine was exercised twice against this repository's committed
+`76e84ff50a20ba4d1b66fb939c0b15a3fcf1d89c` `HEAD`, using the standalone
+`cmd/fak-selfupdate` entry point, the live clone-shared Git common directory, and disposable
+`/tmp` updater/target copies. The updater intentionally built from committed `HEAD`, not the
+peer-dirty working tree.
+
+```text
+run 1: status=divergent reused=false total_ms=37297
+       build_ms=23893 vet_ms=5539 smoke_ms=1469
+run 2: status=divergent reused=false total_ms=38513
+       build_ms=24571 vet_ms=5630 smoke_ms=1649
+both:  binary transaction completed but identity persistence failed:
+       build-input digest is not SHA-256
+```
+
+This is a real dogfood failure, not a synthetic cache benchmark. The build-input identity
+producer emits `sha256:<64 hex>`, while installed-identity persistence accepts only bare
+64-hex SHA-256. Because persistence fails after installation, the verified candidate is not
+committed for reuse and the second run performs build, vet, and smoke again. The required fix
+is tracked by #10342. Two additional findings are filed rather than expanded into this
+follow-on: typed cache-disposition observability (#10346) and stale source-path references
+after the standalone-command migration (#10347). Current implementation and tests live under
+`internal/selfupdate/cmd/`; commit `53d8ec8afd7195af22e519427e91da75f966077f`
+moved them from `cmd/fak/`.
+
+Promotion evidence: the live path reached the repository build, vet, smoke, and binary
+transaction stages twice. Demotion/retirement evidence: no cache-hit or speed claim is promoted;
+the measured retry rebuilt and the readout records the failure. Invalidating assumption: the
+spine's cache can only serve real retries if build-input digest generation and identity
+persistence use one canonical representation.

@@ -296,7 +296,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 - [Ultracode OSS variants: mechanisms are real; comparative effectiveness is not yet proven (2026-08-29)](docs/notes/CONCEPT-STUDY-ULTRACODE-OSS-VARIANTS-2026-08-29.md) — pinned nine-source inventory, current FAK effectiveness audit, license/evidence boundaries, and a fail-closed matched-comparison backlog decision.
 
-- [Self-update fast paths: check less, move less, rebuild only changed artifacts (2026-08-29)](docs/notes/CONCEPT-SELF-UPDATE-FAST-PATHS-2026-08-29.md) - source-ledgered design for local/conditional no-update proofs, build-input and artifact identities, verified delta/full fallback, staged activation, strict version rules, and the live candidate-cache spine #10077.
+- [Self-update fast paths: check less, move less, rebuild only changed artifacts (2026-08-29)](docs/notes/CONCEPT-SELF-UPDATE-FAST-PATHS-2026-08-29.md) - source-ledgered design for local/conditional no-update proofs, build-input and artifact identities, verified delta/full fallback, staged activation, strict version rules, the candidate-cache spine #10077, and its live repository dogfood readout #10212.
 
 - [Harness ABI stability under rapid upstream churn (2026-08-29)](docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md) — pinned Codex, Claude Code, Gemini CLI, and OpenCode compatibility study; separates shipped evidence from open failures, maps FAK's present/partial seams, and sets the default-versus-coverage frontier for #6805/#10020.
 
