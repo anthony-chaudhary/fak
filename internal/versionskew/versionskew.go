@@ -207,7 +207,11 @@ func AssessStamp(ctx context.Context, run Runner, dir, trunkRef string, running 
 	if running.HasVCS && strings.TrimSpace(running.Revision) != "" && !running.Dirty {
 		a.TrunkTip = resolveRev(ctx, run, dir, trunkRef)
 		if a.TrunkTip != "" {
-			a.Relation = ancestryOf(ctx, run, dir, running.Revision, a.TrunkTip)
+			if strings.EqualFold(strings.TrimSpace(running.Revision), strings.TrimSpace(a.TrunkTip)) {
+				a.Relation = RelEqual
+			} else {
+				a.Relation = ancestryOf(ctx, run, dir, running.Revision, a.TrunkTip)
+			}
 		}
 	}
 	a.Verdict = Classify(running, a.TrunkTip, a.Relation)
