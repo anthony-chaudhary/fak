@@ -1,0 +1,62 @@
+{
+  "schema": "fak-learning-route-witness/1",
+  "issue": 10451,
+  "phase": "after",
+  "captured_at": "2026-08-31T12:18:53-07:00",
+  "base_sha": "2bca53f691440965b3fbd16a95a48422666a336d",
+  "target": "docs/courses/end-to-end-inference-agent-harness-memory.md",
+  "scoped_files": [
+    "LEARNING-PATH.md",
+    "llms.txt",
+    "docs/index.md"
+  ],
+  "reference_count": 3,
+  "references": [
+    {
+      "path": "LEARNING-PATH.md",
+      "line": 24,
+      "link": "docs/courses/end-to-end-inference-agent-harness-memory.md",
+      "text": "> [8-module flagship course](docs/courses/end-to-end-inference-agent-harness-memory.md) to"
+    },
+    {
+      "path": "llms.txt",
+      "line": 19,
+      "link": "docs/courses/end-to-end-inference-agent-harness-memory.md",
+      "text": "- [End-to-End Inference, Agent Harness, and Memory](docs/courses/end-to-end-inference-agent-harness-memory.md): the integrated 8-module flagship course across native inference, tool use, policy, context control, durable memory, observability, and proof. Use [`LEARNING-PATH.md`](LEARNING-PATH.md) instead for the full 99-course prerequisite catalog."
+    },
+    {
+      "path": "docs/index.md",
+      "line": 19,
+      "link": "courses/end-to-end-inference-agent-harness-memory.md",
+      "text": "| Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |"
+    }
+  ],
+  "expected_reference_count": 3,
+  "reference_expectation_met": true,
+  "local_link_audit": {
+    "links_checked": 372,
+    "errors": [],
+    "ok": true
+  },
+  "route_distinction": {
+    "flagship_modules": 8,
+    "catalog_courses": 99,
+    "competing_start_here_authority_added": false
+  },
+  "learning_scorecard": {
+    "exit_code": 1,
+    "verdict": "ACTION",
+    "reason": "2 units of pre-existing learning debt across 126 learning docs: 1 coverage and 1 stamp; mean 96.9/100, coverage 96.2%"
+  },
+  "validate_mine": {
+    "exit_code": 2,
+    "status": "environment failure while materializing detached Windows worktree in WSL; path was composed with both worktree gitdir and C:/work/fak/.git/worktrees metadata"
+  },
+  "changed_paths_at_capture": [
+    "LEARNING-PATH.md",
+    "docs/_witnesses/issue-10451-learning-route-after.json",
+    "docs/_witnesses/issue-10451-learning-route-before.json",
+    "docs/index.md",
+    "llms.txt"
+  ]
+}
