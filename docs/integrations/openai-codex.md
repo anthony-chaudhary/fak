@@ -179,6 +179,24 @@ is not the shipped default posture.
 
 ### Hardened recovery and intentional direct sessions
 
+If guard reports that Codex subscription authentication is missing, repair it through
+guard. These exact authentication-management commands bypass only the provider repoint and
+the subscription credential probe; ordinary and model-bearing Codex commands remain guarded.
+
+```powershell
+$env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
+fak guard -- codex login
+fak guard -- codex login status
+fak guard -- codex
+```
+
+```bash
+CODEX_HOME="$HOME/.codex-codexFOUR" fak guard -- codex login
+CODEX_HOME="$HOME/.codex-codexFOUR" fak guard -- codex login status
+CODEX_HOME="$HOME/.codex-codexFOUR" fak guard -- codex
+```
+
+The expected status after successful ChatGPT authentication is `Logged in using ChatGPT`.
 When hardened mode blocks a direct session because fak cannot enforce its next model
 call, relaunch with `fak codex` (preferred) or `fak manage -- codex`.
 
@@ -247,6 +265,17 @@ adds fak as an explicit, inspectable tool boundary.
 
 ### Break-glass recovery for guard failures
 
+If the guarded authentication bootstrap itself cannot start on Windows, invoke the installed
+Codex launcher directly for authentication only:
+
+```powershell
+$env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
+& "$env:APPDATA\npm\codex.cmd" login
+& "$env:APPDATA\npm\codex.cmd" login status
+```
+
+This direct launch is only an authentication-bootstrap escape hatch. Return ordinary and
+model-bearing sessions to `fak guard` as soon as status reports `Logged in using ChatGPT`.
 The normal response to a raw-session continuation block is to exit and restart with
 `fak codex`. For one deliberately unguarded repair session, use the scoped break-glass
 launcher. It starts raw Codex by default, prints an unavoidable warning, removes any inherited

@@ -398,6 +398,28 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 		}
 	})
 
+	t.Run("authentication management commands stay direct", func(t *testing.T) {
+		for _, in := range [][]string{
+			{"codex", "login"},
+			{"codex", "login", "status"},
+			{"codex", "logout"},
+		} {
+			t.Run(strings.Join(in[1:], "_"), func(t *testing.T) {
+				out, info := installGuardCodexConfig(in, true, gw, "")
+				if info.Applied || !equalArgs(out, in) {
+					t.Errorf("auth management command must stay direct: out=%v info=%+v", out, info)
+				}
+			})
+		}
+	})
+
+	t.Run("similar command remains guarded", func(t *testing.T) {
+		in := []string{"codex", "login-extra"}
+		out, info := installGuardCodexConfig(in, true, gw, "")
+		if !info.Applied || !containsArg(out, "model_provider=fak") {
+			t.Errorf("non-auth command must remain repointed: out=%v info=%+v", out, info)
+		}
+	})
 	t.Run("disabled is a no-op", func(t *testing.T) {
 		in := []string{"codex", "exec"}
 		out, info := installGuardCodexConfig(in, false, gw, "")
@@ -422,6 +444,28 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 	})
 }
 
+func TestGuardCodexAuthManagementCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command []string
+		want    bool
+	}{
+		{name: "login", command: []string{"codex", "login"}, want: true},
+		{name: "login status", command: []string{"codex", "login", "status"}, want: true},
+		{name: "logout", command: []string{"codex", "logout"}, want: true},
+		{name: "bare", command: []string{"codex"}},
+		{name: "exec", command: []string{"codex", "exec", "task"}},
+		{name: "login prefix", command: []string{"codex", "login-extra"}},
+		{name: "login extra arg", command: []string{"codex", "login", "status", "extra"}},
+		{name: "other executable", command: []string{"other", "login"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := guardCodexAuthManagementCommand(tc.command); got != tc.want {
+				t.Fatalf("guardCodexAuthManagementCommand(%v) = %v, want %v", tc.command, got, tc.want)
+			}
+		})
+	}
+}
 func TestGuardCodexAuthEnv(t *testing.T) {
 	applied := guardCodexInstall{Applied: true, ProviderID: "fak", EnvKey: "OPENAI_API_KEY", BaseURL: "http://127.0.0.1:1/v1"}
 

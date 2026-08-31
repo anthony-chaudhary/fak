@@ -2599,3 +2599,10 @@ SetKVPreemptionPolicy installs a normalized NativePreemptionPolicy on a NativeSc
 NativeSessionRestored is the NativeSessionLifecycle value assigned when the scheduler rebuilds a model session during swap readmission and imports the preserved KV state.
 
 **Distinct from:** It identifies the restored member of the lifecycle enum, not the NativeSessionLifecycle type itself and not a fresh or recomputed session.
+
+
+### guardCodexAuthManagementCommand
+
+Recognizes the exact Codex CLI authentication-management commands that must execute without FAK provider or credential injection.
+
+**Distinct from:** Unlike ordinary Codex launches or the one-child guard-disable break-glass launcher, this narrow command class manages Codex's own login state and bypasses only FAK auth/config injection; it does not disable guarding for other Codex commands.
