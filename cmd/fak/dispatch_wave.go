@@ -224,8 +224,8 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	preflightResult, preflightErr := dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
-		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
+	preflightResult, preflightErr := dispatchWaveDependencyRetryContext(dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func(ctx context.Context) (dispatchWavePreflightResult, error) {
+		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAllocContext(ctx, root, stderr, *maxWorkers, wk, backendNorm, *count)
 		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, err
 	})
 	if preflightErr != nil {
@@ -336,8 +336,12 @@ func newDispatchWaveRecord(root string, live bool, backendNorm, wk, goalID, prof
 // {"error": …} map when the preflight itself failed — fail-open, matching runDispatchWave's
 // prior inline behavior).
 func dispatchWavePreflightAlloc(root string, stderr io.Writer, maxWorkers int, wk, backendNorm string, count int) (string, int, int, map[string]any, error) {
+	return dispatchWavePreflightAllocContext(context.Background(), root, stderr, maxWorkers, wk, backendNorm, count)
+}
+
+func dispatchWavePreflightAllocContext(ctx context.Context, root string, stderr io.Writer, maxWorkers int, wk, backendNorm string, count int) (string, int, int, map[string]any, error) {
 	product := dispatchtick.ProductForBackend(backendNorm)
-	preflight, err := dispatchPreflight(root, stderr, maxWorkers, wk, product)
+	preflight, _, err := dispatchPreflightTimedContext(ctx, root, stderr, maxWorkers, wk, product)
 	if err != nil {
 		return product, 0, count, nil, err
 	}
@@ -800,6 +804,10 @@ func dispatchWaveDependency[T any](timeout time.Duration, name string, run func(
 	return dispatchWaveDependencyRetry(timeout, name, 1, nil, run)
 }
 
+func dispatchWaveDependencyContext[T any](timeout time.Duration, name string, run func(context.Context) (T, error)) (T, error) {
+	return dispatchWaveDependencyRetryContext(timeout, name, 1, nil, run)
+}
+
 func waitDispatchWaveSnapshot(ctx context.Context, ch <-chan *runsSnapshot) (*runsSnapshot, error) {
 	select {
 	case snap, ok := <-ch:
@@ -812,10 +820,17 @@ func waitDispatchWaveSnapshot(ctx context.Context, ch <-chan *runsSnapshot) (*ru
 	}
 }
 func dispatchWaveDependencyRetry[T any](timeout time.Duration, name string, maxAttempts int, retry func(error) bool, run func() (T, error)) (T, error) {
+	return dispatchWaveDependencyRetryContext(timeout, name, maxAttempts, retry, func(context.Context) (T, error) {
+		return run()
+	})
+}
 
+func dispatchWaveDependencyRetryContext[T any](timeout time.Duration, name string, maxAttempts int, retry func(error) bool, run func(context.Context) (T, error)) (T, error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		type result struct {
 			value T
@@ -823,25 +838,25 @@ func dispatchWaveDependencyRetry[T any](timeout time.Duration, name string, maxA
 		}
 		done := make(chan result, 1)
 		go func() {
-			value, err := run()
+			value, err := run(ctx)
 			done <- result{value: value, err: err}
 		}()
-		timer := time.NewTimer(timeout)
 		select {
 		case got := <-done:
-			timer.Stop()
 			if got.err == nil {
 				return got.value, nil
 			}
 			canRetry := retry != nil && retry(got.err)
-			if canRetry && attempt < maxAttempts {
+			if canRetry && attempt < maxAttempts && ctx.Err() == nil {
 				continue
+			}
+			if errors.Is(got.err, context.DeadlineExceeded) || errors.Is(got.err, context.Canceled) || ctx.Err() != nil {
+				var zero T
+				return zero, &dispatchWaveDependencyError{Dependency: name, Kind: "timeout", Attempts: attempt, Retryable: true, Timeout: timeout, Err: context.DeadlineExceeded}
 			}
 			var zero T
 			return zero, &dispatchWaveDependencyError{Dependency: name, Kind: "upstream", Attempts: attempt, Retryable: canRetry, Err: got.err}
-		case <-timer.C:
-			// The timed-out call may still be unwinding. Do not overlap it with an automatic
-			// retry unless the dependency accepts cancellation; expose retryability instead.
+		case <-ctx.Done():
 			var zero T
 			return zero, &dispatchWaveDependencyError{Dependency: name, Kind: "timeout", Attempts: attempt, Retryable: true, Timeout: timeout, Err: context.DeadlineExceeded}
 		}

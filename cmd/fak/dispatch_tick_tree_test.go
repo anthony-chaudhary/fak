@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,6 +120,37 @@ func TestDispatchProbeTreeBuildNoModuleFailsOpen(t *testing.T) {
 // compiler diagnostic. dispatchTreeBuildCommand wraps that as
 // context.DeadlineExceeded; the probe must fail open (a loaded host is
 // infrastructure, not a poisoned tree) rather than freeze the fleet.
+func TestDispatchPreflightTreeBuildHonorsCallerDeadline(t *testing.T) {
+	oldCommand := dispatchTreeBuildCommandContext
+	t.Cleanup(func() { dispatchTreeBuildCommandContext = oldCommand })
+
+	started := make(chan struct{})
+	dispatchTreeBuildCommandContext = func(ctx context.Context, _ string) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	out, _, err := dispatchPreflightTimedContext(ctx, t.TempDir(), io.Discard, 1, "engineering", "codex")
+	if err != nil {
+		t.Fatalf("dispatch preflight: %v", err)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("tree build command was not invoked")
+	}
+	if elapsed := time.Since(began); elapsed > time.Second {
+		t.Fatalf("preflight returned after %s, want caller deadline to cancel the tree build", elapsed)
+	}
+	if out == nil {
+		t.Fatal("preflight returned a nil payload after tree-build deadline")
+	}
+}
+
 func TestDispatchProbeTreeBuildTimeoutFailsOpen(t *testing.T) {
 	old := dispatchTreeBuildCommand
 	dispatchTreeBuildCommand = func(string) (string, error) {

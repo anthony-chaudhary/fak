@@ -49,12 +49,29 @@ func TestDispatchWavePreflightRetryUsesDeclaredDependencyBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := `dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2,`
+	call := `dispatchWaveDependencyRetryContext(dispatchWaveDependencyTimeout, "dispatch preflight", 2,`
 	if !bytes.Contains(source, []byte(call)) {
 		t.Fatalf("dispatch preflight retry must use the single declared dependency budget")
 	}
 	if bytes.Contains(source, []byte(`dispatchWaveDependencyRetry(3*dispatchWaveDependencyTimeout, "dispatch preflight"`)) {
 		t.Fatalf("dispatch preflight retry still multiplies the declared dependency budget")
+	}
+}
+
+func TestDispatchWaveDependencyCancelsTimedOutCall(t *testing.T) {
+	canceled := make(chan struct{})
+	_, err := dispatchWaveDependencyContext(20*time.Millisecond, "dispatch preflight", func(ctx context.Context) (dispatchWavePreflightResult, error) {
+		<-ctx.Done()
+		close(canceled)
+		return dispatchWavePreflightResult{}, ctx.Err()
+	})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out dependency did not receive caller cancellation")
 	}
 }
 

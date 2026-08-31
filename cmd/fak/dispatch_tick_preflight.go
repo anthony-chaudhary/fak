@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
-const fallbackCodexOAuthSessions = 10
+const (
+	fallbackCodexOAuthSessions        = 10
+	dispatchPreflightTreeBuildTimeout = 30 * time.Second
+)
 
 func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
 	obj, err := dispatchRunJSON(root, stderr, 120*time.Second, filepath.Join("tools", "fleet_sessions.py"), "registry")
@@ -37,10 +41,20 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 }
 
 func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
-	return dispatchPreflightTimedWithTree(root, stderr, maxWorkers, workKind, product, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), dispatchPreflightTreeBuildTimeout)
+	defer cancel()
+	return dispatchPreflightTimedContext(ctx, root, stderr, maxWorkers, workKind, product)
+}
+
+func dispatchPreflightTimedContext(ctx context.Context, root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
+	return dispatchPreflightTimedWithTreeContext(ctx, root, stderr, maxWorkers, workKind, product, nil)
 }
 
 func dispatchPreflightTimedWithTree(root string, stderr io.Writer, maxWorkers int, workKind, product string, treeOverride *dispatchtick.TreeCheck) (map[string]any, map[string]int64, error) {
+	return dispatchPreflightTimedWithTreeContext(context.Background(), root, stderr, maxWorkers, workKind, product, treeOverride)
+}
+
+func dispatchPreflightTimedWithTreeContext(ctx context.Context, root string, stderr io.Writer, maxWorkers int, workKind, product string, treeOverride *dispatchtick.TreeCheck) (map[string]any, map[string]int64, error) {
 	timings := map[string]int64{}
 	stamp := func(name string, started time.Time) {
 		ms := time.Since(started).Milliseconds()
@@ -62,7 +76,7 @@ func dispatchPreflightTimedWithTree(root string, stderr io.Writer, maxWorkers in
 	if treeOverride != nil {
 		tree = *treeOverride
 	} else {
-		tree = dispatchProbeTreeBuild(root)
+		tree, _ = dispatchProbeTreeBuildContext(ctx, root)
 	}
 	// OSWorkerProcs is the PUBLISHED per-worker load (#3376), not the raw per-tick
 	// probe: dispatchPublishWorkerLoad still samples every tick but only lets a CHANGED
