@@ -1,6 +1,7 @@
 package sweepcert
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -195,4 +196,158 @@ func restamp(e *Evidence) {
 
 func measured(value float64, digest, unit string) Observation {
 	return Observation{Status: ObservationMeasured, Value: &value, Provenance: Provenance{Source: "fixture", Method: "fixture-median", Unit: unit, EnvelopeDigest: digest}}
+}
+
+func TestQwen38NativeEnvelopeBindsRequiredProvenance(t *testing.T) {
+	base := qwen38FixtureProvenance()
+	envelope, err := NewQwen38NativeEnvelope([]float64{128, 512, 2048}, base, RangeClosure{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDigest, err := CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations := []struct {
+		name string
+		edit func(*Qwen38NativeProvenance)
+	}{
+		{"artifact", func(p *Qwen38NativeProvenance) { p.Artifact = "fixture/qwen3.8-other" }},
+		{"artifact digest", func(p *Qwen38NativeProvenance) { p.ArtifactDigest = "sha256:other" }},
+		{"engine commit", func(p *Qwen38NativeProvenance) { p.EngineCommit = "fixture-commit-other" }},
+		{"backend", func(p *Qwen38NativeProvenance) { p.Backend = "cuda-other" }},
+		{"node", func(p *Qwen38NativeProvenance) { p.Node = "fixture-node-other" }},
+		{"hardware", func(p *Qwen38NativeProvenance) { p.Hardware = "fixture-gpu-other" }},
+		{"tokenizer", func(p *Qwen38NativeProvenance) { p.Tokenizer = "fixture-tokenizer-other" }},
+		{"output", func(p *Qwen38NativeProvenance) { p.Output = "fixture-output-other" }},
+		{"reset", func(p *Qwen38NativeProvenance) { p.Reset = "fixture-reset-other" }},
+		{"order", func(p *Qwen38NativeProvenance) { p.Order = "fixture-order-other" }},
+		{"capacity", func(p *Qwen38NativeProvenance) { p.Capacity = "fixture-capacity-other" }},
+	}
+	for _, tt := range mutations {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := base
+			tt.edit(&changed)
+			other, err := NewQwen38NativeEnvelope([]float64{128, 512, 2048}, changed, RangeClosure{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := CanonicalEnvelopeDigest(other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if digest == baseDigest {
+				t.Fatalf("changing %s did not change envelope digest", tt.name)
+			}
+		})
+	}
+}
+
+func TestQwen38NativeEnvelopeRejectsMissingProvenanceAndNonNativeEngine(t *testing.T) {
+	base := qwen38FixtureProvenance()
+	tests := []struct {
+		name string
+		edit func(*Qwen38NativeProvenance)
+	}{
+		{"artifact", func(p *Qwen38NativeProvenance) { p.Artifact = "" }},
+		{"artifact digest", func(p *Qwen38NativeProvenance) { p.ArtifactDigest = "" }},
+		{"engine", func(p *Qwen38NativeProvenance) { p.Engine = "" }},
+		{"engine commit", func(p *Qwen38NativeProvenance) { p.EngineCommit = "" }},
+		{"backend", func(p *Qwen38NativeProvenance) { p.Backend = "" }},
+		{"node", func(p *Qwen38NativeProvenance) { p.Node = "" }},
+		{"hardware", func(p *Qwen38NativeProvenance) { p.Hardware = "" }},
+		{"tokenizer", func(p *Qwen38NativeProvenance) { p.Tokenizer = "" }},
+		{"output", func(p *Qwen38NativeProvenance) { p.Output = "" }},
+		{"reset", func(p *Qwen38NativeProvenance) { p.Reset = "" }},
+		{"order", func(p *Qwen38NativeProvenance) { p.Order = "" }},
+		{"capacity", func(p *Qwen38NativeProvenance) { p.Capacity = "" }},
+		{"llama fallback", func(p *Qwen38NativeProvenance) { p.Engine = "llama.cpp" }},
+		{"vague native", func(p *Qwen38NativeProvenance) { p.Engine = "native" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := base
+			tt.edit(&p)
+			if _, err := NewQwen38NativeEnvelope([]float64{128, 512, 2048}, p, RangeClosure{}); err == nil {
+				t.Fatal("invalid provenance was accepted")
+			}
+		})
+	}
+	if _, err := NewQwen38NativeEnvelope([]float64{128, 512}, base, RangeClosure{}); err == nil {
+		t.Fatal("fewer than three prompt lengths were accepted")
+	}
+}
+
+func TestQwen38NativeEvidencePreservesNotMeasuredRuns(t *testing.T) {
+	e := qwen38FixtureEvidence(t, RangeClosure{}, []float64{10, 20, 30})
+	e.Points[1].Status = PointNotMeasured
+	e.Points[1].Observations["prefill_throughput"] = Observation{Status: ObservationNotMeasured, Reason: "fixture allocation failure"}
+	if err := ValidateQwen38NativeEvidence(e); err != nil {
+		t.Fatalf("explicit not-measured run rejected: %v", err)
+	}
+	finding := ObservedExtremum(e, "prefill_throughput", Maximum)
+	if finding.Status != FindingNotIdentifiable {
+		t.Fatalf("finding=%+v, want not identifiable", finding)
+	}
+	bad := e
+	bad.Points = append([]Point(nil), e.Points...)
+	bad.Points[1].Observations = map[string]Observation{}
+	zero := 0.0
+	bad.Points[1].Observations["prefill_throughput"] = Observation{Status: ObservationNotMeasured, Value: &zero, Reason: "fixture allocation failure"}
+	if err := ValidateQwen38NativeEvidence(bad); err == nil {
+		t.Fatal("numeric value on not-measured observation was accepted")
+	}
+	bad.Points[1].Observations["prefill_throughput"] = Observation{Status: ObservationNotMeasured}
+	if err := ValidateQwen38NativeEvidence(bad); err == nil {
+		t.Fatal("not-measured observation without reason was accepted")
+	}
+}
+
+func TestQwen38NativeTerminalMaximumRequiresRangeClosureProof(t *testing.T) {
+	open := qwen38FixtureEvidence(t, RangeClosure{}, []float64{10, 20, 30})
+	finding := ObservedExtremum(open, "prefill_throughput", Maximum)
+	if finding.Status != FindingRightCensored {
+		t.Fatalf("open terminal maximum=%+v, want right-censored", finding)
+	}
+	closed := qwen38FixtureEvidence(t, RangeClosure{Proven: true, Evidence: "fixture capacity boundary witness"}, []float64{10, 20, 30})
+	finding = ObservedExtremum(closed, "prefill_throughput", Maximum)
+	if finding.Status != FindingMeasured {
+		t.Fatalf("proven closed terminal maximum=%+v, want measured", finding)
+	}
+	if _, err := NewQwen38NativeEnvelope([]float64{128, 512, 2048}, qwen38FixtureProvenance(), RangeClosure{Proven: true}); err == nil {
+		t.Fatal("range closure without evidence was accepted")
+	}
+}
+
+func qwen38FixtureProvenance() Qwen38NativeProvenance {
+	return Qwen38NativeProvenance{
+		Artifact: "fixture/qwen3.8", ArtifactDigest: "sha256:fixture-artifact", Engine: Qwen38NativeEngine,
+		EngineCommit: "fixture-commit", Backend: "fixture-cuda", Node: "fixture-node", Hardware: "fixture-gpu",
+		Tokenizer: "sha256:fixture-tokenizer", Output: "fixture-logits-shape", Reset: "fixture-cold-reset",
+		Order: "fixture-ascending", Capacity: "fixture-capacity",
+	}
+}
+
+func qwen38FixtureEvidence(t *testing.T, closure RangeClosure, values []float64) Evidence {
+	t.Helper()
+	coordinates := []float64{128, 512, 2048}
+	envelope, err := NewQwen38NativeEnvelope(coordinates, qwen38FixtureProvenance(), closure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Evidence{Envelope: envelope, EnvelopeDigest: digest}
+	for i, coordinate := range coordinates {
+		e.Points = append(e.Points, Point{
+			ID: fmt.Sprintf("prompt-%d", int(coordinate)), Coordinate: coordinate, Status: PointMeasured, EnvelopeDigest: digest,
+			Observations: map[string]Observation{"prefill_throughput": measured(values[i], digest, "tok/s")},
+		})
+	}
+	if err := ValidateQwen38NativeEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	return e
 }

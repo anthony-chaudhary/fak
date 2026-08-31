@@ -33,6 +33,154 @@ type Envelope struct {
 	Bindings []Binding `json:"bindings"`
 }
 
+// Qwen38NativeEngine is the only engine identity accepted by the Qwen3.8
+// prefill certification helpers. It deliberately excludes vague "native"
+// labels and external fallback engines.
+const Qwen38NativeEngine = "fak-native"
+
+// Qwen38NativeProvenance binds every identity required to compare Qwen3.8
+// prefill samples. Values describe a receipt; they are not inferred or filled
+// from ambient state.
+type Qwen38NativeProvenance struct {
+	Artifact       string
+	ArtifactDigest string
+	Engine         string
+	EngineCommit   string
+	Backend        string
+	Node           string
+	Hardware       string
+	Tokenizer      string
+	Output         string
+	Reset          string
+	Order          string
+	Capacity       string
+}
+
+// RangeClosure records proof that the declared prompt-length range reaches the
+// real operating-envelope boundary. Without proof, a terminal maximum remains
+// censored even when it is the largest measured value.
+type RangeClosure struct {
+	Proven   bool
+	Evidence string
+}
+
+// NewQwen38NativeEnvelope constructs the comparable identity for a Qwen3.8
+// native prefill sweep. It requires at least three prompt lengths and exact,
+// non-empty receipt identities; it never manufactures a live receipt.
+func NewQwen38NativeEnvelope(promptLengths []float64, provenance Qwen38NativeProvenance, closure RangeClosure) (Envelope, error) {
+	if len(promptLengths) < 3 {
+		return Envelope{}, fmt.Errorf("Qwen3.8 native prefill certification requires at least three prompt lengths")
+	}
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"artifact", provenance.Artifact}, {"artifact_digest", provenance.ArtifactDigest},
+		{"engine", provenance.Engine}, {"engine_commit", provenance.EngineCommit},
+		{"backend", provenance.Backend}, {"node", provenance.Node},
+		{"hardware", provenance.Hardware}, {"tokenizer", provenance.Tokenizer},
+		{"output", provenance.Output}, {"reset", provenance.Reset},
+		{"order", provenance.Order}, {"capacity", provenance.Capacity},
+	}
+	for _, field := range fields {
+		if strings.TrimSpace(field.value) == "" {
+			return Envelope{}, fmt.Errorf("Qwen3.8 native prefill provenance %s must be non-empty", field.name)
+		}
+	}
+	if provenance.Engine != Qwen38NativeEngine {
+		return Envelope{}, fmt.Errorf("Qwen3.8 prefill certification requires engine %q, got %q", Qwen38NativeEngine, provenance.Engine)
+	}
+	if closure.Proven && strings.TrimSpace(closure.Evidence) == "" {
+		return Envelope{}, fmt.Errorf("range closure proof requires evidence")
+	}
+	bindings := make([]Binding, 0, len(fields)+1)
+	for _, field := range fields {
+		bindings = append(bindings, Binding{Name: field.name, Value: strings.TrimSpace(field.value)})
+	}
+	bindings = append(bindings, Binding{Name: "model_family", Value: "qwen3.8"})
+	envelope := Envelope{
+		Axis: Axis{
+			Name:        "prompt_length",
+			Unit:        "tokens",
+			Coordinates: append([]float64(nil), promptLengths...),
+			UpperClosed: closure.Proven,
+		},
+		Bindings: bindings,
+	}
+	if _, err := CanonicalEnvelopeDigest(envelope); err != nil {
+		return Envelope{}, err
+	}
+	return envelope, nil
+}
+
+// ValidateQwen38NativeEvidence validates receipt identity and explicit
+// not-measured semantics without converting missing measurements to zero.
+func ValidateQwen38NativeEvidence(e Evidence) error {
+	if e.Envelope.Axis.Name != "prompt_length" || e.Envelope.Axis.Unit != "tokens" || len(e.Envelope.Axis.Coordinates) < 3 {
+		return fmt.Errorf("evidence is not a Qwen3.8 native prefill prompt-length sweep")
+	}
+	required := map[string]bool{
+		"artifact": false, "artifact_digest": false, "engine": false, "engine_commit": false,
+		"backend": false, "node": false, "hardware": false, "tokenizer": false,
+		"output": false, "reset": false, "order": false, "capacity": false, "model_family": false,
+	}
+	for _, binding := range e.Envelope.Bindings {
+		if _, ok := required[binding.Name]; ok && strings.TrimSpace(binding.Value) != "" {
+			required[binding.Name] = true
+		}
+		if binding.Name == "engine" && binding.Value != Qwen38NativeEngine {
+			return fmt.Errorf("evidence engine must be %q", Qwen38NativeEngine)
+		}
+		if binding.Name == "model_family" && binding.Value != "qwen3.8" {
+			return fmt.Errorf("evidence model family must be qwen3.8")
+		}
+	}
+	for name, present := range required {
+		if !present {
+			return fmt.Errorf("evidence is missing required provenance binding %q", name)
+		}
+	}
+	digest, err := CanonicalEnvelopeDigest(e.Envelope)
+	if err != nil {
+		return err
+	}
+	if e.EnvelopeDigest != digest {
+		return fmt.Errorf("evidence envelope digest does not match canonical envelope")
+	}
+	if len(e.Points) != len(e.Envelope.Axis.Coordinates) {
+		return fmt.Errorf("evidence must preserve one point per declared prompt length")
+	}
+	for i, point := range e.Points {
+		if point.Coordinate != e.Envelope.Axis.Coordinates[i] || point.EnvelopeDigest != digest {
+			return fmt.Errorf("point %d does not match declared prompt-length envelope", i)
+		}
+		observation, ok := point.Observations["prefill_throughput"]
+		if !ok {
+			return fmt.Errorf("point %q is missing prefill_throughput observation", point.ID)
+		}
+		switch point.Status {
+		case PointMeasured:
+			if observation.Status != ObservationMeasured || observation.Value == nil || !finite(*observation.Value) {
+				return fmt.Errorf("measured point %q requires finite measured prefill throughput", point.ID)
+			}
+			if observation.Provenance.EnvelopeDigest != digest {
+				return fmt.Errorf("measured point %q has mismatched observation provenance", point.ID)
+			}
+		case PointNotMeasured:
+			if observation.Status != ObservationNotMeasured || observation.Value != nil || strings.TrimSpace(observation.Reason) == "" {
+				return fmt.Errorf("not-measured point %q requires nil value and explicit reason", point.ID)
+			}
+		case PointInvalid:
+			if strings.TrimSpace(point.InvalidReason) == "" {
+				return fmt.Errorf("invalid point %q requires a reason", point.ID)
+			}
+		default:
+			return fmt.Errorf("point %q has unknown status %q", point.ID, point.Status)
+		}
+	}
+	return nil
+}
+
 // CanonicalEnvelopeDigest returns an order-independent digest of bindings and
 // an order-sensitive digest of the declared axis coordinates.
 func CanonicalEnvelopeDigest(envelope Envelope) (string, error) {
