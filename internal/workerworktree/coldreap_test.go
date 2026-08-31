@@ -2,10 +2,12 @@ package workerworktree
 
 import (
 	"archive/zip"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -419,5 +421,119 @@ func TestApplyUnregisteredResidueRevalidatesFreshness(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(path, "new-work.txt")); err != nil {
 		t.Fatalf("new work lost: %v", err)
+	}
+}
+
+// TestColdReapListWithOptionsBoundsLargeCensus is the scale regression for
+// #10383: 240 delayed worktree probes make incremental progress without exceeding
+// the configured ceiling, preserve every live or unlanded tree, and distinguish
+// measured reclaim bytes from unknown estimates.
+func TestColdReapListWithOptionsBoundsLargeCensus(t *testing.T) {
+	const (
+		entries = 240
+		ceiling = 6
+	)
+	now := time.Now()
+	floor := 30 * time.Minute
+	root := t.TempDir()
+	paths := make([]string, entries)
+	index := make(map[string]int, entries)
+	var porcelain strings.Builder
+	for i := range entries {
+		path := coldTempWorktree(t, root, "scale", fmt.Sprintf("%03d", i), 2*time.Hour, now)
+		paths[i] = path
+		index[path] = i
+		fmt.Fprintf(&porcelain, "worktree %s\n\n", path)
+	}
+
+	var active atomic.Int64
+	var maximum atomic.Int64
+	probe := func() func() {
+		current := active.Add(1)
+		for {
+			seen := maximum.Load()
+			if current <= seen || maximum.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		return func() { active.Add(-1) }
+	}
+	git := func(workdir string, args []string) (int, string) {
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			return 0, porcelain.String()
+		}
+		if len(args) >= 1 && args[0] == "status" {
+			done := probe()
+			defer done()
+			i := index[workdir]
+			switch {
+			case i >= 20 && i < 40:
+				return 0, " M retained.go\n"
+			case i >= 40 && i < 50:
+				return 1, "status unavailable"
+			default:
+				return 0, ""
+			}
+		}
+		return 0, ""
+	}
+
+	var progress []ColdReapProgress
+	plan := ColdReapListWithOptions(root, git, now, floor, func(path string) bool {
+		return index[path] < 20
+	}, ColdReapOptions{
+		Concurrency: ceiling,
+		Size: func(path string) (int64, error) {
+			done := probe()
+			defer done()
+			i := index[path]
+			if i >= 50 && i < 60 {
+				return 0, os.ErrPermission
+			}
+			return int64(i + 1), nil
+		},
+		Progress: func(event ColdReapProgress) {
+			progress = append(progress, event)
+		},
+	})
+
+	if got := maximum.Load(); got > ceiling || got < 2 {
+		t.Fatalf("max concurrent probes = %d, want within [2,%d]", got, ceiling)
+	}
+	if len(progress) != entries {
+		t.Fatalf("progress events = %d, want %d", len(progress), entries)
+	}
+	if first := progress[0]; first.Completed != 1 || first.Total != entries {
+		t.Fatalf("first progress = %+v, want completed=1 total=%d", first, entries)
+	}
+	last := progress[len(progress)-1]
+	if last.Completed != entries || last.Eligible != 190 || last.EligibleBytesKnown != 180 || last.EligibleBytesUnknown != 10 || last.EligibleBytes != 27090 {
+		t.Fatalf("final progress = %+v", last)
+	}
+
+	for i, item := range plan {
+		switch {
+		case i < 20:
+			if item.Eligible || !item.LeaseLive || item.HeldByWork {
+				t.Fatalf("live item %d was not preserved: %+v", i, item)
+			}
+		case i < 40:
+			if item.Eligible || !item.HeldByWork || item.Unlanded != 1 {
+				t.Fatalf("dirty item %d was not preserved: %+v", i, item)
+			}
+		case i < 50:
+			if item.Eligible || !item.HeldByWork || item.Unlanded != -1 {
+				t.Fatalf("unreadable item %d was not preserved: %+v", i, item)
+			}
+		case i < 60:
+			if !item.Eligible || item.ReclaimBytesKnown || item.ReclaimBytes != 0 {
+				t.Fatalf("unknown-size item %d lost provenance: %+v", i, item)
+			}
+		default:
+			if !item.Eligible || !item.ReclaimBytesKnown || item.ReclaimBytes != int64(i+1) {
+				t.Fatalf("known-size item %d = %+v", i, item)
+			}
+		}
 	}
 }

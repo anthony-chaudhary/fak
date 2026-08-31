@@ -2,9 +2,11 @@ package workerworktree
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,6 +48,10 @@ import (
 // so a freshly-prepared worktree is never swept out from under a starting worker.
 const DefaultColdAgeFloor = 30 * time.Minute
 
+// DefaultColdReapConcurrency bounds filesystem and git pressure during an all-cold
+// census. Callers may select a smaller ceiling through ColdReapOptions.
+const DefaultColdReapConcurrency = 8
+
 // LeaseLiveFn reports whether the worker bound to wtPath still holds a LIVE lane
 // lease. Injected so the enumeration is testable without real leases; the production
 // wiring reads leaseref live records and matches by lane. It MUST fail toward "live"
@@ -72,6 +78,32 @@ type ColdWorktree struct {
 	// must triage — land it or abandon it — and the set an --even-if-unlanded
 	// override promotes back to reapable.
 	HeldByWork bool `json:"held_by_work,omitempty"`
+	// ReclaimBytes is the logical file-byte estimate for this worktree when it is
+	// eligible and the complete tree was readable. ReclaimBytesKnown distinguishes
+	// a measured empty tree from an estimate that could not be completed.
+	ReclaimBytes      int64 `json:"reclaim_bytes"`
+	ReclaimBytesKnown bool  `json:"reclaim_bytes_known"`
+}
+
+// ColdReapProgress is emitted after each worktree census completes. Byte totals
+// include eligible worktrees only; EligibleBytesUnknown counts eligible trees whose
+// complete logical size could not be measured, so zero is never presented as known.
+type ColdReapProgress struct {
+	Completed            int   `json:"completed"`
+	Total                int   `json:"total"`
+	Eligible             int   `json:"eligible"`
+	EligibleBytes        int64 `json:"eligible_bytes"`
+	EligibleBytesKnown   int   `json:"eligible_bytes_known"`
+	EligibleBytesUnknown int   `json:"eligible_bytes_unknown"`
+}
+
+// ColdReapOptions controls the bounded all-cold census. Size may be supplied by
+// tests or callers that have a more appropriate accounting source. Progress is
+// called serially as results arrive; it must return promptly.
+type ColdReapOptions struct {
+	Concurrency int
+	Size        func(path string) (int64, error)
+	Progress    func(ColdReapProgress)
 }
 
 // WorktreeAge returns how long ago the worktree directory was last modified — the age
@@ -167,43 +199,130 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// ColdReapList enumerates the live worker worktrees (via Count — the same read `list`
-// uses) and decides which are COLD, DELETING NOTHING. A worktree is cold iff leaseLive
-// reports its lane lease dead, WorktreeAge puts it past ageFloor, AND UnlandedCount
-// finds nothing uncommitted still in it. The caller applies
-// Reap to the Eligible entries, and only under an explicit apply opt-in — this function
-// is the dry-run plan. A nil leaseLive is treated as "cannot prove liveness", so every
-// worktree is kept (fail toward keeping).
+// worktreeLogicalBytes returns the complete logical file size beneath path. Any
+// unreadable entry makes the estimate unknown; partial totals are never reported as
+// complete. Symlinks are counted by their link metadata and never followed.
+func worktreeLogicalBytes(path string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// ColdReapList enumerates and plans with the bounded default census settings.
+// It remains the compatibility entry point for callers that do not need progress.
 func ColdReapList(root string, git GitRunner, now time.Time, ageFloor time.Duration, leaseLive LeaseLiveFn) []ColdWorktree {
+	return ColdReapListWithOptions(root, git, now, ageFloor, leaseLive, ColdReapOptions{})
+}
+
+// ColdReapListWithOptions enumerates worker worktrees and decides which are cold,
+// deleting nothing. Expensive per-tree status and size probes run under one explicit
+// worker-pool ceiling. Results retain Count's order even though progress reflects
+// actual completion order. A nil lease oracle fails toward live; status or size probe
+// failures fail toward preserving work or reporting bytes unknown, respectively.
+func ColdReapListWithOptions(root string, git GitRunner, now time.Time, ageFloor time.Duration, leaseLive LeaseLiveFn, opts ColdReapOptions) []ColdWorktree {
 	if ageFloor <= 0 {
 		ageFloor = DefaultColdAgeFloor
 	}
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = DefaultColdReapConcurrency
+	}
+	size := opts.Size
+	if size == nil {
+		size = worktreeLogicalBytes
+	}
+
 	_, paths := Count(root, git)
-	out := make([]ColdWorktree, 0, len(paths))
-	for _, p := range paths {
-		live := true // fail toward keeping when there is no oracle
-		if leaseLive != nil {
-			live = leaseLive(p)
+	out := make([]ColdWorktree, len(paths))
+	if len(paths) == 0 {
+		return out
+	}
+	if concurrency > len(paths) {
+		concurrency = len(paths)
+	}
+
+	type job struct {
+		index int
+		path  string
+	}
+	type result struct {
+		index int
+		item  ColdWorktree
+	}
+	jobs := make(chan job)
+	results := make(chan result)
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer workers.Done()
+			for work := range jobs {
+				p := work.path
+				live := true
+				if leaseLive != nil {
+					live = leaseLive(p)
+				}
+				age := WorktreeAge(p, now)
+				unlanded := 0
+				if !live && age >= ageFloor {
+					unlanded = UnlandedCount(p, git)
+				}
+				eligible, heldByWork, reason := coldEligible(live, age, ageFloor, unlanded)
+				item := ColdWorktree{
+					Path: p, AgeSec: int64(age / time.Second), LeaseLive: live,
+					Eligible: eligible, Reason: reason, Unlanded: unlanded,
+					HeldByWork: heldByWork,
+				}
+				if eligible {
+					if bytes, err := size(p); err == nil {
+						item.ReclaimBytes = bytes
+						item.ReclaimBytesKnown = true
+					}
+				}
+				results <- result{index: work.index, item: item}
+			}
+		}()
+	}
+	go func() {
+		for i, p := range paths {
+			jobs <- job{index: i, path: p}
 		}
-		age := WorktreeAge(p, now)
-		// Probe the working tree ONLY for a worktree the first two gates would
-		// otherwise release. A live or young worktree is kept whatever its status
-		// says, so asking git there would spend a subprocess per worktree to reach
-		// the same verdict — and this sweep runs over every worktree in the namespace.
-		unlanded := 0
-		if !live && age >= ageFloor {
-			unlanded = UnlandedCount(p, git)
+		close(jobs)
+		workers.Wait()
+		close(results)
+	}()
+
+	progress := ColdReapProgress{Total: len(paths)}
+	for result := range results {
+		out[result.index] = result.item
+		progress.Completed++
+		if result.item.Eligible {
+			progress.Eligible++
+			if result.item.ReclaimBytesKnown {
+				progress.EligibleBytes += result.item.ReclaimBytes
+				progress.EligibleBytesKnown++
+			} else {
+				progress.EligibleBytesUnknown++
+			}
 		}
-		eligible, heldByWork, reason := coldEligible(live, age, ageFloor, unlanded)
-		out = append(out, ColdWorktree{
-			Path:       p,
-			AgeSec:     int64(age / time.Second),
-			LeaseLive:  live,
-			Eligible:   eligible,
-			Reason:     reason,
-			Unlanded:   unlanded,
-			HeldByWork: heldByWork,
-		})
+		if opts.Progress != nil {
+			opts.Progress(progress)
+		}
 	}
 	return out
 }
