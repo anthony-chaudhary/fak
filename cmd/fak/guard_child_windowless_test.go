@@ -44,6 +44,7 @@ func TestLaunchGuardChildConsoleUsabilityScope(t *testing.T) {
 		{"headless Claude one-shot", []string{"claude", "-p", "resolve #1"}, 1},
 		{"headless Claude print-eq", []string{"claude", "--print=resolve #1"}, 1},
 		{"headless Codex one-shot", []string{"codex", "-p", "resolve #1"}, 1},
+		{"headless Codex exec", []string{"codex", "-c", "model_auto_compact_token_limit=96000", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}, 1},
 		{"attended Codex keeps usable console", []string{"codex"}, 0},
 		{"attended Claude keeps usable console", []string{"claude"}, 0},
 		{"attended git keeps usable console", []string{"git", "status"}, 0},
