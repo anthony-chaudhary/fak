@@ -461,6 +461,64 @@ func TestAdd(t *testing.T) {
 	if len(res.Tested) == 0 {
 		t.Fatalf("expected affected package test selection")
 	}
+	if res.SelectionAudit != nil {
+		t.Fatalf("default validation unexpectedly emitted selection audit: %+v", res.SelectionAudit)
+	}
+}
+
+func TestValidateAuditSelectionReportsFullOnlyFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedGitFixtureRepo(t)
+	commitFiles(t, repo, git, "fixture", map[string]string{
+		"go.mod": cleanGoMod,
+		"p/p.go": cleanGoFile,
+		"p/p_test.go": `package p
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(1, 2) != 3 { t.Fatal("bad") }
+}
+`,
+		"q/q.go": "package q\n\nfunc Value() int { return 1 }\n",
+		"q/q_test.go": `package q
+
+import "testing"
+
+func TestFullOnlyFailure(t *testing.T) { t.Fatal("truth failure") }
+`,
+	})
+	if err := os.WriteFile(filepath.Join(repo, "p", "p.go"), []byte("package p\n\n// Add returns a + b.\nfunc Add(a, b int) int { return a + b + 0 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, code, stderr := runValidateJSON(t, []string{
+		"--root", repo, "--mine", "p/p.go", "--audit-selection", "--wsl-tests=false", "--json",
+	})
+	if code != 1 || res.OK {
+		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
+	}
+	if res.SelectionAudit == nil {
+		t.Fatalf("missing selection audit: %+v", res)
+	}
+	audit := res.SelectionAudit
+	if audit.Base != res.Tip || !strings.HasPrefix(audit.Head, res.Tip+"+mine:") {
+		t.Fatalf("base=%q head=%q tip=%q", audit.Base, audit.Head, res.Tip)
+	}
+	if got, want := audit.SelectedPackages, []string{"gitfixture.test/p"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("selected_packages=%v, want %v", got, want)
+	}
+	if audit.Sound || !audit.Complete {
+		t.Fatalf("audit=%+v; want complete unsound result", audit.SelectionAudit)
+	}
+	if got, want := audit.FullFailures, []string{"gitfixture.test/q"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("full_failures=%v, want %v", got, want)
+	}
+	if got, want := audit.SelectorMisses, []string{"gitfixture.test/q"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("selector_misses=%v, want %v", got, want)
+	}
 }
 
 func TestValidateSelectsTrackedObjectiveCAndHeaderOverlays(t *testing.T) {
