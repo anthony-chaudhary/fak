@@ -117,3 +117,25 @@ func TestInjectGuardProfilesRefusesUnknownBeforeLaunch(t *testing.T) {
 		}
 	}
 }
+
+func TestInjectGuardProfilesPreservesCodexAuthManagementCommands(t *testing.T) {
+	for _, command := range [][]string{
+		{"codex", "login"},
+		{"codex", "login", "status"},
+		{"codex", "logout"},
+	} {
+		got, capture, err := injectGuardProfiles(command, agentDefaultOutputStyle, agentDefaultWorkProfile, false)
+		if err != nil {
+			t.Fatalf("injectGuardProfiles(%q): %v", command, err)
+		}
+		if !reflect.DeepEqual(got, command) {
+			t.Fatalf("injectGuardProfiles(%q) = %q, want unchanged auth command", command, got)
+		}
+		if capture != nil {
+			t.Fatalf("injectGuardProfiles(%q) capture=%+v, want nil", command, capture)
+		}
+		if repointed, _ := installGuardCodexConfig(got, true, "http://127.0.0.1:8137/v1", "OPENAI_API_KEY"); !reflect.DeepEqual(repointed, command) {
+			t.Fatalf("installGuardCodexConfig(%q) = %q, want auth command to remain direct", got, repointed)
+		}
+	}
+}

@@ -28,8 +28,8 @@ type guardProfileCapture struct {
 }
 
 func injectGuardProfiles(command []string, outputSelection, workSelection string, explicit bool) ([]string, *guardProfileCapture, error) {
-	if len(command) == 0 {
-		return command, nil, nil
+	if len(command) == 0 || guardCodexAuthManagementCommand(command) {
+		return append([]string(nil), command...), nil, nil
 	}
 	output := syspromptmmu.DescribeStyle(outputSelection)
 	if !output.Known {
