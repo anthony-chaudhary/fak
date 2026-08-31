@@ -698,42 +698,45 @@ type guardChildSpawnMetadata struct {
 
 type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
 
-const (
-	guardCodexTerminalRestorePulseDuration = 8 * time.Second
-	guardCodexTerminalRestorePulseInterval = 500 * time.Millisecond
-)
-
-var startGuardChildTerminalRestorePulse = windowgate.StartTerminalRestorePulse
-
-func maybeStartGuardChildTerminalRestorePulse(command []string) {
-	maybeStartGuardChildTerminalRestorePulseForPlan(newGuardLaunchPlan(command))
+type guardChildTerminalRestore interface {
+	RepairAfterStart() bool
 }
 
-func maybeStartGuardChildTerminalRestorePulseForPlan(plan guardLaunchPlan) {
+type noopGuardChildTerminalRestore struct{}
+
+func (noopGuardChildTerminalRestore) RepairAfterStart() bool { return false }
+
+var captureGuardChildTerminalRestore = func() guardChildTerminalRestore {
+	return windowgate.CaptureTerminalRestore()
+}
+
+func maybeCaptureGuardChildTerminalRestore(command []string) guardChildTerminalRestore {
+	return maybeCaptureGuardChildTerminalRestoreForPlan(newGuardLaunchPlan(command))
+}
+
+func maybeCaptureGuardChildTerminalRestoreForPlan(plan guardLaunchPlan) guardChildTerminalRestore {
 	if !plan.harnessProfile().HasRepoint(harnessprofile.RepointCLIConfig) {
-		return
+		return noopGuardChildTerminalRestore{}
 	}
-	startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
+	return captureGuardChildTerminalRestore()
 }
 
-// maybeStartGuardChildHarnessTerminalRestorePulse repairs the parent terminal after a
-// wrapped interactive harness starts. Codex already needed the pulse because its launch
-// can perturb the console window; Claude can leave the same stale/hidden terminal state,
-// so production launch paths cover both harnesses through the same restore seam.
-func maybeStartGuardChildHarnessTerminalRestorePulse(command []string) {
-	maybeStartGuardChildHarnessTerminalRestorePulseForPlan(newGuardLaunchPlan(command))
+// maybeCaptureGuardChildHarnessTerminalRestore pins the attended terminal for
+// interactive harnesses before child start. The caller repairs it only after a
+// successful OS process start.
+func maybeCaptureGuardChildHarnessTerminalRestore(command []string) guardChildTerminalRestore {
+	return maybeCaptureGuardChildHarnessTerminalRestoreForPlan(newGuardLaunchPlan(command))
 }
 
-func maybeStartGuardChildHarnessTerminalRestorePulseForPlan(plan guardLaunchPlan) {
+func maybeCaptureGuardChildHarnessTerminalRestoreForPlan(plan guardLaunchPlan) guardChildTerminalRestore {
 	profile := plan.harnessProfile()
 	if !plan.recognized() {
-		return
+		return noopGuardChildTerminalRestore{}
 	}
-	if profile.Name == "claude" {
-		startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
-		return
+	if profile.Name == "claude" || profile.HasRepoint(harnessprofile.RepointCLIConfig) {
+		return captureGuardChildTerminalRestore()
 	}
-	maybeStartGuardChildTerminalRestorePulseForPlan(plan)
+	return noopGuardChildTerminalRestore{}
 }
 
 func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, launchPlan guardLaunchPlan) guardChildSpawnMetadata {
