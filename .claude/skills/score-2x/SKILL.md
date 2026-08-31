@@ -247,3 +247,13 @@ debt can't drift past the cross-check, and a bounded grade can't conceal an unbo
 - After a benchmark/feature lands that should move a surface, to prove it did.
 - On a **/loop cadence** across the portfolio: each tick, pick the surface with the
   most room, drive it 2×; when every surface is clean, harden the weakest bar.
+
+## Bounded issue-hygiene fleet planning
+
+Before dispatching workers for an issue-hygiene scorecard, convert the scorecard JSON into deterministic packets:
+
+```bash
+fak scoreboard issue-packets --from issue-hygiene.json > issue-hygiene-packets.json
+```
+
+Use the emitted packets as the dispatch units. The planner defaults to one issue mutation per worker and fails closed on larger packets. Only accept a larger packet after explicit operator approval, and pass both the DOS/dispatch price receipt and review reference with `--unsafe-oversized --price-ref <receipt> --review-ref <approval>`.

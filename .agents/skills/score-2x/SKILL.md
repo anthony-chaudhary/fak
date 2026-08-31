@@ -1,6 +1,6 @@
 ---
 name: score-2x
-description: The generic 2×-then-harden loop the whole scorecard family runs — score a surface, drive its debt down 2× with genuine fixes, rescore to PROVE the drop, and when the surface saturates (grade A, zero debt, nothing...
+description: The generic 2×-then-discover loop the scorecard family runs — enumerate exhaustive raw debt, drive it down 2× with genuine fixes, rescore to PROVE the drop, and continuously harden discovery under a new metric...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/score-2x/SKILL.md

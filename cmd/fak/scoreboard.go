@@ -22,8 +22,9 @@ import (
 // lab/DGX control bridge), so a CI job or a local agent publishes a number the
 // moment it changes without touching the lab plumbing.
 func cmdScoreboard(argv []string) {
-	dispatchSubcommands("scoreboard", "post", argv,
+	dispatchSubcommands("scoreboard", "post | issue-packets", argv,
 		subcommand{"post", runScoreboardPost},
+		subcommand{"issue-packets", runScoreboardIssuePackets},
 	)
 }
 
