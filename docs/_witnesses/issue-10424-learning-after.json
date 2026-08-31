@@ -1,0 +1,67 @@
+{
+  "schema": "fak-learning-course-witness/1",
+  "issue": 10424,
+  "captured_at": "2026-08-31T11:43:25-07:00",
+  "workspace_head": "cb55a247ddce88186aac114b69509fdc8cfaaa31",
+  "course": {
+    "path": "docs/courses/end-to-end-inference-agent-harness-memory.md",
+    "bytes": 24520,
+    "sha256": "32dade6440188b94a3465f08c5c8d3c24814b4cbde9254c41257b9784c6a3e94",
+    "modules": 8,
+    "read_sections": 8,
+    "lab_sections": 8,
+    "checkpoint_sections": 8,
+    "capstone": true
+  },
+  "before_scorecard": {
+    "path": "docs/_witnesses/issue-10424-learning-before.json",
+    "bytes": 141420,
+    "sha256": "95bf3d889638fa6be5663a8145725af122fe56c67d40cf1ac04fcaed40814fbb",
+    "valid_json": true
+  },
+  "link_audit": {
+    "markdown_links": 64,
+    "repository_paths_and_fragments_checked": 62,
+    "errors": 0,
+    "external_issue_links": 2
+  },
+  "required_topics": {
+    "fak_native_qwen38": true,
+    "no_silent_llamacpp_fallback": true,
+    "quality_envelope": true,
+    "harness_syscall_tool_path": true,
+    "policy_adjudication_default_deny": true,
+    "shared_prefix_vdso_vcache_prefill_decode": true,
+    "context_mmu_working_context": true,
+    "memq_recall_render_compact_trust_gates": true,
+    "observability_receipts_witnesses": true,
+    "production_operation_and_verification": true,
+    "cache_layers_distinguished": true,
+    "honest_gpu_private_lab_markers": true
+  },
+  "command_audit": {
+    "runtime_capabilities_receipt_schema_exit": 0,
+    "preflight_help_exit": 0,
+    "agent_help_exit": 0,
+    "focused_go_tests": "go test ./internal/vdso ./internal/ctxmmu ./internal/memq ./internal/recall exited 0 on 2026-08-31",
+    "validate_mine_existing_paths_exit": 0,
+    "validate_mine_all_issue_paths_exit": 0,
+    "mcp_verifier_exit": 1,
+    "mcp_verifier_status": "known-broken and explicitly labeled in course; repair tracked by GitHub issue #10449"
+  },
+  "after_scorecard": {
+    "path": "_scratch/issue-10424-learning-after-scorecard.json",
+    "sha256": "95bf3d889638fa6be5663a8145725af122fe56c67d40cf1ac04fcaed40814fbb",
+    "exit_code": 1,
+    "ok": false,
+    "verdict": "ACTION",
+    "finding": "learning_debt",
+    "reason": "2 unit(s) of learning-debt across 126 learning docs (0 in-doc + 1 coverage + 1 stamp); mean 96.9/100, coverage 96.2%"
+  },
+  "limitations": [
+    "The repository learning scorecard remains ACTION learning_debt because its remaining coverage and stamp debt are outside this new course.",
+    "This narrow deterministic witness proves structure, links, command availability, and scorecard state; it does not prove the subjective claim that this is the number-one destination on the internet.",
+    "No GPU or private-lab execution was performed or claimed by this documentation change.",
+    "The optional examples/mcp verifier currently fails because tools/list omits fak_admit; the course labels this honestly and issue #10449 tracks the repair."
+  ]
+}

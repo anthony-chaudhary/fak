@@ -1,0 +1,4256 @@
+{
+  "schema": "fleet-learning-scorecard/1",
+  "ok": false,
+  "verdict": "ACTION",
+  "finding": "learning_debt",
+  "reason": "2 unit(s) of learning-debt across 126 learning docs (0 in-doc + 1 coverage + 1 stamp); mean 96.9/100, coverage 96.2%",
+  "next_action": "retire learning-debt by importance\u00d7debt (see corpus.priorities): add the missing orientation signpost, runnable command, worked example, or honesty marker; re-run to prove the drop",
+  "workspace": "C:\\work\\fak",
+  "corpus": {
+    "n_docs": 126,
+    "mean_score": 96.9,
+    "median_score": 97.0,
+    "min_score": 90.5,
+    "max_score": 100.0,
+    "grade_distribution": {
+      "A": 126,
+      "B": 0,
+      "C": 0,
+      "D": 0,
+      "F": 0
+    },
+    "learning_debt": 2,
+    "learning_debt_in_docs": 0,
+    "learning_debt_in_coverage": 1,
+    "learning_debt_in_stamp": 1,
+    "soft_signals": 228,
+    "worst": [
+      {
+        "path": "docs/explainers/awq-quantization.md",
+        "score": 90.5,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/context-control-surfaces-and-the-pin-audit-gap.md",
+        "score": 90.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/vllm-lifecycle-cache-loss-bridge.md",
+        "score": 90.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/video-content-plan.md",
+        "score": 90.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/local-vs-frontier-parity.md",
+        "score": 91.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/require-witness-tool-call-continuations.md",
+        "score": 92.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/code-linting-at-the-kernel.md",
+        "score": 93.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/fak/server-config.md",
+        "score": 94.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/fak/loop-tool-map.md",
+        "score": 94.1,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "docs/explainers/context-signal-to-noise.md",
+        "score": 94.2,
+        "grade": "A",
+        "n_defects": 0
+      }
+    ],
+    "priorities": [
+      {
+        "path": "docs/fak/server-config.md",
+        "type": "reference",
+        "importance": 66.4,
+        "score": 94.0,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 3,
+        "priority": 0.538
+      },
+      {
+        "path": "docs/explainers/awq-quantization.md",
+        "type": "explainer",
+        "importance": 31.8,
+        "score": 90.5,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 5,
+        "priority": 0.428
+      },
+      {
+        "path": "docs/explainers/vllm-lifecycle-cache-loss-bridge.md",
+        "type": "explainer",
+        "importance": 31.8,
+        "score": 90.6,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 5,
+        "priority": 0.427
+      },
+      {
+        "path": "docs/explainers/local-vs-frontier-parity.md",
+        "type": "explainer",
+        "importance": 31.8,
+        "score": 91.2,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 5,
+        "priority": 0.425
+      },
+      {
+        "path": "docs/explainers/context-control-surfaces-and-the-pin-audit-gap.md",
+        "type": "explainer",
+        "importance": 30.0,
+        "score": 90.6,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 5,
+        "priority": 0.403
+      },
+      {
+        "path": "docs/explainers/video-content-plan.md",
+        "type": "reference",
+        "importance": 30.0,
+        "score": 90.8,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 5,
+        "priority": 0.403
+      },
+      {
+        "path": "docs/explainers/code-linting-at-the-kernel.md",
+        "type": "explainer",
+        "importance": 33.6,
+        "score": 93.0,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 4,
+        "priority": 0.36
+      },
+      {
+        "path": "docs/explainers/kv-cache-agentic-context.md",
+        "type": "explainer",
+        "importance": 44.5,
+        "score": 95.4,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 3,
+        "priority": 0.354
+      },
+      {
+        "path": "START-HERE.md",
+        "type": "tutorial",
+        "importance": 65.5,
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 2,
+        "priority": 0.352
+      },
+      {
+        "path": "docs/explainers/frozen-trajectory-cache-cliff.md",
+        "type": "explainer",
+        "importance": 40.9,
+        "score": 95.4,
+        "grade": "A",
+        "n_defects": 0,
+        "n_soft": 3,
+        "priority": 0.326
+      }
+    ]
+  },
+  "coverage": {
+    "reachability_pct": 100.0,
+    "topic_pct": 92.3,
+    "overall_pct": 96.2,
+    "orphans": [],
+    "missing_topics": [],
+    "covered_topics": [
+      "orientation_path",
+      "install",
+      "first_run_tutorial",
+      "policy_authoring",
+      "framework_integration",
+      "client_examples",
+      "observability",
+      "security_hardening",
+      "troubleshooting",
+      "faq",
+      "concepts",
+      "migration"
+    ],
+    "shipped_surface_coverage": {
+      "stamp": "2026-08-29",
+      "added_paths": [
+        "cmd/fak-selfupdate/main.go",
+        "cmd/fak/guard_crash_rsi.go",
+        "cmd/fak/guard_crash_rsi_test.go",
+        "cmd/fak/guard_fleetbus_flag.go",
+        "cmd/fak/guard_fleetbus_flag_test.go",
+        "cmd/fak/guard_launch_plan_test.go",
+        "cmd/fak/loop_performance_rsi.go",
+        "cmd/fak/scoreboard_packets.go",
+        "cmd/fak/scoreboard_packets_test.go",
+        "cmd/fak/selfupdate_delta.go",
+        "cmd/fak/selfupdate_delta_test.go",
+        "cmd/fak/selfupdate_manifest.go",
+        "cmd/fak/selfupdate_manifest_test.go",
+        "cmd/fak/selfupdate_msix_other.go",
+        "cmd/fak/selfupdate_msix_test.go",
+        "cmd/fak/selfupdate_msix_windows.go",
+        "cmd/fak/serve_load_helpers_test.go",
+        "cmd/fak/vcache_inspect.go",
+        "cmd/fak/vcache_inspect_test.go",
+        "cmd/fak/wip_queue.go",
+        "cmd/fak/wip_queue_test.go",
+        "cmd/modelbench/qwen38_paged_swap.go",
+        "cmd/modelbench/qwen38_paged_swap_test.go",
+        "internal/abi/kvbatch.go",
+        "internal/abi/kvbatch_test.go",
+        "internal/agent/chat_test.go",
+        "internal/agent/inkernel_planner_config.go",
+        "internal/agent/transient_target_failover_test.go",
+        "internal/architest/workflow_concurrency_test.go",
+        "internal/cacheobs/tiers_edge_test.go",
+        "internal/codegraph/codegraph_scc_test.go",
+        "internal/codexresume/rehome.go",
+        "internal/codexresume/rehome_test.go",
+        "internal/compute/graph_arg_promotion_test.go",
+        "internal/compute/graph_pipeline.go",
+        "internal/compute/graph_pipeline_test.go",
+        "internal/compute/graph_sccp.go",
+        "internal/compute/graph_sccp_test.go",
+        "internal/compute/graph_sroa.go",
+        "internal/compute/graph_sroa_test.go",
+        "internal/compute/metal_qwen35_sequence.go",
+        "internal/compute/metal_qwen35_sequence_test.go",
+        "internal/compute/metal_trace_source_test.go",
+        "internal/compute/numa_affinity_linux_test.go",
+        "internal/compute/vulkan_transient_plan.go",
+        "internal/compute/vulkan_transient_plan_test.go",
+        "internal/contextq/derive_records.go",
+        "internal/contextq/derive_records_test.go",
+        "internal/contextq/tree_explore.go",
+        "internal/contextq/tree_explore_test.go",
+        "internal/coordination/bootstrap_repair.go",
+        "internal/coordination/bootstrap_repair_test.go",
+        "internal/devindex/extraction_plan_edge_test.go",
+        "internal/experiments/nativeperf_transaction.go",
+        "internal/experiments/nativeperf_transaction_test.go",
+        "internal/gateway/batchbudget.go",
+        "internal/gateway/batchbudget_test.go",
+        "internal/ggufload/artifact_quant.go",
+        "internal/ggufload/artifact_quant_test.go",
+        "internal/ggufload/gguf_dequant_test.go",
+        "internal/ggufload/gguf_iq12_q2xl_test.go",
+        "internal/ggufload/quant_q4k_iq12_loader_test.go",
+        "internal/issuehygiene/packets.go",
+        "internal/issuehygiene/packets_test.go",
+        "internal/l3kv/warmresume_benchmark_test.go",
+        "internal/metrics/microtrace_scope_test.go",
+        "internal/model/forward_dead_argument_test.go",
+        "internal/model/forward_graph_inline_test.go",
+        "internal/model/forward_graph_slots_test.go",
+        "internal/model/native_selection_identity.go",
+        "internal/model/native_selection_identity_test.go",
+        "internal/model/parallel_pprof_test.go",
+        "internal/model/quant_kquant_iq12_test.go",
+        "internal/model/qwen35_mtp_batch_witness_test.go",
+        "internal/model/qwen35_mtp_draft.go",
+        "internal/model/qwen35_mtp_draft_test.go",
+        "internal/model/qwen35_mtp_load_test.go",
+        "internal/model/qwen38_mtp_eligibility.go",
+        "internal/model/qwen38_mtp_eligibility_test.go",
+        "internal/modelengine/nativesched_deadline.go",
+        "internal/modelengine/nativesched_deadline_test.go",
+        "internal/modelengine/nativesched_donation_test.go",
+        "internal/modelperfobs/bandwidth_collect_apple_provider_darwin.go",
+        "internal/modelperfobs/bandwidth_collect_apple_provider_other.go",
+        "internal/modelperfobs/bandwidth_collect_apple_provider_test.go",
+        "internal/modelperfobs/cache_phase.go",
+        "internal/modelperfobs/cache_phase_test.go",
+        "internal/modelperfobs/proxy_adversarial_test.go",
+        "internal/modelperfobs/proxy_refusal_test.go",
+        "internal/modelperfobs/testdata/apple-memory-current-provider.json",
+        "internal/nativeperf/criterion.go",
+        "internal/nativeperf/criterion_test.go",
+        "internal/perfrsiscore/render.go",
+        "internal/perfrsiscore/usage.go",
+        "internal/perfrsiscore/usage_test.go",
+        "internal/selfinstall/artifact.go",
+        "internal/selfinstall/artifact_test.go",
+        "internal/selfinstall/build_inputs.go",
+        "internal/selfinstall/build_inputs_test.go",
+        "internal/selfinstall/component_plan.go",
+        "internal/selfinstall/component_plan_test.go",
+        "internal/selfinstall/identity.go",
+        "internal/selfinstall/identity_test.go",
+        "internal/selfupdate/cmd/compat.go",
+        "internal/selfupdate/cmd/entrypoint_golden_test.go",
+        "internal/selfupdate/cmd/export.go",
+        "internal/selfupdate/cmd/selfupdate.go",
+        "internal/selfupdate/cmd/testdata/entry-audit-only-attention.golden.json",
+        "internal/selfupdate/cmd/testdata/entry-current.golden.json",
+        "internal/selfupdate/cmd/testdata/entry-repairable-drift.golden.json",
+        "internal/selfupdate/cmd/testdata/entry-rollback.golden.json",
+        "internal/selfupdate/msix.go",
+        "internal/selfupdate/msix_test.go",
+        "internal/selfupdate/version.go",
+        "internal/selfupdate/version_test.go",
+        "internal/trajectoryassurance/event_integrity.go",
+        "internal/trajectoryassurance/event_integrity_test.go",
+        "internal/vdso/diagnostics.go",
+        "internal/vdso/diagnostics_test.go",
+        "internal/vdso/path_normalization.go",
+        "internal/vdso/path_normalization_test.go",
+        "internal/vdso/toolchain_identity_test.go",
+        "internal/vdso/vdso_write_through_test.go",
+        "internal/windowgate/go_exec_scan.go"
+      ],
+      "added_fak_verbs": [],
+      "surfaces": [
+        {
+          "kind": "cmd",
+          "name": "fak-selfupdate",
+          "ref": "cmd/fak-selfupdate",
+          "source_paths": [
+            "cmd/fak-selfupdate/main.go"
+          ],
+          "taught": false
+        }
+      ],
+      "covered": [],
+      "missing": [
+        {
+          "kind": "cmd",
+          "name": "fak-selfupdate",
+          "ref": "cmd/fak-selfupdate",
+          "source_paths": [
+            "cmd/fak-selfupdate/main.go"
+          ],
+          "taught": false
+        }
+      ],
+      "defects": [
+        "shipped-but-untaught surface: cmd/fak-selfupdate (added since learning-scorecard stamp 2026-08-29)"
+      ]
+    },
+    "missing_shipped_surfaces": [
+      "cmd/fak-selfupdate"
+    ],
+    "covered_shipped_surfaces": [],
+    "defects": [
+      "shipped-but-untaught surface: cmd/fak-selfupdate (added since learning-scorecard stamp 2026-08-29)"
+    ]
+  },
+  "stamp_freshness": {
+    "doc": "docs/LEARNING-SCORECARD.md",
+    "stamp": "2026-08-29",
+    "stamp_age_days": 2,
+    "cadence_days": 1,
+    "last_corpus_change": "2026-08-31",
+    "dirty_corpus_count": 0,
+    "dirty_corpus_paths": [],
+    "corpus_changed_since_stamp": true,
+    "stale_stamp": true,
+    "flag": "stale-stamp",
+    "reason": "stale-stamp: docs/LEARNING-SCORECARD.md stamp 2026-08-29 is 2d old (cadence 1d) and the learning corpus changed since"
+  },
+  "docs": [
+    {
+      "path": "GETTING-STARTED.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "13 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "12 H1 / 9 sections / 26 cross-link(s)",
+        "links": "all 15 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 12 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "INSTALL.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "10 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "8 H1 / 10 sections / 3 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 8 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "LEARNING-PATH.md",
+      "type": "curriculum",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "107 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 137 sections / 175 cross-link(s)",
+        "links": "all 116 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 67.3
+    },
+    {
+      "path": "START-HERE.md",
+      "type": "tutorial",
+      "score": 96.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 88,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 39 cross-link(s)",
+        "links": "all 32 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against"
+      ],
+      "n_defects": 0,
+      "importance": 65.5
+    },
+    {
+      "path": "docs/CONTEXT-IS-NOT-MEMORY.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 20 sections / 3 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/FAQ.md",
+      "type": "reference",
+      "score": 96.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 90,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "19 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 229 sections / 22 cross-link(s)",
+        "links": "all 18 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no orientation signpost (audience / prereq / TL;DR / 'you'll be able to')",
+        "structure: 1732-line stretch with no heading (wall of text)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/MEMORY-LAYERS-EXPLAINER.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 20 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/concepts-and-story.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 11 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/addressable-kv-cache-in-5-min.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 5 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/explainers/addressable-kv-cache.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 9 sections / 4 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 70.0
+    },
+    {
+      "path": "docs/explainers/agent-runtime.md",
+      "type": "explainer",
+      "score": 98.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 14 cross-link(s)",
+        "links": "all 13 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/agent-virtual-filesystem.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 17 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/awq-quantization.md",
+      "type": "explainer",
+      "score": 90.5,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 85,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 22 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "honesty: states a speed/multiplier number with no honesty marker (SIMULATED / OPEN / vs-naive / vs-tuned) or authority link",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/cache.md",
+      "type": "explainer",
+      "score": 95.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 5 sections / 7 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/caching/README.md",
+      "type": "reference",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 3 sections / 9 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/explainers/caching/level-1-what-is-caching.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 7 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 23.6
+    },
+    {
+      "path": "docs/explainers/caching/level-2-managed-cache-in-practice.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 7 sections / 11 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 27.3
+    },
+    {
+      "path": "docs/explainers/caching/level-3-cache-economics-and-the-wire.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 13 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 27.3
+    },
+    {
+      "path": "docs/explainers/caching/level-4-kernel-kv-cache.md",
+      "type": "explainer",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "6 H1 / 7 sections / 12 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 6 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 27.3
+    },
+    {
+      "path": "docs/explainers/caching/level-5-the-caching-frontier.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 14 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 23.6
+    },
+    {
+      "path": "docs/explainers/change-data-capture-for-agents.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 8 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/explainers/code-linting-at-the-kernel.md",
+      "type": "explainer",
+      "score": 93.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 75,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "5 H1 / 6 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: 5 H1 titles (expected exactly one)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/explainers/compounding-benefits-of-a-saved-call.md",
+      "type": "explainer",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "4 H1 / 9 sections / 12 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 4 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 20.0
+    },
+    {
+      "path": "docs/explainers/context-as-a-variable.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "7 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 8 cross-link(s)",
+        "links": "all 11 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/explainers/context-control-surfaces-and-the-pin-audit-gap.md",
+      "type": "explainer",
+      "score": 90.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/context-shedding.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 7 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/explainers/context-signal-to-noise.md",
+      "type": "explainer",
+      "score": 94.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/context-tape-visuals.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 7 sections / 4 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/explainers/context.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 11 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/explainers/cross-platform-spine.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 16 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/explainers/data-residency-and-compliance.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 9 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/default-deny-vs-classifier.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 6 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 40.9
+    },
+    {
+      "path": "docs/explainers/engineering-is-building-loops.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 14 sections / 7 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 46.4
+    },
+    {
+      "path": "docs/explainers/fleet-benchmarks.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "8 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 10 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/explainers/frozen-trajectory-cache-cliff.md",
+      "type": "explainer",
+      "score": 95.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "3 H1 / 11 sections / 10 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 3 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 40.9
+    },
+    {
+      "path": "docs/explainers/gateway.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 13 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 21.8
+    },
+    {
+      "path": "docs/explainers/glossary.md",
+      "type": "reference",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 19 cross-link(s)",
+        "links": "all 13 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.9
+    },
+    {
+      "path": "docs/explainers/god-file-growth-gate.md",
+      "type": "explainer",
+      "score": 97.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 7 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/hardware-limits-and-capacity.md",
+      "type": "explainer",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 11 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 164-line stretch with no heading (wall of text)"
+      ],
+      "n_defects": 0,
+      "importance": 21.8
+    },
+    {
+      "path": "docs/explainers/hardware-portability.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/explainers/kv-cache-agentic-context.md",
+      "type": "explainer",
+      "score": 95.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 8 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 44.5
+    },
+    {
+      "path": "docs/explainers/less-context-less-code.md",
+      "type": "explainer",
+      "score": 95.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "3 H1 / 6 sections / 8 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 3 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/loader-semantic-transform-contracts.md",
+      "type": "explainer",
+      "score": 94.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/local-vs-frontier-parity.md",
+      "type": "explainer",
+      "score": 91.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 75,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "4 H1 / 9 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 4 H1 titles (expected exactly one)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/long-session-economics.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 9 sections / 7 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)"
+      ],
+      "n_defects": 0,
+      "importance": 42.7
+    },
+    {
+      "path": "docs/explainers/long-sessions-keep-the-cache-hit.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 3 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/explainers/memory-engineering.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 12 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/explainers/multi-gpu-tensor-parallelism.md",
+      "type": "explainer",
+      "score": 98.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost"
+      ],
+      "n_defects": 0,
+      "importance": 21.8
+    },
+    {
+      "path": "docs/explainers/o1-context-window-economics.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 11 sections / 6 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/explainers/one-binary-one-surface.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 48.2
+    },
+    {
+      "path": "docs/explainers/policy-in-the-kernel.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 7 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)"
+      ],
+      "n_defects": 0,
+      "importance": 51.8
+    },
+    {
+      "path": "docs/explainers/require-witness-tool-call-continuations.md",
+      "type": "explainer",
+      "score": 92.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "7 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 19 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 21.8
+    },
+    {
+      "path": "docs/explainers/routing.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 8 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/runtime-vs-client.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 7 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 29.1
+    },
+    {
+      "path": "docs/explainers/shared-workspace-and-the-negation-operator.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 6 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/sota-optimizations.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 17 sections / 3 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/explainers/status-a-peer-can-trust.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 9 sections / 7 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 23.6
+    },
+    {
+      "path": "docs/explainers/structured-generation-became-infrastructure.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 7 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/tensorrt-llm-vs-sglang-and-fak.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 16 sections / 7 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 20.0
+    },
+    {
+      "path": "docs/explainers/the-abstraction-map.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 18 cross-link(s)",
+        "links": "all 15 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/tool-call-is-a-syscall.md",
+      "type": "explainer",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 6 sections / 5 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 53.6
+    },
+    {
+      "path": "docs/explainers/ultracode-multi-agent-dogfood.md",
+      "type": "explainer",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 11 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/vdso-revoke-as-comm-revoke.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/explainers/verify-dont-trust.md",
+      "type": "explainer",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 6 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/explainers/video-content-plan.md",
+      "type": "reference",
+      "score": 90.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 78,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 75,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "3 H1 / 21 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no orientation signpost (audience / prereq / TL;DR / 'you'll be able to')",
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 3 H1 titles (expected exactly one)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/explainers/vllm-lifecycle-cache-loss-bridge.md",
+      "type": "explainer",
+      "score": 90.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 0 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/what-a-saved-token-is-worth.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 6 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/what-fak-is-not.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 7 sections / 10 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/explainers/what-is-a-cuda-kernel.md",
+      "type": "explainer",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 8 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/explainers/what-is-managed-cache.md",
+      "type": "explainer",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 13 sections / 12 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 25.5
+    },
+    {
+      "path": "docs/explainers/you-never-manage-the-context-window.md",
+      "type": "explainer",
+      "score": 96.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 7 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 25.5
+    },
+    {
+      "path": "docs/fak/README.md",
+      "type": "reference",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 90,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "no code blocks",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 53 cross-link(s)",
+        "links": "all 49 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: teaches no runnable command or code block (prose-only)"
+      ],
+      "n_defects": 0,
+      "importance": 61.8
+    },
+    {
+      "path": "docs/fak/advanced-topics.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "12 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "18 H1 / 27 sections / 9 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 18 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/fak/agent-framework-integration.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "22 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "18 H1 / 16 sections / 24 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 18 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/fak/agent-integration-architecture.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "22 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "17 H1 / 33 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 17 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 42.7
+    },
+    {
+      "path": "docs/fak/always-on-dogfood-server.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "9 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "12 H1 / 8 sections / 5 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 12 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 46.4
+    },
+    {
+      "path": "docs/fak/api-reference.md",
+      "type": "reference",
+      "score": 96.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 90,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 37 sections / 14 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no orientation signpost (audience / prereq / TL;DR / 'you'll be able to')",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 46.4
+    },
+    {
+      "path": "docs/fak/batching-config.md",
+      "type": "howto",
+      "score": 96.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 9 sections / 7 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/claude-gemini-gcp.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 5 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/claude-glm-gcp.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "9 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "3 H1 / 8 sections / 5 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 3 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/concept-glossary.md",
+      "type": "howto",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 243 sections / 7 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/concept-usage-scorecard.md",
+      "type": "howto",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/fak/configuration.md",
+      "type": "howto",
+      "score": 94.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 14 sections / 2 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 206-line stretch with no heading (wall of text)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/deployment-guide.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "23 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "24 H1 / 21 sections / 18 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 24 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 51.8
+    },
+    {
+      "path": "docs/fak/documentation-roadmap.md",
+      "type": "reference",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 15 sections / 21 cross-link(s)",
+        "links": "all 13 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/dogfood-loop-scorecard.md",
+      "type": "howto",
+      "score": 96.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/dojo-rsi-loop.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/dojo.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "14 H1 / 16 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 14 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/edge-quickstart.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "7 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "11 H1 / 11 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 11 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/faq.md",
+      "type": "reference",
+      "score": 96.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 90,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 32 sections / 45 cross-link(s)",
+        "links": "all 17 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no orientation signpost (audience / prereq / TL;DR / 'you'll be able to')",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/gcp-tier2-control-vm.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 2 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/governed-agent-quickstart.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "10 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "13 H1 / 7 sections / 9 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 13 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/green-gate-budget.md",
+      "type": "howto",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 3 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/guard-hop-rsi-loop.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/guard-verdict-rsi-loop.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 7 sections / 3 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/hosted-control-plane.md",
+      "type": "howto",
+      "score": 94.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 7 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/in-kernel-model.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "14 H1 / 6 sections / 5 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 14 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/lab-dev-loop.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "12 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "7 H1 / 8 sections / 8 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 7 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/loop-scorecard.md",
+      "type": "howto",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 30.0
+    },
+    {
+      "path": "docs/fak/loop-tool-map.md",
+      "type": "howto",
+      "score": 94.1,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 85,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "honesty: states a speed/multiplier number with no honesty marker (SIMULATED / OPEN / vs-naive / vs-tuned) or authority link"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/mac-agent-ui.md",
+      "type": "howto",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "27 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "4 H1 / 18 sections / 6 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 4 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/mcp-registry.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/migration-guide.md",
+      "type": "howto",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "17 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "20 H1 / 21 sections / 21 cross-link(s)",
+        "links": "all 10 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 20 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/fak/multi-language-examples.md",
+      "type": "howto",
+      "score": 95.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 85,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "21 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "5 H1 / 24 sections / 10 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "honesty: states a speed/multiplier number with no honesty marker (SIMULATED / OPEN / vs-naive / vs-tuned) or authority link",
+        "structure: 5 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/mystery-free-adjustment-atlas.md",
+      "type": "howto",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 6 sections / 6 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/neo-cloud-deploy.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "4 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "2 H1 / 9 sections / 8 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 2 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/node-macos-a-activation.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "3 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "15 H1 / 6 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 15 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/node-setup.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "4 H1 / 6 sections / 8 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 4 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/observability.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "10 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "18 H1 / 12 sections / 6 cross-link(s)",
+        "links": "all 4 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 18 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 55.5
+    },
+    {
+      "path": "docs/fak/opencode-glm-guard.md",
+      "type": "howto",
+      "score": 97.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "6 H1 / 6 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: 6 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 33.6
+    },
+    {
+      "path": "docs/fak/org-policy-plane.md",
+      "type": "howto",
+      "score": 98.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 10 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/fak/policy-guide.md",
+      "type": "howto",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "24 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "5 H1 / 24 sections / 7 cross-link(s)",
+        "links": "all 5 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 5 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 53.6
+    },
+    {
+      "path": "docs/fak/qwen36-a100-gcp.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "6 H1 / 7 sections / 4 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 6 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/related-items.md",
+      "type": "reference",
+      "score": 95.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 90,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "18 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "36 H1 / 38 sections / 2 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no orientation signpost (audience / prereq / TL;DR / 'you'll be able to')",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 36 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/scrubbing-real-values.md",
+      "type": "howto",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 5 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 23.6
+    },
+    {
+      "path": "docs/fak/security.md",
+      "type": "howto",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "5 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "5 H1 / 13 sections / 12 cross-link(s)",
+        "links": "all 6 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 5 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 57.3
+    },
+    {
+      "path": "docs/fak/server-config.md",
+      "type": "reference",
+      "score": 94.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 88,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "7 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 33 sections / 0 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 66.4
+    },
+    {
+      "path": "docs/fak/server-quickstart.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "11 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "23 H1 / 13 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 23 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 60.9
+    },
+    {
+      "path": "docs/fak/server-troubleshooting.md",
+      "type": "howto",
+      "score": 97.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "43 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "16 H1 / 28 sections / 2 cross-link(s)",
+        "links": "all 2 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 16 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 37.3
+    },
+    {
+      "path": "docs/fak/session-control.md",
+      "type": "howto",
+      "score": 96.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 4 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 21.8
+    },
+    {
+      "path": "docs/fak/session-observability-rsi-loop.md",
+      "type": "howto",
+      "score": 94.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 88,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "1 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 8 sections / 1 cross-link(s)",
+        "links": "all 1 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "runnable: only one code block \u2014 a command shown with no expected output to compare against",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)"
+      ],
+      "n_defects": 0,
+      "importance": 35.5
+    },
+    {
+      "path": "docs/fak/slack-sessions.md",
+      "type": "howto",
+      "score": 95.4,
+      "grade": "A",
+      "kpis": {
+        "orientation": 92,
+        "runnable": 100,
+        "worked": 88,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "6 code block(s)",
+        "worked": "no worked example",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "4 H1 / 6 sections / 5 cross-link(s)",
+        "links": "all 3 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "worked: no worked example / lab / checkpoint / expected-output (tells but never shows)",
+        "structure: 4 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/fak/tutorial.md",
+      "type": "tutorial",
+      "score": 98.8,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 90,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "49 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "6 H1 / 35 sections / 15 cross-link(s)",
+        "links": "all 8 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 6 H1 titles (expected exactly one)"
+      ],
+      "n_defects": 0,
+      "importance": 60.9
+    },
+    {
+      "path": "docs/glossary.md",
+      "type": "reference",
+      "score": 100.0,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 100,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "2 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 42 sections / 10 cross-link(s)",
+        "links": "all 9 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0,
+      "importance": 39.1
+    },
+    {
+      "path": "docs/prefill-elimination-explained.md",
+      "type": "explainer",
+      "score": 94.2,
+      "grade": "A",
+      "kpis": {
+        "orientation": 80,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 85,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "10 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "1 H1 / 32 sections / 0 cross-link(s)",
+        "links": "all 0 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "orientation: no outbound link to another doc (a navigational dead-end in the curriculum)",
+        "orientation: no explicit 'next step / where to go from here' signpost",
+        "structure: no outbound links to other docs (navigational dead-end)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    },
+    {
+      "path": "docs/run-the-demos.md",
+      "type": "tutorial",
+      "score": 97.6,
+      "grade": "A",
+      "kpis": {
+        "orientation": 100,
+        "runnable": 100,
+        "worked": 100,
+        "honesty": 100,
+        "structure": 80,
+        "links": 100,
+        "freshness": 100
+      },
+      "kpi_detail": {
+        "orientation": "oriented: signpost + onward nav",
+        "runnable": "23 code block(s)",
+        "worked": "shows a worked example / lab / checkpoint",
+        "honesty": "no naive-led headline; perf claims marked or sourced",
+        "structure": "17 H1 / 13 sections / 4 cross-link(s)",
+        "links": "all 7 local link(s) resolve",
+        "freshness": "no stale pin or placeholder"
+      },
+      "defects": [],
+      "soft": [
+        "structure: 17 H1 titles (expected exactly one)",
+        "structure: 165-line stretch with no heading (wall of text)"
+      ],
+      "n_defects": 0,
+      "importance": 31.8
+    }
+  ]
+}
