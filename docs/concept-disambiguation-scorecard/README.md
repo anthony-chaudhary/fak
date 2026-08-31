@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **13** (clarity 2 + coverage 11) |
-| **Crystal-clear concepts (and climbing)** | **995** crystal of 2709 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2828 / 2839** (99.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **995** crystal of 2710 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2829 / 2840** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 209 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **81** of 3835 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **81** of 3836 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 99.1/100 (grade A) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2709 concepts - score 99.1/100 (grade A) - disambiguation-debt 13
+concept-disambiguation chart - 2710 concepts - score 99.1/100 (grade A) - disambiguation-debt 13
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 995
-  o defined       ############################ 1714
+  o defined       ############################ 1715
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       ***********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (444 concept(s); 203 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
-  plan             *************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (349 concept(s); 109 crystal)
+  plan             *************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (350 concept(s); 109 crystal)
   policy-capability *****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (194 concept(s); 89 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 76 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ############################ 408/412
+  plan             ############################ 409/413
   loop             ###########################. 94/97
   guard-gate       ############################ 503/505
   cache            ############################ 304/305
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 163/163
 
-namespace coverage  [################################] 99.6%  (2828/2839 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2829/2840 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 209
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 209/209
 
-name index: 3835 lookup name(s) -> 2709 concept(s), 81 ambiguous
+name index: 3836 lookup name(s) -> 2710 concept(s), 81 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **209 / 209** (209 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1858 / 4848 |
+| Boundaries drawn (mutual / total) | 1858 / 4850 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3835 over 2709 concepts |
+| Lookup names indexed | 3836 over 2710 concepts |
 | Lookup names landing on several concepts | 81 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2709 |
+| Concepts carrying a contrast set | 2710 |
 
 ## The concepts (best verdict first)
 
@@ -2193,6 +2193,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **ReplayPlanner (agenttest transcript replay)** - internal/agenttest's ReplayPlanner is a deterministic agent.Planner that re-emits the assistant turns of a recorded transcript, built by NewReplayPlanner. |
 | o | defined | symbol | plan | **NewInKernelPlanner (local GGUF planner ctor)** - agent.NewInKernelPlanner builds the in-kernel agent.Planner that decodes a local GGUF model in-process (used by run_model.go and the gateway's --gguf in-kernel generation path). |
 | o | defined | config | plan | **plannerTimeout (agent HTTP per-call timeout)** - internal/agent/chat.go's plannerTimeout is the per-request upstream-model HTTP timeout (60s default, FAK_PLANNER_TIMEOUT_S override, clamped to [5,3600]), and plannerMaxAttempts is the total upstream try count for that same path. |
+| o | defined | symbol | plan | **plannerMaxAttemptsPinned (explicit retry-attempt pin helper)** - internal/agent/retry.go's plannerMaxAttemptsPinned returns both the configured planner attempt count and whether FAK_PLANNER_MAX_ATTEMPTS was present and parsed as a valid explicit pin. |
 | o | defined | symbol | plan | **BuildIssuePlan (maturity issue create/update plan)** - internal/maturity.BuildIssuePlan decides whether each maturity item creates a new GitHub issue or updates an existing one, and SyncIssuePlan applies that planned create/update set via gh. |
 | o | defined | symbol | plan | **BuildHandoffIssuePlan (taskmgr handoff issue plan)** - internal/taskmgr.BuildHandoffIssuePlan decides create vs update for every next step of a Handoff, emitting HandoffIssuePlanRow rows that syncTaskHandoffPlan applies via gh. |
 | o | defined | symbol | plan | **PlanRow (issue create/update decision row)** - PlanRow is the one-issue create/update decision struct emitted by BuildPlan in internal/dogfoodissues and internal/learningdebt (and guardcomplaint.PlanRow), one row per ActionItem or Defect. |
@@ -2983,7 +2984,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2990/4848 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2992/4850 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2991,14 +2992,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3835 lookup name(s) resolves - 81 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3836 lookup name(s) resolves - 81 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 408 | 412 | 4 |
+| plan | 409 | 413 | 4 |
 | loop | 94 | 97 | 3 |
 | guard-gate | 503 | 505 | 2 |
 | cache | 304 | 305 | 1 |

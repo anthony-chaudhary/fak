@@ -983,6 +983,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// more, longer-spaced retries than with a fast give-up.
 	turnStart := time.Now()
 	maxAttempts, deadline, budgetOn := retryBounds(turnStart)
+	_, attemptsPinned := plannerMaxAttemptsPinned()
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
@@ -1058,6 +1059,8 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			transientRetryTried := triedTransientRetry
+			transientTargetTried := triedTransientTarget
 			retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, resp, raw, attempt, rejectedResponseRetry{
 				triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 				triedRehome: &triedRehome, rehomePending: &rehomePending,
@@ -1068,7 +1071,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if statusErr != nil {
 				return nil, statusErr
 			}
-			if rewind {
+			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
 				attempt--
 			}
 			if retry {

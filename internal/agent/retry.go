@@ -128,12 +128,19 @@ func transientTargetStatus(code int) bool {
 // it, clamped to [1, 16] so a typo can neither disable retries (0/negative) nor wedge a
 // turn for hours (huge). 1 means a single attempt with no retries.
 func plannerMaxAttempts() int {
-	if v := os.Getenv("FAK_PLANNER_MAX_ATTEMPTS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
-			return n
-		}
+	if n, pinned := plannerMaxAttemptsPinned(); pinned {
+		return n
 	}
 	return 8
+}
+
+func plannerMaxAttemptsPinned() (int, bool) {
+	if v := os.Getenv("FAK_PLANNER_MAX_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // defaultRetryBudget is how long the retry loop will keep trying a transient upstream
@@ -162,12 +169,7 @@ const retryAttemptHardCap = 100000
 // resolved budget is non-positive (FAK_PLANNER_RETRY_BUDGET=0 disables the time bound and
 // restores pure attempt-count behavior).
 func retryBounds(now time.Time) (maxAttempts int, deadline time.Time, budgetOn bool) {
-	pinned := false
-	if v := os.Getenv("FAK_PLANNER_MAX_ATTEMPTS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
-			pinned = true
-		}
-	}
+	_, pinned := plannerMaxAttemptsPinned()
 	budget := plannerRetryBudget()
 	budgetOn = budget > 0
 	if pinned || !budgetOn {

@@ -549,6 +549,7 @@ type openAIStreamChunk struct {
 // it) or, after exhausting attempts, the true upstream status error (never a later glitch).
 func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, error) {
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
+	_, attemptsPinned := plannerMaxAttemptsPinned()
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	triedAuthRefresh := false
 	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
@@ -593,6 +594,8 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
+		transientRetryTried := triedTransientRetry
+		transientTargetTried := triedTransientTarget
 		retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, r, raw, attempt, rejectedResponseRetry{
 			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 			triedRehome: &triedRehome, rehomePending: &rehomePending,
@@ -602,7 +605,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		if statusErr != nil {
 			return nil, statusErr
 		}
-		if rewind {
+		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
 			attempt--
 		}
 		if retry {

@@ -202,6 +202,25 @@
       "gaps": []
     },
     {
+      "id": "x2-plan-plannermaxattemptspinned",
+      "canonical": "plannerMaxAttemptsPinned (explicit retry-attempt pin helper)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent/retry.go's plannerMaxAttemptsPinned returns both the configured planner attempt count and whether FAK_PLANNER_MAX_ATTEMPTS was present and parsed as a valid explicit pin.",
+      "distinction": "It reports the attempt value together with explicit valid-pin provenance; it is NOT the attempt limit itself, a retry budget, or a planner implementation/object.",
+      "distinct_from": [
+        "plannerTimeout (agent HTTP per-call timeout)",
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [],
+      "grounding": "plannermaxattemptspinned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x2-plan-buildissueplan",
       "canonical": "BuildIssuePlan (maturity issue create/update plan)",
       "family": "plan",

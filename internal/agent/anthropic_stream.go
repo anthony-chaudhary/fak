@@ -123,6 +123,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	triedTransientRetry := false
 	triedTransientTarget := false
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
+	_, attemptsPinned := plannerMaxAttemptsPinned()
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		// Surface the retry before the otherwise-invisible backoff sleep (the same hook the
@@ -187,6 +188,8 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// Anthropic's HTTP-200 overload envelope gets the same quick retry and transient
 			// target failover as an HTTP 529.
 			rejected := &http.Response{StatusCode: refusalStatus, Header: r.Header}
+			transientRetryTried := triedTransientRetry
+			transientTargetTried := triedTransientTarget
 			retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, rejected, refusalFrame, attempt, rejectedResponseRetry{
 				triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 				triedRehome: &triedRehome, rehomePending: &rehomePending,
@@ -197,7 +200,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			if statusErr != nil {
 				return statusErr
 			}
-			if rewind {
+			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
 				attempt--
 			}
 			if retry {
@@ -206,6 +209,8 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
+		transientRetryTried := triedTransientRetry
+		transientTargetTried := triedTransientTarget
 		retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, r, raw, attempt, rejectedResponseRetry{
 			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
 			triedRehome: &triedRehome, rehomePending: &rehomePending,
@@ -216,7 +221,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		if statusErr != nil {
 			return statusErr
 		}
-		if rewind {
+		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
 			attempt--
 		}
 		if retry {
