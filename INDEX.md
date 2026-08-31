@@ -36,6 +36,7 @@ This is the complete map of repository documentation. The audience table below i
 New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes & research**, so the audience route can stay concise while the map remains complete. Before touching this map or [`llms.txt`](llms.txt), run `python tools/check_index_sync.py --audit-tree`; the same reciprocal check runs in staged mode for front-door index and dated-note changes.
 
 ## Start here
+- Meta-loop trigger effectiveness — [`docs/notes/META-LOOP-TRIGGER-EFFECTIVENESS-2026-08-31.md`](docs/notes/META-LOOP-TRIGGER-EFFECTIVENESS-2026-08-31.md) defines the read-only `fak-loop-trigger/1` receipt, classification precedence, effectiveness metrics, live baseline, and field-derived cadence policy for super/meta loops (#10352).
 
 - [Response profiles: concise, Caveman-compatible, and composable](docs/response-profiles.md) -- choose low/medium/high, distinguish native from original, and understand the safety and composition boundaries.
 - [Work profiles: Ponytail-inspired implementation policy](docs/work-profiles.md) -- independently choose low/medium/high simplicity pressure, mix it with response shape, and keep correctness carve-outs explicit.

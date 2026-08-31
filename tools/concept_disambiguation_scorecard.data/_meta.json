@@ -1513,12 +1513,30 @@
           "category": "incidental",
           "reason": "Private helper deriving configured full-attention layer indices, not a new attention concept",
           "token": "qwenfullattentionlayers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt field name for estimated operator-attention cost",
+          "token": "EstimatedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON projection field for operator-attention cost in seconds",
+          "token": "EstimatedAttentionSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key for estimated operator-attention cost in seconds",
+          "token": "estimated_attention_s"
         }
       ],
       "id": "attention",
       "ignore": [
+        "EstimatedAttention",
+        "EstimatedAttentionSeconds",
         "attentions",
         "attentive",
+        "estimated_attention_s",
         "qwenfullattentionlayers",
         "tattn"
       ],
@@ -14479,6 +14497,31 @@
           "category": "incidental",
           "reason": "Server listener endpoint constrained to loopback networking, not an agent execution loop.",
           "token": "LoopbackEndpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go package import path, not a competing operator-facing loop concept",
+          "token": "looptrigger"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI handler symbol for the canonical superloop trigger receipt",
+          "token": "runSuperloopTrigger"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test function covering JSON receipt rendering",
+          "token": "TestSuperloopTriggerJSON"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test function covering human read-only decision rendering",
+          "token": "TestSuperloopTriggerHumanIsReadOnlyDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned JSON schema identifier, not a distinct loop kind",
+          "token": "fak-loop-trigger"
         }
       ],
       "id": "loop",
@@ -14494,6 +14537,8 @@
         "OldestLoopID",
         "POLLING_LOOP",
         "TRANSFORM_LOOP",
+        "TestSuperloopTriggerHumanIsReadOnlyDecision",
+        "TestSuperloopTriggerJSON",
         "appendlooprunevent",
         "applySuperloopNoProgressEscalation",
         "archiveterminalcodexloop",
@@ -14517,6 +14562,7 @@
         "diagnoseRecentCodexLoopsForGate",
         "dispatch_loop",
         "doomloop_test",
+        "fak-loop-trigger",
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
@@ -14550,6 +14596,7 @@
         "loopsnapshot",
         "loopsnapshotforid",
         "loopstate",
+        "looptrigger",
         "measureSuperloopResidual",
         "meta_superloop",
         "midflight_no_owned_loop",
@@ -14560,6 +14607,7 @@
         "register_scout_loop",
         "residualDriveDecision",
         "runSuperloopFleet",
+        "runSuperloopTrigger",
         "runloop",
         "runsessionscodexlooparchive",
         "startFleetBusLoop",
