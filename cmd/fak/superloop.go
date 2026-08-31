@@ -53,6 +53,8 @@ func runSuperloop(stdout, stderr io.Writer, argv []string) int {
 		return runSuperloopExplain(stdout, stderr, argv[1:])
 	case "walk":
 		return runSuperloopWalk(stdout, stderr, argv[1:])
+	case "trigger":
+		return runSuperloopTrigger(stdout, stderr, argv[1:])
 	case "roster":
 		return runRoster(stdout, stderr, argv[1:])
 	case "fleet":
@@ -675,6 +677,7 @@ func superloopUsage(w io.Writer) {
   fak superloop list                  the named super loops + their members
   fak superloop explain <name>        why <name> is a super loop, not a normal loop
   fak superloop walk <name> [--json]  walk its members' status, fold a worst-first plan
+  fak superloop trigger [flags]        emit a read-only trigger decision receipt
   fak superloop roster [--json]       the ONE canonical loop-fleet roster (#4955): the
                                       deduped union of every folded loop (loopfleet),
                                       the loopmgr job registry, and the registered
