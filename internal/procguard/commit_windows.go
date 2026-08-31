@@ -38,25 +38,15 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	if err != "" {
 		return MemorySnapshot{Metric: MemoryMetricCommit, RootPID: rootPID}, true, err
 	}
-	children := make(map[int][]int)
+	children := make(map[int][]Proc)
 	byPID := make(map[int]Proc, len(rows))
 	for _, row := range rows {
 		byPID[row.PID] = row
 		if row.PPID != nil {
-			children[*row.PPID] = append(children[*row.PPID], row.PID)
+			children[*row.PPID] = append(children[*row.PPID], row)
 		}
 	}
-	owned := map[int]bool{}
-	queue := []int{rootPID}
-	for len(queue) > 0 {
-		pid := queue[0]
-		queue = queue[1:]
-		if owned[pid] {
-			continue
-		}
-		owned[pid] = true
-		queue = append(queue, children[pid]...)
-	}
+	owned := windowsCommitOwnedPIDs(rootPID, byPID, children)
 	s := MemorySnapshot{Metric: MemoryMetricCommit, RootPID: rootPID}
 	for pid := range owned {
 		h, openErr := syscall.OpenProcess(processQueryLimitedInformation|processVMRead, false, uint32(pid))
@@ -91,6 +81,29 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	s.SystemBytes = uint64(perf.CommitTotal) * uint64(perf.PageSize)
 	s.SystemLimit = uint64(perf.CommitLimit) * uint64(perf.PageSize)
 	return s, true, ""
+}
+
+// windowsCommitOwnedPIDs rejects PID-reuse edges before memory accounting.
+// A process that started before its reported parent cannot be that parent's child.
+func windowsCommitOwnedPIDs(rootPID int, byPID map[int]Proc, children map[int][]Proc) map[int]bool {
+	owned := map[int]bool{}
+	queue := []int{rootPID}
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if owned[pid] {
+			continue
+		}
+		owned[pid] = true
+		parent := byPID[pid]
+		for _, child := range children[pid] {
+			if child.PID == pid || childPredatesParent(child, parent) {
+				continue
+			}
+			queue = append(queue, child.PID)
+		}
+	}
+	return owned
 }
 
 func hostPhysicalMemoryBytes() (uint64, string) {

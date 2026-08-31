@@ -31,6 +31,37 @@ func TestCollectCommitSnapshotOwnProcess(t *testing.T) {
 	}
 }
 
+func TestWindowsCommitOwnedPIDsRejectsStalePPIDEdges(t *testing.T) {
+	parentPID := func(pid int) *int { return &pid }
+	rows := []Proc{
+		{PID: 100, Start: "2026-08-31T12:00:00Z"},
+		{PID: 101, PPID: parentPID(100), Start: "2026-08-31T11:59:59Z"},
+		{PID: 102, PPID: parentPID(101), Start: "2026-08-31T12:00:01Z"},
+		{PID: 103, PPID: parentPID(100), Start: "2026-08-31T12:00:01Z"},
+		{PID: 104, PPID: parentPID(103), Start: "2026-08-31T12:00:02Z"},
+	}
+	byPID := make(map[int]Proc, len(rows))
+	children := make(map[int][]Proc)
+	for _, row := range rows {
+		byPID[row.PID] = row
+		if row.PPID != nil {
+			children[*row.PPID] = append(children[*row.PPID], row)
+		}
+	}
+
+	owned := windowsCommitOwnedPIDs(100, byPID, children)
+	for _, pid := range []int{100, 103, 104} {
+		if !owned[pid] {
+			t.Errorf("genuine descendant pid %d excluded: %v", pid, owned)
+		}
+	}
+	for _, pid := range []int{101, 102} {
+		if owned[pid] {
+			t.Errorf("stale PPID edge admitted pid %d: %v", pid, owned)
+		}
+	}
+}
+
 func TestProcessExitedDuringSnapshot(t *testing.T) {
 	if !processExitedDuringSnapshot(syscall.Errno(87)) {
 		t.Fatal("a vanished Windows PID must not abort child resource monitoring")
