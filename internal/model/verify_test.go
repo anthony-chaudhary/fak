@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 )
@@ -31,6 +33,47 @@ func argmaxV(v []float32) int {
 		}
 	}
 	return bi
+}
+
+func qwen38HybridMTPEnabledSyntheticModel(t *testing.T) *Model {
+	t.Helper()
+	cfg := qwen35HybridTestCfg()
+	cfg.Name = "Qwen3.8 hybrid MTP synthetic"
+	cfg.ModelType = "qwen3_5_text"
+	cfg.MTPNumHiddenLayers = 1
+	m := NewSynthetic(cfg)
+	shapes, err := qwen35MTPExpectedShapes(cfg)
+	if err != nil {
+		t.Fatalf("Qwen3.8 hybrid MTP shapes: %v", err)
+	}
+	for tensorIndex, name := range qwen35MTPRequiredTensors {
+		shape := shapes[name]
+		elements := 1
+		for _, dim := range shape {
+			elements *= dim
+		}
+		start := len(m.raw)
+		for i := 0; i < elements; i++ {
+			value := float32(tensorIndex+1)/100 + float32(i)/100000
+			var bits [4]byte
+			binary.LittleEndian.PutUint32(bits[:], math.Float32bits(value))
+			m.raw = append(m.raw, bits[:]...)
+		}
+		m.manifest[name] = tensorMeta{
+			Dtype:  "F32",
+			Shape:  append([]int(nil), shape...),
+			Offset: start,
+			Nbytes: elements * 4,
+		}
+	}
+	mode, err := m.Qwen35MTPMode(false)
+	if err != nil {
+		t.Fatalf("Qwen3.8 hybrid MTP mode: %v", err)
+	}
+	if !mode.Enabled || mode.Engine != targetVerificationEngine {
+		t.Fatalf("Qwen3.8 hybrid MTP mode = %+v, want enabled fak-native", mode)
+	}
+	return m
 }
 
 // TestVerifyForwardChainMatchesSerial proves the single-pass batched verify (the chain
@@ -109,6 +152,149 @@ func TestVerifyForwardEmpty(t *testing.T) {
 	if s.Cache.Len() != before {
 		t.Fatalf("empty VerifyForward mutated cache: %d != %d", s.Cache.Len(), before)
 	}
+}
+
+func TestQwen38VerifyForwardOneOperationMatchesNativeDecode(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	depth := 3
+	if !q8PrefillNeedsTokenLoop(m.Cfg) {
+		t.Fatal("Qwen3.8 hybrid precondition did not select the legacy token-loop verifier")
+	}
+
+	reference := m.NewSession()
+	reference.captureTargetHidden = true
+	t.Cleanup(reference.Close)
+	logits := reference.Prefill(prompt)
+	draft := make([]int, depth)
+	wantRows := make([][]float32, depth)
+	for i := range draft {
+		draft[i] = argmaxF32(logits)
+		logits = reference.Step(draft[i])
+		wantRows[i] = append([]float32(nil), logits...)
+	}
+
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	boundary := target.Prefill(prompt)
+	wantPrefix := m.NewSession()
+	wantPrefix.captureTargetHidden = true
+	t.Cleanup(wantPrefix.Close)
+	wantPrefix.Prefill(prompt)
+
+	operations := 0
+	rows, receipt, err := target.verifyForwardOneOperation(draft, boundary, func(m *Model, tokens []int) *Activations {
+		operations++
+		return m.Forward(tokens)
+	})
+	if err != nil {
+		t.Fatalf("Qwen3.8 one-operation verification: %v", err)
+	}
+	if operations != 1 {
+		t.Fatalf("Qwen3.8 target operations = %d, want exactly 1", operations)
+	}
+	if receipt.Engine != targetVerificationEngine || receipt.Path != targetVerificationQwen38Path ||
+		receipt.TargetVerificationOperations != 1 || receipt.TargetDecodeSteps != 0 || !receipt.OneOperation {
+		t.Fatalf("Qwen3.8 verification receipt = %+v, want one fak-native target operation", receipt)
+	}
+	if receipt.EndToEndMeasured() {
+		t.Fatal("target-only verification receipt was incorrectly treated as end-to-end performance evidence")
+	}
+	for _, missing := range []string{"drafting", "rejection", "memory", "recovery"} {
+		if !containsString(receipt.MissingCostCategories(), missing) {
+			t.Fatalf("partial receipt missing categories = %v, want %q explicit", receipt.MissingCostCategories(), missing)
+		}
+	}
+	if len(rows) != len(wantRows) {
+		t.Fatalf("Qwen3.8 verification rows = %d, want %d", len(rows), len(wantRows))
+	}
+	for i := range rows {
+		if got, want := argmaxF32(rows[i]), argmaxF32(wantRows[i]); got != want {
+			t.Fatalf("Qwen3.8 row %d argmax = %d, want ordinary native decode %d", i, got, want)
+		}
+		if delta := maxAbsF32Delta(rows[i], wantRows[i]); delta > qwen38VerifyBoundaryTolerance {
+			t.Fatalf("Qwen3.8 row %d max delta = %g, want <= %g", i, delta, qwen38VerifyBoundaryTolerance)
+		}
+	}
+	assertQwen35MTPTargetStateEqual(t, target, wantPrefix)
+}
+
+func TestQwen38VerifyForwardOneOperationTypedDowngradeUsesOrdinaryNativeDecode(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	draft := []int{2, 3, 4}
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	boundary := target.Prefill(prompt)
+	wantPrefix := m.NewSession()
+	wantPrefix.captureTargetHidden = true
+	t.Cleanup(wantPrefix.Close)
+	wantPrefix.Prefill(prompt)
+
+	// F16 is outside the witnessed one-operation envelope. The ordinary native
+	// Step path remains f32, so it is a safe way to exercise the explicit
+	// downgrade without introducing an external runtime or unprepared weights.
+	target.F16 = true
+	operations := 0
+	rows, receipt, err := target.verifyForwardOneOperation(draft, boundary, func(m *Model, tokens []int) *Activations {
+		operations++
+		return m.Forward(tokens)
+	})
+	var downgrade *TargetVerificationDowngradeError
+	if !errors.As(err, &downgrade) || !errors.Is(err, ErrTargetVerificationDowngrade) {
+		t.Fatalf("one-operation refusal = %v, want typed target-decode downgrade", err)
+	}
+	if rows != nil || operations != 0 || receipt.OneOperation || receipt.TargetVerificationOperations != 0 {
+		t.Fatalf("pre-operation downgrade rows=%v operations=%d receipt=%+v", rows, operations, receipt)
+	}
+	assertQwen35MTPTargetStateEqual(t, target, wantPrefix)
+	normalizeSnapshotForTest(t, wantPrefix)
+
+	tx, err := beginQwen35MTPTargetTransaction(target, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = tx.Verify(draft)
+	if err != nil {
+		t.Fatalf("explicit ordinary native target downgrade: %v", err)
+	}
+	if len(rows) != len(draft) {
+		t.Fatalf("ordinary native target rows = %d, want %d", len(rows), len(draft))
+	}
+	receipt = tx.VerificationReceipt()
+	if receipt.Engine != targetVerificationEngine || receipt.Path != targetVerificationDecodePath ||
+		receipt.TargetVerificationOperations != 0 || receipt.TargetDecodeSteps != len(draft) ||
+		receipt.OneOperation || receipt.DowngradeReason == "" {
+		t.Fatalf("ordinary target-decode receipt = %+v", receipt)
+	}
+	if err := tx.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	assertQwen35MTPTargetStateEqual(t, target, wantPrefix)
+}
+
+func normalizeSnapshotForTest(t *testing.T, session *Session) {
+	t.Helper()
+	snapshot, err := session.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Restore(session); err != nil {
+		snapshot.Close()
+		t.Fatal(err)
+	}
+	snapshot.Close()
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestVerifyForwardTreeMaskIsolatesBranches proves the tree-attention mask is correct: a

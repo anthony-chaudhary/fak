@@ -86,5 +86,24 @@ func (p guardLaunchPlan) agentName() string {
 func (p guardLaunchPlan) agentBaseName() string { return p.baseName }
 
 func (p guardLaunchPlan) interactive() bool {
+	if p.baseName == "codex" && guardCodexSemanticSubcommand(p.semantic) == "exec" {
+		return false
+	}
 	return guardChildInteractive(p.semanticCommand())
+}
+
+func guardCodexSemanticSubcommand(command []string) string {
+	for i := 1; i < len(command); i++ {
+		arg := command[i]
+		switch {
+		case arg == "-c" || arg == "--config":
+			i++
+		case strings.HasPrefix(arg, "-c="):
+		case strings.HasPrefix(arg, "--") && strings.Contains(arg, "="):
+		case strings.HasPrefix(arg, "-"):
+		default:
+			return arg
+		}
+	}
+	return ""
 }

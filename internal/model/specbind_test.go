@@ -158,7 +158,7 @@ func TestSpecDecodeGreedyQwen35MTPOptInMatchesTargetGreedy(t *testing.T) {
 }
 
 func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
-	m := qwen35MTPEnabledSyntheticModel(t)
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	prompt := []int{0, 1}
 	depth := 3
 
@@ -204,6 +204,12 @@ func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
 			if _, err := tx.Verify(draft); err != nil {
 				t.Fatal(err)
 			}
+			verifyReceipt := tx.VerificationReceipt()
+			if verifyReceipt.Engine != targetVerificationEngine || verifyReceipt.Path != targetVerificationQwen38Path ||
+				verifyReceipt.TargetVerificationOperations != 1 || verifyReceipt.TargetDecodeSteps != 0 ||
+				!verifyReceipt.OneOperation {
+				t.Fatalf("verification receipt = %+v, want one fak-native Qwen3.8 target operation", verifyReceipt)
+			}
 			res := polymodel.AcceptGreedy(draft, targetArgmax)
 			if res.Accepted != tc.accepted {
 				t.Fatalf("accepted = %d, want %d", res.Accepted, tc.accepted)
@@ -214,6 +220,17 @@ func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
 			if _, err := tx.Commit(res.Accepted); err != nil {
 				t.Fatal(err)
 			}
+			commitReceipt := tx.VerificationReceipt()
+			if commitReceipt.AcceptedTokens != tc.accepted || commitReceipt.RejectedTokens != depth-tc.accepted {
+				t.Fatalf("commit receipt accepted/rejected = %d/%d, want %d/%d",
+					commitReceipt.AcceptedTokens, commitReceipt.RejectedTokens, tc.accepted, depth-tc.accepted)
+			}
+			if !commitReceipt.Accounting.Rollback.Measured || !commitReceipt.Accounting.Synchronization.Measured {
+				t.Fatalf("commit receipt omitted rollback/synchronization accounting: %+v", commitReceipt.Accounting)
+			}
+			if commitReceipt.EndToEndMeasured() {
+				t.Fatal("verification receipt incorrectly supports an end-to-end speedup claim")
+			}
 
 			correction := targetArgmax[res.Accepted]
 			got := append(append([]int(nil), draft[:res.Accepted]...), correction)
@@ -221,6 +238,7 @@ func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
 			wantSession.captureTargetHidden = true
 			t.Cleanup(wantSession.Close)
 			wantLogits := wantSession.Prefill(prompt)
+			normalizeSnapshotForTest(t, wantSession)
 			want := make([]int, 0, len(got))
 			for range got {
 				token := argmaxF32(wantLogits)
@@ -273,7 +291,9 @@ func TestQwen35MTPSpeculativeTargetTransaction(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.verifyErr {
-				tx.verify = func([]int) [][]float32 { panic("injected verifier failure") }
+				tx.verify = func([]int) ([][]float32, TargetVerificationReceipt, error) {
+					panic("injected verifier failure")
+				}
 			}
 			_, verifyErr := tx.Verify(draft)
 			if tc.verifyErr && verifyErr == nil {
@@ -321,7 +341,7 @@ func assertQwen35MTPTargetStateEqual(t *testing.T, got, want *Session) {
 }
 
 func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
-	m := qwen35MTPEnabledSyntheticModel(t)
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	prompt := []int{0, 1}
 	panicErr := "injected transaction failure"
 	seed := m.NewSession()
@@ -343,12 +363,13 @@ func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
 		want.captureTargetHidden = true
 		t.Cleanup(want.Close)
 		want.Prefill(prompt)
+		normalizeSnapshotForTest(t, want)
 
 		tx, err := beginQwen35MTPTargetTransaction(target, before)
 		if err != nil {
 			t.Fatal(err)
 		}
-		tx.verify = func(draft []int) [][]float32 {
+		tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
 			target.VerifyForward(draft, nil, nil)
 			panic(panicErr)
 		}
@@ -374,6 +395,7 @@ func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
 		want.captureTargetHidden = true
 		t.Cleanup(want.Close)
 		want.Prefill(prompt)
+		normalizeSnapshotForTest(t, want)
 
 		tx, err := beginQwen35MTPTargetTransaction(target, before)
 		if err != nil {

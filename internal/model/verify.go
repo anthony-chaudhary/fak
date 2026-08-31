@@ -1,5 +1,12 @@
 package model
 
+import (
+	"errors"
+	"fmt"
+	"math"
+	"time"
+)
+
 // verify.go — the single-pass batched + tree-attention VERIFY execution (rung #533 of the
 // poly-model serving epic #529; docs/serving/polymodel-prefill-share-plan.md §5/§7). It is
 // the throughput half that turns the already-shipped accept DECISION (internal/polymodel:
@@ -45,6 +52,196 @@ func (s *Session) VerifyForward(ids []int, pos []int, allow func(q, k int) bool)
 		return s.verifyForwardSequential(ids) // chain fallback: correct, universal, not single-pass
 	}
 	return s.verifyForwardBatched(ids, pos, allow)
+}
+
+const (
+	targetVerificationReceiptSchema = "fak-target-verification/1"
+	targetVerificationEngine        = "fak-native"
+	targetVerificationBatchedPath   = "fak-native/batched-target-verify-v1"
+	targetVerificationQwen38Path    = "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1"
+	targetVerificationDecodePath    = "fak-native/ordinary-target-decode-v1"
+	qwen38VerifyBoundaryTolerance   = float32(2e-5)
+)
+
+// ErrTargetVerificationDowngrade marks a request that cannot be represented by
+// one proven target operation. The caller may explicitly retain ordinary
+// fak-native target decode; it must not count that N-step path as one verify.
+var ErrTargetVerificationDowngrade = errors.New("model: one-operation target verification downgraded")
+
+// TargetVerificationDowngradeError gives the typed reason for retaining
+// ordinary fak-native target decode. It never authorizes another runtime.
+type TargetVerificationDowngradeError struct {
+	Reason string
+}
+
+func (e *TargetVerificationDowngradeError) Error() string {
+	if e == nil || e.Reason == "" {
+		return ErrTargetVerificationDowngrade.Error()
+	}
+	return fmt.Sprintf("%v: %s; use ordinary fak-native target decode", ErrTargetVerificationDowngrade, e.Reason)
+}
+
+func (e *TargetVerificationDowngradeError) Unwrap() error {
+	return ErrTargetVerificationDowngrade
+}
+
+type qwen38TargetForward func(*Model, []int) *Activations
+
+// VerifyForwardOneOperation evaluates a greedy draft chain only when the
+// complete panel is represented by one genuine fak-native target operation.
+// Unsupported shapes return a typed downgrade without silently executing N
+// Steps. The Qwen3.8 hybrid lane recomputes the exact token-lineage prefix and
+// draft through one cacheless native Forward; the transaction later restores
+// and replays only the accepted prefix, preserving live recurrent/KV state.
+func (s *Session) VerifyForwardOneOperation(ids []int, boundaryLogits []float32) ([][]float32, TargetVerificationReceipt, error) {
+	return s.verifyForwardOneOperation(ids, boundaryLogits, nil)
+}
+
+func (s *Session) verifyForwardOneOperation(ids []int, boundaryLogits []float32, forward qwen38TargetForward) (rows [][]float32, receipt TargetVerificationReceipt, err error) {
+	receipt = TargetVerificationReceipt{
+		Schema:      targetVerificationReceiptSchema,
+		Engine:      targetVerificationEngine,
+		Path:        targetVerificationDecodePath,
+		DraftTokens: len(ids),
+	}
+	setupStart := time.Now()
+	setupMeasured := false
+	finishSetup := func() {
+		if setupMeasured {
+			return
+		}
+		receipt.Accounting.Setup.Nanoseconds += time.Since(setupStart).Nanoseconds()
+		receipt.Accounting.Setup.Measured = true
+		setupMeasured = true
+	}
+	defer func() {
+		finishSetup()
+	}()
+	if len(ids) == 0 {
+		receipt.OneOperation = true
+		return nil, receipt, nil
+	}
+	if s == nil || s.M == nil || s.Cache == nil {
+		return nil, receipt, targetVerificationDowngrade("target session or host cache is unavailable")
+	}
+	if verifyForwardBatchedOK(s) {
+		finishSetup()
+		started := time.Now()
+		rows = s.verifyForwardBatched(ids, nil, nil)
+		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
+		receipt.Path = targetVerificationBatchedPath
+		receipt.TargetVerificationOperations = 1
+		receipt.OneOperation = true
+		return rows, receipt, nil
+	}
+
+	prefix, reason := qwen38OneOperationPrefix(s)
+	if reason != "" {
+		return nil, receipt, targetVerificationDowngrade(reason)
+	}
+	if len(boundaryLogits) != s.M.Cfg.VocabSize {
+		return nil, receipt, targetVerificationDowngrade(fmt.Sprintf(
+			"boundary logits width %d differs from Qwen3.8 vocabulary %d",
+			len(boundaryLogits), s.M.Cfg.VocabSize,
+		))
+	}
+	if forward == nil {
+		forward = func(m *Model, tokens []int) *Activations { return m.Forward(tokens) }
+	}
+	tokens := append(prefix, ids...)
+	finishSetup()
+	started := time.Now()
+	receipt.TargetVerificationOperations = 1
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			rows = nil
+			err = fmt.Errorf("model: Qwen3.8 one-operation target verification: %v", recovered)
+			receipt.Accounting.Recovery = measuredSpeculativeCost(started)
+		}
+	}()
+	act := forward(s.M, tokens)
+	receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
+	if act == nil || len(act.Logits) != len(tokens) {
+		return nil, receipt, fmt.Errorf("model: Qwen3.8 one-operation target verification returned %d rows for %d tokens", verificationRows(act), len(tokens))
+	}
+	boundary := act.Logits[len(prefix)-1]
+	if len(boundary) != len(boundaryLogits) || argmaxF32(boundary) != argmaxF32(boundaryLogits) ||
+		maxAbsF32Delta(boundary, boundaryLogits) > qwen38VerifyBoundaryTolerance {
+		receipt.DowngradeReason = "cacheless Qwen3.8 boundary calibration diverged from the live target"
+		return nil, receipt, targetVerificationDowngrade(receipt.DowngradeReason)
+	}
+	rows = make([][]float32, len(ids))
+	for i := range rows {
+		rows[i] = append([]float32(nil), act.Logits[len(prefix)+i]...)
+	}
+	receipt.Path = targetVerificationQwen38Path
+	receipt.OneOperation = true
+	return rows, receipt, nil
+}
+
+func qwen38OneOperationPrefix(s *Session) ([]int, string) {
+	if !s.M.Cfg.IsQwen35Hybrid() {
+		return nil, "target architecture is not the witnessed Qwen3.8 hybrid"
+	}
+	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.F16 || s.GPTQ ||
+		s.Metal || s.MetalQ4K || s.PrecisionPolicy != nil {
+		return nil, "only the native f32 Qwen3.8 target is admitted"
+	}
+	cfg := s.M.Cfg
+	if cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.BlockTopology != PreNorm ||
+		!cfg.AttnOutputGate || !cfg.NormGain1p {
+		return nil, "Qwen3.8 target topology is outside the witnessed dense PreNorm hybrid envelope"
+	}
+	if s.Cache.lineage.fault != "" {
+		return nil, "target token lineage is invalid: " + s.Cache.lineage.fault
+	}
+	if len(s.Cache.pos) == 0 || len(s.Cache.pos) != len(s.Cache.lineage.ids) {
+		return nil, fmt.Sprintf("target token lineage positions=%d ids=%d", len(s.Cache.pos), len(s.Cache.lineage.ids))
+	}
+	prefix := make([]int, len(s.Cache.lineage.ids))
+	for i, pos := range s.Cache.pos {
+		if pos != i {
+			return nil, fmt.Sprintf("target prefix position %d carries absolute position %d", i, pos)
+		}
+		token := uint64(s.Cache.lineage.ids[i])
+		if token >= uint64(s.M.Cfg.VocabSize) {
+			return nil, fmt.Sprintf("target prefix token %d is outside vocabulary %d", token, s.M.Cfg.VocabSize)
+		}
+		prefix[i] = int(token)
+	}
+	return prefix, ""
+}
+
+func targetVerificationDowngrade(reason string) *TargetVerificationDowngradeError {
+	return &TargetVerificationDowngradeError{Reason: reason}
+}
+
+func measuredSpeculativeCost(started time.Time) SpeculativeCostComponent {
+	return SpeculativeCostComponent{Nanoseconds: time.Since(started).Nanoseconds(), Measured: true}
+}
+
+func verificationRows(act *Activations) int {
+	if act == nil {
+		return 0
+	}
+	return len(act.Logits)
+}
+
+func maxAbsF32Delta(a, b []float32) float32 {
+	if len(a) != len(b) {
+		return float32(math.Inf(1))
+	}
+	var max float32
+	for i := range a {
+		d := a[i] - b[i]
+		if d < 0 {
+			d = -d
+		}
+		if d > max {
+			max = d
+		}
+	}
+	return max
 }
 
 // verifyForwardSequential is the always-correct chain fallback: P sequential Steps, each
