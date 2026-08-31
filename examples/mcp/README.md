@@ -35,7 +35,7 @@ to build it) and the Python standard library:
 python examples/mcp/verify.py        # -> PASS / FAIL, exit 0 / 1
 ```
 
-The whole proof **runs in a few seconds** and is **deterministic** — the same four
+The whole proof **runs in a few seconds** and is **deterministic** — the same six
 checks return the same verdicts on every run (no model, no network, no key).
 
 ### What you see
@@ -46,9 +46,11 @@ checks (a `✓` means the check matched expectation):
 | | Check | MCP method |
 |---|---|---|
 | **A** | the JSON-RPC handshake negotiates a protocol and names the server (`fak-gateway`) | `initialize` |
-| **B** | discovery exposes the `fak_*` tools your agent will call | `tools/list` |
-| **C** | a shared-history mutation (`git_push`) is refused: **DENY / POLICY_BLOCK** | `tools/call` |
-| **D** | a read (`git_status`) is permitted (not a blanket deny): **ALLOW** | `tools/call` |
+| **B** | bootstrap discovery exposes the schema-light eager tools and keeps `fak_admit` deferred | `tools/list` |
+| **C** | on-demand discovery finds the deferred `fak_admit` surface | `tools/call` → `fak_tools_search` |
+| **D** | a benign client-run result traverses admission: **DEFER / OK**, with IFC taint recorded | `tools/call` → `fak_admit` |
+| **E** | a shared-history mutation (`git_push`) is refused: **DENY / POLICY_BLOCK** | `tools/call` → `fak_adjudicate` |
+| **F** | a read (`git_status`) is permitted (not a blanket deny): **ALLOW** | `tools/call` → `fak_adjudicate` |
 
 A captured run, including the raw JSON-RPC frames, is in
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
@@ -86,24 +88,28 @@ fail-closed kernel.
 | `fak_changes` | Drain the cross-agent "what changed" feed (typed Mutations + Revocations since your cursor). | to re-plan or evict your cache when another agent changed shared data |
 | `fak_revoke` | Refute an external world-state witness (a commit / blob hash / lease epoch) found poisoned or stale; every entry admitted under it is evicted fleet-wide. | when you discover a witness you relied on is bad |
 
-The full input schemas are in `tools/list` (the MCP discovery call) — every tool
-takes `{tool, arguments, read_only?, trace_id?, witness?}` (or `{tool, result,
-trace_id?}` for `fak_admit`). `fak serve` also exposes these over HTTP at
+Schema-light bootstrap tools are in `tools/list`. Heavier deferred tools such as
+`fak_admit` stay discoverable with `fak_tools_search` (ask for `detail_level: full`
+when you need the input schema). Call-side tools take `{tool, arguments, read_only?,
+trace_id?, witness?}`; `fak_admit` takes `{tool, result, trace_id?, witness?}`.
+`fak serve` also exposes these over HTTP at
 `POST /mcp`, alongside the OpenAI `/v1/chat/completions` and Anthropic
 `/v1/messages` adjudication proxies.
 
 ## Scope — what `verify.py` proves and what it does not
 
-`verify.py` exercises the **call-side capability gate over MCP stdio**: the JSON-RPC
-handshake, tool discovery (`tools/list`), and a verdict on a proposed call
-(`fak_adjudicate` returns DENY/POLICY_BLOCK vs ALLOW). It is the same layer as
+`verify.py` exercises both sides of the MCP stdio seam: the JSON-RPC handshake,
+schema-light bootstrap discovery (`tools/list`), deferred discovery
+(`fak_tools_search`), benign result admission (`fak_admit` returns a typed
+DEFER/OK envelope), and call-side verdicts (`fak_adjudicate` returns
+DENY/POLICY_BLOCK vs ALLOW). The call-side checks are the same layer as
 [`../adjudication-demo`](../adjudication-demo/README.md) and
 [`../wire-proof`](../wire-proof/README.md), driven over the transport an editor's MCP
 client actually uses.
 
-It does **not** exercise the result-side stack — the context-MMU quarantine and the
-IFC taint ledger reached via `fak_admit` / `fak_syscall` — nor the deliberately
-non-load-bearing result detector. For the full, honest scope see
+The benign admission proves the context-MMU/IFC entrypoint is discoverable and
+routable; it does **not** claim that the deliberately non-load-bearing result detector
+catches every poisoned payload. For the full, honest scope see
 [`../../README.md`](../../README.md) and [`../../CLAIMS.md`](../../CLAIMS.md). The floor
 asserted here is [`../dev-agent-policy.json`](../dev-agent-policy.json): `git_push` is
 refused (POLICY_BLOCK), `git_status` is allowed.

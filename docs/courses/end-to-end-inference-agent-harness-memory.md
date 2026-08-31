@@ -167,7 +167,7 @@ Otherwise mark the execution or performance claim **not yet witnessed**.
 - [MCP integration](../integrations/mcp.md)
 - [Harness composition](../integrations/harness-composition.md)
 - [Harness verification runs](../integrations/harness-verify-run.md)
-- [MCP example and known verifier drift](../../examples/mcp/README.md) — the example explains the intended contract, but its checked-in verifier currently fails because `tools/list` omits `fak_admit`; track the repair in [issue #10449](https://github.com/anthony-chaudhary/fak/issues/10449).
+- [MCP stdio example and verifier](../../examples/mcp/README.md) — proves schema-light bootstrap discovery, deferred `fak_admit` discovery, benign result admission, and allow/deny adjudication over the real editor transport.
 
 The harness owns the model loop and exposes tools. fak owns the typed call boundary: synchronous `Syscall` is defined over asynchronous `Submit`/`Reap`; registries provide adjudicators, fast paths, engines, result admitters, and observers without making every new feature part of the hot path.
 
@@ -176,7 +176,7 @@ The harness owns the model loop and exposes tools. fak owns the typed call bound
 1. Run the offline harness from Module 1.
 2. Read the `ToolCall`, syscall, and result structures named in the architecture document and locate their current definitions under `internal/abi`, `internal/gateway`, and `internal/agent`.
 3. Draw a sequence diagram for one allowed call and one denied call. Include caller, harness, syscall boundary, adjudicator fold, vDSO lookup, dispatch, result admitter, context-MMU, observer, and model loop.
-4. Do **not** treat the checked-in MCP verifier as a passing lab today: `python examples/mcp/verify.py` currently fails at the `fak_admit` surface check. Inspect the failure as a contract-drift case and follow [issue #10449](https://github.com/anthony-chaudhary/fak/issues/10449) for the repair; rerun it only after that issue lands.
+4. Run `python examples/mcp/verify.py --no-color`. Confirm all six checks pass: handshake, schema-light `tools/list`, deferred `fak_admit` discovery through `fak_tools_search`, benign result admission with a typed DEFER/OK envelope, `git_push` denial, and `git_status` allowance.
 
 ### Checkpoint
 
