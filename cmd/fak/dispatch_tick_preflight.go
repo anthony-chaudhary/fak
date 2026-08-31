@@ -21,10 +21,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
-const (
-	fallbackCodexOAuthSessions        = 10
-	dispatchPreflightTreeBuildTimeout = 30 * time.Second
-)
+const fallbackCodexOAuthSessions = 10
+
+const dispatchPreflightTimeout = 30 * time.Second
 
 func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
 	obj, err := dispatchRunJSON(root, stderr, 120*time.Second, filepath.Join("tools", "fleet_sessions.py"), "registry")
@@ -41,9 +40,14 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 }
 
 func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), dispatchPreflightTreeBuildTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), dispatchPreflightTimeout)
 	defer cancel()
 	return dispatchPreflightTimedContext(ctx, root, stderr, maxWorkers, workKind, product)
+}
+
+func dispatchPreflightContext(ctx context.Context, root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, error) {
+	out, _, err := dispatchPreflightTimedContext(ctx, root, stderr, maxWorkers, workKind, product)
+	return out, err
 }
 
 func dispatchPreflightTimedContext(ctx context.Context, root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
@@ -72,12 +76,7 @@ func dispatchPreflightTimedWithTreeContext(ctx context.Context, root string, std
 	kernel := dispatchPreflightKernel(root)
 	stamp("kernel_probe", t0)
 	wip := dispatchPreflightWIP(root)
-	tree := dispatchtick.TreeCheck{}
-	if treeOverride != nil {
-		tree = *treeOverride
-	} else {
-		tree, _ = dispatchProbeTreeBuildContext(ctx, root)
-	}
+	tree := dispatchPreflightTree(ctx, root, treeOverride)
 	// OSWorkerProcs is the PUBLISHED per-worker load (#3376), not the raw per-tick
 	// probe: dispatchPublishWorkerLoad still samples every tick but only lets a CHANGED
 	// value through, and only after it survives a reset-on-change coalescing window.
@@ -163,6 +162,25 @@ func dispatchPreflightTimedWithTreeContext(ctx context.Context, root string, std
 		setpointPlan: setpointPlan, forecast: forecast, lazySkipped: lazySkipped,
 	})
 	return out, timings, nil
+}
+
+func dispatchPreflightTree(ctx context.Context, root string, treeOverride *dispatchtick.TreeCheck) dispatchtick.TreeCheck {
+	if treeOverride != nil {
+		return *treeOverride
+	}
+	tree, _ := dispatchProbeTreeBuildContext(ctx, root)
+	// The lower-level probe preserves infrastructure detail in TreeCheck.Error. A caller
+	// deadline is different: it is the dispatch budget doing its job, not tree evidence.
+	// Clear only the matching cancellation detail; a compiler poison verdict and every
+	// non-cancellation infrastructure error keep their existing diagnostics.
+	if !tree.Poisoned && ctx.Err() != nil {
+		detail := strings.TrimSpace(tree.Error)
+		canceled := ctx.Err().Error()
+		if detail == canceled || strings.HasSuffix(detail, ": "+canceled) {
+			return dispatchtick.TreeCheck{}
+		}
+	}
+	return tree
 }
 
 // dispatchSetpointLive mirrors EvaluatePreflight's live fold EXACTLY -- the max of
