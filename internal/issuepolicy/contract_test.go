@@ -602,6 +602,76 @@ func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftRequiresDeclaredScopeAndDefinitionOfDoneBeforeFiling(t *testing.T) {
+	validBody := strings.Join([]string{
+		"### Parent context",
+		"A filing-time issue contract.",
+		"### Current state",
+		"Issue drafts can reach the filing gate without declaring their size.",
+		"### Why this is next",
+		"A declared unit of done makes the next dispatch schedulable.",
+		"### Working spine",
+		"issue draft -> scope gate -> filed issue",
+		"### In scope",
+		"Require one declared done-condition list.",
+		"### Out of scope",
+		"Do not mutate already-filed issues.",
+		"### Definition of Done",
+		"- [ ] The filing gate accepts the declared atomic scope.",
+		"### Witness",
+		"go test ./internal/issuepolicy",
+		"### Acceptance gate",
+		"go test ./internal/issuepolicy",
+		"### Lane",
+		"issuepolicy",
+		"### Likely files",
+		"- `internal/issuepolicy/contract.go`",
+		"### Closure binding",
+		"Resolving commit cites #6200.",
+	}, "\n")
+
+	tests := []struct {
+		name        string
+		body        string
+		wantOK      bool
+		wantMissing string
+	}{
+		{
+			name:        "missing checklist",
+			body:        strings.Replace(validBody, "- [ ] The filing gate accepts the declared atomic scope.", "The filing gate accepts the declared atomic scope.", 1),
+			wantMissing: "scope_class",
+		},
+		{
+			name:        "missing Definition of Done heading",
+			body:        strings.Replace(validBody, "### Definition of Done", "### Done condition", 1),
+			wantMissing: "definition_of_done",
+		},
+		{
+			name:   "declared scope plus Definition of Done",
+			body:   validBody,
+			wantOK: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			review := ReviewIssueDraft(IssueDraft{Title: "issuepolicy: require filing-time scope", Body: tt.body}, Options{})
+			if tt.wantOK {
+				if !review.OK || review.Dispatchability != Dispatchable {
+					t.Fatalf("review = %+v, want dispatchable filing candidate", review)
+				}
+				return
+			}
+			if review.OK || !has(review.Reasons, ReasonScopeIncomplete) {
+				t.Fatalf("review = %+v, want %s", review, ReasonScopeIncomplete)
+			}
+			if !has(review.MissingSections, tt.wantMissing) {
+				t.Fatalf("missing sections = %v, want %q", review.MissingSections, tt.wantMissing)
+			}
+		})
+	}
+}
+
 func TestReviewIssueDraftUsesGeneratedMarkerKey(t *testing.T) {
 	body := "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + strings.Join([]string{
 		"### Parent context",

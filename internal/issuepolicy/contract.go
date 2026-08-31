@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/flowmetrics"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -487,7 +488,20 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 			review.Dispatchability = TriageOnly
 		}
 	}
-	if missingSections := missingRequiredIssueSections(d.Body, candidate); len(missingSections) > 0 {
+	missingSections := missingRequiredIssueSections(d.Body, candidate)
+	// A draft without an issue number has not been filed yet. Require its body
+	// to declare both a done-condition list and the heading that makes
+	// that list authoritative. Historical issue audits remain descriptive so
+	// this filing-time gate does not strand already-open backlog items.
+	if d.Number == 0 {
+		if flowmetrics.ClassifyScope(d.Body) == flowmetrics.ScopeUndeclared {
+			missingSections = appendUnique(missingSections, "scope_class")
+		}
+		if !flowmetrics.HasDoD(d.Body) {
+			missingSections = appendUnique(missingSections, "definition_of_done")
+		}
+	}
+	if len(missingSections) > 0 {
 		review.OK = false
 		review.MissingSections = missingSections
 		review.MissingFields = appendUnique(review.MissingFields, missingSections...)
@@ -772,7 +786,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		RootPoint:              section("Root point"),
 		OriginSignal:           section("Origin signal"),
 		PreventsRecurrence:     section("Prevents recurrence"),
-		DoneCondition:          strmatch.FirstTrimmed(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
+		DoneCondition:          strmatch.FirstTrimmed(section("Done condition", "Definition of done", "Acceptance criteria", "DoD"), prefixedSectionValue(doneWitness, "Done condition")),
 		Witness:                strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
 		AcceptanceGate:         section("Acceptance gate"),
 		Lane:                   lane,
@@ -984,7 +998,7 @@ func missingRequiredIssueSections(body string, c Candidate) []string {
 	}{
 		{"current_state", hasSection("Current state") && c.CurrentState != ""},
 		{"scope", hasScope},
-		{"done_condition", c.DoneCondition != "" && hasSection("Done condition", "Done condition / witness")},
+		{"done_condition", c.DoneCondition != "" && hasSection("Done condition", "Definition of done", "Acceptance criteria", "DoD", "Done condition / witness")},
 		{"witness", c.Witness != "" && hasSection("Witness", "Done condition / witness")},
 		{"likely_files", len(c.Paths) > 0 && hasSection("Likely files", "Path hints", "Paths", "Files")},
 	}
