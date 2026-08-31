@@ -54,8 +54,8 @@ func defaultHTTPClient(c *http.Client) *http.Client {
 	return &http.Client{Timeout: 0, Transport: streamingTransport()}
 }
 
-// streamingTransport clones http.DefaultTransport (preserving proxy/HTTP2 defaults) and
-// pins the three deadlines that bound a dead-or-silent peer: dial, TLS handshake, and —
+// streamingTransport returns a private clone of http.DefaultTransport (preserving proxy/HTTP2
+// defaults without mutating process-global transport state) and pins the three deadlines that bound a dead-or-silent peer: dial, TLS handshake, and —
 // the one DefaultTransport leaves unset — the response-header wait. Client.Timeout is
 // deliberately NOT set here; the caller keeps it 0 for unbounded healthy streams.
 func streamingTransport() *http.Transport {

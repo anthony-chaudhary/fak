@@ -11,11 +11,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-// TestDefaultHTTPClientStreamingTransportDeadlines witnesses the first DoD of #3476:
-// the fallback engine client keeps Client.Timeout at 0 (a long but healthy streaming
-// generation must not be cut off mid-body) yet carries a Transport whose dial, TLS, and
-// response-header deadlines bound a dead-or-silent peer — the "download-safe form".
+// TestDefaultHTTPClientStreamingTransportDeadlines witnesses #3489: the fallback
+// client keeps Client.Timeout at 0 for healthy streams while its private transport bounds
+// connection setup and the response-header wait without mutating http.DefaultTransport.
 func TestDefaultHTTPClientStreamingTransportDeadlines(t *testing.T) {
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatalf("http.DefaultTransport must be an *http.Transport, got %T", http.DefaultTransport)
+	}
+	defaultTLSHandshakeTimeout := defaultTransport.TLSHandshakeTimeout
+	defaultResponseHeaderTimeout := defaultTransport.ResponseHeaderTimeout
+
 	c := defaultHTTPClient(nil)
 	if c.Timeout != 0 {
 		t.Fatalf("Client.Timeout must stay 0 for unbounded healthy streams, got %v", c.Timeout)
@@ -24,23 +30,36 @@ func TestDefaultHTTPClientStreamingTransportDeadlines(t *testing.T) {
 	if !ok || tr == nil {
 		t.Fatalf("fallback client must carry an *http.Transport, got %T", c.Transport)
 	}
-	if tr.DialContext == nil {
-		t.Fatal("Transport.DialContext must be set (bounded dial deadline)")
+	if tr == defaultTransport {
+		t.Fatal("fallback client must use a private clone, not http.DefaultTransport")
 	}
-	if tr.TLSHandshakeTimeout <= 0 {
-		t.Fatalf("Transport.TLSHandshakeTimeout must be positive, got %v", tr.TLSHandshakeTimeout)
+	if tr.DialContext == nil || engineDialTimeout <= 0 || engineDialTimeout > time.Minute {
+		t.Fatalf("Transport.DialContext must use a positive bounded dial timeout, got %v", engineDialTimeout)
 	}
-	if tr.ResponseHeaderTimeout <= 0 {
-		t.Fatalf("Transport.ResponseHeaderTimeout must be positive (bounds a peer that never sends headers), got %v", tr.ResponseHeaderTimeout)
+	if tr.TLSHandshakeTimeout != engineTLSHandshakeTimeout || tr.TLSHandshakeTimeout <= 0 || tr.TLSHandshakeTimeout > time.Minute {
+		t.Fatalf("Transport.TLSHandshakeTimeout = %v, want positive bound %v", tr.TLSHandshakeTimeout, engineTLSHandshakeTimeout)
+	}
+	if tr.ResponseHeaderTimeout != engineResponseHeaderTimeout || tr.ResponseHeaderTimeout <= 0 || tr.ResponseHeaderTimeout > time.Minute {
+		t.Fatalf("Transport.ResponseHeaderTimeout = %v, want positive bound %v", tr.ResponseHeaderTimeout, engineResponseHeaderTimeout)
+	}
+	if defaultTransport.TLSHandshakeTimeout != defaultTLSHandshakeTimeout ||
+		defaultTransport.ResponseHeaderTimeout != defaultResponseHeaderTimeout {
+		t.Fatal("defaultHTTPClient mutated http.DefaultTransport")
 	}
 }
 
-// TestDefaultHTTPClientPassesInjectedClientThrough guards that an explicitly-configured
-// client is returned unchanged — the deadlines are a fallback default, never an override.
+// TestDefaultHTTPClientPassesInjectedClientThrough guards that an explicitly configured
+// client and transport are returned unchanged; fallback deadlines never override callers.
 func TestDefaultHTTPClientPassesInjectedClientThrough(t *testing.T) {
-	inj := &http.Client{Timeout: 7 * time.Second}
-	if got := defaultHTTPClient(inj); got != inj {
+	transport := &http.Transport{ResponseHeaderTimeout: 3 * time.Second}
+	injected := &http.Client{Timeout: 7 * time.Second, Transport: transport}
+
+	got := defaultHTTPClient(injected)
+	if got != injected {
 		t.Fatal("an injected *http.Client must pass through unchanged")
+	}
+	if got.Timeout != 7*time.Second || got.Transport != transport || transport.ResponseHeaderTimeout != 3*time.Second {
+		t.Fatalf("injected client was mutated: timeout=%v transport=%p header_timeout=%v", got.Timeout, got.Transport, transport.ResponseHeaderTimeout)
 	}
 }
 

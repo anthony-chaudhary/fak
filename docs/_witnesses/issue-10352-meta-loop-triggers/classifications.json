@@ -1,0 +1,328 @@
+{
+  "schema": "fak-loop-trigger-classifications/1",
+  "issue": 10352,
+  "generated_by": "fak superloop trigger",
+  "observed_at": "2026-08-31T12:00:00Z",
+  "cases": [
+    {
+      "case": "no-demand",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "SKIP",
+        "reason": "NO_DEMAND",
+        "demand": {
+          "eligible_units": 0,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 0,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 0,
+          "cooldown_s": 0,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 0,
+          "value_floor": 0,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "stale-input",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "DEFER",
+        "reason": "INPUT_STALE",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "STALE",
+          "source_age_s": 360,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 0,
+          "cooldown_s": 0,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 0,
+          "value_floor": 0,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "duplicate-owner",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "MERGE",
+        "reason": "ALREADY_OWNED",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "OWNED",
+          "overlap_count": 1
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 0,
+          "cooldown_s": 0,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 0,
+          "value_floor": 0,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "over-cap",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "DEFER",
+        "reason": "NO_CAPACITY",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 0,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 0,
+          "cooldown_s": 0,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 0,
+          "value_floor": 0,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "too-early",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "DEFER",
+        "reason": "COOLDOWN",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "EARLY",
+          "since_last_run_s": 1800,
+          "cooldown_s": 3600,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 9,
+          "value_floor": 5,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "below-value",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "SKIP",
+        "reason": "BELOW_VALUE_FLOOR",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 0
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 7200,
+          "cooldown_s": 3600,
+          "service_window_s": 0,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 4,
+          "value_floor": 5,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "timely",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "RUN",
+        "reason": "DEMAND_READY",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 7200
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "TIMELY",
+          "since_last_run_s": 7200,
+          "cooldown_s": 3600,
+          "service_window_s": 14400,
+          "lateness_s": 0
+        },
+        "cost": {
+          "expected_value": 9,
+          "value_floor": 5,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    },
+    {
+      "case": "overdue",
+      "receipt": {
+        "schema": "fak-loop-trigger/1",
+        "loop": "super-loop",
+        "observed_at": "2026-08-31T12:00:00Z",
+        "decision": "RUN",
+        "reason": "DEADLINE",
+        "demand": {
+          "eligible_units": 2,
+          "oldest_age_s": 18000
+        },
+        "freshness": {
+          "state": "FRESH",
+          "source_age_s": 0,
+          "max_age_s": 300
+        },
+        "ownership": {
+          "state": "FREE",
+          "overlap_count": 0
+        },
+        "capacity": {
+          "offered": 1,
+          "required": 1
+        },
+        "timing": {
+          "state": "OVERDUE",
+          "since_last_run_s": 7200,
+          "cooldown_s": 3600,
+          "service_window_s": 14400,
+          "lateness_s": 3600
+        },
+        "cost": {
+          "expected_value": 9,
+          "value_floor": 5,
+          "estimated_wall_s": 0,
+          "estimated_attention_s": 0
+        }
+      }
+    }
+  ]
+}

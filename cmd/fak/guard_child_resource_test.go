@@ -100,6 +100,53 @@ func TestGuardTreeRSSDefaultIsHostSized(t *testing.T) {
 	}
 }
 
+func TestGuardResourceMonitorReasonsStayDistinctFromMeasuredLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		detail string
+	}{
+		{name: "protected live owned child", reason: "CHILD_RESOURCE_INSPECTION_DENIED", detail: "OpenProcess: Access is denied"},
+		{name: "unsupported collector", reason: "CHILD_RESOURCE_COLLECTOR_UNAVAILABLE", detail: "native collector unavailable"},
+		{name: "collector failure", reason: "CHILD_RESOURCE_COLLECTOR_FAILURE", detail: "malformed output"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := guardResourceMonitorFailure(42, procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, Processes: []procguard.MemoryProcess{{PID: 42}}}, tt.reason, tt.detail)
+			if event.Kind != guardChildResourceLimit || event.Resource == nil || !event.Resource.Stop || event.Resource.Reason != tt.reason {
+				t.Fatalf("event=%+v", event)
+			}
+			receipt := newGuardResourceReceipt("trace", "codex", 42, *event.Resource)
+			if receipt.Reason != tt.reason || receipt.Action != "reap_tree" || strings.Contains(receipt.Reason, "_LIMIT") {
+				t.Fatalf("receipt=%+v", receipt)
+			}
+		})
+	}
+}
+
+func TestGuardResourceMeasuredBreachesKeepLimitReasons(t *testing.T) {
+	tests := []struct {
+		name     string
+		policy   guardResourcePolicy
+		snapshot procguard.MemorySnapshot
+		reason   string
+	}{
+		{name: "tree limit", policy: guardResourcePolicy{Metric: procguard.MemoryMetricCommit, MaxTreeBytes: 100}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, TreeBytes: 101, Processes: []procguard.MemoryProcess{{PID: 42, Bytes: 101}}}, reason: "CHILD_TREE_COMMIT_LIMIT"},
+		{name: "system headroom", policy: guardResourcePolicy{Metric: procguard.MemoryMetricCommit, MinSystemHeadroom: 100}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 951, SystemLimit: 1000, Processes: []procguard.MemoryProcess{{PID: 42}}}, reason: "SYSTEM_COMMIT_HEADROOM"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := decideGuardResource(tt.policy, tt.snapshot)
+			if !d.Stop || d.Reason != tt.reason {
+				t.Fatalf("decision=%+v", d)
+			}
+			if got := newGuardResourceReceipt("trace", "codex", 42, d); got.Reason != tt.reason {
+				t.Fatalf("receipt=%+v", got)
+			}
+		})
+	}
+}
+
 func TestGuardResourceMonitorFailureIsTypedAndVisible(t *testing.T) {
 	snapshot := procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, RootPID: 42, Processes: []procguard.MemoryProcess{{PID: 42}, {PID: 43}}}
 	event := guardResourceMonitorFailure(42, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", "ps failed")

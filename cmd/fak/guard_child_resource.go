@@ -252,12 +252,22 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 			}
 			if !supported {
 				if runtime.GOOS == "windows" {
-					out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_UNAVAILABLE", detail)
+					reason := "CHILD_RESOURCE_COLLECTOR_UNAVAILABLE"
+					lowerDetail := strings.ToLower(detail)
+					if strings.Contains(lowerDetail, "access is denied") || strings.Contains(lowerDetail, "permission denied") {
+						reason = "CHILD_RESOURCE_INSPECTION_DENIED"
+					}
+					out <- guardResourceMonitorFailure(rootPID, snapshot, reason, detail)
 				}
 				return
 			}
 			if detail != "" {
-				out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", detail)
+				reason := "CHILD_RESOURCE_COLLECTOR_FAILURE"
+				lowerDetail := strings.ToLower(detail)
+				if strings.Contains(lowerDetail, "access is denied") || strings.Contains(lowerDetail, "permission denied") {
+					reason = "CHILD_RESOURCE_INSPECTION_DENIED"
+				}
+				out <- guardResourceMonitorFailure(rootPID, snapshot, reason, detail)
 				return
 			}
 			decision := decideGuardResource(policy, snapshot)
