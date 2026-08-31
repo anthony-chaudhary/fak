@@ -49,7 +49,7 @@ func TestDispatchWavePreflightRetryUsesDeclaredDependencyBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := `dispatchWaveDependencyRetryContext(dispatchWaveDependencyTimeout, "dispatch preflight", 2,`
+	call := `dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2,`
 	if !bytes.Contains(source, []byte(call)) {
 		t.Fatalf("dispatch preflight retry must use the single declared dependency budget")
 	}
@@ -58,27 +58,10 @@ func TestDispatchWavePreflightRetryUsesDeclaredDependencyBudget(t *testing.T) {
 	}
 }
 
-func TestDispatchWaveDependencyCancelsTimedOutCall(t *testing.T) {
-	canceled := make(chan struct{})
-	_, err := dispatchWaveDependencyContext(20*time.Millisecond, "dispatch preflight", func(ctx context.Context) (dispatchWavePreflightResult, error) {
-		<-ctx.Done()
-		close(canceled)
-		return dispatchWavePreflightResult{}, ctx.Err()
-	})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("error = %v, want deadline exceeded", err)
-	}
-	select {
-	case <-canceled:
-	case <-time.After(time.Second):
-		t.Fatal("timed-out dependency did not receive caller cancellation")
-	}
-}
-
 func TestDispatchWaveBoundedDependencyTimesOut(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	_, err := dispatchWaveDependency(20*time.Millisecond, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
+	_, err := dispatchWaveDependency(20*time.Millisecond, "dispatch preflight", func(context.Context) (dispatchWavePreflightResult, error) {
 		<-release
 		return dispatchWavePreflightResult{}, nil
 	})
@@ -94,9 +77,51 @@ func TestDispatchWaveBoundedDependencyTimesOut(t *testing.T) {
 	}
 }
 
+func TestDispatchWaveDependencyPropagatesCallerDeadline(t *testing.T) {
+	observed := make(chan error, 1)
+	started := time.Now()
+	_, err := dispatchWaveDependency(20*time.Millisecond, "dispatch preflight", func(ctx context.Context) (dispatchWavePreflightResult, error) {
+		<-ctx.Done()
+		observed <- ctx.Err()
+		return dispatchWavePreflightResult{}, ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want caller deadline", err)
+	}
+	var dep *dispatchWaveDependencyError
+	if !errors.As(err, &dep) || dep.Kind != "timeout" {
+		t.Fatalf("typed error = %#v, want timeout", dep)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("dependency returned after %s, want caller budget", elapsed)
+	}
+	select {
+	case got := <-observed:
+		if !errors.Is(got, context.DeadlineExceeded) {
+			t.Fatalf("dependency context = %v, want deadline exceeded", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dependency did not observe the caller deadline")
+	}
+}
+
+func TestDispatchWaveDependencyAcceptsCancellationAwareFailOpen(t *testing.T) {
+	started := time.Now()
+	got, err := dispatchWaveDependency(20*time.Millisecond, "dispatch preflight", func(ctx context.Context) (int, error) {
+		<-ctx.Done()
+		return 7, nil
+	})
+	if err != nil || got != 7 {
+		t.Fatalf("got (%d, %v), want cancellation-aware fail-open result", got, err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("dependency returned after %s, want caller budget plus bounded unwind", elapsed)
+	}
+}
+
 func TestDispatchWaveBoundedDependencyPreservesUpstreamError(t *testing.T) {
 	upstream := errors.New("upstream refused")
-	_, err := dispatchWaveDependency(time.Second, "account allocation", func() (int, error) {
+	_, err := dispatchWaveDependency(time.Second, "account allocation", func(context.Context) (int, error) {
 		return 0, upstream
 	})
 	if !errors.Is(err, upstream) {
@@ -109,7 +134,7 @@ func TestDispatchWaveBoundedDependencyPreservesUpstreamError(t *testing.T) {
 }
 
 func TestDispatchWaveBoundedDependencyReturnsCompletedValue(t *testing.T) {
-	got, err := dispatchWaveDependency(time.Second, "account allocation", func() (int, error) {
+	got, err := dispatchWaveDependency(time.Second, "account allocation", func(context.Context) (int, error) {
 		return 7, nil
 	})
 	if err != nil || got != 7 {
@@ -119,7 +144,7 @@ func TestDispatchWaveBoundedDependencyReturnsCompletedValue(t *testing.T) {
 
 func TestDispatchWaveDependencyRetryRecoversReadOnlyUpstreamFailure(t *testing.T) {
 	attempts := 0
-	got, err := dispatchWaveDependencyRetry(time.Second, "issue-contract discovery", 2, func(error) bool { return true }, func() (int, error) {
+	got, err := dispatchWaveDependencyRetry(time.Second, "issue-contract discovery", 2, func(error) bool { return true }, func(context.Context) (int, error) {
 		attempts++
 		if attempts == 1 {
 			return 0, errors.New("temporary read failure")
@@ -135,7 +160,7 @@ func TestDispatchWaveDependencyTimeoutIsNotRetriedWhileCallMayStillRun(t *testin
 	release := make(chan struct{})
 	finished := make(chan struct{})
 	attempts := 0
-	_, err := dispatchWaveDependencyRetry(20*time.Millisecond, "issue-contract discovery", 2, func(error) bool { return true }, func() (int, error) {
+	_, err := dispatchWaveDependencyRetry(20*time.Millisecond, "issue-contract discovery", 2, func(error) bool { return true }, func(context.Context) (int, error) {
 		defer close(finished)
 		attempts++
 		<-release
@@ -183,7 +208,7 @@ func TestDispatchWaveDependencyRetryPropagatesFinalUpstreamCause(t *testing.T) {
 	first := errors.New("first transient")
 	final := errors.New("final upstream detail")
 	attempts := 0
-	_, err := dispatchWaveDependencyRetry(time.Second, "issue-contract discovery", 2, func(error) bool { return true }, func() (int, error) {
+	_, err := dispatchWaveDependencyRetry(time.Second, "issue-contract discovery", 2, func(error) bool { return true }, func(context.Context) (int, error) {
 		attempts++
 		if attempts == 1 {
 			return 0, first

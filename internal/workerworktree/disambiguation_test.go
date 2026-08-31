@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -344,6 +345,73 @@ func TestCheckDisambiguationInvariantContextPreservesFreshnessAndCoverage(t *tes
 	if !reflect.DeepEqual(phases, wantPhases) {
 		t.Fatalf("subphases = %v, want %v", phases, wantPhases)
 	}
+}
+
+func TestCheckInvariantBoundedPreservesAnalyzerExitWhenGeneratedReadmeMissing(t *testing.T) {
+	oldAnalyzer := runAnalyzer
+	defer func() { runAnalyzer = oldAnalyzer }()
+
+	root := t.TempDir()
+	exitErr := disambiguationAnalyzerExitError(t)
+	runAnalyzer = func(_ context.Context, _ string, generated string) ([]byte, error) {
+		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
+		return validDisambiguationPayload(), exitErr
+	}
+
+	_, err := checkInvariantBounded(context.Background(), root, func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "analyzer contract missing generated README.md") {
+		t.Fatalf("missing README contract error = %v", err)
+	}
+	var gotExit *exec.ExitError
+	if !errors.As(err, &gotExit) {
+		t.Fatalf("missing README error does not preserve analyzer exit: %v", err)
+	}
+}
+
+func TestCheckInvariantBoundedAcceptsAnalyzerExitWithCompleteOutput(t *testing.T) {
+	oldAnalyzer := runAnalyzer
+	defer func() { runAnalyzer = oldAnalyzer }()
+
+	root := t.TempDir()
+	writeDisambiguationFixture(t, root, conceptcatalog.GeneratedReadme, "readme\n")
+	writeDisambiguationFixture(t, root, conceptcatalog.GeneratedIndex, "index\n")
+	writeDisambiguationFixture(t, root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[]}`)
+	exitErr := disambiguationAnalyzerExitError(t)
+	runAnalyzer = func(_ context.Context, _ string, generated string) ([]byte, error) {
+		writeDisambiguationFixture(t, generated, "README.md", "readme\n")
+		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
+		return validDisambiguationPayload(), exitErr
+	}
+
+	inv, err := checkInvariantBounded(context.Background(), root, func(string) {})
+	if err != nil {
+		t.Fatalf("complete analyzer output with exit status: %v", err)
+	}
+	if !inv.Freshness.Fresh || !inv.SemanticValid || !inv.CriticalClean {
+		t.Fatalf("complete analyzer output invariant = %+v", inv)
+	}
+}
+
+func disambiguationAnalyzerExitError(t *testing.T) error {
+	t.Helper()
+	err := exec.Command("go", "tool", "fak-test-missing-tool").Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("create analyzer exit error: %T %v", err, err)
+	}
+	return err
+}
+
+func validDisambiguationPayload() []byte {
+	return []byte(`{
+		"ok": true,
+		"reason": "",
+		"corpus": {
+			"coverage_debt": 0,
+			"clarity_defects": 0,
+			"coverage": {"coverage_pct": 100, "per_family": []}
+		}
+	}`)
 }
 
 func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing.T) {

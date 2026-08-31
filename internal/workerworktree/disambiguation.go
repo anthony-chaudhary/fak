@@ -736,7 +736,10 @@ func checkInvariantBounded(ctx context.Context, root string, setSubphase func(st
 	} {
 		expected, readErr := os.ReadFile(filepath.Join(generated, artifact.name))
 		if readErr != nil {
-			return conceptcatalog.InvariantResult{}, fmt.Errorf("read generated %s: %w", artifact.name, readErr)
+			if runErr != nil {
+				return conceptcatalog.InvariantResult{}, fmt.Errorf("analyzer contract missing generated %s after %w: %v", artifact.name, runErr, readErr)
+			}
+			return conceptcatalog.InvariantResult{}, fmt.Errorf("analyzer contract missing generated %s: %w", artifact.name, readErr)
 		}
 		actual, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(artifact.tracked)))
 		if readErr != nil || !bytes.Equal(normalizeDisambiguationNewlines(actual), normalizeDisambiguationNewlines(expected)) {
@@ -778,6 +781,9 @@ func checkInvariantBounded(ctx context.Context, root string, setSubphase func(st
 		} `json:"corpus"`
 	}
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		if runErr != nil {
+			return inv, fmt.Errorf("decode scorecard after analyzer exit %w: %v", runErr, err)
+		}
 		return inv, fmt.Errorf("decode scorecard: %w", err)
 	}
 	inv.ClarityDebt = payload.Corpus.ClarityDebt

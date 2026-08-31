@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,37 +119,6 @@ func TestDispatchProbeTreeBuildNoModuleFailsOpen(t *testing.T) {
 // compiler diagnostic. dispatchTreeBuildCommand wraps that as
 // context.DeadlineExceeded; the probe must fail open (a loaded host is
 // infrastructure, not a poisoned tree) rather than freeze the fleet.
-func TestDispatchPreflightTreeBuildHonorsCallerDeadline(t *testing.T) {
-	oldCommand := dispatchTreeBuildCommandContext
-	t.Cleanup(func() { dispatchTreeBuildCommandContext = oldCommand })
-
-	started := make(chan struct{})
-	dispatchTreeBuildCommandContext = func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	began := time.Now()
-	out, _, err := dispatchPreflightTimedContext(ctx, t.TempDir(), io.Discard, 1, "engineering", "codex")
-	if err != nil {
-		t.Fatalf("dispatch preflight: %v", err)
-	}
-	select {
-	case <-started:
-	default:
-		t.Fatal("tree build command was not invoked")
-	}
-	if elapsed := time.Since(began); elapsed > time.Second {
-		t.Fatalf("preflight returned after %s, want caller deadline to cancel the tree build", elapsed)
-	}
-	if out == nil {
-		t.Fatal("preflight returned a nil payload after tree-build deadline")
-	}
-}
-
 func TestDispatchProbeTreeBuildTimeoutFailsOpen(t *testing.T) {
 	old := dispatchTreeBuildCommand
 	dispatchTreeBuildCommand = func(string) (string, error) {
@@ -309,5 +277,96 @@ func TestDispatchProbeTreeBuildReusesProvenanceMatchedBinary(t *testing.T) {
 	}
 	if !evidence.Reused || evidence.Source != "running_binary" || evidence.RequestedCommit != head || evidence.BinaryRevision != head {
 		t.Fatalf("evidence = %+v, want provenance-valid running-binary reuse", evidence)
+	}
+}
+
+func TestDispatchPreflightTreeBuildCancelsWithinCallerBudget(t *testing.T) {
+	const head = "fedcba9876543210fedcba9876543210fedcba98"
+	oldHead, oldStamp, oldBuild := dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext
+	dispatchTreeBuildHeadContext = func(context.Context, string) string { return head }
+	dispatchTreeBuildStamp = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: "different-revision", HasVCS: true}
+	}
+	buildCanceled := make(chan error, 1)
+	dispatchTreeBuildCommandContext = func(ctx context.Context, _ string) (string, error) {
+		<-ctx.Done()
+		buildCanceled <- ctx.Err()
+		return "", ctx.Err()
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext = oldHead, oldStamp, oldBuild
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	check := dispatchPreflightTree(ctx, t.TempDir(), nil)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("blocked tree build returned after %s, want caller budget", elapsed)
+	}
+	if check.Poisoned || check.Error != "" {
+		t.Fatalf("canceled tree build must fail open, got %+v", check)
+	}
+	select {
+	case err := <-buildCanceled:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("tree build cancellation = %v, want deadline exceeded", err)
+		}
+	default:
+		t.Fatal("tree build did not observe the caller deadline")
+	}
+}
+
+func TestDispatchPreflightTreePreservesCompilerPoison(t *testing.T) {
+	const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	oldHead, oldStamp, oldBuild := dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext
+	dispatchTreeBuildHeadContext = func(context.Context, string) string { return head }
+	dispatchTreeBuildStamp = func() binstamp.Stamp { return binstamp.Stamp{Revision: "different-revision", HasVCS: true} }
+	dispatchTreeBuildCommandContext = func(context.Context, string) (string, error) {
+		return "# example/broken\nbroken.go:3: undefined: nope", errors.New("exit status 1")
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext = oldHead, oldStamp, oldBuild
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+
+	check := dispatchPreflightTree(context.Background(), t.TempDir(), nil)
+	if !check.Poisoned || check.Package != "# example/broken" || check.Error == "" {
+		t.Fatalf("compiler failure = %+v, want preserved poison diagnostics", check)
+	}
+}
+
+func TestDispatchPreflightTreePreservesNonCancellationInfrastructureError(t *testing.T) {
+	const head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	oldHead, oldStamp, oldBuild := dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext
+	dispatchTreeBuildHeadContext = func(context.Context, string) string { return head }
+	dispatchTreeBuildStamp = func() binstamp.Stamp { return binstamp.Stamp{Revision: "different-revision", HasVCS: true} }
+	dispatchTreeBuildCommandContext = func(context.Context, string) (string, error) {
+		return "", errors.New("executable file not found")
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext = oldHead, oldStamp, oldBuild
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+
+	check := dispatchPreflightTree(context.Background(), t.TempDir(), nil)
+	if check.Poisoned || check.Error != "executable file not found" {
+		t.Fatalf("infrastructure failure = %+v, want unchanged fail-open diagnostic", check)
 	}
 }
