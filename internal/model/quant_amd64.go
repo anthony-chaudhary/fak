@@ -252,7 +252,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	if out*in*P < parThreshold {
 		tile(0, nTiles)
 	} else {
-		parFor(nTiles, numWorkers, tile)
+		parFor(nTiles, currentWorkerCount(), tile)
 	}
 
 	qGemm8avx512Remainder(qt, qp, Y, out, in, nblk, Pmain, nTiles)
@@ -306,7 +306,7 @@ func qGemm8avx2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	if out*in*P < parThreshold {
 		tile(0, nTiles)
 	} else {
-		parFor(nTiles, numWorkers, tile)
+		parFor(nTiles, currentWorkerCount(), tile)
 	}
 
 	// Remainder rows (out % MR): every token, via the matching lanes=8 scalar reference.
@@ -373,7 +373,7 @@ func qGemm8IntoMany(qp *q8Panel, targets ...qgemm8Target) {
 	if totalTiles*qgemmMR*in*P < parThreshold {
 		tile(0, totalTiles)
 	} else {
-		parFor(totalTiles, numWorkers, tile)
+		parFor(totalTiles, currentWorkerCount(), tile)
 	}
 
 	for _, tg := range targets {

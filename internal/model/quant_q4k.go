@@ -316,7 +316,7 @@ func q4kExtractGemmWeights(qt *q4kTensor) q4kExtractedGemm {
 	if out*in < parThreshold {
 		body(0, out)
 	} else {
-		parFor(out, numWorkers, body)
+		parFor(out, currentWorkerCount(), body)
 	}
 	return q4kExtractedGemm{qt: q8, minScale: minScale}
 }
@@ -371,7 +371,7 @@ func q8PanelBlockSums(qp *q8Panel) []int32 {
 	if qp.P*qp.in < parThreshold {
 		body(0, qp.P)
 	} else {
-		parFor(qp.P, numWorkers, body)
+		parFor(qp.P, currentWorkerCount(), body)
 	}
 	return sums
 }
@@ -388,7 +388,7 @@ func q4kSubtractGemmMinTerm(minScale []float32, sums []int32, dx []float32, P, o
 	if out*P*nblk < parThreshold {
 		body(0, out)
 	} else {
-		parFor(out, numWorkers, body)
+		parFor(out, currentWorkerCount(), body)
 	}
 }
 

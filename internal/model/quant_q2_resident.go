@@ -101,7 +101,7 @@ func q2G128MatRowsRange(qt *q2Tensor, x, y []float32, lo, hi int) {
 func dequantQ2G128Tensor(qt *q2Tensor) []float32 {
 	w := make([]float32, qt.out*qt.in)
 	rowBytes := qt.nblk * q2G128BlockBytes
-	parFor(qt.out, numWorkers, func(lo, hi int) {
+	parFor(qt.out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			row := qt.raw[o*rowBytes:]
 			for b := 0; b < qt.nblk; b++ {

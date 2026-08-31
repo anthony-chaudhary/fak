@@ -69,7 +69,7 @@ type DecodeRoofline struct {
 }
 
 // DecodeRooflineFor builds the roofline for a measured per-token decode latency (ms) on this
-// model. The decode GEMV runs multi-core (parFor over numWorkers), so its achieved GB/s is
+// model. The decode GEMV runs multi-core (parFor over currentWorkerCount()), so its achieved GB/s is
 // AGGREGATE — and the ceiling it must be judged against is therefore the AGGREGATE STREAM
 // bandwidth (all cores hammering memory at once), NOT one core's share. Comparing aggregate
 // achieved against a single-core ceiling produces a nonsense >100% utilization; this uses the
@@ -81,7 +81,7 @@ func (m *Model) DecodeRooflineFor(perTokenMS float64) DecodeRoofline {
 		r.TokPerSec = 1000.0 / perTokenMS
 		r.AchievedGBps = float64(bytes) / (perTokenMS / 1e3) / 1e9
 	}
-	r.CeilingGBps = measureAggregateStreamGBps(int(bytes), numWorkers)
+	r.CeilingGBps = measureAggregateStreamGBps(int(bytes), currentWorkerCount())
 	if r.CeilingGBps > 0 {
 		r.BWUtilPct = 100 * r.AchievedGBps / r.CeilingGBps
 	}

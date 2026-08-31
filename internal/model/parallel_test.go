@@ -2,6 +2,7 @@ package model
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -127,5 +128,175 @@ func TestSaxpy3MatchesScalar(t *testing.T) {
 				t.Fatalf("saxpy3 n=%d i=%d does not match scalar", n, i)
 			}
 		}
+	}
+}
+
+func resetParPoolForTest(t *testing.T) {
+	t.Helper()
+	parDispatchMu.Lock()
+	if parPool != nil {
+		close(parPool.stop)
+		for i := range parPool.slots {
+			select {
+			case parPool.slots[i].wake <- struct{}{}:
+			default:
+			}
+		}
+		parPool.done.Wait()
+		parPool = nil
+	}
+	parDispatchMu.Unlock()
+	t.Cleanup(func() {
+		parDispatchMu.Lock()
+		if parPool != nil {
+			close(parPool.stop)
+			for i := range parPool.slots {
+				select {
+				case parPool.slots[i].wake <- struct{}{}:
+				default:
+				}
+			}
+			parPool.done.Wait()
+			parPool = nil
+		}
+		parDispatchMu.Unlock()
+	})
+}
+
+func expectedParOutput(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i*i + 7
+	}
+	return out
+}
+
+func runParOutput(n, workers int) []int {
+	out := make([]int, n)
+	parFor(n, workers, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			out[i] = i*i + 7
+		}
+	})
+	return out
+}
+
+func requireParOutput(t *testing.T, workers int, got, want []int) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("width %d output length=%d, want %d", workers, len(got), len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("width %d output[%d]=%d, want %d", workers, i, got[i], want[i])
+		}
+	}
+}
+
+func TestParPoolFollowsRuntimeWidthAtDispatchBoundaries(t *testing.T) {
+	width := 4
+	setWorkerBudgetStateForTest(t, width, defaultWorkerBudgetSource, func() int { return width })
+	resetParPoolForTest(t)
+	want := expectedParOutput(96)
+
+	out4 := runParOutput(len(want), NumWorkers())
+	parDispatchMu.Lock()
+	gen4 := parPool
+	gotWidth := gen4.width
+	parDispatchMu.Unlock()
+	if gotWidth != 4 {
+		t.Fatalf("first pool width=%d, want 4", gotWidth)
+	}
+
+	width = 2
+	out2 := runParOutput(len(want), NumWorkers())
+	parDispatchMu.Lock()
+	gen2 := parPool
+	gotWidth = gen2.width
+	parDispatchMu.Unlock()
+	if gotWidth != 2 || gen2 == gen4 {
+		t.Fatalf("second pool=%p width=%d, want new generation width 2", gen2, gotWidth)
+	}
+	gen4.done.Wait()
+
+	width = 6
+	out6 := runParOutput(len(want), NumWorkers())
+	parDispatchMu.Lock()
+	gen6 := parPool
+	gotWidth = gen6.width
+	parDispatchMu.Unlock()
+	if gotWidth != 6 || gen6 == gen2 {
+		t.Fatalf("third pool=%p width=%d, want new generation width 6", gen6, gotWidth)
+	}
+	gen2.done.Wait()
+
+	requireParOutput(t, 4, out4, want)
+	requireParOutput(t, 2, out2, want)
+	requireParOutput(t, 6, out6, want)
+}
+
+func TestParPoolDoesNotResizeInFlight(t *testing.T) {
+	width := 4
+	setWorkerBudgetStateForTest(t, width, defaultWorkerBudgetSource, func() int { return width })
+	resetParPoolForTest(t)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct{})
+	var once sync.Once
+	go func() {
+		parFor(64, NumWorkers(), func(lo, hi int) {
+			once.Do(func() { close(entered) })
+			<-release
+		})
+		close(firstDone)
+	}()
+	<-entered
+
+	width = 2
+	secondDone := make(chan struct{})
+	go func() {
+		parFor(64, NumWorkers(), func(lo, hi int) {})
+		close(secondDone)
+	}()
+
+	select {
+	case <-secondDone:
+		t.Fatal("next dispatch completed before in-flight dispatch was released")
+	default:
+	}
+
+	close(release)
+	<-firstDone
+	<-secondDone
+	parDispatchMu.Lock()
+	got := parPool.width
+	parDispatchMu.Unlock()
+	if got != 2 {
+		t.Fatalf("next-boundary pool width=%d, want runtime width 2", got)
+	}
+}
+
+func TestParForRetainsOperationBoundaryWidth(t *testing.T) {
+	width := 6
+	setWorkerBudgetStateForTest(t, width, defaultWorkerBudgetSource, func() int { return width })
+	resetParPoolForTest(t)
+
+	retained := NumWorkers()
+	width = 2
+	runParOutput(64, retained)
+	parDispatchMu.Lock()
+	got := parPool.width
+	parDispatchMu.Unlock()
+	if got != retained {
+		t.Fatalf("pool width=%d, want retained operation width %d", got, retained)
+	}
+
+	runParOutput(64, NumWorkers())
+	parDispatchMu.Lock()
+	got = parPool.width
+	parDispatchMu.Unlock()
+	if got != 2 {
+		t.Fatalf("next dispatch pool width=%d, want current runtime width 2", got)
 	}
 }

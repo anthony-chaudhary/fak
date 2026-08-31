@@ -98,7 +98,7 @@ func quantizeQ4(w []float32, out, in int) *q4Tensor {
 	}
 	nblk := in / qBlk4
 	qt := &q4Tensor{out: out, in: in, nblk: nblk, d: make([]float32, out*nblk), q: make([]byte, out*nblk*(qBlk4/2))}
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		blk := make([]float32, qBlk4)
 		for o := lo; o < hi; o++ {
 			for b := 0; b < nblk; b++ {
@@ -162,7 +162,7 @@ func quantizeQ4FromQ8(q8 *q8Tensor) *q4Tensor {
 	out, in, nblk := q8.out, q8.in, q8.nblk
 	qt := &q4Tensor{out: out, in: in, nblk: nblk, d: make([]float32, out*nblk), q: make([]byte, out*nblk*(qBlk4/2))}
 	half := qBlk4 / 2
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		blk := make([]float32, qBlk4)
 		for o := lo; o < hi; o++ {
 			for b := 0; b < nblk; b++ {

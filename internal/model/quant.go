@@ -145,7 +145,7 @@ func quantizeQ8(w []float32, out, in int) *q8Tensor {
 	// this loop used to `continue`, and qt.q is freshly allocated, so those codes are
 	// already zero. Deliberately the SCALAR reference, not the dispatching twin: this is
 	// load-time work, so there is nothing to buy by widening it.
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			quantizeRowQ8scalar(w[o*in:o*in+in], qt.q[o*in:(o+1)*in], qt.d[o*nblk:(o+1)*nblk], nblk)
 		}

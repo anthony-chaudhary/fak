@@ -49,7 +49,7 @@ func qGemm8TileInto(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	if out*in*P < parThreshold {
 		tile(0, nTiles)
 	} else {
-		parFor(nTiles, numWorkers, tile)
+		parFor(nTiles, currentWorkerCount(), tile)
 	}
 
 	// Remainder rows (out % MR): every token, via the matching scalar reference.

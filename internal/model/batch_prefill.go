@@ -72,6 +72,7 @@ func rectangularPrefillLenMin(prompts [][]int, minPrompts int) (int, bool) {
 }
 
 func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bool) [][]float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -96,7 +97,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		Xn := make([]float32, N*H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
 		bIn := m.tensorOptional(lp("input_layernorm.bias"))
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				copy(Xn[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wIn, bIn, eps, cfg))
 			}
@@ -116,7 +117,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 				c.Kraw[l] = append(c.Kraw[l], K[row*w:(row+1)*w]...)
 			}
 		}
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				ropeRowQKInto(Q[row*nH*hd:(row+1)*nH*hd], K[row*w:(row+1)*w], cosN[row], sinN[row], hd, nH, nKV)
 			}
@@ -147,7 +148,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		Xn2 := make([]float32, N*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))
 			}
@@ -175,6 +176,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 }
 
 func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool) [][]float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -224,7 +226,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		// currently keeps out of this quantized lane. Passing it anyway keeps the norm call
 		// identical to the f32 twin, so relaxing that gate can never silently drop the bias.
 		bIn := m.tensorOptional(lp("input_layernorm.bias"))
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
 					copy(Xn[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wIn, bIn, eps, cfg))
@@ -259,7 +261,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 				c.Kraw[l] = append(c.Kraw[l], K[row*w:(row+1)*w]...)
 			}
 		}
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				ropeRowQKInto(Q[row*nH*hd:(row+1)*nH*hd], K[row*w:(row+1)*w], cosN[row], sinN[row], hd, nH, nKV)
 			}
@@ -298,7 +300,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		pb.Xn2 = Xn2
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
-		parFor(N, numWorkers, func(lo, hi int) {
+		parFor(N, dispatchWorkers, func(lo, hi int) {
 			for row := lo; row < hi; row++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
 					copy(Xn2[row*H:(row+1)*H], normCfg(X[row*H:(row+1)*H], wPost, bPost, eps, cfg))

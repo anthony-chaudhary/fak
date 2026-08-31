@@ -39,7 +39,7 @@ func q8RememberAccelPanel(qp *q8Panel, X []float32) {
 func dequantQ8ForAccel(qt *q8Tensor) []float32 {
 	out, in, nblk := qt.out, qt.in, qt.nblk
 	w := make([]float32, out*in)
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			qrow := qt.q[o*in : (o+1)*in]
 			drow := qt.d[o*nblk : (o+1)*nblk]

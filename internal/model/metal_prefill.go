@@ -48,7 +48,7 @@ var (
 func dequantQ8(qt *q8Tensor) []float32 {
 	out, in, nblk := qt.out, qt.in, qt.nblk
 	f := make([]float32, out*in)
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			for b := 0; b < nblk; b++ {
 				d := qt.d[o*nblk+b]
@@ -209,6 +209,7 @@ func (s *Session) prefillMetalResident(ids []int) []float32 {
 // Both fill the same f32 KV cache the CPU paths build and return the last token's
 // post-final-norm hidden (caller applies the head).
 func (s *Session) prefillBatchedMetal(ids []int) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	if s.Cache.Len() == 0 && !metalResidentDisabled {
 		if out := s.prefillMetalResident(ids); out != nil {
 			return out
@@ -258,7 +259,7 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 		lp := func(str string) string { return "model.layers." + itoa(l) + "." + str }
 
 		Xn := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			for t := lo; t < hi; t++ {
 				rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
@@ -278,7 +279,7 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 		}
 
 		s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				for h := 0; h < nH; h++ {
 					applyRopeRow(Q[t*nH*hd+h*hd:t*nH*hd+(h+1)*hd], cosP[t], sinP[t])
@@ -304,14 +305,14 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 		}
 
 		O := mm(lp("self_attn.o_proj.weight"), attnOut, H, nH*hd)
-		parFor(len(X), numWorkers, func(lo, hi int) {
+		parFor(len(X), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += O[i]
 			}
 		})
 
 		Xn2 := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			for t := lo; t < hi; t++ {
 				rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
@@ -320,13 +321,13 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 		I := cfg.IntermediateSize
 		G := mm(lp("mlp.gate_proj.weight"), Xn2, I, H)
 		U := mm(lp("mlp.up_proj.weight"), Xn2, I, H)
-		parFor(len(G), numWorkers, func(lo, hi int) {
+		parFor(len(G), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				G[i] = silu(G[i]) * U[i]
 			}
 		})
 		Down := mm(lp("mlp.down_proj.weight"), G, H, I)
-		parFor(len(X), numWorkers, func(lo, hi int) {
+		parFor(len(X), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += Down[i]
 			}

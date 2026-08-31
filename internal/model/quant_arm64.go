@@ -205,7 +205,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	if out*in*P < parThreshold {
 		tileRow(0, nPairs)
 	} else {
-		parFor(nPairs, numWorkers, tileRow)
+		parFor(nPairs, currentWorkerCount(), tileRow)
 	}
 	// odd last row (out%2): the 1×4 row kernel + cell remainder.
 	if Omain < out {

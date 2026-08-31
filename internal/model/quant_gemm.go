@@ -135,7 +135,7 @@ func quantizeBatchPanelInto(qp *q8Panel, X []float32, P, width int) {
 		qp.d = qp.d[:P*nblk]
 	}
 	qp.P, qp.in, qp.nblk = P, width, nblk
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, currentWorkerCount(), func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			// quantizeRowQ8 is the AVX-512 kernel (scalar fallback off-512), bit-identical
 			// to the per-block math this loop used to inline — see quant_quantize.go.
@@ -261,7 +261,7 @@ func qGemm8scalarInto(qt *q8Tensor, qp *q8Panel, lanes int, Y []float32) {
 		body(0, out)
 		return
 	}
-	parFor(out, numWorkers, body)
+	parFor(out, currentWorkerCount(), body)
 }
 
 // qGemm8legacy reproduces the pre-tile shipped behaviour (one qdot8 GEMV call per output
@@ -290,5 +290,5 @@ func qGemm8legacyInto(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		body(0, out)
 		return
 	}
-	parFor(out, numWorkers, body)
+	parFor(out, currentWorkerCount(), body)
 }

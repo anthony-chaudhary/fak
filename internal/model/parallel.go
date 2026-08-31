@@ -37,16 +37,18 @@ var numWorkers, workerBudgetSource = resolveBudgetWorkers(
 	func(note string) { fmt.Fprintln(os.Stderr, "[fak] "+note) },
 )
 
-// NumWorkers reports the resolved matmul worker count (GOMAXPROCS unless FAK_WORKERS or
-// FAK_BUDGET pins it), so a benchmark can record the actual parallelism its numbers were
-// taken at.
-func NumWorkers() int { return numWorkers }
+// NumWorkers reports the worker count for the next dispatch. The default follows the
+// runtime GOMAXPROCS value; explicit environment and flag overrides remain pinned.
+func NumWorkers() int { return currentWorkerCount() }
 
 // WorkerBudget reports HOW the worker count was resolved — "FAK_WORKERS=8",
 // "FAK_BUDGET=0.75", or "default(GOMAXPROCS)" — so a recorded run states the budget it
 // was taken at (a number at 75% of a 32-core box is a different regime than 100% of an
 // 8-core box, and only the source makes that legible in the JSON report).
-func WorkerBudget() string { return workerBudgetSource }
+func WorkerBudget() string {
+	_, source := currentWorkerBudget()
+	return source
+}
 
 // parThreshold is the minimum work (output elements × inner dim) below which a matmul
 // runs serially — goroutine dispatch isn't worth it for tiny ops (norms, small projs).
@@ -93,15 +95,21 @@ type parSlot struct {
 	_        [40]byte // pad to a cache line, avoid false sharing between slots
 }
 
+type parPoolGeneration struct {
+	width int
+	slots []parSlot
+	stop  chan struct{}
+	done  sync.WaitGroup
+}
+
 var parWorkerLabelContext = pprof.WithLabels(
 	context.Background(),
 	pprof.Labels("fak.component", "model.parallel"),
 )
 
 var (
-	parPoolOnce   sync.Once
 	parDispatchMu sync.Mutex
-	parSlots      []parSlot
+	parPool       *parPoolGeneration
 
 	// Per-dispatch shared work queue (single-owner under parDispatchMu). parBody/parN/parChunkSize/
 	// parNumChunks are published before the per-slot seq bump (release) and read by workers after
@@ -122,19 +130,38 @@ var (
 // slower throughput + serial glue, not chunk size).
 const parChunkGranularity = 4
 
-// startParPool launches numWorkers-1 persistent worker goroutines (the caller is the numWorkers'th
-// worker on every parFor). Each spins for a dispatch signal then joins the shared steal loop.
-func startParPool() {
-	if numWorkers <= 1 {
+// ensureParPool installs the generation required by the next dispatch. parDispatchMu
+// is held, so the previous generation has no in-flight work and can be stopped before
+// its replacement is published. At most one generation is live after this boundary.
+func ensureParPool(width int) {
+	if width < 1 {
+		width = 1
+	}
+	if parPool != nil && parPool.width == width {
 		return
 	}
-	parSlots = make([]parSlot, numWorkers-1)
-	for i := range parSlots {
-		parSlots[i].wake = make(chan struct{}, 1)
+	if parPool != nil {
+		close(parPool.stop)
+		for i := range parPool.slots {
+			select {
+			case parPool.slots[i].wake <- struct{}{}:
+			default:
+			}
+		}
+		parPool.done.Wait()
 	}
-	for i := range parSlots {
-		go parWorkerLoop(i)
+	g := &parPoolGeneration{width: width, stop: make(chan struct{})}
+	if width > 1 {
+		g.slots = make([]parSlot, width-1)
+		for i := range g.slots {
+			g.slots[i].wake = make(chan struct{}, 1)
+		}
+		for i := range g.slots {
+			g.done.Add(1)
+			go parWorkerLoop(g, i)
+		}
 	}
+	parPool = g
 }
 
 // parGrab is the work-stealing loop: fetch-add the chunk cursor and run each contiguous chunk until
@@ -154,15 +181,21 @@ func parGrab() {
 	}
 }
 
-func parWorkerLoop(w int) {
+func parWorkerLoop(g *parPoolGeneration, w int) {
+	defer g.done.Done()
 	// Persistent workers must not retain request-, tenant-, or secret-bearing
 	// labels from the goroutine that first initializes the process-wide pool.
 	pprof.SetGoroutineLabels(parWorkerLabelContext)
 
-	sl := &parSlots[w]
+	sl := &g.slots[w]
 	var last uint64
 	var spun int64
 	for {
+		select {
+		case <-g.stop:
+			return
+		default:
+		}
 		s := sl.seq.Load()
 		if s != last {
 			last = s
@@ -178,7 +211,11 @@ func parWorkerLoop(w int) {
 		// Idle past the spin budget: park until woken (or until work raced in).
 		sl.sleeping.Store(true)
 		if sl.seq.Load() == last {
-			<-sl.wake
+			select {
+			case <-sl.wake:
+			case <-g.stop:
+				return
+			}
 		}
 		sl.sleeping.Store(false)
 		spun = 0
@@ -248,16 +285,29 @@ func fdot3scalar(r0, r1, r2, x []float32) (float32, float32, float32) {
 // each concurrently, returning when all finish. Every index is handled by exactly one
 // chunk, so any per-index work stays independent and order-preserving.
 func parFor(n, workers int, body func(lo, hi int)) {
-	if workers <= 1 || n <= 1 {
+	if n <= 1 {
 		body(0, n)
 		return
+	}
+	if workers < 1 {
+		workers = 1
 	}
 	if workers > n {
 		workers = n
 	}
-	parPoolOnce.Do(startParPool)
-
 	parDispatchMu.Lock()
+	poolWidth := currentWorkerCount()
+	if poolWidth < workers {
+		// The caller may have retained an older default width at its operation boundary.
+		// Keep that in-flight choice intact even if GOMAXPROCS changed before this dispatch.
+		poolWidth = workers
+	}
+	ensureParPool(poolWidth)
+	if workers <= 1 {
+		parDispatchMu.Unlock()
+		body(0, n)
+		return
+	}
 	// Slice [0,n) into ~workers*granularity contiguous chunks so a fast core can grab several while
 	// a slow core grabs one. Only the requested worker budget is dispatched; this lets decode paths
 	// deliberately use fewer workers than the global prefill budget.
@@ -267,8 +317,8 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	}
 	numChunks := int64((n + chunkSize - 1) / chunkSize)
 	nDisp := workers - 1
-	if nDisp > len(parSlots) {
-		nDisp = len(parSlots)
+	if nDisp > len(parPool.slots) {
+		nDisp = len(parPool.slots)
 	}
 	parBody = body
 	parN = n
@@ -279,7 +329,7 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	// never decrement a not-yet-published counter.
 	parActive.Store(int64(nDisp))
 	for w := 0; w < nDisp; w++ {
-		sl := &parSlots[w]
+		sl := &parPool.slots[w]
 		sl.seq.Add(1) // release: publishes parBody/parN/parChunkSize/parNumChunks
 		if sl.sleeping.Load() {
 			select {
@@ -304,7 +354,7 @@ func parFor(n, workers int, body func(lo, hi int)) {
 // regardless of which branch runs. work is the caller's cost estimate (typically out×in,
 // or out×in×P for a batched GEMM).
 func parForRange(n, work int, body func(lo, hi int)) {
-	parForRangeWorkers(n, work, numWorkers, body)
+	parForRangeWorkers(n, work, currentWorkerCount(), body)
 }
 
 // parForRangeWorkers is parForRange with an explicit worker count. The batch-1 decode GEMV
@@ -335,7 +385,7 @@ func parMatRows(w, x []float32, out, in int) []float32 {
 		row(0, out)
 		return y
 	}
-	parFor(out, numWorkers, row)
+	parFor(out, currentWorkerCount(), row)
 	return y
 }
 
@@ -361,6 +411,6 @@ func matMulBatch(w, X []float32, out, in, P int) []float32 {
 		body(0, out)
 		return Y
 	}
-	parFor(out, numWorkers, body)
+	parFor(out, currentWorkerCount(), body)
 	return Y
 }

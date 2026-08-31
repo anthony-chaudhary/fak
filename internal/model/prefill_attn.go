@@ -74,7 +74,7 @@ func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, l
 		}
 	}
 
-	nw := numWorkers
+	nw := currentWorkerCount()
 	if nw > units {
 		nw = units
 	}

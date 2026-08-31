@@ -278,6 +278,7 @@ func verifyForwardBatchedOK(s *Session) bool {
 // norm + head mirror Prefill's head(prefillBatched(...)) per panel token so the chain
 // logits are bit-identical to serial head(finalNorm(tokenHidden(...))).
 func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int) bool) [][]float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -317,7 +318,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		// and tokenHidden's blockStep passes n.preBias — so this call must too. rmsnormCfg's
 		// hard-coded nil would break exactly that contract.
 		Xn := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for q := lo; q < hi; q++ {
@@ -336,7 +337,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		// Kraw (pre-RoPE, post-qk-norm K) stashed before roping K, exactly like the
 		// per-token path, so a later Evict can reposition a survivor in a single rotation.
 		Kraw := append([]float32(nil), K...)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for q := lo; q < hi; q++ {
 				ropeRowQKInto(Q[q*nH*hd:(q+1)*nH*hd], K[q*w:(q+1)*w], cosP[q], sinP[q], hd, nH, nKV)
 			}
@@ -346,7 +347,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		if allow == nil {
 			// CHAIN: byte-identical to prefillBatched's contiguous-causal attention — query
 			// q (absolute base+q) attends to cached keys [j0, base+q] inclusive.
-			parFor(P, numWorkers, func(lo, hi int) {
+			parFor(P, dispatchWorkers, func(lo, hi int) {
 				for q := lo; q < hi; q++ {
 					nPos := base + q + 1
 					j0 := windowLoContig(nPos, base+q, Wl)
@@ -368,7 +369,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 			// it in index order for a deterministic reduction. Siblings are NOT ancestors
 			// of each other, so two candidate continuations never attend to one another —
 			// the structural difference from the chain.
-			parFor(P, numWorkers, func(lo, hi int) {
+			parFor(P, dispatchWorkers, func(lo, hi int) {
 				for q := lo; q < hi; q++ {
 					for h := 0; h < nH; h++ {
 						kvh := h / grp
@@ -411,7 +412,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		}
 
 		Xn2 := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for q := lo; q < hi; q++ {

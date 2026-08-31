@@ -421,6 +421,7 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 // already-normalized token, updates the persistent per-layer conv window and Gated-DeltaNet
 // recurrent state, and returns this token's output projection.
 func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
@@ -553,14 +554,14 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 			}
 		}
 	}
-	if numWorkers <= 1 || nV*kHd*vHd < parThreshold {
+	if dispatchWorkers <= 1 || nV*kHd*vHd < parThreshold {
 		kvmem := make([]float32, vHd)
 		delta := make([]float32, vHd)
 		for h := 0; h < nV; h++ {
 			headStep(h, kvmem, delta)
 		}
 	} else {
-		parFor(nV, numWorkers, func(lo, hi int) {
+		parFor(nV, dispatchWorkers, func(lo, hi int) {
 			kvmem := make([]float32, vHd) // per-worker scratch (the only cross-head hazard)
 			delta := make([]float32, vHd)
 			for h := lo; h < hi; h++ {

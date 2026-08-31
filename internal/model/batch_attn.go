@@ -25,7 +25,7 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 		}
 	}
 	useSaxpy3SIMD := B >= attnSaxpy3SIMDMinBatch
-	nw := numWorkers
+	nw := currentWorkerCount()
 	if nw > units {
 		nw = units
 	}
@@ -115,7 +115,7 @@ func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, 
 			maxPos = n
 		}
 	}
-	nw := numWorkers
+	nw := currentWorkerCount()
 	if nw > units {
 		nw = units
 	}
@@ -175,7 +175,7 @@ func attnPrefillMultiGQAInto(attnOut, Q []float32, caches []*KVCache, baseB []in
 			maxPos = n
 		}
 	}
-	nw := numWorkers
+	nw := currentWorkerCount()
 	if nw > units {
 		nw = units
 	}

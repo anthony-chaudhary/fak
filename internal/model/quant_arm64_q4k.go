@@ -72,7 +72,7 @@ func q4kGemmExtractOnceInt8IntoArm64(qt *q4kTensor, qp *q8Panel, Y []float32) {
 	if out*in*P < parThreshold {
 		body(0, out)
 	} else {
-		parFor(out, numWorkers, body)
+		parFor(out, currentWorkerCount(), body)
 	}
 }
 

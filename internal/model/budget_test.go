@@ -290,3 +290,59 @@ func TestQ4KDecodeWorkersHonorsExplicitBudget(t *testing.T) {
 		}
 	}
 }
+
+func setWorkerBudgetStateForTest(t *testing.T, workers int, source string, now func() int) {
+	t.Helper()
+	workerBudgetMu.Lock()
+	savedWorkers, savedSource, savedNow := numWorkers, workerBudgetSource, gomaxprocsNow
+	numWorkers, workerBudgetSource, gomaxprocsNow = workers, source, now
+	workerBudgetMu.Unlock()
+	t.Cleanup(func() {
+		workerBudgetMu.Lock()
+		numWorkers, workerBudgetSource, gomaxprocsNow = savedWorkers, savedSource, savedNow
+		workerBudgetMu.Unlock()
+	})
+}
+
+func TestDefaultWorkersFollowRuntimeGOMAXPROCS(t *testing.T) {
+	width := 4
+	setWorkerBudgetStateForTest(t, width, defaultWorkerBudgetSource, func() int { return width })
+
+	for _, want := range []int{4, 2, 6} {
+		width = want
+		if got := NumWorkers(); got != want {
+			t.Fatalf("NumWorkers()=%d after runtime width %d, want %d", got, want, want)
+		}
+		if got := WorkerBudget(); got != defaultWorkerBudgetSource {
+			t.Fatalf("WorkerBudget()=%q, want %q", got, defaultWorkerBudgetSource)
+		}
+	}
+}
+
+func TestExplicitWorkerBudgetsStayFixedAcrossRuntimeChanges(t *testing.T) {
+	cases := []struct {
+		name    string
+		workers int
+		source  string
+	}{
+		{name: "FAK_WORKERS", workers: 3, source: "FAK_WORKERS=3"},
+		{name: "FAK_BUDGET", workers: 2, source: "FAK_BUDGET=0.5"},
+		{name: "budget flag", workers: 5, source: "-budget=0.5"},
+		{name: "jobs flag", workers: 7, source: "-jobs=7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			width := 4
+			setWorkerBudgetStateForTest(t, tc.workers, tc.source, func() int { return width })
+			for _, runtimeWidth := range []int{2, 6} {
+				width = runtimeWidth
+				if got := NumWorkers(); got != tc.workers {
+					t.Fatalf("NumWorkers()=%d after runtime width %d, want fixed %d", got, runtimeWidth, tc.workers)
+				}
+				if got := WorkerBudget(); got != tc.source {
+					t.Fatalf("WorkerBudget()=%q, want %q", got, tc.source)
+				}
+			}
+		})
+	}
+}

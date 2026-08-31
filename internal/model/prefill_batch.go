@@ -31,6 +31,7 @@ package model
 // these down exactly as the per-token path does), and returns the LAST token's hidden
 // vector (post-final-norm, pre-head) — the caller applies the head once.
 func (s *Session) prefillBatched(ids []int) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -66,7 +67,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		// passes n.preBias (arch.go:635). rmsnormCfg hard-passes nil and must not be
 		// used here.
 		Xn := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
@@ -89,7 +90,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		Kraw := append([]float32(nil), K...)
 		// RoPE q,k per head at each token's absolute position (parallel across tokens),
 		// each row through the shared single-row builder.
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				ropeRowQKInto(Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], cosP[t], sinP[t], hd, nH, nKV)
 			}
@@ -105,7 +106,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		// cache is contiguous (pos[j]==j: a prior Evict renumbers pos[i]=i and prefill
 		// appends at Cache.Len()), so the index IS the absolute position and the lower
 		// bound max(0, base+t-W+1) equals the keyed-off-pos[] bound.
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				nPos := base + t + 1
 				j0 := windowLoContig(nPos, base+t, Wl)
@@ -139,7 +140,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 
 		// MLP (SwiGLU), batched + residual.
 		Xn2 := make([]float32, P*H)
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for t := lo; t < hi; t++ {

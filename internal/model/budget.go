@@ -34,9 +34,45 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const defaultWorkerBudgetSource = "default(GOMAXPROCS)"
+
+var (
+	workerBudgetMu sync.Mutex
+	gomaxprocsNow  = func() int { return runtime.GOMAXPROCS(0) }
+)
+
+// currentWorkerCount snapshots the process worker budget at an operation boundary.
+// Only the runtime default is dynamic: explicit environment and flag overrides stay
+// pinned until the operator changes them explicitly. Callers retain the returned
+// integer for the whole dispatch, so a runtime update never resizes in-flight work.
+func currentWorkerCount() int {
+	workerBudgetMu.Lock()
+	defer workerBudgetMu.Unlock()
+	if workerBudgetSource == defaultWorkerBudgetSource {
+		w := gomaxprocsNow()
+		if w < 1 {
+			w = 1
+		}
+		numWorkers = w
+	}
+	return numWorkers
+}
+
+func currentWorkerBudget() (int, string) {
+	workerBudgetMu.Lock()
+	defer workerBudgetMu.Unlock()
+	if workerBudgetSource == defaultWorkerBudgetSource {
+		w := gomaxprocsNow()
+		if w < 1 {
+			w = 1
+		}
+		numWorkers = w
+	}
+	return numWorkers, workerBudgetSource
+}
 
 // SetWorkerBudget re-resolves the matmul worker count from a fractional budget AFTER
 // package init — the path a bench's -budget flag uses. The env-driven numWorkers var is
@@ -54,8 +90,10 @@ func SetWorkerBudget(frac float64) error {
 	if !ok {
 		return fmt.Errorf("budget %v is not a fraction in (0,1] or a percent in (0,100]", frac)
 	}
+	workerBudgetMu.Lock()
 	numWorkers = w
 	workerBudgetSource = fmt.Sprintf("-budget=%g", frac)
+	workerBudgetMu.Unlock()
 	return nil
 }
 
@@ -66,8 +104,10 @@ func SetWorkers(n int) error {
 	if n < 1 {
 		return fmt.Errorf("workers %d must be >= 1", n)
 	}
+	workerBudgetMu.Lock()
 	numWorkers = n
 	workerBudgetSource = fmt.Sprintf("-jobs=%d", n)
+	workerBudgetMu.Unlock()
 	return nil
 }
 
@@ -76,14 +116,16 @@ func SetWorkers(n int) error {
 // the M3 Pro scorecard peaks at 4-6 workers, while prefill still benefits from the
 // global worker count. Explicit FAK_WORKERS/FAK_BUDGET/-budget choices remain exact.
 func Q8DecodeWorkers() int {
-	w, _ := q8DecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	workers, source := currentWorkerBudget()
+	w, _ := q8DecodeWorkersFor(workers, source, runtime.GOOS, runtime.GOARCH)
 	return w
 }
 
 // Q8DecodeWorkerBudget reports how Q8DecodeWorkers was derived, so benchmark JSON can
 // state when decode used the Apple Silicon default cap instead of the global budget.
 func Q8DecodeWorkerBudget() string {
-	_, source := q8DecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	workers, budgetSource := currentWorkerBudget()
+	_, source := q8DecodeWorkersFor(workers, budgetSource, runtime.GOOS, runtime.GOARCH)
 	return source
 }
 
@@ -168,7 +210,8 @@ func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) 
 // (#4625) follow-up; this flat workers/4 (<=64) matches the witnessed knee (= 8 workers/node
 // x 8 nodes). Operators override with FAK_WORKERS/FAK_BUDGET (non-default source bypasses it).
 func Q4KDecodeWorkers() int {
-	w, _ := q4kDecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	workers, source := currentWorkerBudget()
+	w, _ := q4kDecodeWorkersFor(workers, source, runtime.GOOS, runtime.GOARCH)
 	return w
 }
 
@@ -188,7 +231,8 @@ func kQuantDecodeWorkers() int { return KQuantDecodeWorkers() }
 
 // Q4KDecodeWorkerBudget reports how Q4KDecodeWorkers was derived (for a bench JSON line).
 func Q4KDecodeWorkerBudget() string {
-	_, source := q4kDecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	workers, budgetSource := currentWorkerBudget()
+	_, source := q4kDecodeWorkersFor(workers, budgetSource, runtime.GOOS, runtime.GOARCH)
 	return source
 }
 

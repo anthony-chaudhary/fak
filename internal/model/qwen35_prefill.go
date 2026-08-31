@@ -43,6 +43,7 @@ func (s *Session) prefillQwen35HybridQNoLogits(ids []int) {
 }
 
 func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	P := len(ids)
@@ -73,7 +74,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		Xn := make([]float32, P*H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
 		t = s.phaseStart()
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
 					copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
@@ -91,7 +92,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 			o = s.prefillQwen35FullAttnLayerQ(l, Xn, P, base, qz)
 		}
 		t = s.phaseStart()
-		parFor(len(X), numWorkers, func(lo, hi int) {
+		parFor(len(X), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += o[i]
 			}
@@ -101,7 +102,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		Xn2 := make([]float32, P*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		t = s.phaseStart()
-		parFor(P, numWorkers, func(lo, hi int) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
 					copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
@@ -126,7 +127,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
 		}
 		t = s.phaseStart()
-		parFor(len(G), numWorkers, func(lo, hi int) {
+		parFor(len(G), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				G[i] = act(G[i], cfg) * U[i]
 			}
@@ -141,7 +142,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
 		}
 		t = s.phaseStart()
-		parFor(len(X), numWorkers, func(lo, hi int) {
+		parFor(len(X), dispatchWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				X[i] += Down[i]
 			}
@@ -161,6 +162,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 }
 
 func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func([]float32, int, int) *q8Panel) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
@@ -190,7 +192,7 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	convOut := make([]float32, P*convDim)
 	hist := lst.conv
 	t = s.phaseStart()
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			outRow := convOut[t*convDim : (t+1)*convDim]
 			for c := 0; c < convDim; c++ {
@@ -233,7 +235,7 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	qNormAll := make([]float32, P*keyDim)
 	kNormAll := make([]float32, P*keyDim)
 	t = s.phaseStart()
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			row := convOut[t*convDim : (t+1)*convDim]
 			q := row[0:keyDim]
@@ -251,7 +253,7 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	})
 	s.phaseEnd("qwen35_linear_qk_norm", t)
 	t = s.phaseStart()
-	parFor(nV, numWorkers, func(lo, hi int) {
+	parFor(nV, dispatchWorkers, func(lo, hi int) {
 		for h := lo; h < hi; h++ {
 			kh := h / repeat
 			st := lst.recurrent[h]
@@ -298,7 +300,7 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	})
 	s.phaseEnd("qwen35_linear_recurrent", t)
 	t = s.phaseStart()
-	parFor(P*nV, numWorkers, func(lo, hi int) {
+	parFor(P*nV, dispatchWorkers, func(lo, hi int) {
 		for idx := lo; idx < hi; idx++ {
 			t := idx / nV
 			h := idx - t*nV
@@ -320,6 +322,7 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 }
 
 func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, qz func([]float32, int, int) *q8Panel) []float32 {
+	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -343,7 +346,7 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 	Q := make([]float32, P*qWidth)
 	gate := make([]float32, P*qWidth)
 	t = s.phaseStart()
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			src := qf[t*2*qWidth : (t+1)*2*qWidth]
 			for h := 0; h < nH; h++ {
@@ -354,14 +357,14 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 	})
 	s.phaseEnd("qwen35_full_split_gate", t)
 	t = s.phaseStart()
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			m.applyProjBias(l, Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w], V[t*w:(t+1)*w])
 			m.applyLayerQKNorm(l, Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w])
 		}
 	})
 	s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
-	parFor(P, numWorkers, func(lo, hi int) {
+	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			cos, sin := ropeRowForLayer(cfg, l, base+t)
 			ropeRowQKInto(Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w], cos, sin, hd, nH, nKV)

@@ -1450,7 +1450,7 @@ func kQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 // bounded decode worker budget as the Q4_K decode GEMV (q4kMatRowsInto → q4kDecodeWorkers). A
 // q4_k_m artifact is a MIXTURE: the Q4_K majority streams through q4kMatRowsInto, but the
 // Q5_K/Q6_K minority a q4_k_m mix leaves on ffn_down / lm_head (plus mixed-quant routed experts)
-// streams through THIS kernel on every decode step. Leaving it at the global numWorkers ran part
+// streams through THIS kernel on every decode step. Leaving it at the global currentWorkerCount() ran part
 // of each token in the uncapped all-workers regime the witnessed cap exists to dodge, so the
 // ordinary path only half-selected the witnessed regime. Bit-identical either way — the [lo,hi)
 // split is worker-count independent (parForRangeWorkers), pinned by
@@ -1460,7 +1460,7 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 }
 
 // kQuantMatRowsIntoWorkers is kQuantMatRowsInto with an explicit worker budget, so the batched
-// PREFILL fallback in kQuantMatRowsIntoBatch keeps the full numWorkers width while batch-1 decode
+// PREFILL fallback in kQuantMatRowsIntoBatch keeps the full currentWorkerCount() width while batch-1 decode
 // takes the capped decode budget. Prefill is not the memory-bound batch-1 shape the cap targets.
 func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 	y = y[:qt.out]
@@ -1535,12 +1535,13 @@ func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
 // kQuantSDOTEnabled(qt.kind) the batch variant falls back to the per-token kQuantMatRowsInto loop
 // — correctness first; the f32 batch below is the bit-exact dequant-once speedup.
 func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
+	dispatchWorkers := currentWorkerCount()
 	if kQuantSDOTEnabled(qt.kind) {
 		in, out := qt.in, qt.out
 		for t := 0; t < P; t++ {
-			// PREFILL keeps the full numWorkers width: the #4974 decode cap targets the
+			// PREFILL keeps the full dispatchWorkers width: the #4974 decode cap targets the
 			// memory-bound batch-1 decode shape, not a P-token prefill wall.
-			kQuantMatRowsIntoWorkers(qt, X[t*in:(t+1)*in], Y[t*out:(t+1)*out], numWorkers)
+			kQuantMatRowsIntoWorkers(qt, X[t*in:(t+1)*in], Y[t*out:(t+1)*out], dispatchWorkers)
 		}
 		return
 	}

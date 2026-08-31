@@ -110,7 +110,7 @@ func quantizeQ2(w []float32, out, in int) *q2Tensor {
 	nblk := in / qBlk2
 	quarter := qBlk2 / 4
 	qt := &q2Tensor{out: out, in: in, nblk: nblk, d: make([]float32, out*nblk), q: make([]byte, out*nblk*quarter)}
-	parFor(out, numWorkers, func(lo, hi int) {
+	parFor(out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			for b := 0; b < nblk; b++ {
 				off := o*in + b*qBlk2
@@ -130,7 +130,7 @@ func dequantQ2Tensor(qt *q2Tensor) []float32 {
 	}
 	w := make([]float32, qt.out*qt.in)
 	quarter := qBlk2 / 4
-	parFor(qt.out, numWorkers, func(lo, hi int) {
+	parFor(qt.out, currentWorkerCount(), func(lo, hi int) {
 		for o := lo; o < hi; o++ {
 			for b := 0; b < qt.nblk; b++ {
 				dequantQ2Block(w[o*qt.in+b*qBlk2:], qt.d[o*qt.nblk+b], qt.q[o*qt.nblk*quarter+b*quarter:])
