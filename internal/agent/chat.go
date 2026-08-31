@@ -1056,8 +1056,17 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			}
 			continue
 		}
-		raw, _ := io.ReadAll(resp.Body)
+		raw, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && readErr != nil {
+			// A 200 with a truncated/unreadable body has not produced a completion yet,
+			// so it is safe to spend the same shared attempt budget used for a
+			// transport glitch. The successful status supersedes any older retryable
+			// status: if every remaining read fails, surface this final wrapped cause.
+			rs.noteTransportGlitch(fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), readErr))
+			rs.lastStatusErr = nil
+			continue
+		}
 		if resp.StatusCode != http.StatusOK {
 			transientRetryTried := triedTransientRetry
 			transientTargetTried := triedTransientTarget

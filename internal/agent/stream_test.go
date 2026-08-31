@@ -170,6 +170,105 @@ func TestCompleteStreamFallsBackWhenUpstreamIgnoresStream(t *testing.T) {
 	}
 }
 
+func TestCompleteStreamRetriesNonSSEHTTP200ReadFailureBeforeEmission(t *testing.T) {
+	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "2")
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "0")
+
+	readCause := io.ErrUnexpectedEOF
+	const good = `{"model":"m","choices":[{"message":{"role":"assistant","content":"fallback recovered"},"finish_reason":"stop"}]}`
+	attempts := 0
+	p := NewHTTPPlanner("http://upstream.test", "m", "")
+	p.Client = &http.Client{Transport: issue10321RoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return issue10321Response("application/json", &issue10321ReadCloser{
+				reader: strings.NewReader(`{"model":"m"`),
+				err:    readCause,
+			}), nil
+		}
+		return issue10321Response("application/json", io.NopCloser(strings.NewReader(good))), nil
+	})}
+
+	var got []string
+	comp, err := p.CompleteStream(context.Background(), func(fragment string) error {
+		got = append(got, fragment)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if len(got) != 1 || got[0] != "fallback recovered" {
+		t.Fatalf("sink fragments = %q, want one recovered fragment", got)
+	}
+	if comp.Message.Content != "fallback recovered" {
+		t.Fatalf("content = %q, want fallback recovered", comp.Message.Content)
+	}
+}
+
+func TestCompleteStreamExhaustedNonSSEHTTP200ReadsPreserveCause(t *testing.T) {
+	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "2")
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "0")
+
+	attempts := 0
+	p := NewHTTPPlanner("http://upstream.test", "m", "")
+	p.Client = &http.Client{Transport: issue10321RoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return issue10321Response("application/json", &issue10321ReadCloser{
+			reader: strings.NewReader(`{"choices":[`),
+			err:    io.ErrUnexpectedEOF,
+		}), nil
+	})}
+
+	var got []string
+	_, err := p.CompleteStream(context.Background(), func(fragment string) error {
+		got = append(got, fragment)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want wrapped io.ErrUnexpectedEOF", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if len(got) != 0 {
+		t.Fatalf("sink fragments = %q, want none", got)
+	}
+}
+
+func TestCompleteStreamDoesNotRetrySSEReadFailureAfterEmission(t *testing.T) {
+	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "3")
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "0")
+
+	readCause := errors.New("sse body reset")
+	attempts := 0
+	p := NewHTTPPlanner("http://upstream.test", "m", "")
+	p.Client = &http.Client{Transport: issue10321RoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return issue10321Response("text/event-stream", &issue10321ReadCloser{
+			reader: strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"once\"}}]}\n\n"),
+			err:    readCause,
+		}), nil
+	})}
+
+	var got []string
+	_, err := p.CompleteStream(context.Background(), func(fragment string) error {
+		got = append(got, fragment)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if !errors.Is(err, readCause) {
+		t.Fatalf("err = %v, want wrapped SSE read cause", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 after SSE emission", attempts)
+	}
+	if len(got) != 1 || got[0] != "once" {
+		t.Fatalf("sink fragments = %q, want [once]", got)
+	}
+}
+
 func TestStreamingSupportedByProvider(t *testing.T) {
 	cases := []struct {
 		provider Provider

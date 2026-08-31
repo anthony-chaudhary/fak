@@ -547,7 +547,7 @@ type openAIStreamChunk struct {
 // dial failure fails fast; a 401 on the rotating-credential path self-heals once via a
 // fresh-token re-send. It returns a live 200 response (body still open — the caller closes
 // it) or, after exhausting attempts, the true upstream status error (never a later glitch).
-func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, error) {
+func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, []byte, error) {
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	_, attemptsPinned := plannerMaxAttemptsPinned()
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
@@ -564,14 +564,14 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		stop, err := p.waitBeforeAttempt(ctx, attempt, &rs, deadline, budgetOn)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if stop {
 			break
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		call.applyHeaders(req)
 		finishProvider := BeginProviderCall(req)
@@ -580,11 +580,27 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		finishProvider(providerResponseStatus(r), err)
 		if err != nil {
 			if uerr := classifyDoError(err, &rs); uerr != nil {
-				return nil, uerr
+				return nil, nil, uerr
 			}
 			continue
 		}
 		if r.StatusCode == http.StatusOK {
+			if !upstreamStreamsSSE(r) {
+				raw, readErr := io.ReadAll(r.Body)
+				r.Body.Close()
+				if readErr != nil {
+					// This fallback has emitted nothing to the sink, so a 200 body
+					// read failure is retryable within this loop's existing shared
+					// budget. A final read failure must remain the terminal cause,
+					// rather than an older retryable status from another attempt.
+					rs.noteTransportGlitch(fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), readErr))
+					rs.lastStatusErr = nil
+					continue
+				}
+				fbState.noteRecovered(p, attempt)
+				notifyRehomeRecovered(p, &rehomePending, attempt)
+				return r, raw, nil
+			}
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
 			fbState.noteRecovered(p, attempt)
 			// A 200 after a 429-account-cap seat rehome is a CONFIRMED rehome (see Complete).
@@ -603,7 +619,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			recordRefreshState: true, bodyCap: 400,
 		})
 		if statusErr != nil {
-			return nil, statusErr
+			return nil, nil, statusErr
 		}
 		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
 			attempt--
@@ -613,9 +629,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		}
 	}
 	if resp == nil {
-		return nil, rs.exhausted("planner: streaming failed after retries")
+		return nil, nil, rs.exhausted("planner: streaming failed after retries")
 	}
-	return resp, nil
+	return resp, nil, nil
 }
 
 // upstreamStreamsSSE reports whether an opened upstream response is actually framed as an
@@ -647,7 +663,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// backoff). A 401 on the rotating-credential path self-heals once via a fresh-token
 	// re-send (a no-op on the static-key/passthrough paths). Each non-200 response body is
 	// drained+closed in the loop; only the successful 200 escapes to the streaming reader.
-	resp, err := p.streamConnect(ctx, call)
+	resp, bufferedRaw, err := p.streamConnect(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -658,10 +674,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// parser — deliver the whole content as one fragment — so the client gets the
 	// correct (if not incremental) turn instead of an empty stream.
 	if !upstreamStreamsSSE(resp) {
-		raw, rerr := io.ReadAll(resp.Body)
-		if rerr != nil {
-			return nil, fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), rerr)
-		}
+		raw := bufferedRaw
 		comp, perr := call.adapter.ParseResponse(raw)
 		if perr != nil {
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), perr)
