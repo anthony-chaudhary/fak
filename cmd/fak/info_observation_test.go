@@ -309,3 +309,39 @@ func infoObservationEnvelope(t *testing.T, source, provenance string, availabili
 	}
 	return envelope
 }
+
+func TestFocusedPagesDoNotRepeatOverviewObservationChrome(t *testing.T) {
+	zero := 0.0
+	v := guardInfoVars{Observation: &guardInfoObservationView{
+		Transport:        guardInfoObservationTransportTyped,
+		Sessions:         guardInfoObservationMetric{Value: &zero, Availability: guardvars.AvailabilityObserved, Unit: "sessions"},
+		CacheAttribution: guardInfoObservationMetric{Value: &zero, Availability: guardvars.AvailabilityObserved, Unit: "tokens"},
+	}}
+	tr := newGuardInfoTrend(8)
+
+	overview := renderGuardInfoInteractiveBlock(infoViewState{active: viewOverview}, v, tr, 120, 0)
+	agents := renderGuardInfoInteractiveBlock(infoViewState{active: viewAgents}, v, tr, 120, 0)
+	cache := renderGuardInfoInteractiveBlock(infoViewState{active: viewCache}, v, tr, 120, 0)
+
+	const shared = "observation transport available · typed"
+	if !strings.Contains(overview, shared) {
+		t.Fatalf("overview lost shared observation context:\n%s", overview)
+	}
+	if strings.Contains(agents, shared) {
+		t.Fatalf("focused Agents page still repeats overview observation chrome:\n%s", agents)
+	}
+	if !strings.Contains(agents, "agents: sessions 0 sessions OBSERVED") {
+		t.Fatalf("focused Agents page did not lead with page-specific content:\n%s", agents)
+	}
+	if overview == agents || agents == cache || overview == cache {
+		t.Fatalf("page switch did not produce visibly distinct captured frames:\noverview:\n%s\nagents:\n%s\ncache:\n%s", overview, agents, cache)
+	}
+	for _, want := range []string{"cache operation is NOT OBSERVED", "likely: child bypasses this gateway", "next: send one guarded child turn"} {
+		if !strings.Contains(cache, want) {
+			t.Fatalf("focused Cache page lost typed cache diagnosis %q:\n%s", want, cache)
+		}
+		if strings.Contains(agents, want) {
+			t.Fatalf("focused Agents page repeats cache-only diagnosis %q:\n%s", want, agents)
+		}
+	}
+}
