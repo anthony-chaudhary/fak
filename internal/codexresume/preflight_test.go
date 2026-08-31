@@ -116,7 +116,7 @@ func TestPreflightAcceptsCorrectedFCItemIDWithCallLogicalID(t *testing.T) {
 
 func TestPreflightLiveWriterOwnerIsAlreadyActive(t *testing.T) {
 	home := t.TempDir()
-	threadID := "019ff1af-9d63-7452-8109-live-owner"
+	threadID := "019ff1af-9d63-7452-8109-58172f63c3eb"
 	rollout := filepath.Join(home, "live-owner.jsonl")
 	writeRolloutRows(t, rollout, sessionMeta(threadID))
 	makeWriterLock(t, home, threadID)
@@ -136,7 +136,7 @@ func TestPreflightLiveWriterOwnerIsAlreadyActive(t *testing.T) {
 
 func TestPreflightPositiveNoOwnerWitnessAllowsCompatibleResume(t *testing.T) {
 	home := t.TempDir()
-	threadID := "019ff1af-9d63-7452-8109-stale"
+	threadID := "019ff1af-9d63-7452-8109-58172f63c3ec"
 	rollout := filepath.Join(home, "stale-owner.jsonl")
 	writeRolloutRows(t, rollout, sessionMeta(threadID))
 	makeWriterLock(t, home, threadID)
@@ -154,7 +154,7 @@ func TestPreflightPositiveNoOwnerWitnessAllowsCompatibleResume(t *testing.T) {
 
 func TestPreflightUnknownWriterOwnershipFailsClosed(t *testing.T) {
 	home := t.TempDir()
-	threadID := "019ff1af-9d63-7452-8109-unknown"
+	threadID := "019ff1af-9d63-7452-8109-58172f63c3ed"
 	rollout := filepath.Join(home, "unknown-owner.jsonl")
 	writeRolloutRows(t, rollout, sessionMeta(threadID))
 	makeWriterLock(t, home, threadID)
@@ -284,5 +284,45 @@ func TestRecoverCorrectedHistoryReachesAuthoritativeCompletion(t *testing.T) {
 	}
 	if got.Preflight == nil || got.Preflight.Verdict != VerdictResumable {
 		t.Fatalf("preflight=%+v", got.Preflight)
+	}
+}
+
+func TestPreflightEmitsTypedThreadAndResourceWithCompatibilityFields(t *testing.T) {
+	home := t.TempDir()
+	thread, err := NewCodexThreadIdentity(testThreadIDOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(home, "sessions", "typed.jsonl")
+	writeRolloutRows(t, rollout, sessionMeta(thread.ID), functionCall("fc_call", "call_logical"))
+	lockPath := makeWriterLock(t, home, thread.ID)
+	got := preflightWithProbe(CheckConfig{ThreadID: thread.ID, Thread: thread, RolloutPath: rollout, CodexHome: home}, fixedOwnershipProbe{
+		witness: ownershipWitness{source: "test_positive", conclusive: true},
+	})
+	if got.Thread == nil || *got.Thread != thread {
+		t.Fatalf("typed thread=%+v", got.Thread)
+	}
+	if got.WriterOwnership.Resource == nil || got.WriterOwnership.Resource.Thread != thread {
+		t.Fatalf("typed resource=%+v", got.WriterOwnership.Resource)
+	}
+	if got.ThreadID != thread.ID || got.WriterLockPath != lockPath || got.WriterOwnership.LockPath != got.WriterOwnership.Resource.LockPath {
+		t.Fatalf("compatibility fields result=%+v", got)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"thread_id", "thread", "writer_lock_path", "writer_ownership", "resource", "resource_id", "lock_path"} {
+		if !strings.Contains(string(data), `"`+field+`"`) {
+			t.Fatalf("preflight JSON missing %s: %s", field, data)
+		}
+	}
+}
+
+func TestPreflightThreadIdentityMismatchFailsClosedBeforeOwnershipProbe(t *testing.T) {
+	thread, _ := NewCodexThreadIdentity(testThreadIDOne)
+	got := preflightWithProbe(CheckConfig{ThreadID: testThreadIDTwo, Thread: thread, CodexHome: t.TempDir()}, fixedOwnershipProbe{})
+	if got.Verdict != VerdictNotFound || !strings.Contains(got.Detail, "does not match") {
+		t.Fatalf("mismatched preflight=%+v", got)
 	}
 }

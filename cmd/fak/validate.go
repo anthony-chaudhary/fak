@@ -77,26 +77,34 @@ type validateWSLCapabilityVerdict struct {
 }
 
 type validateResult struct {
-	Schema        string                        `json:"schema"`
-	Mode          string                        `json:"mode"`
-	Ref           string                        `json:"ref"`
-	Tip           string                        `json:"tip"`
-	Mine          []string                      `json:"mine"`
-	Tested        []string                      `json:"tested,omitempty"`
-	Runner        string                        `json:"runner,omitempty"`
-	TestRun       string                        `json:"test_run,omitempty"`
-	TestScope     string                        `json:"test_scope,omitempty"`
-	OK            bool                          `json:"ok"`
-	Partial       bool                          `json:"partial"`
-	TimedOut      bool                          `json:"timed_out"`
-	Reason        string                        `json:"reason,omitempty"`
-	TimeoutMS     int64                         `json:"timeout_ms"`
-	ElapsedMS     int64                         `json:"elapsed_ms"`
-	Phases        []validatePhase               `json:"phases"`
-	SkippedPhases []string                      `json:"skipped_phases"`
-	Overlays      validateOverlayProgress       `json:"overlays"`
-	WSLPreflight  *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
-	Failures      []ciPreflightFailure          `json:"failures"`
+	Schema         string                        `json:"schema"`
+	Mode           string                        `json:"mode"`
+	Ref            string                        `json:"ref"`
+	Tip            string                        `json:"tip"`
+	Mine           []string                      `json:"mine"`
+	Tested         []string                      `json:"tested,omitempty"`
+	Runner         string                        `json:"runner,omitempty"`
+	TestRun        string                        `json:"test_run,omitempty"`
+	TestScope      string                        `json:"test_scope,omitempty"`
+	OK             bool                          `json:"ok"`
+	Partial        bool                          `json:"partial"`
+	TimedOut       bool                          `json:"timed_out"`
+	Reason         string                        `json:"reason,omitempty"`
+	TimeoutMS      int64                         `json:"timeout_ms"`
+	ElapsedMS      int64                         `json:"elapsed_ms"`
+	Phases         []validatePhase               `json:"phases"`
+	SkippedPhases  []string                      `json:"skipped_phases"`
+	Overlays       validateOverlayProgress       `json:"overlays"`
+	WSLPreflight   *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
+	Failures       []ciPreflightFailure          `json:"failures"`
+	SelectionAudit *validateSelectionAudit       `json:"selection_audit,omitempty"`
+}
+
+type validateSelectionAudit struct {
+	Base             string   `json:"base"`
+	Head             string   `json:"head"`
+	SelectedPackages []string `json:"selected_packages"`
+	affectedtests.SelectionAudit
 }
 
 type validateRecorder struct {
@@ -181,6 +189,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	testOnly := fs.Bool("test-only", false, "skip affected-package build/vet and run only affected tests in the isolated checkout")
 	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
 	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
+	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	if !parseFlags(fs, argv) {
@@ -207,7 +216,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(mine)},
 		Failures: []ciPreflightFailure{},
 	}
-	phaseOrder := validatePhaseOrder(*testOnly)
+	phaseOrder := validatePhaseOrder(*testOnly, *auditSelection)
 	recorder := validateRecorder{ctx: ctx, stderr: stderr, progress: *progress, started: started, phaseOrder: phaseOrder, res: &res}
 
 	phase := recorder.start("resolve_root")
@@ -365,21 +374,58 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			recorder.skip("build", "no affected package")
 			recorder.skip("vet", "no affected package")
 		}
+		var selectedObservation affectedtests.TestObservation
 		if len(res.Tested) > 0 {
 			res.Runner = validateTestRunner(runtime.GOOS, *wslTests)
 			testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
 			args := validateTestArgs(effectiveTestRun, testTargets)
+			if *auditSelection {
+				args = validateJSONTestArgs(args)
+			}
 			phase = recorder.start("test")
-			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "test", errors.New("affected tests failed"), *asJSON, func() (string, bool) {
-				if wslWorkspace {
-					return runValidateTestsInWSLWorkspaceWithin(ctx, dir, args)
-				}
-				return runValidateTestsWithin(ctx, r, dir, tip, args, *wslTests)
-			}); timedOut {
+			detail, ok := runValidateTestCommand(ctx, r, dir, tip, args, *wslTests, wslWorkspace)
+			if *auditSelection {
+				selectedObservation = parseValidateTestObservation(detail, res.Tested, ctx.Err() == nil)
+			}
+			if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "test", *asJSON); timedOut {
 				return code
 			}
+			if ok {
+				phase.finish(nil)
+			} else {
+				recordValidateFailure(&res, phase, "test", detail, errors.New("affected tests failed"))
+			}
 		} else {
+			selectedObservation = affectedtests.TestObservation{Complete: true, Packages: []affectedtests.PackageObservation{}}
 			recorder.skip("test", "no affected test-bearing package")
+		}
+		if *auditSelection {
+			fullPackages := validateAllPackages(fileToPkg)
+			phase = recorder.start("test_audit_full")
+			fullArgs := validateJSONTestArgs(validateTestArgs("", packagePatternsForRoot(dir, fullPackages, fileToPkg)))
+			detail, _ := runValidateTestCommand(ctx, r, dir, tip, fullArgs, *wslTests, wslWorkspace)
+			fullObservation := parseValidateTestObservation(detail, fullPackages, ctx.Err() == nil)
+			if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "test_audit_full", *asJSON); timedOut {
+				return code
+			}
+			audit := affectedtests.AuditSelection(selectedObservation, fullObservation)
+			selectedPackages := append([]string(nil), res.Tested...)
+			sort.Strings(selectedPackages)
+			res.SelectionAudit = &validateSelectionAudit{
+				Base: tip, Head: validateAuditHead(r, tip, paths),
+				SelectedPackages: selectedPackages, SelectionAudit: audit,
+			}
+			if audit.Sound {
+				phase.finish(nil)
+			} else {
+				detail := "affected-test selection was not sound"
+				if !audit.Complete {
+					detail = "affected-test selection audit was incomplete"
+				}
+				phase.finishAs("failed", detail)
+				res.OK = false
+				res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-audit-selection", Detail: detail})
+			}
 		}
 	}
 	recorder.finish()
@@ -1154,6 +1200,90 @@ func runValidateTestsInWSLWorkspaceWithin(ctx context.Context, root string, args
 	return strings.TrimSpace(string(out)), err == nil
 }
 
+type validateGoTestEvent struct {
+	Action  string `json:"Action"`
+	Package string `json:"Package"`
+}
+
+func validateAuditHead(root, tip string, paths []string) string {
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, tip+"\x00")
+	for _, rel := range paths {
+		_, _ = io.WriteString(hash, rel+"\x00")
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			_, _ = io.WriteString(hash, "<deleted>\x00")
+			continue
+		}
+		_, _ = hash.Write(data)
+		_, _ = io.WriteString(hash, "\x00")
+	}
+	return fmt.Sprintf("%s+mine:%x", tip, hash.Sum(nil)[:6])
+}
+
+func validateJSONTestArgs(args []string) []string {
+	out := append([]string(nil), args...)
+	if len(out) == 0 {
+		return out
+	}
+	return append(out[:1], append([]string{"-json"}, out[1:]...)...)
+}
+
+func runValidateTestCommand(ctx context.Context, repo, dir, tip string, args []string, wsl, wslWorkspace bool) (string, bool) {
+	if wslWorkspace {
+		return runValidateTestsInWSLWorkspaceWithin(ctx, dir, args)
+	}
+	return runValidateTestsWithin(ctx, repo, dir, tip, args, wsl)
+}
+
+func validateAllPackages(fileToPkg map[string]string) []string {
+	seen := make(map[string]struct{}, len(fileToPkg))
+	for _, pkg := range fileToPkg {
+		seen[pkg] = struct{}{}
+	}
+	packages := make([]string, 0, len(seen))
+	for pkg := range seen {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	return packages
+}
+
+func parseValidateTestObservation(output string, packages []string, commandComplete bool) affectedtests.TestObservation {
+	observed := make(map[string]affectedtests.PackageObservation, len(packages))
+	terminal := make(map[string]bool, len(packages))
+	for _, pkg := range packages {
+		observed[pkg] = affectedtests.PackageObservation{Package: pkg}
+	}
+	dec := json.NewDecoder(strings.NewReader(output))
+	for {
+		var event validateGoTestEvent
+		if err := dec.Decode(&event); err != nil {
+			break
+		}
+		observation, wanted := observed[event.Package]
+		if !wanted {
+			continue
+		}
+		switch event.Action {
+		case "fail":
+			observation.Failed = true
+			observed[event.Package] = observation
+			terminal[event.Package] = true
+		case "pass", "skip":
+			terminal[event.Package] = true
+		}
+	}
+	result := affectedtests.TestObservation{Complete: commandComplete, Packages: make([]affectedtests.PackageObservation, 0, len(packages))}
+	for _, pkg := range packages {
+		result.Packages = append(result.Packages, observed[pkg])
+		if !terminal[pkg] {
+			result.Complete = false
+		}
+	}
+	return result
+}
+
 func hasDeletedMinePath(root string, paths []string) bool {
 	for _, rel := range paths {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); os.IsNotExist(err) {
@@ -1228,7 +1358,7 @@ func validateWriterIsTerminal(w io.Writer) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func validatePhaseOrder(testOnly bool) []string {
+func validatePhaseOrder(testOnly, auditSelection bool) []string {
 	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay"}
 	if !testOnly {
 		phases = append(phases, "gofmt")
@@ -1237,7 +1367,11 @@ func validatePhaseOrder(testOnly bool) []string {
 	if !testOnly {
 		phases = append(phases, "build", "vet")
 	}
-	return append(phases, "test")
+	phases = append(phases, "test")
+	if auditSelection {
+		phases = append(phases, "test_audit_full")
+	}
+	return phases
 }
 
 func finishValidateTimeout(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase string, asJSON bool) int {

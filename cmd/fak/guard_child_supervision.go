@@ -131,7 +131,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
 		childStdout := guardCaptureChildStdout(child, command, agentName)
-		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
+		terminalRestore := maybeCaptureGuardChildHarnessTerminalRestoreForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
@@ -144,6 +144,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		terminalRestore.RepairAfterStart()
 		startupProgress.Phase("child registration")
 		if err := startBoundGuardRegistration(child); err != nil {
 			startupProgress.Abort()
@@ -360,7 +361,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
 		childStdout := guardCaptureChildStdout(child, command, agentName)
-		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
+		terminalRestore := maybeCaptureGuardChildHarnessTerminalRestoreForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
@@ -375,6 +376,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		terminalRestore.RepairAfterStart()
 		startupProgress.Phase("child registration")
 		if err := startBoundGuardRegistration(child); err != nil {
 			startupProgress.Abort()
