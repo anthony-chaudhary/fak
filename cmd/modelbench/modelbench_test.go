@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,12 +128,12 @@ func TestQ4KLoaderSelectorPreservesResidentDefault(t *testing.T) {
 	}()
 	var residentCalls, streamedCalls int
 	var gotProfiler *ggufload.LoadProfiler
-	loadResidentQ4K = func(path string, p *ggufload.LoadProfiler) (*model.Model, error) {
+	loadResidentQ4K = func(_ context.Context, path string, p *ggufload.LoadProfiler) (*model.Model, error) {
 		residentCalls++
 		gotProfiler = p
 		return &model.Model{}, nil
 	}
-	loadStreamedDenseQ4K = func(path string, p *ggufload.LoadProfiler) (*model.Model, error) {
+	loadStreamedDenseQ4K = func(_ context.Context, path string, p *ggufload.LoadProfiler) (*model.Model, error) {
 		streamedCalls++
 		gotProfiler = p
 		return &model.Model{}, nil
@@ -930,5 +932,42 @@ func TestNativeProfileRefusesAnyPromisedMetalFallback(t *testing.T) {
 	}
 	if err := requireNoMetalFallbacks(1); err == nil {
 		t.Fatal("nonzero fallback accepted")
+	}
+}
+
+func TestQ4KSmokeDeadlineReportsOnlyAfterLoaderCleanup(t *testing.T) {
+	originalResident := loadResidentQ4K
+	originalReporter := smokeTimeoutReporter
+	defer func() {
+		loadResidentQ4K = originalResident
+		smokeTimeoutReporter = originalReporter
+	}()
+
+	var cleaned atomic.Bool
+	loadResidentQ4K = func(ctx context.Context, _ string, _ *ggufload.LoadProfiler) (*model.Model, error) {
+		<-ctx.Done()
+		// This stands in for the loader's joined workers and closed checkpoint reader.
+		cleaned.Store(true)
+		return nil, ctx.Err()
+	}
+	var reported atomic.Bool
+	smokeTimeoutReporter = func(_ *benchFlags, _ time.Duration) {
+		if !cleaned.Load() {
+			t.Fatal("timeout reported before Q4_K loader cleanup completed")
+		}
+		reported.Store(true)
+	}
+
+	f := testCompleteBenchFlags()
+	*f.gguf = "fixture.gguf"
+	*f.q4k = true
+	*f.smoke = true
+	*f.smokeDeadline = time.Millisecond
+	m, name, err := loadModelMaybeDeadline(f, nil)
+	if err != nil || m != nil || name != "" {
+		t.Fatalf("loadModelMaybeDeadline = (%v, %q, %v), want timeout-report return", m, name, err)
+	}
+	if !reported.Load() {
+		t.Fatal("SMOKE_LOAD_TIMEOUT was not reported")
 	}
 }
