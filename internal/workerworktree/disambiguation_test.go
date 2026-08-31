@@ -663,6 +663,7 @@ func TestColdDisambiguationMaterializesOnlyScorecardCorpusPromptly(t *testing.T)
 		{Mode: "100644", ObjectID: "doc", Size: 10, Path: "docs/guide.md"},
 		{Mode: "100644", ObjectID: "root", Size: 9, Path: "README.md"},
 		{Mode: "100644", ObjectID: "catalog", Size: 2, Path: "tools/concept_disambiguation_scorecard.data/family.json"},
+		{Mode: "100644", ObjectID: "meta", Size: disambiguationMaxCorpusBytes + 1, Path: "tools/concept_disambiguation_scorecard.data/_meta.json"},
 		{Mode: "100644", ObjectID: "script", Size: 8, Path: "tools/concept_disambiguation_scorecard.py"},
 		{Mode: "100644", ObjectID: "fresh-readme", Size: disambiguationMaxCorpusBytes + 1, Path: conceptcatalog.GeneratedReadme},
 		{Mode: "100644", ObjectID: "fresh-index", Size: disambiguationMaxCorpusBytes + 2, Path: conceptcatalog.GeneratedIndex},
@@ -670,6 +671,7 @@ func TestColdDisambiguationMaterializesOnlyScorecardCorpusPromptly(t *testing.T)
 	excluded := []disambiguationTreeEntry{
 		{Mode: "100644", ObjectID: "huge", Size: 1 << 30, Path: "artifacts/whole-tree.bin"},
 		{Mode: "100644", ObjectID: "oversize-go", Size: disambiguationMaxCorpusBytes + 1, Path: "internal/workerworktree/huge.go"},
+		{Mode: "100644", ObjectID: "oversize-catalog", Size: disambiguationMaxCorpusBytes + 1, Path: "tools/concept_disambiguation_scorecard.data/ordinary.json"},
 		{Mode: "100644", ObjectID: "test-go", Size: 4, Path: "internal/workerworktree/land_test.go"},
 		{Mode: "100644", ObjectID: "skipped", Size: 4, Path: "docs/testdata/ignored.md"},
 	}

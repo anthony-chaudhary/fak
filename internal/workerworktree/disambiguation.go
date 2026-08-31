@@ -662,8 +662,11 @@ func parseDisambiguationTree(listing []byte) ([]disambiguationTreeEntry, error) 
 
 func disambiguationCorpusPath(path string, size int64) bool {
 	path = filepath.ToSlash(path)
-	freshness := path == filepath.ToSlash(conceptcatalog.GeneratedReadme) || path == filepath.ToSlash(conceptcatalog.GeneratedIndex)
-	if freshness {
+	required := path == "tools/concept_disambiguation_scorecard.py" ||
+		path == "tools/concept_disambiguation_scorecard.data/_meta.json" ||
+		path == filepath.ToSlash(conceptcatalog.GeneratedReadme) ||
+		path == filepath.ToSlash(conceptcatalog.GeneratedIndex)
+	if required {
 		return true
 	}
 	if size > disambiguationMaxCorpusBytes {
@@ -674,9 +677,6 @@ func disambiguationCorpusPath(path string, size int64) bool {
 		if disambiguationSkipDir[part] {
 			return false
 		}
-	}
-	if path == "tools/concept_disambiguation_scorecard.py" {
-		return true
 	}
 	if strings.HasPrefix(path, "tools/concept_disambiguation_scorecard.data/") && strings.HasSuffix(path, ".json") {
 		return true
