@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -65,25 +66,29 @@ func loadGGUFLean(path string, lp *ggufload.LoadProfiler) (*model.Model, string,
 	return m, filepath.Base(path) + " [gguf-lean]", nil
 }
 
-type q4kModelLoader func(string, *ggufload.LoadProfiler) (*model.Model, error)
+type q4kModelLoader func(context.Context, string, *ggufload.LoadProfiler) (*model.Model, error)
 
 var (
-	loadResidentQ4K q4kModelLoader = func(path string, _ *ggufload.LoadProfiler) (*model.Model, error) {
-		return ggufload.LoadModelQ4K(path)
+	loadResidentQ4K q4kModelLoader = func(ctx context.Context, path string, _ *ggufload.LoadProfiler) (*model.Model, error) {
+		return ggufload.LoadModelQ4KContext(ctx, path)
 	}
-	loadStreamedDenseQ4K q4kModelLoader = func(path string, p *ggufload.LoadProfiler) (*model.Model, error) {
-		return ggufload.LoadModelQ4KStreamedDense(path, p)
+	loadStreamedDenseQ4K q4kModelLoader = func(ctx context.Context, path string, p *ggufload.LoadProfiler) (*model.Model, error) {
+		return ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, p)
 	}
 )
 
 func loadGGUFQ4K(path string, lp *ggufload.LoadProfiler, streamed bool) (*model.Model, string, error) {
+	return loadGGUFQ4KContext(context.Background(), path, lp, streamed)
+}
+
+func loadGGUFQ4KContext(ctx context.Context, path string, lp *ggufload.LoadProfiler, streamed bool) (*model.Model, string, error) {
 	loader := loadResidentQ4K
 	label := " [gguf-q4k]"
 	if streamed {
 		loader = loadStreamedDenseQ4K
 		label = " [gguf-q4k-streamed-dense]"
 	}
-	m, err := loader(path, lp)
+	m, err := loader(ctx, path, lp)
 	if err != nil {
 		return nil, "", err
 	}

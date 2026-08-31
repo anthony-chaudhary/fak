@@ -226,12 +226,18 @@ func loadModelQ4KProfileOptionsContext(ctx context.Context, path string, p *Load
 
 // LoadModelQ4KStreamedDense opens path and transfers the checkpoint lifetime to the returned model. CloseWeights must be called when serving stops.
 func LoadModelQ4KStreamedDense(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	return LoadModelQ4KStreamedDenseContext(context.Background(), path, p, opts...)
+}
+
+// LoadModelQ4KStreamedDenseContext is LoadModelQ4KStreamedDense with cooperative cancellation.
+// On cancellation it closes the checkpoint before returning.
+func LoadModelQ4KStreamedDenseContext(ctx context.Context, path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
 	ws, err := OpenWeights(path)
 	if err != nil {
 		return nil, err
 	}
 	opts = append(opts, WithStreamedDenseQ4K(true))
-	m, err := ws.QuantModelQ4KProfileOptions(p, opts...)
+	m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, p, opts...)
 	if err != nil {
 		_ = ws.Close()
 		return nil, err
