@@ -2181,10 +2181,10 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `maxSessionPlanners <br><small>maxSessionPlanners (gateway per-session planner cache cap)</small>` | **maxSessionPlanners (gateway per-session planner cache cap)** | plan / config | plan-sessionplannermu, x-plan-sessionplanners |
 |  | `maxSessionRespBytes` | **maxSessionRespBytes** | session-runtime / config | x-context-ctx-maxctxvaluesessions |
 |  | `maxsessions` | **session-runtime implementation surface for maxsessions** | session-runtime / symbol | c729-fak-sessions-gauge, x2-session-runtime-sessionobs |
-|  | `maybecaptureguardchildharnessterminalrestoreforplan` | **plan implementation surface for maybecaptureguardchildharnessterminalrestoreforplan** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `maybeplananthropicraw` | **PlanOf (syspromptmmu prompt-segment plan)** | plan / symbol | PlanCells (ctxplan), x2-context-ctx-basecontextplan |
 |  | `maybePlanMessages (gateway) <br><small>maybeplanmessages</small>` | **maybePlanMessages (gateway)** | plan / symbol | CtxViewPlanner (ctxplan seam) |
 |  | `maybeRecordGuardSessionIndex <br><small>maybeRecordGuardSessionIndex (guarded index append)</small>` | **maybeRecordGuardSessionIndex (guarded index append)** | guard-gate / symbol | c729-guard-info-agent-text, c729-record-guard-usage |
+|  | `maybestartguardchildharnessterminalrestorepulseforplan` | **plan implementation surface for maybestartguardchildharnessterminalrestorepulseforplan** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `mechanismexplicitnoncandidate` | **plan implementation surface for mechanismexplicitnoncandidate** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `MechanismStaleContext` | **MechanismStaleContext** | context-ctx / symbol | x-goal25b-context-ctx-stalerecall |
 |  | `MedianCacheReadFraction` | **MedianCacheReadFraction** | cache / symbol | kv-cache |
@@ -2507,7 +2507,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `plan implementation surface for matmulplan` | **plan implementation surface for matmulplan** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `plan implementation surface for matmulplandescriptor` | **plan implementation surface for matmulplandescriptor** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `plan implementation surface for matmulplanrevision` | **plan implementation surface for matmulplanrevision** | plan / symbol | x-ci-coverage-plan-blockplan |
-|  | `plan implementation surface for maybecaptureguardchildharnessterminalrestoreforplan` | **plan implementation surface for maybecaptureguardchildharnessterminalrestoreforplan** | plan / symbol | x-ci-coverage-plan-blockplan |
+|  | `plan implementation surface for maybestartguardchildharnessterminalrestorepulseforplan` | **plan implementation surface for maybestartguardchildharnessterminalrestorepulseforplan** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `plan implementation surface for mechanismexplicitnoncandidate` | **plan implementation surface for mechanismexplicitnoncandidate** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `plan implementation surface for mergecandidatenotes` | **plan implementation surface for mergecandidatenotes** | plan / symbol | x-ci-coverage-plan-blockplan |
 |  | `plan implementation surface for modelcanarycandidateconfig` | **plan implementation surface for modelcanarycandidateconfig** | plan / symbol | x-ci-coverage-plan-blockplan |

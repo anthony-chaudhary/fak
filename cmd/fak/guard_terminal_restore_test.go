@@ -1,20 +1,18 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
-type testGuardChildTerminalRestore struct {
-	repairs int
-}
+func TestGuardChildTerminalRestorePulseIncludesClaude(t *testing.T) {
+	original := startGuardChildTerminalRestorePulse
+	t.Cleanup(func() { startGuardChildTerminalRestorePulse = original })
 
-func (r *testGuardChildTerminalRestore) RepairAfterStart() bool {
-	r.repairs++
-	return true
-}
-
-func TestGuardChildTerminalRestoreCaptureIncludesClaude(t *testing.T) {
-	original := captureGuardChildTerminalRestore
-	t.Cleanup(func() { captureGuardChildTerminalRestore = original })
-
+	type pulse struct {
+		duration time.Duration
+		interval time.Duration
+	}
 	for _, tc := range []struct {
 		name    string
 		command []string
@@ -27,22 +25,20 @@ func TestGuardChildTerminalRestoreCaptureIncludesClaude(t *testing.T) {
 		{name: "Codex unchanged", command: []string{"codex", "exec"}, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			captures := 0
-			repair := &testGuardChildTerminalRestore{}
-			captureGuardChildTerminalRestore = func() guardChildTerminalRestore {
-				captures++
-				return repair
+			var pulses []pulse
+			startGuardChildTerminalRestorePulse = func(duration, interval time.Duration) {
+				pulses = append(pulses, pulse{duration: duration, interval: interval})
 			}
 
-			got := maybeCaptureGuardChildHarnessTerminalRestore(tc.command)
-			if captures != tc.want {
-				t.Fatalf("capture count = %d, want %d", captures, tc.want)
+			maybeStartGuardChildHarnessTerminalRestorePulse(tc.command)
+
+			if got := len(pulses); got != tc.want {
+				t.Fatalf("restore pulse count = %d, want %d", got, tc.want)
 			}
-			if got == nil {
-				t.Fatal("capture returned nil repair")
-			}
-			if repair.repairs != 0 {
-				t.Fatalf("capture repaired before child start %d times", repair.repairs)
+			for i, got := range pulses {
+				if got.duration != guardCodexTerminalRestorePulseDuration || got.interval != guardCodexTerminalRestorePulseInterval {
+					t.Errorf("pulse %d = (%s, %s), want (%s, %s)", i, got.duration, got.interval, guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
+				}
 			}
 		})
 	}
