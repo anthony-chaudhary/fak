@@ -5,7 +5,7 @@ description: "fak's deterministic learning-docs scorecard: does the teaching set
 
 # Learning-docs scorecard
 
-<!-- learning-scorecard: 2026-08-29 · process: tools/learning_scorecard.py -->
+<!-- learning-scorecard: 2026-08-31 · process: tools/learning_scorecard.py -->
 
 > Regenerate: `python tools/learning_scorecard.py --markdown --stamp DATE > docs/LEARNING-SCORECARD.md`
 
