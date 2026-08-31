@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 const codexFreshnessReexecHelperEnv = "GO_WANT_CODEX_FRESHNESS_REEXEC_HELPER"
@@ -162,6 +166,57 @@ func TestRunCodexFreshnessAdmissionDirtyCannotUseInheritedHandoff(t *testing.T) 
 	args, code, stop := runCodexFreshnessAdmission(nil)
 	if args != nil || code == 0 || !stop || updated {
 		t.Fatalf("args=%q code=%d stop=%v updated=%v, want dirty launcher refused rather than admitted by inherited handoff", args, code, stop, updated)
+	}
+}
+
+func TestInspectCodexFreshnessDirtyResolvesCommittedTarget(t *testing.T) {
+	const target = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	running := binstamp.Stamp{
+		Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Dirty:    true,
+		HasVCS:   true,
+	}
+	run := func(_ context.Context, dir, name string, args ...string) (string, bool) {
+		if dir != "/repo" || name != "git" {
+			t.Fatalf("runner dir=%q name=%q", dir, name)
+		}
+		want := []string{"rev-parse", "--verify", "--quiet", "origin/main^{commit}"}
+		if !reflect.DeepEqual(args, want) {
+			t.Fatalf("runner args=%q, want %q", args, want)
+		}
+		return target + "\n", true
+	}
+
+	got := inspectCodexFreshness("/repo", running, versionskew.Runner(run)).Assessment
+	if got.Detail != versionskew.Dirty.String() || got.TargetCommit != target {
+		t.Fatalf("assessment=%+v, want dirty verdict with target %q", got, target)
+	}
+}
+
+func TestInspectCodexFreshnessDirtyWithoutResolvableTargetFailsClosed(t *testing.T) {
+	running := binstamp.Stamp{
+		Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Dirty:    true,
+		HasVCS:   true,
+	}
+	tests := []struct {
+		name string
+		out  string
+		ok   bool
+	}{
+		{name: "missing ref", ok: false},
+		{name: "malformed output", out: "not-a-full-commit\n", ok: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := func(context.Context, string, string, ...string) (string, bool) {
+				return tt.out, tt.ok
+			}
+			got := inspectCodexFreshness("/repo", running, versionskew.Runner(run)).Assessment
+			if got.Detail != versionskew.Dirty.String() || got.TargetCommit != "" {
+				t.Fatalf("assessment=%+v, want dirty verdict without target", got)
+			}
+		})
 	}
 }
 

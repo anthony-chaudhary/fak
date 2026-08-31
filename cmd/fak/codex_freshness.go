@@ -73,24 +73,7 @@ var (
 	codexFreshnessUserConfigDir = os.UserConfigDir
 	codexFreshnessRunningCommit = func() string { return strings.TrimSpace(binstamp.Self().Revision) }
 	codexFreshnessInspect       = func(root, _ string) codexFreshnessInspection {
-		skew := versionskew.AssessStamp(context.Background(), versionskew.RealRunner, root, "origin/main", binstamp.Self())
-		assessment := codexFreshnessAssessment{
-			RunningCommit: skew.Running,
-			TargetCommit:  skew.TrunkTip,
-			Detail:        skew.Verdict.String(),
-		}
-		switch skew.Verdict {
-		case versionskew.Fresh:
-			assessment.Verdict = codexFreshnessFresh
-		case versionskew.Skewed:
-			if skew.Relation == versionskew.RelBehind {
-				assessment.Verdict = codexFreshnessBehind
-			}
-		}
-		if assessment.Verdict == codexFreshnessUnknown && assessment.Detail == "" {
-			assessment.Detail = "launcher freshness is unverifiable (" + skew.Verdict.String() + ")"
-		}
-		return codexFreshnessInspection{Assessment: assessment}
+		return inspectCodexFreshness(root, binstamp.Self(), versionskew.RealRunner)
 	}
 	codexFreshnessUpdate = func(root, executable string) (string, error) {
 		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable)...)
@@ -116,6 +99,45 @@ var (
 	}
 	codexFreshnessResolveCheckout = codexFreshnessCheckout
 )
+
+func inspectCodexFreshness(root string, running binstamp.Stamp, run versionskew.Runner) codexFreshnessInspection {
+	skew := versionskew.AssessStamp(context.Background(), run, root, "origin/main", running)
+	if skew.Verdict == versionskew.Dirty && skew.TrunkTip == "" {
+		skew.TrunkTip = codexFreshnessResolveCommit(root, run)
+	}
+	assessment := codexFreshnessAssessment{
+		RunningCommit: skew.Running,
+		TargetCommit:  skew.TrunkTip,
+		Detail:        skew.Verdict.String(),
+	}
+	switch skew.Verdict {
+	case versionskew.Fresh:
+		assessment.Verdict = codexFreshnessFresh
+	case versionskew.Skewed:
+		if skew.Relation == versionskew.RelBehind {
+			assessment.Verdict = codexFreshnessBehind
+		}
+	}
+	if assessment.Verdict == codexFreshnessUnknown && assessment.Detail == "" {
+		assessment.Detail = "launcher freshness is unverifiable (" + skew.Verdict.String() + ")"
+	}
+	return codexFreshnessInspection{Assessment: assessment}
+}
+
+func codexFreshnessResolveCommit(root string, run versionskew.Runner) string {
+	out, ok := run(context.Background(), root, "git", "rev-parse", "--verify", "--quiet", "origin/main^{commit}")
+	if !ok {
+		return ""
+	}
+	commit := strings.TrimSpace(out)
+	if len(commit) != 40 {
+		return ""
+	}
+	if _, err := hex.DecodeString(commit); err != nil {
+		return ""
+	}
+	return commit
+}
 
 func codexFreshnessSelfUpdateArgs(root, executable string) []string {
 	return []string{"self-update", "--json", "--root", root, "--target", executable}
