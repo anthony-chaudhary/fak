@@ -383,6 +383,8 @@ const worktreeColdApplyEnv = "FAK_WORKTREE_COLD_COLLECT"
 // under --apply, whether it was actually removed.
 type worktreeColdReapItem struct {
 	workerworktree.ColdWorktree
+	// BytesKnown and Bytes are retained for existing JSON consumers. They mirror
+	// the provenance-honest reclaim fields on ColdWorktree.
 	BytesKnown bool  `json:"bytes_known"`
 	Bytes      int64 `json:"bytes"`
 	Removed    bool  `json:"removed,omitempty"`
@@ -399,21 +401,27 @@ type worktreeColdReapFailure struct {
 // (dry-run|apply), the age floor, the per-worktree decision ledger, and the roll-up
 // counts/bytes. In dry-run Reaped is always 0 and Bytes is the reclaimable total.
 type worktreeColdReapOut struct {
-	Mode        string                    `json:"mode"`
-	AgeFloorMin int                       `json:"age_floor_min"`
-	Worktrees   []worktreeColdReapItem    `json:"worktrees"`
-	Failures    []worktreeColdReapFailure `json:"failures"`
-	WouldReap   int                       `json:"would_reap"`
-	Reaped      int                       `json:"reaped"`
-	Bytes       int64                     `json:"bytes"`
-	ReapedBytes int64                     `json:"reaped_bytes"`
+	Mode                 string                    `json:"mode"`
+	AgeFloorMin          int                       `json:"age_floor_min"`
+	Worktrees            []worktreeColdReapItem    `json:"worktrees"`
+	Failures             []worktreeColdReapFailure `json:"failures"`
+	WouldReap            int                       `json:"would_reap"`
+	Reaped               int                       `json:"reaped"`
+	Bytes                int64                     `json:"bytes"`
+	EligibleBytes        int64                     `json:"eligible_bytes"`
+	EligibleBytesKnown   int                       `json:"eligible_bytes_known"`
+	EligibleBytesUnknown int                       `json:"eligible_bytes_unknown"`
+	ReapedBytes          int64                     `json:"reaped_bytes"`
+	ReapedBytesKnown     int                       `json:"reaped_bytes_known"`
+	ReapedBytesUnknown   int                       `json:"reaped_bytes_unknown"`
 	// HeldByWork counts the worktrees that cleared the lease and age gates and were
 	// kept only because they still carry uncommitted work, with their reclaimable
 	// bytes. Reported separately from the generic keep because it is a triage queue,
 	// not a wait: that disk comes back only once each diff is landed or abandoned.
-	HeldByWork          int                          `json:"held_by_work"`
-	HeldByWorkBytes     int64                        `json:"held_by_work_bytes"`
-	UnregisteredResidue []workerworktree.ResidueItem `json:"unregistered_residue,omitempty"`
+	HeldByWork             int                          `json:"held_by_work"`
+	HeldByWorkBytes        int64                        `json:"held_by_work_bytes"`
+	HeldByWorkBytesUnknown int                          `json:"held_by_work_bytes_unknown"`
+	UnregisteredResidue    []workerworktree.ResidueItem `json:"unregistered_residue,omitempty"`
 }
 
 // worktreeWorkerReapAllCold is the bulk cold sweep (#5351): enumerate every worker
@@ -422,11 +430,22 @@ type worktreeColdReapOut struct {
 // Reap each cold one with the SAME per-id workerworktree.Reap the single mode uses.
 // The default is a DRY-RUN that ledgers the would-reap set and deletes nothing.
 func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Duration, evenIfUnlanded bool) {
+	worktreeWorkerReapAllColdTo(repoRoot, apply, ageFloor, evenIfUnlanded, os.Stdout, os.Stderr)
+}
+
+func worktreeWorkerReapAllColdTo(repoRoot string, apply bool, ageFloor time.Duration, evenIfUnlanded bool, stdout, stderr io.Writer) {
 	if !apply && strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply") {
 		apply = true
 	}
 	now := time.Now()
-	out := worktreeColdReapReport(repoRoot, apply, ageFloor, now, evenIfUnlanded)
+	progress := json.NewEncoder(stderr)
+	progress.SetEscapeHTML(false)
+	out := worktreeColdReapReportWithOptions(repoRoot, apply, ageFloor, now, evenIfUnlanded, workerworktree.ColdReapOptions{
+		Concurrency: worktreeColdStatusConcurrency,
+		Progress: func(event workerworktree.ColdReapProgress) {
+			_ = progress.Encode(event)
+		},
+	})
 	residueOpts := workerworktree.ResidueOptions{Repo: repoRoot, Now: now, AgeFloor: ageFloor}
 	residue, residueErr := workerworktree.CollectUnregisteredResidue(repoRoot, residueOpts)
 	if residueErr == nil && apply {
@@ -436,15 +455,18 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 	if residueErr != nil {
 		out.Failures = append(out.Failures, worktreeColdReapFailure{Path: "unregistered-residue", Reason: residueErr.Error()})
 	}
-	worktreeWorkerEmit(out)
-	// The human one-liner goes to stderr so stdout stays exactly one JSON object.
+	final := json.NewEncoder(stdout)
+	final.SetEscapeHTML(false)
+	_ = final.Encode(out)
+	// Progress and human summaries stay on stderr so stdout remains the single
+	// backward-compatible final JSON receipt.
 	kept := len(out.Worktrees) - out.WouldReap
 	if apply {
-		fmt.Fprintf(os.Stderr, "reaped %d/%d cold worktrees (%s), %d kept (apply)\n",
-			out.Reaped, out.WouldReap, humanBytes(out.ReapedBytes), kept)
+		fmt.Fprintf(stderr, "reaped %d/%d cold worktrees (%s), %d kept (apply)\n",
+			out.Reaped, out.WouldReap, coldReapBytesSummary(out.ReapedBytes, out.ReapedBytesUnknown), kept)
 	} else {
-		fmt.Fprintf(os.Stderr, "would reap %d cold worktrees (%s), 0 deleted (dry-run; pass --apply to collect), %d kept\n",
-			out.WouldReap, humanBytes(out.Bytes), kept)
+		fmt.Fprintf(stderr, "would reap %d cold worktrees (%s), 0 deleted (dry-run; pass --apply to collect), %d kept\n",
+			out.WouldReap, coldReapBytesSummary(out.EligibleBytes, out.EligibleBytesUnknown), kept)
 	}
 	// Unlanded work is called out on its own line: it is the one keep-reason the
 	// operator must ACT on, and folding it into the "kept" tally is what let 17
@@ -454,8 +476,19 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 		if evenIfUnlanded {
 			verb = "REAPED DESPITE"
 		}
-		fmt.Fprintf(os.Stderr, "%s %d worktree(s) by unlanded work (%s) — land or abandon each before reclaiming\n",
-			verb, out.HeldByWork, humanBytes(out.HeldByWorkBytes))
+		fmt.Fprintf(stderr, "%s %d worktree(s) by unlanded work (%s) — land or abandon each before reclaiming\n",
+			verb, out.HeldByWork, coldReapBytesSummary(out.HeldByWorkBytes, out.HeldByWorkBytesUnknown))
+	}
+}
+
+func coldReapBytesSummary(known int64, unknown int) string {
+	switch {
+	case unknown == 0:
+		return humanBytes(known)
+	case known == 0:
+		return fmt.Sprintf("unknown for %d worktree(s)", unknown)
+	default:
+		return fmt.Sprintf("%s known + %d worktree(s) unknown", humanBytes(known), unknown)
 	}
 }
 
@@ -465,12 +498,12 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 // lease-liveness gate, and — only when apply is true — Reaps each cold one. It NEVER
 // deletes in dry-run: Reaped/ReapedBytes stay 0 and Bytes is the reclaimable total.
 func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration, now time.Time, evenIfUnlanded bool) worktreeColdReapOut {
-	return worktreeColdReapReportWithProbes(
-		repoRoot,
-		apply,
-		ageFloor,
-		now,
-		evenIfUnlanded,
+	return worktreeColdReapReportWithOptions(repoRoot, apply, ageFloor, now, evenIfUnlanded, workerworktree.ColdReapOptions{})
+}
+
+func worktreeColdReapReportWithOptions(repoRoot string, apply bool, ageFloor time.Duration, now time.Time, evenIfUnlanded bool, coldOpts workerworktree.ColdReapOptions) worktreeColdReapOut {
+	return worktreeColdReapReportWithOptionsAndProbes(
+		repoRoot, apply, ageFloor, now, evenIfUnlanded, coldOpts,
 		worktreeColdProcessSnapshot,
 		worktreeColdProcessLive,
 		func(root, path string) workerworktree.Result {
@@ -488,6 +521,20 @@ func worktreeColdReapReportWithProbes(
 	ageFloor time.Duration,
 	now time.Time,
 	evenIfUnlanded bool,
+	processSnapshot func(paths []string) (map[string]bool, error),
+	processLive func(path string) (bool, error),
+	reap func(root, path string) workerworktree.Result,
+) worktreeColdReapOut {
+	return worktreeColdReapReportWithOptionsAndProbes(repoRoot, apply, ageFloor, now, evenIfUnlanded, workerworktree.ColdReapOptions{}, processSnapshot, processLive, reap)
+}
+
+func worktreeColdReapReportWithOptionsAndProbes(
+	repoRoot string,
+	apply bool,
+	ageFloor time.Duration,
+	now time.Time,
+	evenIfUnlanded bool,
+	coldOpts workerworktree.ColdReapOptions,
 	processSnapshot func(paths []string) (map[string]bool, error),
 	processLive func(path string) (bool, error),
 	reap func(root, path string) workerworktree.Result,
@@ -511,8 +558,36 @@ func worktreeColdReapReportWithProbes(
 		}
 	}
 	oracle := worktreeLiveLeaseOracle(repoRoot, now)
-	plan := worktreeColdReapList(repoRoot, nil, now, ageFloor, oracle, workerworktree.UnlandedCount, worktreeColdStatusConcurrency)
+	if coldOpts.Concurrency <= 0 {
+		coldOpts.Concurrency = worktreeColdStatusConcurrency
+	}
+	plan := workerworktree.ColdReapListWithOptions(repoRoot, nil, now, ageFloor, oracle, coldOpts)
+	return worktreeColdReapReportFromPlan(
+		repoRoot,
+		apply,
+		ageFloor,
+		evenIfUnlanded,
+		plan,
+		processSnapshot,
+		processLive,
+		reap,
+	)
+}
 
+// worktreeColdReapReportFromPlan reduces one immutable eligibility snapshot into
+// either a dry-run or apply receipt. Apply may refuse a planned item during its
+// final safety revalidation, but it never re-enumerates or substitutes a second
+// eligible set.
+func worktreeColdReapReportFromPlan(
+	repoRoot string,
+	apply bool,
+	ageFloor time.Duration,
+	evenIfUnlanded bool,
+	plan []workerworktree.ColdWorktree,
+	processSnapshot func(paths []string) (map[string]bool, error),
+	processLive func(path string) (bool, error),
+	reap func(root, path string) workerworktree.Result,
+) worktreeColdReapOut {
 	out := worktreeColdReapOut{
 		Mode:        "dry-run",
 		AgeFloorMin: int(ageFloor / time.Minute),
@@ -524,17 +599,22 @@ func worktreeColdReapReportWithProbes(
 	}
 	processesByPath, processSnapshotErr := batchColdProcessRefs(plan, evenIfUnlanded, processSnapshot)
 	for _, c := range plan {
-		// Recursive byte measurement used to delay both classification and apply
-		// before the first safety recheck. Keep it explicitly unknown; removal and
-		// the count receipt are the authoritative lifecycle evidence.
-		item := worktreeColdReapItem{ColdWorktree: c}
+		item := worktreeColdReapItem{
+			ColdWorktree: c,
+			BytesKnown:   c.ReclaimBytesKnown,
+			Bytes:        c.ReclaimBytes,
+		}
 		// The override promotes ONLY the unlanded-work keeps. A live lease or a
 		// worktree under the age floor stays kept either way: those protect an
 		// in-flight land, which no disk-reclamation flag should be able to override.
 		shouldReap := c.Eligible || (evenIfUnlanded && c.HeldByWork)
 		if c.HeldByWork {
 			out.HeldByWork++
-			out.HeldByWorkBytes += item.Bytes
+			if item.BytesKnown {
+				out.HeldByWorkBytes += item.Bytes
+			} else {
+				out.HeldByWorkBytesUnknown++
+			}
 		}
 		if shouldReap {
 			switch {
@@ -561,7 +641,13 @@ func worktreeColdReapReportWithProbes(
 		}
 		if shouldReap {
 			out.WouldReap++
-			out.Bytes += item.Bytes
+			if item.ReclaimBytesKnown {
+				out.Bytes += item.ReclaimBytes
+				out.EligibleBytes += item.ReclaimBytes
+				out.EligibleBytesKnown++
+			} else {
+				out.EligibleBytesUnknown++
+			}
 			if apply {
 				applyOracle := worktreeLiveLeaseOracle(repoRoot, time.Now())
 				leaseLive := applyOracle(c.Path)
@@ -600,7 +686,12 @@ func worktreeColdReapReportWithProbes(
 				default:
 					item.Removed = true
 					out.Reaped++
-					out.ReapedBytes += item.Bytes
+					if item.BytesKnown {
+						out.ReapedBytes += item.Bytes
+						out.ReapedBytesKnown++
+					} else {
+						out.ReapedBytesUnknown++
+					}
 				}
 			}
 		}
@@ -610,111 +701,6 @@ func worktreeColdReapReportWithProbes(
 }
 
 const worktreeColdStatusConcurrency = 8
-
-// worktreeColdReapList preserves workerworktree.ColdReapList's decisions and
-// deterministic path order while moving its independent, read-only git-status
-// probes behind a small concurrency bound. Live and young trees never reach the
-// status probe. Destructive apply remains serial in worktreeColdReapReportWithProbes.
-func worktreeColdReapList(
-	root string,
-	git workerworktree.GitRunner,
-	now time.Time,
-	ageFloor time.Duration,
-	leaseLive workerworktree.LeaseLiveFn,
-	status func(string, workerworktree.GitRunner) int,
-	limit int,
-) []workerworktree.ColdWorktree {
-	if ageFloor <= 0 {
-		ageFloor = workerworktree.DefaultColdAgeFloor
-	}
-	_, paths := workerworktree.Count(root, git)
-	if len(paths) == 0 {
-		return []workerworktree.ColdWorktree{}
-	}
-
-	leaseByPath := make(map[string]bool, len(paths))
-	candidates := make([]string, 0, len(paths))
-	for _, path := range paths {
-		live := true
-		if leaseLive != nil {
-			live = leaseLive(path)
-		}
-		leaseByPath[path] = live
-		if !live && workerworktree.WorktreeAge(path, now) >= ageFloor {
-			candidates = append(candidates, path)
-		}
-	}
-	statusByPath := boundedColdStatusCounts(candidates, git, status, limit)
-
-	// Feed the prefetched observations through the canonical decision function.
-	// This runner is read-only and deterministic: it replays the original path
-	// order and never starts another git subprocess.
-	statusReplay := func(path string, args []string) (int, string) {
-		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
-			var out strings.Builder
-			for _, path := range paths {
-				fmt.Fprintf(&out, "worktree %s\n\n", path)
-			}
-			return 0, out.String()
-		}
-		if len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
-			count, ok := statusByPath[path]
-			if !ok || count < 0 {
-				return 1, ""
-			}
-			return 0, strings.Repeat("M cached-status-entry\n", count)
-		}
-		return 1, ""
-	}
-	leaseReplay := func(path string) bool { return leaseByPath[path] }
-	return workerworktree.ColdReapList(root, statusReplay, now, ageFloor, leaseReplay)
-}
-
-// boundedColdStatusCounts runs at most limit status probes at once and stores
-// each answer by input index before folding it into a map. The index-addressed
-// writes make completion order irrelevant and avoid concurrent map mutation.
-func boundedColdStatusCounts(
-	paths []string,
-	git workerworktree.GitRunner,
-	status func(string, workerworktree.GitRunner) int,
-	limit int,
-) map[string]int {
-	out := make(map[string]int, len(paths))
-	if len(paths) == 0 {
-		return out
-	}
-	if status == nil {
-		status = func(string, workerworktree.GitRunner) int { return -1 }
-	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > len(paths) {
-		limit = len(paths)
-	}
-
-	counts := make([]int, len(paths))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	wg.Add(limit)
-	for range limit {
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				counts[i] = status(paths[i], git)
-			}
-		}()
-	}
-	for i := range paths {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	for i, path := range paths {
-		out[path] = counts[i]
-	}
-	return out
-}
 
 func batchColdProcessRefs(plan []workerworktree.ColdWorktree, evenIfUnlanded bool, snapshot func([]string) (map[string]bool, error)) (map[string]bool, error) {
 	paths := make([]string, 0, len(plan))
