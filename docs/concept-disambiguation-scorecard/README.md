@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **12** (clarity 2 + coverage 10) |
+| **Disambiguation-debt (drive to 0)** | **13** (clarity 2 + coverage 11) |
 | **Crystal-clear concepts (and climbing)** | **995** crystal of 2709 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2828 / 2838** (99.6% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2828 / 2839** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 209 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **81** of 3835 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2709 concepts - score 99.1/100 (grade A) - disambiguation-debt 12
+concept-disambiguation chart - 2709 concepts - score 99.1/100 (grade A) - disambiguation-debt 13
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 995
@@ -62,8 +62,8 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 76 crystal)
 
 coverage by family (positioned / discovered):
+  plan             ############################ 408/412
   loop             ###########################. 94/97
-  plan             ############################ 408/411
   guard-gate       ############################ 503/505
   cache            ############################ 304/305
   context-ctx      ############################ 237/238
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 163/163
 
-namespace coverage  [################################] 99.6%  (2828/2838 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2828/2839 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 209
@@ -2998,8 +2998,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| plan | 408 | 412 | 4 |
 | loop | 94 | 97 | 3 |
-| plan | 408 | 411 | 3 |
 | guard-gate | 503 | 505 | 2 |
 | cache | 304 | 305 | 1 |
 | context-ctx | 237 | 238 | 1 |

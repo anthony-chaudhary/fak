@@ -7187,7 +7187,6 @@
         },
         {
           "category": "incidental",
-
           "reason": "Private gate implementation symbol; it checks for an existing staged test or microharness-witness receipt and does not define a distinct witness or proof mechanism.",
           "token": "gateMicroharnessWitness"
         },
@@ -7195,7 +7194,6 @@
           "category": "incidental",
           "reason": "Receipt marker consumed by the existing MICROHARNESS_WITNESS advisory; it labels evidence supplied by a bounded harness change rather than defining a new witness or proof mechanism.",
           "token": "microharnessWitness"
-
         },
         {
           "category": "incidental",
@@ -7231,7 +7229,6 @@
           "category": "incidental",
           "reason": "Structured validation reason for absent backend evidence; not a witness primitive.",
           "token": "local_backend_unwitnessed"
-
         }
       ],
       "id": "witness-proof",
@@ -7368,11 +7365,8 @@
         "mergeDispatchWitnessRecords",
         "microCacheWitness",
         "microCacheWitnessSchema",
-
         "microharnessWitness",
-
         "model_identity_unwitnessed",
-
         "motifDetectReproduceFixWitness",
         "named_witness",
         "natural-traffic",
@@ -7922,6 +7916,11 @@
           "category": "incidental",
           "reason": "Structured refusal reason enforcing the existing fak-native engine invariant; not a new engine concept.",
           "token": "native_engine_substitution"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported sweepcert constant pins the accepted fak-native engine string for Qwen3.8 receipt validation; it is an implementation symbol, not a distinct engine concept.",
+          "token": "Qwen38NativeEngine"
         }
       ],
       "id": "gateway-engine",
@@ -7953,6 +7952,7 @@
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
+        "Qwen38NativeEngine",
         "RegisterEngines",
         "RemotePlacement",
         "SessionAffinityGateway",
@@ -9016,16 +9016,13 @@
         },
         {
           "category": "incidental",
-
           "reason": "Local boolean recording whether an already-selected policy document decoded or its referenced file exists; it adds no policy type, capability, or adjudication posture.",
           "token": "policyOK"
-
         },
         {
           "category": "incidental",
           "reason": "Deterministic fixture transition trigger label; not a new policy or capability mechanism.",
           "token": "policy_or_capability_refusal"
-
         }
       ],
       "exclude": [
