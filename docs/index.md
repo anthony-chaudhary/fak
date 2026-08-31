@@ -16,6 +16,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | You are… | Start here | Use this route to… |
 |---|---|---|
 | Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
+| Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |
 | Building or integrating an agent or client | [Managed agent runtime](explainers/agent-runtime.md) | Choose an interface, understand ownership, and follow the proposal-to-continuation flow. |
 | Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |

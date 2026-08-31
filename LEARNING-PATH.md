@@ -20,6 +20,13 @@ Each course points at the doc that already teaches it; the value added here is t
 **order** and the **prerequisites**, so you always have the background a page assumes
 *before* you open it.
 
+> **Want the integrated system story first?** Take the
+> [8-module flagship course](docs/courses/end-to-end-inference-agent-harness-memory.md) to
+> follow one request across native inference, the agent harness, policy, context control,
+> durable memory, observability, and proof. Then use this 99-course catalog to enter at the
+> right prerequisite level or deepen a subsystem. The course is a guided end-to-end route;
+> this page remains the prerequisite-ordered concept front door.
+
 **You do not have to start at the beginning.** Find the row in
 [Find your starting point](#find-your-starting-point) that matches your background, start
 at that course, and walk forward. The catalog is a strict prerequisite order — every

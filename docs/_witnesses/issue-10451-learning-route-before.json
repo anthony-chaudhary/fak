@@ -1,0 +1,16 @@
+{
+  "schema": "fak-learning-route-witness/1",
+  "issue": 10451,
+  "phase": "before",
+  "captured_at": "2026-08-31T12:11:20-07:00",
+  "base_sha": "2bca53f691440965b3fbd16a95a48422666a336d",
+  "target": "docs/courses/end-to-end-inference-agent-harness-memory.md",
+  "scoped_files": [
+    "LEARNING-PATH.md",
+    "llms.txt",
+    "docs/index.md"
+  ],
+  "reference_count": 0,
+  "references": [],
+  "expected": "zero scoped references before issue #10451"
+}
