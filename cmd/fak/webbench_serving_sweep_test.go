@@ -84,3 +84,78 @@ func TestServingSweepCLIParsersRejectInvalidCapacity(t *testing.T) {
 		t.Fatalf("positive list = %v, %v", got, err)
 	}
 }
+
+func TestValidateWebbenchClaimConsumesServingSweepReceipt(t *testing.T) {
+	throughputs := []float64{80, 120}
+	ttft := []float64{10, 20}
+	digest := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	report := &webbench.ServingSweepReport{
+		Schema:   webbench.ServingSweepSchema,
+		Workload: webbench.ServingSweepWorkload{Digest: "workload-1", Concurrencies: []int{1, 2}},
+		SLA:      webbench.ServingSweepSLA{TTFTP99Millis: 50},
+		Contracts: []webbench.ServingSweepTrackContract{{
+			Track:               webbench.TrackOurs,
+			Model:               "qwen3.8",
+			Engine:              "fak-native",
+			EngineReceiptDigest: digest,
+			BatchCapacity:       2,
+			CapacitySource:      "fixture",
+		}},
+	}
+	for i, concurrency := range []int{1, 2} {
+		report.Points = append(report.Points, webbench.ServingSweepPoint{
+			Concurrency: concurrency, WorkloadDigest: report.Workload.Digest,
+			Tracks: []webbench.ServingSweepTrackPoint{{
+				Track: webbench.TrackOurs, Model: "qwen3.8", Engine: "fak-native",
+				EngineReceiptDigest: digest, BatchCapacity: 2, CapacitySource: "fixture",
+				MeasurementStatus: "measured",
+				Stats: webbench.ServingStats{
+					OK:                1,
+					ThroughputTokensS: webbench.ScalarMetric{Status: "measured", Value: &throughputs[i]},
+					TTFTMillis:        webbench.QuantileMetric{Status: "measured", P99: &ttft[i]},
+				},
+			}},
+		})
+	}
+	path := filepath.Join(t.TempDir(), "sweep.json")
+	if err := webbench.WriteServingSweepReport(report, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWebbenchClaim("ours capacity-valid peak is 120 tok/s", path); err != nil {
+		t.Fatalf("valid sweep claim rejected: %v", err)
+	}
+	if err := validateWebbenchClaim("ours p99 SLA knee is concurrency 2", path); err != nil {
+		t.Fatalf("valid SLA-knee claim rejected: %v", err)
+	}
+	if err := validateWebbenchClaim("ours serving peak is 120 tok/s", ""); err == nil {
+		t.Fatal("missing sweep receipt accepted")
+	}
+}
+
+func TestValidateWebbenchClaimPreservesParityGate(t *testing.T) {
+	report := &webbench.ServingParityReport{
+		Schema: webbench.ServingParitySchema,
+		Tracks: []webbench.ServingTrackResult{
+			{Track: webbench.TrackVLLM, Status: "measured", Stats: webbench.ServingStats{OK: 1}},
+			{Track: webbench.TrackSGLang, Status: "measured", Stats: webbench.ServingStats{OK: 1}},
+			{Track: webbench.TrackFakFrontsFleet, Status: "measured", Stats: webbench.ServingStats{OK: 1}},
+		},
+	}
+	path := filepath.Join(t.TempDir(), "parity.json")
+	if err := webbench.WriteServingParityReport(report, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWebbenchClaim("fak is parity or better on serving", path); err != nil {
+		t.Fatalf("valid parity claim rejected: %v", err)
+	}
+	report.Tracks[2].Status = "not_measured"
+	if err := webbench.WriteServingParityReport(report, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWebbenchClaim("fak is parity or better on serving", path); err == nil {
+		t.Fatal("unmeasured parity track accepted")
+	}
+	if err := validateWebbenchClaim("this report records a planned comparison", ""); err != nil {
+		t.Fatalf("unrelated prose rejected: %v", err)
+	}
+}
