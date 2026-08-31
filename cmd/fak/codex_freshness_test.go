@@ -91,6 +91,80 @@ func TestRunCodexFreshnessAdmissionShowsSelfUpdate(t *testing.T) {
 	}
 }
 
+func TestRunCodexFreshnessAdmissionDirtyWithTargetRebuilds(t *testing.T) {
+	const (
+		running   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		installed = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessUnknown,
+		RunningCommit: running,
+		TargetCommit:  installed,
+		Detail:        "DIRTY",
+	})
+	defer restore()
+
+	updated := false
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		updated = true
+		return installed, nil
+	}
+	var gotTarget string
+	codexFreshnessReexec = func(_ string, _ []string, expectedCommit string) error {
+		gotTarget = expectedCommit
+		return nil
+	}
+
+	_, code, stop := runCodexFreshnessAdmission(nil)
+	if code != 0 || !stop || !updated || gotTarget != installed {
+		t.Fatalf("code=%d stop=%v updated=%v reexec_target=%q, want guarded rebuild and re-exec at %q", code, stop, updated, gotTarget, installed)
+	}
+}
+
+func TestRunCodexFreshnessAdmissionDirtyWithoutTargetRefuses(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessUnknown,
+		RunningCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Detail:        "DIRTY",
+	})
+	defer restore()
+
+	updated := false
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		updated = true
+		return "", nil
+	}
+
+	_, code, stop := runCodexFreshnessAdmission(nil)
+	if code == 0 || !stop || updated {
+		t.Fatalf("code=%d stop=%v updated=%v, want dirty launcher without committed target refused before rebuild", code, stop, updated)
+	}
+}
+
+func TestRunCodexFreshnessAdmissionDirtyCannotUseInheritedHandoff(t *testing.T) {
+	const running = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessUnknown,
+		RunningCommit: running,
+		TargetCommit:  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Detail:        "DIRTY",
+	})
+	defer restore()
+	codexFreshnessParentPID = func() int { return 4242 }
+	t.Setenv(codexFreshnessReexecEnv, running+":4242")
+
+	updated := false
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		updated = true
+		return "", nil
+	}
+
+	args, code, stop := runCodexFreshnessAdmission(nil)
+	if args != nil || code == 0 || !stop || updated {
+		t.Fatalf("args=%q code=%d stop=%v updated=%v, want dirty launcher refused rather than admitted by inherited handoff", args, code, stop, updated)
+	}
+}
+
 func TestCodexFreshnessSelfUpdateUsesSupportedFlags(t *testing.T) {
 	want := []string{"self-update", "--json", "--root", `C:\work\fak`, "--target", `C:\bin\fak.exe`}
 	if got := codexFreshnessSelfUpdateArgs(`C:\work\fak`, `C:\bin\fak.exe`); !reflect.DeepEqual(got, want) {

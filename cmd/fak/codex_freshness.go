@@ -50,6 +50,7 @@ const (
 	codexFreshnessUnknown codexFreshnessVerdict = iota
 	codexFreshnessFresh
 	codexFreshnessBehind
+	codexFreshnessRebuild
 )
 
 type codexFreshnessAssessment struct {
@@ -220,6 +221,11 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", inspection.Err)
 		return nil, 1, true
 	}
+	if inspection.Assessment.Verdict == codexFreshnessUnknown &&
+		inspection.Assessment.Detail == versionskew.Dirty.String() &&
+		isFullGitCommit(strings.TrimSpace(inspection.Assessment.TargetCommit)) {
+		inspection.Assessment.Verdict = codexFreshnessRebuild
+	}
 	running, target := shortFreshnessID(inspection.Assessment.RunningCommit), shortFreshnessID(inspection.Assessment.TargetCommit)
 	switch inspection.Assessment.Verdict {
 	case codexFreshnessFresh:
@@ -229,9 +235,9 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 			return nil, 1, true
 		}
 		return filtered, 0, false
-	case codexFreshnessBehind:
+	case codexFreshnessBehind, codexFreshnessRebuild:
 		if os.Getenv(codexFreshnessReexecEnv) != "" {
-			if codexFreshnessMatchesReexecTarget(inspection.Assessment) {
+			if inspection.Assessment.Verdict == codexFreshnessBehind && codexFreshnessMatchesReexecTarget(inspection.Assessment) {
 				consumeCodexFreshnessReexecMarker()
 				return filtered, 0, false
 			}
