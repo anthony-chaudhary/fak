@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -170,9 +171,28 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 	if budget.Schema == orchestration.UltracodeEnvelopeReceiptSchema && budget.DeclaredTokens > 0 && budget.WallBudgetMS > 0 {
 		usage := make([]orchestration.UltracodeChildUsage, 0, len(runStatus.Workers))
 		for _, worker := range runStatus.Workers {
-			if worker.UsageCovered {
+			providerTokens := worker.ProviderTokens
+			authority := worker.UsageAuthority
+			covered := worker.UsageCovered
+			launched := launchWorkers[worker.RoleID]
+			if launched.LogPath != "" {
+				logPath := launched.LogPath
+				if !filepath.IsAbs(logPath) {
+					logPath = filepath.Join(root, logPath)
+				}
+				rootTokens, rootCovered, err := inspectCodexRootGoalUsage(logPath, receipt.LaunchedAt, providerTokens)
+				if err != nil {
+					return ultracodeStatus{}, err
+				}
+				if rootCovered {
+					providerTokens = rootTokens
+					authority = orchestration.UltracodeBudgetAuthorityProvider
+					covered = true
+				}
+			}
+			if covered {
 				usage = append(usage, orchestration.UltracodeChildUsage{
-					ChildID: worker.RoleID, ProviderTokens: worker.ProviderTokens, Authority: worker.UsageAuthority,
+					ChildID: worker.RoleID, ProviderTokens: providerTokens, Authority: authority,
 				})
 			}
 		}
@@ -228,6 +248,102 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 		out.Workers = append(out.Workers, workerStatus)
 	}
 	return out, nil
+}
+
+type codexRootGoalEpoch struct {
+	firstTokens int64
+	maxTokens   int64
+	fresh       bool
+}
+
+// inspectCodexRootGoalUsage treats thread_goal_updated.tokensUsed as a
+// descendant-inclusive cumulative checkpoint. Repeated activation, wait, and
+// completion checkpoints replace one another instead of being added. Goals
+// resumed from before this launch establish a baseline at their first observed
+// checkpoint; replacement goals created during the launch start a new epoch.
+func inspectCodexRootGoalUsage(path string, launchedAt time.Time, directTokens int64) (int64, bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return directTokens, false, nil
+		}
+		return 0, false, fmt.Errorf("inspect Codex root-goal usage: %w", err)
+	}
+	defer file.Close()
+
+	epochs := make(map[string]*codexRootGoalEpoch)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var event struct {
+			Type    string `json:"type"`
+			Payload *struct {
+				Type string `json:"type"`
+				Goal *struct {
+					ThreadID   string  `json:"threadId"`
+					CreatedAt  float64 `json:"createdAt"`
+					TokensUsed int64   `json:"tokensUsed"`
+				} `json:"goal"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal([]byte(line), &event) != nil || event.Payload == nil || event.Payload.Goal == nil || event.Payload.Type != "thread_goal_updated" || event.Payload.Goal.TokensUsed < 0 {
+			continue
+		}
+		goal := event.Payload.Goal
+		key := fmt.Sprintf("%s@%.0f", goal.ThreadID, goal.CreatedAt)
+		epoch := epochs[key]
+		if epoch == nil {
+			epoch = &codexRootGoalEpoch{
+				firstTokens: goal.TokensUsed,
+				maxTokens:   goal.TokensUsed,
+				fresh:       codexGoalCreatedDuringLaunch(goal.CreatedAt, launchedAt),
+			}
+			epochs[key] = epoch
+		} else if goal.TokensUsed > epoch.maxTokens {
+			epoch.maxTokens = goal.TokensUsed
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, false, fmt.Errorf("inspect Codex root-goal usage: %w", err)
+	}
+	if len(epochs) == 0 {
+		return directTokens, false, nil
+	}
+
+	var rootTokens int64
+	for _, epoch := range epochs {
+		baseline := epoch.firstTokens
+		if epoch.fresh {
+			baseline = 0
+		}
+		delta := epoch.maxTokens - baseline
+		if delta > 0 {
+			rootTokens += delta
+		}
+	}
+	// A sparse or newly attached goal stream can lack its zero/baseline event.
+	// Direct session accounting remains the lower bound so adopting root-goal
+	// authority never loses usage that the existing path already observed.
+	if directTokens > rootTokens {
+		rootTokens = directTokens
+	}
+	return rootTokens, true, nil
+}
+
+func codexGoalCreatedDuringLaunch(createdAt float64, launchedAt time.Time) bool {
+	if createdAt <= 0 || launchedAt.IsZero() {
+		return false
+	}
+	// Codex protocol timestamps are Unix seconds. Accept milliseconds as well
+	// so persisted fixtures and future protocol widening keep epoch semantics.
+	if createdAt > 1e12 {
+		createdAt /= 1000
+	}
+	return createdAt >= float64(launchedAt.Unix())
 }
 
 func projectUltracodeActivationVerdict(status *ultracodeWorkerStatus, receipt codexOrchestrationLaunchReceipt, launched codexOrchestrationWorkerLaunch, activation ultracodebench.ActivationReceipt, now time.Time) {

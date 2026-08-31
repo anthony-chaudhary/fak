@@ -286,3 +286,69 @@ func TestUltracodeStatusMarksLegacyChildrenUnknown(t *testing.T) {
 		t.Fatalf("legacy status=%+v", got)
 	}
 }
+
+func TestUltracodeStatusAccountsNestedCodexRootGoalExactlyOnce(t *testing.T) {
+	home := t.TempDir()
+	runID := "orch-nested-usage"
+	runDir := filepath.Join(home, "fak-orchestration-runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logRel := filepath.Join("fak-orchestration-runs", runID, "worker-1.jsonl")
+	started := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
+	log := strings.Join([]string{
+		`{"type":"turn.started"}`,
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root-resumed","createdAt":` + fmt.Sprint(started.Add(-time.Hour).Unix()) + `,"tokensUsed":100}}}`,
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root-resumed","createdAt":` + fmt.Sprint(started.Add(-time.Hour).Unix()) + `,"tokensUsed":160}}}`,
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root-resumed","createdAt":` + fmt.Sprint(started.Add(-time.Hour).Unix()) + `,"tokensUsed":190}}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":10}}`,
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root-replacement","createdAt":` + fmt.Sprint(started.Add(time.Second).Unix()) + `,"tokensUsed":20}}}`,
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root-replacement","createdAt":` + fmt.Sprint(started.Add(time.Second).Unix()) + `,"tokensUsed":35}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(home, logRel), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	budget, err := orchestration.NewUltracodeEnvelopeReceipt(4096, time.Minute, started, []string{"worker-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := codexOrchestrationLaunchReceipt{
+		Schema: codexOrchestrationLaunchSchema, SessionID: "session-nested", RunID: runID,
+		LaunchedAt: started, RequestedProfile: "ultracode", ResolvedProfile: "ultracode", Status: "launched",
+		Workers: []codexOrchestrationWorkerLaunch{{RoleID: "worker-1", PID: 99_999_999, Status: "joined", LogPath: logRel, DeadlineAt: budget.DeadlineAt}},
+		Budget:  budget,
+	}
+	oldNow := ultracodeStatusNow
+	ultracodeStatusNow = func() time.Time { return started.Add(10 * time.Second) }
+	t.Cleanup(func() { ultracodeStatusNow = oldNow })
+
+	status, err := projectUltracodeStatus(home, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The resumed goal contributes 190-100=90 and the replacement goal
+	// contributes its cumulative 35 once. Direct turn usage (50) is retained
+	// for attribution/lower-bound checking but is not added to the root total.
+	if got, want := status.Budget.ConsumedTokens, int64(125); got != want {
+		t.Fatalf("nested root-goal usage=%d, want %d exactly once: %+v", got, want, status.Budget)
+	}
+	if !status.Budget.Complete || status.Budget.Authority != orchestration.UltracodeBudgetAuthorityProvider || status.Budget.CoveredChildren != 1 {
+		t.Fatalf("nested root-goal authority=%+v", status.Budget)
+	}
+}
+
+func TestInspectCodexRootGoalUsagePreservesDirectSessionAccounting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.jsonl")
+	started := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
+	log := `{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"threadId":"root","createdAt":` + fmt.Sprint(started.Unix()) + `,"tokensUsed":30}}}` + "\n"
+	if err := os.WriteFile(path, []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, covered, err := inspectCodexRootGoalUsage(path, started, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !covered || got != 50 {
+		t.Fatalf("root usage=(%d,%v), want direct-session lower bound (50,true)", got, covered)
+	}
+}
