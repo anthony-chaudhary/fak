@@ -76,12 +76,12 @@ func TestExtractUsesOneTreeListingAndOneCatFileBatch(t *testing.T) {
 	}
 }
 
-func TestExtractPipelinesBoundedBlobRequests(t *testing.T) {
+func TestExtractConsumesBatchResponsesWhileWritingRequests(t *testing.T) {
 	command := func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		if len(args) > 0 && args[0] == "ls-tree" {
-			return processTreeHelperCommandWithCount("cat-block", testGitBatchWindow)(ctx, "", "ls-tree")
+			return processTreeHelperCommandWithCount("pipe-pressure", testGitBatchWindow)(ctx, "", "ls-tree")
 		}
-		return processTreeHelperCommand("require-pipeline", "")(ctx, "", "cat-file")
+		return processTreeHelperCommand("pipe-pressure", "")(ctx, "", "cat-file")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -90,9 +90,18 @@ func TestExtractPipelinesBoundedBlobRequests(t *testing.T) {
 	if err := extractWithGit(ctx, "unused", "unused", dir, command); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(filepath.Join(dir, "file-255")); err != nil || string(got) != "x" {
-		t.Fatalf("last pipelined blob = %q, %v; want x", got, err)
+	wantFirst := pipePressureBlob()
+	if got, err := os.ReadFile(filepath.Join(dir, "file-000")); err != nil || !bytes.Equal(got, wantFirst) {
+		t.Fatalf("first pressure blob = %d bytes, %v; want %d raw bytes", len(got), err, len(wantFirst))
 	}
+	if got, err := os.ReadFile(filepath.Join(dir, "file-255")); err != nil || string(got) != "x" {
+		t.Fatalf("last pressure blob = %q, %v; want x", got, err)
+	}
+}
+
+func pipePressureBlob() []byte {
+	pattern := []byte{'r', 'a', 'w', '\r', '\n', 0, 0xff, '\n'}
+	return bytes.Repeat(pattern, 4*gitPipeBufferSize/len(pattern))
 }
 
 func TestMaterializeBlobRejectsTraversal(t *testing.T) {
@@ -220,10 +229,14 @@ func TestCommittedTreeProcessTreeHelper(t *testing.T) {
 		return
 	}
 	switch mode {
-	case "ls-cat-block":
+	case "ls-cat-block", "ls-pipe-pressure":
 		if count, _ := strconv.Atoi(os.Getenv("GO_WANT_COMMITTEDTREE_LS_COUNT")); count > 0 {
+			oidWidth := 40
+			if mode == "ls-pipe-pressure" {
+				oidWidth = 64
+			}
 			for i := 0; i < count; i++ {
-				_, _ = fmt.Fprintf(os.Stdout, "100644 blob %040x\tfile-%03d%c", i+1, i, byte(0))
+				_, _ = fmt.Fprintf(os.Stdout, "100644 blob %0*x\tfile-%03d%c", oidWidth, i+1, i, byte(0))
 			}
 		} else {
 			_, _ = fmt.Fprintf(os.Stdout, "100644 blob %s\tfile.bin%c", strings.Repeat("a", 40), byte(0))
@@ -231,20 +244,41 @@ func TestCommittedTreeProcessTreeHelper(t *testing.T) {
 	case "cat-cat-block":
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		spawnStdoutHoldingDescendant()
-	case "cat-require-pipeline":
+	case "cat-pipe-pressure":
 		scanner := bufio.NewScanner(os.Stdin)
-		oids := make([]string, 0, testGitBatchWindow)
-		for scanner.Scan() {
-			oids = append(oids, scanner.Text())
-			if len(oids) == testGitBatchWindow {
+		if !scanner.Scan() {
+			os.Exit(3)
+		}
+		firstOID := scanner.Text()
+		nextRequest := make(chan bool, 1)
+		go func() { nextRequest <- scanner.Scan() }()
+		responseWritten := make(chan struct{})
+		go func() {
+			body := pipePressureBlob()
+			_, _ = fmt.Fprintf(os.Stdout, "%s blob %d\n", firstOID, len(body))
+			_, _ = os.Stdout.Write(body)
+			_, _ = os.Stdout.Write([]byte{'\n'})
+			close(responseWritten)
+		}()
+		select {
+		case hasNext := <-nextRequest:
+			if hasNext {
+				os.Exit(5)
+			}
+			os.Exit(4)
+		case <-responseWritten:
+		}
+		if !<-nextRequest {
+			os.Exit(4)
+		}
+		for {
+			_, _ = fmt.Fprintf(os.Stdout, "%s blob 1\nx\n", scanner.Text())
+			if !scanner.Scan() {
 				break
 			}
 		}
-		if len(oids) != testGitBatchWindow {
-			os.Exit(3)
-		}
-		for _, oid := range oids {
-			_, _ = fmt.Fprintf(os.Stdout, "%s blob 1\nx\n", oid)
+		if err := scanner.Err(); err != nil {
+			os.Exit(4)
 		}
 	case "ls-ls-traversal":
 		spawnStdoutHoldingDescendant()

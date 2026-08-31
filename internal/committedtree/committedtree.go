@@ -21,12 +21,10 @@ import (
 )
 
 const (
-	defaultTimeout    = 2 * time.Minute
-	gitPipeBufferSize = 64 * 1024
-	maxGitRecordSize  = gitPipeBufferSize
-	maxGitStderrBytes = 64 * 1024
-	// 256 SHA-256 object requests remain well below the 64 KiB pipe buffer.
-	gitBatchWindow     = 256
+	defaultTimeout     = 2 * time.Minute
+	gitPipeBufferSize  = 64 * 1024
+	maxGitRecordSize   = gitPipeBufferSize
+	maxGitStderrBytes  = 64 * 1024
 	regularFileMode    = "100644"
 	executableFileMode = "100755"
 	symlinkMode        = "120000"
@@ -180,9 +178,13 @@ func extract(ctx context.Context, repo, object, dir string) error {
 }
 
 // extractWithGit streams one tree listing into one long-lived cat-file batch.
-// It keeps only a bounded request window in memory, removing a pipe round trip
-// per blob while retaining the raw-object, path-safety, and cleanup contracts.
-func extractWithGit(ctx context.Context, repo, object, dir string, command commandFactory) (retErr error) {
+// A request goroutine writes object IDs while this goroutine consumes responses.
+// It waits for each response before writing the next request, so forward progress
+// never depends on either OS pipe having room for a request-count window.
+func extractWithGit(parentCtx context.Context, repo, object, dir string, command commandFactory) (retErr error) {
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
 	lsCmd := command(ctx, repo, "ls-tree", "-r", "-z", "--full-tree", object)
 	lsOut, err := lsCmd.StdoutPipe()
 	if err != nil {
@@ -196,12 +198,19 @@ func extractWithGit(ctx context.Context, repo, object, dir string, command comma
 		return commandError(ctx, "git ls-tree start", err)
 	}
 	var catProcess *ownedGitCommand
+	var requestDone <-chan error
 	defer func() {
 		failed := retErr != nil
+		if failed {
+			cancel()
+		}
 		if catProcess != nil {
 			catProcess.finish(failed)
 		}
 		lsProcess.finish(failed)
+		if requestDone != nil {
+			<-requestDone
+		}
 	}()
 
 	catCmd := command(ctx, repo, "cat-file", "--batch")
@@ -223,20 +232,55 @@ func extractWithGit(ctx context.Context, repo, object, dir string, command comma
 
 	treeReader := bufio.NewReaderSize(lsOut, gitPipeBufferSize)
 	objectReader := bufio.NewReaderSize(catOut, gitPipeBufferSize)
-	pending := make([]treeEntry, 0, gitBatchWindow)
-	flushPending := func() error {
-		for _, entry := range pending {
-			if err := writeBlobFile(objectReader, dir, entry); err != nil {
-				return commandError(ctx, "read git cat-file", err)
-			}
+	entries := make(chan treeEntry)
+	responseDone := make(chan struct{})
+	requestResult := make(chan error, 1)
+	requestDone = requestResult
+	go func() {
+		requestErr := writeBlobRequests(ctx, treeReader, catIn, dir, entries, responseDone)
+		if closeErr := catIn.Close(); requestErr == nil && closeErr != nil {
+			requestErr = commandError(ctx, "close git cat-file input", closeErr)
 		}
-		pending = pending[:0]
-		return nil
+		requestResult <- requestErr
+		close(entries)
+	}()
+
+	for entry := range entries {
+		if err := writeBlobFile(objectReader, dir, entry); err != nil {
+			return commandError(ctx, "read git cat-file", err)
+		}
+		select {
+		case responseDone <- struct{}{}:
+		case <-ctx.Done():
+			return extractionStopError(ctx)
+		}
 	}
+	requestErr := <-requestResult
+	requestDone = nil
+	if requestErr != nil {
+		return requestErr
+	}
+
+	lsWaitErr := lsProcess.wait()
+	catWaitErr := catProcess.wait()
+
+	if ctx.Err() != nil {
+		return extractionStopError(ctx)
+	}
+	if lsWaitErr != nil {
+		return fmt.Errorf("git ls-tree: %w (%s)", lsWaitErr, lsStderr.String())
+	}
+	if catWaitErr != nil {
+		return fmt.Errorf("git cat-file: %w (%s)", catWaitErr, catStderr.String())
+	}
+	return nil
+}
+
+func writeBlobRequests(ctx context.Context, treeReader *bufio.Reader, catIn io.Writer, dir string, entries chan<- treeEntry, responseDone <-chan struct{}) error {
 	for {
 		record, readErr := treeReader.ReadSlice(0)
 		if readErr == io.EOF && len(record) == 0 {
-			break
+			return nil
 		}
 		if readErr != nil {
 			if errors.Is(readErr, bufio.ErrBufferFull) {
@@ -258,33 +302,17 @@ func extractWithGit(ctx context.Context, repo, object, dir string, command comma
 		if _, err := io.WriteString(catIn, entry.oid+"\n"); err != nil {
 			return commandError(ctx, "write git cat-file request", err)
 		}
-		pending = append(pending, entry)
-		if len(pending) == cap(pending) {
-			if err := flushPending(); err != nil {
-				return err
-			}
+		select {
+		case entries <- entry:
+		case <-ctx.Done():
+			return extractionStopError(ctx)
+		}
+		select {
+		case <-responseDone:
+		case <-ctx.Done():
+			return extractionStopError(ctx)
 		}
 	}
-	if err := flushPending(); err != nil {
-		return err
-	}
-
-	lsWaitErr := lsProcess.wait()
-	if err := catIn.Close(); err != nil {
-		return commandError(ctx, "close git cat-file input", err)
-	}
-	catWaitErr := catProcess.wait()
-
-	if ctx.Err() != nil {
-		return extractionStopError(ctx)
-	}
-	if lsWaitErr != nil {
-		return fmt.Errorf("git ls-tree: %w (%s)", lsWaitErr, lsStderr.String())
-	}
-	if catWaitErr != nil {
-		return fmt.Errorf("git cat-file: %w (%s)", catWaitErr, catStderr.String())
-	}
-	return nil
 }
 
 func parseTreeEntry(record []byte) (treeEntry, bool, error) {
