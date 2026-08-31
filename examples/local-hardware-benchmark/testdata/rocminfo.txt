@@ -1,0 +1,5 @@
+  Name:                    gfx1100
+  Marketing Name:          AMD Radeon RX 7900 XTX
+  Vendor Name:             AMD
+  Name:                    gfx1030
+  Marketing Name:          AMD Radeon PRO W6800

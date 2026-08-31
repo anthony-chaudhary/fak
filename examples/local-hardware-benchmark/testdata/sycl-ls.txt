@@ -1,0 +1,2 @@
+[opencl:gpu:0] Intel(R) OpenCL Graphics, Intel(R) Arc(TM) A770 Graphics 3.0 [31.0.101.5590]
+[level_zero:gpu:0] Intel(R) Level-Zero, Intel(R) Data Center GPU Max 1550 1.6

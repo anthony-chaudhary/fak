@@ -1,0 +1,5 @@
+path=<WINDOWS_HOME>\models\qwen.gguf
+other=/home/sample-user/results/run.json
+API_TOKEN=super-secret
+Authorization: Bearer abc.def.ghi
+hostname=sample-workstation username=sample-user

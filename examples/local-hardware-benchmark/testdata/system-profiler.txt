@@ -1,0 +1,7 @@
+Graphics/Displays:
+
+    Apple M3 Max:
+
+      Chipset Model: Apple M3 Max
+      Type: GPU
+      Bus: Built-In
