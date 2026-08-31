@@ -35,9 +35,10 @@ type ScratchProducerReceipt struct {
 
 // CleanScratchProducer removes exactly repoRoot/_scratch/<producer>. The producer must be one
 // literal top-level name: paths, traversal, glob syntax, and the namespace root are refused.
-// The full tree is resolved and checked for symlinks or Windows reparse points before the first
-// removal. Deletion then uses enumerated exact paths bottom-up, never a recursive wildcard or
-// an ignored-ancestor git pathspec.
+// The producer root is resolved and checked before the first removal. Descendant symlinks and
+// Windows reparse points are enumerated as leaf entries and unlinked without traversing their
+// targets. Deletion uses exact paths bottom-up, never a recursive wildcard or ignored-ancestor
+// git pathspec.
 func CleanScratchProducer(repoRoot, producer string) (ScratchProducerReceipt, error) {
 	receipt := ScratchProducerReceipt{
 		Schema:   ScratchProducerReceiptSchema,
@@ -177,14 +178,22 @@ func enumerateScratchProducer(root string) (files []string, directories []string
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("%w: enumerated path escaped producer root: %s", ErrUnsafeScratchProducer, path)
 		}
-		info, err := entry.Info()
+		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
-		if err := refuseReparse(path, info); err != nil {
-			return err
+		reparse, err := goTmpIsReparse(path, info)
+		if err != nil {
+			return fmt.Errorf("inspect producer entry %s for reparse points: %w", path, err)
 		}
-		if entry.IsDir() {
+		if reparse {
+			files = append(files, path)
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
 			directories = append(directories, path)
 			return nil
 		}
@@ -204,8 +213,8 @@ func removeScratchProducerExact(files, directories []string) (int, error) {
 		if err != nil {
 			return removed, fmt.Errorf("recheck producer entry %s: %w", path, err)
 		}
-		if err := refuseReparse(path, info); err != nil {
-			return removed, err
+		if _, err := goTmpIsReparse(path, info); err != nil {
+			return removed, fmt.Errorf("inspect producer entry %s for reparse points: %w", path, err)
 		}
 		if err := os.Remove(path); err != nil {
 			return removed, fmt.Errorf("remove producer entry %s: %w", path, err)
@@ -220,8 +229,8 @@ func removeScratchProducerExact(files, directories []string) (int, error) {
 		if err != nil {
 			return removed, fmt.Errorf("recheck producer directory %s: %w", path, err)
 		}
-		if err := refuseReparse(path, info); err != nil {
-			return removed, err
+		if _, err := goTmpIsReparse(path, info); err != nil {
+			return removed, fmt.Errorf("inspect producer directory %s for reparse points: %w", path, err)
 		}
 		if err := os.Remove(path); err != nil {
 			return removed, fmt.Errorf("remove producer directory %s: %w", path, err)

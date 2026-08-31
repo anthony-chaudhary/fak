@@ -70,16 +70,62 @@ func TestCleanScratchProducerRefusesUnsafeTargets(t *testing.T) {
 	}
 }
 
-func TestCleanScratchProducerRefusesReparseEscapeBeforeDeleting(t *testing.T) {
+func TestCleanScratchProducerUnlinksNestedLinksWithoutTraversingTargets(t *testing.T) {
 	repo := t.TempDir()
 	target := filepath.Join(repo, "_scratch", "selected")
-	safe := filepath.Join(target, "safe.txt")
+	nested := filepath.Join(target, "nested")
+	mustWrite(t, filepath.Join(target, "root.txt"), "producer root\n")
+	mustWrite(t, filepath.Join(nested, "local.txt"), "producer nested\n")
+
 	outside := t.TempDir()
-	outsideFile := filepath.Join(outside, "outside.txt")
-	mustWrite(t, safe, "keep on refusal\n")
-	mustWrite(t, outsideFile, "outside bytes\n")
-	if err := os.Symlink(outside, filepath.Join(target, "escape")); err != nil {
+	externalFile := filepath.Join(outside, "external.bin")
+	externalNestedFile := filepath.Join(outside, "directory-target", "deeper", "sentinel.bin")
+	mustWrite(t, externalFile, "external bytes\x00\x01\xff")
+	mustWrite(t, externalNestedFile, "nested external bytes\x00\xfe")
+	externalFileBefore, err := os.ReadFile(externalFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalNestedBefore, err := os.ReadFile(externalNestedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(externalFile, filepath.Join(target, "external-file-link")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "directory-target"), filepath.Join(nested, "external-directory-link")); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+
+	receipt, err := CleanScratchProducer(repo, "selected")
+	if err != nil {
+		t.Fatalf("CleanScratchProducer: %v", err)
+	}
+	if receipt.Verdict != ScratchProducerReaped || receipt.RemovedCount != 6 {
+		t.Fatalf("receipt = %+v, want reaped with 6 removed entries", receipt)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("selected producer survived: %v", err)
+	}
+	assertFileBytes(t, externalFile, externalFileBefore)
+	assertFileBytes(t, externalNestedFile, externalNestedBefore)
+}
+
+func TestCleanScratchProducerRefusesProducerRootLinkBeforeDeleting(t *testing.T) {
+	repo := t.TempDir()
+	outside := t.TempDir()
+	externalFile := filepath.Join(outside, "outside.txt")
+	mustWrite(t, externalFile, "outside bytes\n")
+	before, err := os.ReadFile(externalFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "_scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo, "_scratch", "selected")); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
 	}
 
 	receipt, err := CleanScratchProducer(repo, "selected")
@@ -89,10 +135,20 @@ func TestCleanScratchProducerRefusesReparseEscapeBeforeDeleting(t *testing.T) {
 	if receipt.Verdict != ScratchProducerRefused || receipt.RemovedCount != 0 {
 		t.Fatalf("receipt = %+v, want refused before deletion", receipt)
 	}
-	for _, path := range []string{safe, outsideFile} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("refusal removed %s: %v", path, err)
-		}
+	if _, err := os.Lstat(filepath.Join(repo, "_scratch", "selected")); err != nil {
+		t.Fatalf("refusal removed producer root link: %v", err)
+	}
+	assertFileBytes(t, externalFile, before)
+}
+
+func assertFileBytes(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("%s changed: before=%q after=%q", path, want, got)
 	}
 }
 
