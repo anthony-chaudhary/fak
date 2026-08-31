@@ -303,6 +303,36 @@ func (o *metalCommandOwner) encodeMatMul(w, x, y unsafe.Pointer, out, in, p int)
 	return o.lifecycle.encode()
 }
 
+func (o *metalCommandOwner) encodeRMSNorm(x, weight, y unsafe.Pointer, rows, n int, eps float32) error {
+	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
+		return errMetalOwnerTerminal
+	}
+	if C.fmetal_command_encode_rmsnorm_f32(o.ptr, x, weight, y, C.int(rows), C.int(n), C.float(eps)) == 0 {
+		return errors.New("compute: Metal RMSNorm encode failed")
+	}
+	return o.lifecycle.encode()
+}
+
+func (o *metalCommandOwner) encodeSwiGLU(gate, up, y unsafe.Pointer, n int) error {
+	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
+		return errMetalOwnerTerminal
+	}
+	if C.fmetal_command_encode_swiglu_f32(o.ptr, gate, up, y, C.int(n)) == 0 {
+		return errors.New("compute: Metal SwiGLU encode failed")
+	}
+	return o.lifecycle.encode()
+}
+
+func (o *metalCommandOwner) encodeAdd(dst, src unsafe.Pointer, n int) error {
+	if o == nil || o.ptr == nil || o.lifecycle.state != metalOwnerOpen {
+		return errMetalOwnerTerminal
+	}
+	if C.fmetal_command_encode_add_f32(o.ptr, dst, src, C.int(n)) == 0 {
+		return errors.New("compute: Metal add encode failed")
+	}
+	return o.lifecycle.encode()
+}
+
 func (o *metalCommandOwner) finish() (metalCommandReceipt, error) {
 	if o == nil || o.ptr == nil {
 		return metalCommandReceipt{}, errMetalOwnerTerminal
