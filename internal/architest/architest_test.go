@@ -68,6 +68,7 @@ var tier = map[string]int{
 	"eveparity":              1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
 	"eveimport":              1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":           2, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"localbench":             3, // local hardware receipt workflow composes benchcatalog plus OS/process probes; command-facing and off the hot path.
 	"buildoverlay":           2, // neutral shared-checkout Go overlay/file-selection helpers; imports windowgate and is shared by runtime and fak-dev.
 	"buildwitness":           2, // structural CI guard (#3217): runs `go build ./cmd/fak` under default tags and reds the trunk (naming the undefined symbol) when uncommitted/tagless WIP breaks the shared build; stdlib-only (os/exec+runtime), imports nothing internal, off the hot path.
 	"clonescan":              1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
