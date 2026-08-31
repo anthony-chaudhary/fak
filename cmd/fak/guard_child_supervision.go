@@ -47,6 +47,15 @@ func guardRecoverCapCrash(command *[]string, runErr error, agentName string, chi
 	return guardAdoptRecoveredCommand(command, next, recovered)
 }
 
+// guardHandleResourceReceiptFailure preserves the fail-closed containment error
+// as the authoritative return while giving the typed survivor case one
+// best-effort RSI attempt. The launch result never replaces or wraps receiptErr.
+func guardHandleResourceReceiptFailure(stderr io.Writer, session *guardRSISession, guardTraceID, agentName string, receiptErr error) error {
+	resourceErr := fmt.Errorf("child resource receipt failed after containment: %w", receiptErr)
+	guardMaybeLaunchFailureRSI(stderr, session, guardTraceID, agentName, guardTypeContainmentSurvivorError(receiptErr))
+	return resourceErr
+}
+
 // guardGoalParked answers "is THIS account still walled off this goal?" — never
 // the account-blind "is this lane parked?" it used to answer. Every branch below
 // consults it BEFORE rotation.rotateAfterExit, so a positive verdict
@@ -103,6 +112,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
+	rsiSession := new(guardRSISession)
 	crashLimit := guardCrashRestartLimit()
 	var crashProgressHead string
 	crashNoProgress := 0
@@ -163,7 +173,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
 			if receiptErr != nil {
-				resourceErr = fmt.Errorf("child resource receipt failed after containment: %w", receiptErr)
+				resourceErr = guardHandleResourceReceiptFailure(os.Stderr, rsiSession, guardTraceID, agentName, receiptErr)
 				fmt.Fprintf(os.Stderr, "fak guard: %v\n", resourceErr)
 				finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
@@ -238,7 +248,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			continue
 		}
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
-			guardMaybeLaunchCrashRSI(os.Stderr, guardTraceID, agentName, class, code, crashRestarts)
+			guardMaybeLaunchCrashRSI(os.Stderr, rsiSession, guardTraceID, agentName, class, code, crashRestarts)
 			crashRestarts++
 			var reap bool
 			crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)
@@ -310,6 +320,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
 	// the bounded crashLimit (explicit 0 = off) so a systematic crash is surfaced, not masked.
 	crashRestarts := 0
+	rsiSession := new(guardRSISession)
 	crashLimit := guardCrashRestartLimit()
 	var crashProgressHead string
 	crashNoProgress := 0
@@ -399,7 +410,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
 			if receiptErr != nil {
-				resourceErr = fmt.Errorf("child resource receipt failed after containment: %w", receiptErr)
+				resourceErr = guardHandleResourceReceiptFailure(restarter.stderr, rsiSession, guardTraceID, agentName, receiptErr)
 				if restarter.stderr != nil {
 					fmt.Fprintf(restarter.stderr, "fak guard: %v\n", resourceErr)
 				}
@@ -488,7 +499,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				continue
 			}
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
-				guardMaybeLaunchCrashRSI(restarter.stderr, guardTraceID, agentName, class, code, crashRestarts)
+				guardMaybeLaunchCrashRSI(restarter.stderr, rsiSession, guardTraceID, agentName, class, code, crashRestarts)
 				crashRestarts++
 				var reap bool
 				crashProgressHead, crashNoProgress, reap = guardCrashNoProgressStep(crashProgressHead, sessionStartSHA(), crashNoProgress, crashNoProgressLimit)

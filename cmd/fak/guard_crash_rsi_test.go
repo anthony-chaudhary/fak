@@ -18,7 +18,7 @@ func TestGuardCrashRSIFirstEligibleCrashLaunchesBoundedTaggedInvestigation(t *te
 		return nil
 	}
 	var stderr bytes.Buffer
-	if !guardMaybeLaunchCrashRSI(&stderr, "RID-secret-looking-source", "codex", "NONZERO_EXIT", 17, 0) {
+	if !guardMaybeLaunchCrashRSI(&stderr, new(guardRSISession), "RID-secret-looking-source", "codex", "NONZERO_EXIT", 17, 0) {
 		t.Fatal("first eligible crash did not launch")
 	}
 	if len(got) != 1 {
@@ -47,13 +47,14 @@ func TestGuardCrashRSIOnlyFirstCrashAndNeverRecurses(t *testing.T) {
 	t.Cleanup(func() { guardCrashRSILaunch = old })
 	launches := 0
 	guardCrashRSILaunch = func(guardCrashRSIRequest) error { launches++; return nil }
-	guardMaybeLaunchCrashRSI(nil, "trace", "claude", "SIGNAL", -1, 0)
-	guardMaybeLaunchCrashRSI(nil, "trace", "claude", "SIGNAL", -1, 1)
+	session := new(guardRSISession)
+	guardMaybeLaunchCrashRSI(nil, session, "trace", "claude", "SIGNAL", -1, 0)
+	guardMaybeLaunchCrashRSI(nil, session, "trace", "claude", "SIGNAL", -1, 1)
 	if launches != 1 {
 		t.Fatalf("launches=%d, want exactly 1", launches)
 	}
 	t.Setenv(guardCrashRSIMarkerEnv, "guard-crash-rsi/already")
-	guardMaybeLaunchCrashRSI(nil, "other", "claude", "OOM", 137, 0)
+	guardMaybeLaunchCrashRSI(nil, new(guardRSISession), "other", "claude", "OOM", 137, 0)
 	if launches != 1 {
 		t.Fatalf("recursive session launched: %d", launches)
 	}
@@ -75,7 +76,7 @@ func TestGuardCrashRSIUnsafeAndNonCrashCasesSkip(t *testing.T) {
 		{"trace", "codex", "CLEAN_EXIT", 0},
 	}
 	for _, tc := range cases {
-		guardMaybeLaunchCrashRSI(nil, tc.trace, tc.agent, tc.class, tc.code, 0)
+		guardMaybeLaunchCrashRSI(nil, new(guardRSISession), tc.trace, tc.agent, tc.class, tc.code, 0)
 	}
 	if launches != 0 {
 		t.Fatalf("unsafe/non-crash launches=%d", launches)
@@ -88,7 +89,7 @@ func TestGuardCrashRSILaunchFailureIsFailOpen(t *testing.T) {
 	t.Cleanup(func() { guardCrashRSILaunch = old })
 	guardCrashRSILaunch = func(guardCrashRSIRequest) error { return errors.New("synthetic launch failure") }
 	var stderr bytes.Buffer
-	if guardMaybeLaunchCrashRSI(&stderr, "trace", "codex", "NONZERO_EXIT", 9, 0) {
+	if guardMaybeLaunchCrashRSI(&stderr, new(guardRSISession), "trace", "codex", "NONZERO_EXIT", 9, 0) {
 		t.Fatal("failed launch reported success")
 	}
 	if !strings.Contains(stderr.String(), "synthetic launch failure") {
