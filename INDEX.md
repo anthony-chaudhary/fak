@@ -284,6 +284,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-PRE-PR-VERIFICATION-ATTESTATION-2026-08-31.md`](docs/notes/CONCEPT-PRE-PR-VERIFICATION-ATTESTATION-2026-08-31.md) — Stack72 CI study: validate commit/config-bound pre-PR evidence in shadow mode before selective admission.
+
 - [OpenAI prompt-caching watchlist — 2026-08-30](docs/notes/OPENAI-PROMPT-CACHING-WATCHLIST-2026-08-30.md) -- auto-indexed dated note.
 - [Bench: evidence mechanisms worth adapting, not a benchmark contract to import (2026-08-29)](docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md) — pinned exhaustive study of benchmark orchestration, methodology, license posture, and FAK overlap; files watcher-safe snapshots, workload/telemetry correlation receipts, and parser-completeness receipts as #10302-#10304.
 
