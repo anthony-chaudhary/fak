@@ -2,6 +2,7 @@ package computetrace
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -46,5 +47,34 @@ func TestGlobalRecorderIsOptIn(t *testing.T) {
 func TestReadRejectsUnknownSchema(t *testing.T) {
 	if _, err := Read(bytes.NewBufferString(`{"schema":"future"}`)); err == nil {
 		t.Fatal("accepted unknown schema")
+	}
+}
+
+func TestEventMetalFieldsJSONRoundTrip(t *testing.T) {
+	want := Event{Route: "metal_command_buffer", DeviceDurationNS: 1234, InputDType: "f32", WeightDType: "f16", OutputDType: "f32", BytesRead: 4096, BytesWritten: 1024, EstimatedFLOPs: 8192}
+	encoded, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal Metal trace fields: %v", err)
+	}
+	for _, field := range []string{`"route":"metal_command_buffer"`, `"device_duration_ns":1234`, `"input_dtype":"f32"`, `"weight_dtype":"f16"`, `"output_dtype":"f32"`, `"bytes_read":4096`, `"bytes_written":1024`, `"estimated_flops":8192`} {
+		if !bytes.Contains(encoded, []byte(field)) {
+			t.Fatalf("encoded event missing %s: %s", field, encoded)
+		}
+	}
+	var got Event
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("unmarshal Metal trace fields: %v", err)
+	}
+	if got.Route != want.Route || got.DeviceDurationNS != want.DeviceDurationNS || got.InputDType != want.InputDType || got.WeightDType != want.WeightDType || got.OutputDType != want.OutputDType || got.BytesRead != want.BytesRead || got.BytesWritten != want.BytesWritten || got.EstimatedFLOPs != want.EstimatedFLOPs {
+		t.Fatalf("Metal trace fields changed after round trip: got %+v want %+v", got, want)
+	}
+	empty, err := json.Marshal(Event{})
+	if err != nil {
+		t.Fatalf("marshal empty event: %v", err)
+	}
+	for _, field := range []string{`"route"`, `"device_duration_ns"`, `"input_dtype"`, `"weight_dtype"`, `"output_dtype"`, `"bytes_read"`, `"bytes_written"`, `"estimated_flops"`} {
+		if bytes.Contains(empty, []byte(field)) {
+			t.Fatalf("omitempty field %s present in empty event: %s", field, empty)
+		}
 	}
 }

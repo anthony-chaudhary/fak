@@ -25,8 +25,16 @@ type Event struct {
 	Candidate        string    `json:"candidate_id,omitempty"`
 	StartedAt        time.Time `json:"started_at"`
 	DurationNS       int64     `json:"duration_ns"`
+	DeviceDurationNS int64     `json:"device_duration_ns,omitempty"`
 	TimerDomain      string    `json:"timer_domain"`
+	Route            string    `json:"route,omitempty"`
+	InputDType       string    `json:"input_dtype,omitempty"`
+	WeightDType      string    `json:"weight_dtype,omitempty"`
+	OutputDType      string    `json:"output_dtype,omitempty"`
 	Bytes            int64     `json:"bytes,omitempty"`
+	BytesRead        int64     `json:"bytes_read,omitempty"`
+	BytesWritten     int64     `json:"bytes_written,omitempty"`
+	EstimatedFLOPs   int64     `json:"estimated_flops,omitempty"`
 	Shapes           [][]int   `json:"shapes,omitempty"`
 	Status           string    `json:"status"`
 	ProvenanceDigest string    `json:"provenance_digest"`
