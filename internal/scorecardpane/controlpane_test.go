@@ -128,6 +128,27 @@ func TestOperatorHeavinessScorecardRegistered(t *testing.T) {
 	}
 }
 
+func TestBrittlenessScorecardRegisteredExactlyOnce(t *testing.T) {
+	want := Card{
+		Key:   "brittleness",
+		Debt:  "brittleness_debt",
+		Cmd:   "go run ./cmd/fak score brittleness --json",
+		Label: "brittleness",
+	}
+	count := 0
+	for _, card := range Cards {
+		if card.Key != want.Key {
+			continue
+		}
+		count++
+		if !reflect.DeepEqual(card, want) {
+			t.Fatalf("brittleness card = %+v, want %+v", card, want)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("brittleness card count = %d, want 1", count)
+	}
+}
 func TestNativeRosterIncludesPythonParityCards(t *testing.T) {
 	want := map[string]Card{
 		"milestone": {

@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-30T04:16:17Z",
+  "updated_at": "2026-08-31",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -3781,6 +3781,109 @@
           "#10304"
         ],
         "completeness_critic": "Covered the committed tree, architecture and runtime flow, tests and fixtures, local history and tags, forge issues/PRs/discussions metadata, provenance and license evidence, current FAK overlap, candidate dispositions, deduplication, issue filing, and durable receipt read-back. Inventory totals are a mechanical local-tree denominator that includes broad environment material, not project-owned source totals. Private deployments, external runtime logs, dependency-by-dependency license review, producer authentication, and comparative effectiveness remain outside the denominator."
+      }
+    },
+    {
+      "repository": "ActaClad/plumbline",
+      "url": "https://github.com/ActaClad/plumbline",
+      "status": "studied",
+      "priority": 76,
+      "why": "Apache-2.0 Python reliability and architecture analyzer for LLM/agent systems. Pinned study retained four bounded adaptations—SARIF projection, labeled precision/recall corpora, stable finding baseline deltas, and one bounded cross-function value-flow rule—while rejecting a duplicate Python analyzer framework. Refresh after a post-v0.0.2 release, a material engine/reporter change, or a witnessed determinism fix.",
+      "last_checked": "2026-08-31",
+      "checked_revision": "cae5eeaa244830ef88bd47e18d39b7b7761df41e",
+      "stars_at_check": 26,
+      "last_push_at_check": "2026-08-27T07:03:08Z",
+      "study_note": "docs/research/plumbline-study-2026-08-31.md",
+      "refresh_issue": "#10452",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/research/plumbline-study-2026-08-31.md",
+        "indexed_revision": "cae5eeaa244830ef88bd47e18d39b7b7761df41e",
+        "source_classes": [
+          "source",
+          "tests",
+          "docs",
+          "history",
+          "releases",
+          "issues-prs",
+          "license-packaging",
+          "fak-comparison"
+        ],
+        "subsystem_count": 8,
+        "candidate_count": 7,
+        "filed_issue_count": 4,
+        "source_evidence": [
+          {
+            "class": "source",
+            "evidence": [
+              "https://github.com/ActaClad/plumbline/tree/cae5eeaa244830ef88bd47e18d39b7b7761df41e/src/plumbline"
+            ],
+            "note": "AST, value derivation, taint/evidence, rules, scoring, reporters, adapters, and skill export inspected."
+          },
+          {
+            "class": "tests",
+            "evidence": [
+              "python -m pytest -q (with PYTHONPATH=src): 481 passed, 2 failed"
+            ],
+            "note": "Failures recorded in the study note; current determinism claim is not treated as fully witnessed."
+          },
+          {
+            "class": "docs",
+            "evidence": [
+              "docs/research/plumbline-study-2026-08-31.md"
+            ],
+            "note": "README, ADRs/specs, backlog, changelog, CI and integration docs inspected."
+          },
+          {
+            "class": "history",
+            "evidence": [
+              "git -C _scratch/study-plumbline/repo log --reverse"
+            ],
+            "note": "125-commit implementation sequence inspected."
+          },
+          {
+            "class": "releases",
+            "evidence": [
+              "https://github.com/ActaClad/plumbline/releases"
+            ],
+            "note": "v0.0.1 and v0.0.2 inspected."
+          },
+          {
+            "class": "issues-prs",
+            "evidence": [
+              "https://github.com/ActaClad/plumbline/issues?q=is%3Aissue",
+              "https://github.com/ActaClad/plumbline/pulls?q=is%3Apr"
+            ],
+            "note": "No non-PR issues at check time; PR history is Dependabot-only."
+          },
+          {
+            "class": "license-packaging",
+            "evidence": [
+              "https://github.com/ActaClad/plumbline/blob/cae5eeaa244830ef88bd47e18d39b7b7761df41e/LICENSE",
+              "https://github.com/ActaClad/plumbline/blob/cae5eeaa244830ef88bd47e18d39b7b7761df41e/pyproject.toml"
+            ],
+            "note": "Apache-2.0 and Python packaging inspected."
+          },
+          {
+            "class": "fak-comparison",
+            "evidence": [
+              "docs/research/plumbline-study-2026-08-31.md",
+              "#10460",
+              "#10461",
+              "#10462",
+              "#10464",
+              "study_b61c432e9a8f2ad5574036e224b8fd957aa482a9c588e0fe295396ed532edad6"
+            ],
+            "note": "Every surviving candidate has a status, disposition, issue, and durable receipt."
+          }
+        ],
+        "issue_refs": [
+          "#10460",
+          "#10461",
+          "#10462",
+          "#10464"
+        ],
+        "completeness_critic": "One bounded follow-up remains intentionally deferred: no individual Python-specific rule was ported because no FAK corpus currently proves a miss; the source-analysis issue requires selecting and witnessing one concrete Go rule before implementation."
       }
     }
   ]
