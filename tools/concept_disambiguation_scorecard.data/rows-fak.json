@@ -149,13 +149,33 @@
       "distinction": "This is an attended one-child repair launcher, not guardDisabled, the GUARD_DISABLED dispatch switch that skips wrapping workers, and not fak guard allow, which edits a capability overlay while the guard remains active.",
       "distinct_from": [
         "x-goal25-guard-gate-guarddisabled",
-        "guard-gate-guardallow"
+        "guard-gate-guardallow",
+        "guardcodexauthmanagementcommand"
       ],
       "aliases": [
         "fak guard disable",
         "fak manage disable"
       ],
       "grounding": "runGuardDisable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "guardcodexauthmanagementcommand",
+      "canonical": "guardCodexAuthManagementCommand",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Recognizes the exact Codex CLI authentication-management commands that must execute without FAK provider or credential injection.",
+      "distinction": "Unlike ordinary Codex launches or the one-child guard-disable break-glass launcher, this narrow command class manages Codex's own login state and bypasses only FAK auth/config injection; it does not disable guarding for other Codex commands.",
+      "distinct_from": [
+        "guard-gate-guard-disable-break-glass"
+      ],
+      "aliases": [],
+      "grounding": "guardCodexAuthManagementCommand",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

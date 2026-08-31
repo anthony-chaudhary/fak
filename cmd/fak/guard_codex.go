@@ -208,8 +208,18 @@ func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv st
 	return installGuardCodexConfigForProfile(command, profile, enabled, gwURL, apiKeyEnv)
 }
 
+func guardCodexAuthManagementCommand(command []string) bool {
+	if len(command) == 2 {
+		return command[0] == "codex" &&
+			(command[1] == "login" || command[1] == "logout")
+	}
+	return len(command) == 3 &&
+		command[0] == "codex" &&
+		command[1] == "login" &&
+		command[2] == "status"
+}
 func installGuardCodexConfigForProfile(command []string, profile harnessprofile.HarnessProfile, enabled bool, gwURL, apiKeyEnv string) ([]string, guardCodexInstall) {
-	if !enabled || len(command) == 0 || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
+	if !enabled || len(command) == 0 || guardCodexAuthManagementCommand(command) || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return command, guardCodexInstall{}
 	}
 	model := guardCodexDefaultModelID

@@ -240,7 +240,8 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 			os.Exit(2)
 		}
 	}
-	if guardCodexSubscriptionEligibleForProfile(in.profile, p.up, in.baseURL, in.remoteBase, in.apiKeyEnv) {
+	if !guardCodexAuthManagementCommand(command) &&
+		guardCodexSubscriptionEligibleForProfile(in.profile, p.up, in.baseURL, in.remoteBase, in.apiKeyEnv) {
 		if cred, err := resolveCodexSubscriptionCredential(in.codexHome); err == nil {
 			p.apiKey = cred.AccessToken
 			p.pinUpstream = true
