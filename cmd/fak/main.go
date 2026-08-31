@@ -1005,6 +1005,8 @@ func cmdBench(argv []string) {
 			os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv[1:]))
 		case "system-baseline":
 			os.Exit(runBenchSystemBaseline(os.Stdout, os.Stderr, argv[1:]))
+		case "local":
+			os.Exit(runBenchLocal(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
