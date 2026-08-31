@@ -2,9 +2,13 @@ package ggufload
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -226,5 +230,31 @@ func TestQ4KLoadOptionCanRouteDenseKQuantToQ8(t *testing.T) {
 	}
 	if opts.residentDenseKQuant {
 		t.Fatal("WithDenseKQuantResident(false) did not disable dense raw k-quant residency")
+	}
+}
+
+type countingCloser struct {
+	closes atomic.Int32
+}
+
+func (c *countingCloser) Close() error {
+	c.closes.Add(1)
+	return nil
+}
+
+func TestLoadModelQ4KProfileOptionsContextClosesReaderOnceBeforeReturn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	closer := &countingCloser{}
+	open := func(string) (*WeightSource, error) {
+		cancel()
+		return &WeightSource{File: &File{}, closers: []io.Closer{closer}}, nil
+	}
+
+	_, err := loadModelQ4KProfileOptionsContext(ctx, "ignored", nil, open)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("LoadModelQ4KProfileOptionsContext error = %v, want context.Canceled", err)
+	}
+	if got := closer.closes.Load(); got != 1 {
+		t.Fatalf("reader closes before return = %d, want exactly 1", got)
 	}
 }

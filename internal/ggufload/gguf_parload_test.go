@@ -2,9 +2,13 @@ package ggufload
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestParallelQuantLoadDeterministic is the byte-identity gate for the parallel GGUF load
@@ -127,5 +131,95 @@ func TestParallelQuantLoadPathAccounting(t *testing.T) {
 	prof.EmitLoadPathSummary(&summary)
 	if out := summary.String(); !bytes.Contains([]byte(out), []byte("Q4_K")) || !bytes.Contains([]byte(out), []byte("resident=3")) {
 		t.Fatalf("load-path summary missing the Q4_K resident=3 row:\n%s", out)
+	}
+}
+
+func TestParallelQuantLoadContextCancelsAndJoins(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &WeightSource{File: &File{Tensors: []TensorInfo{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}}}
+
+	var admitted atomic.Int32
+	var active atomic.Int32
+	started := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		done <- s.parallelQuantLoadContext(ctx, func(TensorInfo) tensorWork {
+			admitted.Add(1)
+			active.Add(1)
+			started <- struct{}{}
+			<-ctx.Done()
+			active.Add(-1)
+			return tensorWork{}
+		}, func(tensorWork) error { return nil })
+	}()
+
+	<-started
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("parallelQuantLoadContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parallelQuantLoadContext did not return after cancellation")
+	}
+	if got := admitted.Load(); got != 2 {
+		t.Fatalf("admitted tensors = %d, want 2 (no admission after cancellation)", got)
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("active tensor ownership = %d, want 0 after return", got)
+	}
+	if got := activeParallelLoads.Load(); got != 0 {
+		t.Fatalf("active parallel load scopes = %d, want 0 after return", got)
+	}
+}
+
+func TestParallelQuantLoadContextReturnsFirstTensorErrorAfterDrain(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	s := &WeightSource{File: &File{Tensors: []TensorInfo{{Name: "first"}, {Name: "started"}, {Name: "later"}}}}
+	want := errors.New("first tensor failed")
+	releaseFirst := make(chan struct{})
+	releaseStarted := make(chan struct{})
+	started := make(chan struct{}, 2)
+	var admitted atomic.Int32
+	var active atomic.Int32
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.parallelQuantLoadContext(context.Background(), func(info TensorInfo) tensorWork {
+			admitted.Add(1)
+			active.Add(1)
+			defer active.Add(-1)
+			started <- struct{}{}
+			switch info.Name {
+			case "first":
+				<-releaseFirst
+				return tensorWork{err: want}
+			case "started":
+				<-releaseStarted
+			}
+			return tensorWork{}
+		}, func(tensorWork) error { return nil })
+	}()
+
+	<-started
+	<-started
+	close(releaseFirst)
+	select {
+	case err := <-done:
+		t.Fatalf("returned before already-started work drained: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseStarted)
+	if err := <-done; !errors.Is(err, want) {
+		t.Fatalf("parallelQuantLoadContext error = %v, want %v", err, want)
+	}
+	if got := admitted.Load(); got != 2 {
+		t.Fatalf("admitted tensors = %d, want 2 (later work must not be admitted)", got)
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("active tensor ownership = %d, want 0 after return", got)
 	}
 }

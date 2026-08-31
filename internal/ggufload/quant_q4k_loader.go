@@ -16,6 +16,7 @@ package ggufload
 // also falls through to Q8, since the resident q4kTensor holds Q4_K blocks only.
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -27,7 +28,13 @@ import (
 // standard quant-on-load path (Q8_0 for the remaining matmul weights, f32 for small
 // tensors). Run the returned model through a Session with Q4K=true.
 func LoadModelQ4K(path string) (*model.Model, error) {
-	return LoadModelQ4KProfile(path, nil)
+	return LoadModelQ4KContext(context.Background(), path)
+}
+
+// LoadModelQ4KContext is LoadModelQ4K with cooperative cancellation. It does not return
+// until admitted tensor work has drained and the checkpoint readers have been closed.
+func LoadModelQ4KContext(ctx context.Context, path string) (*model.Model, error) {
+	return LoadModelQ4KProfileContext(ctx, path, nil)
 }
 
 // ExpertShard names the routed expert band [Lo,Hi) a rank owns during an expert-parallel
@@ -175,7 +182,12 @@ func (o q4kLoadOptions) keptExperts(total int) int {
 // path streams the same load-progress lines the lean-Q8 path does (a 466 GB GLM-5.2 resident load
 // must not be silent). Nil profiler = no progress, byte-identical to the old LoadModelQ4K.
 func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
-	return LoadModelQ4KProfileOptions(path, p)
+	return LoadModelQ4KProfileContext(context.Background(), path, p)
+}
+
+// LoadModelQ4KProfileContext is LoadModelQ4KProfile with cooperative cancellation.
+func LoadModelQ4KProfileContext(ctx context.Context, path string, p *LoadProfiler) (*model.Model, error) {
+	return LoadModelQ4KProfileOptionsContext(ctx, path, p)
 }
 
 // LoadModelQ4KProfileOptions is LoadModelQ4KProfile with explicit load options.
@@ -186,14 +198,30 @@ func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
 // resident nowhere else has no fallback to degrade to. Open the checkpoint yourself and keep it
 // open for the model's life instead.
 func LoadModelQ4KProfileOptions(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	return LoadModelQ4KProfileOptionsContext(context.Background(), path, p, opts...)
+}
+
+// LoadModelQ4KProfileOptionsContext is LoadModelQ4KProfileOptions with cooperative
+// cancellation. Reader cleanup happens synchronously, exactly once, before it returns.
+func LoadModelQ4KProfileOptionsContext(ctx context.Context, path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	return loadModelQ4KProfileOptionsContext(ctx, path, p, OpenWeights, opts...)
+}
+
+func loadModelQ4KProfileOptionsContext(ctx context.Context, path string, p *LoadProfiler, open func(string) (*WeightSource, error), opts ...Q4KLoadOption) (*model.Model, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if o := probeQ4KLoadOptions(opts); o.streamedExperts || o.streamedDenseQ4K {
 		return nil, fmt.Errorf("gguf: streamed weights need a checkpoint that outlives the model; " +
 			"LoadModelQ4KProfileOptions closes it on return — use OpenWeights + (*WeightSource).QuantModelQ4KProfileOptions " +
 			"and close the source only after the model is done")
 	}
-	return loadVia(path, func(ws *WeightSource) (*model.Model, error) {
-		return ws.QuantModelQ4KProfileOptions(p, opts...)
-	})
+	ws, err := open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return ws.QuantModelQ4KProfileOptionsContext(ctx, p, opts...)
 }
 
 // LoadModelQ4KStreamedDense opens path and transfers the checkpoint lifetime to the returned model. CloseWeights must be called when serving stops.
@@ -216,7 +244,12 @@ func LoadModelQ4KStreamedDense(path string, p *LoadProfiler, opts ...Q4KLoadOpti
 // eligible-Q4_K branch pulled before the dequant, so those tensors never pay the f32
 // round-trip.
 func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
-	return s.QuantModelQ4KProfile(nil)
+	return s.QuantModelQ4KContext(context.Background())
+}
+
+// QuantModelQ4KContext is QuantModelQ4K with cooperative cancellation.
+func (s *WeightSource) QuantModelQ4KContext(ctx context.Context) (*model.Model, error) {
+	return s.QuantModelQ4KProfileContext(ctx, nil)
 }
 
 // QuantModelQ4KProfile is QuantModelQ4K with optional progress reporting (p.SetTotal/Tick).
@@ -230,7 +263,12 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 // every core busy. The collector also records the per-quant-type resident-vs-dequant
 // breakdown (the S4 visibility) so the mixed-quant cost is legible without an external dump.
 func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, error) {
-	return s.QuantModelQ4KProfileOptions(p)
+	return s.QuantModelQ4KProfileContext(context.Background(), p)
+}
+
+// QuantModelQ4KProfileContext is QuantModelQ4KProfile with cooperative cancellation.
+func (s *WeightSource) QuantModelQ4KProfileContext(ctx context.Context, p *LoadProfiler) (*model.Model, error) {
+	return s.QuantModelQ4KProfileOptionsContext(ctx, p)
 }
 
 // shapeAndBytesOrFail calls s.shapeAndBytes(info) and, on error, records it onto
@@ -251,6 +289,14 @@ func (s *WeightSource) shapeAndBytesOrFail(info TensorInfo, tw *tensorWork) (sha
 // option set is byte-compatible with QuantModelQ4KProfile; an expert shard only filters routed
 // expert tensors after the GGUF batched expert split.
 func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	return s.QuantModelQ4KProfileOptionsContext(context.Background(), p, opts...)
+}
+
+// QuantModelQ4KProfileOptionsContext is QuantModelQ4KProfileOptions with cooperative cancellation.
+func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cfg, err := s.File.Config()
 	if err != nil {
 		return nil, err
@@ -485,7 +531,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf, w3Requested)
 	}
 
-	if err := s.parallelQuantLoad(computeFn, applyFn); err != nil {
+	if err := s.parallelQuantLoadContext(ctx, computeFn, applyFn); err != nil {
 		return nil, err
 	}
 	if err := glmKVBUnpaired(kvbHalf); err != nil {

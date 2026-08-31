@@ -28,6 +28,7 @@ package ggufload
 // FAK_GGUF_LOAD_WORKERS tunes it.
 
 import (
+	"context"
 	"io"
 	"os"
 	"runtime"
@@ -152,22 +153,34 @@ type tensorWork struct {
 // merge buffer, profiler) and is never called concurrently. The first error from either
 // stops application (remaining results are still drained so no worker blocks) and is returned.
 func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, applyFn func(tensorWork) error) error {
+	return s.parallelQuantLoadContext(context.Background(), computeFn, applyFn)
+}
+
+// parallelQuantLoadContext is parallelQuantLoad with cooperative cancellation. Cancellation
+// stops new tensor admission, then joins the feeder and every worker before returning. Work
+// already admitted is drained in tensor order so the earliest tensor/apply error remains the
+// deterministic cause rather than being replaced by the cancellation used to stop the pool.
+func (s *WeightSource) parallelQuantLoadContext(ctx context.Context, computeFn func(TensorInfo) tensorWork, applyFn func(tensorWork) error) error {
 	tensors := s.File.Tensors
 	n := len(tensors)
 	if n == 0 {
-		return nil
+		return ctx.Err()
 	}
 	workers := loadWorkers()
 	if workers > n {
 		workers = n
 	}
 	if workers <= 1 {
-		// Serial fallback: identical order, no goroutines (cheap small loads + a clean
-		// -race baseline). Byte-identical to the pool path by construction.
 		for i := range tensors {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			w := computeFn(tensors[i])
 			if w.err != nil {
 				return w.err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 			if err := applyFn(w); err != nil {
 				return err
@@ -176,6 +189,8 @@ func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, 
 		return nil
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	activeParallelLoads.Add(1)
 	defer activeParallelLoads.Add(-1)
 
@@ -184,11 +199,9 @@ func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, 
 	for i := range done {
 		done[i] = make(chan struct{})
 	}
-	// sem is the look-ahead window: the feeder acquires a slot before queuing a tensor and
-	// the collector releases one after APPLYING it, so at most `workers` tensors are in
-	// flight (dequanted but not yet applied) — the peak-transient bound.
 	sem := make(chan struct{}, workers)
 	jobs := make(chan int)
+	var admitted atomic.Int32
 
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
@@ -196,32 +209,74 @@ func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, 
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				results[i] = computeFn(tensors[i]) // write happens-before close(done[i])
+				// Jobs accepted by the feeder own a slot and must run to completion. The
+				// cancellation signal stops later admission; computeFn may also observe it
+				// cooperatively, but the pool never replaces an admitted tensor's real error.
+				results[i] = computeFn(tensors[i])
+				if results[i].err != nil {
+					cancel()
+				}
 				close(done[i])
 			}
 		}()
 	}
+	feederDone := make(chan struct{})
 	go func() {
+		defer close(feederDone)
+		defer close(jobs)
 		for i := 0; i < n; i++ {
-			sem <- struct{}{} // block until the collector frees a window slot
-			jobs <- i
-		}
-		close(jobs)
-	}()
-
-	var applyErr error
-	for i := 0; i < n; i++ {
-		<-done[i] // receive synchronizes-with the worker's write to results[i]
-		if applyErr == nil {
-			if results[i].err != nil {
-				applyErr = results[i].err
-			} else if err := applyFn(results[i]); err != nil {
-				applyErr = err
+			if runCtx.Err() != nil {
+				return
+			}
+			select {
+			case sem <- struct{}{}:
+			case <-runCtx.Done():
+				return
+			}
+			if runCtx.Err() != nil {
+				<-sem
+				return
+			}
+			select {
+			case jobs <- i:
+				admitted.Add(1)
+			case <-runCtx.Done():
+				<-sem
+				return
 			}
 		}
-		results[i] = tensorWork{} // drop the reference so a multi-GB f32 can be GC'd now
-		<-sem                     // free a window slot for the feeder
+	}()
+
+	var firstErr error
+	for i := 0; i < n; i++ {
+		select {
+		case <-done[i]:
+		case <-feederDone:
+			if i >= int(admitted.Load()) {
+				wg.Wait()
+				if firstErr != nil {
+					return firstErr
+				}
+				return ctx.Err()
+			}
+			<-done[i]
+		}
+		if firstErr == nil {
+			if results[i].err != nil {
+				firstErr = results[i].err
+				cancel()
+			} else if err := applyFn(results[i]); err != nil {
+				firstErr = err
+				cancel()
+			}
+		}
+		results[i] = tensorWork{}
+		<-sem
 	}
+	<-feederDone
 	wg.Wait()
-	return applyErr
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
 }
