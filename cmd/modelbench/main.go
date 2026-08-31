@@ -22,8 +22,10 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -72,8 +74,12 @@ func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
 // loadModel selects the load path from the flags (lean GGUF/HF, plain GGUF/HF, or fak
 // dir format) and returns the model plus its report label. May set *f.quant for -lean.
 func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
+	return loadModelContext(context.Background(), f, lp)
+}
+
+func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
 	if *f.q4k {
-		return loadGGUFQ4K(*f.gguf, lp, streamQ4KEnabled(f))
+		return loadGGUFQ4KContext(ctx, *f.gguf, lp, streamQ4KEnabled(f))
 	}
 	if *f.lean {
 		if *f.hf == "" && *f.gguf == "" {
@@ -1193,13 +1199,24 @@ func smokeOutcome(done bool, elapsed, deadline time.Duration) string {
 	return smokeStatusLoaded
 }
 
-// loadModelMaybeDeadline loads the model. Under -smoke it runs the load in a goroutine and races
-// it against -smoke-deadline: on timeout it reports SMOKE_LOAD_TIMEOUT with the elapsed time (the
-// load goroutine is abandoned; the process exits) so a load that would have run for an hour is
-// bounded. Without -smoke it loads synchronously, exactly as before.
+// loadModelMaybeDeadline bounds smoke loads. Q4_K loaders cooperate with cancellation and
+// return only after their workers and checkpoint reader are drained; other loaders retain the
+// historical race-and-exit behavior.
 func loadModelMaybeDeadline(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
 	if !*f.smoke || *f.smokeDeadline <= 0 {
 		return loadModel(f, lp)
+	}
+	if *f.q4k {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), *f.smokeDeadline)
+		defer cancel()
+		m, name, err := loadModelContext(ctx, f, lp)
+		elapsed := time.Since(start)
+		if errors.Is(err, context.DeadlineExceeded) {
+			smokeTimeoutReporter(f, elapsed)
+			return nil, "", nil // unreachable in production: reportSmokeTimeout exits
+		}
+		return m, name, err
 	}
 	type loadRes struct {
 		m    *model.Model
@@ -1230,6 +1247,8 @@ func loadModelMaybeDeadline(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Mo
 
 // reportSmokeTimeout emits the SMOKE_LOAD_TIMEOUT artifact (with the last progress visible on
 // stderr from the load profiler) and exits non-zero.
+var smokeTimeoutReporter = reportSmokeTimeout
+
 func reportSmokeTimeout(f *benchFlags, elapsed time.Duration) {
 	fmt.Fprintf(os.Stderr, "fak: -smoke load exceeded -smoke-deadline %s (%.0fs elapsed) — aborting\n", *f.smokeDeadline, elapsed.Seconds())
 	report := map[string]any{
