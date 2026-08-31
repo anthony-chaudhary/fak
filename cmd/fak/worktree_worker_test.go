@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -525,11 +524,11 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		t.Fatalf("decode list --json: %v; output=%q", err, raw)
 	}
 	if got.Schema != worktreeWorkerLifecycleSchema || got.Count != 1 ||
-		!reflect.DeepEqual(got.Paths, []string{filepath.ToSlash(worktree)}) || len(got.Inventory) != 1 {
+		len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], worktree) || len(got.Inventory) != 1 {
 		t.Fatalf("list --json header = %+v", got)
 	}
 	row := got.Inventory[0]
-	if row.Path != filepath.ToSlash(worktree) || row.HeadSHA != base || row.BaseSHA != base {
+	if !sameResolvedPath(row.Path, worktree) || row.HeadSHA != base || row.BaseSHA != base {
 		t.Fatalf("revision association = %+v, want path=%q head/base=%q", row, worktree, base)
 	}
 	if row.Association.State != worktreeEvidenceAssociated ||
@@ -874,7 +873,12 @@ func TestWorktreeColdReapPlanEndToEnd(t *testing.T) {
 	}
 	// Count returns git's forward-slash paths; Prepare returns native paths — compare
 	// on a normalized form so the Windows slash direction does not spuriously mismatch.
-	norm := func(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+	norm := func(p string) string {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		return filepath.ToSlash(filepath.Clean(p))
+	}
 	elig := map[string]bool{}
 	for _, w := range dry.Worktrees {
 		if w.Eligible {
@@ -1160,135 +1164,129 @@ func TestGoBuildVerifyFailsClosedWhenBuildDirectoryCannotBeCreated(t *testing.T)
 		t.Fatalf("failure detail is not actionable: %q", detail)
 	}
 }
-func TestBoundedColdStatusCountsBoundsConcurrencyAndPreservesAnswers(t *testing.T) {
-	const (
-		count = 40
-		limit = 4
-	)
-	paths := make([]string, count)
-	want := make(map[string]int, count)
-	for i := range paths {
-		paths[i] = fmt.Sprintf("fak-worker-wt-status-%03d", i)
-		want[paths[i]] = i
+func TestWorktreeColdReapKnownAndUnknownBytes(t *testing.T) {
+	tests := []struct {
+		name        string
+		size        func(string) (int64, error)
+		wantBytes   int64
+		wantKnown   int
+		wantUnknown int
+	}{
+		{name: "measured empty", size: func(string) (int64, error) { return 0, nil }, wantKnown: 1},
+		{name: "measurement failed", size: func(string) (int64, error) { return 0, fmt.Errorf("census incomplete") }, wantUnknown: 1},
 	}
-
-	var mu sync.Mutex
-	active, maxActive := 0, 0
-	started := make(chan struct{}, count)
-	release := make(chan struct{})
-	done := make(chan map[string]int, 1)
-	go func() {
-		done <- boundedColdStatusCounts(paths, nil, func(path string, _ workerworktree.GitRunner) int {
-			mu.Lock()
-			active++
-			if active > maxActive {
-				maxActive = active
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, _, now, floor := newColdReapProbeFixture(t)
+			got := worktreeColdReapReportWithOptionsAndProbes(
+				repo, false, floor, now, false,
+				workerworktree.ColdReapOptions{Concurrency: 1, Size: tt.size},
+				func([]string) (map[string]bool, error) { return map[string]bool{}, nil },
+				func(string) (bool, error) { return false, nil },
+				func(_, path string) workerworktree.Result {
+					t.Fatalf("dry-run reached reap for %s", path)
+					return workerworktree.Result{}
+				},
+			)
+			if got.WouldReap != 1 || len(got.Worktrees) != 1 {
+				t.Fatalf("dry-run classification changed: %+v", got)
 			}
-			mu.Unlock()
-			started <- struct{}{}
-			<-release
-			mu.Lock()
-			active--
-			mu.Unlock()
-			return want[path]
-		}, limit)
-	}()
-	for range limit {
-		<-started
-	}
-	mu.Lock()
-	gotMax := maxActive
-	mu.Unlock()
-	if gotMax != limit {
-		t.Fatalf("max concurrency=%d want=%d", gotMax, limit)
-	}
-	close(release)
-	got := <-done
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("status answers changed by completion order: got=%v want=%v", got, want)
+			item := got.Worktrees[0]
+			if got.EligibleBytes != tt.wantBytes || got.Bytes != tt.wantBytes || got.EligibleBytesKnown != tt.wantKnown || got.EligibleBytesUnknown != tt.wantUnknown {
+				t.Fatalf("aggregate byte provenance=%+v", got)
+			}
+			if item.ReclaimBytes != tt.wantBytes || item.Bytes != tt.wantBytes || item.ReclaimBytesKnown != (tt.wantKnown == 1) || item.BytesKnown != (tt.wantKnown == 1) {
+				t.Fatalf("item byte provenance=%+v", item)
+			}
+			encoded := mustKeys(t, got,
+				"bytes", "eligible_bytes", "eligible_bytes_known", "eligible_bytes_unknown", "worktrees",
+			)
+			rows, ok := encoded["worktrees"].([]any)
+			if !ok || len(rows) != 1 {
+				t.Fatalf("encoded worktrees=%T %#v", encoded["worktrees"], encoded["worktrees"])
+			}
+			row, ok := rows[0].(map[string]any)
+			if !ok {
+				t.Fatalf("encoded worktree=%T %#v", rows[0], rows[0])
+			}
+			for _, key := range []string{"bytes", "bytes_known", "reclaim_bytes", "reclaim_bytes_known"} {
+				if _, ok := row[key]; !ok {
+					t.Fatalf("encoded worktree missing compatibility/provenance key %q: %v", key, row)
+				}
+			}
+			if tt.wantUnknown == 1 && strings.Contains(coldReapBytesSummary(got.EligibleBytes, got.EligibleBytesUnknown), "0B") {
+				t.Fatalf("unknown bytes rendered as known zero: %q", coldReapBytesSummary(got.EligibleBytes, got.EligibleBytesUnknown))
+			}
+		})
 	}
 }
 
-func TestWorktreeColdReapListSkipsProtectedStatusAndFailsClosedInOrder(t *testing.T) {
-	root := t.TempDir()
-	now := time.Now()
-	floor := time.Hour
-	paths := []string{
-		filepath.Join(root, "fak-worker-wt-live"),
-		filepath.Join(root, "fak-worker-wt-young"),
-		filepath.Join(root, "fak-worker-wt-clean"),
-		filepath.Join(root, "fak-worker-wt-failed"),
-	}
-	for _, path := range paths {
-		if err := os.Mkdir(path, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old := now.Add(-2 * floor)
-	for _, path := range []string{paths[0], paths[2], paths[3]} {
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-	git := func(_ string, args []string) (int, string) {
-		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
-			var out strings.Builder
-			for _, path := range paths {
-				fmt.Fprintf(&out, "worktree %s\n\n", path)
-			}
-			return 0, out.String()
-		}
-		return 1, ""
-	}
-	var mu sync.Mutex
-	var calls []string
-	got := worktreeColdReapList(root, git, now, floor,
-		func(path string) bool { return path == paths[0] },
-		func(path string, _ workerworktree.GitRunner) int {
-			mu.Lock()
-			calls = append(calls, path)
-			mu.Unlock()
-			if path == paths[3] {
-				return -1
-			}
-			return 0
-		}, 2)
+func TestWorktreeColdReapProgressPrecedesFinalReceipt(t *testing.T) {
+	repo, _, _, floor := newColdReapProbeFixture(t)
+	var stream bytes.Buffer
+	worktreeWorkerReapAllColdTo(repo, false, floor, false, &stream, &stream)
 
-	if !reflect.DeepEqual([]string{got[0].Path, got[1].Path, got[2].Path, got[3].Path}, paths) {
-		t.Fatalf("output order changed: got=%v want=%v", got, paths)
+	dec := json.NewDecoder(&stream)
+	var progress workerworktree.ColdReapProgress
+	if err := dec.Decode(&progress); err != nil {
+		t.Fatalf("decode progress: %v\nstream=%s", err, stream.String())
 	}
-	sort.Strings(calls)
-	wantCalls := append([]string(nil), paths[2:]...)
-	sort.Strings(wantCalls)
-	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("status calls=%v want only old dead trees %v", calls, wantCalls)
+	if progress.Completed != 1 || progress.Total != 1 || progress.Eligible != 1 {
+		t.Fatalf("first event is not completed ColdReapProgress: %+v", progress)
 	}
-	if !got[2].Eligible || got[2].Unlanded != 0 {
-		t.Fatalf("clean candidate=%+v want eligible", got[2])
+	var final worktreeColdReapOut
+	if err := dec.Decode(&final); err != nil {
+		t.Fatalf("decode final receipt after progress: %v\nstream=%s", err, stream.String())
 	}
-	if got[3].Eligible || got[3].Unlanded != -1 || !got[3].HeldByWork {
-		t.Fatalf("failed status candidate=%+v want fail-closed unlanded=-1", got[3])
+	if final.Mode != "dry-run" || len(final.Worktrees) != 1 {
+		t.Fatalf("final receipt=%+v", final)
 	}
 }
-func TestWorktreeColdReapSkipsRecursiveByteCensus(t *testing.T) {
-	repo, _, now, floor := newColdReapProbeFixture(t)
-	got := worktreeColdReapReportWithProbes(
-		repo,
-		false,
-		floor,
-		now,
-		false,
-		func([]string) (map[string]bool, error) { return map[string]bool{}, nil },
+
+func sameResolvedPath(a, b string) bool {
+	resolve := func(path string) string {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
+		}
+		return filepath.Clean(path)
+	}
+	return resolve(a) == resolve(b)
+}
+
+func TestWorktreeColdReapApplyUsesOnePlanningSnapshot(t *testing.T) {
+	repo, wt, now, floor := newColdReapProbeFixture(t)
+	sizeCalls := 0
+	reapCalls := 0
+	got := worktreeColdReapReportWithOptionsAndProbes(
+		repo, true, floor, now, false,
+		workerworktree.ColdReapOptions{
+			Concurrency: 1,
+			Size: func(path string) (int64, error) {
+				sizeCalls++
+				if !sameResolvedPath(path, wt) {
+					t.Fatalf("planned unexpected path %q want %q", path, wt)
+				}
+				return 8192, nil
+			},
+		},
+		func(paths []string) (map[string]bool, error) {
+			if len(paths) != 1 || !sameResolvedPath(paths[0], wt) {
+				t.Fatalf("process snapshot paths=%v want [%s]", paths, wt)
+			}
+			return map[string]bool{}, nil
+		},
 		func(string) (bool, error) { return false, nil },
-		func(_, path string) workerworktree.Result {
-			t.Fatalf("dry-run reached reap for %s", path)
-			return workerworktree.Result{}
+		func(root, path string) workerworktree.Result {
+			reapCalls++
+			return workerworktree.ForceReap(root, path, nil)
 		},
 	)
-	if got.WouldReap != 1 || len(got.Worktrees) != 1 {
-		t.Fatalf("dry-run classification changed: %+v", got)
+	if sizeCalls != 1 || reapCalls != 1 {
+		t.Fatalf("apply recensused or changed the plan: size_calls=%d reap_calls=%d out=%+v", sizeCalls, reapCalls, got)
 	}
-	if got.Worktrees[0].BytesKnown || got.Worktrees[0].Bytes != 0 || got.Bytes != 0 {
-		t.Fatalf("bulk classification must not recursively census bytes: %+v", got)
+	if got.WouldReap != 1 || got.Reaped != 1 ||
+		got.EligibleBytes != 8192 || got.EligibleBytesKnown != 1 || got.EligibleBytesUnknown != 0 ||
+		got.ReapedBytes != 8192 || got.ReapedBytesKnown != 1 || got.ReapedBytesUnknown != 0 {
+		t.Fatalf("apply receipt did not preserve planned bytes: %+v", got)
 	}
 }
