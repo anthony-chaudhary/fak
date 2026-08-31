@@ -192,3 +192,110 @@ func mustBuild(t *testing.T, in Input) Plan {
 	}
 	return plan
 }
+
+// TestFileLiveEdgeRefusalTable maps every strict live refusal class through
+// the real post-filing review seam. Each refusal must happen before the first
+// external write and must not leak a partial result.
+func TestFileLiveEdgeRefusalTable(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Plan, *LiveOptions)
+		wantMsg string
+	}{
+		{
+			name: "nil runner",
+			mutate: func(_ *Plan, opt *LiveOptions) {
+				opt.Runner = nil
+			},
+			wantMsg: "needs a gh Runner",
+		},
+		{
+			name: "missing parent issue",
+			mutate: func(plan *Plan, _ *LiveOptions) {
+				plan.Input.ParentIssue = 0
+			},
+			wantMsg: "requires --parent-issue and --parent-baseline-points",
+		},
+		{
+			name: "missing parent baseline",
+			mutate: func(plan *Plan, _ *LiveOptions) {
+				plan.Input.ParentBaseline = 0
+			},
+			wantMsg: "requires --parent-issue and --parent-baseline-points",
+		},
+		{
+			name: "malformed final candidate",
+			mutate: func(plan *Plan, _ *LiveOptions) {
+				plan.Candidates[len(plan.Candidates)-1].RequiredModelTier = ""
+			},
+			wantMsg: "fails the strict post-filing issue contract",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := liveTestPlan(t)
+			calls := 0
+			opt := LiveOptions{Runner: func([]string) (string, string, bool) {
+				calls++
+				return "https://github.com/o/r/issues/1", "", true
+			}}
+			tc.mutate(&plan, &opt)
+			got, err := FileLive(plan, nil, opt)
+			if err == nil {
+				t.Fatalf("FileLive accepted input, want refusal containing %q", tc.wantMsg)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("refusal = %q, want substring %q", err, tc.wantMsg)
+			}
+			if gotOutcome := ClassifyOutcome(err); gotOutcome != OutcomeRefused {
+				t.Fatalf("outcome = %q, want %q", gotOutcome, OutcomeRefused)
+			}
+			if calls != 0 {
+				t.Fatalf("runner calls = %d, want zero before whole-batch validation", calls)
+			}
+			if !reflect.DeepEqual(got, LiveResult{}) {
+				t.Fatalf("refusal leaked a partial live result: %+v", got)
+			}
+		})
+	}
+}
+
+// TestFileLiveAdversarialRunnerOutput pins both non-refusal live error paths:
+// hostile stderr and malformed success stdout become failed rows, while the
+// remaining candidates are still attempted and no fabricated issue is filed.
+func TestFileLiveAdversarialRunnerOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		stdout     string
+		stderr     string
+		ok         bool
+		wantReason string
+	}{
+		{"hostile stderr", "", "  gh: denied\nwith control-like text --force  ", false, "gh: denied\nwith control-like text --force"},
+		{"malformed success output", "created issue without a URL", "", true, "gh issue create exited 0 but printed no issue URL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := liveTestPlan(t)
+			calls := 0
+			res, err := FileLive(plan, nil, LiveOptions{Runner: func([]string) (string, string, bool) {
+				calls++
+				return tc.stdout, tc.stderr, tc.ok
+			}})
+			if err != nil {
+				t.Fatalf("FileLive returned a contract refusal for a runner result: %v", err)
+			}
+			if calls != len(plan.Candidates) {
+				t.Fatalf("runner calls = %d, want %d", calls, len(plan.Candidates))
+			}
+			if res.Failed != len(plan.Candidates) || res.Filed != 0 || res.Skipped != 0 {
+				t.Fatalf("result = %+v, want every candidate failed and none filed/skipped", res)
+			}
+			for _, row := range res.Rows {
+				if row.Action != "failed" || row.Number != nil || row.URL != "" || row.Reason != tc.wantReason {
+					t.Fatalf("row = %+v, want failed row with reason %q and no fabricated issue", row, tc.wantReason)
+				}
+			}
+		})
+	}
+}
