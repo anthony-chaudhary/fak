@@ -210,6 +210,9 @@ const (
 )
 
 func dequantParallelWorkers(blocks int) int {
+	if activeParallelLoads.Load() != 0 {
+		return 1
+	}
 	if blocks < dequantParallelMinBlocks {
 		return 1
 	}

@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // loadWorkerCap bounds the DEFAULT per-tensor load concurrency. The dequant is largely
@@ -41,6 +42,12 @@ import (
 // the peak transient (window x one expert blob's multi-GB f32) comfortably inside host RAM
 // on the big-model serve box. FAK_GGUF_LOAD_WORKERS overrides this in either direction.
 const loadWorkerCap = 16
+
+// activeParallelLoads marks worker-pool load scopes. Inside one of these scopes the
+// tensor workers already consume the shared CPU budget, so nested block dequant stays
+// serial rather than multiplying runnable work by GOMAXPROCS. Standalone dequant and
+// serial loads retain the existing block-level parallel path.
+var activeParallelLoads atomic.Int32
 
 // loadWorkers returns the per-tensor load concurrency: min(GOMAXPROCS, loadWorkerCap) by
 // default, or the FAK_GGUF_LOAD_WORKERS override (>=1). It never returns < 1.
@@ -168,6 +175,9 @@ func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, 
 		}
 		return nil
 	}
+
+	activeParallelLoads.Add(1)
+	defer activeParallelLoads.Add(-1)
 
 	results := make([]tensorWork, n)
 	done := make([]chan struct{}, n)
