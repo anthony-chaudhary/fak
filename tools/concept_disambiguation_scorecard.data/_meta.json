@@ -5872,6 +5872,26 @@
           "category": "incidental",
           "reason": "private JSON persistence struct for verified artifact slots",
           "token": "verifiedSlotMetadata"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows syscall binding name, not a session-runtime concept",
+          "token": "procRmStartSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows Restart Manager API symbol, not a fak session-runtime concept",
+          "token": "RmStartSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows syscall binding name, not a session-runtime concept",
+          "token": "procRmEndSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows Restart Manager API symbol, not a fak session-runtime concept",
+          "token": "RmEndSession"
         }
       ],
       "exclude": [
@@ -5937,6 +5957,8 @@
         "RestoreSessionMoveCheckpoint",
         "RetiredSessions",
         "RevokeSessionDiscovery",
+        "RmEndSession",
+        "RmStartSession",
         "RunSessionDiag",
         "RunSessionSourceSelfTest",
         "RuntimeTurnStarted",
@@ -6115,6 +6137,8 @@
         "orderRecords",
         "parseGuardProviderSessionStart",
         "pathwithincodexsessions",
+        "procRmEndSession",
+        "procRmStartSession",
         "provider_session_start",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
@@ -7247,6 +7271,11 @@
           "category": "incidental",
           "reason": "Structured validation reason for absent backend evidence; not a witness primitive.",
           "token": "local_backend_unwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation struct carrying native probe results; not an operator-facing proof concept",
+          "token": "ownershipWitness"
         }
       ],
       "id": "witness-proof",
@@ -7392,6 +7421,7 @@
         "no_unique_green_diff_witness",
         "nwitness",
         "observeProxyFillWitness",
+        "ownershipWitness",
         "persistMicroCacheWitness",
         "proxyFillDeclaredWitness",
         "proxyFillWitnessFor",
@@ -9041,6 +9071,11 @@
           "category": "incidental",
           "reason": "Deterministic fixture transition trigger label; not a new policy or capability mechanism.",
           "token": "policy_or_capability_refusal"
+        },
+        {
+          "category": "test-only",
+          "reason": "test seam for injecting an ownership probe; it does not define a policy capability",
+          "token": "preflightWithProbe"
         }
       ],
       "exclude": [
@@ -9212,6 +9247,7 @@
         "postureVCacheSignals",
         "postureWorkProfile",
         "postures",
+        "preflightWithProbe",
         "printGuardLaunchPostures",
         "qwenEmptyUsageGuardFromEnv",
         "qwenEmptyUsageGuardReceipt",
@@ -11188,6 +11224,11 @@
           "category": "incidental",
           "reason": "Study-classification enum member for support-question records; it names a research disposition, not a distinct support-maturity capability or status contract.",
           "token": "DispositionSupportQuestion"
+        },
+        {
+          "category": "incidental",
+          "reason": "closed evidence-source value describing unavailable platform inspection, not a product support tier",
+          "token": "platform_unsupported"
         }
       ],
       "exclude": [
@@ -11379,6 +11420,7 @@
         "parseCoverageLine",
         "partial_provider_coverage",
         "payloadCompatibilitySupported",
+        "platform_unsupported",
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",

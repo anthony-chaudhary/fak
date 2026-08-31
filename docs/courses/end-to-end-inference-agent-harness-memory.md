@@ -348,6 +348,21 @@ fak validate --mine docs/courses/end-to-end-inference-agent-harness-memory.md do
 
 If `fak validate --mine` is unavailable in the current bootstrap state, record that honestly and use the documented isolated build/test primitive rather than a broad in-place build.
 
+### Operations lesson — update without trusting the binary being replaced
+
+The shipped `cmd/fak-selfupdate` surface is a recovery-sized executable over the same implementation as `fak self-update`. Use the ordinary verb when the installed `fak` is healthy; keep the standalone entry point available when the main command is stale or is the target of replacement. Both emit the versioned `fak.self-update.receipt/v1` JSON contract.
+
+The default native path builds from a repository, runs the green gate, and only then installs. `--check` is the non-mutating inspection path, and even `--force` does not bypass the green gate. Optional signed-manifest selection adds channel/cohort and authenticated-cache controls; `--offline` refuses network access and can use only a valid authenticated cache. On Windows, the explicit MSIX path verifies signed package provenance and requires an explicit opt-in for downgrade; differential delivery may fall back only to the declared full package. These are bounded alternatives, not permission to accept an unsigned artifact or silently skip verification. A scheduled updater can also pin the executable path and must refuse provenance drift.
+
+From the repository root, prove the recovery surface is present without replacing anything:
+
+```powershell
+go run ./cmd/fak-selfupdate --help
+go run ./cmd/fak-selfupdate --check --target (Get-Command fak).Source --json
+```
+
+The first command exposes the standalone surface; the second inspects the installed target's embedded Go build metadata without executing that target. Read the exact flags and receipt fields in the [CLI reference](../cli-reference.md), then use the [self-update fast-path design note](../notes/CONCEPT-SELF-UPDATE-FAST-PATHS-2026-08-29.md) when reasoning about manifest, delta/full-fallback, MSIX, or handoff boundaries.
+
 ### Checkpoint
 
 A peer should be able to reconstruct what ran, where, with which engine/model/policy, inside which envelope, and with what result—without trusting your prose. Any missing dimension becomes an explicit limitation, not an inferred success.

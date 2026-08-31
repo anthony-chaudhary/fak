@@ -67,6 +67,7 @@ type PreflightResult struct {
 	LatestTurnID                     string           `json:"latest_turn_id,omitempty"`
 	LatestTurnStatus                 string           `json:"latest_turn_status,omitempty"`
 	LatestTurnError                  *TurnError       `json:"latest_turn_error,omitempty"`
+	WriterOwnership                  WriterOwnership  `json:"writer_ownership"`
 	WriterLockPath                   string           `json:"writer_lock_path,omitempty"`
 	WriterLockPresent                bool             `json:"writer_lock_present"`
 	FailedWrapperMarked              bool             `json:"failed_wrapper_marked"`
@@ -94,6 +95,10 @@ type historyFacts struct {
 // it treats a writer lock or an unterminated turn as active even when process
 // existence looked healthy to an outer launcher.
 func Preflight(cfg CheckConfig) PreflightResult {
+	return preflightWithProbe(cfg, nativeOwnershipProbe{})
+}
+
+func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	cfg = cfg.withDefaults()
 	result := PreflightResult{
 		ThreadID:                       cfg.ThreadID,
@@ -135,14 +140,8 @@ func Preflight(cfg CheckConfig) PreflightResult {
 		return result
 	}
 	result.WriterLockPath = filepath.Join(cfg.CodexHome, "thread-writer-locks", cfg.ThreadID+".lock")
-	if _, err := os.Stat(result.WriterLockPath); err == nil {
-		result.WriterLockPresent = true
-	} else if !errors.Is(err, os.ErrNotExist) {
-		result.Verdict = VerdictHistoryUnreadable
-		result.Detail = fmt.Sprintf("inspect writer lock: %v", err)
-		result.RecoveryAction = "make the Codex writer-lock directory readable and rerun preflight"
-		return result
-	}
+	result.WriterOwnership = inspectWriterOwnership(cfg.ThreadID, result.WriterLockPath, probe)
+	result.WriterLockPresent = result.WriterOwnership.LockPresent
 
 	facts, err := inspectHistory(absRollout, cfg.RequiredFunctionCallItemPrefix)
 	if err != nil {
@@ -176,21 +175,23 @@ func Preflight(cfg CheckConfig) PreflightResult {
 	}
 
 	activeByHistory := facts.latestTurnStatus == "running"
-	if result.WriterLockPresent || activeByHistory {
+	result.FailedWrapperMarked = result.WriterLockPresent && facts.latestTurnStatus == "failed"
+	result.StaleWriterLockSuspected = result.WriterOwnership.Verdict == WriterOwnershipStaleResidue
+	switch {
+	case result.WriterOwnership.Verdict == WriterOwnershipLiveOwner:
 		result.Verdict = VerdictAlreadyActive
-		result.FailedWrapperMarked = result.WriterLockPresent && facts.latestTurnStatus == "failed"
-		result.StaleWriterLockSuspected = result.FailedWrapperMarked
-		switch {
-		case result.FailedWrapperMarked:
-			result.Detail = "writer lock remains after an authoritative failed task_complete; a failed resume wrapper may still own the thread"
-			result.RecoveryAction = "terminate the wrapper process for this exact thread, wait for its process tree to exit, remove the writer lock only after confirming no process owns the thread, then rerun preflight"
-		case activeByHistory:
-			result.Detail = "the persisted rollout contains a task_started without a matching terminal task_complete"
-			result.RecoveryAction = "wait for the active turn to reach task_complete, or stop its owning process before retrying"
-		default:
-			result.Detail = "the Codex writer lock already exists"
-			result.RecoveryAction = "wait for the active writer to finish; never launch a second writer for the same thread"
-		}
+		result.Detail = "a native resource witness proved that a live process owns the Codex writer lock"
+		result.RecoveryAction = "wait for the witnessed owner to release the thread, then rerun preflight"
+		return result
+	case result.WriterOwnership.Verdict == WriterOwnershipUnknown:
+		result.Verdict = VerdictAlreadyActive
+		result.Detail = "writer ownership could not be inspected conclusively; admission fails closed"
+		result.RecoveryAction = "restore permission or platform ownership inspection and rerun preflight; do not delete the lock or terminate a possible owner"
+		return result
+	case activeByHistory:
+		result.Verdict = VerdictAlreadyActive
+		result.Detail = "the persisted rollout contains a task_started without a matching terminal task_complete"
+		result.RecoveryAction = "wait for the owning process to reach a terminal task_complete, then rerun preflight"
 		return result
 	}
 
@@ -391,9 +392,8 @@ func openRollout(path string) (io.Reader, func() error, error) {
 	}, nil
 }
 
-// Recover runs the deterministic preflight, launches only a RESUMABLE candidate,
-// then removes only a writer lock created by its owned process after that process
-// has reached a terminal rollout state and exited or was reclaimed.
+// Recover runs the deterministic preflight and launches only a RESUMABLE candidate.
+// Writer locks remain owned and cleaned up by Codex; recovery never deletes them.
 func Recover(ctx context.Context, checkConfig CheckConfig, runConfig Config) (Result, error) {
 	preflight := Preflight(checkConfig)
 	result := Result{ThreadID: preflight.ThreadID, Preflight: &preflight}
@@ -426,8 +426,5 @@ func cleanupOwnedWriterLock(preflight PreflightResult, result Result) string {
 	} else if err != nil {
 		return "inspect_failed"
 	}
-	if err := os.Remove(preflight.WriterLockPath); err != nil {
-		return "remove_failed"
-	}
-	return "removed"
+	return "left_to_owner"
 }

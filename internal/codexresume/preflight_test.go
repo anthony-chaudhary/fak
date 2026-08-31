@@ -114,6 +114,62 @@ func TestPreflightAcceptsCorrectedFCItemIDWithCallLogicalID(t *testing.T) {
 	}
 }
 
+func TestPreflightLiveWriterOwnerIsAlreadyActive(t *testing.T) {
+	home := t.TempDir()
+	threadID := "019ff1af-9d63-7452-8109-live-owner"
+	rollout := filepath.Join(home, "live-owner.jsonl")
+	writeRolloutRows(t, rollout, sessionMeta(threadID))
+	makeWriterLock(t, home, threadID)
+
+	got := preflightWithProbe(CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home}, fixedOwnershipProbe{
+		witness: ownershipWitness{source: "test_native_witness", conclusive: true, owners: []processOwner{{
+			pid: 321, startTime: "2026-08-31T10:00:00Z", startToken: 77, image: `C:\codex.exe`,
+		}}},
+	})
+	if got.Verdict != VerdictAlreadyActive || got.WriterOwnership.Verdict != WriterOwnershipLiveOwner {
+		t.Fatalf("preflight=%+v", got)
+	}
+	if got.WriterOwnership.HandleReceiptID == "" || got.WriterOwnership.PID != 321 {
+		t.Fatalf("ownership receipt=%+v", got.WriterOwnership)
+	}
+}
+
+func TestPreflightPositiveNoOwnerWitnessAllowsCompatibleResume(t *testing.T) {
+	home := t.TempDir()
+	threadID := "019ff1af-9d63-7452-8109-stale"
+	rollout := filepath.Join(home, "stale-owner.jsonl")
+	writeRolloutRows(t, rollout, sessionMeta(threadID))
+	makeWriterLock(t, home, threadID)
+
+	got := preflightWithProbe(CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home}, fixedOwnershipProbe{
+		witness: ownershipWitness{source: "test_positive_no_owner", conclusive: true},
+	})
+	if got.Verdict != VerdictResumable || got.WriterOwnership.Verdict != WriterOwnershipStaleResidue {
+		t.Fatalf("preflight=%+v", got)
+	}
+	if !got.StaleWriterLockSuspected {
+		t.Fatalf("stale residue not surfaced: %+v", got)
+	}
+}
+
+func TestPreflightUnknownWriterOwnershipFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	threadID := "019ff1af-9d63-7452-8109-unknown"
+	rollout := filepath.Join(home, "unknown-owner.jsonl")
+	writeRolloutRows(t, rollout, sessionMeta(threadID))
+	makeWriterLock(t, home, threadID)
+
+	got := preflightWithProbe(CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home}, fixedOwnershipProbe{
+		witness: ownershipWitness{source: "test_permission_probe"}, err: os.ErrPermission,
+	})
+	if got.Verdict != VerdictAlreadyActive || got.WriterOwnership.Verdict != WriterOwnershipUnknown {
+		t.Fatalf("preflight=%+v", got)
+	}
+	if !strings.Contains(got.RecoveryAction, "do not delete") || !strings.Contains(got.RecoveryAction, "do not") {
+		t.Fatalf("fail-closed action=%q", got.RecoveryAction)
+	}
+}
+
 func TestPreflightMarksFailedWrapperAndWriterLock(t *testing.T) {
 	home := t.TempDir()
 	threadID := "019ff1af-9d63-7452-8109-58172f63c3e9"
@@ -141,9 +197,14 @@ func TestPreflightMarksFailedWrapperAndWriterLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := Preflight(CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home})
-	if got.Verdict != VerdictAlreadyActive || !got.FailedWrapperMarked || !got.StaleWriterLockSuspected {
+	got := preflightWithProbe(CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home}, fixedOwnershipProbe{
+		witness: ownershipWitness{source: "test_positive_no_owner", conclusive: true},
+	})
+	if got.Verdict != VerdictIncompatibleHistory || !got.FailedWrapperMarked || !got.StaleWriterLockSuspected {
 		t.Fatalf("preflight=%+v", got)
+	}
+	if got.WriterOwnership.Verdict != WriterOwnershipStaleResidue {
+		t.Fatalf("ownership=%+v", got.WriterOwnership)
 	}
 	if got.Compatibility != CompatibilityIncompatible || got.LatestTurnStatus != "failed" {
 		t.Fatalf("compatibility/turn=%+v", got)
@@ -151,8 +212,7 @@ func TestPreflightMarksFailedWrapperAndWriterLock(t *testing.T) {
 	if got.LatestTurnError == nil || got.LatestTurnError.Status != 400 {
 		t.Fatalf("latest error=%+v", got.LatestTurnError)
 	}
-	if !strings.Contains(got.RecoveryAction, "terminate the wrapper process") ||
-		!strings.Contains(got.RecoveryAction, "confirming no process owns the thread") {
+	if strings.Contains(got.RecoveryAction, "terminate") || strings.Contains(got.RecoveryAction, "remove the writer lock") {
 		t.Fatalf("unsafe recovery action=%q", got.RecoveryAction)
 	}
 }

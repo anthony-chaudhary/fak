@@ -43,30 +43,31 @@ type SummaryCounts struct {
 }
 
 type Result struct {
-	ThreadID            string   `json:"thread_id"`
-	CWD                 string   `json:"cwd,omitempty"`
-	Source              string   `json:"source,omitempty"`
-	Provider            string   `json:"provider,omitempty"`
-	Harness             string   `json:"harness,omitempty"`
-	HarnessSource       string   `json:"harness_source,omitempty"`
-	Category            string   `json:"category,omitempty"`
-	Action              string   `json:"action,omitempty"`
-	Status              string   `json:"status"`
-	Reason              string   `json:"reason,omitempty"`
-	SelectionReason     string   `json:"selection_reason,omitempty"`
-	ReceiptPath         string   `json:"receipt_path,omitempty"`
-	GuardedProcessTrees int      `json:"guarded_process_trees"`
-	Remediation         string   `json:"remediation,omitempty"`
-	Argv                []string `json:"argv,omitempty"`
-	LaunchedAt          string   `json:"launched_at,omitempty"`
-	BaselineCursor      string   `json:"baseline_cursor,omitempty"`
-	BaselineAt          string   `json:"baseline_at,omitempty"`
-	PostCursor          string   `json:"post_cursor,omitempty"`
-	PostAt              string   `json:"post_at,omitempty"`
-	Advanced            bool     `json:"advanced"`
-	ProgressEvidence    string   `json:"progress_evidence,omitempty"`
-	HostHandles         []string `json:"host_handles,omitempty"`
-	IdentityProvenance  string   `json:"identity_provenance,omitempty"`
+	ThreadID             string   `json:"thread_id"`
+	CWD                  string   `json:"cwd,omitempty"`
+	Source               string   `json:"source,omitempty"`
+	Provider             string   `json:"provider,omitempty"`
+	Harness              string   `json:"harness,omitempty"`
+	HarnessSource        string   `json:"harness_source,omitempty"`
+	Category             string   `json:"category,omitempty"`
+	Action               string   `json:"action,omitempty"`
+	Status               string   `json:"status"`
+	Reason               string   `json:"reason,omitempty"`
+	SelectionReason      string   `json:"selection_reason,omitempty"`
+	ReceiptPath          string   `json:"receipt_path,omitempty"`
+	GuardedProcessTrees  int      `json:"guarded_process_trees"`
+	Remediation          string   `json:"remediation,omitempty"`
+	Argv                 []string `json:"argv,omitempty"`
+	LaunchedAt           string   `json:"launched_at,omitempty"`
+	BaselineCursor       string   `json:"baseline_cursor,omitempty"`
+	BaselineAt           string   `json:"baseline_at,omitempty"`
+	PostCursor           string   `json:"post_cursor,omitempty"`
+	PostAt               string   `json:"post_at,omitempty"`
+	Advanced             bool     `json:"advanced"`
+	ProgressEvidence     string   `json:"progress_evidence,omitempty"`
+	HostHandles          []string `json:"host_handles,omitempty"`
+	IdentityProvenance   string   `json:"identity_provenance,omitempty"`
+	QualifyingEvidenceAt string   `json:"qualifying_evidence_at,omitempty"`
 }
 
 func NewSummary(mode string, report InventoryReport, requests []Request, now time.Time) Summary {
@@ -80,7 +81,7 @@ func NewSummary(mode string, report InventoryReport, requests []Request, now tim
 			ThreadID: req.ThreadID, CWD: req.CWD, Source: req.Source,
 			Provider: req.Provider, Harness: req.Harness, HarnessSource: req.HarnessSource, Category: req.Category, Action: req.Action,
 			Status: req.Status, Reason: req.Reason, ReceiptPath: req.ReceiptPath,
-			Argv: append([]string(nil), req.Argv...), HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance,
+			Argv: append([]string(nil), req.Argv...), HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, QualifyingEvidenceAt: req.QualifyingEvidenceAt,
 		}
 		if baseline := lookupReportRow(report, req.ThreadID); baseline != nil {
 			result.BaselineCursor, result.BaselineAt = progressCursor(baseline)
