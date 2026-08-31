@@ -33,3 +33,5 @@
 
 cmd/fak joinArgs # baseline: render helper has no current call site; owning cmd lane must wire or delete it.
 cmd/fak writeIndexRepo # baseline: test helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak parseCodexFreshnessCheckNow # baseline: compatibility wrapper retained for the legacy check-now parser while callers migrate to parseCodexFreshnessSettings.
+cmd/fak codexFreshnessWriteLease # baseline: compatibility wrapper retained for legacy lease writers while receipt callers carry commit identity.

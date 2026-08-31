@@ -179,7 +179,8 @@
         "Session",
         "session.State",
         "x-goal25b-session-runtime-sessiontime",
-        "x-session-runtime-bysessiontype"
+        "x-session-runtime-bysessiontype",
+        "nativesessionlifecycle"
       ],
       "aliases": [],
       "grounding": "sessiontype",

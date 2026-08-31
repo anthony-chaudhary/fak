@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestDarwinAppleUnifiedMemoryCurrentProviderUnavailable(t *testing.T) {
 	}
 	_, err := collectCurrentAppleMemoryBandwidth(context.Background(), AppleMemoryImportOptions{
 		Scope: AppleMemoryScope{Kind: "system"}, Interval: 100 * time.Millisecond, ProviderVersion: fixture.ProviderVersion,
-	}, run, func() time.Time { return now })
+	}, run, func() time.Time { return now }, time.Second)
 	var unavailable *AppleMemoryProviderUnavailableError
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("error=%T %v, want AppleMemoryProviderUnavailableError", err, err)
@@ -69,13 +70,85 @@ func TestDarwinAppleUnifiedMemoryProviderUnavailableClasses(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			run := func(context.Context, string, ...string) ([]byte, error) { return tc.output, tc.runErr }
-			_, err := collectCurrentAppleMemoryBandwidth(context.Background(), AppleMemoryImportOptions{}, run, func() time.Time { return time.Unix(0, 0) })
+			_, err := collectCurrentAppleMemoryBandwidth(context.Background(), AppleMemoryImportOptions{}, run, func() time.Time { return time.Unix(0, 0) }, time.Second)
 			var unavailable *AppleMemoryProviderUnavailableError
 			if !errors.As(err, &unavailable) {
 				t.Fatalf("error=%T %v", err, err)
 			}
 			if unavailable.Evidence.UnavailableReason != tc.want {
 				t.Fatalf("reason=%q want %q: %v", unavailable.Evidence.UnavailableReason, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestDarwinAppleUnifiedMemoryProviderCancellationClasses(t *testing.T) {
+	tests := []struct {
+		name         string
+		parent       func(*testing.T) (context.Context, context.CancelFunc)
+		probeTimeout time.Duration
+		wantReason   string
+		wantCause    error
+	}{
+		{
+			name: "parent cancellation",
+			parent: func(t *testing.T) (context.Context, context.CancelFunc) {
+				t.Helper()
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			probeTimeout: time.Hour,
+			wantReason:   AppleMemoryUnavailableCanceled,
+			wantCause:    context.Canceled,
+		},
+		{
+			name: "earlier parent deadline",
+			parent: func(t *testing.T) (context.Context, context.CancelFunc) {
+				t.Helper()
+				return context.WithDeadline(context.Background(), time.Unix(0, 0))
+			},
+			probeTimeout: time.Hour,
+			wantReason:   AppleMemoryUnavailableCanceled,
+			wantCause:    context.DeadlineExceeded,
+		},
+		{
+			name: "provider timeout",
+			parent: func(t *testing.T) (context.Context, context.CancelFunc) {
+				t.Helper()
+				return context.WithCancel(context.Background())
+			},
+			probeTimeout: 0,
+			wantReason:   AppleMemoryUnavailableTimeout,
+			wantCause:    context.DeadlineExceeded,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := tc.parent(t)
+			defer cancel()
+			run := func(probeCtx context.Context, name string, args ...string) ([]byte, error) {
+				if name != "/usr/bin/powermetrics" || len(args) != 1 || args[0] != "--help" {
+					t.Fatalf("command=%q %q, want /usr/bin/powermetrics --help", name, args)
+				}
+				<-probeCtx.Done()
+				return nil, probeCtx.Err()
+			}
+			collection, err := collectCurrentAppleMemoryBandwidth(ctx, AppleMemoryImportOptions{}, run, func() time.Time {
+				return time.Unix(0, 0)
+			}, tc.probeTimeout)
+			var unavailable *AppleMemoryProviderUnavailableError
+			if !errors.As(err, &unavailable) {
+				t.Fatalf("error=%T %v, want AppleMemoryProviderUnavailableError", err, err)
+			}
+			if unavailable.Evidence.UnavailableReason != tc.wantReason {
+				t.Fatalf("reason=%q want %q: %v", unavailable.Evidence.UnavailableReason, tc.wantReason, err)
+			}
+			if !errors.Is(err, tc.wantCause) {
+				t.Fatalf("error=%v, want cause %v", err, tc.wantCause)
+			}
+			if !reflect.DeepEqual(collection, BandwidthCollection{}) {
+				t.Fatalf("interrupted probe emitted bandwidth collection: %+v", collection)
 			}
 		})
 	}

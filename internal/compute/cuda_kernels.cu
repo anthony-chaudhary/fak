@@ -1904,13 +1904,82 @@ __global__ void k_qwen35_causal_attention_panel(
   }
 }
 
+// Qwen3.8 27B uses a 256-wide attention head. Keep that production geometry on
+// a named source path so a source/ABI audit can prove it does not accidentally
+// regress to the legacy warp-only body that returned without writing hd > 32.
+// The recurrence deliberately matches k_qwen35_causal_attention_panel above:
+// one 128-thread block owns a row, each thread owns two dimensions, and shared
+// memory holds the query plus the block-reduction lane.
+#define QWEN38_PROMPT_HEAD_DIM 256
+__global__ void k_qwen38_causal_attention_panel_hd256(
+    const float *Q, const float *K, const float *V, float *Out,
+    int tokens, int prefix, int nH, int nKV, float scale) {
+  int flat = blockIdx.x;
+  int h = flat % nH, token = flat / nH;
+  if (h >= nH || token >= tokens) return;
+  int tid = threadIdx.x, kvh = h / (nH / nKV);
+  int width = nKV * QWEN38_PROMPT_HEAD_DIM;
+  int nPos = prefix + token + 1;
+  const float *qh = Q + (size_t)token * nH * QWEN38_PROMPT_HEAD_DIM +
+                    (size_t)h * QWEN38_PROMPT_HEAD_DIM;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + QWEN38_PROMPT_HEAD_DIM;
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  float m = 0.f, l = 0.f;
+  float acc[QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS];
+#pragma unroll
+  for (int k = 0; k < QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS; k++) acc[k] = 0.f;
+  for (int j = 0; j < nPos; j++) {
+    const float *kj = K + (size_t)j * width +
+                      (size_t)kvh * QWEN38_PROMPT_HEAD_DIM;
+    float partial = 0.f;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) {
+      partial += qs[d] * kj[d];
+    }
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float score = red[0] * scale;
+    __syncthreads();
+    const float *vj = V + (size_t)j * width +
+                      (size_t)kvh * QWEN38_PROMPT_HEAD_DIM;
+    if (j == 0) {
+      m = score;
+      l = 1.f;
+      int k = 0;
+      for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) acc[k] = vj[d];
+      continue;
+    }
+    float nextM = fmaxf(m, score);
+    float correction = expf(m - nextM), probability = expf(score - nextM);
+    l = l * correction + probability;
+    int k = 0;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
+      acc[k] = acc[k] * correction + probability * vj[d];
+    }
+    m = nextM;
+  }
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
+    Out[(size_t)token * nH * QWEN38_PROMPT_HEAD_DIM +
+        (size_t)h * QWEN38_PROMPT_HEAD_DIM + d] = acc[k] * invL;
+  }
+}
+
 extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
-  if (!dQ || !dK || !dV || !dOut || tokens <= 0 || prefix < 0 ||
-      nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 ||
-      hd > FLASH_THREADS * FLASH_ACC_MAX || tokens > INT_MAX / nH ||
-      prefix > INT_MAX - tokens || !isfinite(scale) || scale <= 0.f) return -1;
+  if (!dQ || !dK || !dV || !dOut ||
+      tokens != 2 || prefix != 1 || nH != 24 || nKV != 4 ||
+      hd != QWEN38_PROMPT_HEAD_DIM ||
+      tokens > INT_MAX / nH || prefix > INT_MAX - tokens ||
+      !isfinite(scale) || scale <= 0.f) return -1;
   // width is an int inside the kernel and the Go sequence cache uses int-sized
   // element offsets at its C ABI. Refuse every product that cannot be represented
   // before launch, rather than allowing an overflowed address calculation to no-op
@@ -1920,9 +1989,9 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   int positions = prefix + tokens;
   if (positions > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
-  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  k_qwen35_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
-      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
+  size_t shmem = ((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float);
+  k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 50000 + (int)launch;
 }

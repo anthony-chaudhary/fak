@@ -57,6 +57,8 @@ type benchFlags struct {
 	nativeProfileReadback *string
 	nativeProfileCompare  *string
 	nativeDecodeHandoff   *model.Qwen35DecodeHandoffMode
+	qwenSwapOut           *string
+	qwenSwapReadback      *string
 
 	processExit     func(int)
 	weightCloser    func() error
@@ -111,6 +113,8 @@ func parseFlags() *benchFlags {
 		nativeProfileReadback: flag.String("native-performance-readback", "", "validate a native-performance profile and its companion raw-event receipt without loading a model"),
 		nativeProfileCompare:  flag.String("native-performance-compare", "", "compare exactly six comma-separated canonical profile paths in order: 3 selector OFF controls, then 3 selector ON candidates; requires every candidate below the control median and at least 15% median improvement; companion .receipt.json paths are derived"),
 		nativeDecodeHandoff:   &nativeDecodeHandoff,
+		qwenSwapOut:           flag.String("qwen38-paged-swap", "", "write one exact Qwen3.8 fak-native Metal NativeScheduler OFF/ON paged-swap receipt, then exit"),
+		qwenSwapReadback:      flag.String("qwen38-paged-swap-readback", "", "validate an exact Qwen3.8 NativeScheduler paged-swap receipt without loading a model"),
 	}
 	flag.Var(&nativeProfileComparisonPhaseSelection, "native-performance-compare-phase", "stable comparison phase: prefill (default), steady-decode, or end-to-end (full contiguous capture including setup, verification, and teardown)")
 	flag.Var(&nativeProfileComparisonAxisSelection, "native-performance-compare-axis", "typed comparison axis: sequence (default) or m3-decode-handoff")
@@ -210,14 +214,19 @@ func validateFlagCombinations(f *benchFlags) error {
 	if streamQ4KEnabled(f) && (*f.gguf == "" || !*f.q4k) {
 		return fmt.Errorf("-stream-q4k requires exact -gguf and -q4k")
 	}
+	qwenSwapOut := f.qwenSwapOut != nil && *f.qwenSwapOut != ""
+	qwenSwapReadback := f.qwenSwapReadback != nil && *f.qwenSwapReadback != ""
 	nativeModes := 0
-	for _, selected := range []bool{*f.nativeProfileReadback != "", *f.nativeProfileOut != "", *f.nativeProfileCompare != ""} {
+	for _, selected := range []bool{*f.nativeProfileReadback != "", *f.nativeProfileOut != "", *f.nativeProfileCompare != "", qwenSwapOut, qwenSwapReadback} {
 		if selected {
 			nativeModes++
 		}
 	}
 	if nativeModes > 1 {
-		return fmt.Errorf("-native-performance-readback, -native-performance-profile, and -native-performance-compare are mutually exclusive")
+		return fmt.Errorf("native profile and qwen38 paged-swap terminal modes are mutually exclusive")
+	}
+	if qwenSwapOut && (*f.gguf == "" || !*f.q4k || !*f.metal || *f.name != "qwen38:27b" || *f.backendName != "legacy") {
+		return fmt.Errorf("-qwen38-paged-swap requires -gguf, -q4k, -metal, -name=qwen38:27b, and the fak-native legacy engine path")
 	}
 	if *f.nativeDecodeHandoff != model.Qwen35DecodeHandoffAuto && *f.nativeProfileOut == "" {
 		return fmt.Errorf("-native-performance-qwen35-decode-handoff=%s requires -native-performance-profile", *f.nativeDecodeHandoff)

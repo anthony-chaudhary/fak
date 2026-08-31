@@ -322,7 +322,7 @@ func (s *NativeScheduler) readmitPreemptedLocked() {
 func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 	switch ln.preemptMode {
 	case NativePreemptRecompute:
-		sess := s.newLaneSession(ln.q4k)
+		sess := s.newLaneSession(ln.q4k, NativeSessionRestored)
 		history := make([]int, 0, len(ln.prompt)+len(ln.gen))
 		history = append(history, ln.prompt...)
 		history = append(history, ln.gen...)
@@ -555,12 +555,16 @@ func (s *NativeScheduler) recordQwenSwapUsage(direction, outcome, result string,
 	})
 }
 
-func (s *NativeScheduler) newLaneSession(q4k bool) *model.Session {
+func (s *NativeScheduler) newLaneSession(q4k bool, lifecycle NativeSessionLifecycle) *model.Session {
 	sess := s.m.NewSession()
 	if q4k {
-		sess.Quant = true
+		sess.Quant = false
 		sess.Q4K = true
+		sess.MetalQ4K = s.metalQ4K
 		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
+	}
+	if s.sessionProfiler != nil {
+		sess.PhaseProfiler = s.sessionProfiler(lifecycle)
 	}
 	return sess
 }
@@ -615,9 +619,13 @@ func metaBool(meta map[string]string, keys ...string) bool {
 func (s *NativeScheduler) sessionFromCache(cache *model.KVCache, q4k bool) *model.Session {
 	sess := &model.Session{M: s.m, Cache: cache}
 	if q4k {
-		sess.Quant = true
+		sess.Quant = false
 		sess.Q4K = true
+		sess.MetalQ4K = s.metalQ4K
 		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
+	}
+	if s.sessionProfiler != nil {
+		sess.PhaseProfiler = s.sessionProfiler(NativeSessionRestored)
 	}
 	return sess
 }

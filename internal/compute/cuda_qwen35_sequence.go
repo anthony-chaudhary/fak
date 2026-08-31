@@ -30,8 +30,14 @@ func validateQwen35SequenceGeometry(req Qwen35SequencePrefillRequest) error {
 	if req.Hidden <= 0 || req.Intermediate <= 0 || req.NumHeads <= 0 || req.NumKVHeads <= 0 || req.HeadDim <= 0 || req.RotaryDim <= 0 {
 		return qwen35SequenceFailure("geometry", -1, "hidden, FFN, attention head counts, and dimensions must be positive")
 	}
-	if req.NumHeads%req.NumKVHeads != 0 || req.RotaryDim > req.HeadDim || req.RotaryDim%2 != 0 || req.HeadDim > 1024 {
-		return qwen35SequenceFailure("geometry", -1, "attention requires grouped heads, even partial rotary dimension, and head_dim <= 1024")
+	if req.NumHeads%req.NumKVHeads != 0 || req.RotaryDim > req.HeadDim || req.RotaryDim%2 != 0 {
+		return qwen35SequenceFailure("geometry", -1, "attention requires grouped heads and an even partial rotary dimension")
+	}
+	// Use the launcher's bounded panel contract during request preflight. This
+	// runs before tensor validation, KV reservation, allocation, or transfer, so
+	// a dimension the CUDA source cannot execute never reaches an effect.
+	if err := validateQwen35CausalAttentionPanelGeometry(len(req.TokenIDs), req.StartPos, req.NumHeads, req.NumKVHeads, req.HeadDim); err != nil {
+		return err
 	}
 	if req.NumKeyHeads <= 0 || req.NumValueHeads <= 0 || req.KeyHeadDim <= 0 || req.ValueHeadDim <= 0 || req.ConvKernel < 1 || req.NumValueHeads%req.NumKeyHeads != 0 {
 		return qwen35SequenceFailure("geometry", -1, "GDN heads/dimensions must be positive, value heads divisible by key heads, and convolution non-empty")

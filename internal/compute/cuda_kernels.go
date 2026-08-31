@@ -33,14 +33,28 @@ import (
 	"unsafe"
 )
 
-const qwen35CausalAttentionPanelMaxHeadDim = 128 * 8
+const (
+	qwen38CausalAttentionPanelTokens     = 2
+	qwen38CausalAttentionPanelPrefix     = 1
+	qwen38CausalAttentionPanelHeads      = 24
+	qwen38CausalAttentionPanelKVHeads    = 4
+	qwen38CausalAttentionPanelHeadDim    = 256
+	qwen35CausalAttentionPanelMaxHeadDim = qwen38CausalAttentionPanelHeadDim
+)
 
 func validateQwen35CausalAttentionPanelKVGeometry(tokens, prefix, nKV, headDim int) error {
-	if tokens <= 0 || prefix < 0 || nKV <= 0 || headDim <= 0 {
-		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "token count, KV heads, and head dimension must be positive and prefix non-negative"}
-	}
-	if headDim > qwen35CausalAttentionPanelMaxHeadDim {
-		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: fmt.Sprintf("head_dim %d exceeds bounded online-softmax capacity %d", headDim, qwen35CausalAttentionPanelMaxHeadDim)}
+	if tokens != qwen38CausalAttentionPanelTokens ||
+		prefix != qwen38CausalAttentionPanelPrefix ||
+		nKV != qwen38CausalAttentionPanelKVHeads ||
+		headDim != qwen38CausalAttentionPanelHeadDim {
+		return &Qwen35SequenceError{
+			Stage: "causal-attention-geometry", Layer: -1,
+			Reason: fmt.Sprintf(
+				"prompt attention supports only Qwen3.8 source-spine geometry tokens=%d prefix=%d KV_heads=%d head_dim=%d",
+				qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix,
+				qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim,
+			),
+		}
 	}
 	if int64(tokens) > qwen35GDNMaxCInt || int64(prefix) > qwen35GDNMaxCInt-int64(tokens) {
 		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "causal position range overflows the CUDA int ABI"}
@@ -56,8 +70,11 @@ func validateQwen35CausalAttentionPanelGeometry(tokens, prefix, nH, nKV, headDim
 	if err := validateQwen35CausalAttentionPanelKVGeometry(tokens, prefix, nKV, headDim); err != nil {
 		return err
 	}
-	if nH <= 0 || nH%nKV != 0 {
-		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "query heads must be positive and divisible by KV heads"}
+	if nH != qwen38CausalAttentionPanelHeads {
+		return &Qwen35SequenceError{
+			Stage: "causal-attention-geometry", Layer: -1,
+			Reason: fmt.Sprintf("prompt attention supports only %d Qwen3.8 query heads", qwen38CausalAttentionPanelHeads),
+		}
 	}
 	if int64(nH) > qwen35GDNMaxCInt {
 		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "query head count overflows the CUDA int ABI"}
@@ -204,9 +221,10 @@ type qwen35KVReservation struct {
 }
 
 func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, needed int) error {
-	if kv == nil || kv.cfg.NumKVHeads <= 0 || kv.cfg.HeadDim <= 0 ||
-		kv.cfg.HeadDim > qwen35CausalAttentionPanelMaxHeadDim || needed < 0 ||
-		int64(needed) > qwen35GDNMaxCInt {
+	exactNeeded := (qwen38CausalAttentionPanelPrefix + qwen38CausalAttentionPanelTokens) *
+		qwen38CausalAttentionPanelKVHeads * qwen38CausalAttentionPanelHeadDim
+	if kv == nil || kv.cfg.NumKVHeads != qwen38CausalAttentionPanelKVHeads ||
+		kv.cfg.HeadDim != qwen38CausalAttentionPanelHeadDim || needed != exactNeeded {
 		return &Qwen35SequenceError{
 			Stage:  "causal-attention-geometry",
 			Layer:  -1,

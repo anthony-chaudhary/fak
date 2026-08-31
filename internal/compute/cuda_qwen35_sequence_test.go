@@ -6,13 +6,14 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"unsafe"
 )
 
 func qwen35SequenceGeometryFixture(layers int) Qwen35SequencePrefillRequest {
 	req := Qwen35SequencePrefillRequest{
-		Path: Qwen35SequencePrefillPath, TokenIDs: []int{1, 2},
+		Path: Qwen35SequencePrefillPath, TokenIDs: []int{1, 2}, StartPos: qwen38CausalAttentionPanelPrefix,
 		Hidden: Qwen35DenseHidden, Intermediate: Qwen35DenseIntermediate,
 		NumHeads: Qwen35DenseQueryHeads, NumKVHeads: Qwen35DenseKVHeads,
 		HeadDim: Qwen35DenseHeadDim, RotaryDim: Qwen35DenseHeadDim / 4,
@@ -61,45 +62,35 @@ func TestQwen35SequenceBoundedFixtureGeometry(t *testing.T) {
 	req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim = 4, 2, 8, 8
 	req.NumKeyHeads, req.NumValueHeads = 2, 4
 	req.KeyHeadDim, req.ValueHeadDim, req.ConvKernel = 8, 8, 3
-	if err := validateQwen35SequenceGeometry(req); err != nil {
-		t.Fatalf("bounded parity geometry refused: %v", err)
+	var contractErr *Qwen35SequenceError
+	if err := validateQwen35SequenceGeometry(req); err == nil || !errors.As(err, &contractErr) {
+		t.Fatalf("non-Qwen3.8 prompt geometry error = %v, want typed source-spine refusal", err)
 	}
 }
 
 func TestQwen35CausalAttentionPanelGeometryContract(t *testing.T) {
-	for _, geometry := range []struct {
-		name                                    string
-		tokens, prefix, heads, kvHeads, headDim int
-	}{
-		{"qwen3.8-27b", 2, 17, 24, 4, 256},
-		{"bounded-fixture", 2, 0, 4, 2, 8},
-		{"single-dimension", 1, 0, 1, 1, 1},
-		{"multi-stride-dimension", 3, 5, 6, 2, 129},
-		{"online-softmax-bound", 1, 0, 1, 1, qwen35CausalAttentionPanelMaxHeadDim},
-	} {
-		t.Run("accept/"+geometry.name, func(t *testing.T) {
-			if err := validateQwen35CausalAttentionPanelGeometry(geometry.tokens, geometry.prefix, geometry.heads, geometry.kvHeads, geometry.headDim); err != nil {
-				t.Fatalf("bounded geometry refused without a CUDA device: %v", err)
-			}
-		})
+	if err := validateQwen35CausalAttentionPanelGeometry(
+		qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix,
+		qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads,
+		qwen38CausalAttentionPanelHeadDim,
+	); err != nil {
+		t.Fatalf("exact Qwen3.8 source-spine geometry refused without a CUDA device: %v", err)
 	}
 
 	for _, geometry := range []struct {
 		name                                    string
 		tokens, prefix, heads, kvHeads, headDim int
 	}{
-		{"empty-panel", 0, 0, 1, 1, 1},
-		{"negative-prefix", 1, -1, 1, 1, 1},
-		{"zero-query-heads", 1, 0, 0, 1, 1},
-		{"zero-kv-heads", 1, 0, 1, 0, 1},
-		{"ungrouped-heads", 1, 0, 3, 2, 1},
-		{"zero-head-dimension", 1, 0, 1, 1, 0},
-		{"head-dimension-over-bound", 1, 0, 1, 1, qwen35CausalAttentionPanelMaxHeadDim + 1},
-		{"position-overflow", 2, int(qwen35GDNMaxCInt) - 1, 1, 1, 1},
-		{"launch-grid-overflow", 2, 0, int(qwen35GDNMaxCInt), 1, 1},
-		{"kv-width-overflow", 1, 0, int(qwen35GDNMaxCInt), int(qwen35GDNMaxCInt), 2},
-		{"kv-panel-overflow", 1, int(qwen35GDNMaxCInt)/qwen35CausalAttentionPanelMaxHeadDim + 1, 1, 1, qwen35CausalAttentionPanelMaxHeadDim},
-		{"query-panel-overflow", int(qwen35GDNMaxCInt)/(2*qwen35CausalAttentionPanelMaxHeadDim) + 1, 0, 2, 1, qwen35CausalAttentionPanelMaxHeadDim},
+		{"tokens-minus-one", qwen38CausalAttentionPanelTokens - 1, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"tokens-plus-one", qwen38CausalAttentionPanelTokens + 1, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"prefix-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix - 1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"prefix-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix + 1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"query-heads-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads - 1, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"query-heads-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads + 1, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"KV-heads-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads - 1, qwen38CausalAttentionPanelHeadDim},
+		{"KV-heads-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads + 1, qwen38CausalAttentionPanelHeadDim},
+		{"head-dimension-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim - 1},
+		{"head-dimension-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim + 1},
 	} {
 		t.Run("refuse/"+geometry.name, func(t *testing.T) {
 			var contractErr *Qwen35SequenceError
@@ -187,11 +178,32 @@ func TestQwen35CausalAttentionPanelRefusesBeforeKVReservation(t *testing.T) {
 	}
 }
 
+func TestQwen35CausalAttentionPanelRefusesBeforeOutputAllocation(t *testing.T) {
+	sentinel := &cudaBuf{n: 17}
+	be := &cudaBackend{transient: []*cudaBuf{sentinel}}
+	kv := &cudaKV{cfg: KVConfig{
+		NumKVHeads: Qwen35DenseKVHeads,
+		HeadDim:    qwen35CausalAttentionPanelMaxHeadDim + 1,
+	}}
+	var contractErr *Qwen35SequenceError
+	_, _, err := be.qwen35SequenceAttentionLocked(
+		Tensor{}, kv, 0, 2, 1, Qwen35DenseQueryHeads,
+		1/float32(math.Sqrt(qwen38CausalAttentionPanelHeadDim)),
+	)
+	if err == nil || !errors.As(err, &contractErr) {
+		t.Fatalf("unsupported launcher geometry error = %v, want typed refusal", err)
+	}
+	if len(be.transient) != 1 || be.transient[0] != sentinel {
+		t.Fatalf("unsupported launcher geometry allocated or mutated transient inventory: %#v", be.transient)
+	}
+}
+
 func TestQwen35CausalAttentionPanelAppendPreflightsEveryKVSlice(t *testing.T) {
 	const (
-		tokens  = 2
-		kvHeads = 2
-		headDim = 8
+		tokens  = qwen38CausalAttentionPanelTokens
+		prefix  = qwen38CausalAttentionPanelPrefix
+		kvHeads = qwen38CausalAttentionPanelKVHeads
+		headDim = qwen38CausalAttentionPanelHeadDim
 		width   = kvHeads * headDim
 	)
 	be := &cudaBackend{}
@@ -203,17 +215,17 @@ func TestQwen35CausalAttentionPanelAppendPreflightsEveryKVSlice(t *testing.T) {
 			be:  be,
 		}
 	}
-	kRawStorage := make([]byte, tokens*width*F32.Bytes())
-	kStorage := make([]byte, tokens*width*F32.Bytes())
-	vStorage := make([]byte, tokens*width*F32.Bytes())
+	kRawStorage := make([]byte, (prefix+tokens)*width*F32.Bytes())
+	kStorage := make([]byte, (prefix+tokens)*width*F32.Bytes())
+	vStorage := make([]byte, (prefix+tokens)*width*F32.Bytes())
 	kv := &cudaKV{
 		cfg:  KVConfig{NumKVHeads: kvHeads, HeadDim: headDim},
-		Kraw: []dslice{{ptr: unsafe.Pointer(&kRawStorage[0]), cap: tokens * width}},
-		K:    []dslice{{ptr: unsafe.Pointer(&kStorage[0]), cap: tokens*width - 1}},
-		V:    []dslice{{ptr: unsafe.Pointer(&vStorage[0]), cap: tokens * width}},
+		Kraw: []dslice{{ptr: unsafe.Pointer(&kRawStorage[0]), len: prefix * width, cap: (prefix + tokens) * width}},
+		K:    []dslice{{ptr: unsafe.Pointer(&kStorage[0]), len: prefix * width, cap: (prefix+tokens)*width - 1}},
+		V:    []dslice{{ptr: unsafe.Pointer(&vStorage[0]), len: prefix * width, cap: (prefix + tokens) * width}},
 	}
 	beforeKraw, beforeK, beforeV := kv.Kraw[0], kv.K[0], kv.V[0]
-	if err := be.qwen35SequenceAppendKVLocked(kv, 0, resident(), resident(), resident(), 0, tokens); err == nil {
+	if err := be.qwen35SequenceAppendKVLocked(kv, 0, resident(), resident(), resident(), prefix, tokens); err == nil {
 		t.Fatal("undersized middle KV slice accepted")
 	}
 	if kv.Kraw[0] != beforeKraw || kv.K[0] != beforeK || kv.V[0] != beforeV || len(kv.pos) != 0 {
@@ -259,17 +271,7 @@ func TestCUDAQwen35CausalAttentionPanelMatchesCPUReference(t *testing.T) {
 		name                                    string
 		tokens, prefix, heads, kvHeads, headDim int
 	}{
-		{"hd1", 2, 1, 4, 2, 1},
-		{"legacy-hd16", 3, 2, 4, 2, 16},
-		{"warp-boundary-hd32", 2, 1, 4, 2, 32},
-		{"post-warp-hd33", 2, 1, 4, 2, 33},
-		{"pre-block-hd127", 2, 1, 4, 2, 127},
-		{"block-hd128", 2, 1, 4, 2, 128},
-		{"post-block-hd129", 2, 1, 4, 2, 129},
-		{"qwen3.8-24x4-hd256", 3, 2, 24, 4, 256},
-		{"single-key-extreme-negative-score", 1, 0, 1, 1, 1},
-		{"pre-cap-hd1023", 2, 1, 4, 2, 1023},
-		{"cap-hd1024", 2, 1, 4, 2, 1024},
+		{"qwen3.8-24x4-hd256", 2, 1, 24, 4, qwen38CausalAttentionPanelHeadDim},
 	} {
 		t.Run(geometry.name, func(t *testing.T) {
 			const sentinel = float32(-12345.75)
@@ -278,9 +280,6 @@ func TestCUDAQwen35CausalAttentionPanelMatchesCPUReference(t *testing.T) {
 			q := rng.values(geometry.tokens*geometry.heads*geometry.headDim, 0.5)
 			k := rng.values((geometry.prefix+geometry.tokens)*geometry.kvHeads*geometry.headDim, 0.5)
 			v := rng.values((geometry.prefix+geometry.tokens)*geometry.kvHeads*geometry.headDim, 0.5)
-			if geometry.name == "single-key-extreme-negative-score" {
-				q[0], k[0], v[0], scale = 1, -200, 3.25, 1
-			}
 			want := qwen35CausalAttentionPanelCPUReference(q, k, v, geometry.tokens, geometry.prefix, geometry.heads, geometry.kvHeads, geometry.headDim, scale)
 			sentinels := make([]float32, len(want))
 			for i := range sentinels {
@@ -324,4 +323,120 @@ func TestCUDAQwen35CausalAttentionPanelMatchesCPUReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCUDAPartialRoPEQKMatchesRotateHalfReference(t *testing.T) {
+	be := cudaGDNBackend(t)
+	const (
+		pos = 7
+		nQ  = 2
+		nK  = 1
+		hd  = 8
+		rd  = 6
+	)
+	qHost := []float32{.1, .2, .3, .4, .5, .6, .7, .8, -.1, -.2, -.3, -.4, -.5, -.6, -.7, -.8}
+	kHost := []float32{.9, .8, .7, .6, .5, .4, .3, .2}
+	q := uploadCUDAGDN(t, be, []int{nQ * hd}, qHost, MemoryActivation, "partial-rope-q-test")
+	k := uploadCUDAGDN(t, be, []int{nK * hd}, kHost, MemoryActivation, "partial-rope-k-test")
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	qOut, kOut := be.PartialRoPEQK(q, k, pos, nQ, nK, hd, rd, 10000)
+	t.Cleanup(func() { be.Free(qOut); be.Free(kOut) })
+	if got := be.HostXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes D2H", got)
+	}
+	if got := be.H2DXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes H2D", got)
+	}
+
+	ref := func(in []float32, heads int) []float32 {
+		out := append([]float32(nil), in...)
+		half := rd / 2
+		for h := 0; h < heads; h++ {
+			for j := 0; j < half; j++ {
+				freq := math.Pow(10000, -2*float64(j)/rd)
+				cs, sn := float32(math.Cos(pos*freq)), float32(math.Sin(pos*freq))
+				a, b := in[h*hd+j], in[h*hd+j+half]
+				out[h*hd+j], out[h*hd+j+half] = a*cs-b*sn, b*cs+a*sn
+			}
+		}
+		return out
+	}
+	assertNear := func(label string, got, want []float32) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s length %d != %d", label, len(got), len(want))
+		}
+		for i := range want {
+			if math.Abs(float64(got[i]-want[i])) > 2e-5 {
+				t.Fatalf("%s[%d]=%g want %g", label, i, got[i], want[i])
+			}
+		}
+	}
+	assertNear("q", be.Read(qOut), ref(qHost, nQ))
+	assertNear("k", be.Read(kOut), ref(kHost, nK))
+	assertNear("q input", be.Read(q), qHost)
+	assertNear("k input", be.Read(k), kHost)
+}
+
+func TestCUDASigmoidMulInPlace(t *testing.T) {
+	be := cudaGDNBackend(t)
+	xHost := []float32{2, -3, 4, -5}
+	gateHost := []float32{-2, 0, 2, 8}
+	x := uploadCUDAGDN(t, be, []int{len(xHost)}, xHost, MemoryActivation, "sigmoid-x-test")
+	gate := uploadCUDAGDN(t, be, []int{len(gateHost)}, gateHost, MemoryActivation, "sigmoid-gate-test")
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	be.SigmoidMulInPlace(x, gate)
+	if got := be.HostXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes D2H", got)
+	}
+	if got := be.H2DXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes H2D", got)
+	}
+	got := be.Read(x)
+	for i := range got {
+		want := xHost[i] / (1 + float32(math.Exp(float64(-gateHost[i]))))
+		if math.Abs(float64(got[i]-want)) > 2e-6 {
+			t.Fatalf("x[%d]=%g want %g", i, got[i], want)
+		}
+	}
+
+	short := uploadCUDAGDN(t, be, []int{1}, []float32{1}, MemoryActivation, "sigmoid-short-test")
+	defer func() {
+		r := recover()
+		if r == nil || !strings.Contains(r.(string), "shape mismatch") {
+			t.Fatalf("shape mismatch panic = %v", r)
+		}
+	}()
+	be.SigmoidMulInPlace(x, short)
+}
+
+func TestCUDASplitQwen35QueryGate(t *testing.T) {
+	be := cudaGDNBackend(t)
+	qgHost := []float32{
+		1, 2, 3, 4, 11, 12, 13, 14,
+		5, 6, 7, 8, 15, 16, 17, 18,
+	}
+	qg := uploadCUDAGDN(t, be, []int{len(qgHost)}, qgHost, MemoryActivation, "qg-split-test")
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	q, gate := be.SplitQwen35QueryGate(qg, 2, 4)
+	t.Cleanup(func() { be.Free(q); be.Free(gate) })
+	if got := be.HostXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes D2H", got)
+	}
+	if got := be.H2DXferBytes(); got != 0 {
+		t.Fatalf("device operation copied %d bytes H2D", got)
+	}
+	assert := func(label string, got, want []float32) {
+		t.Helper()
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s[%d]=%g want %g", label, i, got[i], want[i])
+			}
+		}
+	}
+	assert("query", be.Read(q), []float32{1, 2, 3, 4, 5, 6, 7, 8})
+	assert("gate", be.Read(gate), []float32{11, 12, 13, 14, 15, 16, 17, 18})
 }

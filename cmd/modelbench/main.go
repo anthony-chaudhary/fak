@@ -886,10 +886,28 @@ func main() {
 		}
 		return
 	}
+	if *f.qwenSwapReadback != "" {
+		if err := runQwen38PagedSwapReadback(*f.qwenSwapReadback); err != nil {
+			fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback:", err)
+			f.exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback: PASS", *f.qwenSwapReadback)
+		return
+	}
 	var nativeControls map[string]string
+	var qwenSwapControls map[string]string
+	var qwenSwapMaxBlocks int
 	if *f.nativeProfileOut != "" {
 		var err error
 		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget, *f.nativeDecodeHandoff)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	if *f.qwenSwapOut != "" {
+		var err error
+		qwenSwapControls, qwenSwapMaxBlocks, err = qwen38PagedSwapControls(os.LookupEnv, os.Environ(), *f.budget)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -968,6 +986,15 @@ func main() {
 	vocab := m.Cfg.VocabSize
 	be, registeredBackends := resolveBackend(f)
 	resolveMetal(f)
+	if *f.qwenSwapOut != "" {
+		if err := runWithTransferredWeightLifetime(f, func() error {
+			return runQwen38PagedSwap(f, m, qwenSwapControls, qwenSwapMaxBlocks)
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, "qwen38 paged-swap:", err)
+			f.exit(1)
+		}
+		return
+	}
 
 	// Quantize once up front (off the timed path) when in Q8 mode. newSession stamps the
 	// Quant flag onto every session the benchmark creates so prefill+decode use it.

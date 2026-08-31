@@ -223,6 +223,11 @@ func newDisambiguationLandFixture(t *testing.T) (repo, worktree, base string) {
 	git(repo, "init", "-q", "-b", "main")
 	git(repo, "config", "user.email", "t@t")
 	git(repo, "config", "user.name", "t")
+	// Keep the synthetic repository deterministic after the test returns. Git can
+	// otherwise start background maintenance that races t.TempDir cleanup and leaves
+	// .git non-empty after the resolver has already produced its typed receipt.
+	git(repo, "config", "maintenance.auto", "false")
+	git(repo, "config", "gc.auto", "0")
 	git(repo, "add", ".")
 	git(repo, "commit", "-qm", "base")
 	base = git(repo, "rev-parse", "HEAD")

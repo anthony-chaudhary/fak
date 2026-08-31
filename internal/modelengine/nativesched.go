@@ -68,10 +68,16 @@ type NativeScheduler struct {
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
 	maxObservedRunning  int
+	maxObservedKVBlocks int
 	sharedBatchSteps    uint64
 	sharedPanels        uint64
 	sharedMACs          uint64
 	q4kGateUpOutputSlab bool
+	residentQ4K         bool
+	metalQ4K            bool
+	sessionProfiler     func(NativeSessionLifecycle) *model.PhaseProfiler
+	captureQwenState    bool
+	qwenStateReceipts   []model.Qwen35MetalStateIdentityReceipt
 	closed              bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
@@ -85,6 +91,9 @@ type NativeScheduler struct {
 
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
+	stopped chan struct{}
+
+	runStarted bool
 
 	// executor serializes lane mutation between the ordinary scheduler goroutine and
 	// Complete callers that donate their blocked drain to advancing scheduler work.
@@ -95,6 +104,15 @@ type NativeScheduler struct {
 	blockedDrains     int
 	donatedIterations uint64
 }
+
+// NativeSessionLifecycle identifies whether a scheduler-created model session is
+// the initial owner or a readmitted owner rebuilt around restored KV state.
+type NativeSessionLifecycle string
+
+const (
+	NativeSessionFresh    NativeSessionLifecycle = "fresh"
+	NativeSessionRestored NativeSessionLifecycle = "restored"
+)
 
 // SetMaxRunning bounds how many admitted lanes run concurrently; the rest wait in the
 // waiting queue and are promoted FIFO as running slots free between steps. n<=0 means
@@ -115,6 +133,47 @@ func (s *NativeScheduler) SetQ4KGateUpOutputSlab(enabled bool) {
 	s.mu.Unlock()
 }
 
+// SetResidentQ4K selects the scheduler-owned resident Q4_K lane and optionally
+// its fak-native Metal backend. Set it before Admit. Restored sessions inherit the
+// same ownership; readmission never changes engine or backend.
+func (s *NativeScheduler) SetResidentQ4K(metal bool) {
+	s.mu.Lock()
+	s.residentQ4K = true
+	s.metalQ4K = metal
+	s.mu.Unlock()
+}
+
+// SetSessionProfilerFactory attaches an existing model phase/Metal profiler to
+// every fresh and restored session. It is an opt-in witness seam; nil is the
+// allocation-free production default.
+func (s *NativeScheduler) SetSessionProfilerFactory(factory func(NativeSessionLifecycle) *model.PhaseProfiler) {
+	s.mu.Lock()
+	s.sessionProfiler = factory
+	s.mu.Unlock()
+}
+
+// EnableQwen35MetalStateIdentityCapture opts exact P32 Qwen Metal admissions
+// into the model-owned state-digest receipt. Unsupported sessions fail Admit
+// rather than silently omitting the requested witness.
+func (s *NativeScheduler) EnableQwen35MetalStateIdentityCapture() {
+	s.mu.Lock()
+	s.captureQwenState = true
+	s.mu.Unlock()
+}
+
+// Qwen35MetalStateIdentityReceipts returns independent copies captured after
+// fresh P32 prefills and before any scheduler preemption.
+func (s *NativeScheduler) Qwen35MetalStateIdentityReceipts() []model.Qwen35MetalStateIdentityReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]model.Qwen35MetalStateIdentityReceipt, len(s.qwenStateReceipts))
+	for i, receipt := range s.qwenStateReceipts {
+		out[i] = receipt
+		out[i].States = append([]model.Qwen35MetalStateDigest(nil), receipt.States...)
+	}
+	return out
+}
+
 // MaxObservedRunning reports the peak running-set size the loop reached — the witness
 // that a maxRunning cap actually gated admission (peak == cap), or that an uncapped
 // scheduler co-batched every lane (peak == #admitted). Safe to read after draining.
@@ -122,6 +181,15 @@ func (s *NativeScheduler) MaxObservedRunning() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.maxObservedRunning
+}
+
+// MaxObservedKVBlocks reports the peak live paged-KV block estimate observed
+// before pressure enforcement. It proves the ON arm crossed its configured
+// budget rather than merely carrying a nonzero swap counter.
+func (s *NativeScheduler) MaxObservedKVBlocks() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxObservedKVBlocks
 }
 
 // SharedWorkReceipt reports model work that actually crossed a shared BatchSession
@@ -165,6 +233,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		prepare:       prepare,
 		now:           time.Now,
 		wake:          make(chan struct{}, 1),
+		stopped:       make(chan struct{}),
 		drainDonation: true,
 	}
 }
@@ -213,29 +282,63 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 
 func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint) (abi.EngineRequest, error) {
 	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return nil, errSchedClosed
+	}
+	return s.admitPrepared(ctx, c, hint, s.prepare(ctx, c, s.m))
+}
+
+// AdmitTokenIDs admits one exact token sequence through the ordinary native
+// scheduler lifecycle. It exists for modelbench and deterministic engine
+// witnesses that must bind exact artifact token IDs instead of byte tokenization.
+func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt []int) (abi.EngineRequest, error) {
+	call := &abi.ToolCall{Tool: name}
+	return s.admitPrepared(ctx, call, dispatchtick.WaveHint{}, schedPrepare{prompt: append([]int(nil), prompt...)})
+}
+
+func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint, prep schedPrepare) (abi.EngineRequest, error) {
+	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return nil, errSchedClosed
 	}
 	s.mu.Unlock()
 
-	prep := s.prepare(ctx, c, s.m)
 	prompt := prep.prompt
 	if len(prompt) == 0 {
 		prompt = []int{0}
 	}
-	sess := s.m.NewSession()
-	if prep.q4k {
-		// Resident-Q4_K preload: engage the Q4_K decode kernel. Multi-lane Q4_K
-		// falls back to serial Step in stepOnce because BatchSession does not yet
-		// implement q4kw dispatch.
-		sess.Quant = true
-		sess.Q4K = true
-		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
+	q4k := prep.q4k || s.residentQ4K
+	sess := s.newLaneSession(q4k, NativeSessionFresh)
+	if s.captureQwenState {
+		if err := sess.EnableQwen35MetalStateIdentityReceipt(prompt); err != nil {
+			sess.Close()
+			return nil, err
+		}
 	}
 	prefillStarted := s.now()
 	logits := sess.Prefill(prompt)
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
+	if s.captureQwenState {
+		executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
+		if err != nil || !executed {
+			sess.Close()
+			if err == nil {
+				err = errors.New("modelengine: Qwen Metal state identity was not executed")
+			}
+			return nil, err
+		}
+		receipt, ok := sess.Qwen35MetalStateIdentityReceipt()
+		if !ok {
+			sess.Close()
+			return nil, errors.New("modelengine: Qwen Metal state identity receipt unavailable")
+		}
+		s.mu.Lock()
+		s.qwenStateReceipts = append(s.qwenStateReceipts, receipt)
+		s.mu.Unlock()
+	}
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
@@ -250,7 +353,7 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 		promptLen:   len(prompt),
 		putCtx:      ctx,
 		tok:         prep.tok,
-		q4k:         prep.q4k,
+		q4k:         q4k,
 		kvReuseHits: kvReuseHits,
 		kvPinned:    kvPinned,
 		kvPinUntil:  kvPinUntil,
@@ -265,7 +368,12 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 	s.waiting = append(s.waiting, ln)
 	s.mu.Unlock()
 
-	s.started.Do(func() { go s.run() })
+	s.started.Do(func() {
+		s.mu.Lock()
+		s.runStarted = true
+		s.mu.Unlock()
+		go s.run()
+	})
 	s.signal()
 	return ln, nil
 }
@@ -318,6 +426,24 @@ func (s *NativeScheduler) Close() {
 	s.signal()
 }
 
+// CloseAndWait closes the scheduler and waits until its loop has retired every
+// terminal lane. A scheduler that never admitted work is already stopped.
+func (s *NativeScheduler) CloseAndWait(ctx context.Context) error {
+	s.Close()
+	s.mu.Lock()
+	runStarted := s.runStarted
+	s.mu.Unlock()
+	if !runStarted {
+		return nil
+	}
+	select {
+	case <-s.stopped:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *NativeScheduler) signal() {
 	select {
 	case s.wake <- struct{}{}:
@@ -332,6 +458,7 @@ func (s *NativeScheduler) signal() {
 // this one goroutine, so those fields need no lock; only the shared waiting/lanes
 // slices (appended by Admit) and the closed flag are mutex-guarded.
 func (s *NativeScheduler) run() {
+	defer close(s.stopped)
 	for {
 		s.mu.Lock()
 		donorOwnsWork := s.drainDonation && s.blockedDrains > 0
@@ -456,11 +583,14 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		s.lanes = append(s.lanes, ln)
 	}
 	s.waiting = kept
+	if used := s.usedKVBlocksLocked(); used > s.maxObservedKVBlocks {
+		s.maxObservedKVBlocks = used
+	}
+	if promoted := len(s.lanes); promoted > s.maxObservedRunning {
+		s.maxObservedRunning = promoted
+	}
 	s.enforcePreemptionLocked()
 	running := len(s.lanes)
-	if running > s.maxObservedRunning {
-		s.maxObservedRunning = running
-	}
 	var solo *schedLane
 	var active []*schedLane
 	if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {

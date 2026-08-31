@@ -127,15 +127,16 @@ def _env_pos_int(name: str, default: int) -> int:
 # safety bound. The real DoS proof is the adaptive cap below: min(this, host_cap,
 # seats). host_cap (#1337) auto-throttles to the box's live cores/RAM/thread
 # headroom; the seat pool (#1336) hard-bounds at bounded account session slots so a
-# spawn can never overbook a rate-limit pool. Raised to 20 after Claude worker
-# accounts were modeled as four bounded sessions each: the static ceiling's only job
-# is to sit ABOVE the adaptive
-# gates — which can only LOWER the effective cap — so concurrency rises to what the
-# box and the account pool can actually carry and no further (the 2026-07-04
-# headroom audit witnessed host_cap 16 with the static caps binding first). The
-# FAK_MAX_WORKERS env knob retunes the fleet-wide ceiling per host without a code
-# change; the Go tick (internal/dispatchtick.DefaultMaxWorkers) reads the same knob.
-DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 20)
+# spawn can never overbook a rate-limit pool. Darwin defaults to 30; other hosts
+# retain 20. The static ceiling's only job is to sit ABOVE the adaptive gates —
+# which can only LOWER the effective cap — so concurrency rises to what the box and
+# account pool can actually carry and no further. FAK_MAX_WORKERS retunes the
+# fleet-wide ceiling per host without a code change.
+def _built_in_max_workers(platform_name: str = sys.platform) -> int:
+    return 30 if platform_name == "darwin" else 20
+
+
+DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", _built_in_max_workers())
 DEFAULT_CODEX_OAUTH_SESSIONS = _env_pos_int("FAK_CODEX_OAUTH_SESSIONS", 10)
 
 
