@@ -33,9 +33,12 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	if state.launchNotice != "" {
 		rows = append(rows, state.launchNotice)
 	}
-	// The semantic source rows stay pinned under every tab. Switching views must
-	// never turn typed availability/provenance into a renderer-local guess.
-	rows = append(rows, guardInfoObservationRows(v.Observation)...)
+	// Shared source/provenance context belongs to the overview. Focused tabs lead
+	// with their own subsystem so switching pages changes the frame immediately;
+	// renderers that need source truth (notably Cache) carry it in their body.
+	if state.active == viewOverview && !state.glossaryOpen {
+		rows = append(rows, guardInfoObservationRows(v.Observation)...)
+	}
 
 	// bodyHeight is the room left under the tab bar; 0/negative height (unknown pane) means
 	// "roomy", so the body renders in full and the loop's own cap pins it.
@@ -277,9 +280,9 @@ func guardInfoSeatDetail(a gateway.SessionAccount) string {
 func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 	v := ctx.v
 	if zeroObservationGap(v.Observation) {
-		// The pinned observation rows carry causes and the next command. Do not
-		// follow them with gauges or savings detail that imply cache traffic.
-		return nil
+		// This diagnosis is Cache content, not global chrome. Keep the typed cause
+		// and next check here without making every focused tab repeat it.
+		return guardInfoObservationRows(v.Observation)
 	}
 	cacheRow := " cache  " + guardInfoSavingWord(v)
 	if guardInfoCacheSourceObserved(v) {
