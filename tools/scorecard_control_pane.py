@@ -244,6 +244,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "parity", "debt": "parity_debt", "script": "industry_scorecard.py", "label": "industry-parity"},
     {"key": "sota", "debt": "sota_debt", "script": "sota_coverage_scorecard.py", "label": "sota-coverage"},
     {"key": "agent", "debt": "friction_debt", "script": "", "cmd": "go run ./cmd/fak score agent-readiness --json", "label": "agent-readiness"},
+    {"key": "brittleness", "debt": "brittleness_debt", "script": "", "cmd": "go run ./cmd/fak score brittleness --json", "label": "brittleness"},
     {"key": "product", "debt": "product_debt", "script": "product_scorecard.py", "label": "product"},
     {"key": "persona", "debt": "persona_debt", "script": "persona_readiness_scorecard.py", "label": "persona"},
     {"key": "popularization", "debt": "popularization_debt", "script": "popularization_readiness_scorecard.py", "label": "popularization"},

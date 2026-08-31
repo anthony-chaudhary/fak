@@ -154,6 +154,7 @@ var Cards = []Card{
 	{Key: "heaviness", Debt: "heaviness_debt", Cmd: "go run ./cmd/fak operator heaviness --json", Label: "operator-heaviness"},
 	{Key: "propagation", Debt: "propagation_debt", Cmd: "go run ./cmd/fak propagation-scorecard --json", Label: "propagation"},
 	{Key: "antipattern", Debt: "antipattern_debt", Cmd: "go run ./cmd/fak antipattern-scorecard --json", Label: "antipattern"},
+	{Key: "brittleness", Debt: "brittleness_debt", Cmd: "go run ./cmd/fak score brittleness --json", Label: "brittleness"},
 	{Key: "negframe", Debt: "negframe_debt", Cmd: "go run ./cmd/fak score negframe --json", Label: "negframe", Origin: &ProducerOrigin{Command: "score negframe", File: "cmd/fak/negframescore.go"}},
 	{Key: "negation_tax", Debt: "negation_tax_debt", Cmd: "go run ./cmd/fak score negation-tax --json", Label: "negation-tax", Origin: &ProducerOrigin{Command: "score negation-tax", File: "cmd/fak/negationtaxscore.go"}},
 	{Key: "negation_operator", Debt: "negation_operator_debt", Cmd: "go run ./cmd/fak score negation_operator --json", Label: "negation-operator"},
