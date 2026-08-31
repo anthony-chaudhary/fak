@@ -182,6 +182,8 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, opt in to a pre-spawn audit of recent Codex sessions and refuse at threshold loop|action, or use off (default: $FLEET_CODEX_LOOP_GATE, else off)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
+	hostDiskReserve := fs.Int64("host-disk-reserve-bytes", dispatchHostSpaceDefaultReserveBytes, "bytes that must remain free on the managed-worktree filesystem")
+	hostDiskPerWorker := fs.Int64("host-disk-per-worker-bytes", dispatchHostSpaceDefaultPerWorkerBytes, "bounded predicted writable-byte demand per worker")
 	live := fs.Bool("live", false, "actually spawn workers")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if !parseFlags(fs, argv) {
@@ -224,15 +226,37 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	requestedCount := *count
+	thresholdProvenance := "dispatch-wave defaults"
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "host-disk-reserve-bytes" || f.Name == "host-disk-per-worker-bytes" {
+			thresholdProvenance = "explicit flags"
+		}
+	})
+	hostSpace := dispatchHostSpaceAdmit(dispatchHostSpaceTarget(), requestedCount, *hostDiskReserve, *hostDiskPerWorker, thresholdProvenance, dispatchHostSpaceProbeFn)
+	if !hostSpace.OK {
+		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, requestedCount, 0, nil)
+		rec["host_space_admission"] = hostSpace
+		rec["granted"] = 0
+		rec["shortfall"] = requestedCount
+		rec["stop_reason"] = hostSpace.Reason
+		dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
+		dispatchWaveRefuseAllExplicitIssues(rec, requestedIssues, dispatchWaveIssueRefusalCapacity, hostSpace.ReasonCode, hostSpace.Reason)
+		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	}
+	*count = hostSpace.AdmittedWorkers
+	hostSpaceShortfall := requestedCount - hostSpace.AdmittedWorkers
+
 	preflightResult, preflightErr := dispatchWaveDependencyRetry(dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func(ctx context.Context) (dispatchWavePreflightResult, error) {
 		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAlloc(ctx, root, stderr, *maxWorkers, wk, backendNorm, *count)
 		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, err
 	})
 	if preflightErr != nil {
-		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, 0, nil)
+		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, requestedCount, 0, nil)
+		rec["host_space_admission"] = hostSpace
 		dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
 		rec["granted"] = 0
-		rec["shortfall"] = *count
+		rec["shortfall"] = requestedCount
 		dispatchWaveRecordDependencyError(rec, preflightErr)
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
@@ -243,12 +267,13 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		preflight["finish_first_admission"] = finishFirstAdmission
 	}
 
-	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, allocationCount, preflight)
+	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, requestedCount, allocationCount, preflight)
+	rec["host_space_admission"] = hostSpace
 	rec["finish_first_admission"] = finishFirstAdmission
 	dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
 	if allocationCount <= 0 {
 		rec["granted"] = 0
-		rec["shortfall"] = *count
+		rec["shortfall"] = requestedCount
 		rec["stop_reason"] = "preflight headroom exhausted before account allocation"
 		dispatchWaveRefuseAllExplicitIssues(rec, requestedIssues, dispatchWaveIssueRefusalCapacity, dispatchWaveReasonCapacity, "preflight capacity admitted no worker seats")
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
@@ -268,7 +293,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	})
 	lanes := alloc.Lanes
 	waveID := alloc.WaveID
-	shortfall := alloc.Shortfall + preflightShortfall
+	shortfall := alloc.Shortfall + preflightShortfall + hostSpaceShortfall
 	rec["granted"] = len(lanes)
 	rec["shortfall"] = shortfall
 	rec["wave_id"] = waveID
