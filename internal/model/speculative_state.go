@@ -2,6 +2,78 @@ package model
 
 import "fmt"
 
+// SpeculativeCostComponent records one wall-time category without pretending
+// that an uninstrumented category cost zero. Measured=false is a hard fence
+// against treating a partial receipt as end-to-end performance evidence.
+type SpeculativeCostComponent struct {
+	Nanoseconds int64 `json:"nanoseconds"`
+	Measured    bool  `json:"measured"`
+}
+
+// SpeculativeCostAccounting names every cost that a speculative-decode
+// performance claim must include. A target-verification receipt may populate
+// only the categories it directly owns; MissingCostCategories reports the rest.
+type SpeculativeCostAccounting struct {
+	Setup              SpeculativeCostComponent `json:"setup"`
+	Drafting           SpeculativeCostComponent `json:"drafting"`
+	TargetVerification SpeculativeCostComponent `json:"target_verification"`
+	Rejection          SpeculativeCostComponent `json:"rejection"`
+	Rollback           SpeculativeCostComponent `json:"rollback"`
+	Synchronization    SpeculativeCostComponent `json:"synchronization"`
+	Recovery           SpeculativeCostComponent `json:"recovery"`
+	KnownMemoryBytes   int64                    `json:"known_memory_bytes"`
+	MemoryMeasured     bool                     `json:"memory_measured"`
+}
+
+// TargetVerificationReceipt distinguishes one genuine target verification
+// operation from an explicit ordinary-target-decode downgrade. It intentionally
+// cannot substantiate an end-to-end speedup while drafting, rejection, memory,
+// or recovery costs remain unmeasured.
+type TargetVerificationReceipt struct {
+	Schema                       string                    `json:"schema"`
+	Engine                       string                    `json:"engine"`
+	Path                         string                    `json:"path"`
+	DowngradeReason              string                    `json:"downgrade_reason,omitempty"`
+	DraftTokens                  int                       `json:"draft_tokens"`
+	AcceptedTokens               int                       `json:"accepted_tokens"`
+	RejectedTokens               int                       `json:"rejected_tokens"`
+	TargetVerificationOperations int                       `json:"target_verification_operations"`
+	TargetDecodeSteps            int                       `json:"target_decode_steps"`
+	OneOperation                 bool                      `json:"one_operation"`
+	Accounting                   SpeculativeCostAccounting `json:"accounting"`
+}
+
+// MissingCostCategories returns every category that prevents this receipt from
+// supporting an end-to-end performance claim.
+func (r TargetVerificationReceipt) MissingCostCategories() []string {
+	var missing []string
+	for _, category := range []struct {
+		name string
+		cost SpeculativeCostComponent
+	}{
+		{name: "setup", cost: r.Accounting.Setup},
+		{name: "drafting", cost: r.Accounting.Drafting},
+		{name: "target_verification", cost: r.Accounting.TargetVerification},
+		{name: "rejection", cost: r.Accounting.Rejection},
+		{name: "rollback", cost: r.Accounting.Rollback},
+		{name: "synchronization", cost: r.Accounting.Synchronization},
+		{name: "recovery", cost: r.Accounting.Recovery},
+	} {
+		if !category.cost.Measured {
+			missing = append(missing, category.name)
+		}
+	}
+	if !r.Accounting.MemoryMeasured {
+		missing = append(missing, "memory")
+	}
+	return missing
+}
+
+// EndToEndMeasured is true only when every required cost category is present.
+func (r TargetVerificationReceipt) EndToEndMeasured() bool {
+	return len(r.MissingCostCategories()) == 0
+}
+
 // HybridSpecCheckpoint identifies one speculative suffix and its accepted prefix.
 // A checkpoint belongs to exactly one state and can be consumed only once.
 type HybridSpecCheckpoint struct {

@@ -30,6 +30,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
@@ -67,8 +68,9 @@ type qwen35MTPTargetTransaction struct {
 	snapshot     *PrefixSnapshot
 	beforeLogits []float32
 	draft        []int
-	verify       func([]int) [][]float32
+	verify       func([]int) ([][]float32, TargetVerificationReceipt, error)
 	step         func(int) []float32
+	receipt      TargetVerificationReceipt
 	closed       bool
 	closeCount   int
 }
@@ -77,15 +79,26 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	if target == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction needs a session")
 	}
+	started := time.Now()
 	snapshot, err := target.PrefixSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("model: snapshot Qwen3.8 MTP target transaction: %w", err)
 	}
-	return &qwen35MTPTargetTransaction{
+	tx := &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
-		verify: func(draft []int) [][]float32 { return target.VerifyForward(draft, nil, nil) },
-		step:   target.Step,
-	}, nil
+		verify: func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
+			return target.VerifyForwardOneOperation(draft, beforeLogits)
+		},
+		step: target.Step,
+	}
+	tx.receipt = TargetVerificationReceipt{
+		Schema: targetVerificationReceiptSchema,
+		Engine: targetVerificationEngine,
+		Path:   targetVerificationDecodePath,
+	}
+	tx.receipt.Accounting.Setup = measuredSpeculativeCost(started)
+	tx.receipt.Accounting.KnownMemoryBytes = snapshot.ResidentBytes()
+	return tx, nil
 }
 
 func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err error) {
@@ -99,7 +112,28 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 			err = tx.rollbackFailure("verify", fmt.Errorf("%v", recovered))
 		}
 	}()
-	return tx.verify(draft), nil
+	rows, receipt, verifyErr := tx.verify(draft)
+	receipt.Accounting.Setup.Nanoseconds += tx.receipt.Accounting.Setup.Nanoseconds
+	receipt.Accounting.Setup.Measured = receipt.Accounting.Setup.Measured || tx.receipt.Accounting.Setup.Measured
+	receipt.Accounting.KnownMemoryBytes += tx.receipt.Accounting.KnownMemoryBytes
+	tx.receipt = receipt
+	var downgrade *TargetVerificationDowngradeError
+	if errors.As(verifyErr, &downgrade) {
+		started := time.Now()
+		rows = tx.target.verifyForwardSequential(draft)
+		tx.receipt.Path = targetVerificationDecodePath
+		tx.receipt.DowngradeReason = downgrade.Reason
+		tx.receipt.TargetDecodeSteps = len(draft)
+		tx.receipt.OneOperation = false
+		cost := measuredSpeculativeCost(started)
+		tx.receipt.Accounting.TargetVerification.Nanoseconds += cost.Nanoseconds
+		tx.receipt.Accounting.TargetVerification.Measured = true
+		return rows, nil
+	}
+	if verifyErr != nil {
+		return nil, tx.rollbackFailure("verify", verifyErr)
+	}
+	return rows, nil
 }
 
 func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, err error) {
@@ -109,19 +143,27 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 	if accepted < 0 || accepted > len(tx.draft) {
 		return nil, tx.rollbackFailure("commit", fmt.Errorf("accepted prefix %d outside draft length %d", accepted, len(tx.draft)))
 	}
+	tx.receipt.AcceptedTokens = accepted
+	tx.receipt.RejectedTokens = len(tx.draft) - accepted
 	rollback, err := tx.snapshot.Clone()
 	if err != nil {
 		tx.finish()
 		return nil, fmt.Errorf("model: preserve Qwen3.8 MTP commit rollback: %w", err)
 	}
-	if err := tx.restore(); err != nil {
-		rollback.Close()
-		tx.finish()
-		return nil, err
+	if tx.receipt.Path == targetVerificationQwen38Path && tx.receipt.OneOperation {
+		// The cacheless Qwen3.8 whole-sequence operation never mutated the live
+		// target. Keep that exact state in place and retain the clone only as the
+		// failure rollback for accepted-prefix replay.
+		tx.receipt.Accounting.Rollback.Measured = true
+	} else {
+		if err := tx.restore(); err != nil {
+			rollback.Close()
+			tx.finish()
+			return nil, err
+		}
 	}
-	// Restore transfers the original snapshot into the live session. Retain the
-	// independent clone until replay succeeds so a mid-block failure can undo
-	// every accepted token rather than exposing a partially committed prefix.
+	// Retain the independent clone until replay succeeds so a mid-block failure
+	// can undo every accepted token rather than exposing a partial prefix.
 	tx.snapshot.Close()
 	tx.snapshot = rollback
 	logits = append([]float32(nil), tx.beforeLogits...)
@@ -131,15 +173,19 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
 		}
 	}()
+	started := time.Now()
 	for _, token := range tx.draft[:accepted] {
 		logits = tx.step(token)
 	}
+	tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
 	tx.finish()
 	return logits, nil
 }
 
 func (tx *qwen35MTPTargetTransaction) rollbackFailure(stage string, cause error) error {
+	started := time.Now()
 	restoreErr := tx.restore()
+	tx.receipt.Accounting.Recovery = measuredSpeculativeCost(started)
 	tx.finish()
 	if restoreErr != nil {
 		return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %v; rollback failed: %w", stage, cause, restoreErr)
@@ -160,10 +206,21 @@ func (tx *qwen35MTPTargetTransaction) Abort() error {
 }
 
 func (tx *qwen35MTPTargetTransaction) restore() error {
+	started := time.Now()
 	if err := tx.snapshot.Restore(tx.target); err != nil {
 		return fmt.Errorf("model: restore Qwen3.8 MTP target transaction: %w", err)
 	}
+	cost := measuredSpeculativeCost(started)
+	tx.receipt.Accounting.Rollback.Nanoseconds += cost.Nanoseconds
+	tx.receipt.Accounting.Rollback.Measured = true
 	return nil
+}
+
+func (tx *qwen35MTPTargetTransaction) VerificationReceipt() TargetVerificationReceipt {
+	if tx == nil {
+		return TargetVerificationReceipt{}
+	}
+	return tx.receipt
 }
 
 func (tx *qwen35MTPTargetTransaction) finish() {
