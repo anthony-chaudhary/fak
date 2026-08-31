@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -324,6 +325,25 @@ func TestGuardResourceErrorPathsEdgeAndAdversarial(t *testing.T) {
 	t.Run("receipt missing decision", func(t *testing.T) {
 		if err := guardWriteResourceReceipt(guardChildWaitEvent{}, "trace", "agent", 1); err == nil || !strings.Contains(err.Error(), "missing decision") {
 			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("partial reap reports only protected survivors with typed recovery", func(t *testing.T) {
+		alivePID := os.Getpid()
+		event := guardChildWaitEvent{Resource: &guardResourceDecision{OwnedPIDs: []int{-51908, alivePID, -64852}}}
+		err := guardWriteResourceReceipt(event, "trace", "codex", -51908)
+		if err == nil {
+			t.Fatal("expected protected survivor error")
+		}
+		got := err.Error()
+		for _, want := range []string{"CHILD_RESOURCE_CONTAINMENT_SURVIVORS", fmt.Sprintf("owned processes still alive: [%d]", alivePID), "elevated Windows terminal", "service owner", "ownership is not verified"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("error %q missing %q", got, want)
+			}
+		}
+		for _, reaped := range []string{"-51908", "-64852"} {
+			if strings.Contains(got, reaped) {
+				t.Fatalf("error %q reports reaped PID %s", got, reaped)
+			}
 		}
 	})
 	t.Run("collector failure without processes keeps root", func(t *testing.T) {

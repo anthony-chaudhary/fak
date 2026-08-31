@@ -305,18 +305,17 @@ func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string,
 		for _, row := range rows {
 			alive[row.PID] = true
 		}
-		survives := false
+		survivors := make([]int, 0, len(d.OwnedPIDs))
 		for _, pid := range d.OwnedPIDs {
 			if alive[pid] {
-				survives = true
-				break
+				survivors = append(survivors, pid)
 			}
 		}
-		if !survives {
+		if len(survivors) == 0 {
 			return appendGuardResourceReceipt(guardResourceReceiptPath(), newGuardResourceReceipt(traceID, agent, rootPID, d))
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("verify child resource reap: owned processes still alive: %v", d.OwnedPIDs)
+			return fmt.Errorf("verify child resource reap: CHILD_RESOURCE_CONTAINMENT_SURVIVORS: owned processes still alive: %v; recovery: rerun fak guard from an elevated Windows terminal or ask the service owner to stop these exact PIDs; do not terminate processes whose ownership is not verified", survivors)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
