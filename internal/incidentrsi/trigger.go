@@ -33,7 +33,7 @@ type RedactionClass string
 
 type DebounceState string
 
-type Decision string
+type TriggerDecision string
 
 type Reason string
 
@@ -53,9 +53,9 @@ const (
 	StateMaxWaitReady       DebounceState = "MAX_WAIT_READY"
 	StateCooldownSuppressed DebounceState = "COOLDOWN_SUPPRESSED"
 
-	DecisionCollect  Decision = "COLLECT"
-	DecisionAdmit    Decision = "ADMIT"
-	DecisionSuppress Decision = "SUPPRESS"
+	DecisionCollect  TriggerDecision = "COLLECT"
+	DecisionAdmit    TriggerDecision = "ADMIT"
+	DecisionSuppress TriggerDecision = "SUPPRESS"
 
 	ReasonBelowThreshold Reason = "BELOW_THRESHOLD"
 	ReasonThreshold      Reason = "THRESHOLD_REACHED"
@@ -72,7 +72,7 @@ const (
 	StageLaunch SideEffectStage = "LAUNCH"
 )
 
-type Source struct {
+type TriggerSource struct {
 	Component       string        `json:"component"`
 	Operation       string        `json:"operation"`
 	IncidentClass   IncidentClass `json:"incident_class"`
@@ -129,13 +129,13 @@ type SideEffectFailure struct {
 // mutate the value or its SideEffectFailures slice.
 type Trigger struct {
 	Schema                          string              `json:"schema"`
-	Source                          Source              `json:"source"`
+	Source                          TriggerSource       `json:"source"`
 	Fingerprint                     string              `json:"fingerprint"`
 	Privacy                         Privacy             `json:"privacy"`
 	Observation                     Observation         `json:"observation"`
 	DebounceInputs                  DebounceInputs      `json:"debounce_inputs"`
 	DebounceResult                  DebounceResult      `json:"debounce_result"`
-	Decision                        Decision            `json:"decision"`
+	Decision                        TriggerDecision     `json:"decision"`
 	Reason                          Reason              `json:"reason"`
 	Refs                            DurableRefs         `json:"refs"`
 	SideEffectFailures              []SideEffectFailure `json:"side_effect_failures,omitempty"`
@@ -229,7 +229,7 @@ func (t Trigger) Validate() error {
 	return nil
 }
 
-func (s Source) validate() error {
+func (s TriggerSource) validate() error {
 	if !safeName.MatchString(s.Component) || !safeName.MatchString(s.Operation) ||
 		!safeName.MatchString(s.ProducerSchema) || !safeName.MatchString(s.ProducerVersion) {
 		return errors.New("source fields must be bounded content-free identifiers")
@@ -280,7 +280,7 @@ func (t Trigger) validateDebounceDecision() error {
 		return errors.New("debounce result bounds do not match first_seen and configured durations")
 	}
 
-	var expectedDecision Decision
+	var expectedDecision TriggerDecision
 	var expectedReason Reason
 	var expectedNext time.Time
 
@@ -343,7 +343,7 @@ func (t Trigger) validateDebounceDecision() error {
 	return nil
 }
 
-func (r DurableRefs) validate(decision Decision) error {
+func (r DurableRefs) validate(decision TriggerDecision) error {
 	if r.IssueAction != IssueNone && r.IssueAction != IssueCreate && r.IssueAction != IssueUpdate {
 		return fmt.Errorf("unknown issue_action %q", r.IssueAction)
 	}

@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **13** (clarity 2 + coverage 11) |
-| **Crystal-clear concepts (and climbing)** | **995** crystal of 2710 positioned |
+| **Crystal-clear concepts (and climbing)** | **996** crystal of 2711 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2829 / 2840** (99.6% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 209 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **81** of 3836 indexed names |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 214 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **81** of 3837 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 99.1/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2710 concepts - score 99.1/100 (grade A) - disambiguation-debt 13
+concept-disambiguation chart - 2711 concepts - score 99.1/100 (grade A) - disambiguation-debt 13
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 995
+  * crystal       ################............ 996
   o defined       ############################ 1715
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -43,7 +43,7 @@ clarity mix by family (each cell = one concept):
   cache            **********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (258 concept(s); 82 crystal)
   context-ctx      *******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (224 concept(s); 67 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         *********************************ooooooooooooooooooooo (54 concept(s); 33 crystal)
+  decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ****************oooooooooooooooooooooooooooooooo (48 concept(s); 16 crystal)
   gateway-engine   ********************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (161 concept(s); 44 crystal)
@@ -87,12 +87,12 @@ coverage by family (positioned / discovered):
 namespace coverage  [################################] 99.6%  (2829/2840 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 209
+  mutual       ############################ 214
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 209/209
+  pairs separated   [################################] 214/214
 
-name index: 3836 lookup name(s) -> 2710 concept(s), 81 ambiguous
+name index: 3837 lookup name(s) -> 2711 concept(s), 81 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 209 |
-| **Separated from each other (drive to all)** | **209 / 209** (209 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 214 |
+| **Separated from each other (drive to all)** | **214 / 214** (214 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1858 / 4850 |
+| Boundaries drawn (mutual / total) | 1868 / 4860 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3836 over 2710 concepts |
+| Lookup names indexed | 3837 over 2711 concepts |
 | Lookup names landing on several concepts | 81 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2710 |
+| Concepts carrying a contrast set | 2711 |
 
 ## The concepts (best verdict first)
 
@@ -332,6 +332,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | decision | **Decision (scheduler)** - Loop admission advisory: whether to fire a scheduled loop now |
 | * | crystal | symbol | decision | **Decision (shared-task)** - Shared-task execution state tracking and reconciliation record |
 | * | crystal | symbol | decision | **ModelDecision** - The modelaccept record (type ModelDecision) capturing the accept/reject decision for one model in the inventory (keyed byDecision). |
+| * | crystal | symbol | decision | **Decision (incident trigger receipt)** - Closed COLLECT, ADMIT, or SUPPRESS outcome recorded by the versioned incident trigger receipt. |
 | * | crystal | symbol | decision | **ObservationValidityDecision** - Reconciliation receipt that binds a read-only child result to its observed state epoch and read set, then marks it current or stale from relevant post-start workspace changes. |
 | * | crystal | symbol | decision | **ComparisonDecision (one cell of a multiplicity family)** - One quality comparison's adjudicated outcome inside a multiplicity family: the (model, slice, metric) cell, its correction-adjusted p-value, whether the correction rejected it, whether the hierarchical gate left it untested, and - when it blocks - the reason plus the first divergence and the scrubbed replay artifact an operator acts on. |
 | * | crystal | symbol | decision | **MultiplicityDecision (whole-family multiplicity verdict)** - The whole-family verdict over one adjudicated grid of quality comparisons: the declared policy, the bound that policy actually buys stated in words, every per-cell ComparisonDecision, the blocking subset ordered strongest-evidence-first, any family-level refusal, the per-tier cost rollup, and a Pass that is true only when nothing blocked and nothing was refused. |
@@ -2984,15 +2985,15 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2992/4850 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2992/4860 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `pair_separated` | 100 | 0 | all 209 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 214 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3836 lookup name(s) resolves - 81 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3837 lookup name(s) resolves - 81 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)

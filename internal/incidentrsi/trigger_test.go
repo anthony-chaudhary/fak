@@ -14,7 +14,7 @@ func validTrigger() Trigger {
 	cooldownUntil := observed.Add(5 * time.Minute)
 	return Trigger{
 		Schema: Schema,
-		Source: Source{
+		Source: TriggerSource{
 			Component:       "guard-hook",
 			Operation:       "post-tool",
 			IncidentClass:   IncidentHookFailure,

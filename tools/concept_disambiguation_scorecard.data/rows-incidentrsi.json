@@ -1,0 +1,26 @@
+{
+  "rows": [
+    {
+      "id": "decision-triggerreceipt",
+      "canonical": "Decision (incident trigger receipt)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Closed COLLECT, ADMIT, or SUPPRESS outcome recorded by the versioned incident trigger receipt.",
+      "distinction": "Incident debounce receipt outcome, not the incident handler disposition or kernel, scheduler, witness, or shared-task Decision types.",
+      "distinct_from": [
+        "decision-kernel",
+        "decision-witness",
+        "decision-scheduler",
+        "decision-task",
+        "sharedtask-decisionid"
+      ],
+      "aliases": [],
+      "grounding": "TriggerDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
