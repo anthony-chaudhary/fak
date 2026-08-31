@@ -37,7 +37,9 @@ const (
 )
 
 type InventoryReport struct {
-	Sessions []Session `json:"sessions"`
+	ObservedAt    string    `json:"observed_at,omitempty"`
+	WindowSeconds int64     `json:"window_seconds,omitempty"`
+	Sessions      []Session `json:"sessions"`
 }
 type Session struct {
 	Thread             *Thread       `json:"thread,omitempty"`
@@ -80,38 +82,40 @@ type ProcessTree struct {
 }
 
 type Request struct {
-	ThreadID           string   `json:"thread_id"`
-	CWD                string   `json:"cwd,omitempty"`
-	Source             string   `json:"source,omitempty"`
-	Provider           string   `json:"provider,omitempty"`
-	Harness            string   `json:"harness,omitempty"`
-	HarnessSource      string   `json:"harness_source,omitempty"`
-	Category           string   `json:"category,omitempty"`
-	Action             string   `json:"action,omitempty"`
-	Argv               []string `json:"argv"`
-	Status             string   `json:"status"`
-	Reason             string   `json:"reason,omitempty"`
-	ReceiptPath        string   `json:"receipt_path,omitempty"`
-	Launched           bool     `json:"launched,omitempty"`
-	HostHandles        []string `json:"host_handles,omitempty"`
-	IdentityProvenance string   `json:"identity_provenance,omitempty"`
+	ThreadID             string   `json:"thread_id"`
+	CWD                  string   `json:"cwd,omitempty"`
+	Source               string   `json:"source,omitempty"`
+	Provider             string   `json:"provider,omitempty"`
+	Harness              string   `json:"harness,omitempty"`
+	HarnessSource        string   `json:"harness_source,omitempty"`
+	Category             string   `json:"category,omitempty"`
+	Action               string   `json:"action,omitempty"`
+	Argv                 []string `json:"argv"`
+	Status               string   `json:"status"`
+	Reason               string   `json:"reason,omitempty"`
+	ReceiptPath          string   `json:"receipt_path,omitempty"`
+	Launched             bool     `json:"launched,omitempty"`
+	HostHandles          []string `json:"host_handles,omitempty"`
+	IdentityProvenance   string   `json:"identity_provenance,omitempty"`
+	QualifyingEvidenceAt string   `json:"qualifying_evidence_at,omitempty"`
 }
 
 type Receipt struct {
-	Schema             string   `json:"schema"`
-	ThreadID           string   `json:"thread_id"`
-	Provider           string   `json:"provider,omitempty"`
-	Harness            string   `json:"harness,omitempty"`
-	HarnessSource      string   `json:"harness_source,omitempty"`
-	Category           string   `json:"category,omitempty"`
-	CWD                string   `json:"cwd"`
-	Argv               []string `json:"argv"`
-	RecordedAt         string   `json:"recorded_at"`
-	UpdatedAt          string   `json:"updated_at,omitempty"`
-	State              string   `json:"state"`
-	Reason             string   `json:"reason,omitempty"`
-	HostHandles        []string `json:"host_handles,omitempty"`
-	IdentityProvenance string   `json:"identity_provenance,omitempty"`
+	Schema               string   `json:"schema"`
+	ThreadID             string   `json:"thread_id"`
+	Provider             string   `json:"provider,omitempty"`
+	Harness              string   `json:"harness,omitempty"`
+	HarnessSource        string   `json:"harness_source,omitempty"`
+	Category             string   `json:"category,omitempty"`
+	CWD                  string   `json:"cwd"`
+	Argv                 []string `json:"argv"`
+	RecordedAt           string   `json:"recorded_at"`
+	UpdatedAt            string   `json:"updated_at,omitempty"`
+	State                string   `json:"state"`
+	Reason               string   `json:"reason,omitempty"`
+	HostHandles          []string `json:"host_handles,omitempty"`
+	IdentityProvenance   string   `json:"identity_provenance,omitempty"`
+	QualifyingEvidenceAt string   `json:"qualifying_evidence_at,omitempty"`
 }
 
 type Options struct {
@@ -122,9 +126,12 @@ type Options struct {
 	Prompt      string
 	ReceiptDir  string
 	CodexBin    string
+	Now         time.Time
+	Since       time.Duration
 }
 
 func Select(report InventoryReport, opts Options) []Request {
+	opts = optionsFromReport(report, opts)
 	if opts.Limit <= 0 {
 		opts.Limit = 1
 	}
@@ -172,7 +179,11 @@ func Select(report InventoryReport, opts Options) []Request {
 		if category == "" {
 			category = CategorySubstantive
 		}
-		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Provider: provider, Harness: provider, HarnessSource: harnessSource, Category: category, Action: row.Action, Status: status, Reason: reason, HostHandles: append([]string(nil), row.HostHandles...), IdentityProvenance: row.IdentityProvenance}
+		evidenceAt, evidenceKnown := qualifyingEvidenceAt(row)
+		if status == "candidate" && !withinEvidenceWindow(evidenceAt, evidenceKnown, opts) {
+			continue
+		}
+		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Provider: provider, Harness: provider, HarnessSource: harnessSource, Category: category, Action: row.Action, Status: status, Reason: reason, HostHandles: append([]string(nil), row.HostHandles...), IdentityProvenance: row.IdentityProvenance, QualifyingEvidenceAt: stampIfKnown(evidenceAt, evidenceKnown)}
 		if status != "candidate" {
 			// Unified cohort rows remain in the witness even when they are probes,
 			// live, waiting for a reset, or identity-blocked. Legacy Codex inventory
@@ -303,6 +314,80 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 	}
 }
 
+func optionsFromReport(report InventoryReport, opts Options) Options {
+	if opts.Now.IsZero() {
+		if observedAt, ok := parseEvidenceStamp(report.ObservedAt); ok {
+			opts.Now = observedAt
+		}
+	}
+	if opts.Since <= 0 && report.WindowSeconds > 0 {
+		opts.Since = time.Duration(report.WindowSeconds) * time.Second
+	}
+	return opts
+}
+
+func qualifyingEvidenceAt(row Session) (time.Time, bool) {
+	if row.LatestTurn != nil {
+		if at, ok := parseEvidenceStamp(row.LatestTurn.StartedAt); ok {
+			return at, true
+		}
+	}
+	if row.Action == ActionRecover || (row.Thread != nil && row.Thread.Source == "exec") {
+		if row.Thread != nil {
+			if at, ok := parseEvidenceStamp(row.Thread.UpdatedAt); ok {
+				return at, true
+			}
+			if at, ok := parseEvidenceStamp(row.Thread.CreatedAt); ok {
+				return at, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func journalQualifyingEvidenceAt(row sessionjournal.Session) (time.Time, bool) {
+	if !row.LastSeen.IsZero() {
+		return row.LastSeen.UTC(), true
+	}
+	if !row.StartedAt.IsZero() {
+		return row.StartedAt.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+func parseEvidenceStamp(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return at.UTC(), true
+}
+
+func withinEvidenceWindow(at time.Time, known bool, opts Options) bool {
+	if opts.Since <= 0 {
+		return true
+	}
+	if !known {
+		return false
+	}
+	now := opts.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return !at.Before(now.Add(-opts.Since))
+}
+
+func stampIfKnown(at time.Time, known bool) string {
+	if !known {
+		return ""
+	}
+	return at.UTC().Format(time.RFC3339Nano)
+}
+
 func selectedHarness(row Session) (string, string) {
 	if harness := providerName(row.Harness); harness != "" {
 		return harness, firstNonBlank(row.HarnessSource, "inventory.harness")
@@ -357,6 +442,10 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 		if row.Status != sessionjournal.StatusCrashed || seen[row.Session.ID] {
 			continue
 		}
+		evidenceAt, evidenceKnown := journalQualifyingEvidenceAt(row.Session)
+		if !withinEvidenceWindow(evidenceAt, evidenceKnown, opts) {
+			continue
+		}
 		if len(opts.Threads) > 0 && !opts.Threads[row.Session.ID] {
 			continue
 		}
@@ -372,6 +461,7 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 		req.CWD = cwd
 		req.Source = "session_journal"
 		req.Provider = journalProvider(row.Session, existing)
+		req.QualifyingEvidenceAt = stampIfKnown(evidenceAt, evidenceKnown)
 		req.Harness = req.Provider
 		if req.HarnessSource == "" {
 			req.HarnessSource = journalHarnessSource(row.Session, existing)
@@ -513,7 +603,7 @@ func WriteReceipt(req Request, now time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, Provider: req.Provider, Harness: req.Harness, HarnessSource: req.HarnessSource, Category: req.Category, HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
+	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, Provider: req.Provider, Harness: req.Harness, HarnessSource: req.HarnessSource, Category: req.Category, HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, QualifyingEvidenceAt: req.QualifyingEvidenceAt, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
 	closeErr := f.Close()
 	if encErr != nil {
 		return false, encErr

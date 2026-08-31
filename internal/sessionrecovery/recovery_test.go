@@ -18,6 +18,118 @@ func candidate(cwd string) Session {
 	return Session{Thread: &Thread{ID: "t1", Source: "interactive_tui", CWD: cwd}, LatestTurn: &Turn{Status: "inProgress", StartedAt: "2026-08-18T01:00:00Z"}}
 }
 
+func TestSelectSinceUsesQualifyingCrashEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-6 * time.Hour)
+	stale := Session{
+		Thread:     &Thread{ID: "stale", Source: "interactive_tui", CWD: `C:\work\fak`, UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+		LatestTurn: &Turn{Status: "inProgress", StartedAt: cutoff.Add(-time.Nanosecond).Format(time.RFC3339Nano)},
+	}
+	exact := Session{
+		Thread:     &Thread{ID: "exact", Source: "interactive_tui", CWD: `C:\work\fak`, UpdatedAt: now.Format(time.RFC3339Nano)},
+		LatestTurn: &Turn{Status: "inProgress", StartedAt: cutoff.Format(time.RFC3339Nano)},
+	}
+	recent := Session{
+		Thread:     &Thread{ID: "recent", Source: "interactive_tui", CWD: `C:\work\fak`, UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+		LatestTurn: &Turn{Status: "inProgress", StartedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)},
+	}
+	report := InventoryReport{
+		ObservedAt: now.Format(time.RFC3339Nano), WindowSeconds: int64((6 * time.Hour).Seconds()),
+		Sessions: []Session{stale, exact, recent},
+	}
+
+	got := Select(report, Options{Limit: 10, ReceiptDir: t.TempDir()})
+	if len(got) != 2 {
+		t.Fatalf("requests=%+v, want exact-cutoff and recent candidates only", got)
+	}
+	byID := map[string]Request{}
+	for _, req := range got {
+		byID[req.ThreadID] = req
+	}
+	if _, ok := byID["stale"]; ok {
+		t.Fatalf("stale interrupted turn was refreshed by unrelated thread inventory: %+v", got)
+	}
+	if byID["exact"].QualifyingEvidenceAt != cutoff.Format(time.RFC3339Nano) {
+		t.Fatalf("exact cutoff evidence=%q", byID["exact"].QualifyingEvidenceAt)
+	}
+	if byID["recent"].QualifyingEvidenceAt != now.Add(-time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("recent evidence=%q", byID["recent"].QualifyingEvidenceAt)
+	}
+	summaryRaw, err := json.Marshal(NewSummary("preview", report, got, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(summaryRaw), `"qualifying_evidence_at":"`+cutoff.Format(time.RFC3339Nano)+`"`) {
+		t.Fatalf("preview summary does not expose cutoff-qualified timestamp: %s", summaryRaw)
+	}
+}
+
+func TestSelectSinceAllExcludesStaleCandidateAndSummaryWitnessesZeroSelected(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	report := InventoryReport{
+		ObservedAt: now.Format(time.RFC3339Nano), WindowSeconds: int64((6 * time.Hour).Seconds()),
+		Sessions: []Session{{
+			Thread:     &Thread{ID: "week-old", Source: "interactive_tui", CWD: `C:\work\fak`, UpdatedAt: now.Format(time.RFC3339Nano)},
+			LatestTurn: &Turn{Status: "inProgress", StartedAt: now.Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)},
+		}},
+	}
+
+	requests := Select(report, Options{Limit: int(^uint(0) >> 1), ReceiptDir: t.TempDir()})
+	if len(requests) != 0 {
+		t.Fatalf("--all-equivalent selection=%+v, want stale candidate excluded", requests)
+	}
+	summary := NewSummary("preview", report, requests, now)
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Counts.Discovered != 1 || summary.Counts.Selected != 0 || !strings.Contains(string(raw), `"selected":0`) {
+		t.Fatalf("dry-run witness=%s", raw)
+	}
+}
+
+func TestMergeJournalCrashesSinceExcludesStaleAllCandidate(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-6 * time.Hour)
+	classified := []sessionjournal.Classified{
+		{Session: sessionjournal.Session{ID: "stale-journal", CWD: `C:\work\stale`, Agent: "codex", StartedAt: cutoff.Add(-24 * time.Hour), LastSeen: cutoff.Add(-time.Nanosecond)}, Status: sessionjournal.StatusCrashed, Reason: "machine_reboot"},
+		{Session: sessionjournal.Session{ID: "exact-journal", CWD: `C:\work\exact`, Agent: "codex", StartedAt: cutoff.Add(-24 * time.Hour), LastSeen: cutoff}, Status: sessionjournal.StatusCrashed, Reason: "machine_reboot"},
+		{Session: sessionjournal.Session{ID: "recent-journal", CWD: `C:\work\recent`, Agent: "codex", StartedAt: cutoff.Add(-24 * time.Hour), LastSeen: now.Add(-time.Hour)}, Status: sessionjournal.StatusCrashed, Reason: "machine_reboot"},
+	}
+
+	got := MergeJournalCrashes(nil, classified, Options{Now: now, Since: 6 * time.Hour, Limit: int(^uint(0) >> 1), ReceiptDir: t.TempDir()})
+	if len(got) != 2 {
+		t.Fatalf("journal requests=%+v, want exact-cutoff and recent only", got)
+	}
+	byID := map[string]Request{}
+	for _, req := range got {
+		byID[req.ThreadID] = req
+	}
+	if _, ok := byID["stale-journal"]; ok {
+		t.Fatalf("stale journal crash admitted by --all-equivalent selection: %+v", got)
+	}
+	if byID["exact-journal"].QualifyingEvidenceAt != cutoff.Format(time.RFC3339Nano) {
+		t.Fatalf("exact journal evidence=%q", byID["exact-journal"].QualifyingEvidenceAt)
+	}
+	if byID["recent-journal"].QualifyingEvidenceAt != now.Add(-time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("recent journal evidence=%q", byID["recent-journal"].QualifyingEvidenceAt)
+	}
+}
+
+func TestSelectSinceExcludesCandidateWithoutQualifyingTimestamp(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	report := InventoryReport{
+		ObservedAt: now.Format(time.RFC3339Nano), WindowSeconds: int64((6 * time.Hour).Seconds()),
+		Sessions: []Session{{
+			Thread:     &Thread{ID: "unknown-time", Source: "interactive_tui", CWD: `C:\work\fak`, UpdatedAt: now.Format(time.RFC3339Nano)},
+			LatestTurn: &Turn{Status: "inProgress"},
+		}},
+	}
+	if got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir()}); len(got) != 0 {
+		t.Fatalf("candidate without qualifying crash timestamp=%+v", got)
+	}
+}
+
 func TestSelectExplicitDeadExecIsCandidate(t *testing.T) {
 	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "exec-1", Source: "exec", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "inProgress"}}}}
 	got := Select(report, Options{ManagerBin: `C:\bin\fak.exe`, Threads: map[string]bool{"exec-1": true}, Limit: 1, ReceiptDir: t.TempDir()})
