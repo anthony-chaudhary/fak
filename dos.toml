@@ -350,6 +350,7 @@ concurrent = [
   "sotacoverage", "sotamatrix", "spendrollup", "stallscan", "stepbaton", "stepbatoncapture",
   "storagepressure",
   "validatedjson",
+  "stablejson",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
@@ -1154,6 +1155,7 @@ stepbatoncapture = ["internal/stepbatoncapture/**"]
 stopfailure = ["internal/stopfailure/**"]
 storagepressure = ["internal/storagepressure/**"]
 validatedjson = ["internal/validatedjson/**"]
+stablejson = ["internal/stablejson/**"]
 stripeload = ["internal/stripeload/**"]
 strmatch = ["internal/strmatch/**"]
 supervisoragent = ["internal/supervisoragent/**"]
