@@ -37,7 +37,7 @@ func publicLeakLineFindings(line string, lineNo int, file string, needles []stri
 		}
 	}
 	for _, rx := range auditRegexes {
-		if rx.re.MatchString(line) {
+		if auditRegexMatches(rx.re, rx.label, line) {
 			findings = append(findings, Finding{Gate: "PUBLIC_LEAK", File: file, Line: lineNo, Detail: "[" + rx.label + "]  " + preview(line)})
 		}
 	}

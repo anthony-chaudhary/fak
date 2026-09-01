@@ -60,6 +60,19 @@ var auditRegexes = []struct {
 	},
 }
 
+const operatorHomePathLabel = "operator-identifying absolute user-home path"
+
+var placeholderUserHomePathRe = regexp.MustCompile(
+	`(?i:[a-z]:\\users\\USER\\)|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/USER/`,
+)
+
+func auditRegexMatches(re *regexp.Regexp, label, line string) bool {
+	if label == operatorHomePathLabel {
+		line = placeholderUserHomePathRe.ReplaceAllString(line, "")
+	}
+	return re.MatchString(line)
+}
+
 // selfReferentialLeak — files exempt from the needle scan (scrub_public_copy.py L463-467), path
 // normalized to forward slashes. gate_publicleak.go is added because it DEFINES the needle list
 // as source (auditNeedles) — the exact analog of exempting tools/scrub_public_copy.py, which
@@ -104,7 +117,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 				}
 			}
 			for _, rx := range auditRegexes {
-				if rx.re.MatchString(al.Text) {
+				if auditRegexMatches(rx.re, rx.label, al.Text) {
 					findings = append(findings, Finding{
 						Gate: "PUBLIC_LEAK", File: f, Line: al.New,
 						Detail: "[" + rx.label + "]  " + preview(al.Text),

@@ -100,6 +100,8 @@ func TestPublicLeak_operatorIdentifyingUserHomePaths(t *testing.T) {
 		{name: "generic local prose", line: "source: an operator-local checkout"},
 		{name: "repository relative", line: "source: docs/research/study.md"},
 		{name: "parent relative", line: "source: ../Users/alice/fak"},
+		{name: "Windows placeholder", line: "source: " + operatorHomePathFixture("windows", "USER", `src\fak`)},
+		{name: "POSIX placeholder", line: "source: " + operatorHomePathFixture("home", "USER", "src/fak")},
 	}
 
 	for _, tc := range cases {
