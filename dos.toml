@@ -351,6 +351,7 @@ concurrent = [
   "storagepressure",
   "validatedjson",
   "stablejson",
+  "optsdefault",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
@@ -1156,6 +1157,7 @@ stopfailure = ["internal/stopfailure/**"]
 storagepressure = ["internal/storagepressure/**"]
 validatedjson = ["internal/validatedjson/**"]
 stablejson = ["internal/stablejson/**"]
+optsdefault = ["internal/optsdefault/**"]
 stripeload = ["internal/stripeload/**"]
 strmatch = ["internal/strmatch/**"]
 supervisoragent = ["internal/supervisoragent/**"]
