@@ -774,6 +774,7 @@ var tier = map[string]int{
 	"selfupdate":                 3,
 	"rollout":                    1,
 	"deployment":                 1,
+	"extensionfault":             1, // stdlib-only optional extension subprocess fault-isolation primitive.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
