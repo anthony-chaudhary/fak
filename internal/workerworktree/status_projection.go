@@ -2,6 +2,7 @@ package workerworktree
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -50,6 +51,7 @@ type StatusProjection struct {
 	Lane        string       `json:"lane,omitempty"`
 	Session     string       `json:"session,omitempty"`
 	Commit      string       `json:"commit,omitempty"`
+	Complete    bool         `json:"complete"`
 }
 
 // ProjectStatus maps authoritative local evidence into one closed display state.
@@ -59,8 +61,8 @@ func ProjectStatus(e StatusEvidence) StatusProjection {
 	out := StatusProjection{
 		Schema:      StatusProjectionSchema,
 		IssueNumber: e.IssueNumber,
-		Lane:        strings.TrimSpace(e.Lane),
-		Session:     strings.TrimSpace(e.Session),
+		Lane:        safeStatusIdentity(e.Lane),
+		Session:     safeStatusIdentity(e.Session),
 	}
 	switch {
 	case !e.AssociationKnown:
@@ -71,6 +73,7 @@ func ProjectStatus(e StatusEvidence) StatusProjection {
 		out.State = DisplayUnlandedChanges
 	case e.LandedWitnessed:
 		out.State = DisplayLandedWitnessed
+		out.Complete = true
 		out.Commit = shortCommit(e.HeadSHA)
 	case e.CleanupReady:
 		out.State = DisplayCleanupReady
@@ -78,6 +81,14 @@ func ProjectStatus(e StatusEvidence) StatusProjection {
 		out.State = DisplayAssociationUnknown
 	}
 	return out
+}
+
+func safeStatusIdentity(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) || filepath.VolumeName(value) != "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, `\`) {
+		return ""
+	}
+	return value
 }
 
 func differentRevision(head, base string) bool {

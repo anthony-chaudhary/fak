@@ -12601,6 +12601,11 @@
           "category": "incidental",
           "reason": "Narrow trajectory-audit compact presentation helper; no new render/materialize domain concept.",
           "token": "renderauditdistributioncompact"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deterministic issue-comment formatter; it materializes one established worker-worktree projection rather than defining a distinct render concept.",
+          "token": "renderSteerLifecycleStatus"
         }
       ],
       "id": "render-materialize",
@@ -12677,6 +12682,7 @@
         "renderSessionJournalAudit",
         "renderSessionOpen",
         "renderShellChoice",
+        "renderSteerLifecycleStatus",
         "renderSweepParkedText",
         "renderTrajectory",
         "renderValidate",
