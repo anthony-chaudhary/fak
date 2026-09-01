@@ -349,6 +349,7 @@ concurrent = [
   "signals", "simhash", "skillenv", "skillvalue", "skipledger", "slackenv", "slackmeta",
   "sotacoverage", "sotamatrix", "spendrollup", "stallscan", "stepbaton", "stepbatoncapture",
   "storagepressure",
+  "validatedjson",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
@@ -1152,6 +1153,7 @@ stepbaton = ["internal/stepbaton/**"]
 stepbatoncapture = ["internal/stepbatoncapture/**"]
 stopfailure = ["internal/stopfailure/**"]
 storagepressure = ["internal/storagepressure/**"]
+validatedjson = ["internal/validatedjson/**"]
 stripeload = ["internal/stripeload/**"]
 strmatch = ["internal/strmatch/**"]
 supervisoragent = ["internal/supervisoragent/**"]
