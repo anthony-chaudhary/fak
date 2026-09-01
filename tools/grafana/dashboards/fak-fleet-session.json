@@ -1,11 +1,12 @@
 {
   "uid": "fak-fleet-session",
-  "title": "FAK Fleet \u2014 Session Drill-down",
-  "description": "One session, end to end: its LIVE registry state (heartbeat liveness, cache posture, wall-clock budget) beside its HISTORICAL cost and cache economics from the gateway-usage ledger. Reached by clicking a session on the fleet overview. Source: `fak fleet metrics --serve` (scrape job fak_fleet).",
+  "title": "FAK Run Operations \u2014 Run Drill-down",
+  "description": "One run, end to end: durable registration identity, current LIVE registry state when present, and separate HISTORICAL usage from the gateway-usage ledger. Reached from either run table on the Run Operations home. Source: `fak fleet metrics --serve` (scrape job fak_fleet).",
   "tags": [
     "fak",
     "fleet",
-    "sessions",
+    "runs",
+    "operations",
     "observability"
   ],
   "editable": true,
@@ -27,10 +28,10 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Fleet overview",
-      "tooltip": "Back to the whole fleet",
+      "title": "Run Operations",
+      "tooltip": "Back to all runs",
       "type": "link",
-      "url": "/d/fak-fleet-overview/fak-fleet-live-sessions-and-roll-up"
+      "url": "/d/fak-fleet-overview/fak-run-operations"
     }
   ],
   "annotations": {
@@ -66,16 +67,16 @@
       },
       {
         "name": "session",
-        "label": "Session",
+        "label": "Run / session",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(fak_fleet_session_info, session)",
+        "definition": "label_values({__name__=~\"fak_fleet_session_info|fak_fleet_run_info\"}, session)",
         "query": {
           "qryType": 1,
-          "query": "label_values(fak_fleet_session_info, session)",
+          "query": "label_values({__name__=~\"fak_fleet_session_info|fak_fleet_run_info\"}, session)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "current": {},
@@ -96,10 +97,10 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "title": "Session drill-down",
+      "title": "Run drill-down",
       "description": "",
       "type": "text",
-      "id": 211,
+      "id": 221,
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -112,14 +113,14 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Everything the fleet knows about **`$session`**. Pick another from the `Session` selector above, or come back via the [fleet overview](/d/fak-fleet-overview/fak-fleet-live-sessions-and-roll-up).\n\n**If the LIVE panels are populated but the HISTORICAL ones are empty**, this session simply has no ledger rows carrying its id yet \u2014 the historical row is written at session EXIT, and `fak serve` rows are deliberately unidentified. That is missing data, not a zero.\n\nSource: **`fak fleet metrics --serve --addr 127.0.0.1:9098`** (scrape job `fak_fleet`). If every panel reads *No data*, the exporter is not running \u2014 start it, or check `up{job=\"fak_fleet\"}`.\n\n**Two tiers, never blended.** `fak_fleet_session_*` / `fak_fleet_sessions*` are **LIVE**, read from the durable session registry by an oracle (PCB state, heartbeat freshness, resume's idle-vs-TTL posture) \u2014 the same fold `fak session ls --durable` prints. `fak_fleet_usage_*` are **HISTORICAL**, folded from the append-only gateway-usage ledger, and their token/cache numbers are OBSERVED (provider-relayed) except the `kv_prefix_*` pair, which fak authored itself."
+        "content": "Everything the fleet knows about run/session **`$session`**. Pick another from the `Run / session` selector above, or return to [Run Operations](/d/fak-fleet-overview/fak-run-operations).\n\n**If the LIVE panels are populated but the HISTORICAL ones are empty**, this session simply has no ledger rows carrying its id yet \u2014 the historical row is written at session EXIT, and `fak serve` rows are deliberately unidentified. If only the durable registration panel is populated, the run has exited and is correctly absent from live inventory. That is missing usage or liveness, not a zero.\n\nSource: **`fak fleet metrics --serve --addr 127.0.0.1:9098`** (scrape job `fak_fleet`). If every panel reads *No data*, the exporter is not running \u2014 start it, or check `up{job=\"fak_fleet\"}`.\n\n**Sources stay separate.** `fak_fleet_session_*` / `fak_fleet_sessions*` are **LIVE**, read from the durable session registry by an oracle (PCB state, heartbeat freshness, resume's idle-vs-TTL posture) \u2014 the same fold `fak session ls --durable` prints. `fak_fleet_run_*` are **DURABLE RUN HISTORY**, read from root session registrations (the default `--registration-ledger`). `fak_fleet_usage_*` are **HISTORICAL USAGE**, folded from the append-only gateway-usage ledger, and their token/cache numbers are OBSERVED (provider-relayed) except the `kv_prefix_*` pair, which fak authored itself."
       },
       "pluginVersion": "11.5.2"
     },
     {
       "type": "row",
       "title": "This session, right now (LIVE)",
-      "id": 212,
+      "id": 222,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -137,7 +138,7 @@
       "title": "Live",
       "description": "1 when the heartbeat is fresh AND the session claims a running-family state.",
       "type": "stat",
-      "id": 213,
+      "id": 223,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -201,7 +202,7 @@
       "title": "Stalled",
       "description": "1 when this session claims work but its heartbeat has not advanced within the stale window.",
       "type": "stat",
-      "id": 214,
+      "id": 224,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -265,7 +266,7 @@
       "title": "Age",
       "description": "Seconds since the session was created.",
       "type": "stat",
-      "id": 215,
+      "id": 225,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -325,7 +326,7 @@
       "title": "Cache posture warm",
       "description": "resume's idle-vs-TTL projection. A projection, never a witnessed provider-cache hit.",
       "type": "stat",
-      "id": 216,
+      "id": 226,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -389,7 +390,7 @@
       "title": "Generation",
       "description": "Re-continuation depth \u2014 how many budget-reset generations this session has been through. Absent when it has never reset.",
       "type": "stat",
-      "id": 217,
+      "id": 227,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -449,7 +450,7 @@
       "title": "Priority",
       "description": "Scheduling priority as persisted in the durable registry. Absent at the default of 0.",
       "type": "stat",
-      "id": 218,
+      "id": 228,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -509,7 +510,7 @@
       "title": "Descriptor",
       "description": "The durable descriptor's labels. `reason` carries the closed token a THROTTLED/STOPPED session stopped for; `parent` is the re-continuation lineage parent.",
       "type": "table",
-      "id": 219,
+      "id": 229,
       "gridPos": {
         "h": 5,
         "w": 24,
@@ -588,15 +589,213 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "title": "Durable run registration",
+      "description": "Root-run lifecycle history with creation, start, terminal time, duration, terminal reason, and witness reference. `source=durable_registration` preserves provenance after the LIVE descriptor disappears.",
+      "type": "table",
+      "id": 230,
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "created"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "started"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "terminal"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "terminal",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_fleet_run_info{session=\"$session\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "((fak_fleet_run_created_timestamp_seconds{session=\"$session\"}) > 0) * 1000",
+          "format": "table",
+          "instant": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "((fak_fleet_run_started_timestamp_seconds{session=\"$session\"}) > 0) * 1000",
+          "format": "table",
+          "instant": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "((fak_fleet_run_terminal_timestamp_seconds{session=\"$session\"}) > 0) * 1000",
+          "format": "table",
+          "instant": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_fleet_run_duration_seconds{session=\"$session\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "E"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "run",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time #A": true,
+              "Time #B": true,
+              "Time #C": true,
+              "Time #D": true,
+              "Time #E": true,
+              "Value #A": true,
+              "session #B": true,
+              "session #C": true,
+              "session #D": true,
+              "session #E": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "service": true
+            },
+            "renameByName": {
+              "Value #B": "created",
+              "Value #C": "started",
+              "Value #D": "terminal",
+              "Value #E": "duration"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "title": "State & liveness over time",
       "description": "The moment a session went from live to stalled is the moment worth correlating against everything else on this page.",
       "type": "timeseries",
-      "id": 220,
+      "id": 231,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 23
       },
       "fieldConfig": {
         "defaults": {
@@ -679,12 +878,12 @@
       "title": "Wall-clock budget",
       "description": "Emitted only when a budget LIMIT is set \u2014 an unbudgeted session has no denominator and is absent here rather than reading as fully burned.",
       "type": "timeseries",
-      "id": 221,
+      "id": 232,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 23
       },
       "fieldConfig": {
         "defaults": {
@@ -752,14 +951,14 @@
     },
     {
       "type": "row",
-      "title": "This session's cost & cache (HISTORICAL)",
-      "id": 222,
+      "title": "This run's cost & cache (HISTORICAL USAGE)",
+      "id": 233,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 31
       },
       "panels": []
     },
@@ -771,12 +970,12 @@
       "title": "Turns",
       "description": "OBSERVED served turns.",
       "type": "stat",
-      "id": 223,
+      "id": 234,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -831,12 +1030,12 @@
       "title": "Cache read ratio",
       "description": "cache_read / (input + cache_read + cache_creation). ABSENT when this session folded no prompt tokens \u2014 unmeasured, not 0%.",
       "type": "stat",
-      "id": 224,
+      "id": 235,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -899,12 +1098,12 @@
       "title": "Input tokens",
       "description": "OBSERVED uncached prompt tokens.",
       "type": "stat",
-      "id": 225,
+      "id": 236,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -959,12 +1158,12 @@
       "title": "Cache read tokens",
       "description": "OBSERVED prompt tokens served from the provider's cache.",
       "type": "stat",
-      "id": 226,
+      "id": 237,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1019,12 +1218,12 @@
       "title": "Cache creation tokens",
       "description": "OBSERVED prompt tokens written INTO the cache \u2014 a cost.",
       "type": "stat",
-      "id": 227,
+      "id": 238,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1079,12 +1278,12 @@
       "title": "Output tokens",
       "description": "OBSERVED completion tokens.",
       "type": "stat",
-      "id": 228,
+      "id": 239,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1139,12 +1338,12 @@
       "title": "Token economy for this session",
       "description": "Cumulative per-session totals as the ledger fold sees them; they step when a new exit row for this session lands.",
       "type": "timeseries",
-      "id": 229,
+      "id": 240,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {
@@ -1236,12 +1435,12 @@
       "title": "In-kernel KV-prefix reuse (WITNESSED)",
       "description": "fak-authored reuse from the kernel-owned KV cache \u2014 a different signal from the provider prompt-cache axes above, and never summed with them.",
       "type": "timeseries",
-      "id": 230,
+      "id": 241,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {
@@ -1315,12 +1514,12 @@
       "title": "Kernel verdicts for this session",
       "description": "What the kernel decided on this session's tool calls.",
       "type": "timeseries",
-      "id": 231,
+      "id": 242,
       "gridPos": {
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 39
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {
@@ -1439,12 +1638,12 @@
       "title": "Session wall-clock",
       "description": "Summed uptime across this session's ledger rows.",
       "type": "stat",
-      "id": 232,
+      "id": 243,
       "gridPos": {
         "h": 8,
         "w": 4,
         "x": 16,
-        "y": 39
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {
@@ -1499,12 +1698,12 @@
       "title": "Ledger rows for this session",
       "description": "How many folded rows carry this id. 0 / No data means the session has not exited yet, or its rows were written without an id.",
       "type": "stat",
-      "id": 233,
+      "id": 244,
       "gridPos": {
         "h": 8,
         "w": 4,
         "x": 20,
-        "y": 39
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {

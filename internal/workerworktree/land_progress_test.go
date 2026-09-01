@@ -26,7 +26,7 @@ func TestLandProgressTrackerFakeClockAndPhases(t *testing.T) {
 		events = append(events, event)
 	}})
 	admission := tracker.start("admission", 0)
-	tracker.setScanned(2, 512)
+	tracker.setPatchScope(2, 512)
 	tracker.complete(admission)
 	commit := tracker.start("commit", 0)
 	tracker.setCache("fresh-isolated-index", false)
@@ -47,7 +47,7 @@ func TestLandProgressTrackerFakeClockAndPhases(t *testing.T) {
 	if receipt.CPUTimeMS == nil || *receipt.CPUTimeMS != 7 || receipt.PeakRSSBytes == nil || *receipt.PeakRSSBytes != 2048 || receipt.ResourceState != "available" {
 		t.Fatalf("resource attribution = %+v", receipt)
 	}
-	if receipt.ScannedFiles != 2 || receipt.ScannedBytes != 512 || receipt.CacheState != "fresh-isolated-index" || receipt.Reused {
+	if receipt.PatchScopeFiles != 2 || receipt.PatchScopeBytes != 512 || receipt.CacheState != "fresh-isolated-index" || receipt.Reused {
 		t.Fatalf("work attribution = %+v", receipt)
 	}
 	if receipt.SlowestPhase == "" || len(receipt.Phases) != 2 {
@@ -97,7 +97,7 @@ func TestLandProgressSurfacesProspectiveValidation(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("validation progress = %v, want %v", got, want)
 	}
-	if res.Cost.ScannedBytes == 0 || res.Cost.CacheState != "not-built" {
+	if res.Cost.PatchScopeBytes == 0 || res.Cost.CacheState != "not-built" {
 		t.Fatalf("refusal cost = %+v", res.Cost)
 	}
 }

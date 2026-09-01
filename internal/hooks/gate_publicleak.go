@@ -15,8 +15,9 @@ import (
 // tools/scrub_public_copy.py's --audit-staged path (_scan_added_lines + _effective_audit_needles).
 // It substring-matches added lines (case-insensitive) against a redact-needle list and two
 // case-sensitive regexes (live Slack token, GCP service-account email), skipping self-referential
-// files. The effective needle list = the base AUDIT_NEEDLES unioned with an optional gitignored
-// sidecar JSON (so the operator's private identity tier can extend it without committing it).
+// files. Structural regexes add high-confidence token, host, and operator-home path shapes. The
+// effective needle list = the base AUDIT_NEEDLES unioned with an optional gitignored sidecar JSON
+// (so the operator's private identity tier can extend it without committing it).
 
 // auditNeedles is the byte-faithful base list from scrub_public_copy.py's AUDIT_NEEDLES. The
 // repeated private address entries are kept exactly as in the source (de-duped at match time
@@ -42,7 +43,7 @@ var auditNeedles = []string{
 
 func privateAddressNeedle() string { return "100" + ".64.0.10" }
 
-// auditRegexes are applied CASE-SENSITIVELY to the raw added line (scrub_public_copy.py L369-380).
+// auditRegexes are applied to the raw added line; each expression owns its case-sensitivity.
 var auditRegexes = []struct {
 	re    *regexp.Regexp
 	label string
@@ -50,6 +51,26 @@ var auditRegexes = []struct {
 	{regexp.MustCompile(`xox[bp]-\d{8,}-\d{8,}-[A-Za-z0-9]{16,}`), "live Slack token (xoxb/xoxp)"},
 	{regexp.MustCompile(`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com`), "GCP service-account email"},
 	{regexp.MustCompile(`(?i)\b(?:lab[-_ ])?dgx[0-9]+\b`), "private GPU host alias (dgxN)"},
+	{
+		regexp.MustCompile(
+			`(?:(?i:[a-z]:\\users\\)[A-Za-z0-9._-]+\\` +
+				`|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/[A-Za-z0-9._-]+/)`,
+		),
+		"operator-identifying absolute user-home path",
+	},
+}
+
+const operatorHomePathLabel = "operator-identifying absolute user-home path"
+
+var placeholderUserHomePathRe = regexp.MustCompile(
+	`(?i:[a-z]:\\users\\USER\\)|(?:^|[^A-Za-z0-9+./?&=%_-])/(?:Users|home)/USER/`,
+)
+
+func auditRegexMatches(re *regexp.Regexp, label, line string) bool {
+	if label == operatorHomePathLabel {
+		line = placeholderUserHomePathRe.ReplaceAllString(line, "")
+	}
+	return re.MatchString(line)
 }
 
 // selfReferentialLeak — files exempt from the needle scan (scrub_public_copy.py L463-467), path
@@ -96,7 +117,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 				}
 			}
 			for _, rx := range auditRegexes {
-				if rx.re.MatchString(al.Text) {
+				if auditRegexMatches(rx.re, rx.label, al.Text) {
 					findings = append(findings, Finding{
 						Gate: "PUBLIC_LEAK", File: f, Line: al.New,
 						Detail: "[" + rx.label + "]  " + preview(al.Text),

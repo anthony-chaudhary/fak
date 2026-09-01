@@ -72,6 +72,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "with --fleet, the git remote whose session refs are folded in")
 	stale := fs.Duration("stale", defaultSessionStaleWindow, "heartbeat window past which a running-family session reads STALLED")
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway-usage ledger folded into the historical fak_fleet_usage_* families")
+	registrationLedger := fs.String("registration-ledger", sessionregistry.DefaultPath(), "durable run-registration ledger folded into the fak_fleet_run_* history families")
 	cacheValueLedger := fs.String("cache-value-ledger", "", "fak-cache-value-ledger/1 JSONL with optional session_id (empty disables root cache-value metrics)")
 	providerCostLedger := fs.String("provider-cost-ledger", "", "authoritative fak-provider-cost-ledger/1 JSONL (empty disables cost metrics)")
 	since := fs.String("since", "", "fold only usage rows on or after this date (YYYY-MM-DD)")
@@ -103,6 +104,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 		providerCostLedger:    *providerCostLedger,
 		cacheValueLedger:      *cacheValueLedger,
 		dispatchRunsDir:       filepath.Join(repoRoot(), ".dispatch-runs"),
+		registrationLedger:    *registrationLedger,
 		since:                 *since,
 		maxSessions:           *maxSessions,
 		goalCoverageThreshold: *goalCoverageThreshold,
@@ -172,6 +174,7 @@ func (s fleetMetricsSources) render(now time.Time) string {
 	renderFleetUsageExposition(w, usageFold, s.maxSessions, dupDropped)
 
 	registrations, registrationReadable := s.registrationInventory()
+	renderFleetRunExposition(w, registrations)
 	var costReport providercost.Report
 	if s.providerCostLedger != "" {
 		if rows, err := providercost.Read(s.providerCostLedger); err == nil {
@@ -204,6 +207,69 @@ func (s fleetMetricsSources) registrationInventory() ([]sessionregistry.Record, 
 		return nil, false
 	}
 	return rows, true
+}
+
+// renderFleetRunExposition projects one row per durable ROOT registration. It is
+// intentionally separate from renderFleetLiveExposition: a terminal registration is
+// historical evidence that a run happened, while a descriptor is the oracle for what
+// is alive now. Joining those stores into one family would make a completed run look
+// live, or make an exited process disappear from history.
+func renderFleetRunExposition(w *promWriter, rows []sessionregistry.Record) {
+	roots := make([]sessionregistry.Record, 0, len(rows))
+	byState := map[sessionregistry.State]int{}
+	for _, r := range rows {
+		if strings.TrimSpace(r.RootRegistrationID) == "" || r.RegistrationID != r.RootRegistrationID {
+			continue
+		}
+		roots = append(roots, r)
+		byState[r.State]++
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].RegistrationID < roots[j].RegistrationID })
+	w.gauge("fak_fleet_registered_runs", "HISTORICAL REGISTRATION: durable root-run registrations in the lifecycle ledger, including open and terminal states; this is not live process inventory.", float64(len(roots)))
+	states := []sessionregistry.State{sessionregistry.StateRegistered, sessionregistry.StateActive, sessionregistry.StateCompleted, sessionregistry.StateFailed, sessionregistry.StateCancelled, sessionregistry.StateLost, sessionregistry.StateReaped, sessionregistry.StateUnknown}
+	for _, state := range states {
+		w.gauge("fak_fleet_registered_runs_by_state", "HISTORICAL REGISTRATION: durable root-run registrations by latest lifecycle state; this is not live process liveness.", float64(byState[state]), "state", string(state))
+	}
+	for _, r := range roots {
+		labels := []string{"run", r.RegistrationID, "session", strings.TrimSpace(r.Identity.SessionID)}
+		w.gauge("fak_fleet_run_info", "HISTORICAL REGISTRATION: one series per durable root run with identity, terminal reason, and witness reference for review and drill-down; value is always 1 and does not assert process liveness.", 1,
+			"run", r.RegistrationID,
+			"session", strings.TrimSpace(r.Identity.SessionID),
+			"root_issue", strings.TrimSpace(r.RootIssue),
+			"task", strings.TrimSpace(r.TaskID),
+			"goal_id", strings.TrimSpace(r.GoalID),
+			"launch", strings.TrimSpace(r.LaunchKind),
+			"runtime", strings.TrimSpace(r.Identity.Runtime),
+			"state", string(r.State),
+			"outcome", strings.TrimSpace(r.RootOutcome),
+			"reason", strings.TrimSpace(r.Reason),
+			"witness_ref", strings.TrimSpace(r.WitnessRef),
+			"source", "durable_registration")
+		w.gauge("fak_fleet_run_created_timestamp_seconds", "HISTORICAL REGISTRATION: Unix timestamp when the durable root run was registered; zero means unavailable.", unixTimestamp(r.CreatedAt), labels...)
+		w.gauge("fak_fleet_run_started_timestamp_seconds", "HISTORICAL REGISTRATION: Unix timestamp when the durable root run started; zero means not recorded or not started.", unixTimestamp(r.StartedAt), labels...)
+		w.gauge("fak_fleet_run_terminal_timestamp_seconds", "HISTORICAL REGISTRATION: Unix timestamp when the durable root run reached a terminal state; zero means open or unavailable.", unixTimestamp(r.TerminalAt), labels...)
+		w.gauge("fak_fleet_run_duration_seconds", "HISTORICAL REGISTRATION: elapsed seconds from run start (or registration when start is unavailable) to terminal time; zero means open or unavailable.", fleetRunDurationSeconds(r), labels...)
+	}
+}
+func unixTimestamp(at time.Time) float64 {
+	if at.IsZero() {
+		return 0
+	}
+	return float64(at.Unix())
+}
+
+func fleetRunDurationSeconds(r sessionregistry.Record) float64 {
+	if r.TerminalAt.IsZero() {
+		return 0
+	}
+	start := r.StartedAt
+	if start.IsZero() {
+		start = r.CreatedAt
+	}
+	if start.IsZero() || r.TerminalAt.Before(start) {
+		return 0
+	}
+	return r.TerminalAt.Sub(start).Seconds()
 }
 
 type fleetGoalAgg struct {

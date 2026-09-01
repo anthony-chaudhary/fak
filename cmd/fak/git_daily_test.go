@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gitdaily"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 )
 
 // TestGitDailyEmitUnitTaskScheduler is the "cron thing" acceptance witness on Windows:
@@ -405,5 +406,16 @@ func TestGitDailyStatusSurfacesWeeklyAdoptionFold(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"weekly":[{"week":"2026-08-03","total":2,"ok":1,"refused":1,"errors":0}`) {
 		t.Fatalf("JSON weekly fold missing: %s", b)
+	}
+}
+
+func TestWriteGitDailyTextIncludesGoCacheReceiptAndCleanupHints(t *testing.T) {
+	var out bytes.Buffer
+	writeGitDailyText(&out, gitdaily.Result{GoCache: treedoctor.GoCacheReport{Root: filepath.Join("tmp", "go-build"), BytesBefore: 10, BytesAfter: 4, BytesAfterSemantics: "projected", ScanComplete: true, CleanupHints: []string{"use tree-doctor GOTMP reaper", "use git-daily --prune-worktrees"}}})
+	text := out.String()
+	for _, want := range []string{"Go build cache: 10 -> 4 bytes (projected)", "tree-doctor GOTMP", "--prune-worktrees"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
 	}
 }

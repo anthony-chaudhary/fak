@@ -143,6 +143,23 @@ func TestQwen35MTPForwardDeterministicTinyTensor(t *testing.T) {
 	}
 }
 
+func TestQwen35MTPForwardKeepsF32MechanismOnF32Layout(t *testing.T) {
+	forward, err := qwen35MTPTinyForwardModel(t).NewQwen35MTPForward()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(forward.Close)
+	if forward.tensorFormat != Qwen38MTPFormatF32 {
+		t.Fatalf("tensor format=%q, want F32", forward.tensorFormat)
+	}
+	if _, ok := forward.mat.(f32Kernel); !ok {
+		t.Fatalf("F32 MTP layout selected kernel %T", forward.mat)
+	}
+	if forward.draft.Q4K || forward.draft.MetalQ4K {
+		t.Fatalf("F32 MTP layout unexpectedly enabled Q4_K/Metal: q4k=%v metal=%v", forward.draft.Q4K, forward.draft.MetalQ4K)
+	}
+}
+
 func TestQwen35MTPForwardRejectsNonMonotonicPosition(t *testing.T) {
 	forward, err := qwen35MTPTinyForwardModel(t).NewQwen35MTPForward()
 	if err != nil {

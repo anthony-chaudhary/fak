@@ -442,65 +442,14 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, nil
 	}
 
-	// (7) VERIFY — the critical assertion. Use the porcelain name list (diff-tree), NOT
-	// --stat: --stat formats names (rename arrows, quoting, truncation) and would make the
-	// path-set comparison brittle. diff-tree --name-only gives one repo-relative path per
-	// line; a deletion still lists the deleted path (correctly "exactly requested").
-	if sha, herr := headSHA(ctx, run, opts.Dir); herr != nil {
-		return res, herr
-	} else {
-		res.SHA = sha
-	}
-	res.Committed = true
-
-	landed, _, lerr := run(ctx, opts.Dir, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "HEAD")
-	if lerr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", lerr)
-	}
-	extra := racedExtra(landed, paths)
-	if len(extra) > 0 {
-		// A peer raced: extra files landed under our commit. Remedy is honest and
-		// NON-DESTRUCTIVE — never reset/revert/force-push (a force-push to "fix" this would
-		// clobber the peer). Leave the commit (HeadBefore is recorded for a human) and stop.
-		res.Reason = ReasonPathspecRace
-		res.RacedExtra = extra
-		res.Detail = "extra files landed in this commit — a peer raced; commit left intact for review, not pushed"
+	verification, verr := verifyCommittedEffect(ctx, run, opts, paths, &res)
+	if verification.record {
 		recordPathspec = true
-		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonPathspecRace, "committed-set!=requested-set"
-		return res, nil
+		recordVerdict, recordReason, recordAssertion = verification.verdict, verification.reason, verification.assertion
 	}
-
-	// racedExtra compared path STRINGS. A symlink created inside the lease that points
-	// outside it would pass that check (the committed path string still starts with a
-	// requested prefix) while git tracked a target outside the lease — the CVE-2025-53109
-	// symlink-escape class. Resolve each landed path on disk and refuse if its real target
-	// escapes the lease. Fail closed on an escaping target; a path that does not resolve to
-	// a real file (deleted, or simply not present) carries no symlink to escape through and
-	// is left to the string-level guard above.
-	if escaped := landedEscapesLease(opts.Dir, landed, paths); len(escaped) > 0 {
-		res.Reason = ReasonSymlinkEscape
-		res.RacedExtra = escaped
-		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
-		recordPathspec = true
-		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonSymlinkEscape, "resolved-targets-within-requested-set=false"
-		return res, nil
+	if verr != nil || verification.stop {
+		return res, verr
 	}
-	if landedMsg, code, merr := run(ctx, opts.Dir, "log", "-1", "--format=%B"); merr != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", merr)
-	} else if code != 0 {
-		res.Reason = ReasonMessageRace
-		res.Detail = "could not read landed commit message for verification; commit left intact for review, not pushed"
-		recordPathspec = true
-		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonMessageRace, "committed-message-readable=false"
-		return res, nil
-	} else if !commitMessagesMatch(landedMsg, opts.Message) {
-		res.Reason = ReasonMessageRace
-		res.Detail = "landed commit message does not match the requested message; commit left intact for review, not pushed"
-		recordPathspec = true
-		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonMessageRace, "committed-message==requested-message=false"
-		return res, nil
-	}
-	res.Verified = true
 	// Local effect boundary reached: stamp the local velocity leg at the verified-commit
 	// instant (#4241), before the lock is released and any push is attempted.
 	localElapsed, localStamped = now().Sub(velStart), true
@@ -526,6 +475,55 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		pushElapsed, pushStamped = now().Sub(velStart), true
 	}
 	return res, err
+}
+
+type commitVerification struct {
+	record                     bool
+	verdict, reason, assertion string
+	stop                       bool
+}
+
+// verifyCommittedEffect performs the post-commit path, symlink, and message assertions.
+func verifyCommittedEffect(ctx context.Context, run Runner, opts Options, paths []string, res *Result) (commitVerification, error) {
+	if sha, err := headSHA(ctx, run, opts.Dir); err != nil {
+		return commitVerification{}, err
+	} else {
+		res.SHA = sha
+	}
+	res.Committed = true
+
+	landed, _, err := run(ctx, opts.Dir, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "HEAD")
+	if err != nil {
+		return commitVerification{}, fmt.Errorf("safecommit: git not executable: %w", err)
+	}
+	if extra := racedExtra(landed, paths); len(extra) > 0 {
+		res.Reason = ReasonPathspecRace
+		res.RacedExtra = extra
+		res.Detail = "extra files landed in this commit — a peer raced; commit left intact for review, not pushed"
+		return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonPathspecRace, assertion: "committed-set!=requested-set", stop: true}, nil
+	}
+	if escaped := landedEscapesLease(opts.Dir, landed, paths); len(escaped) > 0 {
+		res.Reason = ReasonSymlinkEscape
+		res.RacedExtra = escaped
+		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
+		return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonSymlinkEscape, assertion: "resolved-targets-within-requested-set=false", stop: true}, nil
+	}
+	landedMsg, code, err := run(ctx, opts.Dir, "log", "-1", "--format=%B")
+	if err != nil {
+		return commitVerification{}, fmt.Errorf("safecommit: git not executable: %w", err)
+	}
+	if code != 0 {
+		res.Reason = ReasonMessageRace
+		res.Detail = "could not read landed commit message for verification; commit left intact for review, not pushed"
+		return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonMessageRace, assertion: "committed-message-readable=false", stop: true}, nil
+	}
+	if !commitMessagesMatch(landedMsg, opts.Message) {
+		res.Reason = ReasonMessageRace
+		res.Detail = "landed commit message does not match the requested message; commit left intact for review, not pushed"
+		return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonMessageRace, assertion: "committed-message==requested-message=false", stop: true}, nil
+	}
+	res.Verified = true
+	return commitVerification{record: true, verdict: witness.VerdictAssertPass, assertion: "committed-set==requested-set"}, nil
 }
 
 // applyVerifiedPush performs step (8): the optional push of the already-verified commit. It

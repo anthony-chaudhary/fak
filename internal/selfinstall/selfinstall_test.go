@@ -203,6 +203,48 @@ func TestInstallStillBakesCommitWhenNoVersionFile(t *testing.T) {
 	}
 }
 
+func TestInstallBuildAndCacheIdentityContainExactlyOneTrimpath(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 1)
+	var actualBuildArgs []string
+	run := func(ctx context.Context, workDir, name string, args ...string) (string, bool) {
+		if name == "go" && len(args) > 0 && args[0] == "build" {
+			actualBuildArgs = append([]string{}, args...)
+		}
+		return r.run(ctx, workDir, name, args...)
+	}
+	opts := Options{
+		RepoRoot:       dir,
+		Target:         targets[0],
+		BuildTmp:       filepath.Join(dir, "candidate"),
+		CacheDir:       filepath.Join(dir, "cache"),
+		ExpectedCommit: cacheTestCommitA,
+	}
+
+	res := Install(context.Background(), run, func(_, _ string) error { return nil }, opts)
+	if !res.Installed {
+		t.Fatalf("Install = %+v, want installed candidate", res)
+	}
+	if got := countArg(actualBuildArgs, "-trimpath"); got != 1 {
+		t.Fatalf("actual go build args contain -trimpath %d times, want exactly 1: %v", got, actualBuildArgs)
+	}
+	identityArgs := strings.Split(res.BuildEnvelope["build_flags"], "\x00")
+	if got := countArg(identityArgs, "-trimpath"); got != 1 {
+		t.Fatalf("stable build-identity inputs contain -trimpath %d times, want exactly 1: %v", got, identityArgs)
+	}
+}
+
+func countArg(args []string, want string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == want {
+			count++
+		}
+	}
+	return count
+}
+
 func TestPrepareOriginAddsAndCleansWorktree(t *testing.T) {
 	r := &scriptRunner{}
 	repo := t.TempDir()

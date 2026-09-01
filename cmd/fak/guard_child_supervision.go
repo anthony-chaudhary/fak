@@ -56,6 +56,50 @@ func guardHandleResourceReceiptFailure(stderr io.Writer, session *guardRSISessio
 	return resourceErr
 }
 
+// guardChildResourceNeedsContainment is the supervision boundary between a
+// measured resource breach and a monitor diagnostic. Collector/inspection
+// failures use the same resource event transport so their typed reason remains
+// visible, but Stop is false because missing telemetry proves no runaway.
+func guardChildResourceNeedsContainment(event guardChildWaitEvent) bool {
+	return event.Kind == guardChildResourceLimit && event.Resource != nil && event.Resource.Stop && guardResourceContainmentReason(event.Resource.Reason)
+}
+
+func guardReportChildResourceMonitorFailure(stderr io.Writer, event guardChildWaitEvent) {
+	if stderr == nil {
+		return
+	}
+	fmt.Fprintf(stderr, "fak guard: child resource monitor degraded: %s; no measured resource limit; child remains running\n", event.Reason)
+}
+
+// waitGuardChildWithoutRestart keeps the normal guard path attached to the child
+// after a terminal monitor diagnostic. It returns contain=true only for a
+// measured resource breach; callers own the containment sequence.
+func waitGuardChildWithoutRestart(wait <-chan error, resources <-chan guardChildWaitEvent, stderr io.Writer) (runErr error, event guardChildWaitEvent, contain bool) {
+	select {
+	case event = <-resources:
+		if guardChildResourceNeedsContainment(event) {
+			return nil, event, true
+		}
+		guardReportChildResourceMonitorFailure(stderr, event)
+		return <-wait, event, false
+	case runErr = <-wait:
+		return runErr, guardChildWaitEvent{}, false
+	}
+}
+
+// waitGuardChildSupervised disables only an exhausted resource-monitor stream
+// after a diagnostic, preserving child, restart, and time-budget supervision.
+func waitGuardChildSupervised(wait <-chan error, restarts <-chan guardBudgetRestartEvent, ticks <-chan time.Time, exhausted func(time.Time) (bool, string), resources <-chan guardChildWaitEvent, stderr io.Writer) guardChildWaitEvent {
+	for {
+		event := waitGuardChild(wait, restarts, ticks, exhausted, resources)
+		if event.Kind != guardChildResourceLimit || guardChildResourceNeedsContainment(event) {
+			return event
+		}
+		guardReportChildResourceMonitorFailure(stderr, event)
+		resources = nil
+	}
+}
+
 // guardGoalParked answers "is THIS account still walled off this goal?" — never
 // the account-blind "is this lane parked?" it used to answer. Every branch below
 // consults it BEFORE rotation.rotateAfterExit, so a positive verdict
@@ -162,8 +206,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		resourceStop := make(chan struct{})
 		resourcePolicy.Stop = resourceStop
 		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
-		select {
-		case event := <-resourceEvents:
+		runErr, event, contain := waitGuardChildWithoutRestart(wait, resourceEvents, os.Stderr)
+		if contain {
 			markGuardChildTerminalIntent(child, "resource_limit")
 			_ = job.Close()
 			runErr = stopGuardChild(child, wait, 0)
@@ -206,9 +250,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			}
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
-		case runErr = <-wait:
-			close(resourceStop)
 		}
+		close(resourceStop)
 		lifecycle.finish(runErr == nil)
 		_ = job.Close()
 		terminalGuardChild(child, runErr, "")
@@ -398,9 +441,9 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		resourceStop := make(chan struct{})
 		resourcePolicy.Stop = resourceStop
 		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
-		event := waitGuardChild(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
+		event := waitGuardChildSupervised(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
 			return guardTimeBudgetExhausted(serveSessions, guardTraceID, now)
-		}, resourceEvents)
+		}, resourceEvents, restarter.stderr)
 		close(resourceStop)
 		switch event.Kind {
 		case guardChildResourceLimit:

@@ -110,12 +110,30 @@ func NewSelfUpdateRunner() (Runner, func(), error) {
 		cacheBase = os.TempDir()
 	}
 	primary, recovery := selfUpdateGoCachePaths(cacheBase, os.TempDir())
-	return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv)
+	report := func(counts GoCacheOutcomeCounts) {
+		fmt.Fprintln(os.Stderr, FormatGoCacheOutcomeCounts(counts))
+	}
+	return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv, report)
 }
 
 func selfUpdateGoCachePaths(cacheBase, tempDir string) (primary, recovery string) {
 	return filepath.Join(cacheBase, "fak", "self-update", "go-build-v1"),
 		filepath.Join(tempDir, "fak-self-update-go-build-recovery-v1")
+}
+
+// GoCacheOutcomeCounts summarizes commands run through the self-update-owned Go cache.
+// Success means the command completed, Refusal means cache lifecycle recovery was
+// exhausted or unavailable, and Error means the command failed for another reason.
+type GoCacheOutcomeCounts struct {
+	Success int
+	Refusal int
+	Error   int
+}
+
+// FormatGoCacheOutcomeCounts renders the existing self-update progress readout.
+func FormatGoCacheOutcomeCounts(counts GoCacheOutcomeCounts) string {
+	return fmt.Sprintf("self-update: go-cache outcomes success=%d refusal=%d error=%d",
+		counts.Success, counts.Refusal, counts.Error)
 }
 
 type goCacheRunner struct {
@@ -125,10 +143,12 @@ type goCacheRunner struct {
 	tempDir      string
 	active       string
 	recoveryUsed bool
+	counts       GoCacheOutcomeCounts
+	report       func(GoCacheOutcomeCounts)
 	run          commandEnvRunner
 }
 
-func newGoCacheRunner(primary, recovery, tempDir string, run commandEnvRunner) (Runner, func(), error) {
+func newGoCacheRunner(primary, recovery, tempDir string, run commandEnvRunner, reports ...func(GoCacheOutcomeCounts)) (Runner, func(), error) {
 	primary = filepath.Clean(primary)
 	recovery = filepath.Clean(recovery)
 	if primary == "." || recovery == "." || primary == recovery {
@@ -143,6 +163,9 @@ func newGoCacheRunner(primary, recovery, tempDir string, run commandEnvRunner) (
 		return nil, func() {}, fmt.Errorf("selfinstall: clean stale Go build-cache recovery %s: %w", recovery, err)
 	}
 	r := &goCacheRunner{primary: primary, recovery: recovery, tempDir: tempDir, active: primary, run: run}
+	if len(reports) != 0 {
+		r.report = reports[0]
+	}
 	cleanup := func() { _ = os.RemoveAll(recovery) }
 	return r.runCommand, cleanup, nil
 }
@@ -156,33 +179,51 @@ func (r *goCacheRunner) runCommand(ctx context.Context, dir, name string, args .
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := os.MkdirAll(r.active, 0o755); err != nil {
+		r.recordOutcome(&r.counts.Refusal)
 		return fmt.Sprintf("self-update Go build cache %s is unavailable: %v; stop concurrent cache cleanup and rerun fak self-update", r.active, err), false
 	}
 	env := goRunnerEnv(name, os.Environ(), r.tempDir, r.active)
 	out, ok := r.run(ctx, dir, name, args, env)
-	if ok || !goCacheLifecycleFailure(out, r.active) {
-		return out, ok
+	if ok {
+		r.recordOutcome(&r.counts.Success)
+		return out, true
+	}
+	if !goCacheLifecycleFailure(out, r.active) {
+		r.recordOutcome(&r.counts.Error)
+		return out, false
 	}
 	if r.recoveryUsed {
+		r.recordOutcome(&r.counts.Refusal)
 		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable after the one bounded recovery; stop concurrent cache cleanup and rerun fak self-update", r.active)), false
 	}
 
 	failedCache := r.active
 	r.recoveryUsed = true
 	if err := os.RemoveAll(r.recovery); err != nil {
+		r.recordOutcome(&r.counts.Refusal)
 		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable and the one bounded recovery could not clean %s: %v; stop concurrent cache cleanup and rerun fak self-update", failedCache, r.recovery, err)), false
 	}
 	if err := os.MkdirAll(r.recovery, 0o755); err != nil {
+		r.recordOutcome(&r.counts.Refusal)
 		return appendGoCacheDiagnostic(out, fmt.Sprintf("Go build cache %s became unavailable and the one bounded recovery could not create %s: %v; stop concurrent cache cleanup and rerun fak self-update", failedCache, r.recovery, err)), false
 	}
 	r.active = r.recovery
 	retryEnv := goRunnerEnv(name, os.Environ(), r.tempDir, r.active)
 	retryOut, retryOK := r.run(ctx, dir, name, args, retryEnv)
 	if retryOK {
+		r.recordOutcome(&r.counts.Success)
 		return retryOut, true
 	}
+	r.recordOutcome(&r.counts.Refusal)
 	detail := fmt.Sprintf("Go build cache %s became unavailable; one recovery attempt used fresh cache %s, but the retried command failed and will not be retried", failedCache, r.recovery)
 	return appendGoCacheDiagnostic(retryOut, detail), false
+}
+
+func (r *goCacheRunner) recordOutcome(count *int) {
+	*count++
+	if r.report != nil {
+		r.report(r.counts)
+	}
 }
 
 func goCacheLifecycleFailure(out, cacheDir string) bool {

@@ -223,6 +223,98 @@ func attendOne(m *Model, layout kvLayout, layer int, q []float32, rows [][]float
 	return out
 }
 
+// sparseIndexScorerPath identifies the sparse-index scoring implementation selected at
+// the KV-layout seam. The f32 implementation is the explicit oracle and fail-closed
+// fallback until a device scorer is available for the complete validated envelope.
+type sparseIndexScorerPath uint8
+
+const (
+	sparseIndexScorerF32 sparseIndexScorerPath = iota
+	sparseIndexScorerSM100FP8
+)
+
+type sparseIndexDType uint8
+
+const (
+	sparseIndexDTypeF32 sparseIndexDType = iota
+	sparseIndexDTypeFP8E4M3FN
+)
+
+type sparseIndexScorerRequest struct {
+	SMVersion   int
+	QueryDType  sparseIndexDType
+	KeyDType    sparseIndexDType
+	Depth       int
+	NumHeads    int
+	PageSize    int
+	SparseTopK  int
+	KeysPerPool int
+}
+
+// selectSparseIndexScorer fails closed to the f32 oracle unless the request names
+// the complete shape supported by the SM100 tensor-core scorer. In particular, a
+// paged K tile may not straddle the scorer's 128-row physical load.
+func selectSparseIndexScorer(req sparseIndexScorerRequest) sparseIndexScorerPath {
+	if req.SMVersion != 100 ||
+		req.QueryDType != sparseIndexDTypeFP8E4M3FN ||
+		req.KeyDType != sparseIndexDTypeFP8E4M3FN ||
+		req.Depth != 128 ||
+		!sm100SparseIndexHeadCount(req.NumHeads) ||
+		(req.PageSize != 0 && req.PageSize%128 != 0) ||
+		req.SparseTopK <= 0 ||
+		req.KeysPerPool != 1 {
+		return sparseIndexScorerF32
+	}
+	return sparseIndexScorerSM100FP8
+}
+
+func sm100SparseIndexHeadCount(n int) bool {
+	return n == 4 || n == 8 || n == 32 || n == 64
+}
+
+// scoreSparseIndexF32 is the explicit scalar oracle/fallback for sparse-index
+// scoring. It deliberately stays separate from the SM100 eligibility contract.
+func scoreSparseIndexF32(q []float32, keys [][]float32, depth int) []float32 {
+	if depth <= 0 || len(q) != depth {
+		return nil
+	}
+	scores := make([]float32, len(keys))
+	for i, key := range keys {
+		if len(key) != depth {
+			return nil
+		}
+		var score float32
+		for d := 0; d < depth; d++ {
+			score += q[d] * key[d]
+		}
+		scores[i] = score
+	}
+	return scores
+}
+
+// topSparseIndexF32 returns indices in descending score order, breaking ties by
+// the lower key index. Invalid sparse widths fail closed with no selection.
+func topSparseIndexF32(scores []float32, topK int) []int {
+	if topK <= 0 || topK > len(scores) {
+		return nil
+	}
+	indices := make([]int, len(scores))
+	for i := range indices {
+		indices[i] = i
+	}
+	for i := 0; i < topK; i++ {
+		best := i
+		for j := i + 1; j < len(indices); j++ {
+			if scores[indices[j]] > scores[indices[best]] ||
+				(scores[indices[j]] == scores[indices[best]] && indices[j] < indices[best]) {
+				best = j
+			}
+		}
+		indices[i], indices[best] = indices[best], indices[i]
+	}
+	return indices[:topK]
+}
+
 // attendOneAbsorbed is the ABSORBED MLA read path (issue #4356, the DeepSeek weight-
 // absorption trick, colibri@1bdaeee c/glm.c:1088). Instead of reconstructing full per-
 // head K/V from the latent and then running ordinary attention (attendOne +

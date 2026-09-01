@@ -201,6 +201,35 @@ func dsaSparseAttention(query, key, value [][][]float64, queryPositions, keyPosi
 	return out, true
 }
 
+// dsaFoldedMTPTopK selects the read-once sparse-index fold for MTP query
+// positions. It is deliberately narrower than cross-layer IndexShare: only a
+// full indexer reusing one prior MTP decision may fold, and only for the
+// upstream-witnessed q_len range [2,8]. The selected keys must also be causal
+// for the earliest folded query. Every other shape or route retains the
+// unfolded fak-native path as its oracle/fallback.
+func dsaFoldedMTPTopK(queryPositions, priorSelection []int, reusePrior, crossLayerIndexShare bool) ([]int, bool) {
+	if len(queryPositions) < 2 || len(queryPositions) > 8 || !reusePrior || crossLayerIndexShare || len(priorSelection) == 0 {
+		return nil, false
+	}
+	earliest := queryPositions[0]
+	for _, position := range queryPositions[1:] {
+		if position < earliest {
+			earliest = position
+		}
+	}
+	seen := make(map[int]struct{}, len(priorSelection))
+	for _, position := range priorSelection {
+		if position < 0 || position > earliest {
+			return nil, false
+		}
+		if _, duplicate := seen[position]; duplicate {
+			return nil, false
+		}
+		seen[position] = struct{}{}
+	}
+	return append([]int(nil), priorSelection...), true
+}
+
 // dsaIndexShare expands full-indexer decisions over a layer plan where "full"
 // layers compute indices and "shared" layers reuse the immediately preceding
 // full layer's top-k. This is the IndexShare contract GLM-5.2 relies on for

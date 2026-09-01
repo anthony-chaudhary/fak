@@ -1,0 +1,82 @@
+{
+  "rows": [
+    {
+      "id": "gocachereport",
+      "canonical": "GoCacheReport",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "GoCacheReport is the tree-doctor report for one Go build-cache lifecycle inspection, including observed bytes, reclaimable bytes, completeness, and retained-entry reasons.",
+      "distinction": "Use GoCacheReport for the report value produced by Go build-cache inspection; unlike GOCACHE, it is not the cache directory or environment setting, and unlike SweepGoCache, it is not the inspection operation.",
+      "distinct_from": [
+        "x3-cache-gocache",
+        "gocacherootfromenv",
+        "sweepgocache"
+      ],
+      "aliases": [],
+      "grounding": "GoCacheReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "gocachereport-candidatebytesunknown",
+      "canonical": "GoCacheReport.CandidateBytesUnknown",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "GoCacheReport.CandidateBytesUnknown is the count of candidate Go build-cache entries whose sizes could not be measured.",
+      "distinction": "Use CandidateBytesUnknown for unmeasured candidate-entry count; unlike CandidateBytes, it is not a measured byte total, and unlike aggregate storage-pressure UnknownEntries, it is scoped to one GoCacheReport.",
+      "distinct_from": [
+        "gocache-lifecycle-candidatebytes"
+      ],
+      "aliases": [],
+      "grounding": "candidatebytesunknown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "GoCacheReport",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "gocacherootfromenv",
+      "canonical": "GoCacheRootFromEnv",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "GoCacheRootFromEnv resolves the Go build-cache root from the process environment for reporting and lifecycle operations.",
+      "distinction": "Use GoCacheRootFromEnv for environment-to-path resolution; unlike GOCACHE, it is not the setting itself, and unlike SweepGoCache, it neither inventories nor removes cache entries.",
+      "distinct_from": [
+        "x3-cache-gocache",
+        "gocachereport",
+        "sweepgocache"
+      ],
+      "aliases": [],
+      "grounding": "GoCacheRootFromEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "sweepgocache",
+      "canonical": "SweepGoCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "SweepGoCache inventories Go build-cache entries and, only when explicitly applied, removes eligible old entries while returning a GoCacheReport.",
+      "distinction": "Use SweepGoCache for the lifecycle operation; unlike GOCACHE, it is not a cache location, and unlike GoCacheReport, it performs inventory or explicitly requested cleanup rather than representing the result.",
+      "distinct_from": [
+        "x3-cache-gocache",
+        "gocachereport",
+        "gocacherootfromenv"
+      ],
+      "aliases": [],
+      "grounding": "SweepGoCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

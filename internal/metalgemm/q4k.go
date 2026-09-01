@@ -119,6 +119,7 @@ const (
 	Q4KGEMMNotExecuted Q4KGEMMExecution = iota
 	Q4KGEMMExecutedScalar
 	Q4KGEMMExecutedMM32
+	Q4KGEMMExecutedM5CooperativeSMEM
 )
 
 // Q4KGEMMIdentity binds the candidate selected for this shape to the kernel that actually
@@ -137,7 +138,9 @@ type Q4KGEMMMode int
 const (
 	Q4KGEMMModeScalar Q4KGEMMMode = iota
 	Q4KGEMMModeMM32
-	Q4KGEMMModeMM32Unavailable = -1
+	Q4KGEMMModeM5CooperativeSMEM
+	Q4KGEMMModeMM32Unavailable              = -1
+	Q4KGEMMModeM5CooperativeSMEMUnavailable = -2
 )
 
 var q4kUseMM atomic.Bool
@@ -150,8 +153,13 @@ func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
 }
 
 func q4kGEMMRequestedExecution(P int, mode Q4KGEMMMode) Q4KGEMMExecution {
-	if P == 32 && mode != Q4KGEMMModeScalar {
-		return Q4KGEMMExecutedMM32
+	switch mode {
+	case Q4KGEMMModeM5CooperativeSMEM, Q4KGEMMModeM5CooperativeSMEMUnavailable:
+		return Q4KGEMMExecutedM5CooperativeSMEM
+	case Q4KGEMMModeMM32, Q4KGEMMModeMM32Unavailable:
+		if P == 32 {
+			return Q4KGEMMExecutedMM32
+		}
 	}
 	return Q4KGEMMExecutedScalar
 }

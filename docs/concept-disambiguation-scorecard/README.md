@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **996** crystal of 2711 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2829 / 2841** (99.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1001** crystal of 2721 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2838 / 2850** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 214 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **81** of 3837 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **81** of 3850 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 99.1/100 (grade A) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2711 concepts - score 99.1/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2721 concepts - score 99.1/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 996
-  o defined       ############################ 1715
+  * crystal       ################............ 1001
+  o defined       ############################ 1720
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -40,17 +40,17 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (80 concept(s); 15 crystal)
-  cache            **********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (258 concept(s); 82 crystal)
+  cache            *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (265 concept(s); 85 crystal)
   context-ctx      *******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (224 concept(s); 67 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ****************oooooooooooooooooooooooooooooooo (48 concept(s); 16 crystal)
   gateway-engine   ********************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (161 concept(s); 44 crystal)
-  guard-gate       ***********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (444 concept(s); 203 crystal)
+  guard-gate       ************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (445 concept(s); 204 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
-  plan             *************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (350 concept(s); 109 crystal)
+  plan             **************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (352 concept(s); 110 crystal)
   policy-capability *****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (194 concept(s); 89 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
@@ -62,20 +62,20 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 76 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ############################ 409/413
+  plan             ############################ 411/415
   loop             ###########################. 94/97
   guard-gate       ############################ 503/505
-  cache            ############################ 304/305
   context-ctx      ############################ 237/238
+  layout           ###########################. 19/20
   policy-capability ############################ 213/214
   render-materialize ############################ 209/210
   attention        ############################ 85/85
+  cache            ############################ 311/311
   cross-cluster    ............................ 0/0
   decision         ############################ 60/60
   dev-tier         ............................ 0/0
   evict            ############################ 55/55
   gateway-engine   ############################ 200/200
-  layout           ############################ 19/19
   pool             ############################ 40/40
   score-debt       ############################ 93/93
   session-runtime  ############################ 273/273
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 163/163
 
-namespace coverage  [################################] 99.6%  (2829/2841 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2838/2850 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 214
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 214/214
 
-name index: 3837 lookup name(s) -> 2711 concept(s), 81 ambiguous
+name index: 3850 lookup name(s) -> 2721 concept(s), 81 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **214 / 214** (214 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1868 / 4860 |
+| Boundaries drawn (mutual / total) | 1882 / 4882 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3837 over 2711 concepts |
+| Lookup names indexed | 3850 over 2721 concepts |
 | Lookup names landing on several concepts | 81 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2711 |
+| Concepts carrying a contrast set | 2721 |
 
 ## The concepts (best verdict first)
 
@@ -180,6 +180,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **cache implementation surface for readvcachetelemetry** - `readVCacheTelemetry` is the cache symbol declared or used at `cmd/fak/vcache.go:693` as `rows, err := readVCacheTelemetry(*file, os.Stdin)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for treecache** - `treeCache` is the cache symbol declared or used at `internal/gitbroker/gitbroker.go:294` as `// not this type's job: it lives in treeCache (treestate.go), which is keyed and`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for microcachedemo** - `microcachedemo` is the cache symbol declared or used at `cmd/microcachedemo/main.go:70` as `fs := flag.NewFlagSet("microcachedemo", flag.ExitOnError)`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **GoCacheReport** - GoCacheReport is the tree-doctor report for one Go build-cache lifecycle inspection, including observed bytes, reclaimable bytes, completeness, and retained-entry reasons. |
+| * | crystal | symbol | cache | **GoCacheRootFromEnv** - GoCacheRootFromEnv resolves the Go build-cache root from the process environment for reporting and lifecycle operations. |
+| * | crystal | symbol | cache | **SweepGoCache** - SweepGoCache inventories Go build-cache entries and, only when explicitly applied, removes eligible old entries while returning a GoCacheReport. |
 | * | crystal | subsystem | cache | **KV cache** - The kernel-owned raw attention state: per-position Key and Value tensor rows for the running model, supporting in-place eviction and prefix reuse. |
 | * | crystal | subsystem | cache | **vCache** - The virtual API cache: a page-table abstraction that models a remote provider's prefix cache as virtual pages, with a manifest of canonical prefix chains and warmth belief. |
 | * | crystal | subsystem | cache | **cachemeta** - The typed metadata contract (tier 1): owns no payloads, names reusable cache entries, and carries their validity / security / residency metadata and typed lookup verdicts. |
@@ -548,6 +551,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **guardCrashRestartDelay (bounded child relaunch backoff)** - The function that computes the bounded exponential pause before a child relaunch attempt, shared by generic crash recovery and child resource-containment recovery. |
 | * | crystal | symbol | guard-gate | **guardSameTraceRelaunchHop (restart lineage constructor)** - The constructor for one restart-chain lineage hop whose source, destination, and child remain on the same guard trace, marking recognized resume handbacks engaged and unsupported agents orphaned. |
 | * | crystal | symbol | guard-gate | **guardEmitRestartHop (restart lineage persistence)** - The supervision helper that persists an already-constructed restart-chain hop to the audit journal and reports the same lineage status to the operator surface. |
+| * | crystal | symbol | guard-gate | **guardReportChildResourceMonitorFailure** - Reports a typed child resource-monitor diagnostic without treating missing telemetry as a measured resource breach. |
 | * | crystal | subsystem | guard-gate | **guard (fak guard kernel)** - The kernel itself: the in-process adjudication system that runs the decision chain and admits results, launched as `fak guard`. |
 | * | crystal | concept | guard-gate | **gate (decision point)** - One decision point inside a guard, splitting by WHEN it fires: pre-call adjudicators, post-call result admitters, and git-hook gates. |
 | * | crystal | symbol | guard-gate | **ResultAdmitter (post-call gate)** - A post-call gate: inspects a tool RESULT after execution and admits / quarantines / transforms it (ctxmmu, normgate, secretgate). |
@@ -670,6 +674,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **RosterSourceSuperloop (superloop-registry roster source tag)** - RosterSourceSuperloop is the roster source token marking that the super-loop registry claims an entry: either the entry IS a registered intent, or some intent hand-names the loop as a KindLoop member ref (which also sets Named). |
 | * | crystal | symbol | loop | **superloop_spinning (walk SPINNING finding)** - superloop_spinning is the superloop walk-verdict finding token emitted when at least one member loop is SPINNING: ticking on cadence (live/stale) while its ledger-verified progress high-water mark did not advance (#4956). It binds the closed relay reason RELAY_NO_PROGRESS and demands a revive/redirect, never an auto-replan. |
 | * | crystal | symbol | loop | **superloop_orphaned (walk ORPHANED finding)** - superloop_orphaned is the superloop walk-verdict finding token emitted when at least one member loop is ORPHANED: a tick emitted downstream follow-on work — a relay ArtifactIssue baton pointer or the issue an a2achan.WorkerStatus names — that nobody advanced or closed within its cadence window (#4957). It binds the closed relay reason RELAY_ORPHANED_FOLLOWON and demands chasing or redirecting the emitted output through the member's own front door, never an auto-refile. |
+| * | crystal | symbol | plan | **GoCacheReport.CandidateBytesUnknown** - GoCacheReport.CandidateBytesUnknown is the count of candidate Go build-cache entries whose sizes could not be measured. |
 | * | crystal | symbol | plan | **RefusePagedHostPlanIfTooBig** - The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor. |
 | * | crystal | symbol | plan | **refusePagedHostPlanForHostMem** - The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe. |
 | * | crystal | symbol | plan | **refuseHostScopedPlanForHostMem** - The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo. |
@@ -1367,6 +1372,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | cache | **vcacheextract** - Package vcacheextract (internal/vcacheextract) sanitizes Codex session JSONL token telemetry for vCache accounting. |
 | o | defined | symbol | cache | **vcacheGovernorDecisionOrder** - vcacheGovernorDecisionOrder (internal/gateway/vcache_families.go) is the fixed render order of governor decisions on the vCache metrics surface. |
 | o | defined | symbol | cache | **vcacheWindowHasCacheActivity** - vcacheWindowHasCacheActivity (internal/gateway/vcache_families.go) is the predicate: does an observed turn window contain any cache read/write activity at all. |
+| o | defined | symbol | cache | **GoCacheReport.Err (Go build-cache lifecycle error)** - treedoctor.GoCacheReport.Err is the JSON-facing error string for a Go build-cache lifecycle sweep that could not complete normally. |
+| o | defined | symbol | cache | **GoCacheFreeBytes (filesystem free-space probe)** - treedoctor.GoCacheFreeBytes is the platform-specific filesystem probe that returns available bytes for the filesystem containing a supplied path. |
+| o | defined | symbol | cache | **GoCacheOptions (Go build-cache sweep configuration)** - treedoctor.GoCacheOptions configures SweepGoCache's root, pressure thresholds, age gate, bounded census, progress callback, active-build oracle, and mutation hooks. |
+| o | defined | symbol | cache | **goCacheProcessAlive (Go-cache lock-owner liveness probe)** - treedoctor.goCacheProcessAlive is the platform-specific PID liveness probe used only to decide whether a pre-existing Go-cache lifecycle lock can be recovered. |
 | o | defined | metric | cache | **CacheTTLUpgradeReasons (upgrade why-map)** - CacheTTLUpgradeReasons is the reason-keyed tally on a gateway usage summary (cmd/fak/serve.go, internal/gatewayusageledger) recording, per cause (volatile_head, no_stable_breakpoint), how many outbound turns skipped or took the 1-hour prompt-cache TTL upgrade. |
 | o | defined | metric | cache | **CacheTTLUpgradesUpgraded (applied count)** - CacheTTLUpgradesUpgraded is the scalar counter on the gateway usage summary of how many outbound turns fak AUTHORED a 1-hour-TTL upgrade of their stable-head cache_control breakpoint (wrote ttl:1h into the outbound body). It counts fak AUTHORING the upgrade, NOT the provider ACCEPTING it: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching. |
 | o | defined | concept | cache | **provider_prompt_cache (mechanism id)** - provider_prompt_cache is the cache-value ledger Mechanism label (internal/cachevaluereport, cmd/fak/cachevalue_savings.go) tagging token-equivalent savings the PROVIDER's prompt cache delivered, as opposed to savings fak itself authored. |
@@ -2056,6 +2065,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **WatchdogPlanRow** - WatchdogPlanRow (internal/resume/watchdog.go) is one AUTO_RESUME entry of resume_plan.json as the watchdog parses it, with ResumeTarget/RehomeSource accessors. |
 | o | defined | symbol | plan | **RotationPlanWithHeadroom** - Registry.RotationPlanWithHeadroom (internal/accounts/rotation.go) computes the account-rotation plan honoring per-account rotation headroom. |
 | o | defined | symbol | plan | **unwrapHTTPPlanner** - unwrapHTTPPlanner (internal/gateway/messages.go) unwraps an agent.Planner to its underlying HTTPPlanner when one is present. |
+| o | defined | symbol | plan | **GoCacheReport.CandidateBytes (planned Go build-cache reclaim bytes)** - treedoctor.GoCacheReport.CandidateBytes is the measured byte total of stale Go build-cache entries selected by a lifecycle dry run or apply plan. |
 | o | defined | symbol | plan | **WorktreeCandidate (dojocal recalibration payload)** - WorktreeCandidate (internal/dojocal/worktree.go) is the single (lever, metric) recalibration the dojocal worktree arm measures: the cell to re-point plus the corpus-mean claim to swap in, built from the worst RECALIBRATE of `fak dojo-rsi propose` and carried as the Payload of a rsiloop.Candidate. |
 | o | defined | symbol | plan | **LeaseRefSyncPlanInput (lease-ref sync decision state)** - LeaseRefSyncPlanInput (internal/loopdrive/leaseref_sync.go) is the pure input struct that decides which ambient lease-ref convergence calls belong around a loop-drive tick: its Surface, Remote, and LeaseRefsWritten fields feed LeaseRefSyncPlan, where LeaseRefsWritten=true (the tick acquired, released, or reaped a refs/fak/locks/* record) is what adds the publish-after-write step. |
 | o | defined | symbol | plan | **LeaseRefSyncPlanForSurface (surface-profile lease-ref sync constructor)** - LeaseRefSyncPlanForSurface (internal/loopdrive/leaseref_sync.go) is the explicit profile constructor for the three #2302 wiring surfaces (dispatch preflight, loop-drive ticks, garden's stale-lease rung): it stamps the requested surface onto a LeaseRefSyncPlanInput and delegates to LeaseRefSyncPlan, so every surface reuses the same safe boundary rule - fetch before deciding, push after the tick writes lease refs. |
@@ -2984,8 +2994,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
 | well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
-| honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2992/4860 boundaries drawn one-way only |
+| honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
+| separation | `mutuality_soft` | 80 | 0 | 3000/4882 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2993,27 +3003,27 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3837 lookup name(s) resolves - 81 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3850 lookup name(s) resolves - 81 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 409 | 413 | 4 |
+| plan | 411 | 415 | 4 |
 | loop | 94 | 97 | 3 |
 | guard-gate | 503 | 505 | 2 |
-| cache | 304 | 305 | 1 |
 | context-ctx | 237 | 238 | 1 |
+| layout | 19 | 20 | 1 |
 | policy-capability | 213 | 214 | 1 |
 | render-materialize | 209 | 210 | 1 |
 | attention | 85 | 85 | 0 |
+| cache | 311 | 311 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 60 | 60 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | evict | 55 | 55 | 0 |
 | gateway-engine | 200 | 200 | 0 |
-| layout | 19 | 19 | 0 |
 | pool | 40 | 40 | 0 |
 | score-debt | 93 | 93 | 0 |
 | session-runtime | 273 | 273 | 0 |

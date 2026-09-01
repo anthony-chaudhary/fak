@@ -25,6 +25,7 @@ import (
 )
 
 const hostdiagDefaultMaxBytes int64 = 16 << 20
+const hostdiagJSONFixtureMaxBytes int64 = 1 << 20
 
 func cmdHostdiag(args []string) { os.Exit(runHostdiag(os.Stdout, os.Stderr, args)) }
 
@@ -114,7 +115,7 @@ func runHostdiagCorrelate(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("hostdiag correlate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", defaultHostdiagLedger(), "bounded mixed-schema JSONL ledger")
-	fixture := fs.String("fixture", "", "normalized resource-event fixture JSON")
+	fixture := fs.String("fixture", "", "normalized resource-event JSON or sanitized macOS resource .diag fixture")
 	since := fs.Duration("since", 30*24*time.Hour, "Windows event lookback")
 	maxBytes := fs.Int64("max-bytes", hostdiagDefaultMaxBytes, "maximum ledger bytes")
 	shellProvenance := fs.String("shell-provenance", "", "privacy-safe fak-owned shell launch receipt JSONL")
@@ -286,15 +287,49 @@ func currentBuildRevision() string {
 }
 
 func readHostdiagFixture(path string) ([]hostdiag.ResourceEvent, error) {
-	data, err := os.ReadFile(path)
+	maxBytes := hostdiagJSONFixtureMaxBytes
+	if strings.EqualFold(filepath.Ext(path), ".diag") {
+		maxBytes = hostdiag.MacOSDiagFixtureMaxBytes
+	}
+	data, err := readHostdiagFixtureBytes(path, maxBytes)
 	if err != nil {
 		return nil, err
+	}
+	if strings.EqualFold(filepath.Ext(path), ".diag") {
+		event, err := hostdiag.ParseMacOSResourceIncident(filepath.Base(path), data)
+		if err != nil {
+			return nil, fmt.Errorf("parse fixture: %w", err)
+		}
+		return []hostdiag.ResourceEvent{event}, nil
 	}
 	var events []hostdiag.ResourceEvent
 	if err := json.Unmarshal(data, &events); err != nil {
 		return nil, fmt.Errorf("parse fixture: %w", err)
 	}
 	return events, nil
+}
+
+func readHostdiagFixtureBytes(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxBytes {
+		return nil, fmt.Errorf("fixture exceeds %d bytes", maxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("fixture exceeds %d bytes", maxBytes)
+	}
+	return data, nil
 }
 
 func appendHostdiagRow(path string, row any, maxBytes int64) error {

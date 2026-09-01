@@ -166,6 +166,9 @@ type Options struct {
 	// GoTmpMinAge is the quiet period a WORK dir must clear before it is reapable, measured
 	// on the newest file anywhere inside it. Zero => treedoctor.DefaultGoTmpMinAge.
 	GoTmpMinAge time.Duration
+	// GoCacheDir names the resolved Go build cache. Empty disables this lifecycle.
+	GoCacheDir     string
+	GoCacheOptions treedoctor.GoCacheOptions
 }
 
 // LockSweep is the lock half's outcome: the ghost lease locks and the treedoctor reaps.
@@ -241,7 +244,8 @@ type Result struct {
 	Maint      gitgate.MaintResult `json:"maint"`
 	// GoTmp is the orphaned-WORK-dir reap (#6207). Zero-valued when Options.GoTmpDir is
 	// empty, which is the rung's disabled state.
-	GoTmp treedoctor.GoTmpReport `json:"go_tmp"`
+	GoTmp   treedoctor.GoTmpReport   `json:"go_tmp"`
+	GoCache treedoctor.GoCacheReport `json:"go_cache"`
 	// Incident is true for gitgate posture drift or a lock-cleanup failure. Both need an
 	// operator: the tick never edits .git/config, and a lock it could not remove can keep
 	// the maintenance wedge in place.
@@ -278,7 +282,39 @@ type Row struct {
 	// the dirs the filesystem actually gave up, never from the plan's intent.
 	GoTmpReaped         int   `json:"gotmp_reaped,omitempty"`
 	GoTmpReclaimedBytes int64 `json:"gotmp_reclaimed_bytes,omitempty"`
-	Incident            bool  `json:"incident,omitempty"`
+	// GoCache records a bounded lifecycle receipt in the same scheduled ledger. Candidate
+	// paths stay in the immediate Result rather than inflating the long-lived JSONL row.
+	GoCache  GoCacheLedgerReceipt `json:"go_cache,omitempty"`
+	Incident bool                 `json:"incident,omitempty"`
+}
+
+// GoCacheLedgerReceipt is the bounded projection of one Go build-cache lifecycle run.
+type GoCacheLedgerReceipt struct {
+	Root             string   `json:"root,omitempty"`
+	BytesBefore      int64    `json:"bytes_before,omitempty"`
+	BytesAfter       int64    `json:"bytes_after,omitempty"`
+	ReclaimedBytes   int64    `json:"reclaimed_bytes,omitempty"`
+	Reaped           int      `json:"reaped,omitempty"`
+	TriggeredBy      []string `json:"triggered_by,omitempty"`
+	ScanComplete     bool     `json:"scan_complete"`
+	IncompleteReason string   `json:"incomplete_reason,omitempty"`
+	Skipped          string   `json:"skipped,omitempty"`
+	Err              string   `json:"err,omitempty"`
+}
+
+func goCacheLedgerReceipt(r treedoctor.GoCacheReport) GoCacheLedgerReceipt {
+	return GoCacheLedgerReceipt{
+		Root:             r.Root,
+		BytesBefore:      r.BytesBefore,
+		BytesAfter:       r.BytesAfter,
+		ReclaimedBytes:   r.ReclaimedBytes,
+		Reaped:           len(r.Reaped),
+		TriggeredBy:      append([]string(nil), r.TriggeredBy...),
+		ScanComplete:     r.ScanComplete,
+		IncompleteReason: r.IncompleteReason,
+		Skipped:          r.Skipped,
+		Err:              r.Err,
+	}
 }
 
 // LooseFolded reports the loose objects this run folded away.
@@ -359,6 +395,11 @@ func Run(ctx context.Context, run Runner, opts Options) Result {
 		Now:    now,
 	}, opts.Apply)
 
+	cacheOpts := opts.GoCacheOptions
+	cacheOpts.Root = opts.GoCacheDir
+	cacheOpts.Now = now
+	res.GoCache = treedoctor.SweepGoCache(cacheOpts, opts.Apply)
+
 	res.Maint = gitgate.RunMaint(ctx, gitgate.MaintRunner(run), gitgate.MaintOptions{
 		RepoRoot:     opts.RepoRoot,
 		GitCommonDir: opts.GitCommonDir,
@@ -432,6 +473,7 @@ func (r Result) row() Row {
 
 		GoTmpReaped:         r.GoTmp.ReapCount(),
 		GoTmpReclaimedBytes: r.GoTmp.ReapedBytes,
+		GoCache:             goCacheLedgerReceipt(r.GoCache),
 
 		Incident: r.Incident,
 	}

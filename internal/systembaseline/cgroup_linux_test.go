@@ -153,3 +153,56 @@ func TestLinuxCgroupIntegrationShortLivedDescendants(t *testing.T) {
 		t.Fatalf("cleanup=%+v", result.Cleanup)
 	}
 }
+
+func TestLinuxCgroupCPUCapacityPreservesFractionAndTightestAncestor(t *testing.T) {
+	root := t.TempDir()
+	leaf := filepath.Join(root, "tenant", "job")
+	if err := os.MkdirAll(leaf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		filepath.Join(root, "cpu.max"):           "max 100000\n",
+		filepath.Join(root, "tenant", "cpu.max"): "150000 100000\n",
+		filepath.Join(leaf, "cpu.max"):           "200000 100000\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := readLinuxCgroupCPUCapacity(root, "/tenant/job", 2, os.ReadFile)
+	if !got.Available || got.CapacityCPUs != 1.5 || got.RuntimeWidth != 2 || got.QuotaUS != 150000 || got.PeriodUS != 100000 {
+		t.Fatalf("capacity=%+v", got)
+	}
+	if got.EffectivePath != filepath.Join(root, "tenant") || got.MembershipPath != "/tenant/job" || !got.RuntimeDefaultMayOverestimate {
+		t.Fatalf("hierarchy identity=%+v", got)
+	}
+}
+
+func TestLinuxCgroupCPUCapacityReportsUnavailableWithoutFiniteHierarchy(t *testing.T) {
+	root := t.TempDir()
+	leaf := filepath.Join(root, "job")
+	if err := os.MkdirAll(leaf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(root, "cpu.max"), filepath.Join(leaf, "cpu.max")} {
+		if err := os.WriteFile(path, []byte("max 100000\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := readLinuxCgroupCPUCapacity(root, "/job", 8, os.ReadFile)
+	if got.Available || got.Reason == "" || got.RuntimeWidth != 0 || got.CapacityCPUs != 0 {
+		t.Fatalf("capacity=%+v", got)
+	}
+}
+
+func TestParseLinuxCPUMaxRejectsAmbiguousValues(t *testing.T) {
+	for _, raw := range []string{"", "max", "0 100000", "150000 0", "1.5 100000", "max nope", "1 2 3"} {
+		if _, _, _, err := parseLinuxCPUMax([]byte(raw)); err == nil {
+			t.Fatalf("parseLinuxCPUMax(%q) succeeded", raw)
+		}
+	}
+	quota, period, finite, err := parseLinuxCPUMax([]byte("max 100000"))
+	if err != nil || finite || quota != 0 || period != 100000 {
+		t.Fatalf("unlimited=%d/%d finite=%v err=%v", quota, period, finite, err)
+	}
+}

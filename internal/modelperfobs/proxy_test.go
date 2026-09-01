@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,77 @@ type failingRequestBody struct{ err error }
 
 func (b failingRequestBody) Read([]byte) (int, error) { return 0, b.err }
 func (failingRequestBody) Close() error               { return nil }
+
+func TestProxyEarlyFailureDeterminism(t *testing.T) {
+	type result struct {
+		Status int
+		Body   string
+		Ledger string
+	}
+	fixedTimes := []time.Time{
+		time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, time.August, 30, 12, 0, 0, int(time.Millisecond), time.UTC),
+	}
+
+	cases := []struct {
+		name    string
+		request func() *http.Request
+	}{
+		{
+			name: "inbound body read",
+			request: func() *http.Request {
+				r := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", nil)
+				r.Body = failingRequestBody{err: errors.New("forced inbound body read failure")}
+				return r
+			},
+		},
+		{
+			name: "outbound request construction",
+			request: func() *http.Request {
+				r := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"test"}`))
+				r.Method = "invalid method"
+				return r
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func() result {
+				backend, err := ParseBackend("http://backend.test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				ledger := t.TempDir() + "/observations.jsonl"
+				timeIndex := 0
+				proxy := &Proxy{
+					Backend: backend,
+					Ledger:  ledger,
+					Now: func() time.Time {
+						got := fixedTimes[timeIndex]
+						timeIndex++
+						return got
+					},
+				}
+				recorder := httptest.NewRecorder()
+
+				proxy.ServeHTTP(recorder, tc.request())
+
+				data, err := os.ReadFile(ledger)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return result{Status: recorder.Code, Body: recorder.Body.String(), Ledger: string(data)}
+			}
+
+			first := run()
+			second := run()
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("repeated results differ:\nfirst:  %#v\nsecond: %#v", first, second)
+			}
+		})
+	}
+}
 
 func TestProxyRecordsEarlyFailureInboundBodyRead(t *testing.T) {
 	testProxyRecordsEarlyFailure(t, http.StatusBadRequest, func() *http.Request {

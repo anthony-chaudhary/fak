@@ -83,6 +83,9 @@ func run(stdout, stderr io.Writer, argv []string) int {
 	case "capabilities":
 		return devcmd.RunCapabilities(stdout, stderr, argv[1:])
 	case "issue":
+		if len(argv) > 1 && argv[1] == "inventory" {
+			return devcmd.RunIssueInventory(stdout, stderr, argv[2:])
+		}
 		return devcmd.RunIssue(stdout, stderr, argv[1:])
 	case "issue-contract-repair":
 		return devcmd.RunIssueContractRepair(stdout, stderr, argv[1:])

@@ -119,6 +119,9 @@ const (
 // case order mirrors forwardHiddenRows: gemma4, then MLA/MoE, then MiniMax MSA, then
 // the qwen35 GDN hybrid, with standard GQA as the default.
 func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind, error) {
+	if cfg.GLM5Next {
+		return "", &GLM5NextUnsupportedError{ModelType: glm5NextModelType, Architecture: glm5NextArchitecture}
+	}
 	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
 		return "", err
 	}

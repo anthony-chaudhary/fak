@@ -47,10 +47,11 @@ func mustKeys(t *testing.T, v any, want ...string) map[string]any {
 // GOCACHE into the worktree — the shape a spawn site reads.
 func TestPrepareJSONShape(t *testing.T) {
 	out := worktreePrepareOut{
-		Result: workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", BaseSHA: "feedface", Reused: false},
-		Env:    workerworktree.WorktreeEnv(nil, "/wt/fak-worker-wt-cmd-abc"),
+		Result:   workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", BaseSHA: "feedface", Reused: false},
+		Env:      workerworktree.WorktreeEnv(nil, "/wt/fak-worker-wt-cmd-abc"),
+		Capacity: workerworktree.AssessCapacity(50, 51, true, "issue #10459 burst", nil),
 	}
-	got := mustKeys(t, out, "ok", "path", "base_sha", "env")
+	got := mustKeys(t, out, "ok", "path", "base_sha", "env", "capacity")
 	if got["ok"] != true {
 		t.Fatalf("ok = %v, want true", got["ok"])
 	}
@@ -61,13 +62,20 @@ func TestPrepareJSONShape(t *testing.T) {
 	if _, ok := env["GOCACHE"]; !ok {
 		t.Fatal("prepare env must carry GOCACHE to isolate the build")
 	}
+	capacity := got["capacity"].(map[string]any)
+	if capacity["status"] != string(workerworktree.CapacityGrowthJustified) || capacity["reason"] != "issue #10459 burst" || capacity["allowed"] != true {
+		t.Fatalf("prepare capacity evidence = %v", capacity)
+	}
 }
 
 // TestPrepareFailOpenJSONShape proves a failed prepare is still a well-formed
 // object (ok=false, reason set) — never a crash — and omits env.
 func TestPrepareFailOpenJSONShape(t *testing.T) {
-	out := worktreePrepareOut{Result: workerworktree.Result{OK: false, Reason: "could not resolve trunk HEAD — fail open"}}
-	got := mustKeys(t, out, "ok", "reason")
+	out := worktreePrepareOut{
+		Result:   workerworktree.Result{OK: false, Reason: "could not resolve trunk HEAD — fail open"},
+		Capacity: workerworktree.AssessCapacity(0, 0, false, "", nil),
+	}
+	got := mustKeys(t, out, "ok", "reason", "capacity")
 	if got["ok"] != false {
 		t.Fatalf("ok = %v, want false", got["ok"])
 	}
@@ -79,12 +87,27 @@ func TestPrepareFailOpenJSONShape(t *testing.T) {
 // TestLandJSONShape proves `fak worktree worker land` emits the applied/committed
 // verdict object.
 func TestLandJSONShape(t *testing.T) {
+	changedPaths := []string{"cmd/fak/worktree_worker.go", "internal/workerworktree/land.go"}
+	patch := []byte("diff --git a/a b/a\n+patch bytes\n")
 	res := workerworktree.Result{OK: true, Applied: true, Committed: true, Cost: &workerworktree.LandCostReceipt{
-		Schema: "fak-worker-land-cost/1", CacheState: "fresh-isolated-index", Phases: []workerworktree.LandPhaseCost{},
+		Schema:          "fak-worker-land-cost/1",
+		PatchScopeFiles: workerworktree.PatchScopeFiles(len(changedPaths)),
+		PatchScopeBytes: workerworktree.PatchScopeBytes(len(patch)),
+		CacheState:      "fresh-isolated-index",
+		Phases:          []workerworktree.LandPhaseCost{},
 	}}
 	got := mustKeys(t, res, "ok", "applied", "committed", "cost")
 	if got["committed"] != true {
 		t.Fatalf("committed = %v, want true", got["committed"])
+	}
+	cost := got["cost"].(map[string]any)
+	if cost["patch_scope_files"] != float64(len(changedPaths)) || cost["patch_scope_bytes"] != float64(len(patch)) {
+		t.Fatalf("patch scope provenance = %v, want files=%d bytes=%d", cost, len(changedPaths), len(patch))
+	}
+	for _, ambiguous := range []string{"scanned_files", "scanned_bytes"} {
+		if _, ok := cost[ambiguous]; ok {
+			t.Fatalf("current cost receipt must not emit ambiguous key %q: %v", ambiguous, cost)
+		}
 	}
 }
 
@@ -466,19 +489,21 @@ func TestGCJSONShape(t *testing.T) {
 	}
 }
 
-// TestListJSONShape pins both list contracts: the no-flag legacy object remains
-// byte-for-byte compatible, while --json adds the versioned typed lifecycle
-// inventory. Empty collections are [] (never null) in both forms.
+// TestListJSONShape pins both list contracts: each includes the same deterministic
+// capacity evidence, while --json adds the versioned typed lifecycle inventory.
+// Empty collections are [] (never null) in both forms.
 func TestListJSONShape(t *testing.T) {
-	legacy := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}}
+	capacity := workerworktree.AssessCapacity(0, 0, true, "", nil)
+	legacy := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}, Capacity: capacity}
 	b, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if string(b) != `{"count":0,"paths":[],"inventory":[]}` {
-		t.Fatalf("legacy list json = %s, want unchanged empty paths/inventory arrays", b)
+	wantLegacy := `{"count":0,"paths":[],"inventory":[],"capacity":{"schema":"fak-worker-worktree-capacity/1","setpoint":50,"current_count":0,"prospective_count":0,"inventory_known":true,"above_setpoint":false,"allowed":true,"status":"WITHIN_SETPOINT","reason":"","message":"worker worktree capacity 0 is at or below advisory setpoint 50","contraction_recommendations":[]}}`
+	if string(b) != wantLegacy {
+		t.Fatalf("legacy list json = %s", b)
 	}
-	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}}, "count", "paths", "inventory")
+	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}, Capacity: capacity}, "count", "paths", "inventory", "capacity")
 	if got["count"].(float64) != 2 {
 		t.Fatalf("count = %v, want 2", got["count"])
 	}
@@ -488,12 +513,14 @@ func TestListJSONShape(t *testing.T) {
 		Count:     0,
 		Paths:     []string{},
 		Inventory: []worktreeWorkerLifecycleRow{},
+		Capacity:  capacity,
 	}
 	b, err = json.Marshal(typed)
 	if err != nil {
 		t.Fatalf("marshal typed: %v", err)
 	}
-	if string(b) != `{"schema":"fak-worker-worktree-lifecycle/1","count":0,"paths":[],"inventory":[]}` {
+	wantTyped := `{"schema":"fak-worker-worktree-lifecycle/1","count":0,"paths":[],"inventory":[],"capacity":{"schema":"fak-worker-worktree-capacity/1","setpoint":50,"current_count":0,"prospective_count":0,"inventory_known":true,"above_setpoint":false,"allowed":true,"status":"WITHIN_SETPOINT","reason":"","message":"worker worktree capacity 0 is at or below advisory setpoint 50","contraction_recommendations":[]}}`
+	if string(b) != wantTyped {
 		t.Fatalf("typed list json = %s", b)
 	}
 }
@@ -527,6 +554,9 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], worktree) || len(got.Inventory) != 1 {
 		t.Fatalf("list --json header = %+v", got)
 	}
+	if !got.Capacity.Allowed || !got.Capacity.InventoryKnown || got.Capacity.CurrentCount != 1 || got.Capacity.Status != workerworktree.CapacityWithinSetpoint {
+		t.Fatalf("list --json capacity = %+v", got.Capacity)
+	}
 	row := got.Inventory[0]
 	if !sameResolvedPath(row.Path, worktree) || row.HeadSHA != base || row.BaseSHA != base {
 		t.Fatalf("revision association = %+v, want path=%q head/base=%q", row, worktree, base)
@@ -544,6 +574,137 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		row.ReapReadiness.Reapable ||
 		row.ReapReadiness.Reason != "OWNER_LIVE" {
 		t.Fatalf("live clean worktree lifecycle = %+v", row)
+	}
+}
+
+func TestWorktreeWorkerCapacityEvidenceOnlyRecommendsCleanSafeTrees(t *testing.T) {
+	rows := []worktreeWorkerLifecycleRow{
+		{
+			Path: "/wt/cold", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceReleased},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceClean, DirtyPaths: []string{}},
+			Lifecycle:   worktreeLifecycleCold, ReapReadiness: worktreeWorkerReapReadiness{Reapable: true, Verdict: worktreeReapable, Reason: "COLD_CLEAN"},
+		},
+		{
+			Path: "/wt/owner-dead-clean", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceLive},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceClean, DirtyPaths: []string{}},
+			Lifecycle:   worktreeLifecycleRetained, ReapReadiness: worktreeWorkerReapReadiness{Verdict: worktreeKeep, Reason: "LEASE_LIVE"},
+		},
+		{
+			Path: "/wt/dirty", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceReleased},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceDirty, DirtyPaths: []string{"do-not-delete.go"}},
+			Lifecycle:   worktreeLifecycleDirty, ReapReadiness: worktreeWorkerReapReadiness{Verdict: worktreeKeep, Reason: "WORKTREE_DIRTY"},
+		},
+	}
+	paths := make([]string, 51)
+	advisory := worktreeWorkerCapacityAdvisory("/repo", workerworktree.CapacityCensus{Known: true, Paths: paths}, 51, "", rows)
+	if advisory.Status != workerworktree.CapacityJustificationNeeded || len(advisory.ContractionRecommendations) != 2 {
+		t.Fatalf("capacity advisory = %+v", advisory)
+	}
+	for _, recommendation := range advisory.ContractionRecommendations {
+		if recommendation.Path == "/wt/dirty" || strings.Contains(recommendation.Action, "--apply") || strings.Contains(recommendation.Action, "--even-if-unlanded") {
+			t.Fatalf("dirty/destructive contraction recommendation = %+v", recommendation)
+		}
+	}
+
+	var human bytes.Buffer
+	worktreeWorkerWriteCapacityHuman(&human, advisory)
+	want := "capacity advisory: worker worktree capacity 51 exceeds advisory setpoint 50; provide --capacity-reason to justify growth; the operation remains allowed\n" +
+		"capacity contraction: candidate=/wt/cold basis=COLD_REAPABLE; inspect with: fak worktree worker reap --all-cold\n" +
+		"capacity contraction: candidate=/wt/owner-dead-clean basis=OWNER_DEAD_CLEAN; inspect with: fak worktree worker gc --dry-run\n"
+	if human.String() != want {
+		t.Fatalf("human capacity output = %q, want %q", human.String(), want)
+	}
+}
+
+func TestWorktreeWorkerCapacityUnknownInventoryWarnsAndFailsOpen(t *testing.T) {
+	advisory := worktreeWorkerCapacityAdvisory("/repo", workerworktree.CapacityCensus{Known: false, Paths: []string{}}, 0, "", nil)
+	var human bytes.Buffer
+	worktreeWorkerWriteCapacityHuman(&human, advisory)
+	if !advisory.Allowed || advisory.Status != workerworktree.CapacityInventoryUnknown || !strings.Contains(human.String(), "inventory is unknown") || !strings.Contains(human.String(), "failed open") {
+		t.Fatalf("unknown inventory advisory=%+v human=%q", advisory, human.String())
+	}
+}
+
+func TestWorktreeWorkerLifecycleRowJoinsPresentMissingAndInvalidIntent(t *testing.T) {
+	root := t.TempDir()
+	present := filepath.Join(root, "present")
+	missing := filepath.Join(root, "missing")
+	invalid := filepath.Join(root, "invalid")
+	for _, path := range []string{present, missing, invalid} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	message := "feat(worktree): expose intent (#10528) (fak workerworktree)"
+	if err := workerworktree.SaveIntent(present, "base-present", message, []string{"z.txt", "a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	intentDir := filepath.Join(filepath.Dir(invalid), ".fak-worker-intents")
+	if err := os.MkdirAll(intentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(intentDir, filepath.Base(invalid)+".json"), []byte("{not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	probes := worktreeWorkerLifecycleProbes{
+		ReadOwner:    func(string) (workerworktree.OwnerStamp, error) { return workerworktree.OwnerStamp{}, os.ErrNotExist },
+		ProcessAlive: func(int) (bool, error) { return false, nil },
+		LeaseLive:    func(string) (bool, error) { return false, nil },
+		Inspect: func(_ string, path string) (worktreeWorkerRevisionEvidence, error) {
+			return worktreeWorkerRevisionEvidence{HeadSHA: "head", BaseSHA: "base", Cleanliness: worktreeEvidenceClean}, nil
+		},
+	}
+
+	presentRow := worktreeWorkerLifecycleRowForPath(root, present, probes)
+	if presentRow.Intent.Status != worktreeWorkerIntentPresent || presentRow.Intent.IssueNumber != 10528 || presentRow.Intent.Message != message || !reflect.DeepEqual(presentRow.Intent.Paths, []string{"a.txt", "z.txt"}) {
+		t.Fatalf("present intent = %+v", presentRow.Intent)
+	}
+	if presentRow.Lifecycle == "" || presentRow.ReapReadiness.Reason == "" || presentRow.Association.State == "" || presentRow.Cleanliness.State == "" {
+		t.Fatalf("present row lost lifecycle evidence: %+v", presentRow)
+	}
+
+	missingRow := worktreeWorkerLifecycleRowForPath(root, missing, probes)
+	if missingRow.Intent.Status != worktreeWorkerIntentMissing || missingRow.Intent.Diagnostic == "" {
+		t.Fatalf("missing intent = %+v", missingRow.Intent)
+	}
+	if missingRow.Lifecycle == "" || missingRow.ReapReadiness.Reason == "" {
+		t.Fatalf("missing intent suppressed lifecycle evidence: %+v", missingRow)
+	}
+
+	invalidRow := worktreeWorkerLifecycleRowForPath(root, invalid, probes)
+	if invalidRow.Intent.Status != worktreeWorkerIntentInvalid || !strings.Contains(invalidRow.Intent.Diagnostic, "decode worker intent") {
+		t.Fatalf("invalid intent = %+v", invalidRow.Intent)
+	}
+	if invalidRow.Lifecycle == "" || invalidRow.ReapReadiness.Reason == "" {
+		t.Fatalf("invalid intent suppressed lifecycle evidence: %+v", invalidRow)
+	}
+}
+
+func TestWorktreeWorkerSnapshotRowsDoNotExportLocalIntent(t *testing.T) {
+	row := worktreeWorkerLifecycleRow{
+		Path: "/private/local/worktree",
+		Intent: worktreeWorkerIntent{
+			Status:      worktreeWorkerIntentPresent,
+			IssueNumber: 10528,
+			Message:     "secret local subject",
+			Paths:       []string{"private/owned.txt"},
+		},
+		Association: worktreeWorkerAssociation{State: worktreeEvidenceAssociated, Lane: "lane-a"},
+		Liveness:    worktreeWorkerLiveness{Owner: worktreeEvidenceLive, Lease: worktreeEvidenceLive},
+		Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceDirty, DirtyPaths: []string{"private/dirty.txt"}},
+		Lifecycle:   worktreeLifecycleRetained,
+	}
+	b, err := json.Marshal(worktreeWorkerSnapshotRows([]worktreeWorkerLifecycleRow{row}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, secret := range []string{row.Path, row.Intent.Message, row.Intent.Paths[0], row.Cleanliness.DirtyPaths[0], "issue_number", "intent"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("remote snapshot leaked %q: %s", secret, text)
+		}
 	}
 }
 
@@ -1288,5 +1449,117 @@ func TestWorktreeColdReapApplyUsesOnePlanningSnapshot(t *testing.T) {
 		got.EligibleBytes != 8192 || got.EligibleBytesKnown != 1 || got.EligibleBytesUnknown != 0 ||
 		got.ReapedBytes != 8192 || got.ReapedBytesKnown != 1 || got.ReapedBytesUnknown != 0 {
 		t.Fatalf("apply receipt did not preserve planned bytes: %+v", got)
+	}
+}
+
+func captureWorktreeWorkerStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = write
+	defer func() { os.Stdout = old }()
+	fn()
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return bytes.TrimSpace(raw)
+}
+
+func TestWorktreeWorkerListLocalOnlyOutputUnchangedWhenRemoteOmitted(t *testing.T) {
+	repo, _, _ := newSingleReapFixture(t)
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerList([]string{"--root", repo, "--json"}) })
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	want := []string{"schema", "count", "paths", "inventory", "capacity"}
+	if len(got) != len(want) {
+		t.Fatalf("local-only keys=%v output=%s", reflect.ValueOf(got).MapKeys(), raw)
+	}
+	for _, key := range want {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("missing local-only key %q: %s", key, raw)
+		}
+	}
+	for _, forbidden := range []string{"local", "remote", "hosts", "fetched"} {
+		if _, ok := got[forbidden]; ok {
+			t.Fatalf("local-only output gained %q: %s", forbidden, raw)
+		}
+	}
+}
+
+func worktreeWorkerTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func worktreeWorkerSnapshotClones(t *testing.T) (string, string, string) {
+	t.Helper()
+	base := t.TempDir()
+	bare := filepath.Join(base, "remote.git")
+	worktreeWorkerTestGit(t, base, "init", "--bare", bare)
+	source := filepath.Join(base, "source")
+	worktreeWorkerTestGit(t, base, "clone", bare, source)
+	if err := os.WriteFile(filepath.Join(source, "README"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	worktreeWorkerTestGit(t, source, "add", "README")
+	worktreeWorkerTestGit(t, source, "-c", "user.name=fak-test", "-c", "user.email=fak@example.invalid", "commit", "-m", "seed")
+	worktreeWorkerTestGit(t, source, "push", "origin", "HEAD:main")
+	clone := filepath.Join(base, "clone")
+	worktreeWorkerTestGit(t, base, "clone", "--branch", "main", bare, clone)
+	return bare, source, clone
+}
+
+func TestWorktreeWorkerRemoteListGroupsLocalAndRemoteProvenance(t *testing.T) {
+	_, source, clone := worktreeWorkerSnapshotClones(t)
+	now := time.Now().UTC()
+	s, err := workerworktree.NewRemoteSnapshot("publisher", now, []workerworktree.SnapshotRow{{Association: workerworktree.SnapshotAssociation{State: "ASSOCIATED", Lane: "lane-a"}, Liveness: workerworktree.SnapshotLiveness{Owner: "LIVE", Lease: "LIVE"}, Cleanliness: workerworktree.SnapshotCleanliness{State: "CLEAN"}, Lifecycle: "READY"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := workerworktree.PublishRemoteSnapshot(source, "origin", s, true, nil); !got.OK {
+		t.Fatalf("publish=%+v", got)
+	}
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerList([]string{"--root", clone, "--json", "--remote", "origin", "--fetch"}) })
+	var got worktreeWorkerRemoteListOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	if got.Schema != "fak-worker-cross-host-lifecycle/1" || got.Local.Provenance != "LOCAL_LIVE" || !got.Local.Authoritative || got.Local.Freshness != workerworktree.SnapshotFresh {
+		t.Fatalf("local=%+v", got.Local)
+	}
+	if !got.Fetched || got.Remote != "origin" || len(got.Hosts) != 1 {
+		t.Fatalf("remote output=%+v", got)
+	}
+	if got.Hosts[0].Provenance != "REMOTE_SNAPSHOT" || got.Hosts[0].Authoritative || got.Hosts[0].Freshness != workerworktree.SnapshotFresh {
+		t.Fatalf("host=%+v", got.Hosts[0])
+	}
+}
+
+func TestWorktreeWorkerPublishRequiresExplicitMode(t *testing.T) {
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerPublish([]string{"--remote", "origin"}) })
+	var got workerworktree.SnapshotPublishResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	if got.OK || !strings.Contains(got.Reason, "exactly one") {
+		t.Fatalf("publish=%+v", got)
 	}
 }

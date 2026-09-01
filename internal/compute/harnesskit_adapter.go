@@ -112,6 +112,8 @@ func (a *HarnessAdapter) Validate(ctx context.Context, req harnesskit.ExecutionR
 }
 
 func (a *HarnessAdapter) Execute(ctx context.Context, req harnesskit.ExecutionRequest) (harnesskit.ExecutionTelemetry, error) {
+	request := BeginRequest(a.backend)
+	defer request.Retire()
 	if err := a.Validate(ctx, req); err != nil {
 		return harnesskit.ExecutionTelemetry{}, err
 	}

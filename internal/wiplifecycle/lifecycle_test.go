@@ -131,3 +131,76 @@ func initRepo(t *testing.T) string {
 	}
 	return repo
 }
+
+func TestListWithDiagnosticsRetainsValidHistoryBesideCorruptReceipts(t *testing.T) {
+	repo := initRepo(t)
+	started := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	validID := "20260901T120000.000000000Z-aabbccddeeff"
+	if _, err := Begin(repo, "clear-out-wip", validID, started); err != nil {
+		t.Fatal(err)
+	}
+
+	store := filepath.Join(repo, ".git", storeName)
+	missingID := "20260901T120100.000000000Z-112233445566"
+	malformedID := "20260901T120200.000000000Z-66778899aabb"
+	if err := os.MkdirAll(filepath.Join(store, missingID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(store, malformedID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, malformedID, receiptFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ListWithDiagnostics(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Receipts) != 1 || result.Receipts[0].OperationID != validID {
+		t.Fatalf("valid history not retained: %#v", result.Receipts)
+	}
+	if len(result.Diagnostics) != 2 {
+		t.Fatalf("diagnostics=%#v, want missing and malformed", result.Diagnostics)
+	}
+	if got, want := result.Diagnostics[0].Code, "MISSING_RECEIPT"; got != want {
+		t.Fatalf("first diagnostic code=%q, want %q", got, want)
+	}
+	if got, want := result.Diagnostics[1].Code, "MALFORMED_RECEIPT"; got != want {
+		t.Fatalf("second diagnostic code=%q, want %q", got, want)
+	}
+	if _, err := List(repo); err == nil || !strings.Contains(err.Error(), missingID) {
+		t.Fatalf("strict List error=%v, want malformed evidence refusal", err)
+	}
+	if _, err := Finish(repo, malformedID, started.Add(time.Minute)); err == nil {
+		t.Fatal("Finish accepted malformed lifecycle evidence")
+	}
+	if _, err := os.Stat(filepath.Join(store, missingID)); err != nil {
+		t.Fatalf("listing altered missing receipt directory: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(store, malformedID, receiptFile))
+	if err != nil || string(body) != "{" {
+		t.Fatalf("listing repaired malformed receipt: body=%q err=%v", body, err)
+	}
+}
+
+func TestBeginCommitsReceiptDirectoryAtomically(t *testing.T) {
+	repo := initRepo(t)
+	id := "20260901T130000.000000000Z-aabbccddeeff"
+	if _, err := Begin(repo, "clear-out-wip", id, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	operation := filepath.Join(repo, ".git", storeName, id)
+	if _, err := Read(filepath.Join(operation, receiptFile)); err != nil {
+		t.Fatalf("committed receipt unreadable: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(operation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".operation-") {
+			t.Fatalf("staging directory leaked after atomic commit: %s", entry.Name())
+		}
+	}
+}

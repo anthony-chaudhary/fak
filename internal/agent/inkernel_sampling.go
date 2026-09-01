@@ -14,6 +14,56 @@ func SampleLogits(logits []float32, temp float64, rng *rand.Rand) int {
 	return sampleLogits(logits, temp, 0, 0, rng)
 }
 
+const clusterSamplingMinVocabulary = 1 << 16
+
+type samplingTruncationPath uint8
+
+const (
+	samplingTruncationCPU samplingTruncationPath = iota
+	samplingTruncationCluster
+)
+
+// samplingTruncationEnvelope records the capabilities that a future device-side
+// sampler must prove before it may keep a very wide vocabulary resident and launch
+// truncation across a thread-block cluster. Zero values deliberately select the CPU
+// oracle/fallback used by the current host sampler.
+type samplingTruncationEnvelope struct {
+	clusterCapable bool
+	deviceResident bool
+}
+
+// selectSamplingTruncationPath is the fail-closed dispatch seam for the
+// cluster-launched top-k/top-p mechanism. It selects the cluster path only when a
+// truncation is requested, the vocabulary is wide enough to justify partitioning,
+// and the backend explicitly proves both cluster launch support and device
+// residency. Selection is not execution: callers without a device implementation
+// continue through applyCPUSamplingTruncation as the correctness oracle/fallback.
+func selectSamplingTruncationPath(vocabSize int, topP float64, topK int, env samplingTruncationEnvelope) samplingTruncationPath {
+	truncatesTopK := topK > 0 && topK < vocabSize
+	truncatesTopP := topP > 0 && topP < 1
+	if vocabSize >= clusterSamplingMinVocabulary && (truncatesTopK || truncatesTopP) && env.clusterCapable && env.deviceResident {
+		return samplingTruncationCluster
+	}
+	return samplingTruncationCPU
+}
+
+// applyCPUSamplingTruncation is the explicit host oracle/fallback. The current
+// sampler always uses it because its probability row is host-resident; a future
+// device caller may use selectSamplingTruncationPath before choosing a device
+// implementation without weakening this fallback.
+func applyCPUSamplingTruncation(probs []float64, sum, topP float64, topK int) float64 {
+	// Host softmax materializes probs here, so the zero capability envelope must
+	// fail closed to the existing CPU oracle/fallback.
+	_ = selectSamplingTruncationPath(len(probs), topP, topK, samplingTruncationEnvelope{})
+	if topK > 0 && topK < len(probs) {
+		sum = topKTruncate(probs, sum, topK)
+	}
+	if topP > 0 && topP < 1 {
+		sum = nucleusTruncate(probs, sum, topP)
+	}
+	return sum
+}
+
 // sampleLogits is the in-kernel sampler. topK then topP truncate the stochastic
 // path, in that order (the standard top-k → top-p pipeline): top-k keeps only the k
 // highest-probability tokens, then nucleus (top-p) keeps the smallest set whose
@@ -46,12 +96,7 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 		probs[i] = p
 		sum += p
 	}
-	if topK > 0 && topK < len(probs) {
-		sum = topKTruncate(probs, sum, topK)
-	}
-	if topP > 0 && topP < 1 {
-		sum = nucleusTruncate(probs, sum, topP)
-	}
+	sum = applyCPUSamplingTruncation(probs, sum, topP, topK)
 	r := rng.Float64() * sum
 	for i, p := range probs {
 		r -= p

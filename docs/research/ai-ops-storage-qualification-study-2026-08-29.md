@@ -5,7 +5,7 @@ Status: complete source study; borrow decisions are snapshot-scoped.
 ## Snapshot and scope
 
 - Observed at: 2026-08-29 America/Los_Angeles.
-- Source checkout: `C:\Users\antho\OneDrive\Desktop\work\AI-Ops`.
+- Source repository: `anthony-chaudhary/AI-Ops` (operator-local checkout; exact local location retained only in the private companion repository).
 - Source state studied: `origin/master@ca8aef4a3d44d1d1206e3936ed3332f4bcd4eb86` (2026-06-19). The local checkout was `dbe9447`, one commit behind; the upstream-only change updates release packaging, not runtime architecture.
 - Source license: no root `LICENSE`, `COPYING`, or `NOTICE` file was present at the studied revision. This pass therefore permits inspiration and independent reimplementation only; it does not authorize direct code porting.
 - Repository surfaces opened: root product/design docs; Python CLI, config, discovery, doctor, provisioning, SSH and shell-sanitization; runner, analysis, profiles, catalog, FIO, publishing; Go UI API/runner/config/Bench adapter; tests; package/release files; Git history, tags/releases, issues and PRs.

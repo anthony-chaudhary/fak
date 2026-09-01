@@ -509,6 +509,103 @@ kernel void q4k_gemm_mm32(device const uchar* W [[buffer(0)]],
     }
 }
 
+// q4k_gemm_m5_cooperative_smem is the clean-room Q4_K adaptation of Modular's cooperative-SMEM
+// Apple M5 W4A16 mechanism (modular/modular@1c9fd2e, fp4_matmul.mojo). It preserves FAK's raw
+// Q4_K/f32 contract: each 32-wide packed-weight tile is decoded once cooperatively into threadgroup
+// memory, then reused by four dense simdgroup MMA K-steps. The existing q4k_gemm path remains the
+// control/fallback; production routing stays disabled until a device-pinned >=1.10x crossover receipt.
+//
+// q4k_gemm_m5_cooperative_smem: the 64-token SIMDGROUP-MATRIX candidate. The old generic MMA tile had BN=64,
+// so an exact 32-token panel spent half its matrix work and half its accumulator storage on zero
+// columns. MM32 makes the output tile BM=64 x BN=32: all eight simdgroups contribute to live P32
+// columns, each owning 16 rows x 16 cols = a 2x2 array of 8x8 accumulators. The K axis still walks
+// one 32-wide q4_k sub-block at a time in four hardware-MMA steps. C-side selection is exact:
+// FAK_Q4K_MM requests this pipeline only for P=32; P31/P33 remain on q4k_gemm.
+#define Q4K_M5_BN 64
+#define Q4K_M5_SGROW 2  // simdgroups down BM=64 -> 32 rows (4 tiles) each
+#define Q4K_M5_SGCOL 4  // simdgroups across BN=64 -> 16 cols (2 tiles) each
+kernel void q4k_gemm_m5_cooperative_smem(device const uchar* W [[buffer(0)]],
+                          device const float* X [[buffer(1)]],
+                          device float*       Y [[buffer(2)]],
+                          constant int&    nblk [[buffer(3)]],
+                          constant int&     out [[buffer(4)]],
+                          constant int&       P [[buffer(5)]],
+                          constant int&      t0 [[buffer(6)]],
+                          constant int&      nt [[buffer(7)]],
+                          uint ob   [[threadgroup_position_in_grid]],
+                          uint lid  [[thread_index_in_threadgroup]],
+                          uint sgid [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows x one 32-wide sub-block, row-major [row][k] ld=32
+    threadgroup float xbuf[32 * Q4K_M5_BN]; // one sub-block x 32 tokens, K-major [k][tok]
+    int in = nblk * 256;
+    int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
+    // This simdgroup's position in the 4x2 grid -> its 16-row x 16-col output region.
+    int sgRow = (int)sgid / Q4K_M5_SGCOL; // 0..3
+    int sgCol = (int)sgid % Q4K_M5_SGCOL; // 0..1
+    int rowBase = sgRow * 32;            // 0,16,32,48 within the BM tile
+    int colBase = sgCol * 16;            // 0 or 16 within the exact-P32 tile
+    // 2 row-tiles x 2 col-tiles = 4 accumulators of 8x8, C[out_row][token].
+    simdgroup_float8x8 acc[4][2];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 2; j++) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+    for (int sblk = 0; sblk < nblk; sblk++) {
+        for (int sb = 0; sb < 8; sb++) {  // 8 q4_k sub-blocks of 32 per super-block
+            for (int idx = (int)lid; idx < Q4K_BM * 32; idx += Q4K_TG) {
+                int row = idx >> 5, k = idx & 31;
+                int orow = o0 + row;
+                float val = 0.0f;
+                if (orow < out) {
+                    device const uchar* blk = W + ((long)orow * nblk + sblk) * 144;
+                    float d  = (float)(*(device const half*)(blk + 0));
+                    float dm = (float)(*(device const half*)(blk + 2));
+                    device const uchar* scales = blk + 4;
+                    device const uchar* q = blk + 16;
+                    uchar byte = q[(sb >> 1) * 32 + k];
+                    uchar nib = (sb & 1) ? (byte >> 4) : (byte & 0x0f);
+                    float2 sm = q4k_scale_min(sb, scales);
+                    val = d * sm.x * (float)nib - dm * sm.y;
+                }
+                wbuf[idx] = val; // [row][k], ld=32
+            }
+            for (int idx = (int)lid; idx < 32 * Q4K_M5_BN; idx += Q4K_TG) {
+                int k = idx / Q4K_M5_BN, tk = idx % Q4K_M5_BN;
+                xbuf[idx] = (tk < nt) ? X[(long)(t0 + tk) * in + (long)sblk * 256 + sb * 32 + k] : 0.0f;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            // Walk the 32-wide K sub-block in four 8-wide MMA steps. xbuf has exact ld=32.
+            for (int kk = 0; kk < 32; kk += 8) {
+                simdgroup_float8x8 bmat[2];
+                for (int j = 0; j < 2; j++) {
+                    simdgroup_load(bmat[j], xbuf + kk * Q4K_M5_BN + (colBase + j * 8), Q4K_M5_BN);
+                }
+                for (int i = 0; i < 4; i++) {
+                    simdgroup_float8x8 amat;
+                    simdgroup_load(amat, wbuf + (rowBase + i * 8) * 32 + kk, 32);
+                    for (int j = 0; j < 2; j++) {
+                        simdgroup_multiply_accumulate(acc[i][j], amat, bmat[j], acc[i][j]);
+                    }
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+    }
+    threadgroup float cbuf[Q4K_BM * Q4K_M5_BN];
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 2; j++) {
+            int r = rowBase + i * 8, c = colBase + j * 8;
+            simdgroup_store(acc[i][j], cbuf + r * Q4K_M5_BN + c, Q4K_M5_BN);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Cooperative write-back: each thread strides the exact 64x32 tile.
+    for (int idx = (int)lid; idx < Q4K_BM * Q4K_M5_BN; idx += Q4K_TG) {
+        int r = idx / Q4K_M5_BN, c = idx % Q4K_M5_BN;
+        int orow = o0 + r;
+        int tcol = c;
+        if (orow < out && tcol < nt) Y[(long)(t0 + tcol) * out + orow] = cbuf[idx];
+    }
+}
+
 // q4k_swiglu: out[i] = silu(gate[i]) * up[i], the SwiGLU elementwise for the fused decode MLP. Run
 // on the GPU between the gate/up GEMVs and the down GEMV so the I-wide intermediate never leaves
 // the device. silu(z)=z/(1+exp(-z)) — matches internal/model.silu (the non-GELU activation path).
@@ -627,7 +724,7 @@ kernel void graph_quantize_q8(device const float* X [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
 static int gQ4KReady;
 
 // q4k_gemv_pso binds selection to an executed-kernel status. A vector request never falls back:
@@ -653,6 +750,13 @@ static id<MTLComputePipelineState> q4k_gemv_pso(int vectorized_mode, int* execut
 static id<MTLComputePipelineState> q4k_gemm_pso(int P, int mm_mode, int* executed, int* token_tile) {
     *executed = 0;
     *token_tile = 64;
+    if (mm_mode < 0) return nil;
+    if (mm_mode == 2) {
+        if (P < 64 || psoQ4KGemmM5CooperativeSMEM == nil) return nil;
+        *executed = 3;
+        *token_tile = 64;
+        return psoQ4KGemmM5CooperativeSMEM;
+    }
     if (P != 32 || mm_mode == 0) {
         if (psoQ4KGemm == nil) return nil;
         *executed = 1;
@@ -680,6 +784,9 @@ static int q4k_init(void) {
     // q4k_gemm_mm32 is optional. Explicit P32 requests fail closed if this pipeline is unavailable;
     // P31/P33 and default-off P32 dispatches retain the required scalar pipeline.
     psoQ4KGemmMM32 = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm_mm32"] error:&err];
+    // Experimental and optional: no production selector requests this PSO until an M5 crossover
+    // table is backed by a sanctioned fak-native receipt.
+    psoQ4KGemmM5CooperativeSMEM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm_m5_cooperative_smem"] error:&err];
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];

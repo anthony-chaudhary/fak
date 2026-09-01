@@ -67,6 +67,29 @@ type ApplicationFault struct {
 	FaultOffset   string `json:"fault_offset,omitempty"`
 }
 
+type ArtifactProvenance struct {
+	Basename  string `json:"basename"`
+	ByteCount int64  `json:"byte_count"`
+	SHA256    string `json:"sha256"`
+}
+
+type MacOSResourceIncident struct {
+	IncidentType       string             `json:"incident_type"`
+	ReportStartMS      int64              `json:"report_start_ms"`
+	ReportEndMS        int64              `json:"report_end_ms"`
+	Classification     string             `json:"classification"`
+	ActionTaken        string             `json:"action_taken"`
+	DirtiedMB          float64            `json:"dirtied_mb"`
+	DurationSeconds    int64              `json:"duration_seconds"`
+	AverageMBPerSecond float64            `json:"average_mb_per_second"`
+	Process            string             `json:"process"`
+	PID                int                `json:"pid"`
+	FootprintMB        float64            `json:"footprint_mb"`
+	BinaryUUID         string             `json:"binary_uuid"`
+	SampledStackEnd    string             `json:"sampled_stack_end"`
+	Artifact           ArtifactProvenance `json:"artifact"`
+}
+
 var lowVirtualMemoryCulpritRE = regexp.MustCompile(`(?i)([a-z0-9_.-]+\.exe)\s+\((\d+)\)\s+consumed\s+(\d+)\s+bytes`)
 
 // ParseLowVirtualMemoryCulprits extracts the typed process rows present in the
@@ -87,39 +110,42 @@ func ParseLowVirtualMemoryCulprits(message string) []ResourceCulprit {
 }
 
 type ResourceEvent struct {
-	TimeMS         int64             `json:"time_ms"`
-	Source         string            `json:"source"`
-	EventID        int               `json:"windows_event_id"`
-	RecordID       string            `json:"record_id,omitempty"`
-	Name           string            `json:"event_name"`
-	ReportID       string            `json:"report_id,omitempty"`
-	App            string            `json:"app,omitempty"`
-	Message        string            `json:"message,omitempty"`
-	Culprits       []ResourceCulprit `json:"culprits,omitempty"`
-	Fault          *ApplicationFault `json:"application_fault,omitempty"`
-	Hang           *ApplicationHang  `json:"application_hang,omitempty"`
-	ProcessID      int               `json:"process_id,omitempty"`
-	ProcessStartMS int64             `json:"process_start_ms,omitempty"`
+	TimeMS           int64                  `json:"time_ms"`
+	Source           string                 `json:"source"`
+	EventID          int                    `json:"windows_event_id,omitempty"`
+	RecordID         string                 `json:"record_id,omitempty"`
+	Name             string                 `json:"event_name"`
+	ReportID         string                 `json:"report_id,omitempty"`
+	App              string                 `json:"app,omitempty"`
+	Message          string                 `json:"message,omitempty"`
+	Culprits         []ResourceCulprit      `json:"culprits,omitempty"`
+	Fault            *ApplicationFault      `json:"application_fault,omitempty"`
+	Hang             *ApplicationHang       `json:"application_hang,omitempty"`
+	ResourceIncident *MacOSResourceIncident `json:"resource_incident,omitempty"`
+	ProcessID        int                    `json:"process_id,omitempty"`
+	ProcessStartMS   int64                  `json:"process_start_ms,omitempty"`
 }
 
 type Correlation struct {
-	Schema        string            `json:"schema"`
-	CorrelationID string            `json:"correlation_id"`
-	TimeMS        int64             `json:"time_ms"`
-	TimeUTC       string            `json:"time_utc"`
-	Source        string            `json:"source"`
-	WindowsID     int               `json:"windows_event_id"`
-	EventName     string            `json:"event_name"`
-	ReportID      string            `json:"report_id,omitempty"`
-	App           string            `json:"app,omitempty"`
-	Culprits      []ResourceCulprit `json:"culprits,omitempty"`
-	Fault         *ApplicationFault `json:"application_fault,omitempty"`
-	Hang          *ApplicationHang  `json:"application_hang,omitempty"`
-	OwnedLaunch   *OwnedShellLaunch `json:"owned_shell_launch,omitempty"`
-	Status        string            `json:"status"`
-	Reason        string            `json:"reason"`
-	Candidates    []ProcessSample   `json:"candidates,omitempty"`
-	Observational bool              `json:"observational"`
+	Schema           string                 `json:"schema"`
+	CorrelationID    string                 `json:"correlation_id"`
+	TimeMS           int64                  `json:"time_ms"`
+	TimeUTC          string                 `json:"time_utc"`
+	Source           string                 `json:"source"`
+	WindowsID        int                    `json:"windows_event_id,omitempty"`
+	EventName        string                 `json:"event_name"`
+	ReportID         string                 `json:"report_id,omitempty"`
+	App              string                 `json:"app,omitempty"`
+	Culprits         []ResourceCulprit      `json:"culprits,omitempty"`
+	Fault            *ApplicationFault      `json:"application_fault,omitempty"`
+	Hang             *ApplicationHang       `json:"application_hang,omitempty"`
+	ResourceIncident *MacOSResourceIncident `json:"resource_incident,omitempty"`
+	OwnedLaunch      *OwnedShellLaunch      `json:"owned_shell_launch,omitempty"`
+	Status           string                 `json:"status"`
+	Reason           string                 `json:"reason"`
+	Candidates       []ProcessSample        `json:"candidates,omitempty"`
+	Correlated       bool                   `json:"correlated"`
+	Observational    bool                   `json:"observational"`
 }
 
 func NewProcessSample(at time.Time, pid int, started time.Time, executable, executableSHA, buildRevision, commandClass, session string, privateBytes, workingSetBytes uint64, handles, threads uint32) ProcessSample {
@@ -154,6 +180,10 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 
 func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, launches []OwnedShellLaunch) (Correlation, bool) {
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
+	isMacOSResourceIncident := name == MacOSResourceIncidentEventName &&
+		event.EventID == 0 &&
+		strings.EqualFold(strings.TrimSpace(event.Source), MacOSDiagnosticReportsSource) &&
+		validMacOSResourceIncident(event)
 	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
 	isWindowsShellCrash := name == "WINDOWS_SHELL_PROCESS_CRASH" && event.EventID == 1000
@@ -165,7 +195,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	isUncleanRestart := name == "HOST_UNCLEAN_RESTART" && event.EventID == 41 && strings.EqualFold(strings.TrimSpace(event.Source), "Microsoft-Windows-Kernel-Power")
 	isHostLifecycle := isRestartInitiated || isUnexpectedShutdown || isUncleanRestart
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
-	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isApplicationCrash && !isApplicationHang && !isRadar && !isHostLifecycle && !isResolver) {
+	if event.TimeMS <= 0 || (!isMacOSResourceIncident && !isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isApplicationCrash && !isApplicationHang && !isRadar && !isHostLifecycle && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
@@ -195,7 +225,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
 			continue
 		}
-		if isShellCrash || isWindowsShellCrash || isApplicationCrash || isApplicationHang || isHostLifecycle || isResolver {
+		if isMacOSResourceIncident || isShellCrash || isWindowsShellCrash || isApplicationCrash || isApplicationHang || isHostLifecycle || isResolver {
 			continue
 		}
 		candidates = append(candidates, sample)
@@ -226,6 +256,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	if isApplicationHang {
 		reason = "Windows application hang is retained as observational host evidence and is not attributed to fak"
 	}
+	if isMacOSResourceIncident {
+		reason = "macOS resource incident is retained as observational evidence; affected-process identity and causal attribution remain unknown"
+	}
 	if isHostLifecycle {
 		status, reason = "observed", "Windows host lifecycle evidence is retained without attributing cause to fak"
 	}
@@ -236,13 +269,91 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 			reason = "no exact PID and process creation time match in fak-owned launch receipts"
 		}
 	}
-	if len(candidates) == 1 {
+	if !isMacOSResourceIncident && len(candidates) == 1 {
 		status, reason = "identified", "one durable fak process census spans the event time"
-	} else if len(candidates) > 1 {
+	} else if !isMacOSResourceIncident && len(candidates) > 1 {
 		status, reason = "ambiguous", "multiple durable fak process census rows span the event time"
 	}
-	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
-	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Hang: event.Hang, OwnedLaunch: owned, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+	key := correlationIdentityKey(event, name)
+	return Correlation{
+		Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key),
+		TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano),
+		Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app,
+		Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Hang: event.Hang,
+		ResourceIncident: event.ResourceIncident, OwnedLaunch: owned, Status: status, Reason: reason,
+		Candidates: candidates, Correlated: status == "identified", Observational: true,
+	}, true
+}
+
+func correlationIdentityKey(event ResourceEvent, normalizedName string) string {
+	incidentType, artifactDigest := "", ""
+	if event.ResourceIncident != nil {
+		incidentType = event.ResourceIncident.IncidentType
+		artifactDigest = event.ResourceIncident.Artifact.SHA256
+	}
+	return strings.Join([]string{
+		strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID),
+		strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), normalizedName,
+		strings.ToLower(incidentType), strings.ToLower(artifactDigest),
+	}, "|")
+}
+
+func validMacOSResourceIncident(event ResourceEvent) bool {
+	incident := event.ResourceIncident
+	if incident == nil ||
+		event.Fault != nil ||
+		event.Hang != nil ||
+		event.Message != "" ||
+		len(event.Culprits) != 0 ||
+		event.ProcessID != 0 ||
+		event.ProcessStartMS != 0 ||
+		!strings.EqualFold(strings.TrimSpace(event.App), incident.Process) ||
+		incident.IncidentType != MacOSResourceIncidentDiskWrites ||
+		incident.Classification != "disk writes" ||
+		incident.ActionTaken != "none" ||
+		incident.ReportStartMS <= 0 ||
+		incident.ReportEndMS != event.TimeMS ||
+		incident.ReportEndMS <= incident.ReportStartMS ||
+		incident.DirtiedMB <= 0 ||
+		incident.DurationSeconds <= 0 ||
+		incident.AverageMBPerSecond <= 0 ||
+		!strings.EqualFold(incident.Process, "fak") ||
+		incident.PID <= 0 ||
+		incident.FootprintMB <= 0 ||
+		incident.SampledStackEnd != "write(2)" ||
+		incident.Artifact.Basename != macOSDiagSanitizedArtifactName ||
+		incident.Artifact.ByteCount <= 0 ||
+		incident.Artifact.ByteCount > MacOSDiagFixtureMaxBytes ||
+		!validSHA256Digest(incident.Artifact.SHA256) {
+		return false
+	}
+	return validUUID(incident.BinaryUUID)
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil
+}
+
+func validUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, r := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if r != '-' {
+				return false
+			}
+			continue
+		}
+		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func validApplicationHangClass(class string) bool {

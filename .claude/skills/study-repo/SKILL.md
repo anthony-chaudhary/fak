@@ -377,6 +377,11 @@ the research durable.**
 
 ## What "done" proves
 
+- The public study records the repository/project name, public upstream URL when available,
+  pinned revision, and a generic locator such as **operator-local checkout**. It never records an
+  absolute user-home checkout path or operator-local infrastructure detail. Keep exact local
+  locations in the private companion repository, and run `fak public-scrub audit-tree` before
+  publishing.
 - The source was **acquired and read at a pinned `@sha`** — every borrow cites real code,
   not a README claim — and read **deep**: the fan-out covered every load-bearing subsystem
   and the completeness critic found nothing material unopened (a sanctioned `--quick` pass

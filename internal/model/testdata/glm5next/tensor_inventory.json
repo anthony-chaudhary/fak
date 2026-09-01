@@ -1,0 +1,15 @@
+{
+  "source": "zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
+  "license": "MIT",
+  "shard_count": 62,
+  "total_size_bytes": 328326771576,
+  "tensors": [
+    {"name":"model.language_model.embed_tokens.weight","dtype":"BF16","shape":[154880,4096],"shard":"model-00001-of-00062.safetensors"},
+    {"name":"model.language_model.layers.0.self_attn.q_proj.weight","dtype":"BF16","shape":[8192,4096],"shard":"model-00002-of-00062.safetensors"},
+    {"name":"model.language_model.layers.0.self_attn.k_conv1d.weight","dtype":"BF16","shape":[8192,1,4],"shard":"model-00002-of-00062.safetensors"},
+    {"name":"model.language_model.layers.3.self_attn.indexer.index_kpool_compress_ape","dtype":"BF16","shape":[4,128],"shard":"model-00032-of-00062.safetensors"},
+    {"name":"model.language_model.layers.3.mlp.experts.0.down_proj.weight","dtype":"F8_E4M3","shape":[4096,2048],"shard":"model-00031-of-00062.safetensors"},
+    {"name":"model.language_model.layers.3.mlp.experts.0.down_proj.weight_scale_inv","dtype":"F32","shape":[32,16],"shard":"model-00031-of-00062.safetensors"},
+    {"name":"lm_head.weight","dtype":"BF16","shape":[154880,4096],"shard":"model-00001-of-00062.safetensors"}
+  ]
+}
