@@ -212,8 +212,37 @@ func TestWeekdayResetFixtureMatchesPythonParser(t *testing.T) {
 	}
 
 	python, prefix := fleetaccountsPython(t)
-	_, sourceFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+	// runtime.Caller paths are module-relative under -trimpath (the isolated
+	// buildcheck/validate compile), so the caller-derived root is only a first
+	// candidate; walking up from the test's working directory (go test runs in
+	// the package dir) finds the real checkout in both compile modes.
+	repoRoot := ""
+	if _, sourceFile, _, ok := runtime.Caller(0); ok {
+		candidate := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+		if _, err := os.Stat(filepath.Join(candidate, "tools", "issue_resolve_dispatch.py")); err == nil {
+			repoRoot = candidate
+		}
+	}
+	if repoRoot == "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("resolve working directory: %v", err)
+		}
+		for i := 0; i < 8 && repoRoot == ""; i++ {
+			if _, err := os.Stat(filepath.Join(dir, "tools", "issue_resolve_dispatch.py")); err == nil {
+				repoRoot = dir
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	if repoRoot == "" {
+		t.Fatal("locate tools/issue_resolve_dispatch.py above the package directory")
+	}
 	script := `
 import datetime as dt, json, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools"))
