@@ -1,6 +1,9 @@
 package memgate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseLinux(t *testing.T) {
 	mem := ParseLinux("MemTotal: 36000000 kB\nMemFree: 4000000 kB\nMemAvailable: 28000000 kB\nCached: 12000000 kB\n")
@@ -17,6 +20,30 @@ func TestParseDarwin(t *testing.T) {
 	mem := ParseDarwin(vm, 4096, 16_000_000)
 	if mem.FreeBytes != 1000*4096 || mem.PurgeableBytes != 500*4096 || mem.WiredBytes != 2000*4096 || mem.CompressedBytes != 10*4096 {
 		t.Fatalf("mem=%+v", mem)
+	}
+}
+
+// TestParseDarwinCountsInactiveAsAvailable pins the steady-state Mac case where the
+// standalone `fak serve --gguf` Metal admission refused every load (issue #10595):
+// macOS parks most reclaimable RAM in inactive (and speculative) pages, so a
+// free+purgeable-only available figure reads ~0 on a healthy 36G host and the
+// fail-closed reservation always refuses. The sample is the live vm_stat captured
+// at the refusal: free 0.2G, inactive 16.6G, speculative ~0, purgeable 0.2G.
+func TestParseDarwinCountsInactiveAsAvailable(t *testing.T) {
+	vm := strings.Join([]string{
+		"Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+		"Pages free:                                    10279.",
+		"Pages active:                                1012697.",
+		"Pages inactive:                              1012324.",
+		"Pages speculative:                              1215.",
+		"Pages throttled:                                   0.",
+		"Pages wired down:                             154812.",
+		"Pages purgeable:                               13107.",
+	}, "\n")
+	mem := ParseDarwin(vm, 16384, 38_654_705_664)
+	reclaimable := int64(10279+1012324+1215+13107) * 16384
+	if mem.AvailableBytes != reclaimable-int64(SafetyMarginGB*1e9) {
+		t.Fatalf("AvailableBytes=%d, want inactive+speculative counted: %d", mem.AvailableBytes, reclaimable-int64(SafetyMarginGB*1e9))
 	}
 }
 
