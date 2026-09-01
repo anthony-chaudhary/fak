@@ -1,6 +1,7 @@
 package qwen38quantrun
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,8 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/processstart"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
-	"github.com/anthony-chaudhary/fak/internal/serverlifecycle"
 	"github.com/anthony-chaudhary/fak/internal/serverproduct"
 )
 
@@ -300,11 +301,182 @@ func validateManagedServerConfig(cfg ManagedServerConfig) error {
 	return nil
 }
 
+const (
+	managedStateFilename   = "server-state.json"
+	managedReceiptFilename = "server-receipt.json"
+	managedStateSchema     = "fak.server-lifecycle-state/v1"
+	managedStateReady      = "ready"
+)
+
+type managedReadyExpectation struct {
+	Generation           uint64
+	MinimumGeneration    uint64
+	ProcessID            int
+	ProcessStartIdentity string
+	ReceiptDigest        string
+	ProtocolFamily       string
+	ProtocolRevision     string
+	Capabilities         []string
+	BaseURL              string
+	ModelAlias           string
+}
+
+type managedReadyBinding struct {
+	Receipt       serverproduct.ServerReceipt
+	ReceiptDigest string
+	ReceiptBytes  []byte
+}
+
+type managedStateRecord struct {
+	Schema               string `json:"schema"`
+	State                string `json:"state"`
+	InstanceID           string `json:"instance_id"`
+	Generation           uint64 `json:"generation"`
+	ProcessID            int    `json:"process_id,omitempty"`
+	ProcessStartIdentity string `json:"process_start_identity,omitempty"`
+	BaseURL              string `json:"base_url,omitempty"`
+	Error                string `json:"error,omitempty"`
+	UpdatedAt            string `json:"updated_at"`
+	ReadinessDeadline    string `json:"readiness_deadline,omitempty"`
+}
+
+// consumeManagedReady is the runner-side registration seam for the lifecycle
+// wire contract. Keeping the read-only consumer here prevents the tier-2 runner
+// from depending on the tier-3 process manager while preserving identity checks.
+func consumeManagedReady(dir string, want managedReadyExpectation) (managedReadyBinding, error) {
+	if strings.TrimSpace(dir) == "" {
+		return managedReadyBinding{}, errors.New("lifecycle directory is required")
+	}
+	statePath := filepath.Join(dir, managedStateFilename)
+	receiptPath := filepath.Join(dir, managedReceiptFilename)
+	stateRaw, err := os.ReadFile(statePath)
+	if err != nil {
+		return managedReadyBinding{}, fmt.Errorf("read lifecycle state: %w", err)
+	}
+	state, err := decodeManagedReadyState(stateRaw)
+	if err != nil {
+		return managedReadyBinding{}, err
+	}
+	receiptRaw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		return managedReadyBinding{}, fmt.Errorf("read ready receipt: %w", err)
+	}
+	receipt, err := serverproduct.DecodeReceipt(receiptRaw)
+	if err != nil {
+		return managedReadyBinding{}, fmt.Errorf("decode ready receipt: %w", err)
+	}
+	digest := managedReceiptDigest(receiptRaw)
+	if err := matchManagedReadyState(state, receipt, digest, want); err != nil {
+		return managedReadyBinding{}, err
+	}
+	started, ok := processstart.Start(state.ProcessID)
+	if !ok {
+		return managedReadyBinding{}, errors.New("revalidate process start identity: process is not live")
+	}
+	if started.UTC().Format(time.RFC3339Nano) != state.ProcessStartIdentity {
+		return managedReadyBinding{}, errors.New("live process start identity mismatch")
+	}
+	stateAfter, err := os.ReadFile(statePath)
+	if err != nil {
+		return managedReadyBinding{}, fmt.Errorf("reread lifecycle state: %w", err)
+	}
+	receiptAfter, err := os.ReadFile(receiptPath)
+	if err != nil {
+		return managedReadyBinding{}, fmt.Errorf("reread ready receipt: %w", err)
+	}
+	if !bytes.Equal(stateRaw, stateAfter) || !bytes.Equal(receiptRaw, receiptAfter) {
+		return managedReadyBinding{}, errors.New("lifecycle READY identity changed during validation")
+	}
+	return managedReadyBinding{Receipt: receipt, ReceiptDigest: digest, ReceiptBytes: append([]byte(nil), receiptRaw...)}, nil
+}
+
+func decodeManagedReadyState(raw []byte) (managedStateRecord, error) {
+	var state managedStateRecord
+	if err := decodeManagedStrict(raw, &state); err != nil {
+		return managedStateRecord{}, fmt.Errorf("decode lifecycle state: %w", err)
+	}
+	if state.Schema != managedStateSchema {
+		return managedStateRecord{}, fmt.Errorf("lifecycle state schema must be %q", managedStateSchema)
+	}
+	if state.State != managedStateReady {
+		return managedStateRecord{}, fmt.Errorf("lifecycle state = %q, want %q", state.State, managedStateReady)
+	}
+	if state.Generation == 0 || state.ProcessID <= 0 || state.ProcessStartIdentity == "" || state.InstanceID == "" || state.BaseURL == "" {
+		return managedStateRecord{}, errors.New("ready lifecycle state identity is incomplete")
+	}
+	return state, nil
+}
+
+func matchManagedReadyState(state managedStateRecord, receipt serverproduct.ServerReceipt, digest string, want managedReadyExpectation) error {
+	if receipt.Identity.InstanceID != state.InstanceID || receipt.Generation != state.Generation ||
+		receipt.Ownership.InstanceID != state.InstanceID || receipt.Ownership.ProcessID != state.ProcessID ||
+		receipt.Ownership.ProcessStartIdentity != state.ProcessStartIdentity || receipt.Endpoint.BaseURL != state.BaseURL {
+		return errors.New("ready receipt identity does not match lifecycle state")
+	}
+	if want.Generation != 0 && state.Generation != want.Generation {
+		return fmt.Errorf("generation = %d, want %d", state.Generation, want.Generation)
+	}
+	if want.MinimumGeneration != 0 && state.Generation < want.MinimumGeneration {
+		return fmt.Errorf("generation = %d, want at least %d", state.Generation, want.MinimumGeneration)
+	}
+	if want.ProcessID != 0 && state.ProcessID != want.ProcessID {
+		return fmt.Errorf("process id = %d, want %d", state.ProcessID, want.ProcessID)
+	}
+	if want.ProcessStartIdentity != "" && state.ProcessStartIdentity != want.ProcessStartIdentity {
+		return errors.New("process start identity mismatch")
+	}
+	if want.ReceiptDigest != "" && digest != want.ReceiptDigest {
+		return fmt.Errorf("receipt digest = %q, want %q", digest, want.ReceiptDigest)
+	}
+	if want.BaseURL != "" && receipt.Endpoint.BaseURL != want.BaseURL {
+		return fmt.Errorf("base URL = %q, want %q", receipt.Endpoint.BaseURL, want.BaseURL)
+	}
+	if want.ModelAlias != "" && receipt.ModelAlias != want.ModelAlias {
+		return fmt.Errorf("model alias = %q, want %q", receipt.ModelAlias, want.ModelAlias)
+	}
+	if want.ProtocolFamily != "" && receipt.Protocol.Family != want.ProtocolFamily {
+		return fmt.Errorf("protocol family = %q, want %q", receipt.Protocol.Family, want.ProtocolFamily)
+	}
+	if want.ProtocolRevision != "" && receipt.Protocol.Revision != want.ProtocolRevision {
+		return fmt.Errorf("protocol revision = %q, want %q", receipt.Protocol.Revision, want.ProtocolRevision)
+	}
+	if len(want.Capabilities) > 0 {
+		got, expected := slices.Clone(receipt.Protocol.Capabilities), slices.Clone(want.Capabilities)
+		slices.Sort(got)
+		slices.Sort(expected)
+		if !slices.Equal(got, expected) {
+			return errors.New("protocol capabilities mismatch")
+		}
+	}
+	return nil
+}
+
+func managedReceiptDigest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func decodeManagedStrict(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
 type managedServerLifecycle struct {
 	delegate   Lifecycle
 	config     ManagedServerConfig
 	mu         sync.Mutex
-	current    serverlifecycle.ReadyBinding
+	current    managedReadyBinding
 	identities []ManagedServerIdentity
 }
 
@@ -312,7 +484,7 @@ func newManagedServerLifecycle(delegate Lifecycle, cfg ManagedServerConfig) (*ma
 	if err := validateManagedServerConfig(cfg); err != nil {
 		return nil, err
 	}
-	binding, err := serverlifecycle.ConsumeReady(cfg.Directory, managedExpectation(cfg, true))
+	binding, err := consumeManagedReady(cfg.Directory, managedExpectation(cfg, true))
 	if err != nil {
 		return nil, fmt.Errorf("managed server READY identity: %w", err)
 	}
@@ -321,8 +493,8 @@ func newManagedServerLifecycle(delegate Lifecycle, cfg ManagedServerConfig) (*ma
 	return managed, nil
 }
 
-func managedExpectation(cfg ManagedServerConfig, pinDigest bool) serverlifecycle.ReadyExpectation {
-	want := serverlifecycle.ReadyExpectation{
+func managedExpectation(cfg ManagedServerConfig, pinDigest bool) managedReadyExpectation {
+	want := managedReadyExpectation{
 		MinimumGeneration: cfg.MinimumGeneration,
 		ProtocolFamily:    cfg.ProtocolFamily, ProtocolRevision: cfg.ProtocolRevision,
 		Capabilities: slices.Clone(cfg.Capabilities), BaseURL: cfg.BaseURL, ModelAlias: cfg.ModelAlias,
@@ -333,8 +505,8 @@ func managedExpectation(cfg ManagedServerConfig, pinDigest bool) serverlifecycle
 	return want
 }
 
-func exactManagedExpectation(binding serverlifecycle.ReadyBinding, cfg ManagedServerConfig) serverlifecycle.ReadyExpectation {
-	return serverlifecycle.ReadyExpectation{
+func exactManagedExpectation(binding managedReadyBinding, cfg ManagedServerConfig) managedReadyExpectation {
+	return managedReadyExpectation{
 		Generation: binding.Receipt.Generation, ProcessID: binding.Receipt.Ownership.ProcessID,
 		ProcessStartIdentity: binding.Receipt.Ownership.ProcessStartIdentity, ReceiptDigest: binding.ReceiptDigest,
 		ProtocolFamily: cfg.ProtocolFamily, ProtocolRevision: cfg.ProtocolRevision,
@@ -355,7 +527,7 @@ func (m *managedServerLifecycle) Ready(ctx context.Context) error {
 	want.MinimumGeneration = previous.Receipt.Generation + 1
 	want.BaseURL = previous.Receipt.Endpoint.BaseURL
 	want.ModelAlias = previous.Receipt.ModelAlias
-	binding, err := serverlifecycle.ConsumeReady(m.config.Directory, want)
+	binding, err := consumeManagedReady(m.config.Directory, want)
 	if err != nil {
 		return fmt.Errorf("managed server READY identity after restart: %w", err)
 	}
@@ -373,7 +545,7 @@ func (m *managedServerLifecycle) Revalidate(context.Context) error {
 	m.mu.Lock()
 	current := m.current
 	m.mu.Unlock()
-	_, err := serverlifecycle.ConsumeReady(m.config.Directory, exactManagedExpectation(current, m.config))
+	_, err := consumeManagedReady(m.config.Directory, exactManagedExpectation(current, m.config))
 	if err != nil {
 		return fmt.Errorf("managed server READY identity changed: %w", err)
 	}
@@ -399,7 +571,7 @@ func (m *managedServerLifecycle) identityChain() []ManagedServerIdentity {
 	return append([]ManagedServerIdentity(nil), m.identities...)
 }
 
-func managedIdentity(binding serverlifecycle.ReadyBinding) ManagedServerIdentity {
+func managedIdentity(binding managedReadyBinding) ManagedServerIdentity {
 	r := binding.Receipt
 	return ManagedServerIdentity{
 		ReceiptDigest: binding.ReceiptDigest, Generation: r.Generation, ProcessID: r.Ownership.ProcessID,

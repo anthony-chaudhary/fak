@@ -3,15 +3,13 @@ package wipinventory
 import (
 	"testing"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 func TestJoinIssueSessionsConservesRootChildrenAndResumes(t *testing.T) {
 	history := issueHistory("wip:v1:00000000000000000000000000000001", "owner/repo", 10437)
-	bindings := sessionregistry.WIPBindingReport{Bindings: []sessionregistry.WIPExecutionBinding{{
-		RootRegistrationID: "root", Issue: &sessionregistry.WIPIssueIdentity{Repository: "owner/repo", Number: 10437},
-		RegistrationIDs: []string{"child", "resume", "root"}, AttemptIDs: []string{"a0", "a1", "a2"}, SessionIDs: []string{"s0", "s1", "s2"}, Status: sessionregistry.WIPBindingJoined,
+	bindings := ExecutionBindingReport{Bindings: []ExecutionBinding{{
+		RootRegistrationID: "root", Issue: &ExecutionIssueIdentity{Repository: "owner/repo", Number: 10437},
+		RegistrationIDs: []string{"child", "resume", "root"}, AttemptIDs: []string{"a0", "a1", "a2"}, SessionIDs: []string{"s0", "s1", "s2"}, Status: ExecutionBindingJoined,
 	}}}
 	got, err := JoinIssueSessions([]History{history}, bindings)
 	if err != nil {
@@ -30,9 +28,9 @@ func TestJoinIssueSessionsKeepsSimilarIssuesSeparate(t *testing.T) {
 		issueHistory("wip:v1:00000000000000000000000000000001", "owner/repo", 10437),
 		issueHistory("wip:v1:00000000000000000000000000000002", "owner/repo", 10438),
 	}
-	bindings := sessionregistry.WIPBindingReport{Bindings: []sessionregistry.WIPExecutionBinding{
-		{RootRegistrationID: "one", Issue: &sessionregistry.WIPIssueIdentity{Repository: "owner/repo", Number: 10437}, Status: sessionregistry.WIPBindingJoined},
-		{RootRegistrationID: "two", Issue: &sessionregistry.WIPIssueIdentity{Repository: "owner/repo", Number: 10438}, Status: sessionregistry.WIPBindingJoined},
+	bindings := ExecutionBindingReport{Bindings: []ExecutionBinding{
+		{RootRegistrationID: "one", Issue: &ExecutionIssueIdentity{Repository: "owner/repo", Number: 10437}, Status: ExecutionBindingJoined},
+		{RootRegistrationID: "two", Issue: &ExecutionIssueIdentity{Repository: "owner/repo", Number: 10438}, Status: ExecutionBindingJoined},
 	}}
 	got, err := JoinIssueSessions(histories, bindings)
 	if err != nil {
@@ -45,10 +43,10 @@ func TestJoinIssueSessionsKeepsSimilarIssuesSeparate(t *testing.T) {
 
 func TestJoinIssueSessionsPreservesTypedDebt(t *testing.T) {
 	history := issueHistory("wip:v1:00000000000000000000000000000001", "owner/repo", 10437)
-	bindings := sessionregistry.WIPBindingReport{Bindings: []sessionregistry.WIPExecutionBinding{
-		{RootRegistrationID: "legacy", RegistrationIDs: []string{"legacy"}, Status: sessionregistry.WIPBindingMissing, Details: []string{"lineage has no durable issue binding"}},
-		{RootRegistrationID: "conflict", RegistrationIDs: []string{"conflict"}, Status: sessionregistry.WIPBindingConflicting, Details: []string{"lineage carries conflicting issue bindings"}},
-		{RootRegistrationID: "stale", Issue: &sessionregistry.WIPIssueIdentity{Repository: "owner/repo", Number: 10437}, Status: sessionregistry.WIPBindingStale},
+	bindings := ExecutionBindingReport{Bindings: []ExecutionBinding{
+		{RootRegistrationID: "legacy", RegistrationIDs: []string{"legacy"}, Status: ExecutionBindingMissing, Details: []string{"lineage has no durable issue binding"}},
+		{RootRegistrationID: "conflict", RegistrationIDs: []string{"conflict"}, Status: ExecutionBindingConflicting, Details: []string{"lineage carries conflicting issue bindings"}},
+		{RootRegistrationID: "stale", Issue: &ExecutionIssueIdentity{Repository: "owner/repo", Number: 10437}, Status: ExecutionBindingStale},
 	}}
 	got, err := JoinIssueSessions([]History{history}, bindings)
 	if err != nil {
@@ -67,7 +65,7 @@ func TestJoinIssueSessionsDoesNotSilentlyDeduplicateConflictingUnits(t *testing.
 		issueHistory("wip:v1:00000000000000000000000000000001", "owner/repo", 10437),
 		issueHistory("wip:v1:00000000000000000000000000000002", "owner/repo", 10437),
 	}
-	got, err := JoinIssueSessions(histories, sessionregistry.WIPBindingReport{})
+	got, err := JoinIssueSessions(histories, ExecutionBindingReport{})
 	if err != nil {
 		t.Fatal(err)
 	}
