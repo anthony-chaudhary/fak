@@ -17,6 +17,33 @@
           }
         ],
         "matcher": "Bash|Read|Write|Edit|MultiEdit|NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh",
+            "args": [
+              "-c",
+              "dos hook pretool; exit 0"
+            ],
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "sh",
+            "args": [
+              "-c",
+              "dos hook stop; exit 0"
+            ],
+            "type": "command"
+          }
+        ]
       }
     ]
   }
