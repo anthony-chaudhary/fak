@@ -115,13 +115,6 @@ func BuildErrorInventory(in ErrorInventoryInput) (ErrorInventory, error) {
 
 func classifyErrorObservation(obs ErrorObservation, identities map[string][]int) ErrorInventoryIssue {
 	row := ErrorInventoryIssue{Issue: obs.Issue, CanonicalIssue: obs.Issue, ObservedFailure: obs.Observed, ProvenFix: obs.Fix, CurrentTestedState: obs.Current, ScopeException: obs.ScopeException}
-	if key := failureIdentity(obs.Observed); key != "" && len(identities[key]) > 1 && identities[key][0] != obs.Issue {
-		row.CanonicalIssue = identities[key][0]
-		row.Disposition = DispositionDuplicateProven
-		row.ReasonCodes = []string{"STABLE_FAILURE_IDENTITY_MATCH"}
-		row.DuplicateEvidence = []DuplicateEvidence{{Issue: row.CanonicalIssue, Kind: "stable_identity"}}
-		return row
-	}
 	if evidenceStale(obs.Observed) || evidenceStale(obs.Fix) || evidenceStale(obs.Current) {
 		row.Disposition = DispositionStaleEvidence
 		row.ReasonCodes = []string{"STALE_RECEIPT"}
@@ -132,15 +125,22 @@ func classifyErrorObservation(obs ErrorObservation, identities map[string][]int)
 		row.ReasonCodes = []string{"OBSERVED_FAILURE_REQUIRED"}
 		return row
 	}
-	if isFailure(obs.Current.Status) && sameFailure(obs.Observed, obs.Current) {
+	if key := failureIdentity(obs.Observed); key != "" && len(identities[key]) > 1 && identities[key][0] != obs.Issue {
+		row.CanonicalIssue = identities[key][0]
+		row.Disposition = DispositionDuplicateProven
+		row.ReasonCodes = []string{"STABLE_FAILURE_IDENTITY_MATCH"}
+		row.DuplicateEvidence = []DuplicateEvidence{{Issue: row.CanonicalIssue, Kind: "stable_identity"}}
+		return row
+	}
+	if isFailure(obs.Current.Status) && strings.TrimSpace(obs.Current.Witness) != "" && sameFailure(obs.Observed, obs.Current) {
 		row.Disposition = DispositionActionable
 		row.ReasonCodes = []string{"CURRENT_REGRESSION_REPRODUCED"}
 		return row
 	}
-	if isPassing(obs.Current.Status) && strings.TrimSpace(obs.Current.Witness) != "" && strings.TrimSpace(obs.Fix.Commit) != "" {
+	if isPassing(obs.Current.Status) && strings.TrimSpace(obs.Current.Witness) != "" && strings.TrimSpace(obs.Fix.Commit) != "" && strings.TrimSpace(obs.Fix.Witness) != "" {
 		for i := range obs.Releases {
 			rel := obs.Releases[i]
-			if rel.FixAncestor || rel.PassingReceipt {
+			if strings.TrimSpace(rel.Witness) != "" && (rel.FixAncestor || rel.PassingReceipt) {
 				row.Disposition = DispositionFixReleased
 				if rel.FixAncestor {
 					row.ReasonCodes = []string{"RELEASE_TAG_CONTAINS_FIX"}
