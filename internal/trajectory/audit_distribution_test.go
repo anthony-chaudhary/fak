@@ -164,6 +164,36 @@ func TestAuditToolResultsClaudeMCPAndResultBeforeCall(t *testing.T) {
 	}
 }
 
+func TestClassifyClaudeMixedContentBlocksPreservesOrderIDsAndBytes(t *testing.T) {
+	payload := json.RawMessage(`{"content":[{"type":"text","text":"TEXT"},{"type":"thinking","thinking":"THINK"},{"type":"tool_use","id":"call-7","name":"mcp__x__read","input":{"path":"a.txt"}},{"type":"tool_result","tool_use_id":"call-7","content":"RESULT"}]}`)
+	events := classifyClaudeContentEvents("assistant_message", "assistant", payload)
+	if len(events) != 4 {
+		t.Fatalf("events = %d, want one per content block", len(events))
+	}
+	want := []struct {
+		category string
+		tool     string
+		id       string
+		content  string
+	}{
+		{category: "assistant_message", content: "TEXT"},
+		{category: "reasoning", content: "THINK"},
+		{category: "tool_call", tool: "mcp__x__read", id: "call-7", content: `{"path":"a.txt"}`},
+		{category: "tool_result", id: "call-7", content: "RESULT"},
+	}
+	var gotBytes, wantBytes int
+	for i, expected := range want {
+		got := events[i]
+		if got.category != expected.category || got.tool != expected.tool || got.id != expected.id || string(got.content) != expected.content {
+			t.Fatalf("event %d = {category:%q tool:%q id:%q content:%q}, want %+v", i, got.category, got.tool, got.id, got.content, expected)
+		}
+		gotBytes += len(got.content)
+		wantBytes += len(expected.content)
+	}
+	if gotBytes != wantBytes {
+		t.Fatalf("content bytes = %d, want %d", gotBytes, wantBytes)
+	}
+}
 func TestAuditClaudeMixedBlocksConserveResultProjectionBothOrders(t *testing.T) {
 	orders := []string{
 		`{"type":"text","text":"TEXT"},{"type":"thinking","thinking":"THINK"},{"type":"tool_result","tool_use_id":"c1","is_error":false,"content":"RESULT"}`,
