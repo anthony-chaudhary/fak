@@ -209,10 +209,11 @@ func wipUsage(w io.Writer) {
       set and exits 3 if any exist. Read-only. The --ttl claim window is also the cost
       bound: only checkpoints inside it (or held by a live session) are read.
 
-  fak wip admit [-C <repo>] --self <session> [--intend <glob>]... [--strict] [--ceiling N] [--json]
-      Read-only start-of-task admission. Refuse hard peer collisions and untracked
-      WIP before beginning another unit; optionally promote soft intent/self-WIP
-      pressure to HOLD with --strict.
+  fak wip admit [-C <repo>] --self <session> [--path <glob>]... [--strict] [--ceiling N] [--work-intent fresh|recovery|landing|safety|continuation] [--flow-window N] [--json]
+      Read-only start-of-task admission. Refuse hard peer collisions, stale untracked
+      source, and fresh discretionary WIP when the witnessed arrival/service ratio is
+      above the flowmetrics threshold. Recovery, landing, safety, and already-owned
+      continuations remain admitted. Use --flow-issues-file for deterministic replay.
 
   fak wip blocked [-C <repo>] [--ledger <path>] [--stale-days N] [--landable] [--json]
       Rank the dirty working tree by the dispatch admissions each path has REFUSED

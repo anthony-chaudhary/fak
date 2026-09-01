@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
 )
@@ -86,4 +87,86 @@ func initWipAdmitRepo(t *testing.T) string {
 		}
 	}
 	return repo
+}
+
+func TestRunWipAdmitRefusesFreshFlowOverloadWithTypedReceipt(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	issues := writeWipFlowIssues(t, repo, 3, 1)
+	var out, errOut bytes.Buffer
+	code := runWip(&out, &errOut, []string{
+		"admit", "-C", repo, "--session", "session-a", "--json",
+		"--flow-issues-file", issues, "--flow-window", "30",
+	})
+	if code != wipAdmitHoldExit {
+		t.Fatalf("code=%d stderr=%s out=%s", code, errOut.String(), out.String())
+	}
+	var got struct {
+		Verdict string `json:"verdict"`
+		Flow    struct {
+			Verdict    string  `json:"verdict"`
+			ReasonCode string  `json:"reason_code"`
+			Threshold  float64 `json:"threshold"`
+			Observed   struct {
+				Arrivals    int     `json:"arrivals"`
+				Service     int     `json:"service"`
+				ArrivalRate float64 `json:"arrival_rate_per_day"`
+				ServiceRate float64 `json:"service_rate_per_day"`
+				WindowDays  float64 `json:"window_days"`
+			} `json:"observed"`
+		} `json:"flow"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != string(wipattr.AdmitHold) || got.Flow.Verdict != "REFUSE" || got.Flow.ReasonCode != "FLOW_ARRIVAL_EXCEEDS_SERVICE" {
+		t.Fatalf("receipt=%+v", got)
+	}
+	if got.Flow.Observed.Arrivals != 3 || got.Flow.Observed.Service != 1 || got.Flow.Observed.ArrivalRate <= got.Flow.Observed.ServiceRate || got.Flow.Observed.WindowDays < 29.9 || got.Flow.Threshold != 1.10 {
+		t.Fatalf("flow=%+v", got.Flow)
+	}
+}
+
+func TestRunWipAdmitExemptsRecoveryFromFlowOverload(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	issues := writeWipFlowIssues(t, repo, 3, 1)
+	var out, errOut bytes.Buffer
+	code := runWip(&out, &errOut, []string{
+		"admit", "-C", repo, "--session", "session-a", "--json",
+		"--work-intent", "recovery", "--flow-issues-file", issues,
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s out=%s", code, errOut.String(), out.String())
+	}
+	if !strings.Contains(out.String(), `"intent": "recovery"`) || !strings.Contains(out.String(), `"verdict": "ADMIT"`) {
+		t.Fatalf("receipt=%s", out.String())
+	}
+}
+
+func writeWipFlowIssues(t *testing.T, repo string, opened, closed int) string {
+	t.Helper()
+	now := time.Now().UTC()
+	rows := make([]map[string]any, 0, opened)
+	for i := 0; i < opened; i++ {
+		row := map[string]any{
+			"number":    i + 1,
+			"title":     "flow fixture",
+			"createdAt": now.Add(-time.Duration(i+1) * 24 * time.Hour),
+			"closedAt":  nil,
+			"labels":    []any{},
+			"body":      "",
+		}
+		if i < closed {
+			row["closedAt"] = now.Add(-time.Duration(i+1) * 12 * time.Hour)
+		}
+		rows = append(rows, row)
+	}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "flow-issues.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flowmetrics"
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 )
@@ -60,6 +61,9 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	strict := fs.Bool("strict", false, "promote every soft finding (undeclared intent, unlanded self-WIP) to a hard HOLD")
 	ceiling := fs.Int("ceiling", 0, "override how many unlanded paths this session may already hold (default: 3)")
 	asJSON := fs.Bool("json", false, "emit the admission report as JSON")
+	workIntent := fs.String("work-intent", string(flowmetrics.IntentFresh), "admission intent: fresh, recovery, landing, safety, or continuation")
+	flowIssuesFile := fs.String("flow-issues-file", "", "replay a saved gh issue list JSON corpus for arrival/service admission")
+	flowWindow := fs.Int("flow-window", 30, "arrival/service admission window in days")
 	maxUntrackedAge := fs.Duration("max-untracked-age", time.Hour, "refuse stale untracked source work before admitting a new task (0 disables)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
@@ -70,6 +74,15 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	}
 	if self == "" {
 		fmt.Fprintln(stderr, "fak wip admit: --session is required when no session environment is set")
+		return 2
+	}
+	intent, err := flowmetrics.ParseAdmissionIntent(*workIntent)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak wip admit: %v\n", err)
+		return 2
+	}
+	if *flowWindow <= 0 {
+		fmt.Fprintln(stderr, "fak wip admit: --flow-window must be positive")
 		return 2
 	}
 	if *maxUntrackedAge > 0 {
@@ -94,16 +107,60 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak wip admit: %v\n", err)
 		return 1
 	}
+	flow, flowErr := loadFlowAdmission(context.Background(), *repo, *flowIssuesFile, intent, *flowWindow)
+	if flowErr != nil {
+		fmt.Fprintf(stderr, "fak wip admit: arrival/service measurement unavailable (%v); preserving the existing WIP decision\n", flowErr)
+	}
+	result := wipAdmissionResult{AdmitReport: rep, Flow: flow}
+	if flow != nil && flow.Verdict == "REFUSE" {
+		result.Verdict = wipattr.AdmitHold
+	}
 	if *asJSON {
-		if code := encodeJSONOrFail(stdout, stderr, rep, "fak wip admit"); code != 0 {
+		if code := encodeJSONOrFail(stdout, stderr, result, "fak wip admit"); code != 0 {
 			return code
 		}
-		if rep.Verdict == wipattr.AdmitHold {
+		if result.Verdict == wipattr.AdmitHold {
 			return wipAdmitHoldExit
 		}
 		return 0
 	}
+	if flow != nil && flow.Verdict == "REFUSE" {
+		fmt.Fprintf(stderr, "HOLD — %s: %.1f arrivals/day vs %.1f service/day over %.0fd; ratio=%s threshold=%.2f\n", flow.ReasonCode, flow.Observed.ArrivalRate, flow.Observed.ServiceRate, flow.Observed.WindowDays, flowRatioLabel(flow.Observed.Ratio), flow.Threshold)
+		return wipAdmitHoldExit
+	}
 	return wipAdmitRender(stdout, stderr, rep)
+}
+
+type wipAdmissionResult struct {
+	wipattr.AdmitReport
+	Flow *flowmetrics.AdmissionReceipt `json:"flow,omitempty"`
+}
+
+func loadFlowAdmission(ctx context.Context, repo, issuesFile string, intent flowmetrics.AdmissionIntent, windowDays int) (*flowmetrics.AdmissionReceipt, error) {
+	var (
+		issues []flowmetrics.Issue
+		err    error
+	)
+	if issuesFile != "" {
+		issues, err = flowmetrics.LoadIssuesFile(issuesFile)
+	} else {
+		issues, err = flowmetrics.GatherIssues(ctx, repo, "all", 0)
+	}
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	since := now.Add(-time.Duration(windowDays) * 24 * time.Hour)
+	observed := flowmetrics.MeasureArrivalService(flowmetrics.BuildSpans(issues, nil), since, now)
+	receipt := flowmetrics.AdmitWIP(intent, observed, flowmetrics.ArrivalServiceRatioCeiling)
+	return &receipt, nil
+}
+
+func flowRatioLabel(ratio *float64) string {
+	if ratio == nil {
+		return "infinite"
+	}
+	return fmt.Sprintf("%.2f", *ratio)
 }
 
 // wipAdmit gathers the three git facts the fold needs and applies it. The gatherers are
