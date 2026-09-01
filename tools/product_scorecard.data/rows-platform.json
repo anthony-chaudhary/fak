@@ -166,6 +166,30 @@
         "Resource state is sampled from the current Go runtime, so it sees only this process"
       ],
       "durability_note": "Stdlib-only; ETA is emitted only on positive progress against a known total, so it never invents a finish time."
+    },
+    {
+      "id": "claims-ledger",
+      "concept": "The honesty ledger (CLAIMS.md — one tagged, exposure-declared claim page per claim)",
+      "category": "platform",
+      "surface": "product",
+      "what_you_get": "One honesty ledger where every fak capability claim carries exactly one SHIPPED/SIMULATED/STUB tag plus a machine-readable exposure state, indexed as one addressable page per claim under docs/claims/ and machine-checked by the claims-lint gate on every push.",
+      "audience": "buyer",
+      "maturity": "shipped",
+      "claims_section": "Claims",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/claimcheck",
+      "witness": "go test -v -run TestCLAIMSLedger ./internal/claimcheck (the claims-lint gate, in CI on every push)",
+      "entry_doc": "CLAIMS.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "A document + CI gate, not a runnable surface — there is no copy-pasteable command that renders or queries the ledger (the lint is `go test ./internal/claimcheck`, not a cmd/ verb)",
+        "The ledger gate proves the ledger's STRUCTURE (one tag per line, declared exposure with a stated reason on every gated line, page addressing) — the truth of each individual claim is witnessed by that claim's own subsystem tests, not re-proven by the ledger gate"
+      ],
+      "durability_note": "TestCLAIMSLedger re-derives the ledger contract from CLAIMS.md itself on every push, and the 33 per-claim pages under docs/claims/ are the durable record a reader follows from any tag."
     }
   ]
 }
