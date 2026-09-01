@@ -96,18 +96,33 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 		return r
 	}
 
+	rootReal, dir, ok := resolveEffectiveTarget(root, target, &r)
+	if !ok {
+		return r
+	}
+	names := effectiveSourceNames(opts.Fallbacks, &r)
+	dirs, err := hierarchy(rootReal, dir)
+	if err != nil {
+		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Reason: "hierarchy_failed", Detail: err.Error()})
+		return r
+	}
+	state := resolveEffectiveSources(rootReal, dirs, names, opts, &r)
+	finalizeEffectiveResult(&r, state)
+	return r
+}
+
+func resolveEffectiveTarget(root, target string, r *EffectiveResult) (rootReal, dir string, ok bool) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Reason: "root_absolute_failed", Detail: err.Error()})
-		return r
+		return "", "", false
 	}
-	rootReal, err := filepath.EvalSymlinks(filepath.Clean(rootAbs))
+	rootReal, err = filepath.EvalSymlinks(filepath.Clean(rootAbs))
 	if err != nil {
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Reason: "root_canonicalization_failed", Detail: err.Error()})
-		return r
+		return "", "", false
 	}
 	rootReal, _ = filepath.Abs(rootReal)
-
 	if target == "" {
 		target = "."
 	}
@@ -119,7 +134,7 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 	if err != nil {
 		r.Target = slashClean(target)
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Path: r.Target, Reason: "target_canonicalization_failed", Detail: err.Error()})
-		return r
+		return "", "", false
 	}
 	targetReal, _ = filepath.Abs(targetReal)
 	relTarget, inside := relativeInside(rootReal, targetReal)
@@ -127,15 +142,15 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 		r.Status = StatusOutsideRoot
 		r.Target = slashClean(target)
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Path: r.Target, Reason: "target_outside_root"})
-		return r
+		return "", "", false
 	}
 	info, err := os.Stat(targetReal)
 	if err != nil {
 		r.Target = filepath.ToSlash(relTarget)
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Path: r.Target, Reason: "target_stat_failed", Detail: err.Error()})
-		return r
+		return "", "", false
 	}
-	dir := targetReal
+	dir = targetReal
 	if info.IsDir() {
 		r.TargetKind = "directory"
 	} else if info.Mode().IsRegular() {
@@ -144,16 +159,19 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 	} else {
 		r.Target = filepath.ToSlash(relTarget)
 		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Path: r.Target, Reason: "unsupported_target_kind"})
-		return r
+		return "", "", false
 	}
 	r.Target = filepath.ToSlash(relTarget)
 	if r.Target == "" {
 		r.Target = "."
 	}
+	return rootReal, dir, true
+}
 
+func effectiveSourceNames(fallbacks []string, r *EffectiveResult) []string {
 	names := []string{"AGENTS.override.md", FileName}
 	seen := map[string]bool{"AGENTS.override.md": true, FileName: true}
-	for _, fallback := range opts.Fallbacks {
+	for _, fallback := range fallbacks {
 		if filepath.Base(fallback) != fallback || fallback == "." || fallback == "" || filepath.IsAbs(fallback) {
 			r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Path: slashClean(fallback), Reason: "invalid_fallback", Detail: "fallback must be a file name"})
 			continue
@@ -163,12 +181,20 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 			names = append(names, fallback)
 		}
 	}
+	return names
+}
 
-	dirs, err := hierarchy(rootReal, dir)
-	if err != nil {
-		r.Diagnostics = append(r.Diagnostics, ResolutionDiagnostic{Reason: "hierarchy_failed", Detail: err.Error()})
-		return r
-	}
+type effectiveResolutionState struct {
+	combined       []byte
+	digestSources  []EffectiveSource
+	selectedCount  int
+	hadReadFailure bool
+	truncated      bool
+	escaped        bool
+}
+
+func resolveEffectiveSources(rootReal string, dirs, names []string, opts ResolveOptions, r *EffectiveResult) effectiveResolutionState {
+	var state effectiveResolutionState
 	var combined []byte
 	var digestSources []EffectiveSource
 	selectedCount := 0
@@ -265,27 +291,35 @@ func ResolveEffective(root, target string, opts ResolveOptions) EffectiveResult 
 			digestSources = append(digestSources, s)
 		}
 	}
+	state.combined = combined
+	state.digestSources = digestSources
+	state.selectedCount = selectedCount
+	state.hadReadFailure = hadReadFailure
+	state.truncated = truncated
+	state.escaped = escaped
+	return state
+}
 
-	r.Bytes = len(combined)
+func finalizeEffectiveResult(r *EffectiveResult, state effectiveResolutionState) {
+	r.Bytes = len(state.combined)
 	switch {
-	case escaped:
+	case state.escaped:
 		r.Status = StatusOutsideRoot
-	case truncated:
+	case state.truncated:
 		r.Status = StatusTruncated
-	case selectedCount == 0:
+	case state.selectedCount == 0:
 		r.Status = StatusUnknown
-	case hadReadFailure:
+	case state.hadReadFailure:
 		r.Status = StatusPartial
-	case !opts.Trusted:
+	case !r.Trusted:
 		r.Status = StatusUntrusted
 	default:
 		r.Status = StatusComplete
 	}
 	if r.Status == StatusComplete {
-		r.Instructions = string(combined)
-		r.EffectiveSHA256 = digestEffective(digestSources)
+		r.Instructions = string(state.combined)
+		r.EffectiveSHA256 = digestEffective(state.digestSources)
 	}
-	return r
 }
 
 func hierarchy(root, targetDir string) ([]string, error) {
