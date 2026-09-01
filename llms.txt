@@ -45,6 +45,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
+- Builder stability and ownership ladder (CLI → semantic protocol → public Go API → sidecar → internal leaves): [`docs/builder-contract-ladder.md`](docs/builder-contract-ladder.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - Canonical identity and nearest-contrast lookup for overloaded terms: [`docs/generated/disambiguation/INDEX.md`](docs/generated/disambiguation/INDEX.md)
