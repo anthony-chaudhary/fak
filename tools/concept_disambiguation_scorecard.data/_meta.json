@@ -13663,6 +13663,36 @@
           "category": "incidental",
           "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
           "token": "boundedSelfUpdateCandidateCacheReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed implementation symbol within the existing supervision policy concept; it names the validated root, agent, or serving fault-domain family rather than a separate user-facing plan concept.",
+          "token": "FaultPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneRoot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneAgent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneServing"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed-set validation helper for the existing supervision policy schema, not a separate user-facing plan concept.",
+          "token": "knownFaultPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mapping helper that enforces the existing supervision policy process-class-to-fault-domain invariant, not a separate user-facing plan concept.",
+          "token": "processClassPlane"
         }
       ],
       "exclude": [
@@ -13697,6 +13727,10 @@
         "ExplainFilingPlan",
         "ExplanationSeconds",
         "FallbackCandidate",
+        "FaultPlane",
+        "FaultPlaneAgent",
+        "FaultPlaneRoot",
+        "FaultPlaneServing",
         "FleetBenchPlanDoc",
         "GoCandidateCapability",
         "GoCandidateKind",
@@ -13818,6 +13852,7 @@
         "indexPlanSteps",
         "indexedPlanStep",
         "inspectCodexMarketplaceCandidate",
+        "knownFaultPlane",
         "listPlan",
         "measuredPlanner",
         "mergePlanDigest",
@@ -13844,6 +13879,7 @@
         "planted",
         "planting",
         "plants",
+        "processClassPlane",
         "recoveryJournalCandidates",
         "register_bench_plan_doc",
         "relationCandidates",
