@@ -9,29 +9,61 @@ on:
         description: Exact native-performance envelope ID
         required: true
         type: string
+      request_run_id:
+        description: Workflow run ID that returned the scrubbed gate-request artifact
+        required: true
+        type: string
       request_artifact:
         description: Scrubbed gate-request artifact name produced by the sanctioned private campaign
         required: true
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  request-sanctioned-campaign:
+  evaluate-returned-receipt:
     runs-on: ubuntu-latest
+    env:
+      ENVELOPE: ${{ inputs.envelope || vars.NATIVE_PERFORMANCE_ENVELOPE }}
+      REQUEST_RUN_ID: ${{ inputs.request_run_id || vars.NATIVE_PERFORMANCE_REQUEST_RUN_ID }}
+      REQUEST_ARTIFACT: ${{ inputs.request_artifact || vars.NATIVE_PERFORMANCE_REQUEST_ARTIFACT }}
     steps:
       - uses: actions/checkout@v4
-      - name: verify public/private boundary
+      - name: require returned receipt source
         shell: bash
         run: |
-          test -n "${{ inputs.envelope || 'scheduled-envelope-roster' }}"
-          echo "Run the exact envelope through the sanctioned private bridge in docs/private-comms-channel.md."
-          echo "Raw hostnames, credentials, paths, and profiler logs remain private."
-      - name: consume scrubbed verdict when dispatched
-        if: github.event_name == 'workflow_dispatch'
+          set -euo pipefail
+          test -n "$ENVELOPE"
+          test -n "$REQUEST_RUN_ID"
+          test -n "$REQUEST_ARTIFACT"
+          {
+            echo "## Native-performance regression gate"
+            echo
+            echo "- Envelope: \`$ENVELOPE\`"
+            echo "- Return run: \`$REQUEST_RUN_ID\`"
+            echo "- Return artifact: \`$REQUEST_ARTIFACT\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: download scrubbed gate request
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.REQUEST_RUN_ID }}
+          name: ${{ env.REQUEST_ARTIFACT }}
+          path: returned-request
+      - name: build native-performance gate
         shell: bash
-        run: |
-          echo "Expected private return artifact: ${{ inputs.request_artifact }}"
-          echo "Validate with: fak native-performance --gate <downloaded-request.json>"
-          echo "A regression exits 3 and publishes its guarded bisect packet."
+        run: go build -o "$RUNNER_TEMP/fak" ./cmd/fak
+      - name: evaluate returned receipt
+        shell: bash
+        run: bash .github/scripts/native-performance-regression.sh "$RUNNER_TEMP/fak" returned-request/gate-request.json native-performance-verdict/verdict.json "$GITHUB_STEP_SUMMARY"
+      - name: preserve gate verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-performance-verdict-${{ github.run_id }}
+          path: native-performance-verdict/verdict.json
+          if-no-files-found: warn
+          retention-days: 90
