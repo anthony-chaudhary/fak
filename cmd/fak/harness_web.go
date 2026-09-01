@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/harnessweb"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -37,7 +38,9 @@ func (harnessLocalWorkSource) LiveIntentKeys(ctx context.Context, root string, n
 var harnessDOSLive = func(ctx context.Context, root string) ([]byte, error) {
 	timeoutScope, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
-	return exec.CommandContext(timeoutScope, "dos", "--workspace", root, "lease-lane", "live").Output()
+	cmd := exec.CommandContext(timeoutScope, "dos", "--workspace", root, "lease-lane", "live")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Output()
 }
 
 func (harnessLocalWorkSource) LiveDOSLeases(ctx context.Context, root string, _ time.Time) ([]harnessweb.LocalDOSLease, error) {
