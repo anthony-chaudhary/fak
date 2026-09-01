@@ -1368,3 +1368,115 @@ func TestWorktreeColdReapApplyUsesOnePlanningSnapshot(t *testing.T) {
 		t.Fatalf("apply receipt did not preserve planned bytes: %+v", got)
 	}
 }
+
+func captureWorktreeWorkerStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = write
+	defer func() { os.Stdout = old }()
+	fn()
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return bytes.TrimSpace(raw)
+}
+
+func TestWorktreeWorkerListLocalOnlyOutputUnchangedWhenRemoteOmitted(t *testing.T) {
+	repo, _, _ := newSingleReapFixture(t)
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerList([]string{"--root", repo, "--json"}) })
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	want := []string{"schema", "count", "paths", "inventory", "capacity"}
+	if len(got) != len(want) {
+		t.Fatalf("local-only keys=%v output=%s", reflect.ValueOf(got).MapKeys(), raw)
+	}
+	for _, key := range want {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("missing local-only key %q: %s", key, raw)
+		}
+	}
+	for _, forbidden := range []string{"local", "remote", "hosts", "fetched"} {
+		if _, ok := got[forbidden]; ok {
+			t.Fatalf("local-only output gained %q: %s", forbidden, raw)
+		}
+	}
+}
+
+func worktreeWorkerTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func worktreeWorkerSnapshotClones(t *testing.T) (string, string, string) {
+	t.Helper()
+	base := t.TempDir()
+	bare := filepath.Join(base, "remote.git")
+	worktreeWorkerTestGit(t, base, "init", "--bare", bare)
+	source := filepath.Join(base, "source")
+	worktreeWorkerTestGit(t, base, "clone", bare, source)
+	if err := os.WriteFile(filepath.Join(source, "README"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	worktreeWorkerTestGit(t, source, "add", "README")
+	worktreeWorkerTestGit(t, source, "-c", "user.name=fak-test", "-c", "user.email=fak@example.invalid", "commit", "-m", "seed")
+	worktreeWorkerTestGit(t, source, "push", "origin", "HEAD:main")
+	clone := filepath.Join(base, "clone")
+	worktreeWorkerTestGit(t, base, "clone", "--branch", "main", bare, clone)
+	return bare, source, clone
+}
+
+func TestWorktreeWorkerRemoteListGroupsLocalAndRemoteProvenance(t *testing.T) {
+	_, source, clone := worktreeWorkerSnapshotClones(t)
+	now := time.Now().UTC()
+	s, err := workerworktree.NewRemoteSnapshot("publisher", now, []workerworktree.SnapshotRow{{Association: workerworktree.SnapshotAssociation{State: "ASSOCIATED", Lane: "lane-a"}, Liveness: workerworktree.SnapshotLiveness{Owner: "LIVE", Lease: "LIVE"}, Cleanliness: workerworktree.SnapshotCleanliness{State: "CLEAN"}, Lifecycle: "READY"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := workerworktree.PublishRemoteSnapshot(source, "origin", s, true, nil); !got.OK {
+		t.Fatalf("publish=%+v", got)
+	}
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerList([]string{"--root", clone, "--json", "--remote", "origin", "--fetch"}) })
+	var got worktreeWorkerRemoteListOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	if got.Schema != "fak-worker-cross-host-lifecycle/1" || got.Local.Provenance != "LOCAL_LIVE" || !got.Local.Authoritative || got.Local.Freshness != workerworktree.SnapshotFresh {
+		t.Fatalf("local=%+v", got.Local)
+	}
+	if !got.Fetched || got.Remote != "origin" || len(got.Hosts) != 1 {
+		t.Fatalf("remote output=%+v", got)
+	}
+	if got.Hosts[0].Provenance != "REMOTE_SNAPSHOT" || got.Hosts[0].Authoritative || got.Hosts[0].Freshness != workerworktree.SnapshotFresh {
+		t.Fatalf("host=%+v", got.Hosts[0])
+	}
+}
+
+func TestWorktreeWorkerPublishRequiresExplicitMode(t *testing.T) {
+	raw := captureWorktreeWorkerStdout(t, func() { worktreeWorkerPublish([]string{"--remote", "origin"}) })
+	var got workerworktree.SnapshotPublishResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v output=%s", err, raw)
+	}
+	if got.OK || !strings.Contains(got.Reason, "exactly one") {
+		t.Fatalf("publish=%+v", got)
+	}
+}
