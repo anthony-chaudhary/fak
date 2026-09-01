@@ -71,13 +71,20 @@ func ParseDarwin(vmStat string, pageSize, total int64) Memory {
 	purgeable := vals["pages purgeable"] * pageSize
 	wired := firstVal(vals, "pages wired down", "wired pages") * pageSize
 	compressed := vals["pages occupied by compressor"] * pageSize
+	// macOS parks most reclaimable RAM in inactive (evicted-but-recoverable) and
+	// speculative (readahead) pages. Counting only free+purgeable made available read
+	// ~0 on a healthy steady-state Mac (free 0.2G + inactive 16.6G) and refused every
+	// Metal model load in the serve --gguf admission (#10595). Activity Monitor's
+	// "memory used" treats inactive as available too.
+	inactive := vals["pages inactive"] * pageSize
+	speculative := vals["pages speculative"] * pageSize
 	return Memory{
 		TotalBytes:      total,
 		FreeBytes:       free,
 		PurgeableBytes:  purgeable,
 		WiredBytes:      wired,
 		CompressedBytes: compressed,
-		AvailableBytes:  max64(free+purgeable-int64(SafetyMarginGB*1e9), 0),
+		AvailableBytes:  max64(free+inactive+speculative+purgeable-int64(SafetyMarginGB*1e9), 0),
 	}
 }
 
