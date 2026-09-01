@@ -230,7 +230,9 @@ func readIncidentSession(path string, limit int64) (incidentMeta, int64, bool, e
 					}
 				case "response_item":
 					if meta.Prompt == "" {
-						meta.Prompt = incidentUserPrompt(row.Payload)
+						if prompt, launch := incidentUserPrompt(row.Payload); launch {
+							meta.Prompt = prompt
+						}
 					}
 				}
 			}
@@ -266,7 +268,7 @@ func incidentSource(originator string, raw json.RawMessage) (string, string) {
 	return "cli", ""
 }
 
-func incidentUserPrompt(raw json.RawMessage) string {
+func incidentUserPrompt(raw json.RawMessage) (string, bool) {
 	var payload struct {
 		Type    string `json:"type"`
 		Role    string `json:"role"`
@@ -274,9 +276,22 @@ func incidentUserPrompt(raw json.RawMessage) string {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		Metadata struct {
+			ContentItemKinds []string `json:"content_item_kinds"`
+		} `json:"internal_chat_message_metadata_passthrough"`
 	}
 	if json.Unmarshal(raw, &payload) != nil || payload.Type != "message" || payload.Role != "user" {
-		return ""
+		return "", false
+	}
+	launch := false
+	for _, kind := range payload.Metadata.ContentItemKinds {
+		if kind == "user.text" {
+			launch = true
+			break
+		}
+	}
+	if !launch && len(payload.Metadata.ContentItemKinds) != 0 {
+		return "", false
 	}
 	var parts []string
 	for _, item := range payload.Content {
@@ -285,10 +300,10 @@ func incidentUserPrompt(raw json.RawMessage) string {
 		}
 	}
 	text := strings.TrimSpace(strings.Join(parts, "\n"))
-	if strings.HasPrefix(text, "<environment_context>") {
-		return ""
+	if strings.HasPrefix(text, "<environment_context>") || strings.HasPrefix(text, "<recommended_plugins>") {
+		return "", false
 	}
-	return text
+	return text, text != ""
 }
 
 func launchIdentityMatches(prompt, tag, promptSHA256 string) bool {

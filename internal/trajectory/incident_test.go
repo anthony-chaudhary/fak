@@ -73,7 +73,7 @@ func TestRunIncidentHonorsBounds(t *testing.T) {
 
 func writeIncidentFixture(t *testing.T, root, name, meta, prompt string, rest ...string) {
 	t.Helper()
-	row := map[string]any{"timestamp": "2026-08-31T18:29:01Z", "type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}}
+	row := map[string]any{"timestamp": "2026-08-31T18:29:01Z", "type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}, "internal_chat_message_metadata_passthrough": map[string]any{"content_item_kinds": []string{"user.text"}}}}
 	encoded, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
