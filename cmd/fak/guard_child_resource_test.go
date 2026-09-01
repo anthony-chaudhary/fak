@@ -113,11 +113,11 @@ func TestGuardResourceMonitorReasonsStayDistinctFromMeasuredLimits(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event := guardResourceMonitorFailure(42, procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, Processes: []procguard.MemoryProcess{{PID: 42}}}, tt.reason, tt.detail)
-			if event.Kind != guardChildResourceLimit || event.Resource == nil || !event.Resource.Stop || event.Resource.Reason != tt.reason {
+			if event.Kind != guardChildResourceLimit || event.Resource == nil || event.Resource.Stop || event.Resource.Reason != tt.reason {
 				t.Fatalf("event=%+v", event)
 			}
 			receipt := newGuardResourceReceipt("trace", "codex", 42, *event.Resource)
-			if receipt.Reason != tt.reason || receipt.Action != "reap_tree" || strings.Contains(receipt.Reason, "_LIMIT") {
+			if receipt.Reason != tt.reason || receipt.Action != "observe_only" || !receipt.DescendantsSurvive || strings.Contains(receipt.Reason, "_LIMIT") {
 				t.Fatalf("receipt=%+v", receipt)
 			}
 		})
@@ -150,7 +150,7 @@ func TestGuardResourceMeasuredBreachesKeepLimitReasons(t *testing.T) {
 func TestGuardResourceMonitorFailureIsTypedAndVisible(t *testing.T) {
 	snapshot := procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, RootPID: 42, Processes: []procguard.MemoryProcess{{PID: 42}, {PID: 43}}}
 	event := guardResourceMonitorFailure(42, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", "ps failed")
-	if event.Kind != guardChildResourceLimit || event.Resource == nil || !event.Resource.Stop || event.Resource.Reason != "CHILD_RESOURCE_MONITOR_ERROR" {
+	if event.Kind != guardChildResourceLimit || event.Resource == nil || event.Resource.Stop || event.Resource.Reason != "CHILD_RESOURCE_MONITOR_ERROR" {
 		t.Fatalf("event=%+v", event)
 	}
 	if !strings.Contains(event.Reason, "ps failed") || len(event.Resource.OwnedPIDs) != 2 {

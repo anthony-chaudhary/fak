@@ -283,7 +283,11 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 
 func guardResourceMonitorFailure(rootPID int, snapshot procguard.MemorySnapshot, reason, detail string) guardChildWaitEvent {
 	detail = scrubGuardResourceDetail(detail)
-	d := guardResourceDecision{Stop: true, Reason: reason, Metric: snapshot.Metric, TreeBytes: snapshot.TreeBytes, SystemBytes: snapshot.SystemBytes, SystemLimit: snapshot.SystemLimit, Offender: procguard.MemoryProcess{PID: rootPID}, Detail: detail}
+	// A missing or failed measurement is not evidence that the child crossed a
+	// resource limit. Keep the typed diagnostic on the resource event, but leave
+	// Stop false so supervision can report the degraded monitor without
+	// destroying an otherwise healthy workload.
+	d := guardResourceDecision{Reason: reason, Metric: snapshot.Metric, TreeBytes: snapshot.TreeBytes, SystemBytes: snapshot.SystemBytes, SystemLimit: snapshot.SystemLimit, Offender: procguard.MemoryProcess{PID: rootPID}, Detail: detail}
 	for _, process := range snapshot.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 		if process.PID == rootPID {
@@ -345,7 +349,13 @@ func newGuardResourceActivationID() string {
 }
 func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResourceDecision) guardResourceReceipt {
 	identity := guardResourceBuildIdentity()
-	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID}
+	action := "reap_tree"
+	descendantsSurvive := false
+	if !d.Stop {
+		action = "observe_only"
+		descendantsSurvive = true
+	}
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: action, DescendantsSurvive: descendantsSurvive, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID}
 	if receipt.BuildModule == "" {
 		receipt.BuildModule = "cmd/fak"
 	}
