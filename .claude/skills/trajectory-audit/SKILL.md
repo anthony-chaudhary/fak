@@ -75,6 +75,11 @@ per unique `message.id`, matching the provider-billed turn identity. Codex
 Codex `input_tokens` includes its cached/cache-write subsets, so fresh input is
 the exact subtraction `input - cached - cache_write`. The resulting input,
 output, cache-create, and cache-read buckets are disjoint across both harnesses.
+Codex session rows also preserve the configured `session_meta.model_provider`
+and summarize `last_token_usage.cached_input_tokens` with an observed sample
+count and min/max. Those bounds are transcript-producer telemetry for the
+configured provider path; they do not prove physical provider cache residency,
+process-local ownership, or hits in fak-owned caches.
 
 An unknown or malformed usage shape is never estimated. The verb writes a
 `refusal` row and the markdown diagnostic, prints
