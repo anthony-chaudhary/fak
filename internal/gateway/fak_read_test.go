@@ -160,3 +160,74 @@ func TestFakRead_ConfinesPath(t *testing.T) {
 		t.Fatalf("expected a confinement refusal, got %q", env.Content)
 	}
 }
+
+// TestNewArmsAdvertisedFakReadRoute is the #10296 regression witness: a gateway
+// that advertises fak_read must register its execution route before the first
+// single or batch call. Before the fix both calls were ALLOWed and then failed
+// with "no engine registered for route fakread".
+func TestNewArmsAdvertisedFakReadRoute(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+	abi.RegisterEngine("inkernel", echoEngine{})
+	if abi.Engine(agent.FakReadEngineID) != nil {
+		t.Fatal("fakread engine unexpectedly registered before gateway startup")
+	}
+
+	srv, err := New(Config{EngineID: "inkernel", Model: "guard-mcp-test", VDSO: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(srv.Close)
+	if abi.Engine(agent.FakReadEngineID) == nil {
+		t.Fatal("gateway advertised fak_read without registering its fakread engine")
+	}
+
+	files := []string{"fak_read_test.go", "mcp.go"}
+	want := make(map[string]string, len(files))
+	for _, path := range files {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", path, err)
+		}
+		want[path] = string(b)
+	}
+
+	wv, single, err := srv.fakRead(context.Background(), files[0], "guard-single", "")
+	if err != nil {
+		t.Fatalf("single fak_read: %v", err)
+	}
+	if wv.Kind != "ALLOW" || single == nil || single.Status != "OK" {
+		t.Fatalf("single fak_read result: verdict=%+v result=%+v", wv, single)
+	}
+	var singlePayload struct {
+		FilePath string `json:"file_path"`
+		Content  string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(single.Content), &singlePayload); err != nil {
+		t.Fatalf("decode single payload: %v", err)
+	}
+	if singlePayload.FilePath != files[0] || singlePayload.Content != want[files[0]] || single.Meta["engine"] != agent.FakReadEngineID {
+		t.Fatalf("single fak_read payload=%+v meta=%+v", singlePayload, single.Meta)
+	}
+
+	batch := srv.fakReadBatch(context.Background(), files, "guard-batch", "")
+	if batch.ItemCount != len(files) || len(batch.Results) != len(files) {
+		t.Fatalf("batch shape: %+v", batch)
+	}
+	for i, item := range batch.Results {
+		if item.Error != "" || item.Verdict.Kind != "ALLOW" || item.Result == nil || item.Result.Status != "OK" {
+			t.Fatalf("batch result[%d]=%+v", i, item)
+		}
+		var payload struct {
+			FilePath string `json:"file_path"`
+			Content  string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(item.Result.Content), &payload); err != nil {
+			t.Fatalf("decode batch result[%d]: %v", i, err)
+		}
+		if payload.FilePath != files[i] || payload.Content != want[files[i]] || item.Result.Meta["engine"] != agent.FakReadEngineID {
+			t.Fatalf("batch result[%d] payload=%+v meta=%+v", i, payload, item.Result.Meta)
+		}
+	}
+}
