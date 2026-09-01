@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/launchguard"
 )
 
 const guardCrashRSIMarkerEnv = "FAK_GUARD_CRASH_RSI"
@@ -40,6 +43,7 @@ type guardCrashRSIRequest struct {
 }
 
 var guardCrashRSILaunch = launchGuardCrashRSI
+var guardCrashRSIAdmit = admitGuardCrashRSILaunch
 
 // guardRSISession admits at most one launch attempt for the lifetime of one guard
 // session. Admission claims the slot before starting the worker, so even a failed
@@ -121,16 +125,59 @@ func guardMaybeLaunchFailureRSI(stderr io.Writer, session *guardRSISession, guar
 }
 
 func guardLaunchCrashRSI(stderr io.Writer, req guardCrashRSIRequest) bool {
+	finish, decision, err := guardCrashRSIAdmit(req.Tag)
+	if err != nil {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "fak guard: crash RSI launch skipped (%s): launchguard: %v\n", req.Tag, err)
+		}
+		return false
+	}
+	if finish == nil {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "fak guard: crash RSI launch refused (%s): %s", req.Tag, decision.Outcome)
+			if decision.RetryAfter > 0 {
+				fmt.Fprintf(stderr, " retry-after=%s", decision.RetryAfter.Round(time.Millisecond))
+			}
+			fmt.Fprintln(stderr)
+		}
+		return false
+	}
 	if err := guardCrashRSILaunch(req); err != nil {
+		_ = finish(false)
 		if stderr != nil {
 			fmt.Fprintf(stderr, "fak guard: crash RSI launch skipped (%s): %v\n", req.Tag, err)
 		}
 		return false
 	}
+	if err := finish(true); err != nil {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "fak guard: crash RSI launch state warning (%s): %v\n", req.Tag, err)
+		}
+	}
 	if stderr != nil {
 		fmt.Fprintf(stderr, "fak guard: spawned crash RSI session %s for original crash %s exit %d\n", req.Tag, req.Class, req.ExitCode)
 	}
 	return true
+}
+
+func admitGuardCrashRSILaunch(identity string) (func(bool) error, launchguard.Decision, error) {
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return nil, launchguard.Decision{}, err
+	}
+	g, err := launchguard.New(launchguard.Config{
+		Dir: filepath.Join(root, "fak", "launchguard"), MaxAttempts: 3,
+		Window: 10 * time.Minute, BaseBackoff: 5 * time.Second,
+		MaxBackoff: time.Minute, StaleAfter: 15 * time.Minute,
+	})
+	if err != nil {
+		return nil, launchguard.Decision{}, err
+	}
+	decision, lease, err := g.Admit(identity)
+	if err != nil || lease == nil {
+		return nil, decision, err
+	}
+	return lease.Finish, decision, nil
 }
 
 func guardCrashRSIAdmission(guardTraceID, agentName, class string, code, restartsSoFar int) (guardCrashRSIRequest, bool) {
