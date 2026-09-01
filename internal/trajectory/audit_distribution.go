@@ -701,15 +701,6 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 	}
 	return []auditClassifiedEvent{auditStorageEvent(typ, "explicit_storage_only", "known_row_envelope")}
 }
-func classifyClaudeContent(base string, payload json.RawMessage) (string, string, string, []byte) {
-	events := classifyClaudeContentEvents(base, "", payload)
-	if len(events) == 0 {
-		return base, "", "", nil
-	}
-	event := events[0]
-	return event.category, event.tool, event.id, event.content
-}
-
 func classifyClaudeContentEvents(base, rowSubtype string, payload json.RawMessage) []auditClassifiedEvent {
 	var msg map[string]json.RawMessage
 	if json.Unmarshal(payload, &msg) != nil {

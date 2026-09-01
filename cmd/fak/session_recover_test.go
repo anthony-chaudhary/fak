@@ -355,9 +355,35 @@ func TestSessionRecoverProviderLaunchFailurePreservesPromptAndRedactsError(t *te
 	}
 }
 
+// sessionRecoverProviderLaunchHelperMarker is the one line the helper child
+// writes to stderr before simulating the provider failure, so the failure path
+// is observable end to end and the redaction test can distinguish the helper's
+// own diagnostic from a leaked staged prompt.
+const sessionRecoverProviderLaunchHelperMarker = "provider-launch-helper: simulated provider launch failure"
+
 func TestSessionRecoverProviderLaunchFailureHelper(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Stderr.WriteString(sessionRecoverProviderLaunchHelperMarker + "\n")
 		os.Exit(7)
+	}
+	// Prove the helper contract the parent tests rely on: under the helper env
+	// this test binary exits 7, emits only the marker on stderr, and never
+	// echoes a staged prompt into the failure output.
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSessionRecoverProviderLaunchFailureHelper$")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("helper child exit = %v, want 7 (stderr=%q)", err, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), sessionRecoverProviderLaunchHelperMarker) {
+		t.Fatalf("helper child stderr missing failure marker: %q", stderr.String())
+	}
+	const hostile = "secret hostile prompt ; & | $()"
+	if strings.Contains(stderr.String(), hostile) {
+		t.Fatalf("helper child echoed a staged prompt: %q", stderr.String())
 	}
 }
 

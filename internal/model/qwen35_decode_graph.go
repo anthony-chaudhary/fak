@@ -109,17 +109,6 @@ func (s *Session) recordQwen35DecodeGraph(n Qwen35DecodeGraphNode) {
 		r.active.trace.Nodes = append(r.active.trace.Nodes, n)
 	}
 }
-func (s *Session) observeQwen35MetalExecution(observation *metalgemm.ExecutionObservation) {
-	if observation == nil || s.qwen35DecodeGraph == nil {
-		return
-	}
-	snapshot, err := observation.Snapshot()
-	if err != nil {
-		return
-	}
-	s.observeQwen35MetalExecutionSnapshot(snapshot)
-}
-
 func (s *Session) observeQwen35MetalExecutionSnapshot(snapshot metalgemm.ExecutionSnapshot) {
 	if len(snapshot.Events) == 0 || s.qwen35DecodeGraph == nil {
 		return

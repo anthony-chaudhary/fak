@@ -77,10 +77,6 @@ var (
 	}
 )
 
-func loadGGUFQ4K(path string, lp *ggufload.LoadProfiler, streamed bool) (*model.Model, string, error) {
-	return loadGGUFQ4KContext(context.Background(), path, lp, streamed)
-}
-
 func loadGGUFQ4KContext(ctx context.Context, path string, lp *ggufload.LoadProfiler, streamed bool) (*model.Model, string, error) {
 	loader := loadResidentQ4K
 	label := " [gguf-q4k]"

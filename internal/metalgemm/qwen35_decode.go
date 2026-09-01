@@ -229,10 +229,6 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	return outputs[0], receipt, true, nil
 }
 
-func validateQwen35DecodeBlock(req Qwen35DecodeRequest) error {
-	return validateQwen35DecodeBlockHidden(req, len(req.Input))
-}
-
 func validateQwen35DecodeBlockHidden(req Qwen35DecodeRequest, hidden int) error {
 	if req.Block == nil {
 		return nil
@@ -262,10 +258,6 @@ func decodeBoolInt(v bool) int {
 		return 1
 	}
 	return 0
-}
-
-func validateQwen35DecodeRequest(req Qwen35DecodeRequest) (GDNGeometry, error) {
-	return validateQwen35DecodeGeometry(req, len(req.Input))
 }
 
 func validateQwen35DecodeGeometry(req Qwen35DecodeRequest, hidden int) (GDNGeometry, error) {

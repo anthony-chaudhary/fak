@@ -112,10 +112,6 @@ type nativeProfileComparisonInput struct {
 	controls map[string]string
 }
 
-func newProfileComparison() profileComparison {
-	return newProfileComparisonForPhase(profileComparisonPhasePrefill)
-}
-
 func newProfileComparisonForPhase(phase profileComparisonPhase) profileComparison {
 	return newProfileComparisonForPhaseAxis(phase, profileComparisonAxisSequence)
 }

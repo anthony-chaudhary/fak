@@ -457,11 +457,6 @@ func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, conf
 	return filtered, policy, nil
 }
 
-func parseCodexFreshnessCheckNow(args []string) ([]string, bool, error) {
-	filtered, policy, err := parseCodexFreshnessSettings(args, "", "", codexFreshnessConfig{})
-	return filtered, policy.Force, err
-}
-
 func codexFreshnessStatePath(root, executable string) (string, error) {
 	cacheDir, err := codexFreshnessCacheDir()
 	if err != nil {
@@ -495,10 +490,6 @@ func codexFreshnessLeaseValidFor(path string, now time.Time, maxAge time.Duratio
 		return false
 	}
 	return now.Sub(lease.CheckedAt) < maxAge
-}
-
-func codexFreshnessWriteLease(path string, now time.Time) error {
-	return codexFreshnessWriteReceipt(path, now, "", "")
 }
 
 func codexFreshnessWriteReceipt(path string, now time.Time, runningCommit, targetCommit string) error {

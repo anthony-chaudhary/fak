@@ -491,20 +491,6 @@ func qwen35MTPTargetHasEvaluatedPrefix(target *Session, prefix []int) bool {
 	return true
 }
 
-func newQwen35MTPIsolatedSession(m *Model) (session *Session, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			session = nil
-			err = fmt.Errorf("model: create isolated Qwen3.8 MTP target session: %v", recovered)
-		}
-	}()
-	session = m.NewSession()
-	if session == nil {
-		return nil, errors.New("model: could not create isolated Qwen3.8 MTP target session")
-	}
-	return session, nil
-}
-
 func evaluateQwen35MTPTargetPrefix(session *Session, committed []int) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -516,35 +502,6 @@ func evaluateQwen35MTPTargetPrefix(session *Session, committed []int) (err error
 		session.tokenHidden(token, session.Cache.Len())
 	}
 	return nil
-}
-
-func verifyQwen35MTPRound(m *Model, committed, draft []int) (argmax []int, err error) {
-	session, err := newQwen35MTPIsolatedSession(m)
-	if err != nil {
-		return nil, err
-	}
-	defer session.Close()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			argmax = nil
-			err = fmt.Errorf("model: verify Qwen3.8 MTP round: %v", recovered)
-		}
-	}()
-
-	logits := session.Prefill(committed)
-	if len(logits) == 0 {
-		return nil, errors.New("model: Qwen3.8 MTP verifier returned empty prompt logits")
-	}
-	argmax = make([]int, 0, len(draft)+1)
-	argmax = append(argmax, argmaxF32(logits))
-	for _, token := range draft {
-		logits = session.Step(token)
-		if len(logits) == 0 {
-			return nil, errors.New("model: Qwen3.8 MTP verifier returned empty decode logits")
-		}
-		argmax = append(argmax, argmaxF32(logits))
-	}
-	return argmax, nil
 }
 
 // SpecDecodeGreedyWithDrafter runs greedy speculative decoding with a

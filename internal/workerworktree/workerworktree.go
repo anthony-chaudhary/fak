@@ -567,15 +567,6 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 	return res
 }
 
-func isolationBackendName(backend IsolationBackend) string {
-	switch backend.(type) {
-	case blockClone, *blockClone:
-		return blockCloneBackendName
-	default:
-		return gitWorktreeBackendName
-	}
-}
-
 func verifyPreparedWorktree(res Result, git GitRunner) Result {
 	fail := func(code, reason, detail string) Result {
 		return Result{OK: false, Code: code, Path: res.Path, BaseSHA: res.BaseSHA,

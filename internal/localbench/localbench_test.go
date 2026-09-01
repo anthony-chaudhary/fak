@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -260,9 +262,48 @@ func TestLocalbenchChildHelper(t *testing.T) {
 		os.Stderr.WriteString("TOKEN=secret-value\n")
 		os.Exit(7)
 	}
-	if strings.Contains(strings.Join(os.Args, " "), "TestLocalbenchChildHelper") {
+	if localbenchChildInvocation() {
 		os.Stdout.WriteString("TOKEN=secret-value\nresult=ok\n")
+		return
 	}
+	// Prove both child contracts the receipt tests rely on: a plain child
+	// invocation reports its markers on stdout with exit 0, and a failing child
+	// exits 7 with its marker on stderr for the receipt to scrub.
+	success := exec.Command(os.Args[0], "-test.run=TestLocalbenchChildHelper", "--", "--token", "secret-value")
+	success.Env = append(os.Environ(), "FAK_LOCALBENCH_CHILD_FAIL=")
+	var successOut, successErr bytes.Buffer
+	success.Stdout, success.Stderr = &successOut, &successErr
+	if err := success.Run(); err != nil {
+		t.Fatalf("child success run = %v (stderr=%q)", err, successErr.String())
+	}
+	if !strings.Contains(successOut.String(), "TOKEN=secret-value") || !strings.Contains(successOut.String(), "result=ok") {
+		t.Fatalf("child success output lost its markers: stdout=%q", successOut.String())
+	}
+	failing := exec.Command(os.Args[0], "-test.run=TestLocalbenchChildHelper")
+	failing.Env = append(os.Environ(), "FAK_LOCALBENCH_CHILD_FAIL=1")
+	var failingOut, failingErr bytes.Buffer
+	failing.Stdout, failing.Stderr = &failingOut, &failingErr
+	err := failing.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("child failure exit = %v, want 7 (stderr=%q)", err, failingErr.String())
+	}
+	if !strings.Contains(failingErr.String(), "TOKEN=secret-value") {
+		t.Fatalf("child failure stderr lost its marker: %q", failingErr.String())
+	}
+}
+
+// localbenchChildInvocation reports whether this test binary was re-executed as
+// the localbench child. Child invocations always carry a literal "--" separator
+// with trailing arguments (the dispatch command spec), which a plain `go test`
+// run never produces.
+func localbenchChildInvocation() bool {
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDeterministicSubmissionRendering(t *testing.T) {
