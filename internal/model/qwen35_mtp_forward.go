@@ -28,16 +28,19 @@ func (e *Qwen35MTPForwardError) Error() string {
 // mutated. The retained checkpoint payload and shared target LM head remain
 // immutable and are reused without copying.
 type Qwen35MTPForward struct {
-	target  *Model
-	draft   *Session
-	lastPos int
-	closed  bool
+	target       *Model
+	draft        *Session
+	mat          matKernel
+	tensorFormat Qwen38MTPTensorFormat
+	lastPos      int
+	closed       bool
 }
 
 // NewQwen35MTPForward binds the exact mtp.layers.0 namespace to the shared Qwen
 // decoder-layer primitive and binds mtp.norm plus the target model's LM head.
-// The current primitive is f32-only because the retained MTP tensors do not yet
-// have resident Q8/Q4 stores; unsupported storage is refused explicitly.
+// A uniform resident-Q4_K MTP projection set selects sessionQ4KKernel (and the
+// existing Metal dispatch on Apple Silicon); the original uniform-F32 layout
+// remains unchanged. Mixed or unsupported precision is refused explicitly.
 func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
@@ -52,15 +55,16 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 		}
 	}()
 
-	mode, err := qwen35MTPAdmission(m.Cfg, m.manifest, false)
+	layout, present, err := m.qwen38MTPTensorLayout()
 	if err != nil {
 		return nil, err
 	}
-	if !mode.Enabled {
+	if !present {
+		mode, admissionErr := qwen35MTPAdmission(m.Cfg, m.manifest, false)
+		if admissionErr != nil {
+			return nil, admissionErr
+		}
 		return nil, qwen35MTPStateError("model", "eligible one-layer shared-embedding Qwen3.8 MTP model", mode.Reason)
-	}
-	if err := m.validateQwen35MTPForwardTensors(); err != nil {
-		return nil, err
 	}
 
 	cfg := m.Cfg
@@ -72,7 +76,9 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 
 	aliases := make(map[string]tensorMeta, len(qwen35MTPDecoderAliases)+2)
 	for dst, src := range qwen35MTPDecoderAliases {
-		aliases[dst] = m.manifest[src]
+		if meta, ok := m.manifest[src]; ok {
+			aliases[dst] = meta
+		}
 	}
 	aliases["model.norm.weight"] = m.manifest["mtp.norm.weight"]
 	headName, err := m.qwen35MTPHeadName()
@@ -81,11 +87,28 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 	}
 	aliases["lm_head.weight"] = m.manifest[headName]
 
-	draftModel := &Model{Cfg: cfg, manifest: aliases, raw: m.raw}
+	q4Aliases := make(map[string]*q4kTensor, len(qwen35MTPDecoderAliases)+1)
+	if layout.Format == Qwen38MTPFormatQ4K {
+		q4Aliases["mtp.fc.weight"] = m.q4kw["mtp.fc.weight"]
+		for dst, src := range qwen35MTPDecoderAliases {
+			if qt := m.q4kw[src]; qt != nil {
+				q4Aliases[dst] = qt
+			}
+		}
+	}
+	draftModel := &Model{Cfg: cfg, manifest: aliases, raw: m.raw, q4kw: q4Aliases}
 	draft := &Session{M: draftModel, Cache: NewKVCache(cfg)}
+	var mat matKernel = f32Kernel{draftModel}
+	if layout.Format == Qwen38MTPFormatQ4K {
+		draft.Q4K = true
+		// The non-Darwin implementation is an explicit CPU-native no-op. On Apple
+		// Silicon this selects the existing resident Q4_K Metal dispatch.
+		draft.MetalQ4K = true
+		mat = sessionQ4KKernel{s: draft}
+	}
 	draft.initMixedQKV()
 	held = false
-	return &Qwen35MTPForward{target: m, draft: draft, lastPos: -1}, nil
+	return &Qwen35MTPForward{target: m, draft: draft, mat: mat, tensorFormat: layout.Format, lastPos: -1}, nil
 }
 
 // Close releases the target checkpoint lifetime held by this draft head.
@@ -95,6 +118,9 @@ func (f *Qwen35MTPForward) Close() {
 	}
 	f.closed = true
 	if f.draft != nil {
+		if f.tensorFormat == Qwen38MTPFormatQ4K && f.draft.M != nil {
+			releaseModelQ4KHandles(f.draft.M)
+		}
 		f.draft.Close()
 	}
 	if f.target != nil {
@@ -122,12 +148,12 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 		return nil, qwen35MTPStateError("position", fmt.Sprintf("greater than %d", f.lastPos), fmt.Sprint(pos))
 	}
 
-	x, err := f.target.Qwen35MTPFuse(priorHidden, currentEmbedding)
+	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)
 	if err != nil {
 		return nil, err
 	}
 	cos, sin := ropeRowForLayer(f.draft.M.Cfg, 0, pos)
-	x = f.draft.blockStep(0, pos, x, cos, sin, f32Kernel{f.draft.M})
+	x = f.draft.blockStep(0, pos, x, cos, sin, f.mat)
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
 	return f.draft.head(f.draft.M.finalNorm(x)), nil
