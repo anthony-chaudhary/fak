@@ -10,6 +10,13 @@ import (
 const Schema = "fak-storage-pressure/1"
 
 const (
+	// DefaultWarningFreeBytes is the shared early-warning floor for new
+	// write-producing work. DefaultRefuseFreeBytes is the reserve below which a
+	// new managed session must not start. The refusal floor matches dispatch
+	// wave's existing host-space reserve (#10382).
+	DefaultWarningFreeBytes int64 = 4 << 30
+	DefaultRefuseFreeBytes  int64 = 2 << 30
+
 	OwnerWorktrees = "fak worktree worker reap --all-cold"
 	OwnerGoTmp     = "fak tree-doctor --go-tmp --json"
 	OwnerGoCache   = "fak git-daily --dry-run --json"
@@ -49,8 +56,7 @@ type Report struct {
 }
 
 func New(now time.Time, filesystem Filesystem, contributors ...Contributor) Report {
-	filesystem.Warning = filesystem.Known && filesystem.WarningFreeBytes > 0 && filesystem.FreeBytes < filesystem.WarningFreeBytes
-	filesystem.Refuse = filesystem.Known && filesystem.RefuseFreeBytes > 0 && filesystem.FreeBytes < filesystem.RefuseFreeBytes
+	filesystem = AssessFilesystem(filesystem)
 
 	r := Report{
 		Schema:                   Schema,
@@ -71,6 +77,15 @@ func New(now time.Time, filesystem Filesystem, contributors ...Contributor) Repo
 		}
 	}
 	return r
+}
+
+// AssessFilesystem applies the caller-selected thresholds to one capacity
+// observation. Thresholds are inclusive: a two-GiB reserve still exists only
+// while more than two GiB is free. Unknown capacity never synthesizes pressure.
+func AssessFilesystem(filesystem Filesystem) Filesystem {
+	filesystem.Warning = filesystem.Known && filesystem.WarningFreeBytes > 0 && filesystem.FreeBytes <= filesystem.WarningFreeBytes
+	filesystem.Refuse = filesystem.Known && filesystem.RefuseFreeBytes > 0 && filesystem.FreeBytes <= filesystem.RefuseFreeBytes
+	return filesystem
 }
 
 func Worktrees(items []workerworktree.ColdWorktree) Contributor {

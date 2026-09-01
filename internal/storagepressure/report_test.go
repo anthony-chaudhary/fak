@@ -71,3 +71,27 @@ func TestThresholdsUseFilesystemOnly(t *testing.T) {
 		t.Fatalf("threshold verdict = warning %v refuse %v, want true/true", report.Filesystem.Warning, report.Filesystem.Refuse)
 	}
 }
+
+func TestThresholdBoundariesAreInclusiveAndUnknownStaysUnclassified(t *testing.T) {
+	atWarning := AssessFilesystem(Filesystem{
+		Known: true, FreeBytes: DefaultWarningFreeBytes,
+		WarningFreeBytes: DefaultWarningFreeBytes, RefuseFreeBytes: DefaultRefuseFreeBytes,
+	})
+	if !atWarning.Warning || atWarning.Refuse {
+		t.Fatalf("warning boundary = warning %v refuse %v, want true/false", atWarning.Warning, atWarning.Refuse)
+	}
+	atRefusal := AssessFilesystem(Filesystem{
+		Known: true, FreeBytes: DefaultRefuseFreeBytes,
+		WarningFreeBytes: DefaultWarningFreeBytes, RefuseFreeBytes: DefaultRefuseFreeBytes,
+	})
+	if !atRefusal.Warning || !atRefusal.Refuse {
+		t.Fatalf("refusal boundary = warning %v refuse %v, want true/true", atRefusal.Warning, atRefusal.Refuse)
+	}
+	unknown := AssessFilesystem(Filesystem{
+		Known: false, FreeBytes: 0,
+		WarningFreeBytes: DefaultWarningFreeBytes, RefuseFreeBytes: DefaultRefuseFreeBytes,
+	})
+	if unknown.Warning || unknown.Refuse {
+		t.Fatal("unknown capacity must not synthesize warning or refusal")
+	}
+}

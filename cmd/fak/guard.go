@@ -323,6 +323,9 @@ func cmdManageCommand(commandName string, argv []string) {
 		os.Exit(2)
 	}
 	launchPlan = launchPlan.withExecutableCommand(command)
+	if code := runGuardStoragePressureGate(os.Stderr, defaultGuardStoragePressureDeps()); code != 0 {
+		os.Exit(code)
+	}
 	agentName := launchPlan.agentName()
 	if cfg, ok := guardCodexLoopGateConfigForProfile(launchPlan.harnessProfile(), launchPlan.executableCommand(), *codexLoopGate, *codexHome, *codexLoopGateSinceHours, *codexLoopGateLimit, *quiet); ok {
 		if code := runCodexLoopGate(os.Stderr, cfg); code != 0 {
