@@ -187,7 +187,7 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 		var result codexresume.Result
 		if *checkOnly {
 			preflight := codexresume.Preflight(checkConfig)
-			result = codexresume.Result{ThreadID: threadID, Preflight: &preflight}
+			result = codexresume.Result{ThreadID: threadID, Preflight: &preflight, LaunchState: codexresume.LaunchNotAttempted}
 			if preflight.Verdict == codexresume.VerdictResumable {
 				result.Outcome = codexresume.OutcomeCheckOnly
 			} else {
@@ -254,11 +254,27 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		for _, result := range results {
 			preflightVerdict := codexresume.PreflightVerdict("")
+			codexHome, sessionRoot, lookup, recoveryAction := "", "", codexresume.LookupState(""), ""
 			if result.Preflight != nil {
 				preflightVerdict = result.Preflight.Verdict
+				codexHome = result.Preflight.CodexHome
+				sessionRoot = result.Preflight.SessionRoot
+				lookup = result.Preflight.LookupState
+				recoveryAction = result.Preflight.RecoveryAction
 			}
-			fmt.Fprintf(stdout, "%s preflight=%s outcome=%s launch_pid=%d turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
-				result.ThreadID, preflightVerdict, result.Outcome, result.LaunchPID, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
+			launch := "launch state unknown"
+			switch result.LaunchState {
+			case codexresume.LaunchNotAttempted:
+				launch = fmt.Sprintf("launch not attempted (verdict=%s recovery_action=%q)", preflightVerdict, recoveryAction)
+			case codexresume.LaunchStartFailed:
+				launch = "fresh Codex process start_failed"
+			case codexresume.LaunchStarted:
+				launch = fmt.Sprintf("fresh Codex process started (pid=%d)", result.LaunchPID)
+			case codexresume.LaunchCompleted:
+				launch = fmt.Sprintf("fresh Codex process completed (pid=%d)", result.LaunchPID)
+			}
+			fmt.Fprintf(stdout, "%s codex_home=%q session_root=%q lookup=%s launch=%q preflight=%s outcome=%s turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
+				result.ThreadID, codexHome, sessionRoot, lookup, launch, preflightVerdict, result.Outcome, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
 		}
 	}
 	return exitCode
