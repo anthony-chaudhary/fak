@@ -4,16 +4,82 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
 // EventIntegrityLoss identifies one independently budgetable transcript loss class.
+
+type integrityEventKind string
+
+type integrityEventSource struct {
+	Type           string `json:"type"`
+	SessionID      string `json:"session_id,omitempty"`
+	EventID        string `json:"event_id,omitempty"`
+	OrderingKey    string `json:"ordering_key,omitempty"`
+	RawDigest      string `json:"raw_digest,omitempty"`
+	Adapter        string `json:"adapter"`
+	AdapterVersion string `json:"adapter_version"`
+}
+
+type integrityLossReport struct {
+	UnknownFields []string `json:"unknown_fields,omitempty"`
+	UnknownKinds  []string `json:"unknown_kinds,omitempty"`
+	OmittedBytes  int      `json:"omitted_bytes,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+}
+
+type wireEvent struct {
+	Schema         string               `json:"schema"`
+	ID             string               `json:"id"`
+	ConversationID string               `json:"conversation_id"`
+	Kind           integrityEventKind   `json:"kind"`
+	Action         string               `json:"action"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Sequence       uint64               `json:"sequence"`
+	ParentIDs      []string             `json:"parent_ids,omitempty"`
+	Visibility     string               `json:"visibility"`
+	Source         integrityEventSource `json:"source"`
+	Payload        json.RawMessage      `json:"payload"`
+	Loss           *integrityLossReport `json:"loss,omitempty"`
+}
+
+func (e wireEvent) validate() error {
+	if e.Schema != "fak-trajectory-event/1alpha1" {
+		return fmt.Errorf("trajectory event schema %q, want %q", e.Schema, "fak-trajectory-event/1alpha1")
+	}
+	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ConversationID) == "" {
+		return errors.New("trajectory event requires id and conversation_id")
+	}
+	switch e.Kind {
+	case "session", "message", "tool", "approval", "state", "checkpoint", "artifact", "observation", "policy", "error", "intervention":
+	default:
+		return fmt.Errorf("unknown trajectory event kind %q", e.Kind)
+	}
+	if strings.TrimSpace(e.Action) == "" {
+		return errors.New("trajectory event requires action")
+	}
+	if e.Timestamp.IsZero() {
+		return errors.New("trajectory event requires timestamp")
+	}
+	switch e.Visibility {
+	case "public", "operator", "developer", "restricted":
+	default:
+		return fmt.Errorf("unknown trajectory event visibility %q", e.Visibility)
+	}
+	if strings.TrimSpace(e.Source.Type) == "" || strings.TrimSpace(e.Source.Adapter) == "" || strings.TrimSpace(e.Source.AdapterVersion) == "" {
+		return errors.New("trajectory event source requires type, adapter, and adapter_version")
+	}
+	if len(e.Payload) == 0 || !json.Valid(e.Payload) {
+		return errors.New("trajectory event payload must be valid JSON")
+	}
+	return nil
+}
+
 type EventIntegrityLoss string
 
 const (
@@ -64,7 +130,7 @@ type EventIntegrityReport struct {
 }
 
 type observedEvent struct {
-	event trajectory.Event
+	event wireEvent
 	line  int
 }
 
@@ -94,10 +160,10 @@ func AnalyzeEventIntegrity(r io.Reader, cfg EventIntegrityConfig) (EventIntegrit
 		terminated := len(row) > 0 && row[len(row)-1] == '\n'
 		trimmed := bytes.TrimSpace(row)
 		if len(trimmed) > 0 {
-			var event trajectory.Event
+			var event wireEvent
 			decodeErr := json.Unmarshal(trimmed, &event)
 			if decodeErr == nil {
-				decodeErr = event.Validate()
+				decodeErr = event.validate()
 			}
 			if decodeErr != nil {
 				if err == io.EOF && !terminated && looksTruncatedJSON(trimmed) {
@@ -224,7 +290,7 @@ func analyzePairs(events []observedEvent, report *EventIntegrityReport, limit in
 	var starts, completions, calls, results []observedEvent
 	for _, item := range events {
 		action := normalizedAction(item.event.Action)
-		if item.event.Kind == trajectory.EventTool {
+		if item.event.Kind == integrityEventKind("tool") {
 			switch action {
 			case "started", "start", "proposed", "called", "call", "tool_call", "tool_use":
 				calls = append(calls, item)
@@ -267,7 +333,7 @@ func matchPairs(left, right []observedEvent, leftLoss, rightLoss EventIntegrityL
 	}
 }
 
-func pairMatches(first, second trajectory.Event) bool {
+func pairMatches(first, second wireEvent) bool {
 	if first.ConversationID != second.ConversationID {
 		return false
 	}

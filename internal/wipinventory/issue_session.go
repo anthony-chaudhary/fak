@@ -4,12 +4,41 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 // IssueSessionStatus is the inventory-facing vocabulary for an issue/session
 // join. Debt remains visible instead of being guessed away.
+
+// ExecutionBindingStatus is the inventory-facing status contract for a session binding.
+type ExecutionBindingStatus string
+
+const (
+	ExecutionBindingJoined      ExecutionBindingStatus = "joined"
+	ExecutionBindingMissing     ExecutionBindingStatus = "missing"
+	ExecutionBindingAmbiguous   ExecutionBindingStatus = "ambiguous"
+	ExecutionBindingConflicting ExecutionBindingStatus = "conflicting"
+	ExecutionBindingStale       ExecutionBindingStatus = "stale"
+)
+
+type ExecutionIssueIdentity struct {
+	Repository string `json:"repository"`
+	Number     int    `json:"number"`
+}
+
+type ExecutionBinding struct {
+	RootRegistrationID string                  `json:"root_registration_id"`
+	Issue              *ExecutionIssueIdentity `json:"issue,omitempty"`
+	RegistrationIDs    []string                `json:"registration_ids"`
+	AttemptIDs         []string                `json:"attempt_ids"`
+	SessionIDs         []string                `json:"session_ids,omitempty"`
+	Status             ExecutionBindingStatus  `json:"status"`
+	Details            []string                `json:"details,omitempty"`
+}
+
+type ExecutionBindingReport struct {
+	Bindings []ExecutionBinding `json:"bindings"`
+}
+
 type IssueSessionStatus string
 
 const (
@@ -52,7 +81,7 @@ type IssueSessionJoin struct {
 // JoinIssueSessions binds authoritative WIP histories to the read-only session
 // adapter. Issue identity is exact repository+number identity; mutable titles
 // and task strings are never compared. Histories are not modified.
-func JoinIssueSessions(histories []History, bindings sessionregistry.WIPBindingReport) (IssueSessionJoin, error) {
+func JoinIssueSessions(histories []History, bindings ExecutionBindingReport) (IssueSessionJoin, error) {
 	unitByIssue := make(map[string]IssueSessionUnit)
 	for _, history := range histories {
 		if err := ValidateHistory(history); err != nil {
@@ -141,7 +170,7 @@ func issueUnitsFromHistory(history History) (map[string]IssueSessionUnit, error)
 	return result, nil
 }
 
-func debtFromBinding(binding sessionregistry.WIPExecutionBinding, status IssueSessionStatus, details ...string) IssueSessionDebt {
+func debtFromBinding(binding ExecutionBinding, status IssueSessionStatus, details ...string) IssueSessionDebt {
 	return IssueSessionDebt{
 		RootRegistrationID: binding.RootRegistrationID,
 		RegistrationIDs:    append([]string(nil), binding.RegistrationIDs...),
@@ -152,15 +181,15 @@ func debtFromBinding(binding sessionregistry.WIPExecutionBinding, status IssueSe
 	}
 }
 
-func issueSessionStatus(status sessionregistry.WIPBindingStatus) IssueSessionStatus {
+func issueSessionStatus(status ExecutionBindingStatus) IssueSessionStatus {
 	switch status {
-	case sessionregistry.WIPBindingJoined:
+	case ExecutionBindingJoined:
 		return IssueSessionJoined
-	case sessionregistry.WIPBindingAmbiguous:
+	case ExecutionBindingAmbiguous:
 		return IssueSessionAmbiguous
-	case sessionregistry.WIPBindingConflicting:
+	case ExecutionBindingConflicting:
 		return IssueSessionConflicting
-	case sessionregistry.WIPBindingStale:
+	case ExecutionBindingStale:
 		return IssueSessionStale
 	default:
 		return IssueSessionMissing

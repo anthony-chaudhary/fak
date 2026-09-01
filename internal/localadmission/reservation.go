@@ -11,11 +11,28 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
 const reservationSchema = "fak-local-memory-reservations/1"
+
+type Pressure string
+
+const (
+	PressureUnknown  Pressure = "unknown"
+	PressureNormal   Pressure = "normal"
+	PressureWarning  Pressure = "warning"
+	PressureCritical Pressure = "critical"
+)
+
+// AdmissionSample is the byte-precise host contract consumed by local admission.
+// Producers may map their own host-memory sample onto this lower-layer value.
+type AdmissionSample struct {
+	TotalBytes       int64    `json:"total_bytes"`
+	AllocatableBytes int64    `json:"allocatable_bytes"`
+	CompressedBytes  int64    `json:"compressed_bytes"`
+	WiredBytes       int64    `json:"wired_bytes"`
+	Pressure         Pressure `json:"pressure"`
+}
 
 var ErrReservationNotFound = errors.New("localadmission: reservation not found")
 
@@ -25,9 +42,9 @@ type MemoryPlan struct {
 }
 
 type ReservationRequest struct {
-	OwnerPID int                     `json:"owner_pid"`
-	Plan     MemoryPlan              `json:"plan"`
-	Host     memgate.AdmissionSample `json:"host"`
+	OwnerPID int             `json:"owner_pid"`
+	Plan     MemoryPlan      `json:"plan"`
+	Host     AdmissionSample `json:"host"`
 }
 
 type Reservation struct {
@@ -40,14 +57,14 @@ type Reservation struct {
 }
 
 type ReservationDecision struct {
-	Admit              bool             `json:"admit"`
-	Reason             string           `json:"reason"`
-	CapacityBytes      int64            `json:"capacity_bytes"`
-	ReservedBytes      int64            `json:"reserved_bytes"`
-	RequestedPeakBytes int64            `json:"requested_peak_bytes"`
-	Pressure           memgate.Pressure `json:"pressure"`
-	Reservation        *Reservation     `json:"reservation,omitempty"`
-	Reaped             int              `json:"reaped,omitempty"`
+	Admit              bool         `json:"admit"`
+	Reason             string       `json:"reason"`
+	CapacityBytes      int64        `json:"capacity_bytes"`
+	ReservedBytes      int64        `json:"reserved_bytes"`
+	RequestedPeakBytes int64        `json:"requested_peak_bytes"`
+	Pressure           Pressure     `json:"pressure"`
+	Reservation        *Reservation `json:"reservation,omitempty"`
+	Reaped             int          `json:"reaped,omitempty"`
 }
 
 type reservationLedger struct {
@@ -68,11 +85,11 @@ func NewReservationStore(dir string) *ReservationStore {
 
 func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) (ReservationDecision, error) {
 	d := ReservationDecision{CapacityBytes: req.Host.AllocatableBytes, RequestedPeakBytes: req.Plan.StartupPeakBytes, Pressure: req.Host.Pressure}
-	if req.Host.Pressure == memgate.PressureUnknown {
+	if req.Host.Pressure == PressureUnknown {
 		d.Reason = "pressure_unknown"
 		return d, nil
 	}
-	if req.Host.Pressure == memgate.PressureCritical {
+	if req.Host.Pressure == PressureCritical {
 		d.Reason = "pressure_critical"
 		return d, nil
 	}
