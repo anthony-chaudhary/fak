@@ -29,6 +29,15 @@ This map positions the current `cache` coverage backlog. Each entry names the ex
 - **`microcachedemo`** — the exact `cache` symbol `microcachedemo`; use this spelling for that operation rather than the undifferentiated family name.
 
 
+### Go build-cache lifecycle symbols
+
+| Symbol | Canonical meaning | Distinct from |
+|---|---|---|
+| **`GoCacheRootFromEnv`** | Resolves the ambient Go build-cache root from `GOCACHE`, falling back to the platform user cache directory plus `go-build`; `GOCACHE=off` yields no managed root. | It selects the cache location only; it does not scan, classify, or remove entries. |
+| **`SweepGoCache`** | The `internal/treedoctor` owner operation that scans the resolved ambient Go build cache, classifies only owner-approved stale entries as reclaimable, and mutates them only when its explicit `apply` argument is true. Callers such as storage-pressure use `apply=false` for a read-only report. | It is not a second retention policy and is not a generic Go-cache cleaner; active, held, recent, unknown-size, scan-error, incomplete, and otherwise ineligible entries remain non-reclaimable. |
+| **`GoCacheReport`** | The provenance-bearing result from `SweepGoCache`, separating observed bytes from owner-approved reclaimable bytes and carrying incomplete, truncation, timeout, error, hold, active, and apply-state evidence. | Observed bytes are measured storage, not eligibility; reclaimable totals are complete only when the report says they are complete. |
+
+
 ### fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)
 
 fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn.

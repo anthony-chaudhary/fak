@@ -776,6 +776,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdWip(args)
 	case "tree-doctor":
 		cmdTreeDoctor(args)
+	case "storage-pressure":
+		cmdStoragePressure(args)
 	case "git-maint":
 		cmdGitMaint(args)
 	case "git-daily":
