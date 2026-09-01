@@ -363,3 +363,71 @@ func assert3DClose(t *testing.T, got, want [][][]float64, tol float64) {
 func float64Close(a, b, tol float64) bool {
 	return math.Abs(a-b) <= tol
 }
+
+func TestDSAFoldedMTPTopKMatchesUnfoldedOracle(t *testing.T) {
+	prior := []int{7, 3, 1}
+	cases := []struct {
+		name       string
+		queries    []int
+		reusePrior bool
+		indexShare bool
+		wantFold   bool
+	}{
+		{name: "q_len_1", queries: []int{10}, reusePrior: true},
+		{name: "q_len_2", queries: []int{10, 11}, reusePrior: true, wantFold: true},
+		{name: "q_len_8", queries: []int{10, 11, 12, 13, 14, 15, 16, 17}, reusePrior: true, wantFold: true},
+		{name: "q_len_9", queries: []int{10, 11, 12, 13, 14, 15, 16, 17, 18}, reusePrior: true},
+		{name: "fresh_full_indexer", queries: []int{10, 11}, reusePrior: false},
+		{name: "cross_layer_index_share", queries: []int{10, 11}, reusePrior: true, indexShare: true},
+		{name: "future_for_earliest_query", queries: []int{10, 11}, reusePrior: true},
+		{name: "missing_prior_selection", queries: []int{10, 11}, reusePrior: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := prior
+			switch tc.name {
+			case "future_for_earliest_query":
+				candidate = []int{11, 3, 1}
+			case "missing_prior_selection":
+				candidate = nil
+			}
+			got, folded := dsaFoldedMTPTopK(tc.queries, candidate, tc.reusePrior, tc.indexShare)
+			if folded != tc.wantFold {
+				t.Fatalf("folded = %v, want %v", folded, tc.wantFold)
+			}
+			if !tc.wantFold {
+				if got != nil {
+					t.Fatalf("ineligible request returned top-k %v", got)
+				}
+				return
+			}
+
+			// Independent unfolded CPU oracle: clone the prior list per query,
+			// then gather deterministic scalar values for each selected position.
+			oracleSelections := make([][]int, len(tc.queries))
+			oracleOutputs := make([]int, len(tc.queries))
+			for q := range tc.queries {
+				oracleSelections[q] = append([]int(nil), candidate...)
+				for _, position := range oracleSelections[q] {
+					oracleOutputs[q] += position*position + q
+				}
+			}
+			for q := range oracleSelections {
+				if !reflect.DeepEqual(got, oracleSelections[q]) {
+					t.Fatalf("query %d shared top-k = %v, unfolded oracle = %v", q, got, oracleSelections[q])
+				}
+				foldedOutput := 0
+				for _, position := range got {
+					foldedOutput += position*position + q
+				}
+				if foldedOutput != oracleOutputs[q] {
+					t.Fatalf("query %d folded output = %d, unfolded oracle = %d", q, foldedOutput, oracleOutputs[q])
+				}
+			}
+			got[0] = 99
+			if candidate[0] == 99 {
+				t.Fatal("folded selection aliases the prior MTP decision")
+			}
+		})
+	}
+}
