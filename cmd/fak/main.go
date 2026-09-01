@@ -369,6 +369,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdManage(args)
 	case "guard":
 		cmdGuard(args)
+	case "launchguard":
+		cmdLaunchguard(args)
 	case "goal-park":
 		cmdGoalPark(args)
 	case "progress":
