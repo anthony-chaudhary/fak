@@ -50,9 +50,11 @@ fak worktree <subcommand>
 
   worker <op>   Per-worker git worktree isolation (#3182). Ops:
       prepare --lane <l> --key <k> [--base-sha S] [--wt-root D]
-              [--lease-id ID] [--owner-pid PID]
+              [--lease-id ID] [--owner-pid PID] [--capacity-reason WHY]
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha), stamped with owner PID, lease, and timestamp.
+                   Above the advisory setpoint of 50, --capacity-reason records
+                   why growth is needed; omission warns but never blocks prepare.
                    Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
@@ -84,7 +86,7 @@ fak worktree <subcommand>
                    Owner-stamped leak GC. Selects only old, clean worktrees whose
                    owner PID is dead AND stamped lease is released. DRY-RUN by default;
                    --apply force-removes selected worktrees and prunes git admin entries.
-      list [--json]
+      list [--json] [--capacity-reason WHY]
                    List the live per-worker worktrees. The default preserves the
                    existing {count, paths, inventory} output; --json emits the
                    typed association/liveness/cleanliness/lifecycle inventory.
@@ -163,7 +165,8 @@ func worktreeWorkerProgressEmitter(w io.Writer) func(workerworktree.LandProgress
 // fields to the top level.
 type worktreePrepareOut struct {
 	workerworktree.Result
-	Env map[string]string `json:"env,omitempty"`
+	Env      map[string]string               `json:"env,omitempty"`
+	Capacity workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 func worktreeWorkerPrepare(argv []string) {
@@ -173,6 +176,7 @@ func worktreeWorkerPrepare(argv []string) {
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
 	leaseID := fs.String("lease-id", "", "lease identity to retain in the owner stamp (default: FAK_LEASE_ID or resolve-<lane>)")
 	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp")
+	capacityReason := fs.String("capacity-reason", "", "why worker-worktree growth above the advisory setpoint is needed (advisory; never blocks)")
 	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
 	var paths repeatedString
 	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
@@ -181,6 +185,7 @@ func worktreeWorkerPrepare(argv []string) {
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
+	capacityCensus := workerworktree.CapacityCensusFor(repoRoot, nil)
 	owner := workerworktree.OwnerStamp{PID: *ownerPID, LeaseID: strings.TrimSpace(*leaseID), CreatedAt: time.Now().UTC()}
 	if owner.LeaseID == "" {
 		owner.LeaseID = strings.TrimSpace(os.Getenv("FAK_LEASE_ID"))
@@ -189,7 +194,12 @@ func worktreeWorkerPrepare(argv []string) {
 		owner.LeaseID = "resolve-" + strings.TrimSpace(*lane)
 	}
 	res := workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
-	out := worktreePrepareOut{Result: res}
+	prospectiveCount := len(capacityCensus.Paths)
+	if res.OK && !res.Reused {
+		prospectiveCount++
+	}
+	capacity := worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
+	out := worktreePrepareOut{Result: res, Capacity: capacity}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
 		if strings.TrimSpace(*message) != "" || len(paths) > 0 {
@@ -202,6 +212,7 @@ func worktreeWorkerPrepare(argv []string) {
 			}
 		}
 	}
+	worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
 	worktreeWorkerEmit(out)
 	if !res.OK {
 		os.Exit(1)
@@ -861,9 +872,10 @@ func isDigitsOnly(s string) bool {
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree
 // paths (never null — an empty slice renders `[]`), mirroring the Python CLI.
 type worktreeWorkerListOut struct {
-	Count     int                           `json:"count"`
-	Paths     []string                      `json:"paths"`
-	Inventory []workerworktree.InventoryRow `json:"inventory"`
+	Count     int                             `json:"count"`
+	Paths     []string                        `json:"paths"`
+	Inventory []workerworktree.InventoryRow   `json:"inventory"`
+	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 const (
@@ -940,10 +952,11 @@ type worktreeWorkerLifecycleRow struct {
 }
 
 type worktreeWorkerLifecycleOut struct {
-	Schema    string                       `json:"schema"`
-	Count     int                          `json:"count"`
-	Paths     []string                     `json:"paths"`
-	Inventory []worktreeWorkerLifecycleRow `json:"inventory"`
+	Schema    string                          `json:"schema"`
+	Count     int                             `json:"count"`
+	Paths     []string                        `json:"paths"`
+	Inventory []worktreeWorkerLifecycleRow    `json:"inventory"`
+	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 type worktreeWorkerRevisionEvidence struct {
@@ -1224,6 +1237,39 @@ func lifecycleVerdict(row worktreeWorkerLifecycleRow) (worktreeWorkerLifecycleSt
 	}
 }
 
+func worktreeWorkerRetainedTrees(rows []worktreeWorkerLifecycleRow) []workerworktree.RetainedTree {
+	trees := make([]workerworktree.RetainedTree, 0, len(rows))
+	for _, row := range rows {
+		trees = append(trees, workerworktree.RetainedTree{
+			Path:         row.Path,
+			ColdReapable: row.ReapReadiness.Reapable && row.Cleanliness.State == worktreeEvidenceClean,
+			OwnerDead:    row.Liveness.Owner == worktreeEvidenceDead,
+			Clean:        row.Cleanliness.State == worktreeEvidenceClean,
+		})
+	}
+	return trees
+}
+
+func worktreeWorkerCapacityAdvisory(repoRoot string, census workerworktree.CapacityCensus, prospectiveCount int, reason string, rows []worktreeWorkerLifecycleRow) workerworktree.CapacityAdvisory {
+	if census.Known && prospectiveCount > workerworktree.AdvisoryCapacitySetpoint && rows == nil {
+		rows = worktreeWorkerLifecycleInventory(repoRoot, census.Paths, worktreeWorkerLifecycleProbes{})
+	}
+	return workerworktree.AssessCapacity(
+		len(census.Paths), prospectiveCount, census.Known, reason, worktreeWorkerRetainedTrees(rows),
+	)
+}
+
+func worktreeWorkerWriteCapacityHuman(w io.Writer, advisory workerworktree.CapacityAdvisory) {
+	if advisory.Status == workerworktree.CapacityWithinSetpoint {
+		return
+	}
+	fmt.Fprintf(w, "capacity advisory: %s\n", advisory.Message)
+	for _, recommendation := range advisory.ContractionRecommendations {
+		fmt.Fprintf(w, "capacity contraction: candidate=%s basis=%s; inspect with: %s\n",
+			recommendation.Path, recommendation.Basis, recommendation.Action)
+	}
+}
+
 type worktreeWorkerRecoverOut struct {
 	OK            bool                                `json:"ok"`
 	Count         int                                 `json:"count"`
@@ -1297,37 +1343,45 @@ func worktreeWorkerList(argv []string) {
 	fs := flag.NewFlagSet("worktree worker list", flag.ExitOnError)
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit stable typed association, liveness, cleanliness, lifecycle, and reap-readiness rows")
+	capacityReason := fs.String("capacity-reason", "", "record why capacity above the advisory setpoint is retained (advisory evidence)")
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
-	n, paths := workerworktree.Count(repoRoot, nil)
-	if paths == nil {
-		paths = []string{}
-	}
+	census := workerworktree.CapacityCensusFor(repoRoot, nil)
+	paths := census.Paths
 	if *asJSON {
 		rows := worktreeWorkerLifecycleInventory(repoRoot, paths, worktreeWorkerLifecycleProbes{})
 		sortedPaths := make([]string, len(rows))
 		for i := range rows {
 			sortedPaths[i] = rows[i].Path
 		}
+		capacity := worktreeWorkerCapacityAdvisory(repoRoot, census, len(rows), *capacityReason, rows)
+		worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
 		worktreeWorkerEmit(worktreeWorkerLifecycleOut{
 			Schema:    worktreeWorkerLifecycleSchema,
 			Count:     len(rows),
 			Paths:     sortedPaths,
 			Inventory: rows,
+			Capacity:  capacity,
 		})
 		return
 	}
 
-	rows, err := workerworktree.Inventory(repoRoot, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak worktree worker list: %v\n", err)
-		os.Exit(1)
+	rows := []workerworktree.InventoryRow{}
+	if census.Known {
+		var err error
+		rows, err = workerworktree.Inventory(repoRoot, nil)
+		if err != nil {
+			census.Known = false
+			rows = []workerworktree.InventoryRow{}
+		}
 	}
 	if rows == nil {
 		rows = []workerworktree.InventoryRow{}
 	}
-	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths, Inventory: rows})
+	capacity := worktreeWorkerCapacityAdvisory(repoRoot, census, len(paths), *capacityReason, nil)
+	worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
+	worktreeWorkerEmit(worktreeWorkerListOut{Count: len(paths), Paths: paths, Inventory: rows, Capacity: capacity})
 }
 
 // worktreeWorkerGoBuildVerify is the `--verify go-build` witness: run `go build

@@ -47,10 +47,11 @@ func mustKeys(t *testing.T, v any, want ...string) map[string]any {
 // GOCACHE into the worktree — the shape a spawn site reads.
 func TestPrepareJSONShape(t *testing.T) {
 	out := worktreePrepareOut{
-		Result: workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", BaseSHA: "feedface", Reused: false},
-		Env:    workerworktree.WorktreeEnv(nil, "/wt/fak-worker-wt-cmd-abc"),
+		Result:   workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", BaseSHA: "feedface", Reused: false},
+		Env:      workerworktree.WorktreeEnv(nil, "/wt/fak-worker-wt-cmd-abc"),
+		Capacity: workerworktree.AssessCapacity(50, 51, true, "issue #10459 burst", nil),
 	}
-	got := mustKeys(t, out, "ok", "path", "base_sha", "env")
+	got := mustKeys(t, out, "ok", "path", "base_sha", "env", "capacity")
 	if got["ok"] != true {
 		t.Fatalf("ok = %v, want true", got["ok"])
 	}
@@ -61,13 +62,20 @@ func TestPrepareJSONShape(t *testing.T) {
 	if _, ok := env["GOCACHE"]; !ok {
 		t.Fatal("prepare env must carry GOCACHE to isolate the build")
 	}
+	capacity := got["capacity"].(map[string]any)
+	if capacity["status"] != string(workerworktree.CapacityGrowthJustified) || capacity["reason"] != "issue #10459 burst" || capacity["allowed"] != true {
+		t.Fatalf("prepare capacity evidence = %v", capacity)
+	}
 }
 
 // TestPrepareFailOpenJSONShape proves a failed prepare is still a well-formed
 // object (ok=false, reason set) — never a crash — and omits env.
 func TestPrepareFailOpenJSONShape(t *testing.T) {
-	out := worktreePrepareOut{Result: workerworktree.Result{OK: false, Reason: "could not resolve trunk HEAD — fail open"}}
-	got := mustKeys(t, out, "ok", "reason")
+	out := worktreePrepareOut{
+		Result:   workerworktree.Result{OK: false, Reason: "could not resolve trunk HEAD — fail open"},
+		Capacity: workerworktree.AssessCapacity(0, 0, false, "", nil),
+	}
+	got := mustKeys(t, out, "ok", "reason", "capacity")
 	if got["ok"] != false {
 		t.Fatalf("ok = %v, want false", got["ok"])
 	}
@@ -481,19 +489,21 @@ func TestGCJSONShape(t *testing.T) {
 	}
 }
 
-// TestListJSONShape pins both list contracts: the no-flag legacy object remains
-// byte-for-byte compatible, while --json adds the versioned typed lifecycle
-// inventory. Empty collections are [] (never null) in both forms.
+// TestListJSONShape pins both list contracts: each includes the same deterministic
+// capacity evidence, while --json adds the versioned typed lifecycle inventory.
+// Empty collections are [] (never null) in both forms.
 func TestListJSONShape(t *testing.T) {
-	legacy := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}}
+	capacity := workerworktree.AssessCapacity(0, 0, true, "", nil)
+	legacy := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}, Capacity: capacity}
 	b, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if string(b) != `{"count":0,"paths":[],"inventory":[]}` {
-		t.Fatalf("legacy list json = %s, want unchanged empty paths/inventory arrays", b)
+	wantLegacy := `{"count":0,"paths":[],"inventory":[],"capacity":{"schema":"fak-worker-worktree-capacity/1","setpoint":50,"current_count":0,"prospective_count":0,"inventory_known":true,"above_setpoint":false,"allowed":true,"status":"WITHIN_SETPOINT","reason":"","message":"worker worktree capacity 0 is at or below advisory setpoint 50","contraction_recommendations":[]}}`
+	if string(b) != wantLegacy {
+		t.Fatalf("legacy list json = %s", b)
 	}
-	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}}, "count", "paths", "inventory")
+	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}, Capacity: capacity}, "count", "paths", "inventory", "capacity")
 	if got["count"].(float64) != 2 {
 		t.Fatalf("count = %v, want 2", got["count"])
 	}
@@ -503,12 +513,14 @@ func TestListJSONShape(t *testing.T) {
 		Count:     0,
 		Paths:     []string{},
 		Inventory: []worktreeWorkerLifecycleRow{},
+		Capacity:  capacity,
 	}
 	b, err = json.Marshal(typed)
 	if err != nil {
 		t.Fatalf("marshal typed: %v", err)
 	}
-	if string(b) != `{"schema":"fak-worker-worktree-lifecycle/1","count":0,"paths":[],"inventory":[]}` {
+	wantTyped := `{"schema":"fak-worker-worktree-lifecycle/1","count":0,"paths":[],"inventory":[],"capacity":{"schema":"fak-worker-worktree-capacity/1","setpoint":50,"current_count":0,"prospective_count":0,"inventory_known":true,"above_setpoint":false,"allowed":true,"status":"WITHIN_SETPOINT","reason":"","message":"worker worktree capacity 0 is at or below advisory setpoint 50","contraction_recommendations":[]}}`
+	if string(b) != wantTyped {
 		t.Fatalf("typed list json = %s", b)
 	}
 }
@@ -542,6 +554,9 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], worktree) || len(got.Inventory) != 1 {
 		t.Fatalf("list --json header = %+v", got)
 	}
+	if !got.Capacity.Allowed || !got.Capacity.InventoryKnown || got.Capacity.CurrentCount != 1 || got.Capacity.Status != workerworktree.CapacityWithinSetpoint {
+		t.Fatalf("list --json capacity = %+v", got.Capacity)
+	}
 	row := got.Inventory[0]
 	if !sameResolvedPath(row.Path, worktree) || row.HeadSHA != base || row.BaseSHA != base {
 		t.Fatalf("revision association = %+v, want path=%q head/base=%q", row, worktree, base)
@@ -559,6 +574,54 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		row.ReapReadiness.Reapable ||
 		row.ReapReadiness.Reason != "OWNER_LIVE" {
 		t.Fatalf("live clean worktree lifecycle = %+v", row)
+	}
+}
+
+func TestWorktreeWorkerCapacityEvidenceOnlyRecommendsCleanSafeTrees(t *testing.T) {
+	rows := []worktreeWorkerLifecycleRow{
+		{
+			Path: "/wt/cold", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceReleased},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceClean, DirtyPaths: []string{}},
+			Lifecycle:   worktreeLifecycleCold, ReapReadiness: worktreeWorkerReapReadiness{Reapable: true, Verdict: worktreeReapable, Reason: "COLD_CLEAN"},
+		},
+		{
+			Path: "/wt/owner-dead-clean", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceLive},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceClean, DirtyPaths: []string{}},
+			Lifecycle:   worktreeLifecycleRetained, ReapReadiness: worktreeWorkerReapReadiness{Verdict: worktreeKeep, Reason: "LEASE_LIVE"},
+		},
+		{
+			Path: "/wt/dirty", Liveness: worktreeWorkerLiveness{Owner: worktreeEvidenceDead, Lease: worktreeEvidenceReleased},
+			Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceDirty, DirtyPaths: []string{"do-not-delete.go"}},
+			Lifecycle:   worktreeLifecycleDirty, ReapReadiness: worktreeWorkerReapReadiness{Verdict: worktreeKeep, Reason: "WORKTREE_DIRTY"},
+		},
+	}
+	paths := make([]string, 51)
+	advisory := worktreeWorkerCapacityAdvisory("/repo", workerworktree.CapacityCensus{Known: true, Paths: paths}, 51, "", rows)
+	if advisory.Status != workerworktree.CapacityJustificationNeeded || len(advisory.ContractionRecommendations) != 2 {
+		t.Fatalf("capacity advisory = %+v", advisory)
+	}
+	for _, recommendation := range advisory.ContractionRecommendations {
+		if recommendation.Path == "/wt/dirty" || strings.Contains(recommendation.Action, "--apply") || strings.Contains(recommendation.Action, "--even-if-unlanded") {
+			t.Fatalf("dirty/destructive contraction recommendation = %+v", recommendation)
+		}
+	}
+
+	var human bytes.Buffer
+	worktreeWorkerWriteCapacityHuman(&human, advisory)
+	want := "capacity advisory: worker worktree capacity 51 exceeds advisory setpoint 50; provide --capacity-reason to justify growth; the operation remains allowed\n" +
+		"capacity contraction: candidate=/wt/cold basis=COLD_REAPABLE; inspect with: fak worktree worker reap --all-cold\n" +
+		"capacity contraction: candidate=/wt/owner-dead-clean basis=OWNER_DEAD_CLEAN; inspect with: fak worktree worker gc --dry-run\n"
+	if human.String() != want {
+		t.Fatalf("human capacity output = %q, want %q", human.String(), want)
+	}
+}
+
+func TestWorktreeWorkerCapacityUnknownInventoryWarnsAndFailsOpen(t *testing.T) {
+	advisory := worktreeWorkerCapacityAdvisory("/repo", workerworktree.CapacityCensus{Known: false, Paths: []string{}}, 0, "", nil)
+	var human bytes.Buffer
+	worktreeWorkerWriteCapacityHuman(&human, advisory)
+	if !advisory.Allowed || advisory.Status != workerworktree.CapacityInventoryUnknown || !strings.Contains(human.String(), "inventory is unknown") || !strings.Contains(human.String(), "failed open") {
+		t.Fatalf("unknown inventory advisory=%+v human=%q", advisory, human.String())
 	}
 }
 
