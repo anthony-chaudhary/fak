@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
+	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 )
 
 // countObjectsBefore/After are `git count-objects -vH` fixtures: a loose backlog, then
@@ -360,5 +361,39 @@ func TestDeferredStreakSurfacesAStuckTier(t *testing.T) {
 func TestStatusOnMissingLedgerIsEmptyNotAnError(t *testing.T) {
 	if rows := Status(filepath.Join(t.TempDir(), "absent.jsonl"), 0); len(rows) != 0 {
 		t.Fatalf("missing ledger returned %d rows", len(rows))
+	}
+}
+
+func TestRunInvokesGoCacheLifecycleAndReturnsReceipt(t *testing.T) {
+	opts := fakeRepo(t)
+	opts.Now = time.Now()
+	root := filepath.Join(t.TempDir(), "go-build")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, "aa")
+	if err := os.Mkdir(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(p, "entry")
+	if err := os.WriteFile(f, []byte("12345678"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := opts.Now.Add(-48 * time.Hour)
+	if err := os.Chtimes(f, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	opts.GoCacheDir = root
+	opts.GoCacheOptions = treedoctor.GoCacheOptions{HighBytes: 1, LowBytes: 1, MinAge: time.Hour, FreeBytesKnown: true, FreeBytes: 1 << 40}
+	var calls []string
+	res := Run(context.Background(), recordingRunner(&calls), opts)
+	if res.GoCache.Root == "" || res.GoCache.BytesBefore != 8 || res.GoCache.BytesAfterSemantics != "projected" || len(res.GoCache.Candidates) != 1 {
+		t.Fatalf("go cache receipt = %+v", res.GoCache)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("dry-run caller mutated cache: %v", err)
 	}
 }

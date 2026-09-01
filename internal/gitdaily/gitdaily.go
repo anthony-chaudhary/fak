@@ -166,6 +166,9 @@ type Options struct {
 	// GoTmpMinAge is the quiet period a WORK dir must clear before it is reapable, measured
 	// on the newest file anywhere inside it. Zero => treedoctor.DefaultGoTmpMinAge.
 	GoTmpMinAge time.Duration
+	// GoCacheDir names the resolved Go build cache. Empty disables this lifecycle.
+	GoCacheDir     string
+	GoCacheOptions treedoctor.GoCacheOptions
 }
 
 // LockSweep is the lock half's outcome: the ghost lease locks and the treedoctor reaps.
@@ -241,7 +244,8 @@ type Result struct {
 	Maint      gitgate.MaintResult `json:"maint"`
 	// GoTmp is the orphaned-WORK-dir reap (#6207). Zero-valued when Options.GoTmpDir is
 	// empty, which is the rung's disabled state.
-	GoTmp treedoctor.GoTmpReport `json:"go_tmp"`
+	GoTmp   treedoctor.GoTmpReport   `json:"go_tmp"`
+	GoCache treedoctor.GoCacheReport `json:"go_cache"`
 	// Incident is true for gitgate posture drift or a lock-cleanup failure. Both need an
 	// operator: the tick never edits .git/config, and a lock it could not remove can keep
 	// the maintenance wedge in place.
@@ -358,6 +362,11 @@ func Run(ctx context.Context, run Runner, opts Options) Result {
 		MinAge: opts.GoTmpMinAge,
 		Now:    now,
 	}, opts.Apply)
+
+	cacheOpts := opts.GoCacheOptions
+	cacheOpts.Root = opts.GoCacheDir
+	cacheOpts.Now = now
+	res.GoCache = treedoctor.SweepGoCache(cacheOpts, opts.Apply)
 
 	res.Maint = gitgate.RunMaint(ctx, gitgate.MaintRunner(run), gitgate.MaintOptions{
 		RepoRoot:     opts.RepoRoot,

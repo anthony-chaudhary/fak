@@ -94,6 +94,7 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	if goTmpRoot == "" {
 		goTmpRoot = treedoctor.GoTmpRootFromEnv(os.Getenv)
 	}
+	goCacheRoot := treedoctor.GoCacheRootFromEnv(os.Getenv, os.UserCacheDir)
 
 	opts := gitdaily.Options{
 		RepoRoot:        repoRoot,
@@ -107,6 +108,8 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		LeaseLockMaxAge: *leaseMaxAge,
 		GoTmpDir:        goTmpRoot,
 		GoTmpMinAge:     *goTmpMinAge,
+		GoCacheDir:      goCacheRoot,
+		GoCacheOptions:  treedoctor.GoCacheOptions{ActiveBuild: treedoctor.ActiveGoBuild},
 	}
 
 	// --status is a pure readback: it never runs a tick, so an operator can audit the
@@ -290,7 +293,10 @@ func writeGitDailyText(w io.Writer, res gitdaily.Result) {
 
 	// The GOTMPDIR rung (#6207). The age split prints under the summary because a single
 	// total is exactly what made an earlier audit of this tree call in-flight churn a leak.
-	fmt.Fprintf(w, "\nbuild scratch:\n  %s\n", res.GoTmp.Summary())
+	fmt.Fprintf(w, "\nbuild scratch:\n  %s\n  %s\n", res.GoTmp.Summary(), res.GoCache.Summary())
+	for _, hint := range res.GoCache.CleanupHints {
+		fmt.Fprintf(w, "  hint: %s\n", hint)
+	}
 	for _, band := range res.GoTmp.Bands {
 		fmt.Fprintf(w, "    %-9s %3d entries  %d bytes\n", band.Name, band.Entries, band.Bytes)
 	}
