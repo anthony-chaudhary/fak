@@ -6,13 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/anthony-chaudhary/fak/internal/stablejson"
 )
 
 func Marshal(out Output) ([]byte, error) {
 	if err := Validate(out); err != nil {
 		return nil, err
 	}
-	return marshalDeterministic(out)
+	return stablejson.Marshal(out)
 }
 
 func WriteJSON(w io.Writer, out Output) error {
@@ -39,7 +41,7 @@ func MarshalCompact(index CompactIndex) ([]byte, error) {
 	if err := ValidateCompact(index); err != nil {
 		return nil, err
 	}
-	return marshalDeterministic(index)
+	return stablejson.Marshal(index)
 }
 
 func WriteCompactJSON(w io.Writer, index CompactIndex) error {
@@ -62,14 +64,6 @@ func ReadCompactJSON(r io.Reader) (CompactIndex, error) {
 	return out, nil
 }
 
-func marshalDeterministic(v any) ([]byte, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
-}
-
 func decodeClosed(r io.Reader, dst any) error {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
@@ -87,7 +81,7 @@ func decodeClosed(r io.Reader, dst any) error {
 }
 
 func canonicalOutputChecksum(out Output) string {
-	b, err := marshalDeterministic(out)
+	b, err := stablejson.Marshal(out)
 	if err != nil {
 		panic(err)
 	}

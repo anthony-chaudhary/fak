@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/stablejson"
 )
 
 const PromptSchema = "fak.guard.compile.v1"
@@ -126,7 +127,7 @@ func Compile(req Request, manifest []byte, extractor Extractor) (Candidate, erro
 		proposed["advisory"] = true
 	}
 	doc["arg_rules"] = append(rules, proposed)
-	out, err := marshalStable(doc)
+	out, err := stablejson.Marshal(doc)
 	if err != nil {
 		return Candidate{}, err
 	}
@@ -156,14 +157,6 @@ func stripFence(b []byte) []byte {
 		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "```"))
 	}
 	return []byte(s)
-}
-
-func marshalStable(v any) ([]byte, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
 }
 
 // ProposedDiff is a bounded human-review surface; no patch is applied automatically.

@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/optsdefault"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -136,12 +137,7 @@ type Options struct {
 }
 
 func (o Options) normalize() Options {
-	if o.Root == "" {
-		o.Root = "."
-	}
-	if o.Now.IsZero() {
-		o.Now = time.Now().UTC()
-	}
+	o.Root, o.Now = optsdefault.RootNow(o.Root, o.Now)
 	if o.CommitWindow <= 0 {
 		o.CommitWindow = DefaultCommitWindow
 	}

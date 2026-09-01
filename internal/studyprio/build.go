@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/stablejson"
 )
 
 var requiredSourceClusters = []string{"architecture_runtime:body:vllm-ir", "architecture_runtime:label:vllm-ir", "architecture_runtime:title:vllm-ir", "kernels_compilation:label:vllm-ir", "memory_residency:body:allocator-fragmentation"}
@@ -134,13 +136,6 @@ func uncoveredInputs(s sourceLedger) (map[string]sourceJoin, error) {
 	}
 	return out, nil
 }
-func MarshalLedger(v Ledger) ([]byte, error)   { return marshal(v) }
-func MarshalSummary(v Summary) ([]byte, error) { return marshal(v) }
-func marshal(v any) ([]byte, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
-}
-func digest(b []byte) string { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
+func MarshalLedger(v Ledger) ([]byte, error)   { return stablejson.Marshal(v) }
+func MarshalSummary(v Summary) ([]byte, error) { return stablejson.Marshal(v) }
+func digest(b []byte) string                   { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
