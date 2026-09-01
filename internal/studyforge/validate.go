@@ -24,47 +24,8 @@ func validateResumeCheckpoint(c Corpus) error { return validateCorpus(c, false, 
 
 func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) error {
 	allowLegacy := len(allowLegacyResume) == 1 && allowLegacyResume[0]
-	var es []error
-	if c.Schema != CorpusSchema {
-		es = append(es, fmt.Errorf("schema must be %q", CorpusSchema))
-	}
+	es := validateCorpusHeader(c)
 	r := c.Receipt
-	if r.Schema != ReceiptSchema {
-		es = append(es, fmt.Errorf("receipt schema must be %q", ReceiptSchema))
-	}
-	if r.Repository == "" {
-		es = append(es, errors.New("repository is required"))
-	}
-	if r.Revision == "" && (r.Status != StatusFailed || len(r.Sources) != 0) {
-		es = append(es, errors.New("revision is required once source capture starts"))
-	}
-	if _, e := time.Parse(time.RFC3339Nano, r.Cutoff); e != nil {
-		es = append(es, errors.New("cutoff must be RFC3339"))
-	}
-	if r.APIBase != "" {
-		base, e := url.Parse(r.APIBase)
-		if e != nil || base.Scheme == "" || base.Host == "" {
-			es = append(es, errors.New("api_base must be an absolute URL"))
-		}
-	}
-	if r.StartedAt != "" {
-		if _, e := time.Parse(time.RFC3339Nano, r.StartedAt); e != nil {
-			es = append(es, errors.New("started_at must be RFC3339"))
-		}
-	}
-	if r.CompletedAt != "" {
-		if _, e := time.Parse(time.RFC3339Nano, r.CompletedAt); e != nil {
-			es = append(es, errors.New("completed_at must be RFC3339"))
-		}
-	}
-	if r.Status != StatusComplete && r.Status != StatusPartial && r.Status != StatusFailed {
-		es = append(es, fmt.Errorf("invalid receipt status %q", r.Status))
-	}
-	for _, api := range r.API {
-		if api.URL == "" || !validDigest(api.Checksum) {
-			es = append(es, fmt.Errorf("%s API receipt has invalid URL or checksum", api.Purpose))
-		}
-	}
 
 	seenSources := map[string]bool{}
 	seenNodeIDs := map[string]bool{}
@@ -231,12 +192,72 @@ func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) e
 			}
 		}
 	}
-	for _, record := range c.Records {
+	es = append(es, validateRecordSourcesAndOrder(c.Records, seenSources)...)
+	if r.Status == StatusComplete && (!complete || len(seenSources) != len(SourceNames)) {
+		es = append(es, errors.New("partial receipt marked complete"))
+	}
+	if requireComplete && r.Status != StatusComplete {
+		es = append(es, fmt.Errorf("receipt status must be complete, got %q", r.Status))
+	}
+	if r.IndexChecksum != recordDigest(c.Records) {
+		es = append(es, errors.New("index checksum mismatch"))
+	}
+	return errors.Join(es...)
+}
+
+func validateCorpusHeader(c Corpus) []error {
+	var es []error
+	if c.Schema != CorpusSchema {
+		es = append(es, fmt.Errorf("schema must be %q", CorpusSchema))
+	}
+	r := c.Receipt
+	if r.Schema != ReceiptSchema {
+		es = append(es, fmt.Errorf("receipt schema must be %q", ReceiptSchema))
+	}
+	if r.Repository == "" {
+		es = append(es, errors.New("repository is required"))
+	}
+	if r.Revision == "" && (r.Status != StatusFailed || len(r.Sources) != 0) {
+		es = append(es, errors.New("revision is required once source capture starts"))
+	}
+	if _, e := time.Parse(time.RFC3339Nano, r.Cutoff); e != nil {
+		es = append(es, errors.New("cutoff must be RFC3339"))
+	}
+	if r.APIBase != "" {
+		base, e := url.Parse(r.APIBase)
+		if e != nil || base.Scheme == "" || base.Host == "" {
+			es = append(es, errors.New("api_base must be an absolute URL"))
+		}
+	}
+	if r.StartedAt != "" {
+		if _, e := time.Parse(time.RFC3339Nano, r.StartedAt); e != nil {
+			es = append(es, errors.New("started_at must be RFC3339"))
+		}
+	}
+	if r.CompletedAt != "" {
+		if _, e := time.Parse(time.RFC3339Nano, r.CompletedAt); e != nil {
+			es = append(es, errors.New("completed_at must be RFC3339"))
+		}
+	}
+	if r.Status != StatusComplete && r.Status != StatusPartial && r.Status != StatusFailed {
+		es = append(es, fmt.Errorf("invalid receipt status %q", r.Status))
+	}
+	for _, api := range r.API {
+		if api.URL == "" || !validDigest(api.Checksum) {
+			es = append(es, fmt.Errorf("%s API receipt has invalid URL or checksum", api.Purpose))
+		}
+	}
+	return es
+}
+
+func validateRecordSourcesAndOrder(records []Record, seenSources map[string]bool) []error {
+	var es []error
+	for _, record := range records {
 		if !seenSources[record.Source] {
 			es = append(es, fmt.Errorf("record source %q has no receipt", record.Source))
 		}
 	}
-	ordered := append([]Record(nil), c.Records...)
+	ordered := append([]Record(nil), records...)
 	sort.Slice(ordered, func(i, j int) bool {
 		a, b := ordered[i], ordered[j]
 		if sourceRank(a.Source) != sourceRank(b.Source) {
@@ -251,21 +272,12 @@ func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) e
 		return a.Name < b.Name
 	})
 	for i := range ordered {
-		if ordered[i].Source != c.Records[i].Source || ordered[i].ID != c.Records[i].ID || ordered[i].Number != c.Records[i].Number || ordered[i].Name != c.Records[i].Name {
+		if ordered[i].Source != records[i].Source || ordered[i].ID != records[i].ID || ordered[i].Number != records[i].Number || ordered[i].Name != records[i].Name {
 			es = append(es, errors.New("records are not in canonical order"))
 			break
 		}
 	}
-	if r.Status == StatusComplete && (!complete || len(seenSources) != len(SourceNames)) {
-		es = append(es, errors.New("partial receipt marked complete"))
-	}
-	if requireComplete && r.Status != StatusComplete {
-		es = append(es, fmt.Errorf("receipt status must be complete, got %q", r.Status))
-	}
-	if r.IndexChecksum != recordDigest(c.Records) {
-		es = append(es, errors.New("index checksum mismatch"))
-	}
-	return errors.Join(es...)
+	return es
 }
 
 func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords []Record, requireComplete bool, allowLegacyResume ...bool) error {
