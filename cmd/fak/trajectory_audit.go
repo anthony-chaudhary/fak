@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -25,6 +26,8 @@ func runTrajectory(stdout, stderr io.Writer, args []string) int {
 	switch args[0] {
 	case "audit":
 		return runTrajectoryAudit(stdout, stderr, args[1:])
+	case "incident":
+		return runTrajectoryIncident(stdout, stderr, args[1:])
 	case "nightly":
 		return runTrajectoryNightly(stdout, stderr, args[1:])
 	case "assurance":
@@ -34,6 +37,63 @@ func runTrajectory(stdout, stderr io.Writer, args []string) int {
 		printTrajectoryUsage(stderr)
 		return 2
 	}
+}
+
+func runTrajectoryIncident(stdout, stderr io.Writer, args []string) int {
+	flags := flag.NewFlagSet("fak trajectory incident", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	root := flags.String("root", "", "retained Codex session root")
+	tag := flags.String("tag", "", "exact tag in the launch prompt")
+	promptSHA256 := flags.String("prompt-sha256", "", "exact SHA-256 of the normalized launch prompt")
+	sinceText := flags.String("since", "", "include sessions starting at or after RFC3339 time")
+	untilText := flags.String("until", "", "include sessions starting at or before RFC3339 time")
+	restartText := flags.String("restart", "", "bucket sessions around an RFC3339 restart boundary")
+	maxFiles := flags.Int("max-files", trajectory.IncidentDefaultMaxFiles, "maximum JSONL files to inspect")
+	maxFileBytes := flags.Int64("max-file-bytes", trajectory.IncidentDefaultMaxBytesPerFile, "maximum bytes read per JSONL file")
+	maxTotalBytes := flags.Int64("max-total-bytes", trajectory.IncidentDefaultMaxBytesTotal, "maximum bytes read across all files")
+	maxDuration := flags.Duration("max-duration", trajectory.IncidentDefaultMaxDuration, "maximum scan duration")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if len(flags.Args()) != 0 {
+		fmt.Fprintf(stderr, "fak trajectory incident: unexpected arguments: %s\n", strings.Join(flags.Args(), " "))
+		return 2
+	}
+	parseTime := func(name, value string) (time.Time, bool) {
+		if value == "" {
+			return time.Time{}, true
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak trajectory incident: --%s must be RFC3339: %v\n", name, err)
+			return time.Time{}, false
+		}
+		return parsed, true
+	}
+	since, ok := parseTime("since", *sinceText)
+	if !ok {
+		return 2
+	}
+	until, ok := parseTime("until", *untilText)
+	if !ok {
+		return 2
+	}
+	restart, ok := parseTime("restart", *restartText)
+	if !ok {
+		return 2
+	}
+	packet, err := trajectory.RunIncident(trajectory.IncidentOptions{Root: *root, Tag: *tag, PromptSHA256: *promptSHA256, Since: since, Until: until, Restart: restart, MaxFiles: *maxFiles, MaxBytesPerFile: *maxFileBytes, MaxBytesTotal: *maxTotalBytes, MaxDuration: *maxDuration})
+	if err != nil {
+		fmt.Fprintln(stderr, "fak trajectory incident:", err)
+		return 1
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(packet); err != nil {
+		fmt.Fprintln(stderr, "fak trajectory incident: encode:", err)
+		return 1
+	}
+	return 0
 }
 
 func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
@@ -295,7 +355,7 @@ func writeTrajectoryAuditFile(path string, write func(io.Writer) error) error {
 }
 
 func printTrajectoryUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak trajectory <audit|nightly|assurance> [options]")
+	fmt.Fprintln(w, "usage: fak trajectory <audit|incident|nightly|assurance> [options]")
 	fmt.Fprintln(w, "  audit      audit transcript usage and behavior")
 	fmt.Fprintln(w, "  nightly    run the bounded attribution audit and append a scrubbed receipt")
 	fmt.Fprintln(w, "  assurance  read typed evidence JSON on stdin and emit a shadow health receipt")

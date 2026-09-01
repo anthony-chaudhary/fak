@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flowmetrics"
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
+	"github.com/anthony-chaudhary/fak/internal/wipreadiness"
 )
 
 func TestRunWipAdmitRealGitUntrackedRefusalAndCleanAdmission(t *testing.T) {
@@ -165,6 +167,112 @@ func writeWipFlowIssues(t *testing.T, repo string, opened, closed int) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(repo, "flow-issues.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunWipAdmitAgingReceiptBlocksFreshAndScrubsUnit(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	now := time.Now().UTC()
+	issues := writeWipAgingIssues(t, repo, now)
+	commits := writeWipAgingCommits(t, repo, now)
+	readiness := writeWipAgingReadiness(t, repo, now)
+	var out, errOut bytes.Buffer
+	code := runWip(&out, &errOut, []string{
+		"admit", "-C", repo, "--session", "session-a", "--json",
+		"--flow-issues-file", issues, "--aging-commits-file", commits,
+		"--aging-readiness-file", readiness, "--aging-budget", "168h",
+	})
+	if code != wipAdmitHoldExit {
+		t.Fatalf("code=%d stderr=%s out=%s", code, errOut.String(), out.String())
+	}
+	var got struct {
+		Verdict string `json:"verdict"`
+		Aging   struct {
+			Verdict      string                `json:"verdict"`
+			ReasonCode   string                `json:"reason_code"`
+			BudgetDays   float64               `json:"budget_days"`
+			BlockingUnit flowmetrics.AgingUnit `json:"blocking_unit"`
+			SafeActions  []string              `json:"safe_actions"`
+		} `json:"aging"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != string(wipattr.AdmitHold) || got.Aging.Verdict != "REFUSE" || got.Aging.ReasonCode != flowmetrics.AgingWIPReasonCode {
+		t.Fatalf("receipt=%+v", got)
+	}
+	if got.Aging.BlockingUnit.Unit != "#10417" || got.Aging.BlockingUnit.Classification != flowmetrics.AgingActionable || got.Aging.BlockingUnit.AgeDays < 9.9 || got.Aging.BudgetDays != 7 {
+		t.Fatalf("aging=%+v", got.Aging)
+	}
+	if len(got.Aging.SafeActions) < 5 || strings.Contains(out.String(), repo) || strings.Contains(out.String(), "private") {
+		t.Fatalf("receipt leaked or omitted safe actions: %s", out.String())
+	}
+}
+
+func TestRunWipAdmitRecoveryDoesNotRequireReadiness(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	now := time.Now().UTC()
+	issues := writeWipAgingIssues(t, repo, now)
+	commits := writeWipAgingCommits(t, repo, now)
+	var out, errOut bytes.Buffer
+	code := runWip(&out, &errOut, []string{
+		"admit", "-C", repo, "--session", "session-a", "--json",
+		"--work-intent", "recovery", "--flow-issues-file", issues,
+		"--aging-commits-file", commits,
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s out=%s", code, errOut.String(), out.String())
+	}
+	if !strings.Contains(out.String(), `"aging"`) || !strings.Contains(out.String(), `"verdict": "ADMIT"`) {
+		t.Fatalf("receipt=%s", out.String())
+	}
+}
+
+func writeWipAgingIssues(t *testing.T, repo string, now time.Time) string {
+	t.Helper()
+	rows := []map[string]any{{
+		"number": 10417, "title": "aging fixture", "createdAt": now.Add(-30 * 24 * time.Hour),
+		"closedAt": nil, "labels": []any{}, "body": "",
+	}}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "aging-issues.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeWipAgingCommits(t *testing.T, repo string, now time.Time) string {
+	t.Helper()
+	rows := []flowmetrics.Commit{{SHA: "private-sha", When: now.Add(-10 * 24 * time.Hour), Subject: "start #10417", Issues: []int{10417}}}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "aging-commits.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeWipAgingReadiness(t *testing.T, repo string, now time.Time) string {
+	t.Helper()
+	receipt := wipreadiness.Receipt{
+		Schema: "fak-wip-readiness/1", ObservedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+		Verdict: wipreadiness.VerdictCurrent, EvidenceOnly: true,
+	}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "aging-readiness.json")
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
