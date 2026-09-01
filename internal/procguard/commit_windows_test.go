@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+func TestWindowsCommitProcessAccessIsLeastPrivilege(t *testing.T) {
+	if windowsCommitProcessAccess != processQueryLimitedInformation {
+		t.Fatalf("access mask=%#x want %#x", windowsCommitProcessAccess, processQueryLimitedInformation)
+	}
+	if windowsCommitProcessAccess&processVMRead != 0 {
+		t.Fatalf("access mask %#x includes PROCESS_VM_READ", windowsCommitProcessAccess)
+	}
+}
+
 func TestCollectCommitSnapshotOwnProcess(t *testing.T) {
 	s, supported, detail := CollectCommitSnapshot(os.Getpid())
 	if !supported {

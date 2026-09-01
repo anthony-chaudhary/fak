@@ -2,6 +2,7 @@ package modver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,6 +145,39 @@ func TestSnapshotWithFakeRunner(t *testing.T) {
 		if m.Name == "internal/deleted" {
 			t.Errorf("deleted module ghosted into the report")
 		}
+	}
+}
+
+func TestSnapshotAtPinsLiveFilesAndHistoryToRef(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		switch args[0] {
+		case "rev-parse":
+			return []byte("deadbeef\n"), nil
+		case "ls-tree":
+			return []byte("internal/issuepolicy/error_inventory.go\x00"), nil
+		case "log":
+			return []byte("\x1edeadbeef\t2026-09-01T00:00:00Z\ninternal/issuepolicy/error_inventory.go\n"), nil
+		default:
+			return nil, fmt.Errorf("unexpected git verb %q", args[0])
+		}
+	}
+	rep, err := SnapshotAt(context.Background(), ".", run, "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Head != "deadbeef" || len(rep.Modules) != 1 || rep.Modules[0].Name != "internal/issuepolicy" || rep.Modules[0].Version() != "r1+gdeadbeef" {
+		t.Fatalf("unexpected historical report: %+v", rep)
+	}
+	if len(calls) != 3 || calls[0][0] != "rev-parse" || calls[1][0] != "ls-tree" || calls[2][0] != "log" {
+		t.Fatalf("unexpected calls: %v", calls)
+	}
+	if got := strings.Join(calls[1], " "); !strings.Contains(got, "ls-tree -r -z --name-only v1.2.3 --") {
+		t.Fatalf("live-file call not pinned to ref: %q", got)
+	}
+	if got := strings.Join(calls[2], " "); !strings.Contains(got, "--name-only v1.2.3 --") {
+		t.Fatalf("history call not pinned to ref: %q", got)
 	}
 }
 

@@ -144,6 +144,34 @@ func Snapshot(ctx context.Context, dir string, run Runner) (Report, error) {
 	}, nil
 }
 
+// SnapshotAt computes the same derived module-version report as Snapshot, but
+// pins both the live-file set and the history walk to ref. This is the
+// historical provenance seam for receipts that must prove which module
+// revision existed at an affected, fixing, tested, or released commit.
+func SnapshotAt(ctx context.Context, dir string, run Runner, ref string) (Report, error) {
+	run = gitRunner(run)
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return Report{}, fmt.Errorf("modver: ref is required")
+	}
+	headOut, err := run(ctx, dir, "rev-parse", "--short=8", ref+"^{commit}")
+	if err != nil {
+		return Report{}, err
+	}
+	lsArgs := append([]string{"ls-tree", "-r", "-z", "--name-only", ref, "--"}, trackedRoots...)
+	lsOut, err := run(ctx, dir, lsArgs...)
+	if err != nil {
+		return Report{}, err
+	}
+	logArgs := append([]string{"log", "--no-merges", "--pretty=format:%x1e%h%x09%cI", "--name-only", ref, "--"}, trackedRoots...)
+	logOut, err := run(ctx, dir, logArgs...)
+	if err != nil {
+		return Report{}, err
+	}
+	modules := parseLog(logOut, liveModules(lsOut))
+	return Report{Head: strings.TrimSpace(string(headOut)), Modules: modules}, nil
+}
+
 // gitRunner resolves the Runner seam's nil default — "a nil Runner means real git" is
 // the contract every modver entry point (Snapshot, Ghosts, DriftSnapshot) opens with,
 // and this is the one place that substitution happens.

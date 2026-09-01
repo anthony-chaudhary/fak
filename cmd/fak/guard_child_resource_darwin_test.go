@@ -710,8 +710,8 @@ func TestGuardChildResourceMonitorDarwinSurfacesCollectorError(t *testing.T) {
 	defer close(stop)
 	select {
 	case event := <-resource:
-		if event.Resource == nil || event.Resource.Reason != "CHILD_RESOURCE_MONITOR_ERROR" || event.Resource.Metric != procguard.MemoryMetricRSS {
-			t.Fatalf("collector error was not typed: %+v", event)
+		if event.Resource == nil || event.Resource.Stop || event.Resource.Reason != "CHILD_RESOURCE_COLLECTOR_FAILURE" || event.Resource.Metric != procguard.MemoryMetricRSS {
+			t.Fatalf("collector error was not a typed nonterminal diagnostic: %+v", event)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Darwin collector error was silent")
