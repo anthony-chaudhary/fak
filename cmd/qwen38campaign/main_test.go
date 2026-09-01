@@ -30,6 +30,34 @@ func TestRunSoakDispatchesToProductionSoakAdapter(t *testing.T) {
 	}
 }
 
+func TestRunManagedServerRefusalLeavesNoOutputs(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.json")
+	cfg := qwen38quantrun.AdapterConfig{
+		Endpoint:        qwen38quantrun.EndpointConfig{Endpoint: "http://127.0.0.1:1", Model: "hand-copied"},
+		ExecutionEngine: "fak-native", Arm: "q4_k_m", ObservationCommand: []string{"probe"}, RestartCommand: []string{"restart"}, ReadyCommand: []string{"ready"}, CleanupCommand: []string{"cleanup"},
+		ManagedServer: &qwen38quantrun.ManagedServerConfig{Directory: filepath.Join(dir, "missing"), ProtocolFamily: "openai-http", ProtocolRevision: "v1", Capabilities: []string{"models", "chat-completions"}, ModelAlias: "exact"},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, archive := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
+	var stdout, stderr bytes.Buffer
+	exit := run(&stdout, &stderr, []string{"--config", config, "--corpus", filepath.Join("..", "..", "docs", "benchmarks", "qwen38-quant", "corpus.json"), "--report", report, "--archive", archive})
+	if exit != 1 || !strings.Contains(stderr.String(), "managed server READY identity") {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr.String())
+	}
+	for _, path := range []string{report, archive} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after refusal", filepath.Base(path))
+		}
+	}
+}
+
 func TestRunRequiresExplicitOutputs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if exit := run(&stdout, &stderr, []string{"--soak"}); exit != 2 || !strings.Contains(stderr.String(), "usage:") {
