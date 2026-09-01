@@ -127,132 +127,157 @@ func decodeFile(path string, dst any) error {
 }
 
 func Audit(m Manifest, in Input) (Report, error) {
+	stages, arms, outcomes, err := validateAuditInputs(m, in)
+	if err != nil {
+		return Report{}, err
+	}
+	state, err := accumulateObservations(in.Observations, stages, arms, outcomes)
+	if err != nil {
+		return Report{}, err
+	}
+	rep := buildAuditReport(m, outcomes, state)
+	sort.Slice(rep.Inventory, func(i, j int) bool { return rep.Inventory[i].Stage < rep.Inventory[j].Stage })
+	return rep, nil
+}
+
+func validateAuditInputs(m Manifest, in Input) (map[string]Stage, map[string]Arm, map[string]Outcome, error) {
 	if m.Schema != Schema || in.Schema != Schema {
-		return Report{}, fmt.Errorf("schema must be %q", Schema)
+		return nil, nil, nil, fmt.Errorf("schema must be %q", Schema)
 	}
 	if strings.TrimSpace(m.Name) == "" {
-		return Report{}, errors.New("manifest name is required")
+		return nil, nil, nil, errors.New("manifest name is required")
 	}
 	stages := map[string]Stage{}
 	arms := map[string]Arm{}
 	outcomes := map[string]Outcome{}
 	for _, s := range m.Stages {
 		if s.ID == "" {
-			return Report{}, errors.New("stage id is required")
+			return nil, nil, nil, errors.New("stage id is required")
 		}
 		if _, ok := stages[s.ID]; ok {
-			return Report{}, fmt.Errorf("duplicate stage %q", s.ID)
+			return nil, nil, nil, fmt.Errorf("duplicate stage %q", s.ID)
 		}
 		stages[s.ID] = s
 	}
 	for _, a := range m.Arms {
 		if a.ID == "" {
-			return Report{}, errors.New("arm id is required")
+			return nil, nil, nil, errors.New("arm id is required")
 		}
 		if _, ok := arms[a.ID]; ok {
-			return Report{}, fmt.Errorf("duplicate arm %q", a.ID)
+			return nil, nil, nil, fmt.Errorf("duplicate arm %q", a.ID)
 		}
 		arms[a.ID] = a
 	}
 	for _, o := range m.Outcomes {
 		if o.ID == "" || o.Unit == "" {
-			return Report{}, errors.New("outcome id and unit are required")
+			return nil, nil, nil, errors.New("outcome id and unit are required")
 		}
 		if _, ok := outcomes[o.ID]; ok {
-			return Report{}, fmt.Errorf("duplicate outcome %q", o.ID)
+			return nil, nil, nil, fmt.Errorf("duplicate outcome %q", o.ID)
 		}
 		outcomes[o.ID] = o
 	}
 	if err := validateDAG(stages); err != nil {
-		return Report{}, err
+		return nil, nil, nil, err
 	}
-	type accum struct {
-		traces, sessions map[string]bool
-		turns, covered   int64
-		cost             float64
-		costKnown        bool
-		outcomes         map[string]float64
-		obs              int
+	return stages, arms, outcomes, nil
+}
+
+type auditAccum struct {
+	traces, sessions map[string]bool
+	turns, covered   int64
+	cost             float64
+	costKnown        bool
+	outcomes         map[string]float64
+}
+
+type auditState struct {
+	arms               map[string]*auditAccum
+	paired             map[string]map[string]bool
+	stageCount         map[string]int
+	invocationOutcomes OutcomeCounts
+	usageWitnessed     bool
+	outcomeWitnessed   bool
+}
+
+func accumulateObservations(observations []Observation, stages map[string]Stage, arms map[string]Arm, outcomes map[string]Outcome) (auditState, error) {
+	state := auditState{
+		arms:       map[string]*auditAccum{},
+		paired:     map[string]map[string]bool{},
+		stageCount: map[string]int{},
 	}
-	acc := map[string]*accum{}
 	seenObs := map[string]bool{}
 	costOwners := map[string]string{}
-	paired := map[string]map[string]bool{}
-	stageCount := map[string]int{}
-	invocationOutcomes := OutcomeCounts{}
-	usageWitnessed := false
-	outcomeWitnessed := false
-	for _, o := range in.Observations {
+	for _, o := range observations {
 		if o.ID == "" || seenObs[o.ID] {
-			return Report{}, fmt.Errorf("duplicate or empty observation id %q", o.ID)
+			return auditState{}, fmt.Errorf("duplicate or empty observation id %q", o.ID)
 		}
 		seenObs[o.ID] = true
 		if _, ok := stages[o.StageID]; !ok {
-			return Report{}, fmt.Errorf("observation %q references unknown stage %q", o.ID, o.StageID)
+			return auditState{}, fmt.Errorf("observation %q references unknown stage %q", o.ID, o.StageID)
 		}
 		if _, ok := arms[o.Arm]; !ok {
-			return Report{}, fmt.Errorf("observation %q references unknown arm %q", o.ID, o.Arm)
+			return auditState{}, fmt.Errorf("observation %q references unknown arm %q", o.ID, o.Arm)
 		}
 		if o.TraceID == "" || o.Provenance == "" {
-			return Report{}, fmt.Errorf("observation %q requires trace_id and provenance", o.ID)
+			return auditState{}, fmt.Errorf("observation %q requires trace_id and provenance", o.ID)
 		}
 		switch o.InvocationOutcome {
 		case "", "success":
-			invocationOutcomes.Success++
+			state.invocationOutcomes.Success++
 		case "refusal":
-			invocationOutcomes.Refusal++
+			state.invocationOutcomes.Refusal++
 		case "error":
-			invocationOutcomes.Error++
+			state.invocationOutcomes.Error++
 		default:
-			return Report{}, fmt.Errorf("observation %q has invalid invocation_outcome %q", o.ID, o.InvocationOutcome)
+			return auditState{}, fmt.Errorf("observation %q has invalid invocation_outcome %q", o.ID, o.InvocationOutcome)
 		}
 		if o.InvocationOutcome != "" {
-			outcomeWitnessed = true
+			state.outcomeWitnessed = true
 		}
 		if o.Turns < 0 {
-			return Report{}, fmt.Errorf("observation %q has negative turns", o.ID)
+			return auditState{}, fmt.Errorf("observation %q has negative turns", o.ID)
 		}
 		if o.CostUSD != nil {
 			if math.IsNaN(*o.CostUSD) || math.IsInf(*o.CostUSD, 0) {
-				return Report{}, fmt.Errorf("observation %q cost_usd must be finite", o.ID)
+				return auditState{}, fmt.Errorf("observation %q cost_usd must be finite", o.ID)
 			}
 			if *o.CostUSD < 0 {
-				return Report{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
+				return auditState{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
 			}
 		}
 		if o.Turns > 0 || o.CostUSD != nil {
-			usageWitnessed = true
+			state.usageWitnessed = true
 		}
 		if len(o.Outcomes) > 0 {
-			outcomeWitnessed = true
+			state.outcomeWitnessed = true
 		}
 		for id, value := range o.Outcomes {
 			if math.IsNaN(value) || math.IsInf(value, 0) {
-				return Report{}, fmt.Errorf("observation %q outcome %q must be finite", o.ID, id)
+				return auditState{}, fmt.Errorf("observation %q outcome %q must be finite", o.ID, id)
 			}
 			if value < 0 {
-				return Report{}, fmt.Errorf("observation %q has negative outcome %q", o.ID, id)
+				return auditState{}, fmt.Errorf("observation %q has negative outcome %q", o.ID, id)
 			}
 		}
-		a := acc[o.Arm]
+		a := state.arms[o.Arm]
 		if a == nil {
-			a = &accum{traces: map[string]bool{}, sessions: map[string]bool{}, outcomes: map[string]float64{}}
-			acc[o.Arm] = a
+			a = &auditAccum{traces: map[string]bool{}, sessions: map[string]bool{}, outcomes: map[string]float64{}}
+			state.arms[o.Arm] = a
 		}
 		a.traces[o.TraceID] = true
 		if o.SessionID != "" {
 			a.sessions[o.SessionID] = true
 		}
 		a.turns += o.Turns
-		a.obs++
-		stageCount[o.StageID]++
+		state.stageCount[o.StageID]++
 		if o.CostUSD != nil {
 			key := o.CostKey
 			if key == "" {
 				key = o.ID
 			}
 			if owner, ok := costOwners[key]; ok && owner != o.Arm {
-				return Report{}, fmt.Errorf("cost_key %q is ambiguous across arms %q and %q", key, owner, o.Arm)
+				return auditState{}, fmt.Errorf("cost_key %q is ambiguous across arms %q and %q", key, owner, o.Arm)
 			}
 			if _, ok := costOwners[key]; !ok {
 				costOwners[key] = o.Arm
@@ -263,30 +288,34 @@ func Audit(m Manifest, in Input) (Report, error) {
 		}
 		for id, v := range o.Outcomes {
 			if _, ok := outcomes[id]; !ok {
-				return Report{}, fmt.Errorf("observation %q references unknown outcome %q", o.ID, id)
+				return auditState{}, fmt.Errorf("observation %q references unknown outcome %q", o.ID, id)
 			}
 			a.outcomes[id] += v
 		}
 		if o.PairID != "" {
-			if paired[o.PairID] == nil {
-				paired[o.PairID] = map[string]bool{}
+			if state.paired[o.PairID] == nil {
+				state.paired[o.PairID] = map[string]bool{}
 			}
-			paired[o.PairID][o.Arm] = true
+			state.paired[o.PairID][o.Arm] = true
 		}
 	}
-	rep := Report{Schema: Schema, Name: m.Name, InvocationOutcomes: invocationOutcomes}
-	if !usageWitnessed || (len(outcomes) > 0 && !outcomeWitnessed) {
+	return state, nil
+}
+
+func buildAuditReport(m Manifest, outcomes map[string]Outcome, state auditState) Report {
+	rep := Report{Schema: Schema, Name: m.Name, InvocationOutcomes: state.invocationOutcomes}
+	if !state.usageWitnessed || (len(outcomes) > 0 && !state.outcomeWitnessed) {
 		rep.Warnings = append(rep.Warnings, valueChainUnwitnessedAdvisory)
 	}
 	for _, s := range m.Stages {
 		status := "ABSENT"
-		if stageCount[s.ID] > 0 {
+		if state.stageCount[s.ID] > 0 {
 			status = "PRESENT"
 		}
-		rep.Inventory = append(rep.Inventory, LinkStatus{Stage: s.ID, Kind: s.Kind, Status: status, Observations: stageCount[s.ID]})
+		rep.Inventory = append(rep.Inventory, LinkStatus{Stage: s.ID, Kind: s.Kind, Status: status, Observations: state.stageCount[s.ID]})
 	}
 	for _, arm := range m.Arms {
-		a := acc[arm.ID]
+		a := state.arms[arm.ID]
 		ar := ArmReport{Arm: arm.ID, Default: arm.Default, Outcomes: map[string]float64{}, CostPerOutcome: map[string]float64{}}
 		if a != nil {
 			ar.Traces = len(a.traces)
@@ -325,7 +354,7 @@ func Audit(m Manifest, in Input) (Report, error) {
 			base, cand = cand, base
 		}
 		c := &Comparison{Baseline: base.ID, Candidate: cand.ID, Design: "observational"}
-		for _, xs := range paired {
+		for _, xs := range state.paired {
 			if xs[base.ID] && xs[cand.ID] {
 				c.PairedTraces++
 			}
@@ -340,8 +369,7 @@ func Audit(m Manifest, in Input) (Report, error) {
 		}
 		rep.Comparison = c
 	}
-	sort.Slice(rep.Inventory, func(i, j int) bool { return rep.Inventory[i].Stage < rep.Inventory[j].Stage })
-	return rep, nil
+	return rep
 }
 func armByID(xs []ArmReport, id string) *ArmReport {
 	for i := range xs {

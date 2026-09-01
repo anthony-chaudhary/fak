@@ -2,6 +2,13 @@ I have everything I need to synthesize this. The three takes converge sharply, t
 
 # POSITIONING BRIEF — fak organic discovery
 
+**Category lead:** fak is an agent runtime: the operator-controlled boundary for
+cache and context, model routing, tool authority, memory, observability, and
+native inference. **Fused Agent Kernel** and **agent kernel** name the technical
+architecture, history, and syscall analogy; they are not the simple public shelf.
+This framing does not make roadmap-only orchestration or runtime features shipped.
+Use the claim-status authority for each concrete capability.
+
 ## 1. The hook (one sharpest + 2 backups, each fenced)
 
 **THE HOOK:**
@@ -17,7 +24,7 @@ I have everything I need to synthesize this. The three takes converge sharply, t
 *Honest fence:* This is self-described and SHIPPED. The two gates (capability lock + result quarantine) are the floor; the detector is explicitly *not*. Keep the "by design" — it's the credibility, not a caveat. Don't say "unbreakable"; say "attacker must beat two independent gates."
 
 **BACKUP B (operational, for selfhosted/golang/Primeagen):**
-> "An agent kernel in one ~13MB static Go binary. Two golang.org/x deps, a 4-line go.sum. The default-deny gate runs in-process on the same call path as the tool call — no IPC, no sidecar, no second model."
+> "An agent runtime in one ~13MB static Go binary. Its Fused Agent Kernel architecture puts the default-deny gate in-process on the same call path as the tool call — no IPC, no sidecar, no second model. Two golang.org/x deps, a 4-line go.sum."
 
 *Honest fence:* The contrast is *operational surface* vs a multi-GB Python/CUDA stack — NOT tok/s. fak is not a faster token engine and doesn't try to be; vLLM/SGLang/llama.cpp win raw throughput. Say that first, before anyone catches it.
 

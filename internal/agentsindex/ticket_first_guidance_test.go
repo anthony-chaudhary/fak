@@ -8,12 +8,44 @@ import (
 	"testing"
 )
 
-func TestAgentGuidanceTracksWorkInGitHubBeforeImplementation(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file")
+// guidanceRoot resolves the repository root that holds AGENTS.md. runtime.Caller
+// paths are module-relative under -trimpath (the isolated buildcheck/validate
+// compile), so the caller-derived root is only a first candidate; walking up from
+// the test's working directory (go test runs in the package dir) finds the real
+// checkout in both compile modes.
+func guidanceRoot(t *testing.T) string {
+	t.Helper()
+	if _, file, _, ok := runtime.Caller(0); ok {
+		root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+		if fileExists(filepath.Join(root, "AGENTS.md")) {
+			return root
+		}
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve working directory: %v", err)
+	}
+	for i := 0; i < 8; i++ {
+		if fileExists(filepath.Join(dir, "AGENTS.md")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatal("locate AGENTS.md above the package directory")
+	return ""
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func TestAgentGuidanceTracksWorkInGitHubBeforeImplementation(t *testing.T) {
+	root := guidanceRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)
@@ -36,11 +68,7 @@ func TestAgentGuidanceTracksWorkInGitHubBeforeImplementation(t *testing.T) {
 }
 
 func TestAgentGuidanceDefaultsSubstantiveWorkToWorkers(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := guidanceRoot(t)
 	checks := map[string][]string{
 		"AGENTS.md": {
 			"Delegate real work; keep the coordinator context clean",

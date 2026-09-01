@@ -617,48 +617,9 @@ func (g *GitGate) inspectGit(args []string) (string, bool) { return g.inspectGit
 // the git call was found behind an `xargs` (see gitArgvViaXargs), meaning its OPERANDS
 // arrive on stdin and are not in the argv the gate can read.
 func (g *GitGate) inspectGitArgs(args []string, viaXargs bool) (string, bool) {
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			break // the subcommand
-		}
-		switch {
-		case a == "-c" || a == "-C" || a == "--git-dir" || a == "--work-tree" || a == "--namespace" || a == "--exec-path":
-			val := ""
-			if i+1 < len(args) {
-				val = args[i+1]
-			}
-			// `-c core.hooksPath=...` disables hooks for this one invocation. Key-scope
-			// the match (split the key=value operand on '='): a DIFFERENT key whose value
-			// merely mentions the string — e.g. `-c core.editor='vim core.hooksPath'` — is
-			// not a hooks override and must not be refused.
-			if a == "-c" {
-				key, cval, joined := splitConfigKey(strings.ToLower(val))
-				if key == "core.hookspath" {
-					return "skip-hooks refused: `git -c core.hooksPath=...` disables hooks for this invocation.", true
-				}
-				// `git -c remote.<n>.mirror=true push` is `push --mirror` with no flag on
-				// the argv. Decided HERE, before the value is consumed, because the
-				// no-`=` spelling (`git -c remote.origin.mirror push origin`, which git
-				// reads as true) otherwise swallows the `push` token as this option's
-				// value and blinds the whole subcommand scan below.
-				if isMirrorEnable(key, cval, joined) {
-					return pushMirrorConfigLaw, true
-				}
-			}
-			i += 2 // consume the option AND its value
-		case strings.HasPrefix(a, "--") && strings.Contains(a, "="):
-			// A joined long global (e.g. --git-dir=...). Only an override whose KEY is
-			// core.hooksPath disables hooks; key-scope so a path value that merely
-			// contains the string (--git-dir=/repo/core.hooksPathBackup) is not refused.
-			if key, _, _ := splitConfigKey(strings.ToLower(strings.TrimPrefix(a, "--"))); key == "core.hookspath" {
-				return "skip-hooks refused: a core.hooksPath override disables hooks for this invocation.", true
-			}
-			i++ // a joined long global, e.g. --git-dir=...
-		default:
-			i++ // a valueless global flag (--no-pager, -p, --bare, ...)
-		}
+	i, law, refused := inspectGitGlobalArgs(args)
+	if refused {
+		return law, true
 	}
 	if i >= len(args) {
 		return "", false // no subcommand (e.g. `git --version`, `git -C x`)
@@ -766,59 +727,99 @@ func (g *GitGate) inspectGitArgs(args []string, viaXargs bool) (string, bool) {
 	// form only; a read (--get*/--list/-l), an --unset (restores the default), and
 	// setting gpgsign back ON all fall through to defer.
 	if sub == "config" {
-		hasHooksPath, gpgSignOff, isReadOrUnset := false, false, false
-		mirrorOn := false
-		for i, t := range rest {
-			lt := strings.ToLower(t)
-			switch t {
-			case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all":
-				isReadOrUnset = true
-			}
-			// Key-scope both detections off the config KEY (splitConfigKey), never a
-			// substring: a write of a different key whose value merely mentions the
-			// string — `git config alias.st "note core.hooksPath"` — is not a guard
-			// disable. hooksPath as a bare key or joined key=value; gpgsign additionally
-			// requires a false-spelling value (bare next operand or joined).
-			key, val, joined := splitConfigKey(lt)
-			if key == "core.hookspath" {
-				hasHooksPath = true
-			}
-			if key == "commit.gpgsign" {
-				v := val
-				if !joined && i+1 < len(rest) {
-					v = strings.ToLower(rest[i+1])
-				}
-				if isGitFalse(v) {
-					gpgSignOff = true
-				}
-			}
-			// The persistent sibling of `git -c remote.<n>.mirror=true`: written into
-			// the config it arms EVERY later plain `git push <remote>` as a --mirror
-			// mass delete. A bare `git config remote.<n>.mirror` with no value is a
-			// READ, so an enable requires an actual value operand (or a joined one).
-			if isMirrorKey(key) {
-				v, has := val, joined
-				if !joined && i+1 < len(rest) {
-					v, has = strings.ToLower(rest[i+1]), true
-				}
-				if has && isMirrorEnable(key, v, true) {
-					mirrorOn = true
-				}
-			}
-		}
-		if !isReadOrUnset {
-			if hasHooksPath {
-				return configHooksLaw, true
-			}
-			if gpgSignOff {
-				return configSignLaw, true
-			}
-			if mirrorOn {
-				return pushMirrorConfigLaw, true
-			}
+		if law, refused := inspectGitConfig(rest); refused {
+			return law, true
 		}
 	}
 
+	return g.inspectGitRuleFlags(sub, rest)
+}
+
+func inspectGitGlobalArgs(args []string) (int, string, bool) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			break
+		}
+		switch {
+		case a == "-c" || a == "-C" || a == "--git-dir" || a == "--work-tree" || a == "--namespace" || a == "--exec-path":
+			val := ""
+			if i+1 < len(args) {
+				val = args[i+1]
+			}
+			// Key-scope invocation config overrides so values that merely mention a
+			// protected key do not trigger a refusal.
+			if a == "-c" {
+				key, cval, joined := splitConfigKey(strings.ToLower(val))
+				if key == "core.hookspath" {
+					return i, "skip-hooks refused: `git -c core.hooksPath=...` disables hooks for this invocation.", true
+				}
+				if isMirrorEnable(key, cval, joined) {
+					return i, pushMirrorConfigLaw, true
+				}
+			}
+			i += 2
+		case strings.HasPrefix(a, "--") && strings.Contains(a, "="):
+			if key, _, _ := splitConfigKey(strings.ToLower(strings.TrimPrefix(a, "--"))); key == "core.hookspath" {
+				return i, "skip-hooks refused: a core.hooksPath override disables hooks for this invocation.", true
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return i, "", false
+}
+
+func inspectGitConfig(rest []string) (string, bool) {
+	hasHooksPath, gpgSignOff, isReadOrUnset := false, false, false
+	mirrorOn := false
+	for i, t := range rest {
+		lt := strings.ToLower(t)
+		switch t {
+		case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all":
+			isReadOrUnset = true
+		}
+		key, val, joined := splitConfigKey(lt)
+		if key == "core.hookspath" {
+			hasHooksPath = true
+		}
+		if key == "commit.gpgsign" {
+			v := val
+			if !joined && i+1 < len(rest) {
+				v = strings.ToLower(rest[i+1])
+			}
+			if isGitFalse(v) {
+				gpgSignOff = true
+			}
+		}
+		if isMirrorKey(key) {
+			v, has := val, joined
+			if !joined && i+1 < len(rest) {
+				v, has = strings.ToLower(rest[i+1]), true
+			}
+			if has && isMirrorEnable(key, v, true) {
+				mirrorOn = true
+			}
+		}
+	}
+	if isReadOrUnset {
+		return "", false
+	}
+	if hasHooksPath {
+		return configHooksLaw, true
+	}
+	if gpgSignOff {
+		return configSignLaw, true
+	}
+	if mirrorOn {
+		return pushMirrorConfigLaw, true
+	}
+	return "", false
+}
+
+func (g *GitGate) inspectGitRuleFlags(sub string, rest []string) (string, bool) {
 	for _, t := range rest {
 		if t == "--" {
 			break // end of options; the remainder are pathspecs/operands, not flags
