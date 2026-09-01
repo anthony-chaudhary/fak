@@ -305,53 +305,10 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 	if in.ProcessMatchWindow <= 0 {
 		in.ProcessMatchWindow = 3 * time.Second
 	}
-	threads := make(map[string]ThreadEvidence, len(in.Threads))
-	for _, t := range in.Threads {
-		if id := safeID(t.ThreadID); id != "" {
-			t.ThreadID = id
-			threads[id] = t
-		}
-	}
-	turns := latestTurns(in.Turns)
-	harnessByThread := map[string]string{}
-	for _, registration := range in.Registrations {
-		harness := normalizedSessionHarness(registration.Identity.Runtime)
-		if harness == "" {
-			continue
-		}
-		if id := safeID(registration.Identity.ThreadID); id != "" {
-			harnessByThread[id] = harness
-		}
-		if id := safeID(registration.Identity.SessionID); id != "" {
-			harnessByThread[id] = harness
-		}
-	}
-	locks := make(map[string]WriterLockEvidence, len(in.WriterLocks))
-	for _, lock := range in.WriterLocks {
-		if id := safeID(lock.ThreadID); id != "" {
-			lock.ThreadID = id
-			locks[id] = lock
-		}
-	}
-	receipts := make(map[string]GuardReceiptEvidence, len(in.GuardReceipts))
-	for _, receipt := range in.GuardReceipts {
-		if id := safeID(receipt.ThreadID); id != "" {
-			receipt.ThreadID = id
-			receipts[id] = receipt
-		}
-	}
-	parentIDs := map[string][]string{}
-	childIDs := map[string][]string{}
-	childSet := map[string]bool{}
-	for _, edge := range in.SpawnEdges {
-		parent, child := safeID(edge.ParentThreadID), safeID(edge.ChildThreadID)
-		if parent == "" || child == "" {
-			continue
-		}
-		childSet[child] = true
-		parentIDs[child] = appendUnique(parentIDs[child], parent)
-		childIDs[parent] = appendUnique(childIDs[parent], child)
-	}
+	indexed := indexInventoryEvidence(in)
+	threads, turns := indexed.threads, indexed.turns
+	harnessByThread, locks, receipts := indexed.harnessByThread, indexed.locks, indexed.receipts
+	parentIDs, childIDs, childSet := indexed.parentIDs, indexed.childIDs, indexed.childSet
 
 	trees := buildProcessTrees(in.Processes, threads)
 	associateProcessTrees(trees, threads, in.ProcessMatchWindow)
@@ -499,6 +456,77 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 		RegistrationReconciliation: reconciliations,
 		CleanupActions:             cleanupActions,
 		Notice:                     "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself",
+	}
+}
+
+type inventoryEvidenceIndex struct {
+	threads         map[string]ThreadEvidence
+	turns           map[string]TurnEvidence
+	harnessByThread map[string]string
+	locks           map[string]WriterLockEvidence
+	receipts        map[string]GuardReceiptEvidence
+	parentIDs       map[string][]string
+	childIDs        map[string][]string
+	childSet        map[string]bool
+}
+
+func indexInventoryEvidence(in InventoryInput) inventoryEvidenceIndex {
+	threads := make(map[string]ThreadEvidence, len(in.Threads))
+	for _, t := range in.Threads {
+		if id := safeID(t.ThreadID); id != "" {
+			t.ThreadID = id
+			threads[id] = t
+		}
+	}
+	turns := latestTurns(in.Turns)
+	harnessByThread := map[string]string{}
+	for _, registration := range in.Registrations {
+		harness := normalizedSessionHarness(registration.Identity.Runtime)
+		if harness == "" {
+			continue
+		}
+		if id := safeID(registration.Identity.ThreadID); id != "" {
+			harnessByThread[id] = harness
+		}
+		if id := safeID(registration.Identity.SessionID); id != "" {
+			harnessByThread[id] = harness
+		}
+	}
+	locks := make(map[string]WriterLockEvidence, len(in.WriterLocks))
+	for _, lock := range in.WriterLocks {
+		if id := safeID(lock.ThreadID); id != "" {
+			lock.ThreadID = id
+			locks[id] = lock
+		}
+	}
+	receipts := make(map[string]GuardReceiptEvidence, len(in.GuardReceipts))
+	for _, receipt := range in.GuardReceipts {
+		if id := safeID(receipt.ThreadID); id != "" {
+			receipt.ThreadID = id
+			receipts[id] = receipt
+		}
+	}
+	parentIDs := map[string][]string{}
+	childIDs := map[string][]string{}
+	childSet := map[string]bool{}
+	for _, edge := range in.SpawnEdges {
+		parent, child := safeID(edge.ParentThreadID), safeID(edge.ChildThreadID)
+		if parent == "" || child == "" {
+			continue
+		}
+		childSet[child] = true
+		parentIDs[child] = appendUnique(parentIDs[child], parent)
+		childIDs[parent] = appendUnique(childIDs[parent], child)
+	}
+	return inventoryEvidenceIndex{
+		threads:         threads,
+		turns:           turns,
+		harnessByThread: harnessByThread,
+		locks:           locks,
+		receipts:        receipts,
+		parentIDs:       parentIDs,
+		childIDs:        childIDs,
+		childSet:        childSet,
 	}
 }
 
