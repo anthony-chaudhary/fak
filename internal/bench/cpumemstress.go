@@ -84,10 +84,130 @@ const StressNGGuidance = "Use this dependency-free arm when the host forbids pac
 // faults the page in without dirtying every byte (the OS maps in page units).
 const pageBytes = 4096
 
+// SystemTestUtilizationProfile names the host role whose resource defaults a
+// system witness should use.
+type SystemTestUtilizationProfile string
+
+const (
+	// SystemTestProfileSharedDevelopment reserves interactive headroom: 80%
+	// CPU/GPU requested capacity, with at least one logical CPU left unused when
+	// the host has more than one.
+	SystemTestProfileSharedDevelopment SystemTestUtilizationProfile = "shared-development"
+	// SystemTestProfileRemote is for an unattended remote worker: 90% CPU/GPU.
+	SystemTestProfileRemote SystemTestUtilizationProfile = "remote"
+	// SystemTestProfileDedicatedInference is for a dedicated inference host:
+	// 100% CPU/GPU.
+	SystemTestProfileDedicatedInference SystemTestUtilizationProfile = "dedicated-inference"
+)
+
+const gpuUtilizationLimitation = "requested policy ceiling only; this CPU/memory witness does not enforce or measure GPU utilization"
+
+// SystemTestUtilizationRequest is the reusable input contract for resolving a
+// system witness's requested host capacity. Zero percentages select the
+// profile defaults; negative percentages are invalid and values above 100 are
+// clamped to 100. Concurrency, when positive, is the final exact CPU override.
+type SystemTestUtilizationRequest struct {
+	Profile     SystemTestUtilizationProfile
+	CPUPercent  int
+	GPUPercent  int
+	Concurrency int
+}
+
+// SystemTestUtilization is the resolved, artifact-ready utilization contract.
+// GPUPercent is recorded for a shared vocabulary with GPU witnesses; the
+// limitation states honestly that this witness does not apply it yet.
+type SystemTestUtilization struct {
+	Profile       SystemTestUtilizationProfile `json:"profile"`
+	CPUPercent    int                          `json:"cpu_percent"`
+	GPUPercent    int                          `json:"gpu_percent"`
+	CPUCapacity   int                          `json:"cpu_capacity"`
+	GPULimitation string                       `json:"gpu_limitation"`
+}
+
+// ResolveSystemTestUtilization resolves a profile and overrides against a
+// supplied logical CPU count. Supplying the count makes policy tests and other
+// system witnesses deterministic instead of coupling them to the current host.
+func ResolveSystemTestUtilization(req SystemTestUtilizationRequest, logicalCPUs int) (SystemTestUtilization, error) {
+	if logicalCPUs < 1 {
+		return SystemTestUtilization{}, fmt.Errorf("logical CPU count must be positive: %d", logicalCPUs)
+	}
+	if req.Concurrency < 0 {
+		return SystemTestUtilization{}, fmt.Errorf("concurrency must not be negative: %d", req.Concurrency)
+	}
+
+	profile := req.Profile
+	if profile == "" {
+		profile = SystemTestProfileSharedDevelopment
+	}
+	var defaultPercent int
+	switch profile {
+	case SystemTestProfileSharedDevelopment:
+		defaultPercent = 80
+	case SystemTestProfileRemote:
+		defaultPercent = 90
+	case SystemTestProfileDedicatedInference:
+		defaultPercent = 100
+	default:
+		return SystemTestUtilization{}, fmt.Errorf("unknown system-test utilization profile %q", profile)
+	}
+
+	cpuPercent, err := resolveUtilizationPercent("CPU", req.CPUPercent, defaultPercent)
+	if err != nil {
+		return SystemTestUtilization{}, err
+	}
+	gpuPercent, err := resolveUtilizationPercent("GPU", req.GPUPercent, defaultPercent)
+	if err != nil {
+		return SystemTestUtilization{}, err
+	}
+
+	capacity := int(int64(logicalCPUs) * int64(cpuPercent) / 100)
+	if capacity < 1 {
+		capacity = 1
+	}
+	if capacity > logicalCPUs {
+		capacity = logicalCPUs
+	}
+	if profile == SystemTestProfileSharedDevelopment && logicalCPUs > 1 && capacity >= logicalCPUs {
+		capacity = logicalCPUs - 1
+	}
+	if req.Concurrency > 0 {
+		capacity = req.Concurrency
+	}
+
+	return SystemTestUtilization{
+		Profile:       profile,
+		CPUPercent:    cpuPercent,
+		GPUPercent:    gpuPercent,
+		CPUCapacity:   capacity,
+		GPULimitation: gpuUtilizationLimitation,
+	}, nil
+}
+
+func resolveUtilizationPercent(resource string, requested, defaultPercent int) (int, error) {
+	if requested < 0 {
+		return 0, fmt.Errorf("%s percent must not be negative: %d", resource, requested)
+	}
+	if requested == 0 {
+		return defaultPercent, nil
+	}
+	if requested > 100 {
+		return 100, nil
+	}
+	return requested, nil
+}
+
 // CPUMemConfig sizes a run. Zero fields take the defaults in withDefaults, so a
-// bare CPUMemConfig{} is a valid full-size da33 run.
+// bare CPUMemConfig{} is a shared-development run that reserves host headroom.
 type CPUMemConfig struct {
-	// Concurrency is the CPU hash fan-out; 0 => runtime.NumCPU().
+	// Profile selects shared-development (default), remote, or dedicated-inference.
+	Profile SystemTestUtilizationProfile `json:"profile,omitempty"`
+	// CPUPercent overrides the profile CPU percentage; 0 => profile default,
+	// negative => invalid, >100 => clamped to 100.
+	CPUPercent int `json:"cpu_percent,omitempty"`
+	// GPUPercent overrides the recorded GPU percentage with the same semantics.
+	// This witness records but does not enforce or measure GPU utilization.
+	GPUPercent int `json:"gpu_percent,omitempty"`
+	// Concurrency is the CPU hash fan-out; positive values are exact final overrides.
 	Concurrency int `json:"concurrency"`
 	// CPUDuration bounds the hash arm's wall time; 0 => 2s.
 	CPUDuration time.Duration `json:"cpu_duration"`
@@ -107,10 +227,17 @@ type CPUMemConfig struct {
 	MaxMemFraction float64 `json:"max_mem_fraction"`
 }
 
-func (c CPUMemConfig) withDefaults() CPUMemConfig {
-	if c.Concurrency <= 0 {
-		c.Concurrency = runtime.NumCPU()
+func (c CPUMemConfig) withDefaults(logicalCPUs int) (CPUMemConfig, SystemTestUtilization, error) {
+	utilization, err := ResolveSystemTestUtilization(SystemTestUtilizationRequest{
+		Profile: c.Profile, CPUPercent: c.CPUPercent, GPUPercent: c.GPUPercent, Concurrency: c.Concurrency,
+	}, logicalCPUs)
+	if err != nil {
+		return CPUMemConfig{}, SystemTestUtilization{}, err
 	}
+	c.Profile = utilization.Profile
+	c.CPUPercent = utilization.CPUPercent
+	c.GPUPercent = utilization.GPUPercent
+	c.Concurrency = utilization.CPUCapacity
 	if c.CPUDuration <= 0 {
 		c.CPUDuration = 2 * time.Second
 	}
@@ -135,7 +262,7 @@ func (c CPUMemConfig) withDefaults() CPUMemConfig {
 	if c.MaxMemFraction == 0 {
 		c.MaxMemFraction = 0.5
 	}
-	return c
+	return c, utilization, nil
 }
 
 // HostSnapshot is the host's load + memory view at one instant. The /proc fields
@@ -210,26 +337,27 @@ type MemArm struct {
 
 // CPUMemReport is the committed, self-verifying witness artifact.
 type CPUMemReport struct {
-	Schema       string       `json:"schema"`
-	Issue        string       `json:"issue"`
-	GeneratedAt  string       `json:"generated_at"`
-	Hardware     string       `json:"hardware"`
-	GoOS         string       `json:"goos"`
-	GoArch       string       `json:"goarch"`
-	NumCPU       int          `json:"num_cpu"`
-	GoMaxProcs   int          `json:"gomaxprocs"`
-	GoVersion    string       `json:"go_version"`
-	Fence        string       `json:"fence"`
-	StressNGWhen string       `json:"stress_ng_when"`
-	Config       CPUMemConfig `json:"config"`
-	Gates        SafetyGates  `json:"gates"`
-	Refused      bool         `json:"refused"`
-	RefusedWhy   string       `json:"refused_why,omitempty"`
-	HostBefore   HostSnapshot `json:"host_before"`
-	HostAfter    HostSnapshot `json:"host_after"`
-	CPU          CPUArm       `json:"cpu"`
-	Memory       []MemArm     `json:"memory"`
-	Digest       string       `json:"digest"`
+	Schema       string                `json:"schema"`
+	Issue        string                `json:"issue"`
+	GeneratedAt  string                `json:"generated_at"`
+	Hardware     string                `json:"hardware"`
+	GoOS         string                `json:"goos"`
+	GoArch       string                `json:"goarch"`
+	NumCPU       int                   `json:"num_cpu"`
+	GoMaxProcs   int                   `json:"gomaxprocs"`
+	GoVersion    string                `json:"go_version"`
+	Fence        string                `json:"fence"`
+	StressNGWhen string                `json:"stress_ng_when"`
+	Config       CPUMemConfig          `json:"config"`
+	Utilization  SystemTestUtilization `json:"utilization"`
+	Gates        SafetyGates           `json:"gates"`
+	Refused      bool                  `json:"refused"`
+	RefusedWhy   string                `json:"refused_why,omitempty"`
+	HostBefore   HostSnapshot          `json:"host_before"`
+	HostAfter    HostSnapshot          `json:"host_after"`
+	CPU          CPUArm                `json:"cpu"`
+	Memory       []MemArm              `json:"memory"`
+	Digest       string                `json:"digest"`
 }
 
 // RunCPUMemStress runs the bounded CPU + memory stress arm and returns the
@@ -238,7 +366,11 @@ type CPUMemReport struct {
 // returns the report with Refused=true and a non-nil error — the run is REFUSED,
 // not silently skipped, so an operator sees why no load was applied.
 func RunCPUMemStress(ctx context.Context, cfg CPUMemConfig) (*CPUMemReport, error) {
-	cfg = cfg.withDefaults()
+	logicalCPUs := runtime.NumCPU()
+	cfg, utilization, err := cfg.withDefaults(logicalCPUs)
+	if err != nil {
+		return nil, fmt.Errorf("cpumemstress: resolve utilization: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
@@ -249,12 +381,13 @@ func RunCPUMemStress(ctx context.Context, cfg CPUMemConfig) (*CPUMemReport, erro
 		Hardware:     hardwareLabel(),
 		GoOS:         runtime.GOOS,
 		GoArch:       runtime.GOARCH,
-		NumCPU:       runtime.NumCPU(),
+		NumCPU:       logicalCPUs,
 		GoMaxProcs:   runtime.GOMAXPROCS(0),
 		GoVersion:    runtime.Version(),
 		Fence:        cpuMemFence,
 		StressNGWhen: StressNGGuidance,
 		Config:       cfg,
+		Utilization:  utilization,
 		Memory:       []MemArm{},
 	}
 	rep.Gates.TimeoutNS = cfg.Timeout.Nanoseconds()
