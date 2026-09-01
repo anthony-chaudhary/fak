@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-
-	"github.com/anthony-chaudhary/fak/internal/validatedjson"
 )
 
 // Kind is the operation a Request asks a resident worker to run. The set is closed: a
@@ -109,7 +107,10 @@ func (r Request) Validate() error {
 // line-oriented bridge intact. It refuses a malformed request rather than spooling one a
 // worker would only reject later.
 func (r Request) Encode() ([]byte, error) {
-	return validatedjson.Marshal(r)
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(r)
 }
 
 // DecodeRequest parses a spooled request line and validates it, so a worker refuses a

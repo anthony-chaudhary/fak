@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/validatedjson"
 )
 
 const Schema = "fak.local-app-contract/1"
@@ -60,7 +58,10 @@ func (r Receipt) Validate() error {
 	return errors.New("unknown terminal state")
 }
 func (r Receipt) Marshal() ([]byte, error) {
-	return validatedjson.Marshal(r)
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(r)
 }
 func CheckAdditiveCompatibility(oldRaw, newRaw []byte) error {
 	var a, b map[string]any

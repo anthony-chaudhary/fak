@@ -775,6 +775,8 @@ var tier = map[string]int{
 	"rollout":                    1,
 	"deployment":                 1,
 	"extensionfault":             1, // stdlib-only optional extension subprocess fault-isolation primitive.
+	"optsdefault":                1, // stdlib-only shared scorecard Options defaults (empty root, zero now).
+	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

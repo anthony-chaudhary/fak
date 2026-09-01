@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/validatedjson"
 )
 
 const ChildContextReceiptSchema = "fak.child-context.receipt.v1"
@@ -96,7 +94,10 @@ func (r ChildContextReceipt) Validate() error {
 
 // CanonicalJSON returns the single supported JSON representation.
 func (r ChildContextReceipt) CanonicalJSON() ([]byte, error) {
-	return validatedjson.Marshal(r)
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(r)
 }
 
 // Digest returns the lowercase SHA-256 digest of CanonicalJSON.
