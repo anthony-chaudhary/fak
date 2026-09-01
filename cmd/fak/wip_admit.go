@@ -29,6 +29,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -40,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/flowmetrics"
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
+	"github.com/anthony-chaudhary/fak/internal/wipreadiness"
 )
 
 // wipAdmitHoldExit is the exit code for a HOLD verdict, matching sweep-guard's hazard
@@ -61,9 +63,14 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	strict := fs.Bool("strict", false, "promote every soft finding (undeclared intent, unlanded self-WIP) to a hard HOLD")
 	ceiling := fs.Int("ceiling", 0, "override how many unlanded paths this session may already hold (default: 3)")
 	asJSON := fs.Bool("json", false, "emit the admission report as JSON")
-	workIntent := fs.String("work-intent", string(flowmetrics.IntentFresh), "admission intent: fresh, recovery, landing, safety, or continuation")
-	flowIssuesFile := fs.String("flow-issues-file", "", "replay a saved gh issue list JSON corpus for arrival/service admission")
+	workIntent := fs.String("work-intent", string(flowmetrics.IntentFresh), "admission intent: fresh, recovery, landing, parking, safety, continuation, owned-continuation, or supersession")
+	flowIssuesFile := fs.String("flow-issues-file", "", "replay a saved gh issue list JSON corpus for arrival/service and aging admission")
 	flowWindow := fs.Int("flow-window", 30, "arrival/service admission window in days")
+	agingCommitsFile := fs.String("aging-commits-file", "", "replay saved commit JSON for aging-WIP admission")
+	agingReadinessFile := fs.String("aging-readiness-file", "", "replay a saved WIP-readiness receipt for aging admission")
+	agingBudget := fs.Duration("aging-budget", 7*24*time.Hour, "maximum actionable WIP age before unrelated fresh starts are refused")
+	supersessionReason := fs.String("supersession-reason", "", "witnessed reason for superseding aging WIP")
+	overrideReason := fs.String("override-reason", "", "witnessed operator reason overriding aging-WIP admission")
 	maxUntrackedAge := fs.Duration("max-untracked-age", time.Hour, "refuse stale untracked source work before admitting a new task (0 disables)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
@@ -76,13 +83,17 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak wip admit: --session is required when no session environment is set")
 		return 2
 	}
-	intent, err := flowmetrics.ParseAdmissionIntent(*workIntent)
+	agingIntent, intent, err := parseWIPAgingIntent(*workIntent)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip admit: %v\n", err)
 		return 2
 	}
 	if *flowWindow <= 0 {
 		fmt.Fprintln(stderr, "fak wip admit: --flow-window must be positive")
+		return 2
+	}
+	if *agingBudget <= 0 {
+		fmt.Fprintln(stderr, "fak wip admit: --aging-budget must be positive")
 		return 2
 	}
 	if *maxUntrackedAge > 0 {
@@ -107,12 +118,17 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak wip admit: %v\n", err)
 		return 1
 	}
-	flow, flowErr := loadFlowAdmission(context.Background(), *repo, *flowIssuesFile, intent, *flowWindow)
+	ctx := context.Background()
+	flow, flowErr := loadFlowAdmission(ctx, *repo, *flowIssuesFile, intent, *flowWindow)
 	if flowErr != nil {
 		fmt.Fprintf(stderr, "fak wip admit: arrival/service measurement unavailable (%v); preserving the existing WIP decision\n", flowErr)
 	}
-	result := wipAdmissionResult{AdmitReport: rep, Flow: flow}
-	if flow != nil && flow.Verdict == "REFUSE" {
+	aging, agingErr := loadAgingAdmission(ctx, *repo, *flowIssuesFile, *agingCommitsFile, *agingReadinessFile, agingIntent, *agingBudget, *supersessionReason, *overrideReason)
+	if agingErr != nil {
+		fmt.Fprintf(stderr, "fak wip admit: aging-WIP measurement unavailable (%v); preserving the existing WIP decision\n", agingErr)
+	}
+	result := wipAdmissionResult{AdmitReport: rep, Flow: flow, Aging: aging}
+	if (flow != nil && flow.Verdict == "REFUSE") || (aging != nil && aging.Verdict == "REFUSE") {
 		result.Verdict = wipattr.AdmitHold
 	}
 	if *asJSON {
@@ -124,6 +140,14 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
+	if aging != nil && aging.Verdict == "REFUSE" {
+		if aging.BlockingUnit != nil {
+			fmt.Fprintf(stderr, "HOLD — %s: %s age=%.1fd budget=%.1fd classification=%s; safe actions: %s\n", aging.ReasonCode, aging.BlockingUnit.Unit, aging.BlockingUnit.AgeDays, aging.BudgetDays, aging.BlockingUnit.Classification, strings.Join(aging.SafeActions, ", "))
+		} else {
+			fmt.Fprintf(stderr, "HOLD — %s: %s; safe actions: %s\n", aging.ReasonCode, aging.Reason, strings.Join(aging.SafeActions, ", "))
+		}
+		return wipAdmitHoldExit
+	}
 	if flow != nil && flow.Verdict == "REFUSE" {
 		fmt.Fprintf(stderr, "HOLD — %s: %.1f arrivals/day vs %.1f service/day over %.0fd; ratio=%s threshold=%.2f\n", flow.ReasonCode, flow.Observed.ArrivalRate, flow.Observed.ServiceRate, flow.Observed.WindowDays, flowRatioLabel(flow.Observed.Ratio), flow.Threshold)
 		return wipAdmitHoldExit
@@ -133,7 +157,91 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 
 type wipAdmissionResult struct {
 	wipattr.AdmitReport
-	Flow *flowmetrics.AdmissionReceipt `json:"flow,omitempty"`
+	Flow  *flowmetrics.AdmissionReceipt      `json:"flow,omitempty"`
+	Aging *flowmetrics.AgingAdmissionReceipt `json:"aging,omitempty"`
+}
+
+func parseWIPAgingIntent(raw string) (string, flowmetrics.AdmissionIntent, error) {
+	intent := strings.ToLower(strings.TrimSpace(raw))
+	switch intent {
+	case "fresh":
+		return intent, flowmetrics.IntentFresh, nil
+	case "recovery", "parking", "supersession":
+		return intent, flowmetrics.IntentRecovery, nil
+	case "landing":
+		return intent, flowmetrics.IntentLanding, nil
+	case "safety":
+		return intent, flowmetrics.IntentSafety, nil
+	case "continuation", "owned-continuation":
+		return intent, flowmetrics.IntentContinuation, nil
+	default:
+		return "", "", fmt.Errorf("invalid work intent %q (want fresh, recovery, landing, parking, safety, continuation, owned-continuation, or supersession)", raw)
+	}
+}
+
+func loadAgingAdmission(ctx context.Context, repo, issuesFile, commitsFile, readinessFile, intent string, budget time.Duration, supersessionReason, overrideReason string) (*flowmetrics.AgingAdmissionReceipt, error) {
+	now := time.Now().UTC()
+	var (
+		issues    []flowmetrics.Issue
+		commits   []flowmetrics.Commit
+		readiness *wipreadiness.Receipt
+		err       error
+	)
+	if issuesFile != "" {
+		issues, err = flowmetrics.LoadIssuesFile(issuesFile)
+	} else {
+		issues, err = flowmetrics.GatherIssues(ctx, repo, "all", 100000)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("aging issues: %w", err)
+	}
+	if commitsFile != "" {
+		raw, readErr := os.ReadFile(commitsFile)
+		if readErr != nil {
+			return nil, fmt.Errorf("aging commits: %w", readErr)
+		}
+		if err := json.Unmarshal(raw, &commits); err != nil {
+			return nil, fmt.Errorf("aging commits: decode: %w", err)
+		}
+	} else {
+		commits, err = flowmetrics.GatherCommits(ctx, repo, 0)
+		if err != nil {
+			return nil, fmt.Errorf("aging commits: %w", err)
+		}
+	}
+	if readinessFile != "" {
+		raw, readErr := os.ReadFile(readinessFile)
+		if readErr != nil {
+			return nil, fmt.Errorf("aging readiness: %w", readErr)
+		}
+		var receipt wipreadiness.Receipt
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			return nil, fmt.Errorf("aging readiness: decode: %w", err)
+		}
+		readiness = &receipt
+	} else if intent == "fresh" {
+		root, absErr := filepath.Abs(firstNonEmpty(repo, "."))
+		if absErr != nil {
+			return nil, fmt.Errorf("aging readiness root: %w", absErr)
+		}
+		cache := wipreadiness.NewCacheWithClock(
+			wipReadinessScanner{root: root, remote: "origin", now: func() time.Time { return now }},
+			defaultWIPReadinessMaxAge,
+			func() time.Time { return now },
+		)
+		receipt := cache.Receipt(ctx)
+		readiness = &receipt
+	}
+	result := flowmetrics.AdmitAgingWIP(flowmetrics.AgingAdmissionRequest{
+		Intent:             intent,
+		Budget:             budget,
+		Now:                now,
+		Units:              flowmetrics.BuildAgingUnits(issues, commits, readiness, now),
+		Readiness:          readiness,
+		SupersessionReason: supersessionReason,
+		OverrideReason:     overrideReason,
+	})
+	return &result, nil
 }
 
 func loadFlowAdmission(ctx context.Context, repo, issuesFile string, intent flowmetrics.AdmissionIntent, windowDays int) (*flowmetrics.AdmissionReceipt, error) {
