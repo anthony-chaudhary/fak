@@ -158,7 +158,7 @@ func TestCheckedArtifactsCoverCompactIndex(t *testing.T) {
 			t.Fatalf("checked ledger lacks sample %s", clusterID)
 		}
 	}
-	forgePath := "/Users/anthony/Documents/GitHub/fak/_scratch/vllm-fak-corpus/fak-forge.json"
+	forgePath := filepath.Join(root, "_scratch", "vllm-fak-corpus", "fak-forge.json")
 	if _, err := os.Stat(forgePath); err == nil {
 		if err := ValidateFiles(ValidateOptions{
 			LedgerPath:    ledgerPath,
