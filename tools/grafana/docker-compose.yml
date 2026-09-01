@@ -76,7 +76,7 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=fleet
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/fleet-bottleneck-overview.json
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/fak-fleet-overview.json
       - GF_SERVER_HTTP_PORT=3000
     volumes:
       - ./provisioning:/etc/grafana/provisioning:ro

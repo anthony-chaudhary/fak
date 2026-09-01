@@ -11,8 +11,8 @@ gateway. It scrapes:
 - `fak cachevalue metrics --serve`, which re-folds the nightrun cache-value ledgers
   and the offline `fak ablate` arms on each scrape and emits the cache-value roll-up
   (`fak_cachevalue_*`, `fak_ablation_*`) at `/metrics`.
-- `fak fleet metrics --serve`, which re-folds the durable session registry and the
-  gateway-usage ledger on each scrape and emits the **fleet-first** families
+- `fak fleet metrics --serve`, which re-folds the live session registry, durable
+  root-run registrations, and the gateway-usage ledger on each scrape and emits the **fleet-first** families
   (`fak_fleet_*`) at `/metrics` — the only source carrying a per-`session` label, and
   therefore the one that makes a fleet roll-up drill down to a named session.
 
@@ -44,7 +44,8 @@ tools/grafana/down.sh      # stops only processes this stack owns (--purge drops
    `fak cachevalue feed --once` (or the nightrun) to populate them.
 4. **the fleet-session exporter** — `fak fleet metrics --serve` on `:9098`
    (`fak_fleet_*`). It needs no gateway, no weights and no network — it folds the
-   durable session registry and the gateway-usage ledger straight off disk — so it
+   live session registry, durable run registrations, and gateway-usage ledger straight
+   off disk — so it
    starts even under `FAK_NO_GATEWAY=1`, which is the "chart fleet metrics only" mode
    this exporter most belongs to.
 5. **Prometheus** (`127.0.0.1:9091`) and **Grafana** (`127.0.0.1:3000`). Docker
@@ -133,7 +134,8 @@ fleet metrics only; the **FAK Gateway Observability** dashboard simply shows no
 data until `fak serve` is scrapeable.
 
 Open `http://localhost:3000`, log in `admin` / `fleet`.
-The **Fleet Bottleneck & Visibility** dashboard is the home dashboard; the
+The **FAK Run Operations** dashboard (stable uid `fak-fleet-overview`) is the default
+home; the
 **FAK Gateway Observability**, **FAK Dogfood Slow Requests**, **FAK Startup &
 Model Load**, and **FAK Guard — Kernel Adjudication** dashboards appear alongside it
 and populate once Prometheus scrapes `fak serve` (or, for the guard view, a
@@ -193,17 +195,17 @@ Unlike the other dashboards it does **not** read `fak serve`; scrape the dedicat
 `fak_cachevalue` job instead (`fak cachevalue metrics --serve --addr 127.0.0.1:9097`,
 folded from `docs/nightrun/*.jsonl` + `experiments/ablate/*.json`).
 
-## The fleet pair: overview → session drill-down
+## Run Operations: home → run drill-down
 
-The **FAK Fleet — Live Sessions & Roll-up** (uid `fak-fleet-overview`) and **FAK Fleet
-— Session Drill-down** (uid `fak-fleet-session`) dashboards are one surface in two
-zoom levels, and they answer the question none of the dashboards above could:
+The **FAK Run Operations** home (uid `fak-fleet-overview`) and **FAK Run Operations —
+Run Drill-down** (uid `fak-fleet-session`) are one surface at two zoom levels. The UIDs
+stay stable so saved links continue to work after the operator-facing rename.
 
-The fleet overview starts with a bounded **starting-goal** section when `--registration-ledger`
-is configured: root identity, outcome state, attempts/resumes, attributed usage, and explicit
-unattributed coverage. Goal labels are limited to `root_registration`, `root_issue`, `task`,
-`state`, and `outcome`; per-session identifiers remain in the existing session drill-down so
-root-goal panels do not multiply cardinality by descendant count.
+Run Operations starts with source readiness, then keeps two inventories visibly separate:
+**Open / live runs** come only from the current descriptor registry, while **Completed runs**
+come only from durable root registrations. The exporter reads the default registration ledger
+automatically; `--registration-ledger PATH` selects a different durable store. Launch kind,
+runtime, lifecycle state, outcome, and `source=durable_registration` stay on historical rows.
 
 > *Which sessions are alive right now, and what is each one costing?*
 
@@ -220,21 +222,26 @@ was the reason. `fak fleet metrics` adds that axis:
 ./fak fleet metrics --fleet                           # also fold PEER nodes' C2 refs
 ```
 
-Start on the overview: the top row is the fleet right now (sessions, live, **stalled**,
-hosts, warm posture), the table below it is every live session, and clicking a session
-id opens the drill-down for that one session with the time range preserved.
+Start on Run Operations: the readiness row distinguishes a down exporter from an unreadable
+live or registration store. The live table includes every non-terminal descriptor state
+(running, stalled, throttled, paused, and draining). The completed table retains terminal
+root registrations after their processes exit. Clicking either table opens the run drill-down
+with the time range preserved; its selector unions live session IDs with the session IDs retained
+on durable run registrations.
 
-**Two provenance tiers, never blended** — the same honesty fence `fak info` renders:
+**Three projections, never blended** — the same honesty fence `fak info` renders:
 
 | Family | Tier | Source | Read it as |
 |---|---|---|---|
 | `fak_fleet_sessions*`, `fak_fleet_session_*` | **LIVE** | the durable session registry, via an oracle (PCB state, heartbeat freshness, resume's idle-vs-TTL posture) | *who is alive* — the same fold `fak session ls --durable` prints, so the dashboard and the CLI can never disagree |
-| `fak_fleet_usage_*` | **HISTORICAL** | the append-only gateway-usage ledger | *what it cost* — OBSERVED (provider-relayed) tokens, except `kv_prefix_*` which fak authored itself |
+| `fak_fleet_run_*`, `fak_fleet_registered_runs*` | **DURABLE RUN HISTORY** | root records in the session-registration ledger | *what ran and how it ended* — launch/runtime/source are recorded, never inferred from process liveness |
+| `fak_fleet_usage_*` | **HISTORICAL USAGE** | the append-only gateway-usage ledger | *what it cost* — OBSERVED (provider-relayed) tokens, except `kv_prefix_*` which fak authored itself |
 
 Three panels exist purely so the dashboard cannot lie to you:
 
-- **Registry readable** — 0 means the exporter could not *read* the registry. Every live
-  panel then shows zero. Without this tile, "no sessions" and "could not look" are the
+- **Live inventory readable / Run history readable** — 0 means the exporter could not
+  read that source. Every corresponding panel then shows zero. Without this tile,
+  "no sessions" and "could not look" are the
   same picture.
 - **Per-session rows dropped** — the `--max-sessions` cardinality bound confessing. A
   truncated table that looked complete would be worse than no table.
@@ -248,10 +255,10 @@ Three panels exist purely so the dashboard cannot lie to you:
   that declines to stamp lands in the unidentified census instead, which is what this
   tile divides by — an honestly absent id, never a wrong one that reads as right.
 
-The historical tier reaches back only as far as the ledger: a session that has not
-exited yet has no usage row. The live tier's history, by contrast, is whatever
-Prometheus has scraped — the `Sessions by state over time` panel is the fleet's shape
-accumulated one 30s scrape at a time.
+Historical usage reaches back only as far as the usage ledger: a session that has not exited
+yet has no usage row. Durable run history is independent and retains terminal registrations
+even without a usage row. The live tier's time series is only what Prometheus sampled; it is
+not a substitute for completed-run registration history.
 
 ## How it works
 
@@ -265,9 +272,9 @@ fleet_bottleneck.py  :9095/metrics   ──→  Prometheus :9091  ──→  Gra
 fak serve           :8080/metrics    ──→  Prometheus :9091  ──→  Grafana :3000
    (gateway/kernel counters)              (scrape + alerts)     (dashboard)
 
-session registry  ─┐
-gateway-usage.jsonl┴→ fak fleet metrics :9098/metrics ──→ Prometheus ──→ Grafana
-   (durable, on disk)     (namespace fak_fleet_, per-session label)   (overview → drill-down)
+live session registry ─────┐
+run registration ledger ───┼→ fak fleet metrics :9098/metrics ──→ Prometheus ──→ Grafana
+gateway-usage.jsonl ────────┘     (namespace fak_fleet_)        (Run Operations → drill-down)
 ```
 
 `render_prometheus` emits one HELP/TYPE per family with bounded cardinality

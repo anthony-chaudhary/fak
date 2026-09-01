@@ -59,6 +59,10 @@ The entries are the dashboards
 [`tools/grafana`](https://github.com/anthony-chaudhary/fak/tree/main/tools/grafana) provisions (real `uid`s, `category:
 debug`, `lifetime: stack-local`) — they resolve against a local
 `http://localhost:3000` stack (`tools/grafana/up.sh`, login `admin` / `fleet`).
+The stack's default home is **FAK Run Operations** at the stable uid
+`fak-fleet-overview`; its distinct **Run Drill-down** keeps the stable uid
+`fak-fleet-session`. The home separates open/live descriptor inventory from completed
+root-run registration history, while the drill-down remains the shared navigation target.
 **No URL here is fabricated.** To publish a long-lived public-demo dashboard,
 add an entry with `category: public-demo`, `lifetime: long-lived`, and the
 absolute `url` of the public Grafana — point `base_url` at a tailnet/public
