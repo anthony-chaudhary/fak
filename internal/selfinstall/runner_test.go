@@ -141,6 +141,53 @@ func TestGoCacheRunnerRetriesOnlyCacheLifecycleFailureOnceAndCleansRecovery(t *t
 	}
 }
 
+func TestGoCacheRunnerOutcomeReadout(t *testing.T) {
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	recovery := filepath.Join(root, "recovery")
+	var calls int
+	raw := func(_ context.Context, _ string, _ string, _ []string, env []string) (string, bool) {
+		calls++
+		switch calls {
+		case 1:
+			return "", true
+		case 2:
+			return "compile failed", false
+		case 3:
+			return fmt.Sprintf("open %s/deadbeef-d: no such file or directory", envValue(env, "GOCACHE")), false
+		default:
+			return "retry failed", false
+		}
+	}
+	var readout strings.Builder
+	report := func(counts GoCacheOutcomeCounts) {
+		fmt.Fprintln(&readout, FormatGoCacheOutcomeCounts(counts))
+	}
+	run, cleanup, err := newGoCacheRunner(primary, recovery, root, raw, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if out, ok := run(context.Background(), root, "go", "build", "./cmd/fak"); !ok {
+		t.Fatalf("successful command failed: %s", out)
+	}
+	if out, ok := run(context.Background(), root, "go", "vet", "./..."); ok {
+		t.Fatalf("ordinary error unexpectedly succeeded: %s", out)
+	}
+	if out, ok := run(context.Background(), root, "go", "test", "./..."); ok {
+		t.Fatalf("cache lifecycle refusal unexpectedly succeeded: %s", out)
+	}
+
+	want := "self-update: go-cache outcomes success=1 refusal=0 error=0\n" +
+		"self-update: go-cache outcomes success=1 refusal=0 error=1\n" +
+		"self-update: go-cache outcomes success=1 refusal=1 error=1\n"
+	if got := readout.String(); got != want {
+		t.Fatalf("Go-cache outcome readout = %q, want %q", got, want)
+	}
+	t.Log(strings.TrimSpace(readout.String()))
+}
+
 func TestGoCacheRunnerCleansRecoveryAfterSuccessfulRun(t *testing.T) {
 	root := t.TempDir()
 	primary := filepath.Join(root, "primary")
