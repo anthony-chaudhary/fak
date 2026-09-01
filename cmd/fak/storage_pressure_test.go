@@ -101,3 +101,41 @@ func TestRunStoragePressureRequiresJSONAndExposesNoApplyFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStoragePressureUsesSharedThresholdDefaults(t *testing.T) {
+	root := t.TempDir()
+	deps := storagePressureDeps{
+		now:      func() time.Time { return time.Unix(123, 0) },
+		repoRoot: func() string { return root },
+		diskInfo: func(string) (int64, int64, bool) {
+			return 100 << 30, 3 << 30, true
+		},
+		leaseOracle: func(string, time.Time) workerworktree.LeaseLiveFn {
+			return func(string) bool { return false }
+		},
+		worktrees: func(string, workerworktree.GitRunner, time.Time, time.Duration, workerworktree.LeaseLiveFn, workerworktree.ColdReapOptions) []workerworktree.ColdWorktree {
+			return nil
+		},
+		goTmp: func(treedoctor.GoTmpOptions, bool) treedoctor.GoTmpReport { return treedoctor.GoTmpReport{} },
+		goCache: func(treedoctor.GoCacheOptions, bool) treedoctor.GoCacheReport {
+			return treedoctor.GoCacheReport{ScanComplete: true}
+		},
+		lookupEnv: func(string) string { return "" },
+		userCache: func() (string, error) { return t.TempDir(), nil },
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runStoragePressureWith(&stdout, &stderr, []string{"--json"}, deps); code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var report storagepressure.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if report.Filesystem.WarningFreeBytes != storagepressure.DefaultWarningFreeBytes || report.Filesystem.RefuseFreeBytes != storagepressure.DefaultRefuseFreeBytes {
+		t.Fatalf("thresholds = warning %d refuse %d", report.Filesystem.WarningFreeBytes, report.Filesystem.RefuseFreeBytes)
+	}
+	if !report.Filesystem.Warning || report.Filesystem.Refuse {
+		t.Fatalf("default verdict = warning %v refuse %v, want true/false", report.Filesystem.Warning, report.Filesystem.Refuse)
+	}
+}
