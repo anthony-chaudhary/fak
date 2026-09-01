@@ -386,37 +386,25 @@ func kpiAtomicity(spans []Span, since time.Time) KPI {
 
 func kpiArrivalVsService(spans []Span, since, now time.Time) KPI {
 	k := KPI{KPI: "arrival_vs_service", Group: "intake", Defects: []string{}, Soft: []string{}}
-	days := now.Sub(since).Hours() / 24
-	if days <= 0 {
-		days = 1
-	}
-	opened, closed := 0, 0
-	for _, s := range spans {
-		if !s.OpenedAt.Before(since) {
-			opened++
-		}
-		if s.Closed() && !s.ClosedAt.Before(since) {
-			closed++
-		}
-	}
-	if closed == 0 {
+	m := MeasureArrivalService(spans, since, now)
+	if m.Closed == 0 {
 		k.Score, k.Value = 0, -1
-		k.Detail = fmt.Sprintf("%d opened and 0 closed over %.0fd", opened, days)
-		if opened > 0 {
+		k.Detail = fmt.Sprintf("%d opened and 0 closed over %.0fd", m.Opened, m.WindowDays)
+		if m.Opened > 0 {
 			k.Defects = append(k.Defects, fmt.Sprintf(
-				"arrival_vs_service: %d issues arrived and none closed in %.0fd — the queue is write-only", opened, days))
+				"arrival_vs_service: %d issues arrived and none closed in %.0fd — the queue is write-only", m.Opened, m.WindowDays))
 		}
 		return k
 	}
-	ratio := float64(opened) / float64(closed)
+	ratio := *m.Ratio
 	k.Value = ratio
 	k.Score = score01(1 / ratio)
 	k.Detail = fmt.Sprintf("%.1f arrivals/day vs %.1f closes/day over %.0fd (ratio %.2f, net %+d)",
-		float64(opened)/days, float64(closed)/days, days, ratio, opened-closed)
+		m.ArrivalRate, m.ServiceRate, m.WindowDays, ratio, m.Opened-m.Closed)
 	if ratio > ArrivalServiceRatioCeiling {
 		k.Defects = append(k.Defects, fmt.Sprintf(
 			"arrival_vs_service: arrivals exceed closes by %.0f%% (net %+d over %.0fd) — by Little's Law the backlog and its lead time grow without bound; cap intake",
-			(ratio-1)*100, opened-closed, days))
+			(ratio-1)*100, m.Opened-m.Closed, m.WindowDays))
 	}
 	return k
 }
