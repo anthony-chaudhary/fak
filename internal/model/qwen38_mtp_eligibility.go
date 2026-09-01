@@ -44,6 +44,7 @@ type Qwen38MTPEligibilityInput struct {
 	Depth             int
 	FreshSession      bool
 	MemoryHeadroomOK  bool
+	Admission         *Qwen38MTPAdmission
 	OperatorEnabled   bool
 }
 
@@ -57,6 +58,7 @@ type Qwen38MTPEligibility struct {
 	RequestedDepth   int                      `json:"requested_depth"`
 	TargetEquivalent bool                     `json:"target_equivalent"`
 	DowngradeReason  Qwen38MTPDowngradeReason `json:"downgrade_reason,omitempty"`
+	Admission        *Qwen38MTPAdmission      `json:"admission,omitempty"`
 }
 
 // EvaluateQwen38MTPEligibility selects MTP only inside its witnessed envelope. Every
@@ -86,13 +88,17 @@ func EvaluateQwen38MTPEligibility(in Qwen38MTPEligibilityInput) Qwen38MTPEligibi
 	}
 	switch {
 	case reason != Qwen38MTPEligible:
+	case in.Admission != nil && in.Admission.validate() != nil:
+		reason = Qwen38MTPMemoryUnsafe
 	case !in.Greedy:
 		reason = Qwen38MTPSamplingUnsupported
 	case in.Depth <= 0 || in.Depth > Qwen35MTPMaxDraftDepth:
 		reason = Qwen38MTPDepthUnsupported
 	case !in.FreshSession:
 		reason = Qwen38MTPSessionNotFresh
-	case !in.MemoryHeadroomOK:
+	case in.Admission != nil && in.Admission.Outcome == Qwen38MTPAdmissionTargetOnly:
+		reason = Qwen38MTPMemoryUnsafe
+	case in.Admission == nil && !in.MemoryHeadroomOK:
 		reason = Qwen38MTPMemoryUnsafe
 	case !in.OperatorEnabled:
 		reason = Qwen38MTPDisabledByPolicy
@@ -102,6 +108,7 @@ func EvaluateQwen38MTPEligibility(in Qwen38MTPEligibilityInput) Qwen38MTPEligibi
 			Engine:          Qwen38EngineTargetDecode,
 			RequestedDepth:  in.Depth,
 			DowngradeReason: reason,
+			Admission:       in.Admission,
 		}
 	}
 	return Qwen38MTPEligibility{
@@ -111,5 +118,6 @@ func EvaluateQwen38MTPEligibility(in Qwen38MTPEligibilityInput) Qwen38MTPEligibi
 		MTPTensorFormat:  format,
 		RequestedDepth:   in.Depth,
 		TargetEquivalent: true,
+		Admission:        in.Admission,
 	}
 }

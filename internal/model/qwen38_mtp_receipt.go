@@ -84,6 +84,7 @@ type Qwen38MTPReceipt struct {
 	Tokens          Qwen38MTPTokenAccounting `json:"tokens"`
 	LatencyNS       Qwen38MTPLatencyNS       `json:"latency_ns"`
 	MemoryBytes     Qwen38MTPMemoryBytes     `json:"memory_bytes"`
+	Admission       *Qwen38MTPAdmission      `json:"admission,omitempty"`
 	DowngradeReason Qwen38MTPDowngradeReason `json:"downgrade_reason,omitempty"`
 	FailureReason   Qwen38MTPFailureReason   `json:"failure_reason,omitempty"`
 }
@@ -112,6 +113,11 @@ func (r Qwen38MTPReceipt) Validate() error {
 	if err := r.MemoryBytes.validate(); err != nil {
 		return err
 	}
+	if r.Admission != nil {
+		if err := r.Admission.validate(); err != nil {
+			return err
+		}
+	}
 	if !validQwen38MTPDowngradeReason(r.DowngradeReason) {
 		return fmt.Errorf("model: qwen3.8 MTP receipt unknown downgrade reason %q", r.DowngradeReason)
 	}
@@ -122,6 +128,9 @@ func (r Qwen38MTPReceipt) Validate() error {
 	speculativeCost := r.LatencyNS.Draft + r.LatencyNS.Verify + r.LatencyNS.Rollback + r.LatencyNS.Sync + r.LatencyNS.Recovery
 	switch r.Outcome {
 	case Qwen38MTPOutcomeTargetOnly:
+		if r.Admission != nil && r.Admission.Outcome != Qwen38MTPAdmissionTargetOnly {
+			return fmt.Errorf("model: target-only Qwen3.8 receipt has admission outcome %q", r.Admission.Outcome)
+		}
 		if r.Engine != Qwen38EngineTargetDecode || r.FallbackEngine != "" {
 			return fmt.Errorf("model: target-only Qwen3.8 receipt must name only fak-native target decode")
 		}
@@ -132,6 +141,9 @@ func (r Qwen38MTPReceipt) Validate() error {
 			return fmt.Errorf("model: target-only Qwen3.8 receipt requires downgrade reason and no failure reason")
 		}
 	case Qwen38MTPOutcomeSucceeded:
+		if r.Admission != nil && r.Admission.Outcome == Qwen38MTPAdmissionTargetOnly {
+			return fmt.Errorf("model: successful Qwen3.8 MTP receipt has target-only admission")
+		}
 		if r.Engine != Qwen38EngineMTP || r.FallbackEngine != "" {
 			return fmt.Errorf("model: successful Qwen3.8 MTP receipt must name only the fak-native MTP engine")
 		}
@@ -145,6 +157,9 @@ func (r Qwen38MTPReceipt) Validate() error {
 			return fmt.Errorf("model: successful Qwen3.8 MTP receipt omits draft, verify, or memory cost")
 		}
 	case Qwen38MTPOutcomeFailed:
+		if r.Admission != nil && r.Admission.Outcome == Qwen38MTPAdmissionTargetOnly {
+			return fmt.Errorf("model: failed Qwen3.8 MTP receipt has target-only admission")
+		}
 		if r.Engine != Qwen38EngineMTP || r.FallbackEngine != Qwen38EngineTargetDecode {
 			return fmt.Errorf("model: failed Qwen3.8 MTP receipt must identify MTP and fak-native target fallback")
 		}
