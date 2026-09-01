@@ -314,15 +314,23 @@ concurrent = [
   "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
   "flock", "flowcredit", "focusscore", "framebus", "frontierswe", "fusedturn", "gardenbundle",
+  # reconciled 2026-09-01 (index-freshness refresh pass): six committed internal/ leaves the
+  # `fak-dev index freshness` drift report flagged as holding Go files with NO [lanes.trees]
+  # entry -- the same empty-tree-overlaps-everything class the 2026-07-25 audit fixed at scale.
+  # Declared so the arbiter detects same-tree collisions and a `(fak <leaf>)` stamp binds.
+  # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
+  "generalizationdebt",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
   "hostfault", "hostplacement", "hostresurrect", "hwgatelint", "ideascout", "idempotency",
+  "incidentrsi",
   "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuestriage", "jsonlledger", "kimik3page",
   "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "launchlatency", "lifebridge",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
+  "localbench", "looptrigger",
   "looporphan", "looprecover", "loopscore", "loopunblock", "macbench", "maputil", "mathx",
   "mcpfootprint", "memgate", "memorycotravel", "memoryread", "memorystability", "memvaluescore",
   "memview", "mergepreview", "milestoneburndown", "milestonedoc", "milestonepost",
@@ -340,6 +348,7 @@ concurrent = [
   "sessionreset", "sessionsearch", "sessionsignals", "sessionsteer", "shadowgit", "sidecar",
   "signals", "simhash", "skillenv", "skillvalue", "skipledger", "slackenv", "slackmeta",
   "sotacoverage", "sotamatrix", "spendrollup", "stallscan", "stepbaton", "stepbatoncapture",
+  "storagepressure",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
@@ -450,6 +459,7 @@ concurrent = [
   "testenv", "testquality", "toolplugin", "toolpriorbench", "trajectoryassurance", "turnavoid",
   "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer", "usagepreflight",
   "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplease", "wiplifecycle",
+  "wipreadiness",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
   "placementtax",
   "rollout",
@@ -979,6 +989,7 @@ framebus = ["internal/framebus/**"]
 frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
+generalizationdebt = ["internal/generalizationdebt/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
@@ -1008,6 +1019,7 @@ hostresurrect = ["internal/hostresurrect/**"]
 hwgatelint = ["internal/hwgatelint/**"]
 ideascout = ["internal/ideascout/**"]
 idempotency = ["internal/idempotency/**"]
+incidentrsi = ["internal/incidentrsi/**"]
 intlist = ["internal/intlist/**"]
 issuecatalog = ["internal/issuecatalog/**"]
 issuecohort = ["internal/issuecohort/**"]
@@ -1029,11 +1041,13 @@ lifebridge = ["internal/lifebridge/**"]
 lifecycle = ["internal/lifecycle/**"]
 linkstate = ["internal/linkstate/**"]
 loaddebounce = ["internal/loaddebounce/**"]
+localbench = ["internal/localbench/**"]
 lookahead = ["internal/lookahead/**"]
 loopfleet = ["internal/loopfleet/**"]
 loopmap = ["internal/loopmap/**"]
 looporphan = ["internal/looporphan/**"]
 looprecover = ["internal/looprecover/**"]
+looptrigger = ["internal/looptrigger/**"]
 loopscore = ["internal/loopscore/**"]
 loopunblock = ["internal/loopunblock/**"]
 macbench = ["internal/macbench/**"]
@@ -1137,6 +1151,7 @@ stallscan = ["internal/stallscan/**"]
 stepbaton = ["internal/stepbaton/**"]
 stepbatoncapture = ["internal/stepbatoncapture/**"]
 stopfailure = ["internal/stopfailure/**"]
+storagepressure = ["internal/storagepressure/**"]
 stripeload = ["internal/stripeload/**"]
 strmatch = ["internal/strmatch/**"]
 supervisoragent = ["internal/supervisoragent/**"]
@@ -1477,6 +1492,7 @@ wavefuel = ["internal/wavefuel/**"]
 wipinventory = ["internal/wipinventory/**"]
 wiplease = ["internal/wiplease/**"]
 wiplifecycle = ["internal/wiplifecycle/**"]
+wipreadiness = ["internal/wipreadiness/**"]
 witnessprocess = ["internal/witnessprocess/**"]
 workaccount = ["internal/workaccount/**"]
 workdelivery = ["internal/workdelivery/**"]
