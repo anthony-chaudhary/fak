@@ -944,8 +944,25 @@ type worktreeWorkerReapReadiness struct {
 // sanctioned worktree. Evidence fields are always present: an unreadable owner
 // stamp, liveness store, revision, or status is represented as UNKNOWN rather
 // than omitted, and UNKNOWN can never derive a reapable verdict.
+type worktreeWorkerIntentStatus string
+
+const (
+	worktreeWorkerIntentPresent worktreeWorkerIntentStatus = "PRESENT"
+	worktreeWorkerIntentMissing worktreeWorkerIntentStatus = "MISSING"
+	worktreeWorkerIntentInvalid worktreeWorkerIntentStatus = "INVALID"
+)
+
+type worktreeWorkerIntent struct {
+	Status      worktreeWorkerIntentStatus `json:"status"`
+	Diagnostic  string                     `json:"diagnostic,omitempty"`
+	IssueNumber int                        `json:"issue_number,omitempty"`
+	Message     string                     `json:"message,omitempty"`
+	Paths       []string                   `json:"paths,omitempty"`
+}
+
 type worktreeWorkerLifecycleRow struct {
 	Path          string                       `json:"path"`
+	Intent        worktreeWorkerIntent         `json:"intent"`
 	HeadSHA       string                       `json:"head_sha"`
 	BaseSHA       string                       `json:"base_sha"`
 	Association   worktreeWorkerAssociation    `json:"association"`
@@ -1167,6 +1184,24 @@ func worktreeWorkerLifecycleRowForPath(repoRoot, path string, probes worktreeWor
 			State:      worktreeEvidenceUnknown,
 			DirtyPaths: []string{},
 		},
+	}
+
+	intent, intentErr := workerworktree.LoadIntent(path)
+	switch {
+	case intentErr == nil:
+		row.Intent = worktreeWorkerIntent{
+			Status:      worktreeWorkerIntentPresent,
+			IssueNumber: intent.IssueNumber,
+			Message:     intent.Message,
+			Paths:       append([]string(nil), intent.Paths...),
+		}
+		if row.Intent.Paths == nil {
+			row.Intent.Paths = []string{}
+		}
+	case os.IsNotExist(intentErr):
+		row.Intent = worktreeWorkerIntent{Status: worktreeWorkerIntentMissing, Diagnostic: "worker intent not found"}
+	default:
+		row.Intent = worktreeWorkerIntent{Status: worktreeWorkerIntentInvalid, Diagnostic: intentErr.Error()}
 	}
 
 	stamp, ownerErr := probes.ReadOwner(path)

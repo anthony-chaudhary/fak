@@ -55,6 +55,12 @@ import (
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
 func New(cfg Config) (*Server, error) {
+	// fak_read is part of this server's default MCP inventory, so arm its confined
+	// execution route before the server can advertise the tool. Preserve any caller-
+	// supplied narrower root; only the missing default route needs startup repair.
+	if abi.Engine(agent.FakReadEngineID) == nil {
+		agent.RegisterReadEngine("")
+	}
 	if abi.ActiveResolver() == nil {
 		return nil, errors.New("gateway: no Ref resolver registered (blank-import internal/registrations before New)")
 	}
