@@ -42,6 +42,8 @@ import (
 // error.
 func cmdGitDaily(argv []string) { os.Exit(runGitDaily(os.Stdout, os.Stderr, argv)) }
 
+var gitDailyRun = gitdaily.Run
+
 func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("git-daily", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -59,6 +61,13 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	leaseMaxAge := fs.Duration("lease-lock-max-age", 0, "orphan bound for refs/fak/locks/*.lock (0 = the session-heartbeat TTL)")
 	goTmpDir := fs.String("gotmp-dir", "", "collect orphaned go-build* WORK dirs under this GOTMPDIR (default: $"+treedoctor.GoTmpDirEnv+"; empty disables the rung)")
 	goTmpMinAge := fs.Duration("gotmp-min-age", 0, "quiet period a go-build WORK dir must clear before it is reapable, measured on the newest file ANYWHERE inside it (0 = the default floor)")
+	goCache := fs.Bool("go-cache", true, "manage Go build cache lifecycle for this run")
+	goCacheHighBytes := fs.Int64("go-cache-high-bytes", 0, "start pruning Go build cache when usage reaches this many bytes (0 = automatic)")
+	goCacheLowBytes := fs.Int64("go-cache-low-bytes", 0, "prune Go build cache down to this many bytes once cleanup starts (0 = automatic)")
+	goCacheMinAge := fs.Duration("go-cache-min-age", 0, "minimum age a Go build cache entry must reach before it is reapable (0 = automatic)")
+	goCacheMinFreeBytes := fs.Int64("go-cache-min-free-bytes", 0, "require at least this many free bytes before skipping Go build cache cleanup (0 = automatic)")
+	goCacheMaxEntries := fs.Int("go-cache-max-entries", 0, "limit the Go build cache to at most this many entries (0 = automatic)")
+	goCacheDeadline := fs.Duration("go-cache-deadline", 0, "stop Go build cache cleanup after this long (0 = automatic)")
 	emitUnit := fs.String("emit-unit", "", "instead of running, print an OS scheduler unit that fires this verb: launchd|systemd|taskscheduler")
 	interval := fs.Duration("interval", 24*time.Hour, "firing cadence stamped into --emit-unit's unit")
 	fakBin := fs.String("fak-bin", "fak", "path to the fak binary the emitted unit invokes")
@@ -95,6 +104,46 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		goTmpRoot = treedoctor.GoTmpRootFromEnv(os.Getenv)
 	}
 	goCacheRoot := treedoctor.GoCacheRootFromEnv(os.Getenv, os.UserCacheDir)
+	goCacheOptions := treedoctor.GoCacheOptions{ActiveBuild: treedoctor.ActiveGoBuild}
+	if *goCacheHighBytes < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-high-bytes must be >= 0")
+	}
+	if *goCacheLowBytes < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-low-bytes must be >= 0")
+	}
+	if *goCacheMinAge < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-min-age must be >= 0")
+	}
+	if *goCacheMinFreeBytes < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-min-free-bytes must be >= 0")
+	}
+	if *goCacheMaxEntries < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-max-entries must be >= 0")
+	}
+	if *goCacheDeadline < 0 {
+		return gitDailyUsagef(stderr, "--go-cache-deadline must be >= 0")
+	}
+	if *goCacheHighBytes > 0 {
+		goCacheOptions.HighBytes = *goCacheHighBytes
+	}
+	if *goCacheLowBytes > 0 {
+		goCacheOptions.LowBytes = *goCacheLowBytes
+	}
+	if *goCacheHighBytes > 0 && *goCacheLowBytes > 0 && *goCacheLowBytes > *goCacheHighBytes {
+		return gitDailyUsagef(stderr, "--go-cache-low-bytes must be <= --go-cache-high-bytes")
+	}
+	if *goCacheMinAge > 0 {
+		goCacheOptions.MinAge = *goCacheMinAge
+	}
+	if *goCacheMinFreeBytes > 0 {
+		goCacheOptions.MinFreeBytes = *goCacheMinFreeBytes
+	}
+	if *goCacheMaxEntries > 0 {
+		goCacheOptions.MaxWalkEntries = *goCacheMaxEntries
+	}
+	if *goCacheDeadline > 0 {
+		goCacheOptions.Deadline = *goCacheDeadline
+	}
 
 	opts := gitdaily.Options{
 		RepoRoot:        repoRoot,
@@ -108,8 +157,11 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		LeaseLockMaxAge: *leaseMaxAge,
 		GoTmpDir:        goTmpRoot,
 		GoTmpMinAge:     *goTmpMinAge,
-		GoCacheDir:      goCacheRoot,
-		GoCacheOptions:  treedoctor.GoCacheOptions{ActiveBuild: treedoctor.ActiveGoBuild},
+		GoCacheDir:      "",
+		GoCacheOptions:  goCacheOptions,
+	}
+	if *goCache {
+		opts.GoCacheDir = goCacheRoot
 	}
 
 	// --status is a pure readback: it never runs a tick, so an operator can audit the
@@ -154,7 +206,7 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
-	res := gitdaily.Run(context.Background(), gitdaily.Runner(gitRunner), opts)
+	res := gitDailyRun(context.Background(), gitdaily.Runner(gitRunner), opts)
 
 	if *asJSON {
 		if code := encodeJSONOrFail(stdout, stderr, res, "fak git-daily"); code != 0 {
@@ -172,6 +224,11 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func gitDailyUsagef(stderr io.Writer, format string, args ...any) int {
+	fmt.Fprintf(stderr, "git-daily: "+format+"\n", args...)
+	return 2
 }
 
 // emitGitDailyUnit prints an OS scheduler unit whose action is `fak git-daily`, reusing
