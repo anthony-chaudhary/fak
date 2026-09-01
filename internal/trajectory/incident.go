@@ -139,7 +139,11 @@ func RunIncident(opts IncidentOptions) (IncidentPacket, error) {
 		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
 			return nil
 		}
-		if packet.Limits.FilesScanned >= opts.MaxFiles || packet.Limits.BytesScanned >= opts.MaxBytesTotal || time.Now().After(deadline) {
+		if packet.Limits.FilesScanned >= opts.MaxFiles || packet.Limits.BytesScanned >= opts.MaxBytesTotal {
+			packet.Limits.Truncated = true
+			return fs.SkipAll
+		}
+		if time.Now().After(deadline) {
 			packet.Limits.Truncated = true
 			return fs.SkipAll
 		}
@@ -160,6 +164,9 @@ func RunIncident(opts IncidentOptions) (IncidentPacket, error) {
 	})
 	if err != nil {
 		return IncidentPacket{}, fmt.Errorf("trajectory incident: scan %s: %w", opts.Root, err)
+	}
+	if packet.Limits.FilesScanned < opts.MaxFiles && packet.Limits.BytesScanned < opts.MaxBytesTotal && time.Now().Before(deadline) {
+		packet.Limits.Truncated = false
 	}
 
 	for _, meta := range all {
