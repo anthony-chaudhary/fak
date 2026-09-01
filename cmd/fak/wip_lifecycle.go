@@ -51,19 +51,22 @@ func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
 		if *rootShort != "" {
 			*root = *rootShort
 		}
-		receipts, err := wiplifecycle.List(*root)
+		result, err := wiplifecycle.ListWithDiagnostics(*root)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak wip lifecycle list: %v\n", err)
 			return 1
 		}
 		if *jsonOut {
-			return encodeJSONOrFail(stdout, stderr, receipts, "fak wip lifecycle list")
+			return encodeJSONOrFail(stdout, stderr, result, "fak wip lifecycle list")
 		}
-		if len(receipts) == 0 {
+		for _, diagnostic := range result.Diagnostics {
+			fmt.Fprintf(stderr, "WIP_LIFECYCLE_%s operation_id=%s path=%s error=%q\n", diagnostic.Code, diagnostic.OperationID, diagnostic.Path, diagnostic.Error)
+		}
+		if len(result.Receipts) == 0 {
 			fmt.Fprintln(stdout, "no WIP lifecycle receipts")
 			return 0
 		}
-		for _, receipt := range receipts {
+		for _, receipt := range result.Receipts {
 			state, when := "OPEN", receipt.StartedAt
 			if receipt.FinishedAt != "" {
 				state, when = "FINISHED", receipt.FinishedAt
