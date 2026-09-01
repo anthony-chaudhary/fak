@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My fak web harness</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; background: #f4f1ea; color: #20251f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 3rem 1rem; }
+    main { width: min(46rem, 100%); margin: auto; }
+    .card { background: #fffdf8; border: 1px solid #d8d3c7; border-radius: 1rem; padding: clamp(1.25rem, 4vw, 2.5rem); box-shadow: 0 1rem 3rem #413c3020; }
+    .eyebrow { color: #276749; font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: .4rem 0; font-size: clamp(2rem, 6vw, 3.4rem); line-height: 1; }
+    p { line-height: 1.6; }
+    label { display: block; margin-top: 2rem; font-weight: 700; }
+    textarea { width: 100%; min-height: 8rem; margin: .5rem 0 1rem; padding: .9rem; resize: vertical; border: 1px solid #aaa38f; border-radius: .65rem; font: inherit; }
+    button { border: 0; border-radius: 999px; padding: .75rem 1.2rem; background: #276749; color: white; font: inherit; font-weight: 800; cursor: pointer; }
+    .error { padding: .8rem; border-radius: .5rem; background: #fee2e2; color: #8a1c1c; }
+    ol { padding: 0; list-style: none; }
+    li { display: grid; grid-template-columns: 9rem 1fr; gap: 1rem; padding: .8rem 0; border-top: 1px solid #e7e1d5; }
+    code { color: #276749; font-weight: 700; }
+    @media (max-width: 34rem) { li { grid-template-columns: 1fr; gap: .25rem; } }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="eyebrow">offline learning example</div>
+    <h1>Ask the harness</h1>
+    <p>This form runs one deterministic governed turn and renders its semantic events. No key, JavaScript, or frontend build step.</p>
+
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <form action="/turn" method="post">
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" name="prompt" placeholder="What should my agent do?">{{.Prompt}}</textarea>
+      <button type="submit">Run offline turn</button>
+    </form>
+
+    {{if .Events}}
+    <section aria-labelledby="events-heading">
+      <h2 id="events-heading">Governed event stream</h2>
+      <ol>
+        {{range .Events}}<li><code>{{.Type}}</code><span>{{.Detail}}</span></li>{{end}}
+      </ol>
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>
