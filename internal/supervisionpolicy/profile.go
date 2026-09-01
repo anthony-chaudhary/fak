@@ -23,14 +23,17 @@ const (
 	ProcessClassServeReplica    ProcessClass = "serve-replica"
 )
 
-// RequiredProcessClasses is the closed process-class vocabulary.
-var RequiredProcessClasses = []ProcessClass{
-	ProcessClassRootService,
-	ProcessClassRegularAgent,
-	ProcessClassSubagent,
-	ProcessClassServeController,
-	ProcessClassServeProxy,
-	ProcessClassServeReplica,
+// RequiredProcessClasses returns a copy of the closed process-class vocabulary.
+// Validation uses an immutable switch rather than caller-visible collection state.
+func RequiredProcessClasses() []ProcessClass {
+	return []ProcessClass{
+		ProcessClassRootService,
+		ProcessClassRegularAgent,
+		ProcessClassSubagent,
+		ProcessClassServeController,
+		ProcessClassServeProxy,
+		ProcessClassServeReplica,
+	}
 }
 
 var (
@@ -50,7 +53,8 @@ type MemberIdentity struct {
 }
 
 // ValidateIdentityTransition permits generation replacement but not logical reclassification
-// or movement between supervision domains.
+// or movement between supervision domains. An unchanged generation is valid so repeated
+// validation of the same observed process is idempotent.
 func ValidateIdentityTransition(admitted, next MemberIdentity) error {
 	if admitted.Member == "" || next.Member == "" || admitted.Member != next.Member ||
 		admitted.Class != next.Class || admitted.ParentDomain != next.ParentDomain {
@@ -260,10 +264,20 @@ func applyRestart(current *RestartBudget, patch RestartPatch, bounded bool) erro
 	return nil
 }
 
-// DomainSpec declares a supervision domain and its enclosing restart budget.
+// FaultPlane identifies the fault domain family a supervision domain belongs to.
+type FaultPlane string
+
+const (
+	FaultPlaneRoot    FaultPlane = "root"
+	FaultPlaneAgent   FaultPlane = "agent"
+	FaultPlaneServing FaultPlane = "serving"
+)
+
+// DomainSpec declares a typed supervision domain and its enclosing restart budget.
 type DomainSpec struct {
 	ID            DomainID
 	Parent        DomainID
+	Plane         FaultPlane
 	RestartBudget RestartBudget
 }
 
@@ -284,7 +298,7 @@ type Topology struct {
 func ValidateTopology(topology Topology) error {
 	domains := make(map[DomainID]DomainSpec, len(topology.Domains))
 	for _, domain := range topology.Domains {
-		if domain.ID == "" || domain.RestartBudget.Window <= 0 {
+		if domain.ID == "" || !knownFaultPlane(domain.Plane) || domain.RestartBudget.Window <= 0 {
 			return fmt.Errorf("%w: malformed domain", ErrInvalidTopology)
 		}
 		if _, exists := domains[domain.ID]; exists {
@@ -306,6 +320,9 @@ func ValidateTopology(topology Topology) error {
 			if domain.RestartBudget.MaxRestarts > parent.RestartBudget.MaxRestarts || domain.RestartBudget.Window < parent.RestartBudget.Window {
 				return fmt.Errorf("%w: domain %q exceeds parent budget", ErrInvalidTopology, domain.ID)
 			}
+			if parent.Plane != FaultPlaneRoot && domain.Plane != parent.Plane {
+				return fmt.Errorf("%w: domain %q crosses from %s to %s plane", ErrInvalidTopology, domain.ID, domain.Plane, parent.Plane)
+			}
 			domain = parent
 		}
 	}
@@ -317,8 +334,12 @@ func ValidateTopology(topology Topology) error {
 		if id.Member == "" || id.Generation == 0 || !knownProcessClass(id.Class) {
 			return fmt.Errorf("%w: malformed member", ErrInvalidTopology)
 		}
-		if _, ok := domains[id.ParentDomain]; !ok {
+		domain, ok := domains[id.ParentDomain]
+		if !ok {
 			return fmt.Errorf("%w: undeclared domain %q", ErrInvalidTopology, id.ParentDomain)
+		}
+		if expected := processClassPlane(id.Class); domain.Plane != expected {
+			return fmt.Errorf("%w: %s member %q assigned to %s plane", ErrInvalidTopology, id.Class, id.Member, domain.Plane)
 		}
 		if _, exists := members[id.Member]; exists {
 			return fmt.Errorf("%w: duplicate member %q", ErrInvalidTopology, id.Member)
@@ -332,19 +353,6 @@ func ValidateTopology(topology Topology) error {
 		return fmt.Errorf("%w: require exactly one root-service", ErrInvalidTopology)
 	}
 	for _, member := range members {
-		if member.Identity.Class == ProcessClassRootService {
-			if member.Parent != "" {
-				return fmt.Errorf("%w: root-service has parent", ErrInvalidTopology)
-			}
-			continue
-		}
-		parent, ok := members[member.Parent]
-		if !ok {
-			return fmt.Errorf("%w: undeclared parent member %q", ErrInvalidTopology, member.Parent)
-		}
-		if !allowedParent(member.Identity.Class, parent.Identity.Class) {
-			return fmt.Errorf("%w: %s cannot be parented by %s", ErrInvalidTopology, member.Identity.Class, parent.Identity.Class)
-		}
 		seen := map[MemberID]struct{}{member.Identity.Member: {}}
 		cursor := member
 		for cursor.Parent != "" {
@@ -352,19 +360,57 @@ func ValidateTopology(topology Topology) error {
 				return fmt.Errorf("%w: member cycle", ErrInvalidTopology)
 			}
 			seen[cursor.Parent] = struct{}{}
-			cursor = members[cursor.Parent]
+			parent, ok := members[cursor.Parent]
+			if !ok {
+				return fmt.Errorf("%w: undeclared parent member %q", ErrInvalidTopology, cursor.Parent)
+			}
+			cursor = parent
+		}
+
+		if member.Identity.Class == ProcessClassRootService {
+			if member.Parent != "" {
+				return fmt.Errorf("%w: root-service has parent", ErrInvalidTopology)
+			}
+			continue
+		}
+		parent := members[member.Parent]
+		if !allowedParent(member.Identity.Class, parent.Identity.Class) {
+			return fmt.Errorf("%w: %s cannot be parented by %s", ErrInvalidTopology, member.Identity.Class, parent.Identity.Class)
 		}
 	}
 	return nil
 }
 
 func knownProcessClass(class ProcessClass) bool {
-	for _, required := range RequiredProcessClasses {
-		if class == required {
-			return true
-		}
+	switch class {
+	case ProcessClassRootService, ProcessClassRegularAgent, ProcessClassSubagent,
+		ProcessClassServeController, ProcessClassServeProxy, ProcessClassServeReplica:
+		return true
+	default:
+		return false
 	}
-	return false
+}
+
+func knownFaultPlane(plane FaultPlane) bool {
+	switch plane {
+	case FaultPlaneRoot, FaultPlaneAgent, FaultPlaneServing:
+		return true
+	default:
+		return false
+	}
+}
+
+func processClassPlane(class ProcessClass) FaultPlane {
+	switch class {
+	case ProcessClassRootService:
+		return FaultPlaneRoot
+	case ProcessClassRegularAgent, ProcessClassSubagent:
+		return FaultPlaneAgent
+	case ProcessClassServeController, ProcessClassServeProxy, ProcessClassServeReplica:
+		return FaultPlaneServing
+	default:
+		return ""
+	}
 }
 
 func allowedParent(child, parent ProcessClass) bool {

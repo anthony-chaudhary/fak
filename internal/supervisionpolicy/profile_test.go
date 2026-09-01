@@ -3,6 +3,7 @@ package supervisionpolicy
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,20 +62,67 @@ func TestResolveProfileRejectsResourceWidening(t *testing.T) {
 	}
 }
 
-func TestValidateIdentityTransitionRejectsClassAndDomainMutation(t *testing.T) {
-	admitted := MemberIdentity{Member: "agent-a", Generation: 1, Class: ProcessClassRegularAgent, ParentDomain: "agents"}
-	for name, next := range map[string]MemberIdentity{
-		"class":  {Member: "agent-a", Generation: 2, Class: ProcessClassSubagent, ParentDomain: "agents"},
-		"domain": {Member: "agent-a", Generation: 2, Class: ProcessClassRegularAgent, ParentDomain: "other"},
+func TestResolveProfileRestartInheritance(t *testing.T) {
+	for name, mutate := range map[string]func(*ProfileLayers){
+		"rejects max restarts widening": func(layers *ProfileLayers) {
+			layers.ProcessClass.Restart.MaxRestarts = pointer(uint32(13))
+		},
+		"rejects shorter window": func(layers *ProfileLayers) {
+			layers.ProcessClass.Restart.Window = pointer(9 * time.Minute)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			layers := baselineLayers()
+			mutate(&layers)
+			_, _, err := ResolveProfile(layers)
+			if !errors.Is(err, ErrRestartWidening) {
+				t.Fatalf("ResolveProfile error = %v, want ErrRestartWidening", err)
+			}
+		})
+	}
+
+	t.Run("accepts narrowing and deterministic partial inheritance", func(t *testing.T) {
+		layers := baselineLayers()
+		layers.ProcessClass.Restart.MaxRestarts = pointer(uint32(8))
+		layers.ParentDomain.Restart.Window = pointer(20 * time.Minute)
+
+		first, firstDigest, err := ResolveProfile(layers)
+		if err != nil {
+			t.Fatalf("first ResolveProfile: %v", err)
+		}
+		second, secondDigest, err := ResolveProfile(layers)
+		if err != nil {
+			t.Fatalf("second ResolveProfile: %v", err)
+		}
+		want := RestartBudget{MaxRestarts: 8, Window: 20 * time.Minute}
+		if first.Restart != want || second.Restart != want || firstDigest != secondDigest {
+			t.Fatalf("partial restart inheritance = %+v/%q then %+v/%q, want %+v with stable digest", first.Restart, firstDigest, second.Restart, secondDigest, want)
+		}
+	})
+}
+
+func TestValidateIdentityTransition(t *testing.T) {
+	admitted := MemberIdentity{Member: "agent-a", Generation: 2, Class: ProcessClassRegularAgent, ParentDomain: "agents"}
+	for name, next := range map[string]MemberIdentity{
+		"member":     {Member: "agent-b", Generation: 3, Class: ProcessClassRegularAgent, ParentDomain: "agents"},
+		"class":      {Member: "agent-a", Generation: 3, Class: ProcessClassSubagent, ParentDomain: "agents"},
+		"domain":     {Member: "agent-a", Generation: 3, Class: ProcessClassRegularAgent, ParentDomain: "other"},
+		"regression": {Member: "agent-a", Generation: 1, Class: ProcessClassRegularAgent, ParentDomain: "agents"},
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
 			if err := ValidateIdentityTransition(admitted, next); !errors.Is(err, ErrIdentityMutation) {
 				t.Fatalf("error = %v, want ErrIdentityMutation", err)
 			}
 		})
 	}
-	if err := ValidateIdentityTransition(admitted, MemberIdentity{Member: "agent-a", Generation: 2, Class: ProcessClassRegularAgent, ParentDomain: "agents"}); err != nil {
-		t.Fatalf("generation replacement rejected: %v", err)
+	for name, generation := range map[string]uint64{"idempotent unchanged generation": 2, "generation advancement": 3} {
+		t.Run("accepts "+name, func(t *testing.T) {
+			next := admitted
+			next.Generation = generation
+			if err := ValidateIdentityTransition(admitted, next); err != nil {
+				t.Fatalf("ValidateIdentityTransition: %v", err)
+			}
+		})
 	}
 }
 
@@ -113,9 +161,9 @@ func validTopology() Topology {
 	childBudget := RestartBudget{MaxRestarts: 5, Window: 15 * time.Minute}
 	return Topology{
 		Domains: []DomainSpec{
-			{ID: "root", RestartBudget: budget},
-			{ID: "agents", Parent: "root", RestartBudget: childBudget},
-			{ID: "serving", Parent: "root", RestartBudget: childBudget},
+			{ID: "root", Plane: FaultPlaneRoot, RestartBudget: budget},
+			{ID: "agents", Parent: "root", Plane: FaultPlaneAgent, RestartBudget: childBudget},
+			{ID: "serving", Parent: "root", Plane: FaultPlaneServing, RestartBudget: childBudget},
 		},
 		Members: []MemberSpec{
 			{Identity: MemberIdentity{Member: "root", Generation: 1, Class: ProcessClassRootService, ParentDomain: "root"}},
@@ -140,7 +188,11 @@ func TestValidateTopologyRejectsMalformedOrUndeclaredTopology(t *testing.T) {
 		"undeclared domain":        func(topology *Topology) { topology.Members[1].Identity.ParentDomain = "missing" },
 		"undeclared parent member": func(topology *Topology) { topology.Members[2].Parent = "missing" },
 		"invalid class edge":       func(topology *Topology) { topology.Members[4].Parent = "agent" },
-		"domain budget widening":   func(topology *Topology) { topology.Domains[1].RestartBudget.MaxRestarts = 11 },
+		"agent in serving domain":  func(topology *Topology) { topology.Members[2].Identity.ParentDomain = "serving" },
+		"controller in agent domain": func(topology *Topology) {
+			topology.Members[3].Identity.ParentDomain = "agents"
+		},
+		"domain budget widening": func(topology *Topology) { topology.Domains[1].RestartBudget.MaxRestarts = 11 },
 		"duplicate root": func(topology *Topology) {
 			topology.Members[1].Identity.Class = ProcessClassRootService
 			topology.Members[1].Parent = ""
@@ -153,5 +205,32 @@ func TestValidateTopologyRejectsMalformedOrUndeclaredTopology(t *testing.T) {
 				t.Fatalf("error = %v, want ErrInvalidTopology", err)
 			}
 		})
+	}
+}
+
+func TestValidateTopologyRejectsDomainCycle(t *testing.T) {
+	topology := validTopology()
+	topology.Domains[0].Parent = "agents"
+	topology.Domains[1].Plane = FaultPlaneRoot
+	topology.Domains[1].RestartBudget = topology.Domains[0].RestartBudget
+	if err := ValidateTopology(topology); !errors.Is(err, ErrInvalidTopology) || !strings.Contains(err.Error(), "domain cycle") {
+		t.Fatalf("error = %v, want domain-cycle ErrInvalidTopology", err)
+	}
+}
+
+func TestValidateTopologyRejectsMemberCycle(t *testing.T) {
+	topology := validTopology()
+	// Cycle detection precedes edge-role validation so corrupt graphs are classified as cycles.
+	topology.Members[0].Parent = "agent"
+	if err := ValidateTopology(topology); !errors.Is(err, ErrInvalidTopology) || !strings.Contains(err.Error(), "member cycle") {
+		t.Fatalf("error = %v, want member-cycle ErrInvalidTopology", err)
+	}
+}
+
+func TestRequiredProcessClassesReturnsCopy(t *testing.T) {
+	classes := RequiredProcessClasses()
+	classes[0] = "invented"
+	if knownProcessClass("invented") || RequiredProcessClasses()[0] != ProcessClassRootService {
+		t.Fatal("caller mutation changed closed process-class vocabulary")
 	}
 }
