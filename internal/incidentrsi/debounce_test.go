@@ -205,3 +205,23 @@ func TestDebounceTriggerAndMetricsAreBounded(t *testing.T) {
 		t.Fatalf("metrics=%+v", m)
 	}
 }
+
+func TestDebounceRestartReadyBurstKeepsAdmissionIdentity(t *testing.T) {
+	start := time.Unix(10000, 0).UTC()
+	cfg := debounceConfig()
+	cfg.Threshold = 99
+	store := &MemoryBurstStore{}
+	clock := &fakeClock{now: start}
+	first := NewDebouncer(cfg, store, clock)
+	first.Observe(observation("one", 1), nil)
+	clock.set(start.Add(cfg.MaxWait))
+	admitted := first.Tick("irsi-v1-safe", 1, nil)
+	if !admitted.Admitted || admitted.Trigger.State != BurstMaxWaitReady {
+		t.Fatalf("admitted=%+v", admitted)
+	}
+	restarted := NewDebouncer(cfg, store, clock)
+	replayed := restarted.Observe(observation("one", 1), nil)
+	if replayed.Admitted || replayed.Trigger.State != BurstMaxWaitReady || replayed.Trigger.AdmissionID != admitted.Trigger.AdmissionID {
+		t.Fatalf("replayed=%+v admitted=%+v", replayed, admitted)
+	}
+}

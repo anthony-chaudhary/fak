@@ -287,7 +287,7 @@ func (d *Debouncer) decide(obs Observation, productFailure error, addOccurrence 
 	// A retry for an admitted burst returns its stable identity. Once its
 	// collection window closes, a new observation starts the next burst while
 	// retaining the prior cooldown boundary.
-	if exists && r.AdmissionID != "" && !now.After(r.WindowEnd) {
+	if exists && r.AdmissionID != "" && contains(r.ObservationIDs, obs.ObservationID) {
 		return d.finish(r, obs.ObservationID, false, result)
 	}
 	if !exists || (r.AdmissionID != "" && now.After(r.WindowEnd)) {
@@ -318,6 +318,10 @@ func (d *Debouncer) decide(obs Observation, productFailure error, addOccurrence 
 	}
 	if ready != BurstCollecting && !r.NextEligibleTime.IsZero() && now.Before(r.NextEligibleTime) {
 		r.Status = BurstCooldownSuppressed
+	} else if ready != BurstCollecting && r.AdmissionID != "" {
+		// A ready burst may already have been durably admitted before restart.
+		// Preserve its ready reason while returning the existing identity.
+		r.Status = ready
 	} else {
 		r.Status = ready
 	}
