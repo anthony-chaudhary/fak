@@ -170,7 +170,7 @@ func (e *LLMDEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return ServingMetricsSnapshot{}, fmt.Errorf("llm-d: metrics returned %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := readHTTPAdapterResponse(resp.Body, maxHTTPAdapterResponseBytes)
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}

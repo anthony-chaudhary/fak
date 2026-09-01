@@ -30,7 +30,29 @@ const (
 	engineDialTimeout           = 15 * time.Second
 	engineTLSHandshakeTimeout   = 10 * time.Second
 	engineResponseHeaderTimeout = 30 * time.Second
+	maxHTTPAdapterResponseBytes = 8 << 20
 )
+
+// HTTPAdapterResponseTooLargeError reports a successful non-streaming adapter
+// response that exceeded the configured decode ceiling.
+type HTTPAdapterResponseTooLargeError struct {
+	Limit int64
+}
+
+func (e *HTTPAdapterResponseTooLargeError) Error() string {
+	return fmt.Sprintf("engine: HTTP adapter response exceeds %d bytes", e.Limit)
+}
+
+func readHTTPAdapterResponse(r io.Reader, limit int64) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, &HTTPAdapterResponseTooLargeError{Limit: limit}
+	}
+	return raw, nil
+}
 
 // sseIdleTimeout bounds the gap between reads on an SSE body. A healthy generation emits
 // tokens well within this window; a peer that goes silent mid-stream is unblocked here

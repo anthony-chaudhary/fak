@@ -1,10 +1,14 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,5 +129,65 @@ func TestRunSSEPumpIdleReadDeadlineUnblocksStall(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		cancel()
 		t.Fatal("runSSEPump did not unblock within 3s of an idle stall")
+	}
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.n += int64(n)
+	return n, err
+}
+
+func TestReadHTTPAdapterResponseBoundsBeforeDecode(t *testing.T) {
+	const limit = int64(32)
+	body := bytes.Repeat([]byte("x"), int(limit+1))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	counted := &countingReader{r: resp.Body}
+
+	raw, err := readHTTPAdapterResponse(counted, limit)
+	if raw != nil {
+		t.Fatalf("oversized response must not reach decode, got %d bytes", len(raw))
+	}
+	var tooLarge *HTTPAdapterResponseTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("expected typed oversized-response error, got %T: %v", err, err)
+	}
+	if tooLarge.Limit != limit {
+		t.Fatalf("error limit = %d, want %d", tooLarge.Limit, limit)
+	}
+	if counted.n != limit+1 {
+		t.Fatalf("client read %d bytes, want exactly limit+1 (%d)", counted.n, limit+1)
+	}
+}
+
+func TestReadHTTPAdapterResponseBelowLimit(t *testing.T) {
+	const payload = `{"ok":true}`
+	raw, err := readHTTPAdapterResponse(strings.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("normal response no longer decodes: %v", err)
+	}
+	if !decoded.OK {
+		t.Fatal("normal response lost payload")
 	}
 }
