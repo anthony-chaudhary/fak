@@ -43,6 +43,15 @@ type Config struct {
 	Stderr       io.Writer
 }
 
+type LaunchState string
+
+const (
+	LaunchNotAttempted LaunchState = "not_attempted"
+	LaunchStartFailed  LaunchState = "start_failed"
+	LaunchStarted      LaunchState = "started"
+	LaunchCompleted    LaunchState = "completed"
+)
+
 // Result is safe to serialize: it contains no prompt, command, or transcript body.
 type Result struct {
 	ThreadID          string           `json:"thread_id,omitempty"`
@@ -51,6 +60,7 @@ type Result struct {
 	ProcessExit       bool             `json:"process_exit"`
 	ExitCode          int              `json:"exit_code,omitempty"`
 	LaunchPID         int              `json:"launch_pid"`
+	LaunchState       LaunchState      `json:"launch_state"`
 	TurnID            string           `json:"turn_id,omitempty"`
 	TurnStatus        string           `json:"turn_status,omitempty"`
 	TurnError         *TurnError       `json:"turn_error,omitempty"`
@@ -81,11 +91,12 @@ type TurnError struct {
 // not the upstream process' willingness to exit. A completed task is success;
 // if the process does not drain promptly, Run reclaims only that owned tree.
 func Run(ctx context.Context, cfg Config) (Result, error) {
+	result := Result{LaunchState: LaunchNotAttempted}
 	if len(cfg.Command) == 0 {
-		return Result{}, errors.New("codexresume: command is required")
+		return result, errors.New("codexresume: command is required")
 	}
 	if cfg.RolloutPath == "" {
-		return Result{}, errors.New("codexresume: rollout path is required")
+		return result, errors.New("codexresume: rollout path is required")
 	}
 	if cfg.Deadline <= 0 {
 		cfg.Deadline = 10 * time.Minute
@@ -98,7 +109,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	startOffset, err := fileSize(cfg.RolloutPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("codexresume: baseline rollout: %w", err)
+		return result, fmt.Errorf("codexresume: baseline rollout: %w", err)
 	}
 	cmd := windowgate.Command(cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = cfg.Dir
@@ -107,20 +118,24 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 	if err := configureOwnedProcess(cmd); err != nil {
-		return Result{}, err
+		return result, err
 	}
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
-		return Result{}, fmt.Errorf("codexresume: start: %w", err)
+		result.LaunchState = LaunchStartFailed
+		result.DurationMS = time.Since(startedAt).Milliseconds()
+		return result, fmt.Errorf("codexresume: start: %w", err)
 	}
 	launchPID := cmd.Process.Pid
+	result.LaunchPID = launchPID
+	result.LaunchState = LaunchStarted
 	var copies sync.WaitGroup
 	copies.Add(2)
 	go func() { defer copies.Done(); _, _ = io.Copy(writerOrDiscard(cfg.Stdout), stdout) }()
@@ -135,6 +150,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	var state rolloutState
 	finish := func(r Result) Result {
 		r.LaunchPID = launchPID
+		r.LaunchState = LaunchCompleted
 		r.DurationMS = time.Since(startedAt).Milliseconds()
 		return r
 	}
@@ -158,7 +174,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			state, scanErr = scanRollout(cfg.RolloutPath, startOffset)
 			if scanErr != nil {
 				_ = killOwnedProcessTree(cmd)
-				return Result{}, scanErr
+				<-exitCh
+				copies.Wait()
+				return finish(result), scanErr
 			}
 			if state.terminal {
 				t := time.NewTimer(cfg.Drain)

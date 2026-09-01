@@ -91,6 +91,8 @@ type Request struct {
 	Category             string   `json:"category,omitempty"`
 	Action               string   `json:"action,omitempty"`
 	Argv                 []string `json:"argv"`
+	PromptPath           string   `json:"-"`
+	Prompt               string   `json:"-"`
 	Status               string   `json:"status"`
 	Reason               string   `json:"reason,omitempty"`
 	ReceiptPath          string   `json:"receipt_path,omitempty"`
@@ -124,6 +126,7 @@ type Options struct {
 	Limit       int
 	CWDOverride string
 	Prompt      string
+	PromptPath  string
 	ReceiptDir  string
 	CodexBin    string
 	Now         time.Time
@@ -137,6 +140,9 @@ func Select(report InventoryReport, opts Options) []Request {
 	}
 	if opts.CodexBin == "" {
 		opts.CodexBin = "codex"
+	}
+	if opts.Prompt != "" && opts.ReceiptDir != "" {
+		opts.PromptPath = filepath.Join(opts.ReceiptDir, "prompts", promptName(opts.Prompt)+".txt")
 	}
 	if opts.ManagerBin == "" {
 		opts.ManagerBin = "fak"
@@ -208,10 +214,8 @@ func Select(report InventoryReport, opts Options) []Request {
 			continue
 		}
 		switch provider {
-		case ProviderClaude:
-			req.Argv = claudeResumeArgv(opts.ManagerBin, id)
-		case ProviderCodex:
-			req.Argv = codexResumeArgv(opts.ManagerBin, opts.CodexBin, id, cwd)
+		case ProviderClaude, ProviderCodex:
+			req.Argv = recoveryResumeArgv(opts, provider, id, cwd)
 		default:
 			req.Status = "identity_blocked"
 			req.Category = CategoryIdentityBlocked
@@ -220,9 +224,8 @@ func Select(report InventoryReport, opts Options) []Request {
 			out = append(out, req)
 			continue
 		}
-		if opts.Prompt != "" {
-			req.Argv = append(req.Argv, opts.Prompt)
-		}
+		req.PromptPath = opts.PromptPath
+		req.Prompt = opts.Prompt
 		req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(id, cwd, req.Argv)+".json")
 		out = append(out, req)
 		selected++
@@ -243,6 +246,20 @@ func Select(report InventoryReport, opts Options) []Request {
 		}
 	}
 	return out
+}
+
+func recoveryResumeArgv(opts Options, provider, threadID, cwd string) []string {
+	if opts.PromptPath == "" {
+		if provider == ProviderClaude {
+			return claudeResumeArgv(opts.ManagerBin, threadID)
+		}
+		return codexResumeArgv(opts.ManagerBin, opts.CodexBin, threadID, cwd)
+	}
+	argv := []string{opts.ManagerBin, "session", "recover", "--provider-launch", provider, "--thread", threadID, "--cwd", cwd, "--prompt-file", opts.PromptPath}
+	if provider == ProviderCodex {
+		argv = append(argv, "--codex", opts.CodexBin)
+	}
+	return argv
 }
 
 func codexResumeArgv(managerBin, codexBin, threadID, cwd string) []string {
@@ -557,9 +574,14 @@ func prepareJournalRequest(req *Request, hasStateRequest bool, opts Options) {
 	}
 	managerBin := firstNonBlank(opts.ManagerBin, "fak")
 	codexBin := firstNonBlank(opts.CodexBin, "codex")
+	if opts.Prompt != "" && opts.ReceiptDir != "" {
+		opts.PromptPath = filepath.Join(opts.ReceiptDir, "prompts", promptName(opts.Prompt)+".txt")
+	}
+	opts.ManagerBin = managerBin
+	opts.CodexBin = codexBin
 	switch req.Provider {
 	case ProviderClaude:
-		req.Argv = claudeResumeArgv(managerBin, req.ThreadID)
+		req.Argv = recoveryResumeArgv(opts, req.Provider, req.ThreadID, req.CWD)
 	case ProviderCodex:
 		if !hasStateRequest || !isUUID(req.ThreadID) {
 			req.Category = CategoryIdentityBlocked
@@ -569,7 +591,7 @@ func prepareJournalRequest(req *Request, hasStateRequest bool, opts Options) {
 			req.Argv = nil
 			return
 		}
-		req.Argv = codexResumeArgv(managerBin, codexBin, req.ThreadID, req.CWD)
+		req.Argv = recoveryResumeArgv(opts, req.Provider, req.ThreadID, req.CWD)
 	default:
 		req.Category = CategoryIdentityBlocked
 		req.Action = ActionResolveIdentity
@@ -578,10 +600,43 @@ func prepareJournalRequest(req *Request, hasStateRequest bool, opts Options) {
 		req.Argv = nil
 		return
 	}
-	if opts.Prompt != "" {
-		req.Argv = append(req.Argv, opts.Prompt)
-	}
+	req.PromptPath = opts.PromptPath
+	req.Prompt = opts.Prompt
 	req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(req.ThreadID, req.CWD, req.Argv)+".json")
+}
+
+func promptName(prompt string) string {
+	h := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(h[:12])
+}
+
+func StagePrompt(req Request) error {
+	if req.PromptPath == "" || req.Prompt == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(req.PromptPath), 0700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(req.PromptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		b, readErr := os.ReadFile(req.PromptPath)
+		if readErr != nil {
+			return readErr
+		}
+		if string(b) != req.Prompt {
+			return errors.New("recovery prompt file content mismatch")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.WriteString(req.Prompt)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 func receiptName(id, cwd string, argv []string) string {

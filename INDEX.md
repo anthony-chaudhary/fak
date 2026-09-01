@@ -285,6 +285,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md`](docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md) — pinned deep study of Hipfire's RDNA-native admission, cache/session safety, retained replay, evidence contracts, negative results, and provenance; reuses #9587/#8395 and files no duplicate mechanism issue.
+
 - [`docs/notes/CONCEPT-PRE-PR-VERIFICATION-ATTESTATION-2026-08-31.md`](docs/notes/CONCEPT-PRE-PR-VERIFICATION-ATTESTATION-2026-08-31.md) — Stack72 CI study: validate commit/config-bound pre-PR evidence in shadow mode before selective admission.
 
 - [OpenAI prompt-caching watchlist — 2026-08-30](docs/notes/OPENAI-PROMPT-CACHING-WATCHLIST-2026-08-30.md) -- auto-indexed dated note.

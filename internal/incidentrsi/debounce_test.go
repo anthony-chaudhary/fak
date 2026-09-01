@@ -15,8 +15,8 @@ func (c *fakeClock) set(t time.Time) { c.now = t }
 func debounceConfig() DebounceConfig {
 	return DebounceConfig{Threshold: 3, CollectionWindow: 10 * time.Second, MaxWait: 20 * time.Second, Cooldown: time.Minute, Retention: time.Hour, MaxEntries: 8, MaxObservations: 32, MaxClockSkew: time.Minute}
 }
-func observation(id string, major int) Observation {
-	return Observation{Fingerprint: "irsi-v1-safe", ProducerMajor: major, ObservationID: id}
+func observation(id string, major int) DebounceObservation {
+	return DebounceObservation{Fingerprint: "irsi-v1-safe", ProducerMajor: major, ObservationID: id}
 }
 
 func TestDebounceBoundaryPrecedence(t *testing.T) {

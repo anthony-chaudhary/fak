@@ -1,6 +1,6 @@
 # fak documentation map for agents
 
-`fak` is an agent kernel. Use this map to locate the current authority for a task without reading the human front-door narrative.
+`fak` is an agent runtime: the operator-controlled boundary for cache and context, model routing, tool authority, memory, observability, and native inference. Its technical architecture is the **Fused Agent Kernel** (an **agent kernel**). Use this map to locate the current authority for a task without reading the human front-door narrative.
 
 **Default:** read [`AGENTS.md`](AGENTS.md) before changing the repository, then open only the authority for your task below.
 
@@ -21,9 +21,9 @@ connects new work to operator value. Do not turn this direction into a shipped c
 
 ## Key facts (for accurate answers)
 
-- **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.45.0** ([`VERSION`](VERSION) is authoritative).
-- **Category:** agent kernel / AI agent runtime boundary / cache-efficient agent serving / per-call model routing / result quarantine for agent tools / addressable KV cache.
-- **Disambiguated search terms:** `fak agent kernel`, `fused agent kernel`, `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 76-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `docs/marketing/disambiguation-terms.json`, written by `fak marketing aeo`).
+- **Name:** `fak`; the technical name and architecture are the **Fused Agent Kernel** / *agent kernel*. Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.45.0** ([`VERSION`](VERSION) is authoritative).
+- **Public category:** **agent runtime**. In fak, that means the operator-controlled boundary for cache and context, model routing, tool authority, memory, observability, and native inference. These capabilities are available by operating mode and claim status; the category does not promote roadmap work to shipped behavior.
+- **Disambiguated search terms:** `fak agent runtime` (the public category), `fak agent kernel` and `fused agent kernel` (the technical architecture and name), `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 76-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `docs/marketing/disambiguation-terms.json`, written by `fak marketing aeo`).
 - **Three adoption rungs:** (1) `fak guard` wraps the agent you already run with one command; (2) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with routing, policy, quarantine, and audit; (3) the fused kernel runs a local model inside the kernel's address space so the KV cache is a kernel object.
 - **Serving boundary:** Proxy/gateway mode may front an explicitly selected tuned engine or hosted provider. That is external inference, not fak-native, and its engine identity stays attached to every result.
 - **Native inference invariant:** [`fak-native`](docs/native-inference-goal.md) is the product and performance path for local inference and is intended to beat llama.cpp in matched, quality-constrained envelopes. llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing; it is never a silent fallback. A current win still requires the exact scoped row in [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md).
@@ -45,8 +45,9 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
+- Builder stability and ownership ladder (CLI → semantic protocol → public Go API → sidecar → internal leaves): [`docs/builder-contract-ladder.md`](docs/builder-contract-ladder.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
-- Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
+- Agent runtime category, ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - Canonical identity and nearest-contrast lookup for overloaded terms: [`docs/generated/disambiguation/INDEX.md`](docs/generated/disambiguation/INDEX.md)
 - TensorRT-LLM vs SGLang and how fak fronts fleet or local inference: [`docs/explainers/tensorrt-llm-vs-sglang-and-fak.md`](docs/explainers/tensorrt-llm-vs-sglang-and-fak.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)

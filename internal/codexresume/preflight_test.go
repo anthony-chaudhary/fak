@@ -326,3 +326,52 @@ func TestPreflightThreadIdentityMismatchFailsClosedBeforeOwnershipProbe(t *testi
 		t.Fatalf("mismatched preflight=%+v", got)
 	}
 }
+
+func TestPreflightLookupStateAndSelectedHome(t *testing.T) {
+	threadID := "019ff200-1000-7000-8000-000000000901"
+	presentHome := t.TempDir()
+	missingHome := t.TempDir()
+	rollout := filepath.Join(presentHome, "sessions", "2026", "09", "01", "rollout-"+threadID+".jsonl")
+	writeRolloutRows(t, rollout,
+		map[string]any{"type": "session_meta", "payload": map[string]any{"id": threadID}},
+	)
+
+	found := preflightWithProbe(CheckConfig{ThreadID: threadID, CodexHome: presentHome}, fixedOwnershipProbe{witness: ownershipWitness{source: "test_positive_no_owner", conclusive: true}})
+	if found.LookupState != LookupFound || found.CodexHome != presentHome || found.SessionRoot != filepath.Join(presentHome, "sessions") {
+		t.Fatalf("found=%+v", found)
+	}
+	missing := preflightWithProbe(CheckConfig{ThreadID: threadID, CodexHome: missingHome}, fixedOwnershipProbe{witness: ownershipWitness{source: "test_positive_no_owner", conclusive: true}})
+	if missing.LookupState != LookupNotFound || missing.CodexHome != missingHome || missing.SessionRoot != filepath.Join(missingHome, "sessions") {
+		t.Fatalf("missing=%+v", missing)
+	}
+	invalid := Preflight(CheckConfig{ThreadID: "not-a-canonical-uuid", CodexHome: presentHome})
+	if invalid.LookupState != LookupInvalidIdentity {
+		t.Fatalf("invalid=%+v", invalid)
+	}
+}
+
+func TestPreflightExplicitRolloutLookupClassification(t *testing.T) {
+	threadID := "019ff200-1000-7000-8000-000000000902"
+	home := t.TempDir()
+	mismatch := filepath.Join(home, "mismatch.jsonl")
+	writeRolloutRows(t, mismatch, map[string]any{"type": "session_meta", "payload": map[string]any{"id": "019ff200-1000-7000-8000-000000000903"}})
+	got := preflightWithProbe(CheckConfig{ThreadID: threadID, CodexHome: home, RolloutPath: mismatch}, fixedOwnershipProbe{witness: ownershipWitness{source: "test_positive_no_owner", conclusive: true}})
+	if got.LookupState != LookupNotFound {
+		t.Fatalf("mismatch=%+v", got)
+	}
+	unreadable := Preflight(CheckConfig{ThreadID: threadID, CodexHome: home, RolloutPath: filepath.Join(home, "absent.jsonl")})
+	if unreadable.LookupState != LookupUnreadable {
+		t.Fatalf("unreadable=%+v", unreadable)
+	}
+}
+
+func TestRunStartFailureReportsLaunchState(t *testing.T) {
+	rollout := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(rollout, []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), Config{Command: []string{filepath.Join(t.TempDir(), "missing-codex")}, RolloutPath: rollout})
+	if err == nil || r.LaunchState != LaunchStartFailed || r.LaunchPID != 0 {
+		t.Fatalf("result=%+v err=%v", r, err)
+	}
+}

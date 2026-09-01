@@ -1,8 +1,9 @@
 ---
-title: "How to find and name fak: search terms and disambiguation"
-description: "How to search for and refer to fak. The bare word is buried under homophone and F.A.K.-acronym noise, so use 'agent kernel', 'Fused Agent Kernel', or 'treat the tool call like a syscall'."
+title: "How to find and name fak: agent runtime first, kernel architecture second"
+description: "Call fak an agent runtime in public category messaging; use 'Fused Agent Kernel' and 'agent kernel' for its technical architecture, history, and disambiguation."
 slug: naming-and-search
 keywords:
+  - fak agent runtime
   - fak agent kernel
   - fused agent kernel
   - long-session prompt cache
@@ -16,14 +17,13 @@ keywords:
 date: 2026-07-02
 ---
 
-# How to find and name fak: search terms and disambiguation
+# How to find and name fak: agent runtime first, kernel architecture second
 
-> **TL;DR:** the bare word **fak** is dominated by homophone and F.A.K.-acronym
-> noise, so a plain search for it will not find this project. Pair it with a
-> disambiguated term — **agent kernel**, **Fused Agent Kernel**, or the slogan
-> **"treat the tool call like a syscall"** — and give advocates those terms so
-> word-of-mouth lands on findable language. A concept people cannot find is a
-> concept that cannot spread.
+> **TL;DR:** **fak is an agent runtime: the operator-controlled boundary for
+> cache and context, model routing, tool authority, memory, observability, and
+> native inference.** Lead with **agent runtime** as the simple public category.
+> Use **Fused Agent Kernel** and **agent kernel** for the technical architecture,
+> project history, and search disambiguation.
 
 This is dimension **I — Memorable framing & naming** of the
 [concept-popularization epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
@@ -41,8 +41,9 @@ discovery point at the same names.
 - the **F.A.K.** acronym (first-aid kit, and dozens of unrelated initialisms),
 - generic typo-noise.
 
-So the rule is simple: **never ship the bare word alone.** Always pair it with one
-of the disambiguated terms below.
+So the rule is simple: **never ship the bare word alone.** In public category
+messaging, pair it with **agent runtime**. In technical or historical material,
+pair it with one of the architecture terms below.
 
 ## The terms to use (pair `fak` with one of these)
 
@@ -51,8 +52,9 @@ These are the canonical search + reference terms, drawn from
 
 | Term | Use it when you mean |
 |---|---|
-| `fak agent kernel` | the whole thing — the primary handle |
-| `fused agent kernel` | the expanded product name when `fak` alone is too ambiguous |
+| `fak agent runtime` | the public product category and primary first-contact handle |
+| `fak agent kernel` | the technical architecture or a disambiguated historical search |
+| `fused agent kernel` | the expanded technical name when `fak` alone is too ambiguous |
 | `treat the tool call like a syscall` | the one-line mental model / slogan |
 | `fak serve` | the gateway verb (the runnable surface) |
 | `fak manage` | the one-command wrapper for an agent you already run |
@@ -64,15 +66,18 @@ These are the canonical search + reference terms, drawn from
 | `neo-silicon agent kernel` | the chip-vendor / backend-author angle |
 | `fak backend conformance`, `fak-certified backend` | the conformance mark |
 
-**The one canonical name to lead with:** *fak, the Fused Agent Kernel* — an
-**agent kernel** for AI agent loops.
+**The one category to lead with:** *fak, the agent runtime.*
+
+**The technical name and architecture:** *Fused Agent Kernel*, shortened to
+**agent kernel** where the architecture or syscall analogy is the subject.
 
 ## What category is this? (so people search the right shelf)
 
-fak is on these shelves — say the category, then the name:
+Put fak on the **agent runtime** shelf first. The rest are capability facets or
+technical search handles, not competing top-level categories:
 
-- **agent kernel**
-- **AI agent runtime boundary**
+- **agent runtime** — the simple public category
+- **agent kernel / Fused Agent Kernel** — the technical architecture and name
 - **cache-efficient agent serving**
 - **per-call model routing**
 - **result quarantine for agent tools**
@@ -101,15 +106,24 @@ Draw these lines:
 
 When you talk about fak, hand people a term they can search back to:
 
-- Say: "It's an **agent kernel** — it treats every tool call like a syscall."
+- Say: "It's an **agent runtime** — one operator-controlled boundary for the
+  agent's context, models, tools, memory, evidence, and local inference."
+- For the technical follow-up: "Its **Fused Agent Kernel** architecture treats
+  every tool call like a syscall."
 - Not: "It's called fak" (they will never find it).
-- In writing, link the name: [fak, the Fused Agent Kernel](../../README.md).
+- In writing, link the category: [fak, the agent runtime](../index.md).
 
 ## Honest scope
 
 No market-adoption claim is made here. fak's contribution is the **assembly** of
 established primitives into one in-process gate — a 29-claim prior-art audit scored
 **0/29 novel**, so this note claims a clear *name*, not a novel invention.
+
+Category breadth is not feature status: **agent runtime** names the boundary fak
+intends operators to control. It does not claim every possible orchestration or
+runtime feature is shipped, nor that every operating mode activates every listed
+capability. [`CLAIMS.md`](../../CLAIMS.md) and the selected mode's documentation
+remain authoritative.
 
 ## Verify
 

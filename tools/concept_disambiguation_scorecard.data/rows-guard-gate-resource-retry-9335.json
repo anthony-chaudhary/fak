@@ -9,7 +9,8 @@
       "distinction": "It is the WAIT-MULTIPLEXER OUTCOME ENVELOPE, not guardRestartRelaunchCommand, which builds the next child command, and not guardRestartLimitStatus, which formats restart-budget exhaustion status.",
       "distinct_from": [
         "guard-gate-guardrestartrelaunchcommand",
-        "cov5305-guard-restart-limit-status"
+        "cov5305-guard-restart-limit-status",
+        "guardreportchildresourcemonitorfailure"
       ],
       "aliases": [],
       "grounding": "guardChildWaitEvent",
@@ -75,6 +76,25 @@
       ],
       "aliases": [],
       "grounding": "guardEmitRestartHop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "guardreportchildresourcemonitorfailure",
+      "canonical": "guardReportChildResourceMonitorFailure",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Reports a typed child resource-monitor diagnostic without treating missing telemetry as a measured resource breach.",
+      "distinction": "Reporting preserves the running child and differs from the wait-event envelope, which carries measured completion, restart, time-budget, or resource-containment outcomes.",
+      "distinct_from": [
+        "issue9335-guard-gate-child-wait-event"
+      ],
+      "aliases": [],
+      "grounding": "guardReportChildResourceMonitorFailure",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

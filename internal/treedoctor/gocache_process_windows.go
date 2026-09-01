@@ -8,10 +8,14 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func ActiveGoBuild() (bool, error) {
-	out, err := exec.Command("tasklist", "/FO", "CSV", "/NH").Output()
+	cmd := exec.Command("tasklist", "/FO", "CSV", "/NH")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("list processes: %w", err)
 	}
@@ -35,7 +39,9 @@ func goCacheProcessAlive(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, fmt.Errorf("invalid pid %d", pid)
 	}
-	out, err := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH").Output()
+	cmd := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("query pid %d: %w", pid, err)
 	}

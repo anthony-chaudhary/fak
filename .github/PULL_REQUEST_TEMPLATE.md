@@ -6,6 +6,20 @@
 
 <!-- One or two sentences. Link the issue if there is one: Fixes #NNN -->
 
+## Risk assessment
+
+<!-- Keep this proportionate, but cover every line. "None" requires a concrete
+     rationale. Reassess this block whenever scope or implementation changes. -->
+
+- **Risk event:**
+- **Exposed subject/system:**
+- **Severity:**
+- **Likelihood:**
+- **Blast radius:**
+- **Mitigations/containment:**
+- **Rollback:**
+- **Negative-path witness:**
+
 ## Evidence
 
 <!-- What you ran and what it said. For Go changes, the tests for the package you

@@ -664,6 +664,13 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		}
 	}
 
+	// exec_command's readOnlyHint is a classification request, not authority.
+	// Structural refusals and explicit policy decisions above keep precedence;
+	// only the narrow positive grammar may replace the default deny below.
+	if v, ok := a.execCommandReadOnlyVerdict(c, args); ok {
+		return v
+	}
+
 	// Nothing affirmatively allowed it — fail-closed default deny.
 	if confirmedWithToken && (p.admitAndLogLower(c.Tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
 		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {

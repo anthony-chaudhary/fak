@@ -56,8 +56,8 @@ func runStoragePressureWith(stdout, stderr io.Writer, argv []string, deps storag
 	verbFlagUsage(fs, "storage-pressure")
 	asJSON := fs.Bool("json", false, "emit the read-only storage pressure report as JSON")
 	root := fs.String("root", "", "repo root and filesystem path to inspect (default: discover from cwd)")
-	warningFree := fs.Int64("warning-free-bytes", 0, "set warning=true when filesystem free bytes are below this explicit threshold")
-	refuseFree := fs.Int64("refuse-free-bytes", 0, "set refuse=true when filesystem free bytes are below this explicit threshold")
+	warningFree := fs.Int64("warning-free-bytes", storagepressure.DefaultWarningFreeBytes, "set warning=true when filesystem free bytes are at or below this threshold (0 disables)")
+	refuseFree := fs.Int64("refuse-free-bytes", storagepressure.DefaultRefuseFreeBytes, "set refuse=true when filesystem free bytes are at or below this threshold (0 disables)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}

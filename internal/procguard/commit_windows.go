@@ -20,6 +20,8 @@ type performanceInformation struct {
 	HandleCount, ProcessCount, ThreadCount                                     uint32
 }
 
+const windowsCommitProcessAccess = processQueryLimitedInformation
+
 type processMemoryCountersCommit struct {
 	CB                         uint32
 	PageFaultCount             uint32
@@ -49,7 +51,7 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	owned := windowsCommitOwnedPIDs(rootPID, byPID, children)
 	s := MemorySnapshot{Metric: MemoryMetricCommit, RootPID: rootPID}
 	for pid := range owned {
-		h, openErr := syscall.OpenProcess(processQueryLimitedInformation|processVMRead, false, uint32(pid))
+		h, openErr := syscall.OpenProcess(windowsCommitProcessAccess, false, uint32(pid))
 		if openErr != nil {
 			if processExitedDuringSnapshot(openErr) {
 				continue

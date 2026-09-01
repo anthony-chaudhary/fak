@@ -10,13 +10,84 @@ import (
 	"time"
 )
 
+func TestResolveSystemTestUtilization_ProfilesAndCPUCounts(t *testing.T) {
+	tests := []struct {
+		name       string
+		profile    SystemTestUtilizationProfile
+		logicalCPU int
+		wantCPU    int
+		wantPct    int
+	}{
+		{name: "shared one CPU", profile: SystemTestProfileSharedDevelopment, logicalCPU: 1, wantCPU: 1, wantPct: 80},
+		{name: "shared two CPUs", profile: SystemTestProfileSharedDevelopment, logicalCPU: 2, wantCPU: 1, wantPct: 80},
+		{name: "shared larger host", profile: SystemTestProfileSharedDevelopment, logicalCPU: 8, wantCPU: 6, wantPct: 80},
+		{name: "remote one CPU", profile: SystemTestProfileRemote, logicalCPU: 1, wantCPU: 1, wantPct: 90},
+		{name: "remote two CPUs", profile: SystemTestProfileRemote, logicalCPU: 2, wantCPU: 1, wantPct: 90},
+		{name: "remote larger host", profile: SystemTestProfileRemote, logicalCPU: 8, wantCPU: 7, wantPct: 90},
+		{name: "dedicated one CPU", profile: SystemTestProfileDedicatedInference, logicalCPU: 1, wantCPU: 1, wantPct: 100},
+		{name: "dedicated two CPUs", profile: SystemTestProfileDedicatedInference, logicalCPU: 2, wantCPU: 2, wantPct: 100},
+		{name: "dedicated larger host", profile: SystemTestProfileDedicatedInference, logicalCPU: 8, wantCPU: 8, wantPct: 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveSystemTestUtilization(SystemTestUtilizationRequest{Profile: tt.profile}, tt.logicalCPU)
+			if err != nil {
+				t.Fatalf("ResolveSystemTestUtilization: %v", err)
+			}
+			if got.Profile != tt.profile || got.CPUPercent != tt.wantPct || got.GPUPercent != tt.wantPct || got.CPUCapacity != tt.wantCPU {
+				t.Fatalf("resolved = %+v, want profile=%q cpu_percent=%d gpu_percent=%d capacity=%d", got, tt.profile, tt.wantPct, tt.wantPct, tt.wantCPU)
+			}
+			if !strings.Contains(got.GPULimitation, "does not enforce or measure GPU") {
+				t.Errorf("GPU limitation is not honest: %q", got.GPULimitation)
+			}
+		})
+	}
+}
+
+func TestResolveSystemTestUtilization_OverridesAndValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       SystemTestUtilizationRequest
+		cpus      int
+		want      SystemTestUtilization
+		wantError string
+	}{
+		{name: "zero profile selects shared", cpus: 8, want: SystemTestUtilization{Profile: SystemTestProfileSharedDevelopment, CPUPercent: 80, GPUPercent: 80, CPUCapacity: 6}},
+		{name: "explicit percentages", req: SystemTestUtilizationRequest{Profile: SystemTestProfileRemote, CPUPercent: 50, GPUPercent: 35}, cpus: 8, want: SystemTestUtilization{Profile: SystemTestProfileRemote, CPUPercent: 50, GPUPercent: 35, CPUCapacity: 4}},
+		{name: "percentages clamp above 100", req: SystemTestUtilizationRequest{CPUPercent: 101, GPUPercent: 1000}, cpus: 8, want: SystemTestUtilization{Profile: SystemTestProfileSharedDevelopment, CPUPercent: 100, GPUPercent: 100, CPUCapacity: 7}},
+		{name: "exact concurrency wins last", req: SystemTestUtilizationRequest{Profile: SystemTestProfileSharedDevelopment, CPUPercent: 25, Concurrency: 11}, cpus: 8, want: SystemTestUtilization{Profile: SystemTestProfileSharedDevelopment, CPUPercent: 25, GPUPercent: 80, CPUCapacity: 11}},
+		{name: "unknown profile", req: SystemTestUtilizationRequest{Profile: "workstation"}, cpus: 8, wantError: "unknown system-test utilization profile"},
+		{name: "negative CPU percent", req: SystemTestUtilizationRequest{CPUPercent: -1}, cpus: 8, wantError: "CPU percent must not be negative"},
+		{name: "negative GPU percent", req: SystemTestUtilizationRequest{GPUPercent: -1}, cpus: 8, wantError: "GPU percent must not be negative"},
+		{name: "negative concurrency", req: SystemTestUtilizationRequest{Concurrency: -1}, cpus: 8, wantError: "concurrency must not be negative"},
+		{name: "invalid CPU count", cpus: 0, wantError: "logical CPU count must be positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveSystemTestUtilization(tt.req, tt.cpus)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveSystemTestUtilization: %v", err)
+			}
+			if got.Profile != tt.want.Profile || got.CPUPercent != tt.want.CPUPercent || got.GPUPercent != tt.want.GPUPercent || got.CPUCapacity != tt.want.CPUCapacity {
+				t.Fatalf("resolved = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // #4371 smoke: a tiny bounded run exercises both arms, records the required
 // witness fields (duration, concurrency, alloc size, throughput, latency
 // distribution, host before/after, digest), and the artifact self-verifies. Sized
 // down so CI stays fast and allocates only a few MiB.
 func TestRunCPUMemStress_Smoke(t *testing.T) {
 	cfg := CPUMemConfig{
-		Concurrency: 2,
+		CPUPercent:  1, // exercise the profile ceiling without saturating the host
 		CPUDuration: 60 * time.Millisecond,
 		BlockBytes:  64 << 10, // 64 KiB blocks — many ops even in 60ms
 		AllocSizes:  []int64{4 << 20, 16 << 20},
@@ -33,9 +104,24 @@ func TestRunCPUMemStress_Smoke(t *testing.T) {
 		t.Fatalf("smoke run refused unexpectedly: %s", rep.RefusedWhy)
 	}
 
-	// CPU arm: concurrency echoed, work actually happened, throughput derived.
-	if rep.CPU.Workers != 2 {
-		t.Errorf("cpu workers = %d, want 2", rep.CPU.Workers)
+	// CPU arm: the resolved shared-development ceiling is reported and used.
+	if rep.Utilization.Profile != SystemTestProfileSharedDevelopment || rep.Utilization.CPUPercent != 1 || rep.Utilization.GPUPercent != 80 {
+		t.Fatalf("resolved utilization = %+v", rep.Utilization)
+	}
+	if rep.CPU.Workers != rep.Utilization.CPUCapacity || rep.Config.Concurrency != rep.Utilization.CPUCapacity {
+		t.Errorf("workers/config/resolved mismatch: workers=%d config=%d resolved=%d", rep.CPU.Workers, rep.Config.Concurrency, rep.Utilization.CPUCapacity)
+	}
+	if rep.NumCPU > 1 && rep.CPU.Workers >= rep.NumCPU {
+		t.Errorf("smoke saturated host: workers=%d logical CPUs=%d", rep.CPU.Workers, rep.NumCPU)
+	}
+	raw, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	for _, field := range []string{`"profile":"shared-development"`, `"cpu_percent":1`, `"gpu_percent":80`, `"gpu_limitation":`} {
+		if !strings.Contains(string(raw), field) {
+			t.Errorf("JSON report missing resolved utilization field %s: %s", field, raw)
+		}
 	}
 	if rep.CPU.Ops <= 0 {
 		t.Fatalf("cpu ops = %d, want > 0 (no hashing happened)", rep.CPU.Ops)

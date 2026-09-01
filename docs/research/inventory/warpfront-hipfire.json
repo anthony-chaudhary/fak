@@ -1,0 +1,76 @@
+{
+  "schema": "fak-study/1",
+  "title": "warpfront/hipfire RDNA-native inference and evidence mechanisms",
+  "observed": "2026-09-01",
+  "sources": [{
+    "url": "https://github.com/warpfront/hipfire",
+    "revision": "0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+    "license": "MIT/Apache-2.0 bundle with NOTICE and per-surface provenance caveats; pinned submodule license not inspected"
+  }],
+  "observations": [
+    "Hipfire treats RDNA-native inference as a fail-closed evidence system: physical admission, cache/session identity, retained-command safety, architecture-isolated kernels, and route/hash-bound certification outrank isolated throughput.",
+    "The pinned tree contains strict memory admission, transactional adaptive-KV handoff, safe session-prefix reuse, retained-command replay, typed super-op lowering, and architecture-specific fused kernels.",
+    "Benchmark and Redline doctrine separate measurement from production admission and bind claims to fixture, artifact, route, source, daemon, registry, profile, contract, and PM4 identities.",
+    "The large investigation corpus and retained FAILED kernels make negative knowledge a durable product surface rather than disposable scratch.",
+    "Open device-mesh, source-aware loading, collective-aware execution, and partial-resource rollback work are directions, not shipped facts at the pin.",
+    "This pass is clean-room inspiration only: no Hipfire code was copied. Direct integration requires file-level provenance, NOTICE, generated/vendor, and submodule-license review."
+  ],
+  "candidates": [
+    {
+      "effect": "Reserve native inference memory against startup peak and steady-state physical capacity before execution.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": ["crates/hipfire-runtime/src/admission.rs:86@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "internal/localadmission/reservation.go", "internal/localadmission/reservation_test.go:20"],
+      "issue": "#9587",
+      "outcome": "Existing FAK issue already owns aggregate unified-memory byte and pressure admission; no duplicate filed."
+    },
+    {
+      "effect": "Reuse prompt prefixes only under monotonic session identity while excluding active generations.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": ["crates/hipfire-runtime/src/session_table.rs:12@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "crates/hipfire-runtime/src/session_table.rs:135@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "crates/hipfire-runtime/src/session_table.rs:235@0f1628241f751d9ee44922b5a1ca40aa756a82e0"],
+      "issue": "#8395",
+      "outcome": "Existing serving-baseline issue already includes prefix reuse and paged KV; retain Hipfire's identity/exclusion invariants as acceptance criteria."
+    },
+    {
+      "effect": "Make adaptive-KV ownership handoff transactional and resettable.",
+      "status": "PARTIAL",
+      "disposition": "WATCH",
+      "evidence": ["crates/hipfire-runtime/src/kv_adaptive.rs:271@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "crates/hipfire-runtime/tests/kv_adaptive_reset.rs:64@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "internal/model/cache_geometry.go:227"],
+      "issue": "#8395",
+      "outcome": "FAK has transactional cache-geometry rollback but not yet the same shipped adaptive-tier seam; watch under the existing KV serving issue."
+    },
+    {
+      "effect": "Certify benchmarks with fixture, artifact, route, source, daemon, registry, profile, contract, and command identity separated from admission.",
+      "status": "PRESENT",
+      "disposition": "EXCLUDE",
+      "evidence": ["docs/BENCHMARKS.md:3@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "docs/GOLDEN-REDLINE.md:24@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "BENCHMARK-AUTHORITY.md"],
+      "issue": "",
+      "outcome": "FAK already has a benchmark authority and witnessed receipt discipline; no parallel framework."
+    },
+    {
+      "effect": "Retain measured failed native optimizations with operating-envelope and diagnosis evidence.",
+      "status": "PRESENT",
+      "disposition": "EXCLUDE",
+      "evidence": ["kernels/src/attention_dflash_wmma_m32_kstg_FAILED.hip:6@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "docs/sota/README.md", "CLAIMS.md"],
+      "issue": "",
+      "outcome": "FAK already preserves negative native evidence through SOTA, claim, benchmark, and dated-note surfaces."
+    },
+    {
+      "effect": "Select host-capability-aware gates and emit typed machine-readable receipts.",
+      "status": "PRESENT",
+      "disposition": "EXCLUDE",
+      "evidence": ["tools/change_gate/selector.py:115@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "tools/change_gate/report.py:31@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "docs/ci/ci-spec-change-migration.md"],
+      "issue": "",
+      "outcome": "FAK/DOS already route typed gates and receipts; no duplicate implementation."
+    },
+    {
+      "effect": "Roll back partially allocated native model resources transactionally on load failure.",
+      "status": "ABSENT",
+      "disposition": "WATCH",
+      "evidence": ["crates/hipfire-runtime/src/weight_pager.rs:424@0f1628241f751d9ee44922b5a1ca40aa756a82e0", "internal/model/safetensors.go:255", "internal/model/safetensors.go:327"],
+      "issue": "",
+      "outcome": "Upstream partial-device rollback is itself emerging and FAK host-file cleanup does not prove device-resource rollback; wait for a concrete FAK native allocation seam and witness."
+    }
+  ]
+}

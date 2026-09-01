@@ -2606,3 +2606,10 @@ NativeSessionRestored is the NativeSessionLifecycle value assigned when the sche
 Recognizes the exact Codex CLI authentication-management commands that must execute without FAK provider or credential injection.
 
 **Distinct from:** Unlike ordinary Codex launches or the one-child guard-disable break-glass launcher, this narrow command class manages Codex's own login state and bypasses only FAK auth/config injection; it does not disable guarding for other Codex commands.
+
+
+### Decision (incident trigger receipt)
+
+Closed COLLECT, ADMIT, or SUPPRESS outcome recorded by the versioned incident trigger receipt.
+
+**Distinct from:** Incident debounce receipt outcome, not the incident handler disposition or kernel, scheduler, witness, or shared-task Decision types.

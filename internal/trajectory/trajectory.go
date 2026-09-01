@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -47,13 +48,15 @@ type Turn struct {
 // contract is fire-and-forget. Safe for concurrent Emit; queries (Trace/Traces/
 // Export) take a snapshot.
 type Recorder struct {
-	mu        sync.Mutex
-	byID      map[string][]Turn // trace id -> ordered turns
-	order     []string          // trace ids in first-seen order (stable export)
-	embed     bool              // stamp QueryEmbedding from simhash
-	clock     func() int64      // injectable wall clock (UnixNano); nil => Fields-only
-	maxLen    int               // cap on retained turns per trace (0 = unbounded)
-	maxTraces int               // cap on retained distinct traces, oldest evicted (0 = unbounded)
+	mu          sync.Mutex
+	byID        map[string][]Turn // trace id -> ordered turns
+	order       []string          // trace ids in first-seen order (stable export)
+	embed       bool              // stamp QueryEmbedding from simhash
+	clock       func() int64      // injectable wall clock (UnixNano); nil => Fields-only
+	maxLen      int               // cap on retained turns per trace (0 = unbounded)
+	maxTraces   int               // cap on retained distinct traces, oldest evicted (0 = unbounded)
+	publisherMu sync.Mutex
+	publisher   *tokenDestinationPublisher
 }
 
 // DefaultMaxTraces / DefaultMaxPerTrace are the in-memory bounds a fresh Recorder
@@ -131,7 +134,6 @@ func (r *Recorder) Emit(ev abi.Event) {
 		}
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.embed && t.Query != "" {
 		t.QueryEmbedding = simhash.Embed(t.Query)
 	}
@@ -155,6 +157,12 @@ func (r *Recorder) Emit(ev abi.Event) {
 		turns[i].Seq = i + 1
 	}
 	r.byID[t.TraceID] = turns
+	r.mu.Unlock()
+
+	// Publishing never runs on the kernel event path. A capacity-one signal marks
+	// the snapshot dirty; the recorder-owned background publisher coalesces bursts
+	// and performs the bounded transcript scan at its next cadence boundary.
+	r.notifyTokenDestinationPublisher()
 }
 
 func sourceMatch(ev abi.Event) pathutil.CaptureSourceMatch {
@@ -521,7 +529,14 @@ func init() {
 	if !truthy(os.Getenv("FAK_TRAJECTORY")) {
 		return
 	}
-	Enable(truthy(os.Getenv("FAK_TRAJECTORY_EMBED")))
+	r := Enable(truthy(os.Getenv("FAK_TRAJECTORY_EMBED")))
+	if path := strings.TrimSpace(os.Getenv("FAK_INFO_TOKEN_DESTINATION_SNAPSHOT")); path != "" {
+		interval := DefaultTokenDestinationRefreshInterval
+		if configured, err := time.ParseDuration(strings.TrimSpace(os.Getenv("FAK_TRAJECTORY_TOKEN_DESTINATION_INTERVAL"))); err == nil && configured > 0 {
+			interval = configured
+		}
+		_ = r.StartTokenDestinationPublisher(path, interval)
+	}
 }
 
 // truthy reads an env toggle: "1", "true", "yes", "on" (case-insensitive) enable;

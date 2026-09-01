@@ -39,6 +39,15 @@ const (
 // CheckConfig names the candidate and the target wire contract it would be
 // resumed against. RequiredFunctionCallItemPrefix is the prefix required on the
 // persisted response_item.function_call.id field (not its logical call_id).
+type LookupState string
+
+const (
+	LookupFound           LookupState = "found"
+	LookupNotFound        LookupState = "not_found"
+	LookupInvalidIdentity LookupState = "invalid_identity"
+	LookupUnreadable      LookupState = "unreadable"
+)
+
 type CheckConfig struct {
 	ThreadID                       string
 	Thread                         ThreadIdentity
@@ -53,6 +62,9 @@ type CheckConfig struct {
 // candidate -> compatibility -> admission verdict -> exact recovery action.
 type PreflightResult struct {
 	ThreadID                         string           `json:"thread_id"`
+	CodexHome                        string           `json:"codex_home"`
+	SessionRoot                      string           `json:"session_root"`
+	LookupState                      LookupState      `json:"lookup_state"`
 	Thread                           *ThreadIdentity  `json:"thread,omitempty"`
 	Verdict                          PreflightVerdict `json:"verdict"`
 	Compatibility                    Compatibility    `json:"compatibility"`
@@ -104,6 +116,9 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	cfg = cfg.withDefaults()
 	result := PreflightResult{
 		ThreadID:                       cfg.ThreadID,
+		CodexHome:                      cfg.CodexHome,
+		SessionRoot:                    filepath.Join(cfg.CodexHome, "sessions"),
+		LookupState:                    LookupNotFound,
 		Compatibility:                  CompatibilityUnknown,
 		TargetProvider:                 cfg.TargetProvider,
 		TargetWire:                     cfg.TargetWire,
@@ -112,6 +127,7 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	thread, err := resolveCheckThreadIdentity(cfg)
 	if err != nil {
 		result.Verdict = VerdictNotFound
+		result.LookupState = LookupInvalidIdentity
 		result.Detail = err.Error()
 		result.RecoveryAction = "supply the exact persisted Codex thread UUID and rerun preflight"
 		return result
@@ -123,9 +139,15 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	rolloutPath := cfg.RolloutPath
 	if rolloutPath == "" {
 		var err error
-		rolloutPath, err = discoverRollout(cfg.CodexHome, cfg.ThreadID)
+		var lookupState LookupState
+		rolloutPath, lookupState, err = discoverRollout(cfg.CodexHome, cfg.ThreadID)
 		if err != nil {
-			result.Verdict = VerdictNotFound
+			result.LookupState = lookupState
+			if lookupState == LookupUnreadable {
+				result.Verdict = VerdictHistoryUnreadable
+			} else {
+				result.Verdict = VerdictNotFound
+			}
 			result.Detail = err.Error()
 			result.RecoveryAction = "restore the thread rollout under CODEX_HOME/sessions or choose an existing thread id"
 			return result
@@ -134,17 +156,12 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	absRollout, err := filepath.Abs(rolloutPath)
 	if err != nil {
 		result.Verdict = VerdictHistoryUnreadable
+		result.LookupState = LookupUnreadable
 		result.Detail = err.Error()
 		result.RecoveryAction = "supply a readable absolute rollout path and rerun preflight"
 		return result
 	}
 	result.RolloutPath = absRollout
-	if strings.HasSuffix(strings.ToLower(absRollout), ".gz") {
-		result.Verdict = VerdictHistoryUnreadable
-		result.Detail = "the matching rollout is archived and cannot be append-tailed as an authoritative live resume witness"
-		result.RecoveryAction = "restore the thread to a live .jsonl rollout before launching; preflight may inspect archives but must not report them RESUMABLE"
-		return result
-	}
 	result.WriterLockPath = filepath.Join(cfg.CodexHome, "thread-writer-locks", cfg.ThreadID+".lock")
 	resource, err := NewWriterResourceHandle(thread, result.WriterLockPath)
 	if err != nil {
@@ -157,14 +174,23 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	facts, err := inspectHistory(absRollout, cfg.RequiredFunctionCallItemPrefix)
 	if err != nil {
 		result.Verdict = VerdictHistoryUnreadable
+		result.LookupState = LookupUnreadable
 		result.Detail = err.Error()
 		result.RecoveryAction = "repair or restore the persisted rollout; do not spawn a resume against unreadable history"
 		return result
 	}
 	if facts.threadID == "" || facts.threadID != cfg.ThreadID {
 		result.Verdict = VerdictNotFound
+		result.LookupState = LookupNotFound
 		result.Detail = fmt.Sprintf("rollout session id %q does not match candidate %q", facts.threadID, cfg.ThreadID)
 		result.RecoveryAction = "select the rollout whose session_meta.id exactly matches the candidate thread"
+		return result
+	}
+	result.LookupState = LookupFound
+	if strings.HasSuffix(strings.ToLower(absRollout), ".gz") {
+		result.Verdict = VerdictHistoryUnreadable
+		result.Detail = "the matching rollout is archived and cannot be append-tailed as an authoritative live resume witness"
+		result.RecoveryAction = "restore the thread to a live .jsonl rollout before launching; preflight may inspect archives but must not report them RESUMABLE"
 		return result
 	}
 	result.SourceProvider = facts.sourceProvider
@@ -274,7 +300,7 @@ func defaultCodexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-func discoverRollout(codexHome, threadID string) (string, error) {
+func discoverRollout(codexHome, threadID string) (string, LookupState, error) {
 	root := filepath.Join(codexHome, "sessions")
 	var candidates []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -292,18 +318,28 @@ func discoverRollout(codexHome, threadID string) (string, error) {
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("thread %s has no rollout under %s", threadID, root)
+			return "", LookupNotFound, fmt.Errorf("thread %s has no rollout under %s", threadID, root)
 		}
-		return "", fmt.Errorf("scan Codex rollouts: %w", err)
+		return "", LookupUnreadable, fmt.Errorf("scan Codex rollouts: %w", err)
 	}
 	sort.Strings(candidates)
+	var firstUnreadable error
 	for _, candidate := range candidates {
 		facts, inspectErr := inspectHistory(candidate, "")
-		if inspectErr == nil && facts.threadID == threadID {
-			return candidate, nil
+		if inspectErr != nil {
+			if firstUnreadable == nil {
+				firstUnreadable = inspectErr
+			}
+			continue
+		}
+		if facts.threadID == threadID {
+			return candidate, LookupFound, nil
 		}
 	}
-	return "", fmt.Errorf("thread %s has no matching rollout under %s", threadID, root)
+	if firstUnreadable != nil {
+		return "", LookupUnreadable, fmt.Errorf("inspect matching Codex rollout: %w", firstUnreadable)
+	}
+	return "", LookupNotFound, fmt.Errorf("thread %s has no matching rollout under %s", threadID, root)
 }
 
 func inspectHistory(path, requiredPrefix string) (historyFacts, error) {
@@ -430,7 +466,7 @@ func openRollout(path string) (io.Reader, func() error, error) {
 // Writer locks remain owned and cleaned up by Codex; recovery never deletes them.
 func Recover(ctx context.Context, checkConfig CheckConfig, runConfig Config) (Result, error) {
 	preflight := Preflight(checkConfig)
-	result := Result{ThreadID: preflight.ThreadID, Preflight: &preflight}
+	result := Result{ThreadID: preflight.ThreadID, Preflight: &preflight, LaunchState: LaunchNotAttempted}
 	if preflight.Verdict != VerdictResumable {
 		result.Outcome = OutcomeRefused
 		return result, nil

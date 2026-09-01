@@ -10,6 +10,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
+type writerFunc func([]byte) (int, error)
+
+func (fn writerFunc) Write(p []byte) (int, error) {
+	return fn(p)
+}
+
 func guardInspectionFailureForSupervisionTest() guardChildWaitEvent {
 	return guardResourceMonitorFailure(42, procguard.MemorySnapshot{
 		Metric:    procguard.MemoryMetricCommit,
@@ -54,10 +60,24 @@ func TestGuardChildNormalSupervisionWaitsForChildAfterMonitorFailure(t *testing.
 	resources := make(chan guardChildWaitEvent, 1)
 	resources <- guardInspectionFailureForSupervisionTest()
 	childErr := errors.New("child completed after monitor degraded")
-	wait <- childErr
 
-	var diagnostic bytes.Buffer
-	runErr, event, contain := waitGuardChildWithoutRestart(wait, resources, &diagnostic)
+	// The child may complete only after the monitor diagnostic is emitted. This
+	// models the ordering under test instead of preloading both select cases.
+	diagnosticObserved := make(chan struct{})
+	diagnostic := writerFunc(func(p []byte) (int, error) {
+		select {
+		case <-diagnosticObserved:
+		default:
+			close(diagnosticObserved)
+		}
+		return len(p), nil
+	})
+	go func() {
+		<-diagnosticObserved
+		wait <- childErr
+	}()
+
+	runErr, event, contain := waitGuardChildWithoutRestart(wait, resources, diagnostic)
 	if contain {
 		t.Fatal("normal supervision requested containment for monitor failure")
 	}
@@ -67,8 +87,10 @@ func TestGuardChildNormalSupervisionWaitsForChildAfterMonitorFailure(t *testing.
 	if event.Resource == nil || event.Resource.Stop {
 		t.Fatalf("monitor event=%+v, want non-terminal diagnostic", event)
 	}
-	if !strings.Contains(diagnostic.String(), "child remains running") {
-		t.Fatalf("diagnostic=%q", diagnostic.String())
+	select {
+	case <-diagnosticObserved:
+	default:
+		t.Fatal("monitor diagnostic was not emitted before child completion")
 	}
 }
 

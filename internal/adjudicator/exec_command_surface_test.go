@@ -53,3 +53,69 @@ func shellCommandArgs(arg, cmd string) string {
 	b, _ := json.Marshal(map[string]string{arg: cmd})
 	return string(b)
 }
+func TestExecCommandReadOnlyAdmission(t *testing.T) {
+	a := New(Policy{})
+	workdir := a.receiptRoot
+	if workdir == "" {
+		t.Fatal("test requires a workspace root")
+	}
+
+	tests := []struct {
+		name string
+		args map[string]string
+		kind abi.VerdictKind
+	}{
+		{
+			name: "PowerShell Get-Content",
+			args: map[string]string{
+				"cmd":     `Get-Content -LiteralPath 'go.mod'`,
+				"shell":   "powershell",
+				"workdir": workdir,
+			},
+			kind: abi.VerdictAllow,
+		},
+		{
+			name: "git status",
+			args: map[string]string{
+				"cmd":     "git status --short --branch",
+				"workdir": workdir,
+			},
+			kind: abi.VerdictAllow,
+		},
+		{
+			name: "mixed read and mutation",
+			args: map[string]string{
+				"cmd":     "git status; git reset --hard",
+				"workdir": workdir,
+			},
+			kind: abi.VerdictDeny,
+		},
+		{
+			name: "unknown executable",
+			args: map[string]string{
+				"cmd":     "unknown-reader state.txt",
+				"workdir": workdir,
+			},
+			kind: abi.VerdictDeny,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := a.Adjudicate(context.Background(), inlineCall("functions.exec_command", string(encoded)))
+			if v.Kind != tc.kind {
+				t.Fatalf("verdict = %v/%s by %q, want %v", v.Kind, abi.ReasonName(v.Reason), v.By, tc.kind)
+			}
+			if tc.kind == abi.VerdictAllow && v.By != "monitor/cli-read-only" {
+				t.Fatalf("allow By = %q, want monitor/cli-read-only", v.By)
+			}
+			if tc.kind == abi.VerdictDeny && v.Reason != abi.ReasonPolicyBlock {
+				t.Fatalf("deny reason = %s, want POLICY_BLOCK", abi.ReasonName(v.Reason))
+			}
+		})
+	}
+}

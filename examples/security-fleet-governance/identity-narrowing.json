@@ -1,0 +1,12 @@
+{
+  "arg_rules": [
+    {
+      "tool": "read_corp_kb",
+      "arg": "uri",
+      "allow_glob": "corp://security/identity/**",
+      "reason": "POLICY_BLOCK",
+      "fix": "Use an identity-team resource under corp://security/identity/."
+    }
+  ]
+}
+

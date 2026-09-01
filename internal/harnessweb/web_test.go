@@ -46,6 +46,11 @@ func TestCapturedPageRendersOperatingStatesAndSecondSkin(t *testing.T) {
 		"copy.textContent=message.text",
 		"inspect typed startup messages",
 		"@media(max-width:600px){.startup-summary{grid-template-columns:1fr}}",
+		"const local=data.local_work||{}",
+		"worktrees=local.worker_worktrees||{}",
+		"cleanup ready, not complete",
+		"landed with independent commit witness",
+		"target.append(row(identity,detail,item.complete?\"complete\":\"evidence\"))",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("captured browser render missing %q", want)

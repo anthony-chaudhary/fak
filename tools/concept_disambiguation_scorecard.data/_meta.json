@@ -3456,6 +3456,16 @@
           "category": "incidental",
           "reason": "Local accounts gate-write target-directory variable and parameter; it carries the directory being checked but is not a reusable guard, gate, or admission mechanism.",
           "token": "gateDir"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data field naming the scorecard debt exit criterion; not a runtime guard gate.",
+          "token": "ExitGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Carrying-cost driver label in a debt record, not an executable guard gate.",
+          "token": "explicit_retirement_gate"
         }
       ],
       "exclude": [
@@ -3494,6 +3504,7 @@
         "DELEGATE",
         "EmptyUsageGuard",
         "EnvGated",
+        "ExitGate",
         "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
@@ -3578,6 +3589,7 @@
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
         "equalAggregate",
+        "explicit_retirement_gate",
         "exposureGated",
         "extensionFixtureCells",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
@@ -10172,36 +10184,136 @@
           "category": "incidental",
           "reason": "package-local scorecard constructor rather than a distinct score-debt concept",
           "token": "HealthScorecard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI dispatch wrapper; not a distinct score-debt concept.",
+          "token": "cmdGeneralizationScorecard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI execution helper; not a distinct score-debt concept.",
+          "token": "runGeneralizationScorecard"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test symbol only.",
+          "token": "TestGeneralizationScoreJSONIsByteIdentical"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test symbol only.",
+          "token": "TestGeneralizationScoreRejectsUnexpectedArgument"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation data type documented by the generalization debt scorecard; not a separate operator concept.",
+          "token": "DebtRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field for carrying-cost metadata; not a separate score-debt command or scorecard.",
+          "token": "Interest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local output schema type; not a distinct score-debt concept.",
+          "token": "Report"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local scanner result type; not a distinct score-debt concept.",
+          "token": "Finding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go package name implementing the generalization debt scorecard; not an additional score-debt concept.",
+          "token": "generalizationdebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation disposition constant documented by the generalization debt scorecard.",
+          "token": "AcceptedDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation disposition constant documented by the generalization debt scorecard.",
+          "token": "AccidentalDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation disposition constant documented by the generalization debt scorecard.",
+          "token": "RetiredDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package scanner function implementing the documented scorecard.",
+          "token": "Scan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local aggregate schema type; not a distinct score-debt concept.",
+          "token": "Totals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic score field in the generalization debt report.",
+          "token": "DebtPoints"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation enum for generalization debt findings.",
+          "token": "DebtKind"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation enum for debt lifecycle state.",
+          "token": "DebtDisposition"
         }
       ],
       "id": "score-debt",
       "ignore": [
+        "AcceptedDebt",
+        "AccidentalDebt",
         "CacheValueGateDebtKey",
         "CoverageDebtUnit",
         "DebtByBand",
         "DebtCaughtAtOrigin",
+        "DebtDisposition",
         "DebtFoundLate",
+        "DebtKind",
+        "DebtPoints",
+        "DebtRecord",
         "DebtWitnessRecord",
         "DebtWitnesses",
         "DomainDebtIncluded",
+        "Finding",
         "GitDailyDebtKey",
         "HealthScorecard",
+        "Interest",
         "LateFoundDebt",
         "NegationOperatorDebtKey",
         "OriginDebt",
         "PythonCappedDebt",
         "ReleaseDebt",
+        "Report",
+        "RetiredDebt",
+        "Scan",
         "ScorecardAxis",
         "ScorecardAxisOracle",
         "ScorecardDebtKey",
+        "TestGeneralizationScoreJSONIsByteIdentical",
+        "TestGeneralizationScoreRejectsUnexpectedArgument",
         "TestModeDebtGradeInvariants",
         "TotalDebtSemantics",
+        "Totals",
         "UnboundPaneDebt",
         "UnboundProducerDebt",
         "addDebtWitnesses",
         "appendDebtSection",
         "appendFullDebtSection",
         "baseline_debt_non_integer",
+        "cmdGeneralizationScorecard",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "debtCeiling",
@@ -10210,6 +10322,7 @@
         "debtSummary",
         "dogfoodDebtNextAction",
         "flow_debt",
+        "generalizationdebt",
         "lightgap_debt",
         "lightgap_scorecard",
         "loadDebtWitnesses",
@@ -10217,6 +10330,7 @@
         "pluralDebt",
         "portfolio-discovery",
         "producer_debt_capped",
+        "runGeneralizationScorecard",
         "runScorecardPortfolioDiscovery",
         "scorecardPath",
         "scorecard_incomparable",
@@ -11229,6 +11343,11 @@
           "category": "incidental",
           "reason": "closed evidence-source value describing unavailable platform inspection, not a product support tier",
           "token": "platform_unsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Carrying-cost driver label in a debt record, not a support-maturity status concept.",
+          "token": "unsupported_variant_count"
         }
       ],
       "exclude": [
@@ -11463,6 +11582,7 @@
         "unsupported_recipe",
         "unsupported_runtime_fusion",
         "unsupported_scale",
+        "unsupported_variant_count",
         "unsupported_version",
         "unsupportedgdnpreprojectedsequenceerror",
         "unsupportedqwen4expexecutionerror",
@@ -12481,6 +12601,11 @@
           "category": "incidental",
           "reason": "Narrow trajectory-audit compact presentation helper; no new render/materialize domain concept.",
           "token": "renderauditdistributioncompact"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deterministic issue-comment formatter; it materializes one established worker-worktree projection rather than defining a distinct render concept.",
+          "token": "renderSteerLifecycleStatus"
         }
       ],
       "id": "render-materialize",
@@ -12557,6 +12682,7 @@
         "renderSessionJournalAudit",
         "renderSessionOpen",
         "renderShellChoice",
+        "renderSteerLifecycleStatus",
         "renderSweepParkedText",
         "renderTrajectory",
         "renderValidate",
@@ -13537,6 +13663,36 @@
           "category": "incidental",
           "reason": "Receipt-local implementation identifier; not a distinct cache or plan concept.",
           "token": "boundedSelfUpdateCandidateCacheReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed implementation symbol within the existing supervision policy concept; it names the validated root, agent, or serving fault-domain family rather than a separate user-facing plan concept.",
+          "token": "FaultPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneRoot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneAgent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum value of the existing FaultPlane implementation type, not a separate user-facing plan concept.",
+          "token": "FaultPlaneServing"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed-set validation helper for the existing supervision policy schema, not a separate user-facing plan concept.",
+          "token": "knownFaultPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mapping helper that enforces the existing supervision policy process-class-to-fault-domain invariant, not a separate user-facing plan concept.",
+          "token": "processClassPlane"
         }
       ],
       "exclude": [
@@ -13571,6 +13727,10 @@
         "ExplainFilingPlan",
         "ExplanationSeconds",
         "FallbackCandidate",
+        "FaultPlane",
+        "FaultPlaneAgent",
+        "FaultPlaneRoot",
+        "FaultPlaneServing",
         "FleetBenchPlanDoc",
         "GoCandidateCapability",
         "GoCandidateKind",
@@ -13692,6 +13852,7 @@
         "indexPlanSteps",
         "indexedPlanStep",
         "inspectCodexMarketplaceCandidate",
+        "knownFaultPlane",
         "listPlan",
         "measuredPlanner",
         "mergePlanDigest",
@@ -13718,6 +13879,7 @@
         "planted",
         "planting",
         "plants",
+        "processClassPlane",
         "recoveryJournalCandidates",
         "register_bench_plan_doc",
         "relationCandidates",

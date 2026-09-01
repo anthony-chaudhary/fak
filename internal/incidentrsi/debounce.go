@@ -45,10 +45,10 @@ func DefaultDebounceConfig() DebounceConfig {
 	}
 }
 
-// Observation identifies a retry and its producer compatibility boundary.
+// DebounceObservation identifies a retry and its producer compatibility boundary.
 // Fingerprint must already be privacy-safe; ProducerMajor prevents incompatible
 // producer contracts from sharing state.
-type Observation struct {
+type DebounceObservation struct {
 	Fingerprint   string
 	ProducerMajor int
 	ObservationID string
@@ -260,11 +260,11 @@ func NewDebouncer(cfg DebounceConfig, store BurstStore, clock Clock) *Debouncer 
 // Observe records an occurrence and atomically admits a ready burst. Boundary
 // precedence is: existing admission retry, cooldown suppression, threshold at
 // or before WindowEnd, maximum wait at or after its deadline, then collecting.
-func (d *Debouncer) Observe(obs Observation, productFailure error) DebounceDecision {
+func (d *Debouncer) Observe(obs DebounceObservation, productFailure error) DebounceDecision {
 	return d.decide(obs, productFailure, true, d.clock.Now())
 }
 
-func (d *Debouncer) decide(obs Observation, productFailure error, addOccurrence bool, now time.Time) DebounceDecision {
+func (d *Debouncer) decide(obs DebounceObservation, productFailure error, addOccurrence bool, now time.Time) DebounceDecision {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	result := DebounceDecision{ProductFailure: productFailure}
@@ -346,7 +346,7 @@ func (d *Debouncer) decide(obs Observation, productFailure error, addOccurrence 
 // Tick advances liveness without adding an occurrence.
 func (d *Debouncer) Tick(fingerprint string, producerMajor int, productFailure error) DebounceDecision {
 	now := d.clock.Now()
-	return d.decide(Observation{Fingerprint: fingerprint, ProducerMajor: producerMajor, ObservationID: stableID("tick", fingerprint, fmt.Sprint(producerMajor), now.String())}, productFailure, false, now)
+	return d.decide(DebounceObservation{Fingerprint: fingerprint, ProducerMajor: producerMajor, ObservationID: stableID("tick", fingerprint, fmt.Sprint(producerMajor), now.String())}, productFailure, false, now)
 }
 
 func (d *Debouncer) Metrics() DebounceMetrics {
@@ -416,7 +416,7 @@ func (d *Debouncer) evictOne(now time.Time) bool {
 	return true
 }
 
-func newBurst(obs Observation, now time.Time, cfg DebounceConfig, prior BurstRecord) BurstRecord {
+func newBurst(obs DebounceObservation, now time.Time, cfg DebounceConfig, prior BurstRecord) BurstRecord {
 	return BurstRecord{Fingerprint: obs.Fingerprint, ProducerMajor: obs.ProducerMajor, BurstID: stableID("burst", obs.Fingerprint, fmt.Sprint(obs.ProducerMajor), now.UTC().Format(time.RFC3339Nano)), FirstSeen: now, LastSeen: now, Threshold: cfg.Threshold, WindowEnd: now.Add(cfg.CollectionWindow), MaxWaitDeadline: now.Add(cfg.MaxWait), Status: BurstCollecting, LastAdmission: prior.LastAdmission, NextEligibleTime: prior.NextEligibleTime}
 }
 func keyFor(f string, major int) string { return fmt.Sprintf("%d\x00%s", major, f) }

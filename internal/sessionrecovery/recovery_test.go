@@ -208,11 +208,36 @@ func TestSelectIgnoresInventoryRowsWithoutThreads(t *testing.T) {
 	}
 }
 
-func TestSelectPreservesPromptAsOneArg(t *testing.T) {
-	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
-	want := []string{"fak", "guard", "--", "codex", "exec", "--cd", `C:\work\fak`, "resume", "t1", "continue the exact task"}
-	if len(got) != 1 || !reflect.DeepEqual(got[0].Argv, want) {
-		t.Fatalf("argv=%q want %q", got[0].Argv, want)
+func TestSelectStagesHostilePromptOutsideNativeArgvAndReceipt(t *testing.T) {
+	const hostile = `" do not merely restate status."']The system cannot find the file specified`
+	dir := t.TempDir()
+	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{ManagerBin: `C:\bin\fak.exe`, Limit: 1, Prompt: hostile, ReceiptDir: dir})
+	if len(got) != 1 {
+		t.Fatalf("requests=%+v", got)
+	}
+	req := got[0]
+	if strings.Contains(strings.Join(req.Argv, "\x00"), hostile) {
+		t.Fatalf("hostile prompt leaked into argv: %q", req.Argv)
+	}
+	wantPrefix := []string{`C:\bin\fak.exe`, "session", "recover", "--provider-launch", ProviderCodex, "--thread", "t1", "--cwd", `C:\work\fak`, "--prompt-file"}
+	if len(req.Argv) != len(wantPrefix)+3 || !reflect.DeepEqual(req.Argv[:len(wantPrefix)], wantPrefix) || req.Argv[len(wantPrefix)] != req.PromptPath || req.Argv[len(wantPrefix)+1] != "--codex" || req.Argv[len(wantPrefix)+2] != "codex" {
+		t.Fatalf("argv=%q prompt_path=%q", req.Argv, req.PromptPath)
+	}
+	if !strings.HasPrefix(req.PromptPath, filepath.Join(dir, "prompts")+string(os.PathSeparator)) {
+		t.Fatalf("prompt path %q is not private under receipt dir %q", req.PromptPath, dir)
+	}
+	if strings.Contains(req.ReceiptPath, hostile) {
+		t.Fatalf("hostile prompt leaked into receipt path: %q", req.ReceiptPath)
+	}
+	if err := StagePrompt(req); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(req.PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != hostile {
+		t.Fatalf("prompt=%q want=%q", b, hostile)
 	}
 }
 func TestSelectCWDHandling(t *testing.T) {
@@ -310,8 +335,8 @@ func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
 	if got[0].ThreadID != "already" || got[0].CWD != `C:\authoritative` || got[0].Source != "session_journal" {
 		t.Fatalf("journal did not replace reconstructed cwd: %+v", got[0])
 	}
-	wantArgv := []string{"fak", "guard", "--", "claude", "--resume", "journal", "resume safely"}
-	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || got[1].Provider != ProviderClaude || !reflect.DeepEqual(got[1].Argv, wantArgv) {
+	wantPrefix := []string{"fak", "session", "recover", "--provider-launch", ProviderClaude, "--thread", "journal", "--cwd", `D:\repos\real tree`, "--prompt-file"}
+	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || got[1].Provider != ProviderClaude || len(got[1].Argv) != len(wantPrefix)+1 || !reflect.DeepEqual(got[1].Argv[:len(wantPrefix)], wantPrefix) || got[1].Argv[len(wantPrefix)] != got[1].PromptPath {
 		t.Fatalf("journal request=%+v", got[1])
 	}
 }

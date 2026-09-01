@@ -1,0 +1,44 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "read_corp_kb",
+    "read_service_catalog",
+    "create_support_ticket"
+  ],
+  "deny": {
+    "export_customer_data": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "safe_sinks": [
+    "create_support_ticket"
+  ],
+  "sources": {
+    "read_corp_kb": "trusted_local",
+    "read_service_catalog": "trusted_local"
+  },
+  "arg_rules": [
+    {
+      "tool": "read_corp_kb",
+      "arg": "uri",
+      "allow_glob": "corp://security/**",
+      "reason": "POLICY_BLOCK",
+      "fix": "Use a canonical corp://security/... resource reference."
+    },
+    {
+      "tool": "read_service_catalog",
+      "arg": "uri",
+      "allow_glob": "corp://services/**",
+      "reason": "POLICY_BLOCK",
+      "fix": "Use a canonical corp://services/... resource reference."
+    },
+    {
+      "tool": "create_support_ticket",
+      "arg": "body",
+      "max_bytes": 4096,
+      "reason": "OVERSIZE"
+    }
+  ]
+}
+
