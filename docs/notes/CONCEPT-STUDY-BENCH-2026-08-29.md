@@ -23,8 +23,8 @@ The P1-P4 checks resolve as: **P1** benchmark/evidence maintainers are the user;
 
 ## Source identity and license posture
 
-- Local checkout: `C:\Users\antho\OneDrive\Desktop\work\Bench`.
-- Canonical remote: `https://github.com/anthony-chaudhary/Benchmark`.
+- Source checkout: operator-local; exact local location retained only in the private companion repository.
+- Canonical repository: `https://github.com/anthony-chaudhary/Benchmark`.
 - Pinned revision: `b60f2f05e23ec38ae4f50ca19717c2f615ed419a`; the checkout was clean on `main...origin/main` when inspected.
 - Repository identity at observation: 842 commits, 309 tags, 14 closed issues, zero open issues, zero pull requests, discussions disabled, zero stars, zero forks, and last push at `2026-08-19T00:33:36Z`.
 - License evidence conflicts in sufficiency, not text: `pyproject.toml:71` says `license = "MIT"`, but there is no root license file and GitHub license metadata is null. The conservative disposition is clean-room conceptual adaptation only.

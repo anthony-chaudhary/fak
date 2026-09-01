@@ -43,6 +43,13 @@ func userPathFixture(suffix string) string {
 	return `C:\Users\` + operatorNameFixture() + suffix
 }
 
+func operatorHomePathFixture(root, user, suffix string) string {
+	if root == "windows" {
+		return `C:` + `\` + `Users` + `\` + user + `\` + suffix
+	}
+	return `/` + root + `/` + user + `/` + suffix
+}
+
 func TestPublicLeak_needleAndRegex(t *testing.T) {
 	d := diffOf("/r", map[string][]string{
 		"docs/a.md": {
@@ -70,6 +77,46 @@ func TestPublicLeak_backslashUsersNeedle(t *testing.T) {
 	f, _ := gatePublicLeak(d)
 	if len(f) == 0 {
 		t.Fatalf("expected a leak for a Windows user path; got none")
+	}
+}
+
+func TestPublicLeak_operatorIdentifyingUserHomePaths(t *testing.T) {
+	const reason = "operator-identifying absolute user-home path"
+	cases := []struct {
+		name string
+		line string
+		leak bool
+	}{
+		{
+			name: "exact Source checkout regression",
+			line: "- Source checkout: " + operatorHomePathFixture("windows", "antho", `OneDrive\Desktop\work\AI-Ops`) + ".",
+			leak: true,
+		},
+		{name: "unseen Windows operator", line: "source: " + operatorHomePathFixture("windows", "alice", `src\fak`), leak: true},
+		{name: "macOS operator", line: "source: " + operatorHomePathFixture("Users", "alice", "src/fak"), leak: true},
+		{name: "Linux operator", line: "source: " + operatorHomePathFixture("home", "alice", "src/fak"), leak: true},
+		{name: "public URL", line: "source: https://github.com/example/fak"},
+		{name: "URL path shaped like a home", line: "source: https://example.com/Users/alice/fak"},
+		{name: "generic local prose", line: "source: an operator-local checkout"},
+		{name: "repository relative", line: "source: docs/research/study.md"},
+		{name: "parent relative", line: "source: ../Users/alice/fak"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := diffOf("/r", map[string][]string{"docs/study.md": {tc.line}})
+			findings, err := gatePublicLeak(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := hasFindingFor(findings, "PUBLIC_LEAK", reason)
+			if got != tc.leak {
+				t.Fatalf("operator-home finding = %v, want %v; findings: %+v", got, tc.leak, findings)
+			}
+			if !tc.leak && len(findings) != 0 {
+				t.Fatalf("safe near-miss produced findings: %+v", findings)
+			}
+		})
 	}
 }
 
