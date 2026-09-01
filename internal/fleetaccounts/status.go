@@ -379,67 +379,81 @@ func countActiveLive(acct []Session) (active, live int) {
 	return active, live
 }
 
-func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
-	throttleMap := normalizeThrottle(reg.Throttle)
-	authMap := reg.Auth
-	generatedUTC := reg.GeneratedUTC
+type runtimeEvidence struct {
+	acct               []Session
+	freshProbeOK       bool
+	freshProbeBlock    *Session
+	freshProbeOKRow    *Session
+	active             int
+	live               int
+	authBlocked        []Session
+	sessionAuthCurrent bool
+	authInfo           map[string]any
+	knownAuthCurrent   bool
+	authCurrent        bool
+}
 
-	var acct []Session
-	for _, s := range reg.Sessions {
-		if s.Account == account {
-			acct = append(acct, s)
+func collectRuntimeEvidence(account string, reg Registry) runtimeEvidence {
+	var evidence runtimeEvidence
+	for _, session := range reg.Sessions {
+		if session.Account == account {
+			evidence.acct = append(evidence.acct, session)
 		}
 	}
-
-	freshProbeOK, freshProbeBlock, freshProbeOKRow := scanProbeRows(acct)
-
-	active, live := countActiveLive(acct)
-
-	var authBlocked []Session
-	for _, s := range acct {
-		if s.Action == "BLOCKED_AUTH" || s.Disp == "INFRA_AUTH" {
-			authBlocked = append(authBlocked, s)
+	evidence.freshProbeOK, evidence.freshProbeBlock, evidence.freshProbeOKRow = scanProbeRows(evidence.acct)
+	evidence.active, evidence.live = countActiveLive(evidence.acct)
+	for _, session := range evidence.acct {
+		if session.Action == "BLOCKED_AUTH" || session.Disp == "INFRA_AUTH" {
+			evidence.authBlocked = append(evidence.authBlocked, session)
 		}
 	}
-	latestAuthAge, haveAuthAge := minAge(authBlocked)
+	latestAuthAge, haveAuthAge := minAge(evidence.authBlocked)
 	var successRows []Session
-	for _, s := range acct {
-		if s.Disp == "LIVE" || s.Disp == "DONE" {
-			successRows = append(successRows, s)
+	for _, session := range evidence.acct {
+		if session.Disp == "LIVE" || session.Disp == "DONE" {
+			successRows = append(successRows, session)
 		}
 	}
 	latestSuccessAge, haveSuccessAge := minAge(successRows)
-
-	sessionAuthCurrent := len(authBlocked) > 0 &&
+	evidence.sessionAuthCurrent = len(evidence.authBlocked) > 0 &&
 		(!haveSuccessAge || !haveAuthAge || latestSuccessAge > latestAuthAge)
-
 	var latestSuccessSeen *time.Time
-	for _, s := range successRows {
-		if seen := rowSeenUTC(s, generatedUTC); seen != nil {
+	for _, session := range successRows {
+		if seen := rowSeenUTC(session, reg.GeneratedUTC); seen != nil {
 			if latestSuccessSeen == nil || seen.After(*latestSuccessSeen) {
 				latestSuccessSeen = seen
 			}
 		}
 	}
-	var authInfo map[string]any
-	if ai, ok := authMap[account].(map[string]any); ok {
-		authInfo = ai
-	} else if _, ok := authMap[account]; ok {
-		authInfo = map[string]any{}
+	if authInfo, ok := reg.Auth[account].(map[string]any); ok {
+		evidence.authInfo = authInfo
+	} else if _, ok := reg.Auth[account]; ok {
+		evidence.authInfo = map[string]any{}
 	}
 	var authSeen *time.Time
-	if authInfo != nil {
-		authSeen = parseUTC(asString(authInfo["seen_utc"]))
+	if evidence.authInfo != nil {
+		authSeen = parseUTC(asString(evidence.authInfo["seen_utc"]))
 	}
-	knownAuthCurrent := authInfo != nil &&
+	evidence.knownAuthCurrent = evidence.authInfo != nil &&
 		(latestSuccessSeen == nil || authSeen == nil || !latestSuccessSeen.After(*authSeen))
-	authCurrent := sessionAuthCurrent || knownAuthCurrent
+	evidence.authCurrent = evidence.sessionAuthCurrent || evidence.knownAuthCurrent
+	return evidence
+}
+
+func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
+	throttleMap := normalizeThrottle(reg.Throttle)
+	evidence := collectRuntimeEvidence(account, reg)
+	acct := evidence.acct
+	freshProbeOK, freshProbeBlock, freshProbeOKRow := evidence.freshProbeOK, evidence.freshProbeBlock, evidence.freshProbeOKRow
+	authBlocked := evidence.authBlocked
+	sessionAuthCurrent, knownAuthCurrent, authCurrent := evidence.sessionAuthCurrent, evidence.knownAuthCurrent, evidence.authCurrent
+	authInfo := evidence.authInfo
 
 	st := RuntimeStatus{
 		Available:           true,
 		Throttled:           false,
-		ActiveSessions:      active,
-		LiveSessions:        live,
+		ActiveSessions:      evidence.active,
+		LiveSessions:        evidence.live,
 		AuthBlockedSessions: len(authBlocked),
 		StatusSource:        "none",
 	}
