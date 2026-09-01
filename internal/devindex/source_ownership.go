@@ -149,8 +149,27 @@ func resolveDevCaseHandler(clause *ast.CaseClause, dispatchPkg, implPkg *vsPkg) 
 		path string
 		pkg  *vsPkg
 		fn   string
+		// inGuard marks a call lexically inside an if statement in the case
+		// body — a subcommand route (`issue inventory`) that early-returns,
+		// not the case's owning handler. The unconditional call owns the row.
+		inGuard bool
 	}
 	var matches []match
+	// Collect every call nested under an IfStmt so a match can be classified
+	// as a guarded subcommand route instead of the case's handler.
+	guardCalls := map[*ast.CallExpr]bool{}
+	ast.Inspect(clause, func(n ast.Node) bool {
+		if _, ok := n.(*ast.IfStmt); !ok {
+			return true
+		}
+		ast.Inspect(n, func(inner ast.Node) bool {
+			if call, ok := inner.(*ast.CallExpr); ok {
+				guardCalls[call] = true
+			}
+			return true
+		})
+		return true
+	})
 	ast.Inspect(clause, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -163,20 +182,34 @@ func resolveDevCaseHandler(clause *ast.CaseClause, dispatchPkg, implPkg *vsPkg) 
 				return true
 			}
 			file := implPkg.fileOf[fun.Sel.Name]
-			matches = append(matches, match{"devcmd." + fun.Sel.Name, implPkg.pathOf[file], implPkg, fun.Sel.Name})
+			matches = append(matches, match{"devcmd." + fun.Sel.Name, implPkg.pathOf[file], implPkg, fun.Sel.Name, guardCalls[call]})
 		case *ast.Ident:
 			if dispatchPkg.funcs[fun.Name] == nil {
 				return true
 			}
 			file := dispatchPkg.fileOf[fun.Name]
-			matches = append(matches, match{fun.Name, dispatchPkg.pathOf[file], dispatchPkg, fun.Name})
+			matches = append(matches, match{fun.Name, dispatchPkg.pathOf[file], dispatchPkg, fun.Name, guardCalls[call]})
 		}
 		return true
 	})
-	if len(matches) != 1 {
+	primary := matches
+	if len(matches) > 1 {
+		var unguarded []match
+		for _, m := range matches {
+			if !m.inGuard {
+				unguarded = append(unguarded, m)
+			}
+		}
+		// Filter only when the guarded/unguarded split isolates exactly one
+		// owner; otherwise the case is genuinely ambiguous and must refuse.
+		if len(unguarded) == 1 {
+			primary = unguarded
+		}
+	}
+	if len(primary) != 1 {
 		return "", "", nil, "", fmt.Errorf("expected exactly one resolvable handler, found %d", len(matches))
 	}
-	return matches[0].name, matches[0].path, matches[0].pkg, matches[0].fn, nil
+	return primary[0].name, primary[0].path, primary[0].pkg, primary[0].fn, nil
 }
 
 // reachableComponentHazards walks the same-package declaration call component,
