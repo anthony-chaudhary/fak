@@ -409,3 +409,38 @@ func TestSweepGoCacheCancellationIsIncomplete(t *testing.T) {
 		t.Fatalf("report=%+v", rep)
 	}
 }
+
+func TestSweepGoCacheRevalidatesStalenessBeforeRemoval(t *testing.T) {
+	root := newGoCacheRoot(t)
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	dir := writeGoCacheFixture(t, root, "aa", 8, now.Add(-48*time.Hour))
+	path := filepath.Join(dir, "entry")
+	buildChecks := 0
+	removeCalls := 0
+	rep := SweepGoCache(GoCacheOptions{
+		Root:      root,
+		Now:       now,
+		HighBytes: 1,
+		LowBytes:  0,
+		MinAge:    time.Hour,
+		ActiveBuild: func() (bool, error) {
+			buildChecks++
+			if buildChecks == 2 {
+				if err := os.Chtimes(path, now, now); err != nil {
+					return false, err
+				}
+			}
+			return false, nil
+		},
+		Remove: func(string) error {
+			removeCalls++
+			return nil
+		},
+	}, true)
+	if rep.Err != "" || removeCalls != 0 || len(rep.Reaped) != 0 || rep.ReclaimedBytes != 0 || rep.BytesAfter != rep.BytesBefore {
+		t.Fatalf("report=%+v remove_calls=%d", rep, removeCalls)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("refreshed cache entry removed: %v", err)
+	}
+}

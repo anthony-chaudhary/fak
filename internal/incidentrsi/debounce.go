@@ -13,543 +13,454 @@ import (
 	"time"
 )
 
-const debounceSnapshotSchema = "fak-incident-rsi-debounce/1"
-
-// AdmissionState mirrors the closed state vocabulary of the incident trigger
-// receipt without depending on that receipt's concrete Go types.
-type AdmissionState string
+// BurstStatus is the externally visible state of one incident burst.
+type BurstStatus string
 
 const (
-	AdmissionCollecting         AdmissionState = "COLLECTING"
-	AdmissionThresholdReady     AdmissionState = "THRESHOLD_READY"
-	AdmissionMaxWaitReady       AdmissionState = "MAX_WAIT_READY"
-	AdmissionCooldownSuppressed AdmissionState = "COOLDOWN_SUPPRESSED"
+	BurstCollecting         BurstStatus = "collecting"
+	BurstThresholdReady     BurstStatus = "threshold_ready"
+	BurstMaxWaitReady       BurstStatus = "max_wait_ready"
+	BurstCooldownSuppressed BurstStatus = "cooldown_suppressed"
 )
 
-// AdmissionReason is the bounded reason vocabulary emitted with every decision.
-type AdmissionReason string
-
-const (
-	AdmissionBelowThreshold AdmissionReason = "BELOW_THRESHOLD"
-	AdmissionByThreshold    AdmissionReason = "THRESHOLD_REACHED"
-	AdmissionByMaxWait      AdmissionReason = "MAX_WAIT_REACHED"
-	AdmissionDuringCooldown AdmissionReason = "COOLDOWN_ACTIVE"
-)
-
-// DebounceConfig controls one persistent debounce/admission domain.
+// DebounceConfig keeps burst collection, liveness, cooldown, and retention
+// independent. MaxWait is measured from FirstSeen and may extend past the
+// collection window; observations after WindowEnd do not join that burst.
 type DebounceConfig struct {
 	Threshold        int
 	CollectionWindow time.Duration
 	MaxWait          time.Duration
 	Cooldown         time.Duration
+	Retention        time.Duration
 	MaxEntries       int
-	MaxReplayIDs     int
-	MaxBackwardSkew  time.Duration
-	MaxForwardSkew   time.Duration
-	LatencyBuckets   []time.Duration
+	MaxObservations  int
+	MaxClockSkew     time.Duration
 }
 
-// DefaultDebounceConfig bounds both retained state and cross-restart clock skew.
 func DefaultDebounceConfig() DebounceConfig {
 	return DebounceConfig{
-		Threshold:        3,
-		CollectionWindow: 30 * time.Second,
-		MaxWait:          5 * time.Minute,
-		Cooldown:         30 * time.Minute,
-		MaxEntries:       1024,
-		MaxReplayIDs:     64,
-		MaxBackwardSkew:  time.Minute,
-		MaxForwardSkew:   10 * time.Minute,
-		LatencyBuckets:   []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute},
+		Threshold: 3, CollectionWindow: 5 * time.Minute, MaxWait: 15 * time.Minute,
+		Cooldown: 30 * time.Minute, Retention: 24 * time.Hour, MaxEntries: 1024,
+		MaxObservations: 4096, MaxClockSkew: 5 * time.Minute,
 	}
 }
 
-// DebounceObservation contains only privacy-safe identity. Fingerprint must be
-// the content-free fingerprint declared by the trigger contract.
+// DebounceObservation identifies a retry and its producer compatibility boundary.
+// Fingerprint must already be privacy-safe; ProducerMajor prevents incompatible
+// producer contracts from sharing state.
 type DebounceObservation struct {
 	Fingerprint   string
-	ContractMajor int
+	ProducerMajor int
 	ObservationID string
-	ObservedAt    time.Time
 }
 
-// AdmissionDecision is directly mappable to the debounce portion of a trigger
-// receipt. Identity fields belong in receipts/ledgers, never metric labels.
-type AdmissionDecision struct {
-	Fingerprint       string
-	ContractMajor     int
-	ObservationID     string
-	State             AdmissionState
-	Reason            AdmissionReason
-	FirstSeen         time.Time
-	LastSeen          time.Time
-	OccurrenceCount   int
-	Threshold         int
-	WindowEnds        time.Time
-	MaxWaitEnds       time.Time
-	LastAdmission     time.Time
-	NextEligibleAt    time.Time
-	AdmissionID       string
-	Admitted          bool
-	Replay            bool
-	ClockSkewAdjusted bool
+// BurstRecord is the complete persisted state for one keyed burst.
+type BurstRecord struct {
+	Fingerprint      string      `json:"fingerprint"`
+	ProducerMajor    int         `json:"producer_major"`
+	BurstID          string      `json:"burst_id"`
+	FirstSeen        time.Time   `json:"first_seen"`
+	LastSeen         time.Time   `json:"last_seen"`
+	OccurrenceCount  int         `json:"occurrence_count"`
+	Threshold        int         `json:"threshold"`
+	WindowEnd        time.Time   `json:"window_end"`
+	MaxWaitDeadline  time.Time   `json:"max_wait_deadline"`
+	Status           BurstStatus `json:"status"`
+	AdmissionID      string      `json:"admission_id,omitempty"`
+	LastAdmission    time.Time   `json:"last_admission,omitempty"`
+	NextEligibleTime time.Time   `json:"next_eligible_time,omitempty"`
+	ObservationIDs   []string    `json:"observation_ids,omitempty"`
 }
 
-// DebounceOutcome preserves the product fault even when debounce maintenance
-// fails. Callers may launch only when Decision.Admitted is true.
-type DebounceOutcome struct {
-	ProductFault     error
-	Decision         AdmissionDecision
+// IncidentTrigger is the bounded decision projection consumed by the sibling
+// fak-incident-rsi-trigger/1 contract. It intentionally contains no raw error.
+type IncidentTrigger struct {
+	Schema           string      `json:"schema"`
+	Fingerprint      string      `json:"fingerprint"`
+	ProducerMajor    int         `json:"producer_major"`
+	BurstID          string      `json:"burst_id"`
+	ObservationID    string      `json:"observation_id"`
+	State            BurstStatus `json:"state"`
+	OccurrenceCount  int         `json:"occurrence_count"`
+	Threshold        int         `json:"threshold"`
+	FirstSeen        time.Time   `json:"first_seen"`
+	LastSeen         time.Time   `json:"last_seen"`
+	WindowEnd        time.Time   `json:"window_end"`
+	MaxWaitDeadline  time.Time   `json:"max_wait_deadline"`
+	AdmissionID      string      `json:"admission_id,omitempty"`
+	LastAdmission    time.Time   `json:"last_admission,omitempty"`
+	NextEligibleTime time.Time   `json:"next_eligible_time,omitempty"`
+}
+
+// DebounceDecision returns the original product failure unchanged. Sidecar
+// persistence/maintenance failures are bounded separately so they cannot hide it.
+type DebounceDecision struct {
+	Trigger          IncidentTrigger
+	Admitted         bool
+	ProductFailure   error
 	MaintenanceError error
 }
 
-// Clock returns times with a monotonic reading when the implementation can.
-// RealClock uses time.Now, so elapsed comparisons are monotonic in-process.
-type Clock interface {
-	Now() time.Time
+// BurstStore persists a complete bounded snapshot atomically.
+type BurstStore interface {
+	Load() ([]BurstRecord, error)
+	Save([]BurstRecord) error
 }
 
-type RealClock struct{}
-
-func (RealClock) Now() time.Time { return time.Now().UTC() }
-
-// DebounceStore persists a complete bounded snapshot atomically from the
-// component's perspective.
-type DebounceStore interface {
-	Load() (DebounceSnapshot, error)
-	Save(DebounceSnapshot) error
+// MemoryBurstStore is a restart-capable store for embedders and tests.
+type MemoryBurstStore struct {
+	mu                   sync.Mutex
+	records              []BurstRecord
+	LoadError, SaveError error
 }
 
-// DebounceSnapshot is exported so alternate ledger stores can persist it.
-type DebounceSnapshot struct {
-	Schema  string          `json:"schema"`
-	Entries []DebounceEntry `json:"entries"`
-	Metrics DebounceMetrics `json:"metrics"`
+func (s *MemoryBurstStore) Load() ([]BurstRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LoadError != nil {
+		return nil, s.LoadError
+	}
+	return cloneRecords(s.records), nil
+}
+func (s *MemoryBurstStore) Save(records []BurstRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.SaveError != nil {
+		return s.SaveError
+	}
+	s.records = cloneRecords(records)
+	return nil
 }
 
-// DebounceEntry is the durable state for one fingerprint/contract-major key.
-type DebounceEntry struct {
-	Fingerprint     string          `json:"fingerprint"`
-	ContractMajor   int             `json:"contract_major"`
-	FirstSeen       time.Time       `json:"first_seen"`
-	LastSeen        time.Time       `json:"last_seen"`
-	OccurrenceCount int             `json:"occurrence_count"`
-	Threshold       int             `json:"threshold"`
-	WindowEnds      time.Time       `json:"window_ends"`
-	MaxWaitEnds     time.Time       `json:"max_wait_ends"`
-	LastAdmission   time.Time       `json:"last_admission,omitempty"`
-	NextEligibleAt  time.Time       `json:"next_eligible_at,omitempty"`
-	AdmissionID     string          `json:"admission_id,omitempty"`
-	AdmissionReason AdmissionReason `json:"admission_reason,omitempty"`
-	Replays         []ReplayRecord  `json:"replays,omitempty"`
-}
+// FileBurstStore stores JSON using write-and-rename in the destination directory.
+type FileBurstStore struct{ Path string }
 
-// ReplayRecord makes retries idempotent across process restart.
-type ReplayRecord struct {
-	ObservationID string            `json:"observation_id"`
-	Decision      AdmissionDecision `json:"decision"`
-}
-
-// DebounceMetrics contains bounded aggregate counters and fixed histogram
-// buckets. It intentionally has no fingerprint, observation, or admission labels.
-type DebounceMetrics struct {
-	Observations         uint64   `json:"observations"`
-	Collecting           uint64   `json:"collecting"`
-	ThresholdAdmissions  uint64   `json:"threshold_admissions"`
-	MaxWaitAdmissions    uint64   `json:"max_wait_admissions"`
-	CooldownSuppressions uint64   `json:"cooldown_suppressions"`
-	Replays              uint64   `json:"replays"`
-	Evictions            uint64   `json:"evictions"`
-	PersistenceFailures  uint64   `json:"persistence_failures"`
-	ClockAdjustments     uint64   `json:"clock_adjustments"`
-	LatencyUpperMillis   []int64  `json:"latency_upper_ms"`
-	LatencyCounts        []uint64 `json:"latency_counts"`
-}
-
-// FileDebounceStore is a deterministic JSON snapshot store.
-type FileDebounceStore struct{ Path string }
-
-func (s FileDebounceStore) Load() (DebounceSnapshot, error) {
+func (s FileBurstStore) Load() ([]BurstRecord, error) {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return DebounceSnapshot{}, nil
+		return nil, nil
 	}
 	if err != nil {
-		return DebounceSnapshot{}, err
+		return nil, err
 	}
-	var snapshot DebounceSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return DebounceSnapshot{}, err
+	var records []BurstRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, err
 	}
-	return snapshot, nil
+	return records, nil
+}
+func (s FileBurstStore) Save(records []BurstRecord) error {
+	data, err := json.Marshal(records)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.Path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".incident-rsi-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	ok := false
+	defer func() {
+		tmp.Close()
+		if !ok {
+			_ = os.Remove(name)
+		}
+	}()
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(name, s.Path); err != nil {
+		return err
+	}
+	ok = true
+	return nil
 }
 
-func (s FileDebounceStore) Save(snapshot DebounceSnapshot) error {
-	if s.Path == "" {
-		return errors.New("incidentrsi: empty debounce store path")
-	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
-		return err
-	}
-	data, err := json.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".incidentrsi-debounce-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, s.Path); err == nil {
-		return nil
-	}
-	// Windows cannot replace an existing file with Rename. The store remains
-	// fail-closed: remove only the explicitly configured snapshot, then replace.
-	if err := os.Remove(s.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(tmpName, s.Path)
+type Clock interface{ Now() time.Time }
+type wallClock struct{}
+
+func (wallClock) Now() time.Time { return time.Now() }
+
+// DebounceMetrics contains only bounded aggregate dimensions.
+type DebounceMetrics struct {
+	Decisions           map[BurstStatus]uint64
+	Admissions          uint64
+	PersistenceFailures uint64
+	ClockSkewClamps     uint64
+	LatencyBuckets      [5]uint64
 }
 
-// Debouncer serializes decisions and persists each mutation before exposing an
-// admission. A failed save therefore cannot authorize a duplicate launch.
+// Debouncer owns durable burst admission. Its mutex makes one process linearizable;
+// saving the admitted identity before returning makes retries exact-once across restart.
 type Debouncer struct {
 	mu      sync.Mutex
-	config  DebounceConfig
-	store   DebounceStore
+	cfg     DebounceConfig
+	store   BurstStore
 	clock   Clock
-	entries map[string]DebounceEntry
+	records map[string]BurstRecord
 	metrics DebounceMetrics
+	loadErr error
 }
 
-// NewDebouncer restores persisted state. Unknown snapshot schemas fail closed.
-func NewDebouncer(config DebounceConfig, store DebounceStore, clock Clock) (*Debouncer, error) {
-	config = normalizeDebounceConfig(config)
+func NewDebouncer(cfg DebounceConfig, store BurstStore, clock Clock) *Debouncer {
+	d := DefaultDebounceConfig()
+	if cfg.Threshold <= 0 {
+		cfg.Threshold = d.Threshold
+	}
+	if cfg.CollectionWindow <= 0 {
+		cfg.CollectionWindow = d.CollectionWindow
+	}
+	if cfg.MaxWait <= 0 {
+		cfg.MaxWait = d.MaxWait
+	}
+	if cfg.Cooldown <= 0 {
+		cfg.Cooldown = d.Cooldown
+	}
+	if cfg.Retention <= 0 {
+		cfg.Retention = d.Retention
+	}
+	if cfg.MaxEntries <= 0 {
+		cfg.MaxEntries = d.MaxEntries
+	}
+	if cfg.MaxObservations <= 0 {
+		cfg.MaxObservations = d.MaxObservations
+	}
+	if cfg.MaxClockSkew <= 0 {
+		cfg.MaxClockSkew = d.MaxClockSkew
+	}
 	if store == nil {
-		return nil, errors.New("incidentrsi: debounce store is required")
+		store = &MemoryBurstStore{}
 	}
 	if clock == nil {
-		clock = RealClock{}
+		clock = wallClock{}
 	}
-	d := &Debouncer{config: config, store: store, clock: clock, entries: make(map[string]DebounceEntry)}
-	d.metrics.LatencyUpperMillis = durationMillis(config.LatencyBuckets)
-	d.metrics.LatencyCounts = make([]uint64, len(config.LatencyBuckets)+1)
-	snapshot, err := store.Load()
-	if err != nil {
-		return nil, fmt.Errorf("incidentrsi: load debounce state: %w", err)
-	}
-	if snapshot.Schema != "" && snapshot.Schema != debounceSnapshotSchema {
-		return nil, fmt.Errorf("incidentrsi: unsupported debounce schema %q", snapshot.Schema)
-	}
-	for _, entry := range snapshot.Entries {
-		if err := validateEntry(entry); err != nil {
-			return nil, err
-		}
-		d.entries[entryKey(entry.Fingerprint, entry.ContractMajor)] = entry
-	}
-	if snapshot.Schema != "" {
-		d.metrics = snapshot.Metrics
-		d.metrics.LatencyUpperMillis = durationMillis(config.LatencyBuckets)
-		if len(d.metrics.LatencyCounts) != len(config.LatencyBuckets)+1 {
-			d.metrics.LatencyCounts = make([]uint64, len(config.LatencyBuckets)+1)
+	b := &Debouncer{cfg: cfg, store: store, clock: clock, records: map[string]BurstRecord{}, metrics: DebounceMetrics{Decisions: map[BurstStatus]uint64{}}}
+	records, err := store.Load()
+	b.loadErr = err
+	if err == nil {
+		for _, r := range records {
+			if validRecord(r) {
+				b.records[keyFor(r.Fingerprint, r.ProducerMajor)] = r
+			}
 		}
 	}
-	d.trimToLimit()
-	return d, nil
+	return b
 }
 
-// Handle preserves originalFault independently from maintenance status.
-func (d *Debouncer) Handle(originalFault error, observation DebounceObservation) DebounceOutcome {
-	decision, err := d.Observe(observation)
-	return DebounceOutcome{ProductFault: originalFault, Decision: decision, MaintenanceError: err}
+// Observe records an occurrence and atomically admits a ready burst. Boundary
+// precedence is: existing admission retry, cooldown suppression, threshold at
+// or before WindowEnd, maximum wait at or after its deadline, then collecting.
+func (d *Debouncer) Observe(obs DebounceObservation, productFailure error) DebounceDecision {
+	return d.decide(obs, productFailure, true, d.clock.Now())
 }
 
-// Observe records one occurrence. Exact threshold beats max-wait; an active
-// cooldown suppresses either ready state. Exact cooldown expiry is eligible.
-func (d *Debouncer) Observe(observation DebounceObservation) (AdmissionDecision, error) {
-	if observation.Fingerprint == "" || observation.ContractMajor <= 0 || observation.ObservationID == "" {
-		return AdmissionDecision{}, errors.New("incidentrsi: fingerprint, positive contract major, and observation ID are required")
-	}
+func (d *Debouncer) decide(obs DebounceObservation, productFailure error, addOccurrence bool, now time.Time) DebounceDecision {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
-	key := entryKey(observation.Fingerprint, observation.ContractMajor)
-	entry, exists := d.entries[key]
-	if exists {
-		if replay, ok := findReplay(entry.Replays, observation.ObservationID); ok {
-			replay.Replay = true
-			d.metrics.Replays++
-			return replay, nil
-		}
-	}
-
-	now := observation.ObservedAt
-	fromClock := now.IsZero()
-	if fromClock {
-		now = d.clock.Now()
-	}
-	now = now.UTC()
-	adjusted := false
-	if exists && fromClock {
-		now, adjusted = d.boundRestartSkew(now, entry.LastSeen)
-	}
-	if adjusted {
-		d.metrics.ClockAdjustments++
-	}
-
-	if !exists {
-		d.evictFor(key)
-		entry = d.newEntry(observation, now)
-	} else {
-		burstComplete := entry.AdmissionID != "" || entry.OccurrenceCount >= entry.Threshold
-		maxWaitDue := !now.Before(entry.MaxWaitEnds)
-		quietWindowExpired := !now.Before(entry.WindowEnds)
-		if burstComplete || (quietWindowExpired && !maxWaitDue) {
-			lastAdmission, nextEligible := entry.LastAdmission, entry.NextEligibleAt
-			entry = d.newEntry(observation, now)
-			entry.LastAdmission, entry.NextEligibleAt = lastAdmission, nextEligible
-		} else {
-			entry.OccurrenceCount++
-			entry.LastSeen = now
-			entry.WindowEnds = now.Add(d.config.CollectionWindow)
-		}
-	}
-
-	decision := d.decide(entry, observation.ObservationID, now)
-	decision.ClockSkewAdjusted = adjusted
-	if decision.Admitted {
-		entry.LastAdmission = now
-		entry.NextEligibleAt = now.Add(d.config.Cooldown)
-		entry.AdmissionReason = decision.Reason
-		entry.AdmissionID = admissionIdentity(key, entry.FirstSeen, decision.Reason)
-		decision.LastAdmission = entry.LastAdmission
-		decision.NextEligibleAt = entry.NextEligibleAt
-		decision.AdmissionID = entry.AdmissionID
-	}
-	entry.Replays = append(entry.Replays, ReplayRecord{ObservationID: observation.ObservationID, Decision: decision})
-	entry.Replays = boundedReplays(entry.Replays, d.config.MaxReplayIDs)
-	d.entries[key] = entry
-	d.recordDecision(decision)
-
-	if err := d.store.Save(d.snapshot()); err != nil {
+	result := DebounceDecision{ProductFailure: productFailure}
+	if d.loadErr != nil {
+		result.MaintenanceError = fmt.Errorf("load debounce state: %w", d.loadErr)
 		d.metrics.PersistenceFailures++
-		// Admission is not authorized until the identity and cooldown are durable.
-		decision.Admitted = false
-		return decision, fmt.Errorf("incidentrsi: persist debounce decision: %w", err)
+		return result
 	}
-	return decision, nil
+	if obs.Fingerprint == "" || obs.ProducerMajor <= 0 || obs.ObservationID == "" {
+		result.MaintenanceError = errors.New("invalid incident debounce observation")
+		return result
+	}
+	before := cloneRecordMap(d.records)
+	key := keyFor(obs.Fingerprint, obs.ProducerMajor)
+	r, exists := d.records[key]
+	if exists {
+		now = d.clampNow(now, r.LastSeen)
+	}
+
+	// A retry for an admitted burst returns its stable identity. Once its
+	// collection window closes, a new observation starts the next burst while
+	// retaining the prior cooldown boundary.
+	if exists && r.AdmissionID != "" && contains(r.ObservationIDs, obs.ObservationID) {
+		return d.finish(r, obs.ObservationID, false, result)
+	}
+	if !exists || (r.AdmissionID != "" && now.After(r.WindowEnd)) {
+		if !exists && len(d.records) >= d.cfg.MaxEntries && !d.evictOne(now) {
+			result.MaintenanceError = errors.New("incident debounce capacity is fully protected")
+			return result
+		}
+		r = newBurst(obs, now, d.cfg, r)
+	}
+
+	if addOccurrence && !contains(r.ObservationIDs, obs.ObservationID) && !now.After(r.WindowEnd) {
+		if len(r.ObservationIDs) >= d.cfg.MaxObservations {
+			result.MaintenanceError = errors.New("incident burst observation capacity reached")
+			return result
+		}
+		r.ObservationIDs = append(r.ObservationIDs, obs.ObservationID)
+		r.OccurrenceCount++
+		if now.After(r.LastSeen) {
+			r.LastSeen = now
+		}
+	}
+
+	ready := BurstCollecting
+	if r.OccurrenceCount >= r.Threshold && !now.After(r.WindowEnd) {
+		ready = BurstThresholdReady
+	} else if !now.Before(r.MaxWaitDeadline) {
+		ready = BurstMaxWaitReady
+	}
+	if ready != BurstCollecting && !r.NextEligibleTime.IsZero() && now.Before(r.NextEligibleTime) {
+		r.Status = BurstCooldownSuppressed
+	} else if ready != BurstCollecting && r.AdmissionID != "" {
+		// A ready burst may already have been durably admitted before restart.
+		// Preserve its ready reason while returning the existing identity.
+		r.Status = ready
+	} else {
+		r.Status = ready
+	}
+
+	admitted := false
+	if (r.Status == BurstThresholdReady || r.Status == BurstMaxWaitReady) && r.AdmissionID == "" {
+		r.AdmissionID = stableID("admission", r.BurstID)
+		r.LastAdmission = now
+		r.NextEligibleTime = now.Add(d.cfg.Cooldown)
+		admitted = true
+	}
+	d.records[key] = r
+	if err := d.store.Save(d.snapshot()); err != nil {
+		d.records = before
+		result.MaintenanceError = fmt.Errorf("save debounce state: %w", err)
+		d.metrics.PersistenceFailures++
+		return result
+	}
+	return d.finish(r, obs.ObservationID, admitted, result)
 }
 
-// Metrics returns a copy of bounded aggregate telemetry.
+// Tick advances liveness without adding an occurrence.
+func (d *Debouncer) Tick(fingerprint string, producerMajor int, productFailure error) DebounceDecision {
+	now := d.clock.Now()
+	return d.decide(DebounceObservation{Fingerprint: fingerprint, ProducerMajor: producerMajor, ObservationID: stableID("tick", fingerprint, fmt.Sprint(producerMajor), now.String())}, productFailure, false, now)
+}
+
 func (d *Debouncer) Metrics() DebounceMetrics {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	m := d.metrics
-	m.LatencyUpperMillis = append([]int64(nil), m.LatencyUpperMillis...)
-	m.LatencyCounts = append([]uint64(nil), m.LatencyCounts...)
+	m.Decisions = map[BurstStatus]uint64{}
+	for k, v := range d.metrics.Decisions {
+		m.Decisions[k] = v
+	}
 	return m
 }
 
-func (d *Debouncer) newEntry(observation DebounceObservation, now time.Time) DebounceEntry {
-	return DebounceEntry{
-		Fingerprint: observation.Fingerprint, ContractMajor: observation.ContractMajor,
-		FirstSeen: now, LastSeen: now, OccurrenceCount: 1, Threshold: d.config.Threshold,
-		WindowEnds: now.Add(d.config.CollectionWindow), MaxWaitEnds: now.Add(d.config.MaxWait),
+func (d *Debouncer) finish(r BurstRecord, observationID string, admitted bool, out DebounceDecision) DebounceDecision {
+	out.Admitted = admitted
+	out.Trigger = IncidentTrigger{Schema: "fak-incident-rsi-trigger/1", Fingerprint: r.Fingerprint, ProducerMajor: r.ProducerMajor, BurstID: r.BurstID, ObservationID: observationID, State: r.Status, OccurrenceCount: r.OccurrenceCount, Threshold: r.Threshold, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, WindowEnd: r.WindowEnd, MaxWaitDeadline: r.MaxWaitDeadline, AdmissionID: r.AdmissionID, LastAdmission: r.LastAdmission, NextEligibleTime: r.NextEligibleTime}
+	d.metrics.Decisions[r.Status]++
+	if admitted {
+		d.metrics.Admissions++
 	}
-}
-
-func (d *Debouncer) decide(entry DebounceEntry, observationID string, now time.Time) AdmissionDecision {
-	decision := AdmissionDecision{
-		Fingerprint: entry.Fingerprint, ContractMajor: entry.ContractMajor, ObservationID: observationID,
-		FirstSeen: entry.FirstSeen, LastSeen: entry.LastSeen, OccurrenceCount: entry.OccurrenceCount,
-		Threshold: entry.Threshold, WindowEnds: entry.WindowEnds, MaxWaitEnds: entry.MaxWaitEnds,
-		LastAdmission: entry.LastAdmission, NextEligibleAt: entry.NextEligibleAt,
-	}
-	readyState, readyReason := AdmissionCollecting, AdmissionBelowThreshold
-	if entry.OccurrenceCount >= entry.Threshold {
-		readyState, readyReason = AdmissionThresholdReady, AdmissionByThreshold
-	} else if !now.Before(entry.MaxWaitEnds) {
-		readyState, readyReason = AdmissionMaxWaitReady, AdmissionByMaxWait
-	}
-	if readyState == AdmissionCollecting {
-		decision.State, decision.Reason = readyState, readyReason
-		return decision
-	}
-	if !entry.NextEligibleAt.IsZero() && now.Before(entry.NextEligibleAt) {
-		decision.State, decision.Reason = AdmissionCooldownSuppressed, AdmissionDuringCooldown
-		return decision
-	}
-	decision.State, decision.Reason, decision.Admitted = readyState, readyReason, true
-	return decision
-}
-
-func (d *Debouncer) boundRestartSkew(now, last time.Time) (time.Time, bool) {
-	if now.Before(last) {
-		// Backward time never decreases persisted state. The configured bound is
-		// retained as policy documentation; all backward movement clamps to last.
-		return last, true
-	}
-	if d.config.MaxForwardSkew > 0 && now.Sub(last) > d.config.MaxForwardSkew {
-		return last.Add(d.config.MaxForwardSkew), true
-	}
-	return now, false
-}
-
-func (d *Debouncer) evictFor(newKey string) {
-	if _, exists := d.entries[newKey]; exists || len(d.entries) < d.config.MaxEntries {
-		return
-	}
-	keys := make([]string, 0, len(d.entries))
-	for key := range d.entries {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := d.entries[keys[i]], d.entries[keys[j]]
-		if a.LastSeen.Equal(b.LastSeen) {
-			return keys[i] < keys[j]
-		}
-		return a.LastSeen.Before(b.LastSeen)
-	})
-	delete(d.entries, keys[0])
-	d.metrics.Evictions++
-}
-
-func (d *Debouncer) trimToLimit() {
-	for len(d.entries) > d.config.MaxEntries {
-		d.evictFor("__restore__")
-	}
-}
-
-func (d *Debouncer) snapshot() DebounceSnapshot {
-	entries := make([]DebounceEntry, 0, len(d.entries))
-	for _, entry := range d.entries {
-		entries = append(entries, entry)
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entryKey(entries[i].Fingerprint, entries[i].ContractMajor) < entryKey(entries[j].Fingerprint, entries[j].ContractMajor)
-	})
-	return DebounceSnapshot{Schema: debounceSnapshotSchema, Entries: entries, Metrics: d.metrics}
-}
-
-func (d *Debouncer) recordDecision(decision AdmissionDecision) {
-	d.metrics.Observations++
-	switch {
-	case decision.Admitted && decision.Reason == AdmissionByThreshold:
-		d.metrics.ThresholdAdmissions++
-	case decision.Admitted && decision.Reason == AdmissionByMaxWait:
-		d.metrics.MaxWaitAdmissions++
-	case decision.State == AdmissionCooldownSuppressed:
-		d.metrics.CooldownSuppressions++
-	default:
-		d.metrics.Collecting++
-	}
-	latency := decision.LastSeen.Sub(decision.FirstSeen)
-	bucket := len(d.config.LatencyBuckets)
-	for i, upper := range d.config.LatencyBuckets {
-		if latency <= upper {
-			bucket = i
+	latency := r.LastSeen.Sub(r.FirstSeen)
+	i := 4
+	for j, b := range []time.Duration{time.Second, time.Minute, 5 * time.Minute, time.Hour} {
+		if latency <= b {
+			i = j
 			break
 		}
 	}
-	d.metrics.LatencyCounts[bucket]++
+	d.metrics.LatencyBuckets[i]++
+	return out
 }
 
-func normalizeDebounceConfig(config DebounceConfig) DebounceConfig {
-	defaults := DefaultDebounceConfig()
-	if config.Threshold <= 0 {
-		config.Threshold = defaults.Threshold
+func (d *Debouncer) clampNow(now, last time.Time) time.Time {
+	if now.Before(last) {
+		d.metrics.ClockSkewClamps++
+		return last
 	}
-	if config.CollectionWindow <= 0 {
-		config.CollectionWindow = defaults.CollectionWindow
+	if d.cfg.MaxClockSkew > 0 && now.Sub(last) > d.cfg.MaxClockSkew {
+		// Forward time remains authoritative for liveness, but the bounded counter
+		// exposes the discontinuity; persisted deadlines prevent duplicate admission.
+		d.metrics.ClockSkewClamps++
 	}
-	if config.MaxWait < config.CollectionWindow {
-		config.MaxWait = defaults.MaxWait
-	}
-	if config.MaxWait < config.CollectionWindow {
-		config.MaxWait = config.CollectionWindow
-	}
-	if config.Cooldown <= 0 {
-		config.Cooldown = defaults.Cooldown
-	}
-	if config.MaxEntries <= 0 {
-		config.MaxEntries = defaults.MaxEntries
-	}
-	if config.MaxReplayIDs <= 0 {
-		config.MaxReplayIDs = defaults.MaxReplayIDs
-	}
-	if config.MaxBackwardSkew <= 0 {
-		config.MaxBackwardSkew = defaults.MaxBackwardSkew
-	}
-	if config.MaxForwardSkew <= 0 {
-		config.MaxForwardSkew = defaults.MaxForwardSkew
-	}
-	if len(config.LatencyBuckets) == 0 {
-		config.LatencyBuckets = defaults.LatencyBuckets
-	}
-	config.LatencyBuckets = append([]time.Duration(nil), config.LatencyBuckets...)
-	sort.Slice(config.LatencyBuckets, func(i, j int) bool { return config.LatencyBuckets[i] < config.LatencyBuckets[j] })
-	return config
+	return now
 }
 
-func validateEntry(entry DebounceEntry) error {
-	if entry.Fingerprint == "" || entry.ContractMajor <= 0 || entry.Threshold <= 0 || entry.FirstSeen.IsZero() || entry.LastSeen.Before(entry.FirstSeen) {
-		return errors.New("incidentrsi: invalid persisted debounce entry")
-	}
-	return nil
-}
-
-func entryKey(fingerprint string, major int) string {
-	return fmt.Sprintf("%d\x00%s", major, fingerprint)
-}
-
-func admissionIdentity(key string, firstSeen time.Time, reason AdmissionReason) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("incidentrsi-admission-v1\x00%s\x00%s\x00%s", key, firstSeen.UTC().Format(time.RFC3339Nano), reason)))
-	return "irsi-admit-v1-" + hex.EncodeToString(h[:])
-}
-
-func findReplay(records []ReplayRecord, id string) (AdmissionDecision, bool) {
-	for _, record := range records {
-		if record.ObservationID == id {
-			return record.Decision, true
+func (d *Debouncer) evictOne(now time.Time) bool {
+	candidates := make([]BurstRecord, 0, len(d.records))
+	for _, r := range d.records {
+		protectedUntil := r.LastSeen.Add(d.cfg.Retention)
+		if r.NextEligibleTime.After(protectedUntil) {
+			protectedUntil = r.NextEligibleTime
+		}
+		if !now.Before(protectedUntil) {
+			candidates = append(candidates, r)
 		}
 	}
-	return AdmissionDecision{}, false
-}
-
-func boundedReplays(records []ReplayRecord, limit int) []ReplayRecord {
-	if len(records) <= limit {
-		return records
+	if len(candidates) == 0 {
+		return false
 	}
-	sort.Slice(records, func(i, j int) bool {
-		a, b := records[i].Decision.LastSeen, records[j].Decision.LastSeen
-		if a.Equal(b) {
-			return records[i].ObservationID < records[j].ObservationID
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].LastSeen.Equal(candidates[j].LastSeen) {
+			return keyFor(candidates[i].Fingerprint, candidates[i].ProducerMajor) < keyFor(candidates[j].Fingerprint, candidates[j].ProducerMajor)
 		}
-		return a.Before(b)
+		return candidates[i].LastSeen.Before(candidates[j].LastSeen)
 	})
-	return append([]ReplayRecord(nil), records[len(records)-limit:]...)
+	delete(d.records, keyFor(candidates[0].Fingerprint, candidates[0].ProducerMajor))
+	return true
 }
 
-func durationMillis(values []time.Duration) []int64 {
-	result := make([]int64, len(values))
-	for i, value := range values {
-		result[i] = value.Milliseconds()
+func newBurst(obs DebounceObservation, now time.Time, cfg DebounceConfig, prior BurstRecord) BurstRecord {
+	return BurstRecord{Fingerprint: obs.Fingerprint, ProducerMajor: obs.ProducerMajor, BurstID: stableID("burst", obs.Fingerprint, fmt.Sprint(obs.ProducerMajor), now.UTC().Format(time.RFC3339Nano)), FirstSeen: now, LastSeen: now, Threshold: cfg.Threshold, WindowEnd: now.Add(cfg.CollectionWindow), MaxWaitDeadline: now.Add(cfg.MaxWait), Status: BurstCollecting, LastAdmission: prior.LastAdmission, NextEligibleTime: prior.NextEligibleTime}
+}
+func keyFor(f string, major int) string { return fmt.Sprintf("%d\x00%s", major, f) }
+func stableID(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
 	}
-	return result
+	return hex.EncodeToString(h.Sum(nil))
+}
+func contains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+func validRecord(r BurstRecord) bool {
+	return r.Fingerprint != "" && r.ProducerMajor > 0 && r.BurstID != "" && r.Threshold > 0 && !r.FirstSeen.IsZero() && !r.WindowEnd.Before(r.FirstSeen) && !r.MaxWaitDeadline.Before(r.FirstSeen)
+}
+func cloneRecords(in []BurstRecord) []BurstRecord {
+	out := append([]BurstRecord(nil), in...)
+	for i := range out {
+		out[i].ObservationIDs = append([]string(nil), out[i].ObservationIDs...)
+	}
+	return out
+}
+func (d *Debouncer) snapshot() []BurstRecord {
+	out := make([]BurstRecord, 0, len(d.records))
+	for _, r := range d.records {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return keyFor(out[i].Fingerprint, out[i].ProducerMajor) < keyFor(out[j].Fingerprint, out[j].ProducerMajor)
+	})
+	return cloneRecords(out)
+}
+func cloneRecordMap(in map[string]BurstRecord) map[string]BurstRecord {
+	out := make(map[string]BurstRecord, len(in))
+	for key, record := range in {
+		record.ObservationIDs = append([]string(nil), record.ObservationIDs...)
+		out[key] = record
+	}
+	return out
 }

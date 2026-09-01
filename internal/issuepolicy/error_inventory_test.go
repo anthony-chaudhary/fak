@@ -65,6 +65,33 @@ func TestErrorInventoryPreservesThreeProvenancePoints(t *testing.T) {
 	}
 }
 
+func TestErrorInventoryNeverSuppressesDispatchWithoutCompleteWitnesses(t *testing.T) {
+	fail := evidence("fail", "fp", "internal/x", "panic", "aaa", "observed")
+	cases := []struct {
+		name string
+		obs  []ErrorObservation
+		want ErrorDisposition
+	}{
+		{"stale duplicate", []ErrorObservation{{Issue: 1, Observed: fail}, {Issue: 2, Observed: ErrorEvidence{Status: "fail", Fingerprint: "fp", Module: "internal/x", FailureClass: "panic", Witness: "observed", Stale: true}}}, DispositionStaleEvidence},
+		{"unwitnessed duplicate", []ErrorObservation{{Issue: 1, Observed: fail}, {Issue: 2, Observed: ErrorEvidence{Status: "fail", Fingerprint: "fp", Module: "internal/x", FailureClass: "panic"}}}, DispositionReproRequired},
+		{"unwitnessed current failure", []ErrorObservation{{Issue: 1, Observed: fail, Current: ErrorEvidence{Status: "fail", Fingerprint: "fp", Module: "internal/x", FailureClass: "panic"}}}, DispositionReproRequired},
+		{"unwitnessed fix", []ErrorObservation{{Issue: 1, Observed: fail, Fix: ErrorEvidence{Commit: "bbb"}, Current: evidence("pass", "", "internal/x", "", "ccc", "current")}}, DispositionReproRequired},
+		{"unwitnessed release", []ErrorObservation{{Issue: 1, Observed: fail, Fix: evidence("pass", "", "internal/x", "", "bbb", "fix"), Current: evidence("pass", "", "internal/x", "", "ccc", "current"), Releases: []ReleaseEvidence{{Tag: "v1.2.0", FixAncestor: true}}}}, DispositionFixPresentTrunk},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rep, err := BuildErrorInventory(ErrorInventoryInput{GeneratedAt: time.Unix(1, 0), SnapshotDigest: "sha256:x", Observations: tc.obs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := rep.Issues[len(rep.Issues)-1].Disposition
+			if got != tc.want {
+				t.Fatalf("disposition=%s want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCurrentRegressionOutranksPossibleDuplicate(t *testing.T) {
 	fail := evidence("fail", "fp", "internal/x", "panic", "aaa", "observed")
 	rep, err := BuildErrorInventory(ErrorInventoryInput{GeneratedAt: time.Unix(1, 0), SnapshotDigest: "sha256:x", Observations: []ErrorObservation{{Issue: 1, Observed: fail, Current: fail, PossibleDuplicate: 2}}})

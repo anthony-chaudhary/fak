@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -406,6 +408,112 @@ func TestGitDailyStatusSurfacesWeeklyAdoptionFold(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"weekly":[{"week":"2026-08-03","total":2,"ok":1,"refused":1,"errors":0}`) {
 		t.Fatalf("JSON weekly fold missing: %s", b)
+	}
+}
+
+func TestRunGitDailyRejectsInvalidGoCacheFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "negative high bytes", args: []string{"--go-cache-high-bytes=-1"}, want: "--go-cache-high-bytes must be >= 0"},
+		{name: "negative low bytes", args: []string{"--go-cache-low-bytes=-1"}, want: "--go-cache-low-bytes must be >= 0"},
+		{name: "negative min age", args: []string{"--go-cache-min-age=-1s"}, want: "--go-cache-min-age must be >= 0"},
+		{name: "negative min free bytes", args: []string{"--go-cache-min-free-bytes=-1"}, want: "--go-cache-min-free-bytes must be >= 0"},
+		{name: "negative max entries", args: []string{"--go-cache-max-entries=-1"}, want: "--go-cache-max-entries must be >= 0"},
+		{name: "negative deadline", args: []string{"--go-cache-deadline=-1s"}, want: "--go-cache-deadline must be >= 0"},
+		{name: "low above high", args: []string{"--go-cache-high-bytes=10", "--go-cache-low-bytes=11"}, want: "--go-cache-low-bytes must be <= --go-cache-high-bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := runGitDaily(&stdout, &stderr, tt.args)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2; stderr = %q", code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestRunGitDailyGoCacheFlagsPropagateAndDisable(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitDailyTestRepo(t, repoRoot)
+	t.Setenv(treedoctor.GoTmpDirEnv, filepath.Join(t.TempDir(), "gotmp"))
+
+	oldRun := gitDailyRun
+	defer func() { gitDailyRun = oldRun }()
+
+	t.Run("propagates values", func(t *testing.T) {
+		gitDailyRun = func(_ context.Context, _ gitdaily.Runner, opts gitdaily.Options) gitdaily.Result {
+			if opts.GoCacheDir != treedoctor.GoCacheRootFromEnv(os.Getenv, os.UserCacheDir) {
+				t.Fatalf("GoCacheDir = %q", opts.GoCacheDir)
+			}
+			if opts.GoCacheOptions.ActiveBuild == nil {
+				t.Fatal("ActiveBuild is nil")
+			}
+			if opts.GoCacheOptions.HighBytes != 100 {
+				t.Fatalf("HighBytes = %d, want 100", opts.GoCacheOptions.HighBytes)
+			}
+			if opts.GoCacheOptions.LowBytes != 50 {
+				t.Fatalf("LowBytes = %d, want 50", opts.GoCacheOptions.LowBytes)
+			}
+			if opts.GoCacheOptions.MinAge != 2*time.Minute {
+				t.Fatalf("MinAge = %v, want 2m", opts.GoCacheOptions.MinAge)
+			}
+			if opts.GoCacheOptions.MinFreeBytes != 200 {
+				t.Fatalf("MinFreeBytes = %d, want 200", opts.GoCacheOptions.MinFreeBytes)
+			}
+			if opts.GoCacheOptions.MaxWalkEntries != 7 {
+				t.Fatalf("MaxWalkEntries = %d, want 7", opts.GoCacheOptions.MaxWalkEntries)
+			}
+			if opts.GoCacheOptions.Deadline != 3*time.Second {
+				t.Fatalf("Deadline = %v, want 3s", opts.GoCacheOptions.Deadline)
+			}
+			return gitdaily.Result{Apply: true, Day: "2026-09-01"}
+		}
+		var stdout, stderr bytes.Buffer
+		code := runGitDaily(&stdout, &stderr, []string{"--root", repoRoot, "--go-cache-high-bytes=100", "--go-cache-low-bytes=50", "--go-cache-min-age=2m", "--go-cache-min-free-bytes=200", "--go-cache-max-entries=7", "--go-cache-deadline=3s"})
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+	})
+
+	t.Run("disable skips only go cache", func(t *testing.T) {
+		gitDailyRun = func(_ context.Context, _ gitdaily.Runner, opts gitdaily.Options) gitdaily.Result {
+			if opts.GoCacheDir != "" {
+				t.Fatalf("GoCacheDir = %q, want empty", opts.GoCacheDir)
+			}
+			if opts.GoCacheOptions.ActiveBuild == nil {
+				t.Fatal("ActiveBuild is nil")
+			}
+			if opts.GoTmpDir != os.Getenv(treedoctor.GoTmpDirEnv) {
+				t.Fatalf("GoTmpDir = %q, want %q", opts.GoTmpDir, os.Getenv(treedoctor.GoTmpDirEnv))
+			}
+			if !opts.PruneWorktrees {
+				t.Fatal("PruneWorktrees = false, want true")
+			}
+			return gitdaily.Result{Apply: true, Day: "2026-09-01"}
+		}
+		var stdout, stderr bytes.Buffer
+		code := runGitDaily(&stdout, &stderr, []string{"--root", repoRoot, "--prune-worktrees", "--go-cache=false"})
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+	})
+}
+
+func initGitDailyTestRepo(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("git", "init", root)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init %s: %v\n%s", root, err, out)
 	}
 }
 

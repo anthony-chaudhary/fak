@@ -6,9 +6,21 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/launchguard"
 )
 
+func stubGuardCrashRSIAdmission(t *testing.T) {
+	t.Helper()
+	old := guardCrashRSIAdmit
+	guardCrashRSIAdmit = func(string) (func(bool) error, launchguard.Decision, error) {
+		return func(bool) error { return nil }, launchguard.Decision{Outcome: launchguard.Admitted}, nil
+	}
+	t.Cleanup(func() { guardCrashRSIAdmit = old })
+}
+
 func TestGuardCrashRSIFirstEligibleCrashLaunchesBoundedTaggedInvestigation(t *testing.T) {
+	stubGuardCrashRSIAdmission(t)
 	t.Setenv(guardCrashRSIMarkerEnv, "")
 	old := guardCrashRSILaunch
 	t.Cleanup(func() { guardCrashRSILaunch = old })
@@ -42,6 +54,7 @@ func TestGuardCrashRSIFirstEligibleCrashLaunchesBoundedTaggedInvestigation(t *te
 }
 
 func TestGuardCrashRSIOnlyFirstCrashAndNeverRecurses(t *testing.T) {
+	stubGuardCrashRSIAdmission(t)
 	t.Setenv(guardCrashRSIMarkerEnv, "")
 	old := guardCrashRSILaunch
 	t.Cleanup(func() { guardCrashRSILaunch = old })
@@ -61,6 +74,7 @@ func TestGuardCrashRSIOnlyFirstCrashAndNeverRecurses(t *testing.T) {
 }
 
 func TestGuardCrashRSIUnsafeAndNonCrashCasesSkip(t *testing.T) {
+	stubGuardCrashRSIAdmission(t)
 	t.Setenv(guardCrashRSIMarkerEnv, "")
 	old := guardCrashRSILaunch
 	t.Cleanup(func() { guardCrashRSILaunch = old })
@@ -84,6 +98,7 @@ func TestGuardCrashRSIUnsafeAndNonCrashCasesSkip(t *testing.T) {
 }
 
 func TestGuardCrashRSILaunchFailureIsFailOpen(t *testing.T) {
+	stubGuardCrashRSIAdmission(t)
 	t.Setenv(guardCrashRSIMarkerEnv, "")
 	old := guardCrashRSILaunch
 	t.Cleanup(func() { guardCrashRSILaunch = old })
@@ -94,6 +109,39 @@ func TestGuardCrashRSILaunchFailureIsFailOpen(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "synthetic launch failure") {
 		t.Fatalf("missing fail-open diagnostic: %s", stderr.String())
+	}
+}
+
+func TestGuardCrashRSILaunchguardRefusalSkipsLaunch(t *testing.T) {
+	t.Setenv(guardCrashRSIMarkerEnv, "")
+	oldAdmit, oldLaunch := guardCrashRSIAdmit, guardCrashRSILaunch
+	t.Cleanup(func() { guardCrashRSIAdmit, guardCrashRSILaunch = oldAdmit, oldLaunch })
+	guardCrashRSIAdmit = func(string) (func(bool) error, launchguard.Decision, error) {
+		return nil, launchguard.Decision{Outcome: launchguard.Quarantined}, nil
+	}
+	launches := 0
+	guardCrashRSILaunch = func(guardCrashRSIRequest) error { launches++; return nil }
+	var stderr bytes.Buffer
+	if guardMaybeLaunchCrashRSI(&stderr, new(guardRSISession), "trace", "codex", "NONZERO_EXIT", 9, 0) {
+		t.Fatal("quarantined launch reported success")
+	}
+	if launches != 0 || !strings.Contains(stderr.String(), "quarantined") {
+		t.Fatalf("launches=%d stderr=%q", launches, stderr.String())
+	}
+}
+
+func TestGuardCrashRSILaunchFailureRecordsFailure(t *testing.T) {
+	t.Setenv(guardCrashRSIMarkerEnv, "")
+	oldAdmit, oldLaunch := guardCrashRSIAdmit, guardCrashRSILaunch
+	t.Cleanup(func() { guardCrashRSIAdmit, guardCrashRSILaunch = oldAdmit, oldLaunch })
+	var finished []bool
+	guardCrashRSIAdmit = func(string) (func(bool) error, launchguard.Decision, error) {
+		return func(success bool) error { finished = append(finished, success); return nil }, launchguard.Decision{Outcome: launchguard.Admitted}, nil
+	}
+	guardCrashRSILaunch = func(guardCrashRSIRequest) error { return errors.New("boom") }
+	guardMaybeLaunchCrashRSI(nil, new(guardRSISession), "trace", "codex", "NONZERO_EXIT", 9, 0)
+	if len(finished) != 1 || finished[0] {
+		t.Fatalf("finished=%v, want [false]", finished)
 	}
 }
 

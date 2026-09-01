@@ -72,7 +72,7 @@ pilot_development_branch = "dev"
 #     reversible for any real path -- see escapeLaneSegment.
 [lanes]
 concurrent = [
-  "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
+  "adjudicator", "agent", "agentdojo", "architest", "launchguard", "bench", "blob", "canon", "compute",
   "cachemeta", "ociartifact", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
@@ -638,6 +638,7 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+launchguard = ["internal/launchguard/**", "cmd/fak/guard_crash_rsi.go", "cmd/fak/guard_crash_rsi_test.go", "cmd/fak/guard_failure_rsi_test.go", "cmd/fak/launchguard.go", "cmd/fak/launchguard_test.go", "docs/launchguard.md"]
 nativebench = ["internal/nativebench/**"]
 adjudicator = ["internal/adjudicator/**"]
 agent = ["internal/agent/**"]
