@@ -816,9 +816,9 @@ for ($idx = 0; $idx -lt $planCount; $idx++) {
   # $LaunchSpacingSec apart must not share one stale tick-start second (#2172).
   $attempt = [int]$launchCount[$sid] + 1
   try {
-    $proc = Start-Process @startArgs
+    $proc = Start-Process @startArgs # windowgate: visible-ok — operator-selected visible mode; -Headless sets WindowStyle Hidden.
   } catch {
-    $detail = "Start-Process: $($_.Exception.Message)"
+    $detail = "Start-Process: $($_.Exception.Message)" # windowgate: visible-ok — diagnostic text for the annotated launch above.
     $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; cause = $p.disp; phase = 'launch_failed'; attempt = $attempt; launch_mode = $launchMode; detail = $detail } | ConvertTo-Json -Compress
     Add-Content -Path $ledgerPath -Value $rec
     $launchCount[$sid] = $attempt
