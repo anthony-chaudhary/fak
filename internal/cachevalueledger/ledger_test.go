@@ -52,6 +52,57 @@ func TestRejectedTierAccessesIsTopLevelIndexed(t *testing.T) {
 	}
 }
 
+func TestRejectedTierIndexEdgeInputs(t *testing.T) {
+	valid := func(value string) string {
+		return `{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"edge","rejected_tier_accesses":` + value + `}`
+	}
+	tests := []struct {
+		name    string
+		content string
+		want    []uint64
+	}{
+		{name: "empty ledger", content: ""},
+		{name: "zero", content: valid("0"), want: []uint64{0}},
+		{name: "maximum uint64", content: valid("18446744073709551615"), want: []uint64{^uint64(0)}},
+		{name: "legacy row without index", content: valid("0")[:strings.Index(valid("0"), `,"rejected_tier_accesses"`)] + "}", want: []uint64{0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := ParseLedger(tt.content)
+			if len(rows) != len(tt.want) {
+				t.Fatalf("ParseLedger() returned %d rows, want %d: %+v", len(rows), len(tt.want), rows)
+			}
+			for i, want := range tt.want {
+				if got := rows[i].RejectedTierAccesses; got != want {
+					t.Errorf("row %d rejected_tier_accesses = %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestRejectedTierIndexAdversarialInputs(t *testing.T) {
+	valid := `{"schema":"fak-cache-value-ledger/1","date":"2026-08-31","session_type":"serve","context":"adversarial","rejected_tier_accesses":9}`
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "malformed JSON before valid row", content: "{not-json}\n" + valid},
+		{name: "negative count before valid row", content: strings.Replace(valid, ":9}", ":-1}", 1) + "\n" + valid},
+		{name: "overflow count before valid row", content: strings.Replace(valid, ":9}", ":18446744073709551616}", 1) + "\n" + valid},
+		{name: "string count before valid row", content: strings.Replace(valid, ":9}", `:"9"}`, 1) + "\n" + valid},
+		{name: "oversized malformed row before valid row", content: `{"junk":"` + strings.Repeat("x", 512*1024) + `"` + "\n" + valid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := ParseLedger(tt.content)
+			if len(rows) != 1 || rows[0].RejectedTierAccesses != 9 {
+				t.Fatalf("ParseLedger() = %+v, want one valid row with rejected_tier_accesses=9", rows)
+			}
+		})
+	}
+}
+
 func TestParseLedger(t *testing.T) {
 	content := `{"schema":"fak-cache-value-ledger/1","date":"2026-06-27","session_type":"serve","context":"test","pid":12345,"unix_millis":1719494400000,"turns":10,"prompt_tokens":1000,"reused_tokens":800,"frozen_turns":5,"partial_turns":3,"cold_turns":2,"reuse_ratio":4.0}
 {"schema":"fak-cache-value-ledger/1","date":"2026-06-27","session_type":"run","context":"test2","pid":12346,"unix_millis":1719494500000,"turns":5,"prompt_tokens":500,"reused_tokens":400,"frozen_turns":2,"partial_turns":1,"cold_turns":2,"reuse_ratio":4.0}

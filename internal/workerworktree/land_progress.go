@@ -31,24 +31,32 @@ type LandPhaseCost struct {
 	ElapsedMS int64  `json:"elapsed_ms"`
 }
 
+// PatchScopeFiles counts non-empty paths emitted by git diff --name-only for
+// the captured land patch. It is patch metadata, not whole-tree scan I/O.
+type PatchScopeFiles int
+
+// PatchScopeBytes is the byte length of the captured git diff used by Land.
+// It is patch metadata, not whole-tree scan I/O.
+type PatchScopeBytes int64
+
 // LandCostReceipt is the terminal cost attribution for one Land call.
 // ResourceState explains whether this platform exposed process CPU and peak RSS.
 type LandCostReceipt struct {
-	Schema         string          `json:"schema"`
-	WallTimeMS     int64           `json:"wall_time_ms"`
-	CPUTimeMS      *int64          `json:"cpu_time_ms,omitempty"`
-	PeakRSSBytes   *int64          `json:"peak_rss_bytes,omitempty"`
-	ResourceState  string          `json:"resource_state"`
-	ResourceReason string          `json:"resource_reason,omitempty"`
-	ScannedFiles   int             `json:"scanned_files"`
-	ScannedBytes   int64           `json:"scanned_bytes"`
-	CacheState     string          `json:"cache_state"`
-	Reused         bool            `json:"reused"`
-	SlowestPhase   string          `json:"slowest_phase,omitempty"`
-	SlowestPhaseMS int64           `json:"slowest_phase_ms"`
-	PhaseTotalMS   int64           `json:"phase_total_ms"`
-	UnattributedMS int64           `json:"unattributed_ms"`
-	Phases         []LandPhaseCost `json:"phases"`
+	Schema          string          `json:"schema"`
+	WallTimeMS      int64           `json:"wall_time_ms"`
+	CPUTimeMS       *int64          `json:"cpu_time_ms,omitempty"`
+	PeakRSSBytes    *int64          `json:"peak_rss_bytes,omitempty"`
+	ResourceState   string          `json:"resource_state"`
+	ResourceReason  string          `json:"resource_reason,omitempty"`
+	PatchScopeFiles PatchScopeFiles `json:"patch_scope_files"`
+	PatchScopeBytes PatchScopeBytes `json:"patch_scope_bytes"`
+	CacheState      string          `json:"cache_state"`
+	Reused          bool            `json:"reused"`
+	SlowestPhase    string          `json:"slowest_phase,omitempty"`
+	SlowestPhaseMS  int64           `json:"slowest_phase_ms"`
+	PhaseTotalMS    int64           `json:"phase_total_ms"`
+	UnattributedMS  int64           `json:"unattributed_ms"`
+	Phases          []LandPhaseCost `json:"phases"`
 }
 
 type landResourceSample struct {
@@ -66,16 +74,16 @@ type landPhase struct {
 }
 
 type landProgressTracker struct {
-	now           func() time.Time
-	resources     func() landResourceSample
-	emit          func(LandProgressEvent)
-	started       time.Time
-	resourceStart landResourceSample
-	phases        []LandPhaseCost
-	scannedFiles  int
-	scannedBytes  int64
-	cacheState    string
-	reused        bool
+	now             func() time.Time
+	resources       func() landResourceSample
+	emit            func(LandProgressEvent)
+	started         time.Time
+	resourceStart   landResourceSample
+	phases          []LandPhaseCost
+	patchScopeFiles int
+	patchScopeBytes int64
+	cacheState      string
+	reused          bool
 }
 
 func newLandProgressTracker(cfg landConfig) *landProgressTracker {
@@ -115,7 +123,7 @@ func (t *landProgressTracker) complete(p landPhase) {
 	t.emitEvent(LandProgressEvent{
 		Schema: landProgressSchema, Phase: p.name, Status: "completed", Attempt: p.attempt,
 		LandElapsedMS: elapsedMillis(t.started, finished), PhaseElapsedMS: d,
-		ScannedFiles: t.scannedFiles, ScannedBytes: t.scannedBytes,
+		ScannedFiles: t.patchScopeFiles, ScannedBytes: t.patchScopeBytes,
 	})
 }
 
@@ -125,9 +133,9 @@ func (t *landProgressTracker) emitEvent(event LandProgressEvent) {
 	}
 }
 
-func (t *landProgressTracker) setScanned(files int, bytes int64) {
-	t.scannedFiles = files
-	t.scannedBytes = bytes
+func (t *landProgressTracker) setPatchScope(files int, bytes int64) {
+	t.patchScopeFiles = files
+	t.patchScopeBytes = bytes
 }
 
 func (t *landProgressTracker) setCache(state string, reused bool) {
@@ -141,7 +149,7 @@ func (t *landProgressTracker) receipt() *LandCostReceipt {
 	wall := elapsedMillis(t.started, finished)
 	receipt := &LandCostReceipt{
 		Schema: landCostSchema, WallTimeMS: wall,
-		ResourceState: "unavailable", ScannedFiles: t.scannedFiles, ScannedBytes: t.scannedBytes,
+		ResourceState: "unavailable", PatchScopeFiles: PatchScopeFiles(t.patchScopeFiles), PatchScopeBytes: PatchScopeBytes(t.patchScopeBytes),
 		CacheState: t.cacheState, Reused: t.reused, Phases: append([]LandPhaseCost(nil), t.phases...),
 	}
 	cpuAvailable := t.resourceStart.cpuAvailable && endResources.cpuAvailable
@@ -186,7 +194,7 @@ func elapsedMillis(start, end time.Time) int64 {
 	return end.Sub(start).Milliseconds()
 }
 
-func countLandScanFiles(names string) int {
+func countPatchScopeFiles(names string) int {
 	count := 0
 	for _, name := range strings.Split(names, "\n") {
 		if strings.TrimSpace(name) != "" {

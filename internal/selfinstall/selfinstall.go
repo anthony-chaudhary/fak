@@ -12,7 +12,7 @@
 // The flow (Install):
 //  0. cache   restore only an exact-input, digest-verified candidate, then smoke it again;
 //     any miss or mismatch falls through to the complete gate below.
-//  1. build   `go build [-ldflags -X …BuildVersion=<VERSION>] -o <tmp> ./cmd/fak` — a tree
+//  1. build   `go build -trimpath [-ldflags -X …BuildVersion=<VERSION>] -o <tmp> ./cmd/fak` — a tree
 //     that won't compile stops here; the ldflags bake the tree's VERSION into the
 //     binary so its reported version does not depend on a guard's runtime cwd.
 //  2. vet     `go vet ./cmd/fak`                — a vet failure stops here.
@@ -166,16 +166,10 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 
 	// The output path changes per activation and cannot affect the artifact, so the cache
 	// identity binds the stable build arguments rather than BuildTmp.
-	buildInputs := []string{"build", "-buildvcs=true"}
-	if ld := versionLDFlags(opts.RepoRoot, sourceCommit); ld != "" {
-		buildInputs = append(buildInputs, "-ldflags", ld)
-	}
+	buildInputs := append([]string{"build"}, selfInstallBuildFlags(opts.RepoRoot, sourceCommit)...)
 	buildArgs := append(append([]string{}, buildInputs...), "-o", tmp, "./cmd/fak")
 	buildInputs = append(buildInputs, "./cmd/fak")
-	identityBuildInputs := []string{"-buildvcs=true"}
-	if ld := versionLDFlags(opts.RepoRoot, ""); ld != "" {
-		identityBuildInputs = append(identityBuildInputs, "-ldflags", ld)
-	}
+	identityBuildInputs := selfInstallBuildFlags(opts.RepoRoot, "")
 	vetArgs := []string{"vet", "./cmd/fak"}
 
 	cacheDir := strings.TrimSpace(opts.CacheDir)
@@ -641,6 +635,18 @@ func versionLDFlags(repoRoot, commit string) string {
 		flags = append(flags, "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit="+commit)
 	}
 	return strings.Join(flags, " ")
+}
+
+// selfInstallBuildFlags returns the stable flags shared by the real build and the
+// executable-input identity. The identity deliberately omits commit ldflags so equivalent
+// source graphs can reuse a verified candidate across commits, while still binding every
+// artifact-affecting build mode such as trimpath.
+func selfInstallBuildFlags(repoRoot, commit string) []string {
+	flags := []string{"-buildvcs=true", "-trimpath"}
+	if ld := versionLDFlags(repoRoot, commit); ld != "" {
+		flags = append(flags, "-ldflags", ld)
+	}
+	return flags
 }
 
 func validCommit(s string) bool {

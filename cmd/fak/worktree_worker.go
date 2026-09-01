@@ -50,9 +50,11 @@ fak worktree <subcommand>
 
   worker <op>   Per-worker git worktree isolation (#3182). Ops:
       prepare --lane <l> --key <k> [--base-sha S] [--wt-root D]
-              [--lease-id ID] [--owner-pid PID]
+              [--lease-id ID] [--owner-pid PID] [--capacity-reason WHY]
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha), stamped with owner PID, lease, and timestamp.
+                   Above the advisory setpoint of 50, --capacity-reason records
+                   why growth is needed; omission warns but never blocks prepare.
                    Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
@@ -84,10 +86,12 @@ fak worktree <subcommand>
                    Owner-stamped leak GC. Selects only old, clean worktrees whose
                    owner PID is dead AND stamped lease is released. DRY-RUN by default;
                    --apply force-removes selected worktrees and prunes git admin entries.
-      list [--json]
+      list [--json] [--capacity-reason WHY] [--remote R] [--fetch]
                    List the live per-worker worktrees. The default preserves the
                    existing {count, paths, inventory} output; --json emits the
                    typed association/liveness/cleanliness/lifecycle inventory.
+      publish --remote R [--dry-run|--apply]
+                   Explicitly publish one bounded path-scrubbed per-host snapshot.
       recover [--remote R] [--fetch] [--cleanup REF] [--force]
               [--cleanup-remote REF] [--apply] [--allow-peer] [--worktree-name NAME]
                    List durable off-branch land candidates and their LANDED or
@@ -116,6 +120,8 @@ func cmdWorktreeWorker(argv []string) {
 		worktreeWorkerGC(argv[1:])
 	case "list":
 		worktreeWorkerList(argv[1:])
+	case "publish":
+		worktreeWorkerPublish(argv[1:])
 	case "recover":
 		worktreeWorkerRecover(argv[1:])
 	case "-h", "--help", "help":
@@ -163,7 +169,8 @@ func worktreeWorkerProgressEmitter(w io.Writer) func(workerworktree.LandProgress
 // fields to the top level.
 type worktreePrepareOut struct {
 	workerworktree.Result
-	Env map[string]string `json:"env,omitempty"`
+	Env      map[string]string               `json:"env,omitempty"`
+	Capacity workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 func worktreeWorkerPrepare(argv []string) {
@@ -173,6 +180,7 @@ func worktreeWorkerPrepare(argv []string) {
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
 	leaseID := fs.String("lease-id", "", "lease identity to retain in the owner stamp (default: FAK_LEASE_ID or resolve-<lane>)")
 	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp")
+	capacityReason := fs.String("capacity-reason", "", "why worker-worktree growth above the advisory setpoint is needed (advisory; never blocks)")
 	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
 	var paths repeatedString
 	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
@@ -181,6 +189,7 @@ func worktreeWorkerPrepare(argv []string) {
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
+	capacityCensus := workerworktree.CapacityCensusFor(repoRoot, nil)
 	owner := workerworktree.OwnerStamp{PID: *ownerPID, LeaseID: strings.TrimSpace(*leaseID), CreatedAt: time.Now().UTC()}
 	if owner.LeaseID == "" {
 		owner.LeaseID = strings.TrimSpace(os.Getenv("FAK_LEASE_ID"))
@@ -189,7 +198,12 @@ func worktreeWorkerPrepare(argv []string) {
 		owner.LeaseID = "resolve-" + strings.TrimSpace(*lane)
 	}
 	res := workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
-	out := worktreePrepareOut{Result: res}
+	prospectiveCount := len(capacityCensus.Paths)
+	if res.OK && !res.Reused {
+		prospectiveCount++
+	}
+	capacity := worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
+	out := worktreePrepareOut{Result: res, Capacity: capacity}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
 		if strings.TrimSpace(*message) != "" || len(paths) > 0 {
@@ -202,6 +216,7 @@ func worktreeWorkerPrepare(argv []string) {
 			}
 		}
 	}
+	worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
 	worktreeWorkerEmit(out)
 	if !res.OK {
 		os.Exit(1)
@@ -861,9 +876,10 @@ func isDigitsOnly(s string) bool {
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree
 // paths (never null — an empty slice renders `[]`), mirroring the Python CLI.
 type worktreeWorkerListOut struct {
-	Count     int                           `json:"count"`
-	Paths     []string                      `json:"paths"`
-	Inventory []workerworktree.InventoryRow `json:"inventory"`
+	Count     int                             `json:"count"`
+	Paths     []string                        `json:"paths"`
+	Inventory []workerworktree.InventoryRow   `json:"inventory"`
+	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 const (
@@ -940,10 +956,11 @@ type worktreeWorkerLifecycleRow struct {
 }
 
 type worktreeWorkerLifecycleOut struct {
-	Schema    string                       `json:"schema"`
-	Count     int                          `json:"count"`
-	Paths     []string                     `json:"paths"`
-	Inventory []worktreeWorkerLifecycleRow `json:"inventory"`
+	Schema    string                          `json:"schema"`
+	Count     int                             `json:"count"`
+	Paths     []string                        `json:"paths"`
+	Inventory []worktreeWorkerLifecycleRow    `json:"inventory"`
+	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
 }
 
 type worktreeWorkerRevisionEvidence struct {
@@ -1224,6 +1241,39 @@ func lifecycleVerdict(row worktreeWorkerLifecycleRow) (worktreeWorkerLifecycleSt
 	}
 }
 
+func worktreeWorkerRetainedTrees(rows []worktreeWorkerLifecycleRow) []workerworktree.RetainedTree {
+	trees := make([]workerworktree.RetainedTree, 0, len(rows))
+	for _, row := range rows {
+		trees = append(trees, workerworktree.RetainedTree{
+			Path:         row.Path,
+			ColdReapable: row.ReapReadiness.Reapable && row.Cleanliness.State == worktreeEvidenceClean,
+			OwnerDead:    row.Liveness.Owner == worktreeEvidenceDead,
+			Clean:        row.Cleanliness.State == worktreeEvidenceClean,
+		})
+	}
+	return trees
+}
+
+func worktreeWorkerCapacityAdvisory(repoRoot string, census workerworktree.CapacityCensus, prospectiveCount int, reason string, rows []worktreeWorkerLifecycleRow) workerworktree.CapacityAdvisory {
+	if census.Known && prospectiveCount > workerworktree.AdvisoryCapacitySetpoint && rows == nil {
+		rows = worktreeWorkerLifecycleInventory(repoRoot, census.Paths, worktreeWorkerLifecycleProbes{})
+	}
+	return workerworktree.AssessCapacity(
+		len(census.Paths), prospectiveCount, census.Known, reason, worktreeWorkerRetainedTrees(rows),
+	)
+}
+
+func worktreeWorkerWriteCapacityHuman(w io.Writer, advisory workerworktree.CapacityAdvisory) {
+	if advisory.Status == workerworktree.CapacityWithinSetpoint {
+		return
+	}
+	fmt.Fprintf(w, "capacity advisory: %s\n", advisory.Message)
+	for _, recommendation := range advisory.ContractionRecommendations {
+		fmt.Fprintf(w, "capacity contraction: candidate=%s basis=%s; inspect with: %s\n",
+			recommendation.Path, recommendation.Basis, recommendation.Action)
+	}
+}
+
 type worktreeWorkerRecoverOut struct {
 	OK            bool                                `json:"ok"`
 	Count         int                                 `json:"count"`
@@ -1297,37 +1347,70 @@ func worktreeWorkerList(argv []string) {
 	fs := flag.NewFlagSet("worktree worker list", flag.ExitOnError)
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit stable typed association, liveness, cleanliness, lifecycle, and reap-readiness rows")
+	capacityReason := fs.String("capacity-reason", "", "record why capacity above the advisory setpoint is retained (advisory evidence)")
+	remote := fs.String("remote", "", "explicit remote whose scrubbed host snapshots are included")
+	fetch := fs.Bool("fetch", false, "refresh the remote snapshot mirror before listing")
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
-	n, paths := workerworktree.Count(repoRoot, nil)
-	if paths == nil {
-		paths = []string{}
-	}
+	census := workerworktree.CapacityCensusFor(repoRoot, nil)
+	paths := census.Paths
 	if *asJSON {
 		rows := worktreeWorkerLifecycleInventory(repoRoot, paths, worktreeWorkerLifecycleProbes{})
 		sortedPaths := make([]string, len(rows))
 		for i := range rows {
 			sortedPaths[i] = rows[i].Path
 		}
-		worktreeWorkerEmit(worktreeWorkerLifecycleOut{
-			Schema:    worktreeWorkerLifecycleSchema,
-			Count:     len(rows),
-			Paths:     sortedPaths,
-			Inventory: rows,
-		})
+		capacity := worktreeWorkerCapacityAdvisory(repoRoot, census, len(rows), *capacityReason, rows)
+		worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
+		local := worktreeWorkerLifecycleOut{Schema: worktreeWorkerLifecycleSchema, Count: len(rows), Paths: sortedPaths, Inventory: rows, Capacity: capacity}
+		if strings.TrimSpace(*remote) == "" {
+			worktreeWorkerEmit(local)
+			return
+		}
+		hostname, hostErr := os.Hostname()
+		localHost := workerworktree.SnapshotHostID(hostname)
+		if hostErr != nil || strings.TrimSpace(hostname) == "" {
+			localHost = "host-unknown"
+		}
+		out := worktreeWorkerRemoteListOut{
+			Schema: "fak-worker-cross-host-lifecycle/1",
+			Local:  worktreeWorkerLocalHostGroup{Host: localHost, Provenance: "LOCAL_LIVE", Freshness: workerworktree.SnapshotFresh, ObservedAt: time.Now().UTC(), Authoritative: true, Lifecycle: local},
+			Remote: *remote, Hosts: []workerworktree.RemoteSnapshotGroup{},
+		}
+		if *fetch {
+			if err := workerworktree.FetchRemoteSnapshots(repoRoot, *remote, nil); err != nil {
+				out.Warning = err.Error()
+				worktreeWorkerEmit(out)
+				return
+			}
+			out.Fetched = true
+		}
+		hosts, err := workerworktree.ListRemoteSnapshots(repoRoot, *remote, time.Now(), nil)
+		if err != nil {
+			out.Warning = err.Error()
+		} else {
+			out.Hosts = hosts
+		}
+		worktreeWorkerEmit(out)
 		return
 	}
 
-	rows, err := workerworktree.Inventory(repoRoot, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak worktree worker list: %v\n", err)
-		os.Exit(1)
+	rows := []workerworktree.InventoryRow{}
+	if census.Known {
+		var err error
+		rows, err = workerworktree.Inventory(repoRoot, nil)
+		if err != nil {
+			census.Known = false
+			rows = []workerworktree.InventoryRow{}
+		}
 	}
 	if rows == nil {
 		rows = []workerworktree.InventoryRow{}
 	}
-	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths, Inventory: rows})
+	capacity := worktreeWorkerCapacityAdvisory(repoRoot, census, len(paths), *capacityReason, nil)
+	worktreeWorkerWriteCapacityHuman(os.Stderr, capacity)
+	worktreeWorkerEmit(worktreeWorkerListOut{Count: len(paths), Paths: paths, Inventory: rows, Capacity: capacity})
 }
 
 // worktreeWorkerGoBuildVerify is the `--verify go-build` witness: run `go build
@@ -1336,6 +1419,69 @@ func worktreeWorkerList(argv []string) {
 // land. FAIL-OPEN: if the go toolchain is missing it returns ok (the pre-land
 // gate never wedges a land just because `go` is absent), mirroring the Python
 // module's _go_build_verify.
+type worktreeWorkerLocalHostGroup struct {
+	Host          string                           `json:"host"`
+	Provenance    string                           `json:"provenance"`
+	Freshness     workerworktree.SnapshotFreshness `json:"freshness"`
+	ObservedAt    time.Time                        `json:"observed_at"`
+	Authoritative bool                             `json:"authoritative"`
+	Lifecycle     worktreeWorkerLifecycleOut       `json:"lifecycle"`
+}
+
+type worktreeWorkerRemoteListOut struct {
+	Schema  string                               `json:"schema"`
+	Local   worktreeWorkerLocalHostGroup         `json:"local"`
+	Remote  string                               `json:"remote"`
+	Fetched bool                                 `json:"fetched"`
+	Hosts   []workerworktree.RemoteSnapshotGroup `json:"hosts"`
+	Warning string                               `json:"warning,omitempty"`
+}
+
+func worktreeWorkerSnapshotRows(rows []worktreeWorkerLifecycleRow) []workerworktree.SnapshotRow {
+	out := make([]workerworktree.SnapshotRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, workerworktree.SnapshotRow{
+			HeadSHA: row.HeadSHA, BaseSHA: row.BaseSHA,
+			Association: workerworktree.SnapshotAssociation{State: string(row.Association.State), Lane: row.Association.Lane, LeaseID: row.Association.LeaseID},
+			Liveness:    workerworktree.SnapshotLiveness{Owner: string(row.Liveness.Owner), Lease: string(row.Liveness.Lease)},
+			Cleanliness: workerworktree.SnapshotCleanliness{State: string(row.Cleanliness.State)},
+			Lifecycle:   string(row.Lifecycle),
+		})
+	}
+	return out
+}
+
+func worktreeWorkerPublish(argv []string) {
+	fs := flag.NewFlagSet("worktree worker publish", flag.ExitOnError)
+	root := fs.String("root", "", "repo root (default: discover from cwd)")
+	remote := fs.String("remote", "", "explicit remote receiving this host snapshot")
+	dryRun := fs.Bool("dry-run", false, "render and check the publication without writing the remote ref")
+	apply := fs.Bool("apply", false, "compare-and-swap publish and read back the host ref")
+	fs.Parse(argv)
+	if *remote == "" || *dryRun == *apply {
+		worktreeWorkerEmit(workerworktree.SnapshotPublishResult{Remote: *remote, Reason: "require --remote and exactly one of --dry-run or --apply"})
+		return
+	}
+	repoRoot := worktreeWorkerRoot(*root)
+	census := workerworktree.CapacityCensusFor(repoRoot, nil)
+	if !census.Known {
+		worktreeWorkerEmit(workerworktree.SnapshotPublishResult{Remote: *remote, Reason: "local lifecycle inventory unavailable; ordinary worker operations remain unaffected"})
+		return
+	}
+	rows := worktreeWorkerLifecycleInventory(repoRoot, census.Paths, worktreeWorkerLifecycleProbes{})
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		worktreeWorkerEmit(workerworktree.SnapshotPublishResult{Remote: *remote, Reason: "hostname unavailable"})
+		return
+	}
+	snapshot, err := workerworktree.NewRemoteSnapshot(host, time.Now(), worktreeWorkerSnapshotRows(rows))
+	if err != nil {
+		worktreeWorkerEmit(workerworktree.SnapshotPublishResult{Remote: *remote, Reason: err.Error()})
+		return
+	}
+	worktreeWorkerEmit(workerworktree.PublishRemoteSnapshot(repoRoot, *remote, snapshot, *apply, nil))
+}
+
 func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return true, "go toolchain not found — skipping build verify (fail open)"

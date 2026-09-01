@@ -1,0 +1,12 @@
+{
+  "schema": "fak-wip-unit/1",
+  "transitions": [
+    {"kind":"create","timestamp":"2026-09-01T08:00:00Z","source":"fixture","provenance":{"actor":"coordinator","mechanism":"test"},"successors":["wip:v1:00000000000000000000000000000001"],"witness":"create-1"},
+    {"kind":"bind","timestamp":"2026-09-01T08:01:00Z","source":"fixture","provenance":{"actor":"coordinator","mechanism":"test"},"predecessors":["wip:v1:00000000000000000000000000000001"],"successors":["wip:v1:00000000000000000000000000000001"],"references":[{"kind":"issue","issue":{"repository":"anthony-chaudhary/fak","number":10436}}],"witness":"bind-1"},
+    {"kind":"handoff","timestamp":"2026-09-01T08:02:00Z","source":"fixture","provenance":{"actor":"coordinator","mechanism":"test"},"predecessors":["wip:v1:00000000000000000000000000000001"],"successors":["wip:v1:00000000000000000000000000000001"],"references":[{"kind":"dispatch_session","dispatch_session":{"dispatch_id":"dispatch-7","session_id":"session-8"}}],"witness":"handoff-1"},
+    {"kind":"land","timestamp":"2026-09-01T08:03:00Z","source":"fixture","provenance":{"actor":"coordinator","mechanism":"test"},"predecessors":["wip:v1:00000000000000000000000000000001"],"successors":["wip:v1:00000000000000000000000000000001"],"references":[{"kind":"witnessed_retirement","witnessed_retirement":{"retirement_id":"retire-1","witness":"commit:abc"}}],"witness":"land-1"},
+    {"kind":"create","timestamp":"2026-09-01T09:00:00Z","source":"fixture","provenance":{"actor":"watchdog","mechanism":"test"},"successors":["wip:v1:00000000000000000000000000000002"],"witness":"create-2"},
+    {"kind":"recover","timestamp":"2026-09-01T09:01:00Z","source":"fixture","provenance":{"actor":"watchdog","mechanism":"test"},"predecessors":["wip:v1:00000000000000000000000000000002"],"successors":["wip:v1:00000000000000000000000000000002"],"references":[{"kind":"checkpoint","checkpoint":{"checkpoint_id":"checkpoint-2"}}],"witness":"recover-2"},
+    {"kind":"abandon","timestamp":"2026-09-01T09:02:00Z","source":"fixture","provenance":{"actor":"watchdog","mechanism":"test"},"predecessors":["wip:v1:00000000000000000000000000000002"],"successors":["wip:v1:00000000000000000000000000000002"],"witness":"abandon-2"}
+  ]
+}

@@ -15,13 +15,29 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 )
 
-const Schema = "fak-wip-lifecycle/1"
+const (
+	Schema      = "fak-wip-lifecycle/1"
+	storeName   = "fak-wip-lifecycle"
+	receiptFile = "receipt.json"
+)
 
 type Capture struct {
 	Known      bool   `json:"known"`
 	Artifact   string `json:"artifact,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+type Diagnostic struct {
+	Code        string `json:"code"`
+	OperationID string `json:"operation_id"`
+	Path        string `json:"path"`
+	Error       string `json:"error"`
+}
+
+type ListResult struct {
+	Receipts    []Receipt    `json:"receipts"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 type Receipt struct {
@@ -73,15 +89,30 @@ func BeginWithRunner(root, kind, id string, now time.Time, runner wipinventory.R
 	if err != nil {
 		return Receipt{}, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	store := filepath.Dir(dir)
+	if err := os.MkdirAll(store, 0o755); err != nil {
 		return Receipt{}, err
 	}
+	if _, err := os.Stat(dir); err == nil {
+		return Receipt{}, fmt.Errorf("lifecycle operation %q already exists", id)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Receipt{}, err
+	}
+	staging, err := os.MkdirTemp(store, ".operation-*.tmp")
+	if err != nil {
+		return Receipt{}, err
+	}
+	defer os.RemoveAll(staging)
 	receipt := Receipt{
 		Schema: Schema, OperationID: id, Kind: kind, Repository: filepath.ToSlash(root),
-		StartedAt: now.UTC().Format(time.RFC3339Nano), ReceiptPath: filepath.ToSlash(filepath.Join(dir, "receipt.json")),
+		StartedAt: now.UTC().Format(time.RFC3339Nano), ReceiptPath: filepath.ToSlash(filepath.Join(dir, receiptFile)),
 	}
-	receipt.Before = capture(root, filepath.Join(dir, "before.json"), now, runner)
-	if err := writeReceipt(receipt); err != nil {
+	receipt.Before = capture(root, filepath.Join(staging, "before.json"), now, runner)
+	receipt.Before.Artifact = filepath.ToSlash(filepath.Join(dir, "before.json"))
+	if err := writeReceiptAt(filepath.Join(staging, receiptFile), receipt); err != nil {
+		return receipt, err
+	}
+	if err := os.Rename(staging, dir); err != nil {
 		return receipt, err
 	}
 	return receipt, nil
@@ -98,7 +129,7 @@ func FinishWithRunner(root, id string, now time.Time, runner wipinventory.Runner
 	if err != nil {
 		return Receipt{}, err
 	}
-	receipt, err := Read(filepath.Join(dir, "receipt.json"))
+	receipt, err := Read(filepath.Join(dir, receiptFile))
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -125,32 +156,67 @@ func Read(path string) (Receipt, error) {
 	return receipt, nil
 }
 
-// List returns every durable lifecycle receipt in newest-first order. Receipts live
-// under the Git directory, so this remains available after the refs or worktrees whose
-// transition they witnessed have disappeared.
+// List returns every durable lifecycle receipt in newest-first order and fails
+// on malformed evidence. Mutation and restore callers use this strict view.
 func List(root string) ([]Receipt, error) {
-	store, err := storeDir(root, wipinventory.GitRunner{})
+	result, err := ListWithDiagnostics(root)
 	if err != nil {
 		return nil, err
+	}
+	if len(result.Diagnostics) > 0 {
+		diagnostic := result.Diagnostics[0]
+		return nil, fmt.Errorf("read lifecycle receipt %s: %s", diagnostic.OperationID, diagnostic.Error)
+	}
+	return result.Receipts, nil
+}
+
+// ListWithDiagnostics retains valid history while reporting every corrupt sibling
+// deterministically. It never deletes or repairs lifecycle evidence.
+func ListWithDiagnostics(root string) (ListResult, error) {
+	store, err := storeDir(root, wipinventory.GitRunner{})
+	if err != nil {
+		return ListResult{}, err
 	}
 	entries, err := os.ReadDir(store)
 	if errors.Is(err, os.ErrNotExist) {
-		return []Receipt{}, nil
+		return ListResult{Receipts: []Receipt{}, Diagnostics: []Diagnostic{}}, nil
 	}
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
-	receipts := make([]Receipt, 0, len(entries))
+	result := ListResult{
+		Receipts:    make([]Receipt, 0, len(entries)),
+		Diagnostics: make([]Diagnostic, 0),
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() || !validID(entry.Name()) {
 			continue
 		}
-		receipt, err := Read(filepath.Join(store, entry.Name(), "receipt.json"))
+		path := filepath.Join(store, entry.Name(), receiptFile)
+		receipt, err := Read(path)
 		if err != nil {
-			return nil, fmt.Errorf("read lifecycle receipt %s: %w", entry.Name(), err)
+			code := "MALFORMED_RECEIPT"
+			if errors.Is(err, os.ErrNotExist) {
+				code = "MISSING_RECEIPT"
+			}
+			result.Diagnostics = append(result.Diagnostics, Diagnostic{
+				Code: code, OperationID: entry.Name(), Path: filepath.ToSlash(path), Error: err.Error(),
+			})
+			continue
 		}
-		receipts = append(receipts, receipt)
+		result.Receipts = append(result.Receipts, receipt)
 	}
+	sortReceipts(result.Receipts)
+	sort.Slice(result.Diagnostics, func(i, j int) bool {
+		if result.Diagnostics[i].OperationID == result.Diagnostics[j].OperationID {
+			return result.Diagnostics[i].Code < result.Diagnostics[j].Code
+		}
+		return result.Diagnostics[i].OperationID < result.Diagnostics[j].OperationID
+	})
+	return result, nil
+}
+
+func sortReceipts(receipts []Receipt) {
 	sort.Slice(receipts, func(i, j int) bool {
 		left := receipts[i].FinishedAt
 		if left == "" {
@@ -165,7 +231,6 @@ func List(root string) ([]Receipt, error) {
 		}
 		return left > right
 	})
-	return receipts, nil
 }
 
 func capture(root, path string, now time.Time, runner wipinventory.Runner) Capture {
@@ -184,11 +249,15 @@ func capture(root, path string, now time.Time, runner wipinventory.Runner) Captu
 }
 
 func writeReceipt(receipt Receipt) error {
+	return writeReceiptAt(filepath.FromSlash(receipt.ReceiptPath), receipt)
+}
+
+func writeReceiptAt(path string, receipt Receipt) error {
 	b, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.FromSlash(receipt.ReceiptPath), append(b, '\n'))
+	return atomicWrite(path, append(b, '\n'))
 }
 
 func atomicWrite(path string, body []byte) error {
@@ -228,7 +297,7 @@ func operationDir(root, id string, runner wipinventory.Runner) (string, error) {
 }
 
 func storeDir(root string, runner wipinventory.Runner) (string, error) {
-	gitPath, err := runner.Run(root, "rev-parse", "--git-path", "fak-wip-lifecycle")
+	gitPath, err := runner.Run(root, "rev-parse", "--git-path", storeName)
 	if err != nil {
 		return "", err
 	}

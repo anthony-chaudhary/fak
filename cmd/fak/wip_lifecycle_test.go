@@ -87,3 +87,56 @@ func TestRunWIPLifecycleListRendersDurableHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestRunWIPLifecycleListRetainsHistoryAndReportsCorruptSiblings(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	var out, errOut bytes.Buffer
+	if code := runWIPLifecycle([]string{"begin", "--root", repo, "--kind", "checkpoint-reap", "--id", "history-valid"}, &out, &errOut); code != 0 {
+		t.Fatalf("begin rc=%d stderr=%s", code, errOut.String())
+	}
+	store := filepath.Join(repo, ".git", "fak-wip-lifecycle")
+	missingID := "history-missing"
+	malformedID := "history-malformed"
+	if err := os.MkdirAll(filepath.Join(store, missingID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(store, malformedID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, malformedID, "receipt.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runWIPLifecycle([]string{"list", "--root", repo}, &out, &errOut); code != 0 {
+		t.Fatalf("list rc=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "history-valid") {
+		t.Fatalf("valid history missing: %s", out.String())
+	}
+	for _, want := range []string{
+		"WIP_LIFECYCLE_MALFORMED_RECEIPT operation_id=history-malformed",
+		"WIP_LIFECYCLE_MISSING_RECEIPT operation_id=history-missing",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("diagnostic missing %q:\n%s", want, errOut.String())
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runWIPLifecycle([]string{"list", "--root", repo, "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("json list rc=%d stderr=%s", code, errOut.String())
+	}
+	var result wiplifecycle.ListResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Receipts) != 1 || len(result.Diagnostics) != 2 {
+		t.Fatalf("json result=%#v", result)
+	}
+	if result.Diagnostics[0].OperationID != malformedID || result.Diagnostics[1].OperationID != missingID {
+		t.Fatalf("diagnostic order=%#v", result.Diagnostics)
+	}
+}

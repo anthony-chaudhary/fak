@@ -163,3 +163,56 @@ func TestQwen38MTPReceiptTargetOnlyFromEligibility(t *testing.T) {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 }
+
+func TestQwen38MTPReceiptIdentifiesAdmissionOutcomes(t *testing.T) {
+	resident := AdmitQwen38MTP(Qwen38MTPAdmissionInput{
+		TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+		TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+		AvailableBytes: 170, Pressure: Qwen38MTPPressureNominal,
+	})
+	hostAssisted := AdmitQwen38MTP(Qwen38MTPAdmissionInput{
+		TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+		TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+		AvailableBytes: 169, Pressure: Qwen38MTPPressureNominal, HostAssistedSupported: true,
+	})
+	targetOnly := AdmitQwen38MTP(Qwen38MTPAdmissionInput{
+		TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+		TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+		AvailableBytes: 129, Pressure: Qwen38MTPPressureNominal, HostAssistedSupported: true,
+	})
+
+	for _, admission := range []*Qwen38MTPAdmission{&resident, &hostAssisted} {
+		receipt := Qwen38MTPReceipt{
+			SchemaVersion:  Qwen38MTPReceiptSchema,
+			Outcome:        Qwen38MTPOutcomeSucceeded,
+			Engine:         Qwen38EngineMTP,
+			RequestedDepth: 1,
+			EffectiveDepth: 1,
+			Tokens: Qwen38MTPTokenAccounting{
+				Proposed: 1, Accepted: 1,
+				Distribution: []Qwen38MTPAcceptanceBucket{{Depth: 1, Proposed: 1, Accepted: 1}},
+			},
+			LatencyNS:   Qwen38MTPLatencyNS{Setup: 1, Draft: 1, Verify: 1, Total: 3},
+			MemoryBytes: Qwen38MTPMemoryBytes{DraftWorkspace: 1, VerifyWorkspace: 1, Peak: 1},
+			Admission:   admission,
+		}
+		if err := receipt.Validate(); err != nil {
+			t.Fatalf("%s receipt invalid: %v", admission.Outcome, err)
+		}
+	}
+
+	targetReceipt := Qwen38MTPReceipt{
+		SchemaVersion:   Qwen38MTPReceiptSchema,
+		Outcome:         Qwen38MTPOutcomeTargetOnly,
+		Engine:          Qwen38EngineTargetDecode,
+		RequestedDepth:  1,
+		DowngradeReason: Qwen38MTPMemoryUnsafe,
+		Admission:       &targetOnly,
+	}
+	if err := targetReceipt.Validate(); err != nil {
+		t.Fatalf("native target-only receipt invalid: %v", err)
+	}
+	if targetReceipt.Engine != Qwen38EngineTargetDecode || targetReceipt.Admission.Outcome != Qwen38MTPAdmissionTargetOnly {
+		t.Fatalf("target-only receipt lost typed native downgrade: %+v", targetReceipt)
+	}
+}

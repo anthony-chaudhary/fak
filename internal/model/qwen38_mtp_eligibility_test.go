@@ -105,3 +105,67 @@ func TestEvaluateQwen38MTPEligibilityUsesActualRetainedTensorTypes(t *testing.T)
 		t.Fatalf("mixed-layout receipt=%+v, want ordinary native precision downgrade", mixed)
 	}
 }
+
+func TestEvaluateQwen38MTPEligibilityUsesTypedAdmission(t *testing.T) {
+	input := Qwen38MTPEligibilityInput{
+		Qwen38MTPArtifact: true,
+		MTPBackendReady:   true,
+		Backend:           Qwen38MTPBackendMetal,
+		F32:               true,
+		Greedy:            true,
+		Depth:             1,
+		FreshSession:      true,
+		OperatorEnabled:   true,
+	}
+	for _, tc := range []struct {
+		name     string
+		input    Qwen38MTPAdmissionInput
+		eligible bool
+		outcome  Qwen38MTPAdmissionOutcome
+	}{
+		{
+			name: "resident",
+			input: Qwen38MTPAdmissionInput{
+				TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+				TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+				AvailableBytes: 170, Pressure: Qwen38MTPPressureNominal,
+			},
+			eligible: true, outcome: Qwen38MTPAdmissionResident,
+		},
+		{
+			name: "host-assisted",
+			input: Qwen38MTPAdmissionInput{
+				TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+				TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+				AvailableBytes: 169, Pressure: Qwen38MTPPressureNominal, HostAssistedSupported: true,
+			},
+			eligible: true, outcome: Qwen38MTPAdmissionHostAssisted,
+		},
+		{
+			name: "native-target-only",
+			input: Qwen38MTPAdmissionInput{
+				TargetTensorBytes: 100, RetainedMTPTensorBytes: 40,
+				TransactionalStateBytes: 20, VerificationWorkspaceBytes: 10,
+				AvailableBytes: 129, Pressure: Qwen38MTPPressureNominal, HostAssistedSupported: true,
+			},
+			outcome: Qwen38MTPAdmissionTargetOnly,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admission := AdmitQwen38MTP(tc.input)
+			in := input
+			in.Admission = &admission
+			got := EvaluateQwen38MTPEligibility(in)
+			if got.Eligible != tc.eligible || got.Admission == nil || got.Admission.Outcome != tc.outcome {
+				t.Fatalf("eligibility=%+v admission=%+v", got, admission)
+			}
+			if tc.eligible {
+				if got.Engine != Qwen38EngineMTP || got.DowngradeReason != Qwen38MTPEligible {
+					t.Fatalf("admitted execution=%+v", got)
+				}
+			} else if got.Engine != Qwen38EngineTargetDecode || got.DowngradeReason != Qwen38MTPMemoryUnsafe {
+				t.Fatalf("unsafe execution did not retain native target decode: %+v", got)
+			}
+		})
+	}
+}

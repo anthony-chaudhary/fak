@@ -19,6 +19,7 @@ import (
 // TestArchLlamaNoOp). The fields are grouped: the Llama-13 base first, then the
 // additive Stage-2 axes.
 type Config struct {
+	GLM5Next bool `json:"-"`
 	// EnableResidualHook gates the activation-space write seam. Its zero value is off.
 	EnableResidualHook bool
 	residualHook       ResidualHook
@@ -427,6 +428,7 @@ type configJSONHints struct {
 // HF under a nested rope_scaling object; the flat json tags above are what
 // export_oracle.py flattens them to, so a re-export carries them with zero code change.
 func (c *Config) UnmarshalJSON(b []byte) error {
+	c.GLM5Next = isExactGLM5NextConfig(b)
 	aux := struct {
 		*configAlias
 		EOS eosToken `json:"eos_token_id"`

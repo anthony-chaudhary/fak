@@ -1,0 +1,16 @@
+Date/Time:       2026-08-25 14:35:52.769 -0700
+End time:        2026-08-25 14:46:34.171 -0700
+Command:         fak
+PID:             20870
+
+Event:           disk writes
+Action taken:    none
+Writes:          8,589.95 MB of file backed memory dirtied over 641 seconds (13.39 MB per second average)
+
+Footprint:       16.36 MB
+
+Heaviest stack for the target process:
+  7  write + 8 (libsystem_kernel.dylib + 1234)
+
+Binary Images:
+  0x100000000 - 0x1000fffff fak (0) <7D5CFA95-4B8D-3CEF-DD58-D6BC242B7AA1>

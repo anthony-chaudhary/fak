@@ -94,6 +94,77 @@ func fleetTestSources(t *testing.T) fleetMetricsSources {
 	}
 }
 
+func TestFleetMetricsRunHistoryIsRootRegistrationOnly(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	w := newPromWriter()
+	renderFleetRunExposition(w, []sessionregistry.Record{
+		{RegistrationID: "run-active", RootRegistrationID: "run-active", RootIssue: "#10361", TaskID: "operate-runs", GoalID: "goal-ops", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "session-active"}, State: sessionregistry.StateActive, CreatedAt: now, StartedAt: now.Add(5 * time.Second)},
+		{RegistrationID: "child", RootRegistrationID: "run-active", LaunchKind: "subagent", Identity: sessionregistry.Identity{SessionID: "session-child"}, State: sessionregistry.StateCompleted, CreatedAt: now},
+		{RegistrationID: "run-done", RootRegistrationID: "run-done", RootIssue: "#100", TaskID: "finished", LaunchKind: "headless", Identity: sessionregistry.Identity{Runtime: "claude", SessionID: "session-done"}, State: sessionregistry.StateCompleted, RootOutcome: "success", Reason: "goal_complete", WitnessRef: "dos-verify:abc123", CreatedAt: now, StartedAt: now.Add(10 * time.Second), TerminalAt: now.Add(time.Minute)},
+	})
+
+	raw := w.String()
+	parseExposition(t, raw)
+	for _, want := range []string{
+		"fak_fleet_registered_runs 2",
+		`fak_fleet_registered_runs_by_state{state="active"} 1`,
+		`fak_fleet_registered_runs_by_state{state="completed"} 1`,
+		`fak_fleet_run_info{run="run-active",session="session-active",root_issue="#10361",task="operate-runs",goal_id="goal-ops",launch="guarded_tui",runtime="codex",state="active",outcome="",reason="",witness_ref="",source="durable_registration"} 1`,
+		`fak_fleet_run_info{run="run-done",session="session-done",root_issue="#100",task="finished",goal_id="",launch="headless",runtime="claude",state="completed",outcome="success",reason="goal_complete",witness_ref="dos-verify:abc123",source="durable_registration"} 1`,
+		fmt.Sprintf(`fak_fleet_run_created_timestamp_seconds{run="run-active",session="session-active"} %d`, now.Unix()),
+		fmt.Sprintf(`fak_fleet_run_started_timestamp_seconds{run="run-active",session="session-active"} %d`, now.Add(5*time.Second).Unix()),
+		`fak_fleet_run_terminal_timestamp_seconds{run="run-active",session="session-active"} 0`,
+		`fak_fleet_run_duration_seconds{run="run-active",session="session-active"} 0`,
+		fmt.Sprintf(`fak_fleet_run_created_timestamp_seconds{run="run-done",session="session-done"} %d`, now.Unix()),
+		fmt.Sprintf(`fak_fleet_run_started_timestamp_seconds{run="run-done",session="session-done"} %d`, now.Add(10*time.Second).Unix()),
+		fmt.Sprintf(`fak_fleet_run_terminal_timestamp_seconds{run="run-done",session="session-done"} %d`, now.Add(time.Minute).Unix()),
+		`fak_fleet_run_duration_seconds{run="run-done",session="session-done"} 50`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("missing %q\n%s", want, raw)
+		}
+	}
+	if strings.Contains(raw, `run="child"`) || strings.Contains(raw, `session="session-child"`) {
+		t.Fatalf("child registration leaked into root-run history:\n%s", raw)
+	}
+	for _, family := range []string{"fak_fleet_run_created_timestamp_seconds", "fak_fleet_run_started_timestamp_seconds", "fak_fleet_run_terminal_timestamp_seconds", "fak_fleet_run_duration_seconds"} {
+		for _, line := range parseExposition(t, raw).samples[family] {
+			if strings.Contains(line, "reason=") || strings.Contains(line, "witness_ref=") {
+				t.Fatalf("high-cardinality review labels leaked into numeric family %s: %s", family, line)
+			}
+		}
+	}
+}
+
+func TestFleetRunDurationUsesCreatedTimeWhenStartIsMissing(t *testing.T) {
+	created := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	if got := fleetRunDurationSeconds(sessionregistry.Record{CreatedAt: created, TerminalAt: created.Add(90 * time.Second)}); got != 90 {
+		t.Fatalf("duration = %v, want 90", got)
+	}
+	if got := fleetRunDurationSeconds(sessionregistry.Record{CreatedAt: created, TerminalAt: created.Add(-time.Second)}); got != 0 {
+		t.Fatalf("negative duration = %v, want 0", got)
+	}
+}
+
+func TestFleetMetricsDefaultsRunHistoryToDurableRegistrationLedger(t *testing.T) {
+	dir := t.TempDir()
+	registrationPath := filepath.Join(dir, "registrations.jsonl")
+	livePath := filepath.Join(dir, "no-live-registry.json")
+	usagePath := filepath.Join(dir, "no-usage-ledger.jsonl")
+	t.Setenv("FAK_SESSION_REGISTRY", registrationPath)
+	rec := sessionregistry.Record{Schema: sessionregistry.Schema, RegistrationID: "run-default", RootRegistrationID: "run-default", AttemptID: "attempt", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "session-default"}, State: sessionregistry.StateCompleted, CreatedAt: time.Now(), TerminalAt: time.Now()}
+	if err := (sessionregistry.Store{Path: registrationPath}).Register(rec); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runFleetMetrics(&stdout, &stderr, []string{"--registry", livePath, "--usage-ledger", usagePath}); code != 0 {
+		t.Fatalf("runFleetMetrics code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `fak_fleet_run_info{run="run-default",session="session-default"`) {
+		t.Fatalf("default registration ledger was not folded:\n%s", stdout.String())
+	}
+}
+
 // TestFleetMetricsExpositionIsFamilyMajor pins the exposition FORMAT contract: every
 // sample of a metric family must be contiguous, and each family declares HELP and TYPE
 // exactly once. This is the invariant a session-major emission loop breaks — it would

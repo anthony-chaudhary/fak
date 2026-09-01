@@ -30,6 +30,9 @@ import (
 // linear_attention layer present). It gates the (1+w) RMSNorm, the rotary-dim rope
 // denominator, the tensor-name normalization, and the per-layer mixer dispatch.
 func (c Config) IsQwen35Hybrid() bool {
+	if c.GLM5Next {
+		return false
+	}
 	for _, t := range c.LayerTypes {
 		if t == "linear_attention" {
 			return true

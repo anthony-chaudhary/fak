@@ -19,8 +19,8 @@ import (
 // shared-path verbs), each card carrying the exact call to make.
 func printGuardCapabilitiesNote(w io.Writer, mcpInstall guardMCPInstall) {
 	if mcpInstall.Applied {
-		fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` or the fak_capabilities MCP tool lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
+		fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` or the fak_capabilities MCP tool lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make; before starting more shared-tree work, query WIP with `fak_capabilities` intent `WIP` or run `fak wip queue --json`\n")
 		return
 	}
-	fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
+	fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make; before starting more shared-tree work, run `fak-dev capabilities WIP` or `fak wip queue --json`\n")
 }
