@@ -48,3 +48,29 @@ func TestBuildSnapshotAndEvaluate(t *testing.T) {
 		t.Fatalf("expected shortfall: %+v", e)
 	}
 }
+
+func TestAdmissionSampleForFailsClosedAndClassifiesPressure(t *testing.T) {
+	tests := []struct {
+		name string
+		mem  Memory
+		want Pressure
+	}{
+		{name: "unknown total", mem: Memory{AvailableBytes: 8 << 30}, want: PressureUnknown},
+		{name: "unknown available", mem: Memory{TotalBytes: 16 << 30}, want: PressureUnknown},
+		{name: "normal", mem: Memory{TotalBytes: 16 << 30, AvailableBytes: 8 << 30}, want: PressureNormal},
+		{name: "warning compressor", mem: Memory{TotalBytes: 16 << 30, AvailableBytes: 8 << 30, CompressedBytes: 2 << 30}, want: PressureWarning},
+		{name: "critical compressor", mem: Memory{TotalBytes: 16 << 30, AvailableBytes: 8 << 30, CompressedBytes: 4 << 30}, want: PressureCritical},
+		{name: "critical wired", mem: Memory{TotalBytes: 16 << 30, AvailableBytes: 8 << 30, WiredBytes: 7 << 30}, want: PressureCritical},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AdmissionSampleFor(tc.mem)
+			if got.Pressure != tc.want {
+				t.Fatalf("pressure=%q want %q sample=%+v", got.Pressure, tc.want, got)
+			}
+			if got.AllocatableBytes != tc.mem.AvailableBytes {
+				t.Fatalf("allocatable=%d want %d", got.AllocatableBytes, tc.mem.AvailableBytes)
+			}
+		})
+	}
+}
