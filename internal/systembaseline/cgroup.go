@@ -49,6 +49,21 @@ type CgroupMemory struct {
 	Events       CounterSet `json:"events"`
 }
 
+// CgroupCPUCapacity keeps sustained quota separate from runtime scheduler width.
+// CapacityCPUs is quota/period and is not CPU affinity.
+type CgroupCPUCapacity struct {
+	Available                     bool    `json:"available"`
+	CapacityCPUs                  float64 `json:"capacity_cpus,omitempty"`
+	RuntimeWidth                  int     `json:"runtime_width,omitempty"`
+	QuotaUS                       uint64  `json:"quota_us,omitempty"`
+	PeriodUS                      uint64  `json:"period_us,omitempty"`
+	EffectivePath                 string  `json:"effective_path,omitempty"`
+	MembershipPath                string  `json:"membership_path,omitempty"`
+	RuntimeDefaultMayOverestimate bool    `json:"runtime_default_may_overestimate,omitempty"`
+	Source                        string  `json:"source,omitempty"`
+	Reason                        string  `json:"reason,omitempty"`
+}
+
 type CgroupCleanup struct {
 	Attempted       bool   `json:"attempted"`
 	KilledRemaining bool   `json:"killed_remaining"`
@@ -60,17 +75,22 @@ type CgroupCleanup struct {
 // CgroupV2 is the bounded per-command Linux cgroup attribution receipt. State
 // is measured only when atomic membership and all core counters were verified.
 type CgroupV2 struct {
-	State      string           `json:"state"`
-	Reason     string           `json:"reason,omitempty"`
-	Membership CgroupMembership `json:"membership"`
-	CPU        CounterSet       `json:"cpu_stat"`
-	Memory     CgroupMemory     `json:"memory"`
-	Pressure   CgroupPressure   `json:"pressure"`
-	Cleanup    CgroupCleanup    `json:"cleanup"`
+	State       string             `json:"state"`
+	Reason      string             `json:"reason,omitempty"`
+	Membership  CgroupMembership   `json:"membership"`
+	CPU         CounterSet         `json:"cpu_stat"`
+	CPUCapacity *CgroupCPUCapacity `json:"cpu_capacity,omitempty"`
+	Memory      CgroupMemory       `json:"memory"`
+	Pressure    CgroupPressure     `json:"pressure"`
+	Cleanup     CgroupCleanup      `json:"cleanup"`
 }
 
 func (c CgroupV2) clone() CgroupV2 {
 	c.CPU.Values = cloneCounters(c.CPU.Values)
+	if c.CPUCapacity != nil {
+		capacity := *c.CPUCapacity
+		c.CPUCapacity = &capacity
+	}
 	c.Memory.Events.Values = cloneCounters(c.Memory.Events.Values)
 	return c
 }
@@ -305,6 +325,15 @@ func (c CgroupV2) validate() error {
 		}
 		if !metric.Available && (metric.Unit == "" || metric.Reason == "" || metric.Value != 0 || metric.Source != "") {
 			return fmt.Errorf("systembaseline: cgroup metric has inconsistent unavailable state")
+		}
+	}
+	if capacity := c.CPUCapacity; capacity != nil {
+		if capacity.Available {
+			if capacity.CapacityCPUs <= 0 || math.IsNaN(capacity.CapacityCPUs) || math.IsInf(capacity.CapacityCPUs, 0) || capacity.RuntimeWidth <= 0 || capacity.QuotaUS == 0 || capacity.PeriodUS == 0 || capacity.EffectivePath == "" || capacity.MembershipPath == "" || capacity.Source == "" || capacity.Reason != "" {
+				return fmt.Errorf("systembaseline: measured cgroup CPU capacity is incomplete")
+			}
+		} else if capacity.Reason == "" || capacity.CapacityCPUs != 0 || capacity.RuntimeWidth != 0 || capacity.QuotaUS != 0 || capacity.PeriodUS != 0 || capacity.Source != "" {
+			return fmt.Errorf("systembaseline: unavailable cgroup CPU capacity is inconsistent")
 		}
 	}
 	if c.State == CgroupStateMeasured {

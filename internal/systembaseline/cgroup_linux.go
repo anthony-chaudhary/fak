@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -72,10 +73,11 @@ func newLinuxCommandAttributor(root string, ops cgroupFSOps) *linuxCommandAttrib
 	unavailableResult := func(reason string) *linuxCommandAttributor {
 		return &linuxCommandAttributor{ops: ops, result: unavailableCgroup(reason)}
 	}
-	parent, err := currentLinuxCgroupParent(root, ops.readFile)
+	parent, membership, err := currentLinuxCgroupParent(root, ops.readFile)
 	if err != nil {
 		return unavailableResult(err.Error())
 	}
+	capacity := readLinuxCgroupCPUCapacity(root, membership, runtime.GOMAXPROCS(0), ops.readFile)
 	path, err := ops.mkdirTemp(parent, "fak-systembaseline-")
 	if err != nil {
 		return unavailableResult(fmt.Sprintf("cgroup v2 delegation unavailable: %v", err))
@@ -105,7 +107,8 @@ func newLinuxCommandAttributor(root string, ops cgroupFSOps) *linuxCommandAttrib
 		dir:     dir,
 		initial: initial,
 		result: CgroupV2{
-			State: CgroupStateMeasured,
+			State:       CgroupStateMeasured,
+			CPUCapacity: &capacity,
 			Membership: CgroupMembership{
 				AfterStart:      unavailable("processes", "command has not started"),
 				AfterWait:       unavailable("processes", "command has not completed"),
@@ -115,13 +118,13 @@ func newLinuxCommandAttributor(root string, ops cgroupFSOps) *linuxCommandAttrib
 	}
 }
 
-func currentLinuxCgroupParent(root string, readFile func(string) ([]byte, error)) (string, error) {
+func currentLinuxCgroupParent(root string, readFile func(string) ([]byte, error)) (string, string, error) {
 	if _, err := readFile(filepath.Join(root, "cgroup.controllers")); err != nil {
-		return "", fmt.Errorf("cgroup v2 unavailable: %v", err)
+		return "", "", fmt.Errorf("cgroup v2 unavailable: %v", err)
 	}
 	raw, err := readFile("/proc/self/cgroup")
 	if err != nil {
-		return "", fmt.Errorf("read current cgroup membership: %v", err)
+		return "", "", fmt.Errorf("read current cgroup membership: %v", err)
 	}
 	var relative string
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
@@ -131,15 +134,79 @@ func currentLinuxCgroupParent(root string, readFile func(string) ([]byte, error)
 		}
 	}
 	if relative == "" {
-		return "", fmt.Errorf("unified cgroup v2 membership unavailable")
+		return "", "", fmt.Errorf("unified cgroup v2 membership unavailable")
 	}
 	clean := filepath.Clean("/" + strings.TrimPrefix(relative, "/"))
 	parent := filepath.Join(root, clean)
 	rootClean := filepath.Clean(root)
 	if parent != rootClean && !strings.HasPrefix(parent, rootClean+string(os.PathSeparator)) {
-		return "", fmt.Errorf("current cgroup path escapes cgroup v2 mount")
+		return "", "", fmt.Errorf("current cgroup path escapes cgroup v2 mount")
 	}
-	return parent, nil
+	return parent, clean, nil
+}
+
+func readLinuxCgroupCPUCapacity(root, membership string, runtimeWidth int, readFile func(string) ([]byte, error)) CgroupCPUCapacity {
+	unavailableCapacity := func(reason string) CgroupCPUCapacity {
+		return CgroupCPUCapacity{MembershipPath: membership, Reason: reason}
+	}
+	if runtimeWidth <= 0 {
+		return unavailableCapacity("runtime GOMAXPROCS is unavailable")
+	}
+	root = filepath.Clean(root)
+	membership = filepath.Clean("/" + strings.TrimPrefix(membership, "/"))
+	current := filepath.Join(root, membership)
+	if current != root && !strings.HasPrefix(current, root+string(os.PathSeparator)) {
+		return unavailableCapacity("current cgroup path escapes cgroup v2 mount")
+	}
+	var best CgroupCPUCapacity
+	for {
+		raw, err := readFile(filepath.Join(current, "cpu.max"))
+		if err != nil {
+			return unavailableCapacity(fmt.Sprintf("read cpu.max at %s: %v", current, err))
+		}
+		quota, period, finite, err := parseLinuxCPUMax(raw)
+		if err != nil {
+			return unavailableCapacity(fmt.Sprintf("parse cpu.max at %s: %v", current, err))
+		}
+		if finite {
+			capacity := float64(quota) / float64(period)
+			if !best.Available || capacity < best.CapacityCPUs {
+				best = CgroupCPUCapacity{
+					Available: true, CapacityCPUs: capacity, RuntimeWidth: runtimeWidth,
+					QuotaUS: quota, PeriodUS: period, EffectivePath: current, MembershipPath: membership,
+					RuntimeDefaultMayOverestimate: float64(runtimeWidth) > capacity,
+					Source:                        "cgroup v2 cpu.max hierarchy",
+				}
+			}
+		}
+		if current == root {
+			break
+		}
+		current = filepath.Dir(current)
+	}
+	if !best.Available {
+		return unavailableCapacity("cgroup v2 cpu.max hierarchy has no finite quota")
+	}
+	return best
+}
+
+func parseLinuxCPUMax(raw []byte) (quota, period uint64, finite bool, err error) {
+	fields := strings.Fields(string(raw))
+	if len(fields) != 2 {
+		return 0, 0, false, errors.New("expected quota and period")
+	}
+	period, err = strconv.ParseUint(fields[1], 10, 64)
+	if err != nil || period == 0 {
+		return 0, 0, false, errors.New("period must be a positive integer")
+	}
+	if fields[0] == "max" {
+		return 0, period, false, nil
+	}
+	quota, err = strconv.ParseUint(fields[0], 10, 64)
+	if err != nil || quota == 0 {
+		return 0, 0, false, errors.New("quota must be max or a positive integer")
+	}
+	return quota, period, true, nil
 }
 
 func (l *linuxCommandAttributor) active() bool {
