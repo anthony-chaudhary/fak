@@ -148,7 +148,22 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 	if topK <= 0 {
 		topK = CensusDefaultTopK
 	}
+	rows, order, comb := buildCensusIndex(issues)
+	groups := newCensusGroups(order)
+	pairs := findCensusPairs(rows, order, comb, groups, threshold, topK)
+	clusters, suppressedFamilies, suppressedIssues := buildCensusClusters(order, pairs, groups)
 
+	return CensusReport{
+		Threshold:          threshold,
+		TopK:               topK,
+		Issues:             len(order),
+		Clusters:           clusters,
+		SuppressedFamilies: suppressedFamilies,
+		SuppressedIssues:   suppressedIssues,
+	}
+}
+
+func buildCensusIndex(issues []BacklogIssue) (map[int]*censusRow, []int, simhash.Index) {
 	rows := make(map[int]*censusRow, len(issues))
 	order := make([]int, 0, len(issues))
 	var comb simhash.Index
@@ -174,26 +189,35 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 		rows[is.Number] = r
 		comb.Add(strconv.Itoa(is.Number), r.combV, "")
 	}
+	return rows, order, comb
+}
 
-	parent := make(map[int]int, len(order))
+type censusGroups map[int]int
+
+func newCensusGroups(order []int) censusGroups {
+	parent := make(censusGroups, len(order))
 	for _, n := range order {
 		parent[n] = n
 	}
-	var find func(int) int
-	find = func(x int) int {
-		for parent[x] != x {
-			parent[x] = parent[parent[x]]
-			x = parent[x]
-		}
-		return x
-	}
-	union := func(a, b int) {
-		ra, rb := find(a), find(b)
-		if ra != rb {
-			parent[ra] = rb
-		}
-	}
+	return parent
+}
 
+func (g censusGroups) find(x int) int {
+	for g[x] != x {
+		g[x] = g[g[x]]
+		x = g[x]
+	}
+	return x
+}
+
+func (g censusGroups) union(a, b int) {
+	ra, rb := g.find(a), g.find(b)
+	if ra != rb {
+		g[ra] = rb
+	}
+}
+
+func findCensusPairs(rows map[int]*censusRow, order []int, comb simhash.Index, groups censusGroups, threshold float64, topK int) []PairEvidence {
 	seen := make(map[[2]int]bool)
 	exactMembers := make(map[int]bool)
 	pairs := make([]PairEvidence, 0)
@@ -206,6 +230,11 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 	// remains independently reviewable rather than disappearing into a family.
 	numbers := append([]int(nil), order...)
 	sort.Ints(numbers)
+	pairs = appendExactCensusPairs(pairs, rows, numbers, seen, exactMembers, groups)
+	return appendFuzzyCensusPairs(pairs, rows, order, comb, seen, exactMembers, groups, threshold, topK)
+}
+
+func appendExactCensusPairs(pairs []PairEvidence, rows map[int]*censusRow, numbers []int, seen map[[2]int]bool, exactMembers map[int]bool, groups censusGroups) []PairEvidence {
 	for i, n := range numbers {
 		r := rows[n]
 		for _, other := range numbers[i+1:] {
@@ -220,26 +249,21 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 			key := [2]int{n, other}
 			seen[key] = true
 			exactMembers[n], exactMembers[other] = true, true
-			union(n, other)
+			groups.union(n, other)
 			pairs = append(pairs, PairEvidence{
-				A:                 n,
-				B:                 other,
-				Similarity:        1,
-				TitleScore:        simhash.Cosine(r.titleV, o.titleV),
-				BodyScore:         simhash.Cosine(r.combV, o.combV),
-				MatchedOn:         MatchedOnExactBodySuperset,
-				Reason:            CensusReasonExactBodySuperset,
-				CommonPrefixChars: prefix,
-				ShorterBodyChars:  shorter,
-				LongerBodyChars:   longer,
-				SharedPaths:       sharedKeys(r.paths, o.paths),
-				SharedLabels:      sharedKeys(r.labels, o.labels),
-				ExcerptA:          r.excerpt,
-				ExcerptB:          o.excerpt,
+				A: n, B: other, Similarity: 1,
+				TitleScore: simhash.Cosine(r.titleV, o.titleV), BodyScore: simhash.Cosine(r.combV, o.combV),
+				MatchedOn: MatchedOnExactBodySuperset, Reason: CensusReasonExactBodySuperset,
+				CommonPrefixChars: prefix, ShorterBodyChars: shorter, LongerBodyChars: longer,
+				SharedPaths: sharedKeys(r.paths, o.paths), SharedLabels: sharedKeys(r.labels, o.labels),
+				ExcerptA: r.excerpt, ExcerptB: o.excerpt,
 			})
 		}
 	}
+	return pairs
+}
 
+func appendFuzzyCensusPairs(pairs []PairEvidence, rows map[int]*censusRow, order []int, comb simhash.Index, seen map[[2]int]bool, exactMembers map[int]bool, groups censusGroups, threshold float64, topK int) []PairEvidence {
 	for _, n := range order {
 		if exactMembers[n] {
 			continue
@@ -265,7 +289,7 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 				continue
 			}
 			seen[key] = true
-			union(n, other)
+			groups.union(n, other)
 			lo, hi := rows[key[0]], rows[key[1]]
 			pairs = append(pairs, PairEvidence{
 				A:            key[0],
@@ -282,10 +306,13 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 			})
 		}
 	}
+	return pairs
+}
 
+func buildCensusClusters(order []int, pairs []PairEvidence, groups censusGroups) ([]Cluster, int, int) {
 	members := make(map[int][]int)
 	for _, n := range order {
-		root := find(n)
+		root := groups.find(n)
 		members[root] = append(members[root], n)
 	}
 	clusters := make([]Cluster, 0)
@@ -296,7 +323,7 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 		}
 		hasExactEvidence := false
 		for _, p := range pairs {
-			if p.Reason == CensusReasonExactBodySuperset && find(p.A) == root {
+			if p.Reason == CensusReasonExactBodySuperset && groups.find(p.A) == root {
 				hasExactEvidence = true
 				break
 			}
@@ -313,7 +340,7 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 		cp := make([]PairEvidence, 0)
 		top := 0.0
 		for _, p := range pairs {
-			if find(p.A) != root {
+			if groups.find(p.A) != root {
 				continue
 			}
 			cp = append(cp, p)
@@ -347,15 +374,7 @@ func Census(issues []BacklogIssue, threshold float64, topK int) CensusReport {
 	for i := range clusters {
 		clusters[i].ID = i
 	}
-
-	return CensusReport{
-		Threshold:          threshold,
-		TopK:               topK,
-		Issues:             len(order),
-		Clusters:           clusters,
-		SuppressedFamilies: suppressedFamilies,
-		SuppressedIssues:   suppressedIssues,
-	}
+	return clusters, suppressedFamilies, suppressedIssues
 }
 
 // RenderCensus renders a census report as the markdown the issue gardener reads:
