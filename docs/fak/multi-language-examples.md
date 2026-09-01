@@ -505,7 +505,7 @@ type syscallExecResponse struct {
 resp, err := http.Get("http://127.0.0.1:8080/metrics") // Prometheus exposition format
 if err != nil { /* ... */ }
 defer resp.Body.Close()
-// resp.Body is text/plain; version=0.0.4 — kernel counters: submits, vDSO hits,
+// resp.Body is text/plain (format version 0.0.4) — kernel counters: submits, vDSO hits,
 // denies, transforms, quarantines, admits. See docs/fak/observability.md.
 ```
 

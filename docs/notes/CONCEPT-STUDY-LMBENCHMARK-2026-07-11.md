@@ -33,7 +33,7 @@ License is compatible, but every borrow is **`inspire`** (Python→Go clean-room
 | C12 | allocator/env-knob tuning (GC pressure) | N/A | Go runtime — Python-GC-moot | DROP |
 | C13 | discrete-event scheduler sim inside the load generator | N/A | — | DROP — open-loop load-gen, **mission-fenced** |
 
-Completeness critic: *"No material technique left unmined."* The residual cache-value axes (offload-tier transfer latency, eviction-pressure hit-rate degradation, TTFT-vs-overlap) are **already explicit TBD cells inside epic #2244** — filing would duplicate the epic, not add a borrowed technique.
+Completeness critic: *"No material technique left unmined."* The residual cache-value axes (offload-tier transfer latency, eviction-pressure hit-rate degradation, TTFT-vs-overlap) are **already explicit unfilled cells inside epic #2244** — filing would duplicate the epic, not add a borrowed technique.
 
 ## The one filed borrow — #3937
 

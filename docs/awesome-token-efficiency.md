@@ -449,7 +449,7 @@ fak's gateway position lets it do several mechanically. A useful field taxonomy 
 - **Structured note-taking (NOTES.md / memory tool)** — write durable state to a file, re-inject
   only the relevant slice. [Anthropic](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents).
   *recoverable · semantic · harness.* **fak: ➖**.
-- **Recitation (todo.md rewriting)** — rewrite the todo list each step so the global plan stays in
+- **Recitation (plan-file rewriting)** — rewrite the running plan checklist each step so the global plan stays in
   the most-recent attention span (counters "lost in the middle" over long loops). [Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus).
   *lossless (adds, doesn't drop) · semantic · harness.* **fak: ➖**.
 - **Context offloading ("think" tool / scratchpad)** — store working notes outside the conversation

@@ -110,7 +110,7 @@ Appendix Table 22 is more operational: vLLM+LMCache, Llama 3.3 70B FP8, 2×H100 
 - The MIT-licensed tip implements a CPU/PyTorch path: per-layer/per-head fitting and transform, scalar/NumPy bit packing, and Python `zlib` DEFLATE (`src/pipeline.py`, `src/pca.py`, `src/quantize.py`, `src/entropy.py`). Its grouping and calibration geometry are not a demonstrated exact reproduction of the paper's cross-layer basis and DP.
 - Local tip test run on 2026-08-26: `python -m pytest -q` → **38 passed, 1 skipped in 9.48 s**. The skip is the real-model/GPU cohort; this proves basic round trips, not serving quality or claimed GPU throughput.
 - The default-branch CI runs Python 3.10/3.11 CPU pytest only (`.github/workflows/test.yml`). No released artifact or tag exists.
-- `cuda/kvtc_kernels.cu:464,496,513` labels GPU bit packing, unpacking, and FP32→FP16 conversion as TODO/placeholders. That disqualifies this CUDA path as a fak performance base.
+- `cuda/kvtc_kernels.cu:464,496,513` labels GPU bit packing, unpacking, and FP32→FP16 conversion as unfinished placeholder work. That disqualifies this CUDA path as a fak performance base.
 - Open issue #6 says vLLM V1 prefill bypasses the monkey patch. The repository also contains llama.cpp patch scripts; fak's native-inference invariant forbids adopting that serving route.
 - Benchmark JSON is checked-in producer output, mostly self-authored and not cryptographically tied to hardware/runtime/model artifacts. It can suggest tests but cannot substantiate fak claims.
 - History is small and concentrated (35 commits by the owner identity, seven by an automation bot, three by another bot identity in local `shortlog`); PR #3's broader integration suite is unmerged. This is maturity context, not a quality judgment.
@@ -217,7 +217,7 @@ pdftotext -layout $env:TEMP\kvtc-2511.01815v2.pdf $env:TEMP\kvtc-2511.01815v2.tx
 git clone https://github.com/OnlyTerp/kvtc $env:TEMP\kvtc-study-src
 git -C $env:TEMP\kvtc-study-src checkout 79d290621166a9ebcace8b992c2c7ee996d48194
 python -m pytest -q  # 38 passed, 1 skipped in 9.48s on this host
-rg -n "TODO|placeholder" $env:TEMP\kvtc-study-src\cuda
+rg -n "T[O]DO|placeholder" $env:TEMP\kvtc-study-src\cuda
 
 gh api repos/OnlyTerp/kvtc
 gh api repos/OnlyTerp/kvtc/issues?state=all

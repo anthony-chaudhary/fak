@@ -7,11 +7,15 @@ description: "Reference documentation for Related-system inventory maps, preserv
 
 Machine-assisted maps in this directory are generated from pinned local checkouts with `fak study-inventory`.
 
+## What these maps are
+
 Each map is an inventory denominator for a deep `study-repo` pass. It records the local tree shape and explicitly names source classes that still require forge/API read-back or study-pass artifacts. A map is not a borrow decision and not proof that the study is complete.
 
 Registry rows must add external evidence for any source class the map marks `partial` or `external_required`. For `open_closed_issues_prs_discussions`, `inventory.forge_receipt_path` may point to a complete `fak study-forge capture` corpus or standalone `fak-studyforge-receipt/1` object. `fak study-monitor --inventory-check` validates that receipt against the registry repository and checked revision and requires complete receipts for issues, pulls, discussions, releases, labels, and milestones. The local map still reports the class as external; the receipt satisfies it alongside rather than rewriting local-tree coverage. Other external classes use `source_evidence`. Bare `source_classes` names are only acceptable when backed by a map status of `covered` or `checked_absent`.
 
 A forge corpus is a compact top-level index, not complete relational enrichment. Its receipt proves pagination through the six census endpoints at an explicit cutoff. Comments, reviews, review comments, timelines/events, and linked commits remain per-parent follow-up work, and separate endpoint traversals are not snapshot-atomic.
+
+## Current maps
 
 Current maps:
 

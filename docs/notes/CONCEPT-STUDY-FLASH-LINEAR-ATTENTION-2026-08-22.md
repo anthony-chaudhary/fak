@@ -234,7 +234,7 @@ Primary code and project sources, all observed 2026-08-22:
 - GDN operator exports and naive references: <https://github.com/fla-org/flash-linear-attention/tree/bc3b101dcb713ddc5bd8924b66754eb68b5ccf89/fla/ops/gated_delta_rule>;
 - GDN operating-envelope tests: <https://github.com/fla-org/flash-linear-attention/blob/bc3b101dcb713ddc5bd8924b66754eb68b5ccf89/tests/ops/test_gdn.py>;
 - benchmark registry, runner, and verifier: <https://github.com/fla-org/flash-linear-attention/tree/bc3b101dcb713ddc5bd8924b66754eb68b5ccf89/benchmarks/ops>;
-- release `v0.5.2`: <https://github.com/fla-org/flash-linear-attention/releases/tag/v0.5.2>;
+- release `v0.5.2`: <https://github.com/fla-org/flash-linear-attention/releases>;
 - open issues and RFCs: #1155, #1119, #1110, #1029, #872, #659, and #942 linked above.
 
 FAK sources and backlog were read from the current `main` checkout and GitHub state on

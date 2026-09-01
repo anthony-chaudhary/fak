@@ -46,7 +46,7 @@ intact (no edit since written)**. The deny is tamper-evident, not a log line.
   this CPU host and is never attributed to a fak action.
 
 No number crosses the WITNESSED/OBSERVED line; the packet inherits the
-[GLM52 results-doc fence](../../../../../docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md).
+[GLM52 results-doc fence](../../../../../../docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md).
 
 ## What this pilot does and does NOT establish
 

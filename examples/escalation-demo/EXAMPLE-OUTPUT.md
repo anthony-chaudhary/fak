@@ -5,6 +5,8 @@ The harness proposes a denied call, the kernel refuses it, and the harness escal
 along the policy's declared `safe_sink` — `transfer_to_human_agents` — carrying a redacted
 ticket. A `✓` means the step held. Reproduce: `./examples/escalation-demo/run.sh`.
 
+## The demo run
+
 ```
 fak kernel — human-in-the-loop escalation demo  kernel=http://127.0.0.1:8080  policy=customer-support-readonly-policy.json
   a denied call must not dead-end — it escalates along the policy's declared safe_sink
@@ -38,6 +40,8 @@ summary: escalation test passed  ·  deny → catch → route → redacted ticke
   policy's DECLARED safe_sink; the same redact_fields scrubbed the escalation payload, so
   a refused call became a graceful human handoff with no secret leaked.
 ```
+
+## Redaction happens in the harness, not the kernel
 
 Note that the original call carried `ssn` and `token` values; the ticket that reaches the
 human queue shows `[REDACTED]` for both. The kernel refuses a *denied* call before decoding

@@ -79,7 +79,7 @@ These are observation inputs, not support claims or dependencies:
 | MLX-LM | `v0.31.3` | `74e7cf931e84ef7c2f63e875adf414e20decc1c5` |
 
 Issue #9214 owns refreshing this ledger and deciding whether changed source evidence affects any phase. Historical campaign receipts retain their original revisions.
-The source study contains the architecture/tensor inventory and what-not-to-borrow decisions. The older [`qwen38-upstream-support-map-2026-08-26.md`](../research/qwen38-upstream-support-map-2026-08-26.md) covers dense Qwen3.8-27B and is not evidence for this architecture.
+The source study contains the architecture/tensor inventory and what-not-to-borrow decisions. The older [`qwen38-upstream-support-map-2026-08-26.md`](qwen38-upstream-support-map-2026-08-26.md) covers dense Qwen3.8-27B and is not evidence for this architecture.
 
 ## Operator queries
 

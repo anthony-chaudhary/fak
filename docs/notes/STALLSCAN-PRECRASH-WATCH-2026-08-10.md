@@ -10,11 +10,15 @@ conhost.exe --headless "$HOME\bin\fak.exe" stallscan --watch `
   --max-bytes 16777216
 ```
 
+## What the watcher records
+
 The 16 MiB bound is enforced by atomic newest-record retention. Every current
 record includes boot time, committed bytes/limit, available bytes, process and
 thread census, system handles, top holders, and the explainable stall verdict.
 After an unexpected reboot, compare the newest record whose `sample.boot_time`
 precedes the new boot with Windows Event 6008/Kernel-Power 41.
+
+## Install or repair the scheduled task
 
 Install or repair the task from an ordinary PowerShell session. The five-minute
 trigger is a self-heal for a watcher process that exits after logon; `IgnoreNew`
@@ -36,6 +40,8 @@ Register-ScheduledTask -TaskName FakStallscanWatch -Action $action `
   -Trigger @($logon,$selfHeal) -Settings $settings -Force
 Start-ScheduledTask FakStallscanWatch
 ```
+
+## Verify process state and effect
 
 Verify both process state and effect; a task result alone is ambiguous because a
 healthy running instance can refuse a periodic duplicate:

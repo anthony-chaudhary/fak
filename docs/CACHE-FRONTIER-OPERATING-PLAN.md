@@ -117,8 +117,7 @@ thin Track-1 `run` evidence and the missing Track-2 provider-dollar ledger.
 
 ## Decision fences
 
-- Quote the 50-turn x 5-agent win only with its baseline: **60.3x vs naive** and
-  **4.1x vs tuned per-agent KV** are different claims.
+- Quote the 50-turn x 5-agent win only with its baseline: **60.3x vs naive and 4.1x vs tuned per-agent KV** are different claims.
 - Do not turn Track-1 kernel reuse into Track-2 dollar savings. A dollar claim needs the
   provider/billing join.
 - Do not call O(1) context a quality win until the task-success or faithfulness witness is

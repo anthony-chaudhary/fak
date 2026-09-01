@@ -31,12 +31,12 @@ toolchain, never from a self-report.
 | `tests` | HARD | a non-trivial package (≥4 funcs) with no `_test.go` |
 | `ship_integrity` | HARD | a `dos review` RESIDUAL commit — a claim the diff can't witness |
 | `godoc` | SOFT | an undocumented exported symbol (advisory — anti-gaming) |
-| `hygiene` | SOFT | a `TODO/FIXME/HACK/XXX` marker (advisory — anti-gaming) |
+| `hygiene` | SOFT | a leftover marker comment (`HACK`, `XXX`, or the to-do/fix-me class — advisory, anti-gaming) |
 
 **Why two KPIs are SOFT.** The cheap way to move `godoc` or `hygiene` is *gaming,
-not quality*: doc-comment spam, or deleting a `// TODO` to hide a gap rather than
-close it — and this repo keeps an honest `[STUB]` ledger where a "TODO: implement"
-marker is a feature of that honesty. They score (a doc-poor or marker-heavy tree
+not quality*: doc-comment spam, or deleting a leftover to-do marker to hide a gap rather than
+close it — and this repo keeps an honest `[STUB]` ledger where an explicit "not yet
+implemented" marker is a feature of that honesty. They score (a doc-poor or marker-heavy tree
 grades lower) but never gate, so the loop is never rewarded for cosmetic churn.
 
 **The DOS grounding.** `ship_integrity` reads `dos review --json` and counts each

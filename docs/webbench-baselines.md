@@ -37,7 +37,7 @@ floor, no model)."* Reproduce it yourself:
 | Cost arm formulas (A/B/C) | Closed-form integer geometry | ✅ Correct |
 | CLI implementation | Code execution | ✅ Shipped |
 | WebVoyager task set | **643 tasks from official source** | ✅ Real dataset |
-| Prefill numbers | **8.8x – 9.7x vs the naive floor** | ⚙️ Modeled (no wall-clock) |
+| Prefill numbers | **8.8x – 9.7x vs the naive floor · 1.00x-1.10x vs tuned per-agent KV** | ⚙️ Modeled (no wall-clock) |
 | Mock-geometry legacy | 5 tasks, example.com | Legacy reference |
 
 **What this shows:** the CLI works and the prefill-token *work-elimination* a
@@ -186,7 +186,7 @@ agent, same task set, and logged token/cost artifacts.
 - Agent orchestration logic — that's LangChain, custom controllers
 
 **fak DOES compete with:**
-- Naive agent serving (re-send full context every turn) — **modeled 8.8x-9.7x less prefill work vs the naive floor**
+- Naive agent serving (re-send full context every turn) — **modeled 8.8x-9.7x less prefill work vs the naive floor · 1.00x-1.10x vs tuned per-agent KV**
 - Per-agent KV isolation (vLLM prefix caching per worker) — **modeled 1.00x-1.10x cross-worker gain at 1-8 workers**
 - Frontier prompt caches (append-only, no eviction) — **addressable eviction advantage**
 

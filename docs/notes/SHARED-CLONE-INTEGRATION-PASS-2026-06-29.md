@@ -32,7 +32,7 @@ the over-caution reaches for is already guaranteed by the commit mechanic.
 
 3. **Judge each unit on three axes.** Commit only when all three hold:
    - **Complete** — finished and coherent: tests present (or the change is
-     trivially correct), no `panic("not implemented")`, no stub, no TODO marking
+     trivially correct), no `panic("not implemented")`, no stub, no in-source marker of
      unfinished work. *"Builds" only proves it compiles, not that the feature is
      done* — never ship a mid-development unit.
    - **Self-contained** — no non-test file in the unit references a **new**

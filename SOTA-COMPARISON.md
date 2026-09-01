@@ -7,7 +7,7 @@
 
 | Aspect | SOTA Leaders | fak (Current) | fak (Potential) |
 |--------|--------------|---------------|------------------|
-| **Resolve Rate** | 72-77% | Not measured | TBD (needs real agent) |
+| **Resolve Rate** | 72-77% | Not measured | Not yet measured (needs real agent integration) |
 | **Cost Efficiency** | Prefix prompt-cached per session | **+ cross-worker/session reuse (~1.1–1.2× at 2-4 workers)** | Scales with shared-prefix fraction & workers |
 | **Cross-worker Reuse** | None (single-agent / single-instance) | **1.13-1.22x at 2-4 workers** | Scales with workers |
 | **Turn Tax** | Already reused via prompt cache | **KV persistence (≈ parity)** | Eliminated |

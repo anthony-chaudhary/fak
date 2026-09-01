@@ -59,7 +59,7 @@ fak la bloqueó 5/5.
 Revisa cada tool call *antes* de que se ejecute y reutiliza el trabajo compartido a lo largo
 de una sesión larga. Resultado: el mismo bucle de agente se vuelve **más seguro, más barato y
 más rápido**, sin reescritura. No reemplaza tu modelo — lo gobierna y lo cachea. **Qwen2/Qwen3
-y GLM-MoE** están probados bit-exact en el motor de referencia in-kernel; todo lo demás
+y GLM-MoE** están probados bit-exact en el motor de referencia in-kernel; el resto
 (DeepSeek, Mistral, cualquier modelo open-weights) se sirve por la interfaz compatible con
 OpenAI — vía Ollama / vLLM / SGLang / llama.cpp / LM Studio o cualquier API compatible con
 OpenAI.
@@ -68,7 +68,7 @@ OpenAI.
 
 En un run medido de **50 turnos × 5 agentes**, la mejora honesta frente a un stack warm-cache
 **afinado** es de **~4,1× menos trabajo**. Esa es la cifra de titular. El **~60×** (de unas
-**19 horas a unos 19 minutos**) es cierto **solo frente al patrón ingenuo** de reenviar todo
+**19 horas a unos 19 minutos**) es cierto **solo frente al patrón ingenuo** de reenviar el contexto completo
 en cada turno — nunca es el titular. La ganancia por reutilización es **solo en self-host** y
 aplica a flotas con mucha lectura. En euros y en las monedas locales de la región, esto es una
 palanca directa de coste y margen. Cada cifra está trazada a su commit y artefacto en
@@ -82,7 +82,7 @@ caché es decisión del provider, que fak relaya en lugar de afirmar.
 ## Instalar y hacia dónde seguir
 
 Sin tarjeta, sin factura transfronteriza, sin entidad legal — **Apache-2.0**, libre, self-host.
-`git clone` más `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` es todo el camino.
+`git clone` más `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` es el camino completo.
 
 - [README (la visión completa)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 - [START-HERE — un modelo local en 10 minutos](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)

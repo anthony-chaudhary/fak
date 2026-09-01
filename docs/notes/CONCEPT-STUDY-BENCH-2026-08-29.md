@@ -31,7 +31,7 @@ The P1-P4 checks resolve as: **P1** benchmark/evidence maintainers are the user;
 
 ## Scope, method, and completeness
 
-The pass covered committed source and documentation, architecture, runtime paths, tests and fixtures, history/tags/releases, forge state, roadmap/TODO evidence, license provenance, FAK self-query, candidate disposition, deduplication, issue filing, and durable receipt registration. Architecture and methodology reads were delegated as bounded sidecars and independently reconciled against the pinned checkout by the coordinator.
+The pass covered committed source and documentation, architecture, runtime paths, tests and fixtures, history/tags/releases, forge state, roadmap and unfinished-work-marker evidence, license provenance, FAK self-query, candidate disposition, deduplication, issue filing, and durable receipt registration. Architecture and methodology reads were delegated as bounded sidecars and independently reconciled against the pinned checkout by the coordinator.
 
 The mechanical inventory at `docs/research/inventory/anthony-chaudhary-benchmark.json` reports 9,516 files, 986 directories, 4,862,125,342 bytes, 2,758 runtime files, 1,102 test files, 1,282 documentation files, and 1,847,800 text lines across 44 immediate subsystem groups. Those totals are a **mechanical local-tree denominator, not project-owned source totals**: the checkout includes `.venv-test` and other broad material, while enumerated dependency/cache/control directories are skipped. Forge state, FAK self-query, the candidate matrix, and issue tracking are attached through the monitored-repository evidence rather than inferred from the filesystem census.
 

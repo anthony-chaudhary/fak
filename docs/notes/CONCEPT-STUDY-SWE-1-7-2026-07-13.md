@@ -26,6 +26,6 @@ Both restate an SWE-1.7 **trained-reward** discipline as a **fak structural witn
 
 ## Related passes
 
-Same genre as the [colibri](docs/notes/CONCEPT-STUDY-COLIBRI-2026-07-11.md), [Dynamo](docs/notes/CONCEPT-STUDY-DYNAMO-2026-07-08.md), and [deepagents](docs/notes/CONCEPT-STUDY-DEEPAGENTS-2026-07-10.md) study-repo passes. Companion skills: `.claude/skills/field-borrow`, `.claude/skills/sota-check`.
+Same genre as the [colibri](CONCEPT-STUDY-COLIBRI-2026-07-11.md), [Dynamo](CONCEPT-STUDY-DYNAMO-2026-07-08.md), and [deepagents](CONCEPT-STUDY-DEEPAGENTS-2026-07-10.md) study-repo passes. Companion skills: `.claude/skills/field-borrow`, `.claude/skills/sota-check`.
 
 _Witness is lexical + a 2026-07-13 snapshot; re-witness before acting._

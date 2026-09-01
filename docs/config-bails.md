@@ -103,7 +103,7 @@ site. `TestConfigBailReasonsAreEmitted` (`cmd/fak/bail_test.go`) holds that
 property: a reason with a plan but no site fails the build unless it is
 explicitly declared in `pendingBailWiring` with the site it is waiting on. So a
 reason cannot quietly ship as a recovery for a refusal fak never makes, and a
-deliberate gap has to be written down rather than discovered later.
+deliberate gap has to be recorded rather than discovered later.
 
 | Reason | Cause | Where it fires |
 |---|---|---|

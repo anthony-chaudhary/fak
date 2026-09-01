@@ -3,6 +3,8 @@
 `python examples/autogen-groupchat/groupchat_demo.py`, run from the repository root with
 no arguments and no environment overrides (the dependency-free local-evaluator path):
 
+## The demo run
+
 ```text
 == Part 1: every group-chat tool call passes the capability floor ==
 verdict source: local policy.json evaluator
@@ -36,6 +38,8 @@ verdict source: local policy.json evaluator
 
 summary: PASS
 ```
+
+## Exit code and the kernel cross-check
 
 Exit code: `0`.
 

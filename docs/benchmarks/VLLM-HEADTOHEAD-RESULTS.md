@@ -6,7 +6,7 @@ description: "How fak measures itself against vLLM as a first-class peer: a gate
 # VLLM-HEADTOHEAD-RESULTS — fak vs vLLM, measured the same way SGLang is
 
 > **Status: pending-measurement (GATED scaffold).** No vLLM GPU run has landed yet.
-> **Every numeric cell in the vLLM tables below is a placeholder (`TBD`)** and stays
+> **Every numeric cell in the vLLM tables below is a placeholder (`not yet`)** and stays
 > that way until a run on a serving node writes a committed artifact under
 > `experiments/vllm/` or `experiments/benchmark/runs/`. The only real *vLLM-comparison*
 > numbers in this document are the **measured SGLang sibling's** (§4), and they are fenced
@@ -76,9 +76,9 @@ regime, and the table must be read with that disclosure.
 
 | Engine | Backend / precision | prefill tok/s | decode tok/s |
 |---|---|---|---|
-| llama.cpp | llama.cpp CUDA / Q8_0 | TBD | TBD |
-| **vLLM** | vLLM PagedAttention / bf16 (aggregate) | n/a (server) | TBD |
-| fak-cuda | fak CUDA backend / f32 | TBD | TBD |
+| llama.cpp | llama.cpp CUDA / Q8_0 | not yet | not yet |
+| **vLLM** | vLLM PagedAttention / bf16 (aggregate) | n/a (server) | not yet |
+| fak-cuda | fak CUDA backend / f32 | not yet | not yet |
 
 Artifacts (pending): a run dir under `experiments/benchmark/runs/by-machine/<machine>/`
 with `result.json` carrying a `vllm` engine row.
@@ -94,8 +94,8 @@ the **tax** as a delta:
 
 | Metric | raw vLLM | fak-fronts-vLLM | tax |
 |---|---|---|---|
-| median latency (s) | TBD | TBD | TBD |
-| median decode tok/s | TBD | TBD | TBD |
+| median latency (s) | not yet | not yet | not yet |
+| median decode tok/s | not yet | not yet | not yet |
 
 fak is **expected to trail** (tax ≥ 1) — the witness records the tax so a *regression* in it
 can be caught against a recorded baseline (KEEP/REVERT, like `tools/bench_witness.py`); it
@@ -105,7 +105,7 @@ can be caught against a recorded baseline (KEEP/REVERT, like `tools/bench_witnes
 ### 3a. The on-host adjudication-overhead FLOOR (GPU-free, MEASURED — [#451](https://github.com/anthony-chaudhary/fak/issues/451))
 
 The §3 table above is the *end-to-end network* tax — it needs a live vLLM serving node and
-stays `TBD` until one runs. But a provider weighing the drop-in does not have to wait for a
+stays `not yet` until one runs. But a provider weighing the drop-in does not have to wait for a
 GPU to learn the **lower bound** of what fronting their engine with `fak serve` costs: the
 per-call overhead fak's adjudication plane adds **before any byte crosses the wire**. That
 floor is measurable on any laptop, today, with no model and no GPU — and it is published here
@@ -135,7 +135,7 @@ does not creep as a provider registers more policy.
   [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) is the realistic per-call cost
   fak adds before the engine runs; the `~0.55 ns` zero-alloc fold is the registry-read
   *component* of it that the issue names. None of these three numbers is the vLLM end-to-end
-  tax — that stays `TBD` (§3) until a serving-node run lands an artifact.
+  tax — that stays `not yet` (§3) until a serving-node run lands an artifact.
 
 Reproduce (any host, ~3 s):
 
@@ -241,7 +241,7 @@ similarly and is **to be measured, not assumed**.
   tool-call parser / `--enable-auto-tool-choice` for the served model, or the agent sees no
   `tool_calls`. This is a config item to verify on the run, not a settled value.
 - **No fabricated numbers.** Until a serving-node run lands a committed artifact, every vLLM
-  cell stays `TBD`. The SGLang numbers in §4 are the SGLang stack's, fenced and labelled.
+  cell stays `not yet`. The SGLang numbers in §4 are the SGLang stack's, fenced and labelled.
 
 ## 6. Reproduce (run on a serving node)
 

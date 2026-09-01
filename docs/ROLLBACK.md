@@ -17,7 +17,7 @@ Reach for the cheapest layer that fixes your problem. Most incidents stop at lay
 | 1. Revert the commit | a specific bad commit is on the trunk | `git revert <sha>` |
 | 2. Quarantine a bad published release | a `vX.Y.Z` release failed post-publish verification | mark the release prerelease + non-latest |
 | 3. Downgrade to a stable tag | the trunk is unstable; you need a known-good build | `git checkout v0.31.0` |
-| 4. Pin a stable version | a fleet should hold a version and not auto-upgrade | `FAK_APP_VERSION=0.31.0` |
+| 4. Pin a stable version | a fleet should hold a version and not auto-upgrade | `FAK_APP_VERSION=0.45.0` |
 | 5. Revert measured state | a KPI / scorecard regressed | the keep/revert ladder + a re-pin |
 
 ## 1. Revert the commit (the trunk default)
@@ -69,8 +69,8 @@ gh release delete "$TAG" --cleanup-tag --yes
 For consumers, immediately point both install paths at the last-good tag:
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@v0.31.0
-export FAK_VERSION=0.31.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@vX.Y.Z   # the last-good tag
+export FAK_VERSION=X.Y.Z                                     # the same last-good version
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
@@ -103,10 +103,10 @@ To **pin a stable version** for a fleet — hold it on a known-good build and no
 trunk — set the version explicitly. `internal/appversion.Current()` resolves in this order, so
 any of these pins the answer:
 
-1. `FAK_APP_VERSION=0.31.0` in the environment (highest precedence; the simplest **pin to v0.31.0**).
-2. A release build's `-ldflags "-X …/internal/appversion.BuildVersion=0.31.0"`.
-3. The release tag Go records inside the binary: `go install github.com/anthony-chaudhary/fak/cmd/fak@v0.31.0`
-   reports `0.31.0` wherever that binary runs, with no environment or checkout needed.
+1. `FAK_APP_VERSION=0.45.0` in the environment (highest precedence; the simplest **pin to v0.45.0**).
+2. A release build's `-ldflags "-X …/internal/appversion.BuildVersion=0.45.0"`.
+3. The release tag Go records inside the binary: `go install github.com/anthony-chaudhary/fak/cmd/fak@vX.Y.Z`
+   reports `X.Y.Z` wherever that binary runs, with no environment or checkout needed.
 4. A `VERSION` file found by walking up from the **executable's own directory** (pin by running
    a binary that lives in a checkout held on a tag).
 

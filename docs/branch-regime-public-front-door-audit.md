@@ -23,7 +23,7 @@ keeps two meanings alive:
 ## Regeneration Commands
 
 ```bash
-rg -n "github\\.com/anthony-chaudhary/fak/(blob|tree)/main|raw\\.githubusercontent\\.com/anthony-chaudhary/fak/main|badge\\.svg\\?branch=main|go install github\\.com/anthony-chaudhary/fak/cmd/fak@(latest|main|master)|git (fetch|merge|push) origin[/ ](main|master)|origin/(main|master)" README.md INSTALL.md GETTING-STARTED.md START-HERE.md AGENTS.md CONTRIBUTING.md .github/copilot-instructions.md docs/integrations docs/fak/deployment-guide.md
+rg -n "github\\.com/anthony-chaudhary/fak/(blob|tree)/main|raw\\.githubusercontent\\.com/anthony-chaudhary/fak/main|badge\\.svg\\?branch=main|go install github\\.com/anthony-chaudhary/fak/cmd/fak@(latest|main|master)|git (fetch|merge|push) origin([/]|\s)(main|master)|origin/(main|master)" README.md INSTALL.md GETTING-STARTED.md START-HERE.md AGENTS.md CONTRIBUTING.md .github/copilot-instructions.md docs/integrations docs/fak/deployment-guide.md
 go test ./internal/branchrole -run TestPublicDocRefsCurrentTreeClassified -count=1
 ```
 

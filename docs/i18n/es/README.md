@@ -54,7 +54,7 @@ fak manage claude      # envuelve tu agente existente en un solo comando
   [BENCHMARK-AUTHORITY](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 - **Apache-2.0, sin fricción de compra.** fak es libre, open source y self-hosted — sin
   contrato con proveedor, sin tarjeta, sin pago transfronterizo, sin cuenta. `git clone` y
-  `go install` son todo el camino.
+  `go install` son el camino completo.
 - **Un binario estático, cero dependencias externas.** Ops simples para un equipo pequeño —
   sin sidecar, sin authorizer aparte. Del portátil a la flota, el mismo artefacto; añades
   flags, no componentes.
@@ -83,7 +83,7 @@ go build -o fak ./cmd/fak
 ## Con tu modelo
 
 fak no reemplaza tu modelo — lo gobierna y lo cachea. **Qwen2/Qwen3 y GLM-MoE** están
-probados bit-exact en el motor de referencia in-kernel; todo lo demás (Mistral, DeepSeek,
+probados bit-exact en el motor de referencia in-kernel; el resto (Mistral, DeepSeek,
 cualquier modelo open-weights) se sirve por la interfaz compatible con OpenAI — vía Ollama /
 vLLM / SGLang / llama.cpp / LM Studio o cualquier API compatible con OpenAI.
 

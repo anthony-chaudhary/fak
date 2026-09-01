@@ -58,7 +58,7 @@ cobram em dólares, menos trabalho é uma alavanca direta de margem.
 ## Q6. Quais modelos funcionam?
 
 **Qwen2/Qwen3 e GLM-MoE** são comprovadamente bit-exact no motor de referência
-in-kernel. Todo o resto (DeepSeek, Mistral, qualquer modelo de pesos abertos) entra
+in-kernel. O restante (DeepSeek, Mistral, qualquer modelo de pesos abertos) entra
 pela interface compatível com OpenAI: Ollama / vLLM / SGLang / llama.cpp / LM Studio
 ou qualquer API compatível com OpenAI.
 

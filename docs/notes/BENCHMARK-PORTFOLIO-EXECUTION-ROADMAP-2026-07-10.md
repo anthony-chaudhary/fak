@@ -89,7 +89,7 @@ raw arm and the fak arm.
 | Lane | Epic / issue | Residual |
 |---|---|---|
 | GLM-5.2 fak-kernel cache-value | **#1010 OPEN (3/4)**, open child **#1012** | GPU-server replay capturing `kv_prefix.reused_tokens` on a solved ticket. Observation seam shipped (`52dfea0d`). |
-| Memory benchmark matrix | **#2236 / #2244 OPEN** | every fak cell `TBD`; matrix not run (rung R1, mechanism-in-code) |
+| Memory benchmark matrix | **#2236 / #2244 OPEN** | every fak cell unfilled; matrix not run (rung R1, mechanism-in-code) |
 | FrontierSWE TTS | #1721 | GATED — no number until official grader + score-parity |
 
 ---

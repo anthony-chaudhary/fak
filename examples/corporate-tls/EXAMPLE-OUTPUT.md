@@ -10,6 +10,8 @@ this host really does carry an AWS profile. On a host without one that list is j
 `CLAUDE_CODE_USE_BEDROCK` — the refusal is identical either way, and `Observed`
 prints variable NAMES only, never values.
 
+## The full witness run
+
 ```console
 $ FAK_BIN=./fak examples/corporate-tls/run.sh
 == 1/7  a clean host: the check is silent ==
@@ -126,6 +128,8 @@ corporate-tls: PASS
   cannot silently absorb — a bundle that will not load, and a request-signed cloud
   route — were refused at launch with a token, a check, and a recovery plan.
 ```
+
+## What was elided from the capture
 
 Elided from witnesses 4–6 above: each `fak guard` invocation also prints its
 `fak guard: response-profile {…}` JSON block before the gate runs. It is unrelated

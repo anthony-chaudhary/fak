@@ -34,7 +34,7 @@ the commit touched)` — so the demo is deterministic and CI-usable. `dos` is a 
 Python wheel; install it once:
 
 ```bash
-pip install dos-kernel==0.29.0   # pinned; the bare `dos` package is an unrelated squatter, the name is `dos-kernel`
+pip install "dos-kernel>=0.29"   # compatibility floor; the bare `dos` package is an unrelated squatter, the name is `dos-kernel`
 ```
 
 ## Run it

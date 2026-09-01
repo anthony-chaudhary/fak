@@ -110,7 +110,7 @@ accuracy number the repo never measured. Running it requires live model access a
 research shows model capability dominates the format effect) — not feasible in this background
 session.
 
-**Methodology a follow-on would run** (so the gap is a checkable next step, not a vague TODO):
+**Methodology a follow-on would run** (so the gap is a checkable next step, not a vague marker):
 
 1. For each family, author a small held answer key: N retrieval questions with exact expected
    answers (e.g. "the `dir` of the `toon` leaf", "the count of `guard.reasons`").

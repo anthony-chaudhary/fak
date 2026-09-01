@@ -17,7 +17,7 @@ Centrality: **Enabling**. P1: profile owns repeated support setup. P2: compare a
 - Date: 2026-08-15 (America/Los_Angeles)
 - Host: Windows
 - Target module: `example.test/support-harness`
-- Pin: `github.com/anthony-chaudhary/fak@v0.43.1-0.20260814184635-613a82b762e2`
+- Pin: `github.com/anthony-chaudhary/fak` pseudo-version `v0.43.1-0.20260814184635-613a82b762e2`
 - Contract: `v1alpha1`
 
 ## Commands and result

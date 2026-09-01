@@ -91,7 +91,7 @@ detector. Em testes ao vivo, a prompt injection atingiu a baseline desprotegida 
 ## 4. Com o seu modelo
 
 fak governa e faz cache do seu modelo; não o substitui. **Qwen2/Qwen3 e GLM-MoE** são comprovadamente
-bit-exact no motor de referência in-kernel. Todo o resto (DeepSeek, Mistral, qualquer modelo de open-weights)
+bit-exact no motor de referência in-kernel. O restante (DeepSeek, Mistral, qualquer modelo de open-weights)
 conecta pela wire compatível com OpenAI: Ollama / vLLM / SGLang / llama.cpp / LM Studio ou qualquer API
 compatível com OpenAI.
 

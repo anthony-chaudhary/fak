@@ -125,7 +125,7 @@ below):
   kernels; sm_80 uses the software-emulated FP8 path (correct, not HW-accelerated).
   V4-Flash GGUFs (UD-IQ3_XXS ≈103 GB → UD-Q8_K_XL ≈162 GB) fit **resident** on
   8×A100-80 GB (640 GB) — no CPU-offload floor like GLM-5.2's 466 GB. The turnkey
-  harness is [`tools/deepseekv4_stage_serve_the Ampere GPU server.sh`](../../tools/deepseekv4_stage_serve_the Ampere GPU server.sh)
+   harness is [`tools/deepseekv4_stage_serve_gpu_server.sh`](../../tools/deepseekv4_stage_serve_gpu_server.sh)
   (self-stages the GGUF, builds the fork at sm_80 with the required
   `GGML_SCHED_MAX_SPLIT_INPUTS=128`, serves, and records a three-rung on-box wire
   witness). This does **not** replace the deferred fak-native V4 kernel track

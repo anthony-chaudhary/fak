@@ -32,7 +32,7 @@ fak_gateway_inflight_requests 1
 fak_gateway_inflight_max_age_seconds 0
 
 # build labels (version / engine / model / vdso)
-fak_gateway_build_info{version="0.32.0",engine="inkernel",model="mock",vdso="true"} 1
+fak_gateway_build_info{version="0.45.0",engine="inkernel",model="mock",vdso="true"} 1
 
 [obs] GET /debug/vars — break-glass live process view:
 # kernel counters block

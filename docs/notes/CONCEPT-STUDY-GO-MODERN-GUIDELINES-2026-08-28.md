@@ -90,9 +90,9 @@ Default frontier: keep FAK's kernel-owned skill paging/version/digest model. Cov
 
 ## Completeness and limits
 
-The deep fan-out opened every one of the 29 tracked files and all 54 rules/63 examples; deepened and read all 25 commits and all refs/tags; exhausted all 12 issues and all 12 PRs including comments, reviews, inline threads, and timelines; checked releases, discussions, wiki, roadmap/RFC/ADR/TODO, license, NOTICE, contributions, submodules, vendoring/generated provenance, and the FAK seams. No load-bearing source/content/validation subsystem remains unopened.
+The deep fan-out opened every one of the 29 tracked files and all 54 rules/63 examples; deepened and read all 25 commits and all refs/tags; exhausted all 12 issues and all 12 PRs including comments, reviews, inline threads, and timelines; checked releases, discussions, wiki, roadmap/RFC/ADR/unfinished-work-marker, license, NOTICE, contributions, submodules, vendoring/generated provenance, and the FAK seams. No load-bearing source/content/validation subsystem remains unopened.
 
-Discussions are disabled. No releases, milestones, wiki content, RFC/ADR/roadmap/TODO files, submodules, vendor tree, generated markers, or NOTICE exist. GitHub Projects is enabled, but ProjectsV2 could not be enumerated because the token lacks `read:project`; that is an unavailable surface, not proof that no board exists.
+Discussions are disabled. No releases, milestones, wiki content, RFC/ADR/roadmap/unfinished-work-marker files, submodules, vendor tree, generated markers, or NOTICE exist. GitHub Projects is enabled, but ProjectsV2 could not be enumerated because the token lacks `read:project`; that is an unavailable surface, not proof that no board exists.
 
 Refresh on a new upstream commit/tag/release, any correctness-cluster disposition, a new semantic-conformance path, or a changed FAK skill-runtime/modern-Go frontier. This note does not claim the four FAK issues are implemented.
 

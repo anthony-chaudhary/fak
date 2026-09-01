@@ -63,7 +63,8 @@ docker run --rm -p 7860:7860 fak-hf-demo
 
 The build git-clones the public repo and compiles the three binaries from source, so
 this image is reproducible from just `Dockerfile` + `app.py` + this README. Pin a release
-with `--build-arg FAK_REF=v0.37.0`.
+with `--build-arg FAK_REF=<release-tag>` — the newest published tag at the time of writing
+is `v0.44.0`.
 
 ## More
 

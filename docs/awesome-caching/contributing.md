@@ -49,7 +49,7 @@ tokenizer choice, batching), it belongs in
 3. **Write one line**, this shape:
 
    ```md
-   - **[Name](link)** — one-sentence self-description, in the concept's own words. TAG
+   - **[Name](https://example.com/concept)** — one-sentence self-description, in the concept's own words. TAG
    ```
 
 4. **Tag fak status honestly** (the load-bearing part):

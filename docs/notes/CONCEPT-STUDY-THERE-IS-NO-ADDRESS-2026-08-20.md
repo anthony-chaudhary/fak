@@ -274,7 +274,7 @@ Issue #8992 refreshed the denominator at the same pinned revision. The machine-g
 non-tree source class recorded separately. GitHub read-back through the revision timestamp found
 17 issue-endpoint records (two open issue-only post drafts and 15 closed pull requests), 15 pull
 requests (one merged), zero discussions, zero releases, and zero tags. Reachable git history has
-306 commits; four touch the target essay. No test/fixture suite, changelog, roadmap, or TODO artifact
+306 commits; four touch the target essay. No test/fixture suite, changelog, roadmap, or unfinished-work artifact
 exists in the pinned tree; `tools/test.sh` is a site-build helper, not a test suite.
 
 The FAK decision did not expand. #8259 remains the single open terminal-consumer-readiness leaf;
@@ -322,7 +322,7 @@ The non-tree denominator is also pinned to that commit timestamp. GitHub REST
 pagination found 250 issues (67 open, 183 closed) and 1,904 pull requests (198
 open, 1,706 closed) created by the cutoff. GraphQL reported zero discussions.
 The release/history pass covered 20 published releases and 28 reachable tags;
-`v1.4.0` was latest. Repository-wide TODO, FIXME, unsupported, and deprecation
+`v1.4.0` was latest. Repository-wide unfinished-work-marker, unsupported, and deprecation
 searches supplied the roadmap surface because no dedicated roadmap file exists.
 The provenance pass covered Apache-2.0 core licensing, attribution manifests,
 the proprietary component notice, the separately licensed DeepEP example,

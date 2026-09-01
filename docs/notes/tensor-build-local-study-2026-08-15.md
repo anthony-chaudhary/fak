@@ -49,7 +49,7 @@ The non-tree audit is explicit in the map's `non_tree_study` block:
 
 - **History, changelog, and releases:** `CHANGELOG.md` is indexed. The snapshot is uncommitted inside an unrelated enclosing checkout, so source Git history, release history, and blame cannot be attributed to TensorBuild.
 - **Issues, PRs, and discussions:** templates exist, but no trustworthy forge identity is recoverable with the available credentials. Open/closed issues, pull requests, discussions, and releases therefore remain unavailable, not silently treated as empty.
-- **Roadmap/TODOs:** no dedicated roadmap or TODO path exists. Prose future-work mentions were sampled, but are not promoted to a canonical roadmap.
+- **Roadmap and unfinished-work markers:** no dedicated roadmap or unfinished-work-marker path exists. Prose future-work mentions were sampled, but are not promoted to a canonical roadmap.
 - **License and provenance:** module manifests are present, but no repository `LICENSE`, `COPYING`, or `NOTICE` file exists. They establish module/dependency provenance, not permission to copy TensorBuild source; this study remains **concepts only**.
 - **FAK self-query and dedupe:** three replayable `fak capabilities` queries and the source/issue checks behind the candidate matrix are recorded in the map. The refresh found no novel unowned borrow. #6874 is now closed; #6875 and #6876 remain the open owners.
 - **Completeness critic:** the map records every skipped tree, the raw-versus-indexed denominator, all unavailable non-tree surfaces, the candidate dispositions, and issue tracking. The largest residual uncertainty is provenance: without source history or a license, code transfer remains out of scope.

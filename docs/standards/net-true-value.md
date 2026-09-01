@@ -31,8 +31,8 @@ can't answer one of the first five is `not yet`, not a result.
    answers nothing until you say *than what*. The honest baseline is the best practice a
    competent operator already runs, not the naive thing they'd never ship. When you cite
    the easy baseline, cite the hard one beside it and lead with the hard one: fak's fleet
-   reuse is **60.3× vs naive re-send-everything** *and* **4.1× vs a tuned warm-cache
-   stack** — the 4.1× is the headline; the 60.3× must never be quoted as the serving win.
+   reuse is **60.3× vs naive re-send-everything and 4.1× vs a tuned warm-cache stack** —
+   the 4.1× is the headline; the 60.3× must never be quoted as the serving win.
 
 2. **Net — after the cost the change itself adds.** A cache that is a win on reuse is a
    *loss* on single use. A quantization that saves bandwidth can cost accuracy. A saved

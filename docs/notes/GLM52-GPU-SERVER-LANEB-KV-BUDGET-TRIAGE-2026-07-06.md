@@ -206,7 +206,7 @@ one. Keep the llama.cpp engine-honest baseline separate from any pure-fak number
 - Ceiling + lever map:
   [`GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md`](GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md)
   (§1 — ~206 GiB free VRAM; Ceiling B — aggregate ~11–14k tok/s COMPUTED)
-- Sibling triages: [`GLM52-GPU server-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md`](GLM52-GPU server-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md)
+- Sibling triages: [`GLM52-GPU-SERVER-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md`](GLM52-GPU-SERVER-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md)
   · [`GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md`](GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md)
 - MLA cache shape: [`GLM52-DSA-PROJECTIONS-ON-PURE-KERNEL-GPU-SERVER-2026-06-22.md`](GLM52-DSA-PROJECTIONS-ON-PURE-KERNEL-GPU-SERVER-2026-06-22.md)
   · `internal/model/synthetic.go` · `internal/model/paged_hal.go`

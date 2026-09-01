@@ -34,7 +34,7 @@ This is an **Enabling** study.
 
 - Observed at: 2026-08-18.
 - Pinned main: [`llm-d/llm-d@48fa8c0`](https://github.com/llm-d/llm-d/tree/48fa8c0a76012038c76f30936fff9727c2e6909d), committed 2026-08-18.
-- Latest release observed: [`v0.9.0`](https://github.com/llm-d/llm-d/releases/tag/v0.9.0), published 2026-08-17; its peeled commit is `3291bca445be5bd309387fa78cc24f487f07003d`.
+- Latest release observed: [`v0.9.0`](https://github.com/llm-d/llm-d/releases), published 2026-08-17; its peeled commit is `3291bca445be5bd309387fa78cc24f487f07003d`.
 - Repository state observed: 4,051 stars and 686 forks. GitHub showed 202 open issues and a last push at `2026-08-18T18:05:57Z`. These numbers show adoption and activity. Quality requires separate evidence.
 - License: root Apache-2.0 at
   [`LICENSE@48fa8c0`](https://github.com/llm-d/llm-d/blob/48fa8c0a76012038c76f30936fff9727c2e6909d/LICENSE).
@@ -194,7 +194,7 @@ measured FAK-specific demand changes the boundary.
 ## Source trail
 
 - [llm-d pinned tree](https://github.com/llm-d/llm-d/tree/48fa8c0a76012038c76f30936fff9727c2e6909d)
-- [v0.9.0 release](https://github.com/llm-d/llm-d/releases/tag/v0.9.0)
+- [v0.9.0 release](https://github.com/llm-d/llm-d/releases)
 - [Architecture](https://github.com/llm-d/llm-d/blob/48fa8c0a76012038c76f30936fff9727c2e6909d/docs/architecture/README.md)
 - [EPP scheduling](https://github.com/llm-d/llm-d/blob/48fa8c0a76012038c76f30936fff9727c2e6909d/docs/architecture/core/router/epp/scheduling.md)
 - [EPP flow control](https://github.com/llm-d/llm-d/blob/48fa8c0a76012038c76f30936fff9727c2e6909d/docs/architecture/core/router/epp/flow-control.md)

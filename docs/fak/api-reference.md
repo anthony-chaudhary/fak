@@ -598,7 +598,7 @@ authenticated gateway). Returns:
 
 ### `GET /metrics`
 
-Prometheus exposition format (`text/plain; version=0.0.4`): HTTP request histograms,
+Prometheus exposition format (media type `text/plain`, format version `0.0.4`): HTTP request histograms,
 kernel operation counters (submits, vDSO hits, denies, transforms, quarantines,
 admits), startup-phase gauges, and more. `405` on a non-GET method. The full metric
 catalog with captured output is in [observability.md](observability.md).

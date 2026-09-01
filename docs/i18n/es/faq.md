@@ -47,13 +47,13 @@ bloque técnico; no es asesoría legal. Detalles:
 ## Q4. ¿Cuánto cuesta? ¿De verdad es gratis?
 
 **Apache-2.0**, libre, self-host. Sin tarjeta de crédito, sin factura transfronteriza (ni en
-EUR ni en tu moneda local), sin entidad legal. `git clone` más `go install` es todo el camino.
+EUR ni en tu moneda local), sin entidad legal. `git clone` más `go install` es el camino completo.
 
 ## Q5. ¿Cuánto más barato o más rápido es?
 
 En un run medido de 50 turnos × 5 agentes, **~4,1× menos trabajo** que un stack warm-cache
 afinado (*tuned*). La cifra de **~60×** (de unas 19 horas a unos 19 minutos) solo se cumple
-**frente a un bucle ingenuo que reenvía todo** — nunca como titular. La ganancia por
+**frente a un bucle ingenuo que reenvía el contexto completo** — nunca como titular. La ganancia por
 reutilización es **self-host únicamente**, para flotas con carga de lectura intensiva. En la
 práctica: cada token que no reenvías es margen que no pagas, en EUR o en tu moneda local.
 fak **garantiza** que el prefijo cacheado sea byte-idéntico; que el provider reutilice esa
@@ -63,8 +63,8 @@ respaldada en
 
 ## Q6. ¿Qué modelos funcionan?
 
-**Qwen2/Qwen3 y GLM-MoE** están probados bit-exact en el motor de referencia in-kernel. Todo
-lo demás (DeepSeek, Mistral, cualquier modelo open-weights) se sirve por la interfaz compatible
+**Qwen2/Qwen3 y GLM-MoE** están probados bit-exact en el motor de referencia in-kernel. El resto
+(DeepSeek, Mistral, cualquier modelo open-weights) se sirve por la interfaz compatible
 con OpenAI: Ollama / vLLM / SGLang / llama.cpp / LM Studio o cualquier API compatible con OpenAI.
 
 ## Q7. ¿Cómo detiene el prompt injection?

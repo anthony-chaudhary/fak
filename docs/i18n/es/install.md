@@ -99,18 +99,18 @@ proteger 5/5; fak la aisló 5/5.
   elijas, sin ninguna ruta de «reenviado por defecto a un tercer país» que analizar. El
   registro de auditoría append-only encadenado por hash es el bloque técnico que un audit del
   Reglamento de IA de la UE pide. Sin tarjeta, sin factura transfronteriza, sin entidad
-  legal: `git clone` y `go install` son todo el camino.
+  legal: `git clone` y `go install` son el camino completo.
 - **El precio del token es una palanca de margen, en euros y en moneda local.** fak reutiliza
   el trabajo compartido de las sesiones largas: en un run de 50 turnos × 5 agentes, **~4,1×
   menos trabajo** que un stack warm-cache afinado. (La cifra de ~60×, de unas 19 horas a unos
-  19 minutos, solo es cierta frente al patrón ingenuo de reenviar todo; nunca es el titular.)
+  19 minutos, solo es cierta frente al patrón ingenuo de reenviar el contexto completo; nunca es el titular.)
   La reutilización es **solo en self-host** y aplica a flotas con mucha lectura. fak mantiene
   el prefijo cacheado idéntico byte por byte mientras descarta los turnos intermedios viejos,
   así que el descuento de prompt-cache del provider sobrevive — fak **garantiza** la identidad
   byte a byte del prefijo; que el provider reutilice la caché es decisión del provider, que
   fak transmite en lugar de afirmar.
 - **fak gobierna y cachea tu modelo; no lo reemplaza.** **Qwen2/Qwen3 y GLM-MoE** están
-  probados bit-exact en el motor de referencia in-kernel; todo lo demás (DeepSeek, Mistral,
+  probados bit-exact en el motor de referencia in-kernel; el resto (DeepSeek, Mistral,
   cualquier modelo open-weights) se sirve por la interfaz compatible con OpenAI — vía Ollama /
   vLLM / SGLang / llama.cpp / LM Studio o cualquier API compatible con OpenAI.
 

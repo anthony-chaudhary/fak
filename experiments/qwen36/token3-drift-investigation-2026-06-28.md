@@ -233,8 +233,8 @@ post-`rmsNormGatedInPlace` (`qwen35_linear_step_recurrent` / `_gated_norm`), and
 op labels, so the per-op localization needs no new structure, only a write.
 
 **This doc does not add the tap** (DESIGN only; the trunk forward stays
-unchanged). The tap is the named follow-on `#<TBD> qwen35 FAK_HIDDEN_TAP per-layer
-hidden dump`.
+unchanged). The tap is the named follow-on `qwen35 FAK_HIDDEN_TAP per-layer
+hidden dump` (issue to be filed).
 
 ### 3c — The comparison + first-divergence finder (unit-testable HERE)
 A small comparator (`cmd/` tool or a `_test.go`) loads both layer dumps and computes:

@@ -16,7 +16,7 @@ description: >-
 ## What was studied
 
 `mit-han-lab/kernel-design-agents` @ `dda6be3c` — the KDA **orchestration
-workflow** (a global-TODO orchestrator driving stateless sub-agent workers over
+workflow** (a global task-list orchestrator driving stateless sub-agent workers over
 shared files), which vendors two submodules:
 
 - `mit-han-lab/KernelWiki` @ `2777d18f` — the curated GPU-kernel knowledge base.

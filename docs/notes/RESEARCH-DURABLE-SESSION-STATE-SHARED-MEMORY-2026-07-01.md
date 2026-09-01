@@ -113,7 +113,7 @@ compute](https://arxiv.org/abs/2504.13171), [Mem0](https://arxiv.org/abs/2504.19
 3. **Small always-loaded index over on-demand detail** — Claude Code's MEMORY.md pointer
    index is the shipped instance of the pattern.
 4. **Externalize to files/ledgers because compaction is destructive** — Manus's file
-   system as restorable memory (drop page content, keep the URL) and todo.md recitation;
+   system as restorable memory (drop page content, keep the URL) and plan-file recitation;
    Cognition's finding that models develop *context anxiety* near the window limit and
    spontaneously dump summary files ([inkeep.com/blog/context-anxiety](https://inkeep.com/blog/context-anxiety)).
 

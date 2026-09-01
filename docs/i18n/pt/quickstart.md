@@ -55,8 +55,8 @@ chama. Você não troca de modelo — o fak **governa e faz cache** do modelo qu
 Você aponta **uma** base URL para `fak serve`, ou envolve um agente existente com
 `fak manage claude`.
 
-**Qwen2/Qwen3 e GLM-MoE** estão provados bit-exact no motor de referência in-kernel; todo o
-resto (DeepSeek, Mistral, qualquer modelo de pesos abertos) entra pela wire compatível com
+**Qwen2/Qwen3 e GLM-MoE** estão provados bit-exact no motor de referência in-kernel; o restante
+(DeepSeek, Mistral, qualquer modelo de pesos abertos) entra pela wire compatível com
 OpenAI — Ollama / vLLM / SGLang / llama.cpp / LM Studio ou qualquer API compatível com
 OpenAI.
 

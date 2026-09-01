@@ -48,7 +48,7 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 
 - **CPU**: x86_64, 8 cores
 - **GPU**: NVIDIA L4
-- **RAM**: TBD
+- **RAM**: not yet recorded (open question: capture the VM's memory size on the next bench run)
 - **OS**: GCP Deep Learning VM (CUDA)
 - **Status**: ✅ Active
 - **Benchmarks**:
@@ -57,8 +57,8 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 ### Machine 5: datacenter GPU Datacenter Server (`a100`)
 
 - **CPU**: x86_64, 256 cores
-- **GPU**: NVIDIA datacenter GPU (spec TBD)
-- **RAM**: TBD
+- **GPU**: NVIDIA datacenter GPU (exact model not yet recorded)
+- **RAM**: not yet recorded (open question: capture full specs when this host is next accessed)
 - **OS**: Linux
 - **Status**: 🕸️ Spec needed
 - **Benchmarks**:

@@ -29,7 +29,7 @@ Dry run (no spend):
 ```sh
 fak armbench ponytail-managed \
   --upstream-dir _scratch/issue-6688-upstream/ponytail \
-  --task todo-null,safe-path,critic-email,rate-limit \
+  --task safe-path,critic-email,rate-limit \
   --dry-run \
   --receipt docs/_witnesses/armbench-ponytail-managed-dryrun-2026-08-14.json
 ```
@@ -39,7 +39,7 @@ Live launch requires a trusted configured provider identity label, not a secret:
 ```sh
 FAK_PROVIDER_ACCOUNT_IDENTITY=<fak-accounts-seat> fak armbench ponytail-managed \
   --upstream-dir _scratch/issue-6688-upstream/ponytail \
-  --task todo-null,safe-path,critic-email,rate-limit \
+  --task safe-path,critic-email,rate-limit \
   --workers 4 \
   --receipt docs/_witnesses/armbench-ponytail-managed-live-YYYY-MM-DD.json
 ```

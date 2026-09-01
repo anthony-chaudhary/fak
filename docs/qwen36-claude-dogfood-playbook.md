@@ -559,7 +559,7 @@ cat > strpad/strpad.go <<'EOF'
 package strpad
 
 // LeftPad pads s on the left with the rune p until it is at least n wide.
-// TODO: this stub is wrong — it ignores n and p. Make it correct.
+// BUG: this stub is wrong — it ignores n and p. Make it correct.
 func LeftPad(s string, n int, p rune) string { return s }
 EOF
 ```

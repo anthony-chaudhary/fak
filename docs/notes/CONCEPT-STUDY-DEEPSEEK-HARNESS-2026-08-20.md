@@ -38,7 +38,7 @@ The full clone contained 7,807 files and 12,940 commits reachable from the pinne
 | Runtime source | boot/profile composition, agent loop/inbox, ordered tool scheduling, context projection, compaction, session repair/persistence, agent presets, settings, client modules, Cordis/Loader/Include vendor adaptations |
 | Tests | transactional config reload, preset generations, plugin HMR disposal, session/backend snapshots, browser composition snapshots |
 | History and releases | full reachable history, `rc.7`→`rc.8` delta, both public release tags, recent path history |
-| Agent Notes | implemented, proposed, rejected, and frozen notes; TODO and known-limitation sweeps |
+| Agent Notes | implemented, proposed, rejected, and frozen notes; to-do and known-limitation sweeps |
 | Field feedback | GitHub metadata and 3,616 Discussions; public Issues are disabled and the public PR count is zero |
 | Provenance | root MIT license, `vendor/README.md`, pinned vendor revisions/local-change ledger, no submodules |
 
@@ -172,14 +172,14 @@ There is no public upstream issue/PR filing path to use: repository Issues are d
 
 ## Sources
 
-- [Pinned repository revision](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534) and [`dsh-v0.1.0-rc.8`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.0-rc.8).
+- [Pinned repository revision](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534) and [`dsh-v0.1.0-rc.8`](https://github.com/deepseek-ai/deepseek-harness/releases).
 - [Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/architecture.md), [agent lifecycle](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/agent-lifecycle.md), [tool pipeline](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/tool-execution-pipeline.md), and [testing doctrine](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/testing.md).
 - [Agent preset composition](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/preset/agent-presets/README.md), [settings](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/settings/settings/README.md), and [self-modifying Cordis tool trust stance](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/extensions/tool-cordis/README.md).
 - [Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions), observed 2026-08-20; exact reports are linked beside each claim above.
 
 ## Exhaustive inventory refresh (2026-08-25)
 
-Issue [#8989](https://github.com/anthony-chaudhary/fak/issues/8989) closes the denominator gap without moving the original study cutoff. The machine-readable map is [`docs/research/inventory/deepseek-ai-deepseek-harness.json`](../research/inventory/deepseek-ai-deepseek-harness.json), generated from the detached checkout at commit `141eb6fef83422698aef7a981029e843e8161534` (`dsh-v0.1.0-rc.8`). It walks every regular file outside `.git` and vendored dependency trees and accounts for README/docs, architecture/design, runtime, tests/fixtures, changelog/history/releases, roadmap/TODO evidence, and license/provenance.
+Issue [#8989](https://github.com/anthony-chaudhary/fak/issues/8989) closes the denominator gap without moving the original study cutoff. The machine-readable map is [`docs/research/inventory/deepseek-ai-deepseek-harness.json`](../research/inventory/deepseek-ai-deepseek-harness.json), generated from the detached checkout at commit `141eb6fef83422698aef7a981029e843e8161534` (`dsh-v0.1.0-rc.8`). It walks every regular file outside `.git` and vendored dependency trees and accounts for README/docs, architecture/design, runtime, tests/fixtures, changelog/history/releases, roadmap/to-do evidence, and license/provenance.
 
 The non-tree audit used the same commit timestamp as its cutoff. GitHub reports Issues and Pull Requests disabled for this repository, so those two classes are checked absent rather than inferred from an empty REST response. Discussions were paged to exhaustion and filtered by `createdAt`: 3,310 existed at the cutoff, comprising 3,226 open and 84 closed. The local history contains 12,940 commits reachable from the pin, two merged tags, and the pinned `dsh-v0.1.0-rc.8` release. Commands, counts, cutoff, and source URLs are recorded in the map's `non_tree_study` object and registry `source_evidence`.
 

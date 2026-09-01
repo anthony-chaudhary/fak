@@ -184,7 +184,7 @@ archived-consult-as-artifact (`ask-gemini.sh` forced web-research + cite-sources
 anti-fabrication sentinel `exploratory, no concrete precedent` (`commands/gen-idea.md:108-142`);
 finalize/simplify gated terminal phase constrained to this run's diff with a tests-pass witness
 (`finalize-phase-prompt.md:9-24,42-52`); PostToolUse leader-only session-binding hook
-(`loop-post-bash-hook.sh:20-21,85-101`); todo-completeness gate, lane-typed, DEFAULT-to-blocking
+(`loop-post-bash-hook.sh:20-21,85-101`); task-list-completeness gate, lane-typed, DEFAULT-to-blocking
 (`check-todos-from-transcript.py:24-35,110-112`); model-router capability clamp
 (`scripts/lib/model-router.sh:62-91`); filesystem-as-bus observability (terminal reason = which
 `*-state.md` exists, `monitor-common.sh:154-192`); portable timeout wrapper

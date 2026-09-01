@@ -22,7 +22,7 @@ This evaluation preserves the full named target rather than reducing it to a gen
 - Public recipe: `github.com/Amir-zsh/nova-kv@d81c77b007d7a8e50ed608134fcb0feba0269ef8`.
 - Recipe artifact manifest SHA-256:
   `41691496d9628cb2825bbe1fa87470b2159e931fe869ce74d9f786eb733edd98`.
-- Delegated runtime: `sglang@v0.5.10+nova-kv.d81c77b`. This is the repository's
+- Delegated runtime: `sglang` at `v0.5.10+nova-kv.d81c77b`. This is the repository's
   research fork and is not represented as stock SGLang support.
 
 The Go contract requires all these IDs and both paper digests. A changed paper version,
@@ -93,7 +93,7 @@ quality or performance numbers are added.
 - `supported / KV_VECTOR_EVAL_EXACT_MATCH`: exact contract, paper artifacts, recipe and
   delegated runtime are pinned, and that exact runtime is available.
 - `delegate / KV_VECTOR_EVAL_EXTERNAL_RUNTIME`: exact inputs are recognized but execution
-  belongs to `sglang@v0.5.10+nova-kv.d81c77b`, which is unavailable to the caller.
+  belongs to `sglang` at `v0.5.10+nova-kv.d81c77b`, which is unavailable to the caller.
 - `unsupported`: malformed input, unknown contract/paper/recipe/runtime, or an artifact
   digest mismatch receives its own stable reason code. There is no silent fallback.
 

@@ -70,11 +70,10 @@ reported side by side and never conflated — the standing BENCHMARK-AUTHORITY l
 
 ### The two headlines the regime names
 
-- **Single session > 100k: ~10× vs naive** (9.9× token / 9.5× FLOP). With one agent there is no
+- **Single session > 100k: ~10× vs naive · B/C 1.0 vs tuned per-agent KV** (9.9× token / 9.5× FLOP). With one agent there is no
   cross-agent prefix to share, so **B/C is exactly 1.0** — the entire win is the *turn-tax*: not
   re-prefilling a 100k context on every one of the 10 turns. This is an A/C (vs-naive) number.
-- **5-agent fleet, each > 100k: ~40×+ vs naive** (42.1× token / 34.4× FLOP), and **~4.3× vs a warm
-  per-agent KV cache** (B/C). The vs-naive figure is turn-tax × cross-agent prefix-share; the
+- **5-agent fleet, each > 100k: ~40×+ vs naive · ~4.3× vs a tuned per-agent KV cache** (42.1× token / 34.4× FLOP; B/C). The vs-naive figure is turn-tax × cross-agent prefix-share; the
   vs-tuned figure is the genuine marginal cross-agent reuse.
 
 ## The honest reconciliation (read before quoting B/C)

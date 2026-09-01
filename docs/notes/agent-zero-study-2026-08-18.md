@@ -139,7 +139,7 @@ non-tree classes.
 
 GitHub's paged read-back supplied the non-tree denominator: 834 issues (63 open, 771 closed),
 897 pull requests (82 open, 815 closed), all 94 discussions, and 72 observed releases. The
-map also records full pinned history/tag evidence, roadmap/TODO absence and distributed planning
+map also records full pinned history/tag evidence, roadmap and unfinished-work-marker absence and distributed planning
 evidence, MIT and nested-license provenance, four candidate-specific `fak capabilities`
 self-queries, and the complete candidate matrix.
 

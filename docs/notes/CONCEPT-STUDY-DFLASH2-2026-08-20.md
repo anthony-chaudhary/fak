@@ -161,7 +161,7 @@ adoption claim therefore needs the target operating regime, not a batch-1 headli
 | vLLM | PR [#52816](https://github.com/vllm-project/vllm/pull/52816) head `66e5414c6`, 885 added/changed implementation/test lines | WATCH: open, conflicting/needs-rebase at observation. Do not call it released support. |
 | llama.cpp | PR [#27342](https://github.com/ggml-org/llama.cpp/pull/27342) head `5ecbe1ac17`, 20 files / 676 additions | WATCH: open. It includes GGUF metadata, graph, lattice walk, and sampling changes but no PR-specific test file. |
 | Ollama | PR [#17865](https://github.com/ollama/ollama/pull/17865) head `1c7808a61c`, 17 files / 635 additions | WATCH: open; MLX-specific integration with unit tests. |
-| oMLX fork | release [`0.6.2-dflash2`](https://github.com/z-lab/omlx-fork/releases/tag/0.6.2-dflash2), tag `46225aebee`; signed arm64 DMG digest `sha256:94f56e...d5e5bd21` | SHIPPED fork artifact for Apple Silicon; not evidence of upstream oMLX support or cross-platform parity. |
+| oMLX fork | release [`0.6.2-dflash2`](https://github.com/z-lab/omlx-fork/releases), tag `46225aebee`; signed arm64 DMG digest `sha256:94f56e...d5e5bd21` | SHIPPED fork artifact for Apple Silicon; not evidence of upstream oMLX support or cross-platform parity. |
 
 SGLang and vLLM both carry real regression tests around candidate selection. That makes
 the implementations stronger evidence than the blog diagram, but it does not reproduce

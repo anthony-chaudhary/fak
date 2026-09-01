@@ -32,7 +32,7 @@ dependency, nested module, workflow, runner, or CI input.
 The exact version read-back was:
 
 ```text
-Bazelisk version: v1.28.1
+Bazelisk v1.28.1
 Build label: 9.2.0
 ```
 

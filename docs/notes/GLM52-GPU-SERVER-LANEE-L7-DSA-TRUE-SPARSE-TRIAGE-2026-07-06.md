@@ -152,7 +152,7 @@ the issue to the curve-only witness â€” **not this triage note**.
 
 The #3073 lever cohort shares this shape â€” one lever, one WITNESSED
 `experiments/benchmark/runs` artifact, triage note first when the witness is
-operator-gated: [#3076 L4](GLM52-GPU server-LANEA-L4-FA-CUDAGRAPH-TRIAGE-2026-07-06.md) Â·
+operator-gated: [#3076 L4](GLM52-GPU-SERVER-LANEA-L4-FA-CUDAGRAPH-TRIAGE-2026-07-06.md) Â·
 [#3077 L5](GLM52-L5-QUANT-SWEEP-TRIAGE-2026-07-06.md) Â·
 [#3079 L2](GLM52-GPU-SERVER-LANEB-L2-CONTBATCH-TRIAGE-2026-07-06.md) Â·
 [#3080 KV budget](GLM52-GPU-SERVER-LANEB-KV-BUDGET-TRIAGE-2026-07-06.md). L7 differs from all of

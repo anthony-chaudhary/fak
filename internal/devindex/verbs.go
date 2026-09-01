@@ -205,7 +205,7 @@ var verbManifest = []Verb{
 	{Name: "guard-verdict-rsi", Synopsis: "the guard verdict RSI loop: fold the decision journal, score verdict-quality, keep on gain", Lane: "cmd"},
 	{Name: "harness", Synopsis: "compose, inspect, resolve, and verify reusable agent harness stacks", Lane: "cmd"},
 	{Name: "harness-debt-dispatch", Synopsis: "harness-strength verdict -> backlog: file one deduped deletion issue per REDUNDANT/HOBBLING HARD scaffold", Lane: "cmd"},
-	{Name: "headless-lint", Synopsis: "scan an agent's final output for operator-directed notes (push?/TODO?) and type each to a remediation class", Lane: "cmd"},
+	{Name: "headless-lint", Synopsis: "scan an agent's final output for operator-directed notes (push asks, deferred-work markers) and type each to a remediation class", Lane: "cmd"},
 	{Name: "headroom", Synopsis: "the context-compression seam: shrink tool outputs/logs/files before they reach the model", Lane: "cmd"},
 	{Name: "help", Synopsis: "the compact help: task-grouped overview, per-verb depth (help <verb>), --all index, --full wall", Aliases: []string{"-h", "--help"}, Lane: "cmd"},
 	{Name: "hook", Synopsis: "spawned-hook decide (the A/B baseline transport; reads call.json on stdin)", Lane: "cmd"},

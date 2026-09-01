@@ -81,7 +81,7 @@ go build -o fak ./cmd/fak
 ## Com o seu modelo
 
 fak governa e faz cache do seu modelo — não o substitui. **Qwen2/Qwen3 e GLM-MoE** estão
-provados bit-exact no motor de referência in-kernel; todo o resto (DeepSeek, Mistral,
+provados bit-exact no motor de referência in-kernel; o restante (DeepSeek, Mistral,
 qualquer modelo open-weights) é servido pela interface compatível com OpenAI — via Ollama /
 vLLM / SGLang / llama.cpp / LM Studio ou qualquer API compatível com OpenAI.
 
