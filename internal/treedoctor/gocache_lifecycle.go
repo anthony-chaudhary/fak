@@ -2,13 +2,14 @@ package treedoctor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,11 +24,16 @@ const (
 )
 
 func GoCacheRootFromEnv(lookup func(string) string, userCacheDir func() (string, error)) string {
-	if v := strings.TrimSpace(lookup("GOCACHE")); v != "" {
-		if strings.EqualFold(v, "off") {
-			return ""
+	if lookup != nil {
+		if v := strings.TrimSpace(lookup("GOCACHE")); v != "" {
+			if strings.EqualFold(v, "off") {
+				return ""
+			}
+			return filepath.Clean(v)
 		}
-		return filepath.Clean(v)
+	}
+	if userCacheDir == nil {
+		return ""
 	}
 	r, e := userCacheDir()
 	if e != nil || strings.TrimSpace(r) == "" {
@@ -51,7 +57,7 @@ type GoCacheOptions struct {
 	FreeBytesKnown      bool
 	FreeBytesFunc       func(string) (int64, error)
 	ActiveBuild         func() (bool, error)
-	RemoveAll           func(string) error
+	Remove              func(string) error
 	Context             context.Context
 	Deadline            time.Duration
 	MaxWalkEntries      int
@@ -102,7 +108,7 @@ func (r GoCacheReport) Summary() string {
 }
 
 func SweepGoCache(o GoCacheOptions, apply bool) GoCacheReport {
-	r := GoCacheReport{Root: filepath.Clean(o.Root), ScanComplete: true, CleanupHints: []string{"use tree-doctor GOTMP reaper for orphaned go-build WORK dirs", "use git-daily --prune-worktrees for stale worktrees"}}
+	r := GoCacheReport{Root: filepath.Clean(o.Root), ScanComplete: true, CleanupHints: []string{"GOTMP cleanup: fak git-daily --gotmp-dir <GOTMPDIR>", "GOTMP cleanup: set $FAK_GOTMPDIR, then run fak git-daily", "worktree cleanup dry-run: fak worktree worker reap --all-cold", "worktree cleanup apply: fak worktree worker reap --all-cold --apply"}}
 	if strings.TrimSpace(o.Root) == "" {
 		r.Root = ""
 		r.Skipped = "disabled"
@@ -138,11 +144,11 @@ func SweepGoCache(o GoCacheOptions, apply bool) GoCacheReport {
 	if o.Context == nil {
 		o.Context = context.Background()
 	}
-	if o.RemoveAll == nil {
-		o.RemoveAll = os.RemoveAll
+	if o.Remove == nil {
+		o.Remove = os.Remove
 	}
 	if !apply {
-		o.RemoveAll = os.RemoveAll
+		o.Remove = os.Remove
 		r.BytesAfterSemantics = "projected"
 	} else {
 		r.BytesAfterSemantics = "actual"
@@ -264,7 +270,7 @@ func SweepGoCache(o GoCacheOptions, apply bool) GoCacheReport {
 			r.Err = err.Error()
 			return r
 		}
-		if err := o.RemoveAll(e.Path); err != nil {
+		if err := o.Remove(e.Path); err != nil {
 			r.Err = err.Error()
 			return r
 		}
@@ -281,142 +287,173 @@ func validateGoCacheRoot(root string) (string, string, error) {
 		return "", "", e
 	}
 	a = filepath.Clean(a)
-	base := strings.ToLower(filepath.Base(a))
-	if base != "go-build" {
+	// Custom GOCACHE basenames are intentionally refused: a path supplied through the
+	// environment is not enough evidence that an arbitrary directory is Go-owned.
+	if strings.ToLower(filepath.Base(a)) != "go-build" {
 		return "", "", fmt.Errorf("refusing non-go-build cache root %q", a)
 	}
-	for _, p := range strings.Split(strings.ToLower(filepath.ToSlash(a)), "/") {
-		switch p {
-		case "models", "model", "huggingface", "ollama", "lmstudio":
-			return "", "", fmt.Errorf("refusing protected model-store path %q", a)
-		}
+	if containsProtectedModelStore(a) {
+		return "", "", fmt.Errorf("refusing protected model-store path %q", a)
 	}
 	resolved, e := filepath.EvalSymlinks(a)
 	if e != nil {
 		return "", "", fmt.Errorf("resolve GOCACHE: %w", e)
 	}
-	for _, p := range strings.Split(strings.ToLower(filepath.ToSlash(resolved)), "/") {
-		switch p {
-		case "models", "model", "huggingface", "ollama", "lmstudio":
-			return "", "", fmt.Errorf("refusing protected resolved model-store path %q", resolved)
-		}
+	if containsProtectedModelStore(resolved) {
+		return "", "", fmt.Errorf("refusing protected resolved model-store path %q", resolved)
 	}
 	return a, resolved, nil
 }
-func acquireGoCacheLock(root string) (func(), error) {
-	p := filepath.Join(root, ".fak-gocache-lifecycle.lock")
-	f, e := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return nil, e
+
+func containsProtectedModelStore(path string) bool {
+	for _, component := range strings.Split(strings.ToLower(filepath.ToSlash(path)), "/") {
+		switch component {
+		case "models", "model", "fak-models", "huggingface", "ollama", ".ollama", "llama.cpp", "lmstudio":
+			return true
+		}
+		if strings.HasPrefix(component, "qwen") {
+			return true
+		}
 	}
-	f.Close()
-	return func() { _ = os.Remove(p) }, nil
+	return false
 }
-func scanGoCache(ctx context.Context, root string, max int, progress func(GoCacheProgress) error) ([]GoCacheEntry, int64, int, bool, string, error) {
-	dir, err := os.Open(root)
+
+type goCacheLockOwner struct {
+	PID   int    `json:"pid"`
+	Token string `json:"token"`
+}
+
+func acquireGoCacheLock(root string) (func(), error) {
+	return acquireGoCacheLockWith(root, goCacheProcessAlive)
+}
+
+func acquireGoCacheLockWith(root string, processAlive func(int) (bool, error)) (func(), error) {
+	path := filepath.Join(root, ".fak-gocache-lifecycle.lock")
+	owner := goCacheLockOwner{PID: os.Getpid(), Token: strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())}
+	contents, err := json.Marshal(owner)
 	if err != nil {
-		return nil, 0, 0, true, "", err
+		return nil, err
 	}
-	defer dir.Close()
+	create := func() error {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err = f.Write(contents); err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return err
+		}
+		return f.Close()
+	}
+	if err := create(); err != nil {
+		if !errors.Is(err, fs.ErrExist) || processAlive == nil {
+			return nil, err
+		}
+		staleContents, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, err
+		}
+		var stale goCacheLockOwner
+		if json.Unmarshal(staleContents, &stale) != nil || stale.PID <= 0 || stale.Token == "" {
+			return nil, err
+		}
+		alive, aliveErr := processAlive(stale.PID)
+		if aliveErr != nil || alive {
+			return nil, err
+		}
+		current, readErr := os.ReadFile(path)
+		if readErr != nil || string(current) != string(staleContents) {
+			return nil, err
+		}
+		if removeErr := os.Remove(path); removeErr != nil {
+			return nil, err
+		}
+		if retryErr := create(); retryErr != nil {
+			return nil, retryErr
+		}
+	}
+	return func() {
+		current, err := os.ReadFile(path)
+		if err == nil && string(current) == string(contents) {
+			_ = os.Remove(path)
+		}
+	}, nil
+}
+
+func scanGoCache(ctx context.Context, root string, max int, progress func(GoCacheProgress) error) ([]GoCacheEntry, int64, int, bool, string, error) {
 	var out []GoCacheEntry
 	var total int64
 	seen := 0
-	for {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
 		select {
 		case <-ctx.Done():
-			return out, total, seen, false, ctx.Err().Error(), nil
+			return ctx.Err()
 		default:
 		}
-		if seen >= max {
-			return out, total, seen, false, "entry budget exhausted", nil
+		if path == root {
+			return nil
 		}
-		batch, readErr := dir.ReadDir(1)
-		if len(batch) == 0 {
-			if readErr == nil || errors.Is(readErr, fs.ErrClosed) {
-				return out, total, seen, true, "", nil
-			}
-			if errors.Is(readErr, io.EOF) {
-				return out, total, seen, true, "", nil
-			}
-			return nil, total, seen, false, "directory read failed", readErr
+		if entry.Name() == ".fak-gocache-lifecycle.lock" && filepath.Dir(path) == root {
+			return nil
 		}
-		d := batch[0]
-		if d.Name() == ".fak-gocache-lifecycle.lock" {
-			continue
-		}
-		p := filepath.Join(root, d.Name())
-		li, err := os.Lstat(p)
+		info, err := entry.Info()
 		if err != nil {
-			return nil, total, seen, false, "entry metadata failed", err
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink in GOCACHE %q", path)
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing non-regular GOCACHE entry %q", path)
+		}
+		if seen >= max {
+			return errEntryBudget
 		}
 		seen++
-		if li.Mode()&os.ModeSymlink != 0 {
-			continue
+		total += info.Size()
+		out = append(out, GoCacheEntry{Path: path, Bytes: info.Size(), ModTime: info.ModTime()})
+		if progress != nil {
+			if err := progress(GoCacheProgress{Entries: seen, Bytes: total, Path: path}); err != nil {
+				return fmt.Errorf("progress callback: %w", err)
+			}
 		}
-		var sz int64
-		newest := li.ModTime()
-		err = filepath.WalkDir(p, func(q string, de fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if q != p {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-				if seen >= max {
-					return errEntryBudget
-				}
-				seen++
-			}
-			info, err := de.Info()
-			if err != nil {
-				return err
-			}
-			if info.ModTime().After(newest) {
-				newest = info.ModTime()
-			}
-			if info.Mode().IsRegular() {
-				sz += info.Size()
-			}
-			if progress != nil {
-				if err := progress(GoCacheProgress{Entries: seen, Bytes: total + sz, Path: q}); err != nil {
-					return fmt.Errorf("progress callback: %w", err)
-				}
-			}
-			return nil
-		})
-		if errors.Is(err, errEntryBudget) {
-			return out, total, seen, false, "entry budget exhausted", nil
-		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return out, total, seen, false, err.Error(), nil
-		}
-		if err != nil {
-			return nil, total, seen, false, "entry scan failed", err
-		}
-		total += sz
-		out = append(out, GoCacheEntry{Path: p, Bytes: sz, ModTime: newest})
+		return nil
+	})
+	if errors.Is(err, errEntryBudget) {
+		return out, total, seen, false, "entry budget exhausted", nil
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return out, total, seen, false, err.Error(), nil
+	}
+	if err != nil {
+		return nil, total, seen, false, "entry scan failed", err
+	}
+	return out, total, seen, true, "", nil
 }
 
 var errEntryBudget = errors.New("entry budget exhausted")
 
 func safeCandidate(root, path string) error {
-	li, e := os.Lstat(path)
-	if e != nil {
-		return e
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
 	}
-	if li.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing symlink candidate %q", path)
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing non-regular cache candidate %q", path)
 	}
-	resolved, e := filepath.EvalSymlinks(path)
-	if e != nil {
-		return e
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
 	}
-	rel, e := filepath.Rel(root, resolved)
-	if e != nil || rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) || strings.Contains(rel, string(os.PathSeparator)) {
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
 		return fmt.Errorf("candidate escapes GOCACHE %q", path)
 	}
 	return nil

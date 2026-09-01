@@ -810,24 +810,26 @@ func TestBuildGuardChildStripsProxyOnlyUpstreamKey(t *testing.T) {
 	}
 }
 
-func TestGuardChildTerminalRestoreCaptureCodexOnly(t *testing.T) {
-	captures := 0
-	orig := captureGuardChildTerminalRestore
-	captureGuardChildTerminalRestore = func() guardChildTerminalRestore {
-		captures++
-		return &testGuardChildTerminalRestore{}
+func TestGuardChildTerminalRestorePulseCodexOnly(t *testing.T) {
+	var calls [][2]time.Duration
+	orig := startGuardChildTerminalRestorePulse
+	startGuardChildTerminalRestorePulse = func(duration, interval time.Duration) {
+		calls = append(calls, [2]time.Duration{duration, interval})
 	}
-	defer func() { captureGuardChildTerminalRestore = orig }()
+	defer func() { startGuardChildTerminalRestorePulse = orig }()
 
-	maybeCaptureGuardChildTerminalRestore(nil)
-	maybeCaptureGuardChildTerminalRestore([]string{"claude"})
-	if captures != 0 {
-		t.Fatalf("non-Codex commands captured terminal %d times", captures)
+	maybeStartGuardChildTerminalRestorePulse(nil)
+	maybeStartGuardChildTerminalRestorePulse([]string{"claude"})
+	if len(calls) != 0 {
+		t.Fatalf("non-Codex commands started restore pulse: %v", calls)
 	}
 
-	maybeCaptureGuardChildTerminalRestore([]string{"codex", "exec"})
-	if captures != 1 {
-		t.Fatalf("Codex command captured terminal %d times, want 1", captures)
+	maybeStartGuardChildTerminalRestorePulse([]string{"codex", "exec"})
+	if len(calls) != 1 {
+		t.Fatalf("Codex command started %d pulses, want 1", len(calls))
+	}
+	if calls[0][0] != guardCodexTerminalRestorePulseDuration || calls[0][1] != guardCodexTerminalRestorePulseInterval {
+		t.Fatalf("pulse durations = %v, want %v/%v", calls[0], guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
 	}
 }
 

@@ -343,17 +343,17 @@
       "gaps": []
     },
     {
-      "id": "coverage-9678-plan-maybecaptureguardchildharnessterminalrestoreforplan",
-      "canonical": "plan implementation surface for maybecaptureguardchildharnessterminalrestoreforplan",
+      "id": "coverage-9678-plan-maybestartguardchildharnessterminalrestorepulseforplan",
+      "canonical": "plan implementation surface for maybestartguardchildharnessterminalrestorepulseforplan",
       "family": "plan",
       "kind": "symbol",
-      "definition": "`maybecaptureguardchildharnessterminalrestoreforplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `maybecaptureguardchildharnessterminalrestoreforplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "definition": "`maybestartguardchildharnessterminalrestorepulseforplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `maybestartguardchildharnessterminalrestorepulseforplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
       "distinct_from": [
         "x-ci-coverage-plan-blockplan"
       ],
       "aliases": [],
-      "grounding": "maybecaptureguardchildharnessterminalrestoreforplan",
+      "grounding": "maybestartguardchildharnessterminalrestorepulseforplan",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
       "parent": "",

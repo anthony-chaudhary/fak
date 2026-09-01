@@ -71,22 +71,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	}
 	budget := fs.Duration("budget", budgetDefault, budgetHelp)
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
-	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
-	var recheckPaths pathList
-	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
 	}
-	if command != "check" && (*resumeToken != "" || len(recheckPaths) > 0) {
-		fmt.Fprintf(stderr, "fak sync: --resume-token and --recheck-path are check-only options\n")
-		return syncExitUsage
-	}
-	normalizedRecheckPaths, normalizeErr := normalizeSyncRecheckPaths(recheckPaths)
-	if normalizeErr != nil {
-		fmt.Fprintf(stderr, "fak sync: %v\n", normalizeErr)
-		return syncExitUsage
-	}
-	recheckPaths = normalizedRecheckPaths
 
 	// push is the push-side sibling of check/apply: a safe `git push` that retries a
 	// transient non-fast-forward race (a peer landed between fetch and push, but HEAD
@@ -182,52 +169,13 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	}
 	info = annotateSyncWorktree(context.Background(), info, pathutil.ExpandTilde(*repo))
 
-	var publicLeak *syncPublicLeakPreflight
-	if command == "check" {
-		repoPath := pathutil.ExpandTilde(*repo)
-		expectedToken := syncPublicLeakOperationToken(repoPath, *remote, info)
-		if *resumeToken != "" && *resumeToken != expectedToken {
-			fmt.Fprintln(stderr, "fak sync: PUBLIC_LEAK resume token does not match this repo, branch, HEAD, and remote target; rerun `fak sync check` to start a new operation")
-			return syncExitRefused
-		}
-		preflight, scanErr := assessSyncPublicLeak(repoPath, *remote, info, recheckPaths)
-		if scanErr != nil {
-			fmt.Fprintf(stderr, "fak sync: PUBLIC_LEAK preflight: %v\n", scanErr)
-			return syncExitInternal
-		}
-		preflight.ResumeValidated = *resumeToken != ""
-		if len(preflight.Findings) > 0 || len(recheckPaths) > 0 || preflight.ResumeValidated {
-			publicLeak = &preflight
-		}
-	}
-
 	if *asJSON {
-		var report any = info
-		if publicLeak != nil {
-			report = syncCheckReport{Assessment: info, PublicLeak: publicLeak}
-		}
-		if err := writeIndentedJSON(stdout, report); err != nil {
+		if err := writeIndentedJSON(stdout, info); err != nil {
 			fmt.Fprintf(stderr, "fak sync: %v\n", err)
 			return syncExitInternal
 		}
 	} else {
 		renderSync(stdout, command, info)
-		if publicLeak != nil {
-			renderSyncPublicLeak(stdout, *publicLeak)
-		}
-	}
-
-	// A targeted recheck answers only whether the named repair paths are now clean. It
-	// deliberately does not reinterpret the branch-sync state; the emitted resume command
-	// performs a fresh whole-candidate scan before returning to the original operation.
-	if command == "check" && len(recheckPaths) > 0 {
-		if publicLeak != nil && publicLeak.BlockingCount > 0 {
-			return syncExitRefused
-		}
-		return syncExitOK
-	}
-	if publicLeak != nil && publicLeak.BlockingCount > 0 {
-		return syncExitRefused
 	}
 
 	if info.State == safesync.StateInSync {
@@ -256,16 +204,12 @@ func syncTargetRef(branch string) string {
 func syncUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak sync [check] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-                        [--recheck-path PATH ...] [--resume-token TOKEN]
   fak sync apply   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
   fak sync drain   [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
---fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
-the remote baseline, and emits collision-safe repair slices, a targeted recheck, and an
-operation-bound resume token. A resume always reruns the whole gate; the token cannot
-bypass or soften it. apply runs the fast-forward only when every path Git would write is clean at
+--fetch. apply runs the fast-forward only when every path Git would write is clean at
 HEAD or already byte-identical to the remote-tracking version. push pushes the branch
 and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a

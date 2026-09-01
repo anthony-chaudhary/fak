@@ -2,10 +2,7 @@ package qwen38quantrun
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,68 +12,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
-	"github.com/anthony-chaudhary/fak/internal/serverlifecycle"
-	"github.com/anthony-chaudhary/fak/internal/serverproduct"
 )
-
-type managedFixture struct {
-	dir, baseURL, model string
-	generation          uint64
-	started             string
-}
-
-func newManagedFixture(t *testing.T, baseURL, model string) *managedFixture {
-	t.Helper()
-	started, ok := serverlifecycle.ProcessIdentity(os.Getpid())
-	if !ok {
-		t.Skip("current process identity unavailable")
-	}
-	f := &managedFixture{dir: t.TempDir(), baseURL: baseURL, model: model, generation: 7, started: started}
-	f.write(t)
-	return f
-}
-
-func (f *managedFixture) write(t *testing.T) string {
-	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	state := map[string]any{"schema": "fak.server-lifecycle-state/v1", "state": "ready", "instance_id": "managed-test", "generation": f.generation, "process_id": os.Getpid(), "process_start_identity": f.started, "base_url": f.baseURL, "updated_at": now}
-	writeJSONTest(t, filepath.Join(f.dir, serverlifecycle.StateFilename), state)
-	digest := "sha256:" + strings.Repeat("a", 64)
-	receipt := serverproduct.ServerReceipt{
-		Schema: serverproduct.SchemaV1, State: serverproduct.ReceiptStateReady,
-		Identity: serverproduct.ServerIdentity{ServerName: "managed-server", InstanceID: "managed-test"}, SpecDigest: digest, Generation: f.generation, CreatedAt: now,
-		Artifact: serverproduct.ArtifactIdentity{Reference: filepath.Join(f.dir, "model.gguf"), Digest: digest}, Adapter: serverproduct.AdapterIdentity{Name: "llama-server", Version: "test", ExecutableDigest: digest},
-		Endpoint: serverproduct.LoopbackEndpoint{BaseURL: f.baseURL}, ModelAlias: f.model, Auth: serverproduct.AuthReference{Mode: serverproduct.AuthNone},
-		Protocol:  serverproduct.ProtocolObservation{Family: serverproduct.ProtocolOpenAIHTTP, Revision: "v1", Capabilities: []string{"chat-completions", "models"}},
-		Readiness: serverproduct.ReadinessEvidence{Probe: "models", ProbeDigest: digest, ObservedAt: now}, Ownership: serverproduct.OwnershipReference{InstanceID: "managed-test", ProcessID: os.Getpid(), ProcessStartIdentity: f.started},
-		Provenance: serverproduct.ReceiptProvenance{Spec: serverproduct.Provenance{Kind: serverproduct.ProvenanceAuthored, Source: "test"}, Artifact: serverproduct.Provenance{Kind: serverproduct.ProvenanceObserved, Source: "test"}, Adapter: serverproduct.Provenance{Kind: serverproduct.ProvenanceObserved, Source: "test"}, Endpoint: serverproduct.Provenance{Kind: serverproduct.ProvenanceObserved, Source: "test"}, Readiness: serverproduct.Provenance{Kind: serverproduct.ProvenanceObserved, Source: "test"}, Ownership: serverproduct.Provenance{Kind: serverproduct.ProvenanceObserved, Source: "test"}},
-	}
-	raw, err := json.MarshalIndent(receipt, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw = append(raw, '\n')
-	if err := os.WriteFile(filepath.Join(f.dir, serverlifecycle.ReceiptFilename), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("sha256:%x", sum)
-}
-
-func managedAdapterConfig(t *testing.T, endpoint, model, marker, observationPath string) AdapterConfig {
-	t.Helper()
-	h := strings.Repeat("a", 64)
-	id := qwen38quant.Identity{Model: "Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "quant-r1", RuntimeRevision: "runtime-r1", FakModuleRev: "internal/model@r1+gabcdef0"}
-	return AdapterConfig{
-		Endpoint: EndpointConfig{Endpoint: "http://127.0.0.1:1", Model: "hand-copied", Repetitions: 3}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m", Expected: id,
-		Command: []string{"fak", "serve"}, RequireDevice: "test-device", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%",
-		ObservationCommand: adapterHelperCommand("observation", marker, observationPath), RestartCommand: adapterHelperCommand("managed-restart", marker), ReadyCommand: adapterHelperCommand("ok", ""), CleanupCommand: adapterHelperCommand("effect", marker),
-		ManagedServer: &ManagedServerConfig{ProtocolFamily: serverproduct.ProtocolOpenAIHTTP, ProtocolRevision: "v1", Capabilities: []string{"models", "chat-completions"}, ModelAlias: model, BaseURL: endpoint, MinimumGeneration: 7},
-	}
-}
 
 func TestCheckedInAdapterExamplesSelfcheck(t *testing.T) {
 	tests := []struct {
@@ -86,7 +24,6 @@ func TestCheckedInAdapterExamplesSelfcheck(t *testing.T) {
 	}{
 		{"llama.cpp.json", qwen38quant.EngineLlamaCpp, []string{"q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs"}},
 		{"vllm.json", qwen38quant.EngineVLLM, []string{"bf16", "fp8", "awq_int4", "gptq_int4"}},
-		{"managed-llama.json", qwen38quant.EngineLlamaCpp, []string{"q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -322,139 +259,6 @@ func TestRunAdapterWritesNothingWhenProbeFails(t *testing.T) {
 	}
 }
 
-func TestRunAdapterManagedServerRefusesDriftBeforeTimedRequestOrCleanup(t *testing.T) {
-	var models, chats atomic.Int32
-	var fixture *managedFixture
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			models.Add(1)
-			fixture.model = "drifted-model"
-			fixture.write(t)
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
-		case "/v1/chat/completions":
-			chats.Add(1)
-			http.Error(w, "timed request must not run", http.StatusInternalServerError)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer endpoint.Close()
-	fixture = newManagedFixture(t, endpoint.URL, "exact")
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "cleanup-called")
-	observationMarker := filepath.Join(dir, "observation-called")
-	observationPath := filepath.Join(dir, "observation.json")
-	cfg := managedAdapterConfig(t, endpoint.URL, "exact", marker, observationPath)
-	cfg.ObservationCommand = adapterHelperCommand("observation", observationMarker, observationPath)
-	cfg.ManagedServer.Directory = fixture.dir
-	cfg.RestartCommand = adapterHelperCommand("managed-restart", fixture.dir)
-	writeJSONTest(t, observationPath, Observation{Identity: cfg.Expected, Hardware: "test", Software: "test", Device: cfg.RequireDevice, ContextTokens: 16384, CacheMode: "test", Resident: true})
-	t.Setenv("FAK_QWEN38_MANAGED_TEST_KEY", "test-key")
-	cfg.APIKeyEnv = "FAK_QWEN38_MANAGED_TEST_KEY"
-	configPath, corpusPath := filepath.Join(dir, "config.json"), filepath.Join(dir, "corpus.json")
-	writeJSONTest(t, configPath, cfg)
-	writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
-	reportPath, archivePath := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
-	err := RunAdapter(context.Background(), configPath, corpusPath, reportPath, archivePath)
-	if err == nil || !contains(err.Error(), "managed server READY identity changed") {
-		t.Fatalf("err=%v", err)
-	}
-	if models.Load() != 1 || chats.Load() != 0 {
-		t.Fatalf("requests models=%d chats=%d", models.Load(), chats.Load())
-	}
-	assertNoAdapterArtifacts(t, marker, reportPath, archivePath)
-	if temps, globErr := filepath.Glob(filepath.Join(dir, ".*.tmp")); globErr != nil || len(temps) != 0 {
-		t.Fatalf("temporary artifacts=%v err=%v", temps, globErr)
-	}
-}
-
-func TestRunAdapterManagedServerBindsMatchingGenerationChain(t *testing.T) {
-	var chats atomic.Int32
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
-			return
-		}
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		call := chats.Add(1)
-		msg := map[string]any{"content": "ok"}
-		switch {
-		case call <= 3:
-		case call <= 6:
-			msg["content"] = `{"ok":true}`
-		case call <= 9:
-			msg["content"] = ""
-			msg["tool_calls"] = []any{map[string]any{"function": map[string]any{"name": "x", "arguments": `null`}}}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"model": "exact", "choices": []any{map[string]any{"message": msg}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 2}})
-	}))
-	defer endpoint.Close()
-	fixture := newManagedFixture(t, endpoint.URL, "exact")
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "lifecycle-called")
-	observationMarker := filepath.Join(dir, "observation-called")
-	observationPath := filepath.Join(dir, "observation.json")
-	cfg := managedAdapterConfig(t, endpoint.URL, "exact", marker, observationPath)
-	cfg.ObservationCommand = adapterHelperCommand("observation", observationMarker, observationPath)
-	cfg.ManagedServer.Directory = fixture.dir
-	cfg.RestartCommand = adapterHelperCommand("managed-restart", fixture.dir)
-	writeJSONTest(t, observationPath, Observation{Identity: cfg.Expected, Hardware: "test", Software: "test", Device: cfg.RequireDevice, ContextTokens: 16384, CacheMode: "test", Resident: true})
-	t.Setenv("FAK_QWEN38_MANAGED_TEST_KEY", "test-key")
-	cfg.APIKeyEnv = "FAK_QWEN38_MANAGED_TEST_KEY"
-	configPath, corpusPath := filepath.Join(dir, "config.json"), filepath.Join(dir, "corpus.json")
-	writeJSONTest(t, configPath, cfg)
-	writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
-	reportPath, archivePath := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
-	if err := RunAdapter(context.Background(), configPath, corpusPath, reportPath, archivePath); err != nil {
-		t.Fatal(err)
-	}
-	if chats.Load() != int32(len(qwen38quant.RequiredWorkloads)*3) {
-		t.Fatalf("timed requests=%d", chats.Load())
-	}
-	var archive managedArchive
-	archiveRaw, err := os.ReadFile(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(archiveRaw, &archive); err != nil {
-		t.Fatal(err)
-	}
-	if archive.Schema != "fak.qwen38-quant-managed-raw/1" || len(archive.ServerIdentity) != 2 {
-		t.Fatalf("managed archive=%+v", archive)
-	}
-	if archive.ServerIdentity[0].Generation != 7 || archive.ServerIdentity[1].Generation != 8 || archive.ServerIdentity[0].ReceiptDigest == archive.ServerIdentity[1].ReceiptDigest {
-		t.Fatalf("identity chain=%+v", archive.ServerIdentity)
-	}
-	var report qwen38quant.Report
-	reportRaw, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(reportRaw, &report); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(archiveRaw)
-	if report.RawArchiveSHA256 != fmt.Sprintf("%x", sum) || report.Verdict != "PROMOTE" {
-		t.Fatalf("report archive/verdict=%s/%s", report.RawArchiveSHA256, report.Verdict)
-	}
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("validated cleanup was not executed: %v", err)
-	}
-}
-
-func assertNoAdapterArtifacts(t *testing.T, paths ...string) {
-	t.Helper()
-	for _, path := range paths {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("%s exists after refusal: %v", filepath.Base(path), err)
-		}
-	}
-}
-
 func TestAdapterHelperProcess(t *testing.T) {
 	separator := slices.Index(os.Args, "--")
 	if separator < 0 || separator+1 >= len(os.Args) {
@@ -481,15 +285,6 @@ func TestAdapterHelperProcess(t *testing.T) {
 	args := os.Args[separator+1:]
 	switch args[0] {
 	case "ok":
-		os.Exit(0)
-	case "managed-restart":
-		if len(args) < 2 {
-			os.Exit(4)
-		}
-		if err := advanceManagedFixture(args[1]); err != nil {
-			os.Stderr.WriteString(err.Error())
-			os.Exit(8)
-		}
 		os.Exit(0)
 	case "effect":
 		if len(args) < 2 {
@@ -519,51 +314,6 @@ func TestAdapterHelperProcess(t *testing.T) {
 		os.Stderr.WriteString("probe failed")
 		os.Exit(7)
 	}
-}
-
-func advanceManagedFixture(dir string) error {
-	statePath := filepath.Join(dir, serverlifecycle.StateFilename)
-	receiptPath := filepath.Join(dir, serverlifecycle.ReceiptFilename)
-	var state map[string]any
-	stateRaw, err := os.ReadFile(statePath)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(stateRaw, &state); err != nil {
-		return err
-	}
-	generation, ok := state["generation"].(float64)
-	if !ok {
-		return errors.New("fixture generation missing")
-	}
-	generation++
-	state["generation"] = generation
-	state["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-	stateRaw, err = json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	stateRaw = append(stateRaw, '\n')
-	if err := os.WriteFile(statePath, stateRaw, 0o600); err != nil {
-		return err
-	}
-	var receipt serverproduct.ServerReceipt
-	receiptRaw, err := os.ReadFile(receiptPath)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(receiptRaw, &receipt); err != nil {
-		return err
-	}
-	receipt.Generation = uint64(generation)
-	receipt.CreatedAt = state["updated_at"].(string)
-	receipt.Readiness.ObservedAt = receipt.CreatedAt
-	receiptRaw, err = json.MarshalIndent(receipt, "", "  ")
-	if err != nil {
-		return err
-	}
-	receiptRaw = append(receiptRaw, '\n')
-	return os.WriteFile(receiptPath, receiptRaw, 0o600)
 }
 
 func helperCommand(mode string) []string {

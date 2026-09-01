@@ -364,6 +364,35 @@ func TestStatusOnMissingLedgerIsEmptyNotAnError(t *testing.T) {
 	}
 }
 
+func TestRunPersistsGoCacheReceiptInScheduledLedger(t *testing.T) {
+	opts := fakeRepo(t)
+	opts.Now = time.Date(2026, 8, 31, 12, 0, 0, 0, time.Local)
+	opts.Apply = true
+	root := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(filepath.Join(root, "00"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(root, "00", "stale-a")
+	if err := os.WriteFile(entry, []byte("12345678"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := opts.Now.Add(-48 * time.Hour)
+	if err := os.Chtimes(entry, old, old); err != nil {
+		t.Fatal(err)
+	}
+	opts.GoCacheDir = root
+	opts.GoCacheOptions = treedoctor.GoCacheOptions{HighBytes: 1, LowBytes: 1, MinAge: time.Hour, FreeBytesKnown: true, FreeBytes: 1 << 40, ActiveBuild: func() (bool, error) { return false, nil }}
+	var calls []string
+	res := Run(context.Background(), recordingRunner(&calls), opts)
+	if res.LedgerErr != "" {
+		t.Fatalf("ledger error: %s", res.LedgerErr)
+	}
+	rows := Status(res.LedgerPath, 1)
+	if len(rows) != 1 || rows[0].GoCache.Root == "" || rows[0].GoCache.ReclaimedBytes != 8 || rows[0].GoCache.Reaped != 1 {
+		t.Fatalf("rows=%+v result=%+v", rows, res.GoCache)
+	}
+}
+
 func TestRunInvokesGoCacheLifecycleAndReturnsReceipt(t *testing.T) {
 	opts := fakeRepo(t)
 	opts.Now = time.Now()

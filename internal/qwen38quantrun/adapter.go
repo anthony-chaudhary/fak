@@ -3,7 +3,6 @@ package qwen38quantrun
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,12 +12,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
-	"github.com/anthony-chaudhary/fak/internal/serverlifecycle"
-	"github.com/anthony-chaudhary/fak/internal/serverproduct"
 )
 
 const AdapterSchema = "fak.qwen38-quant-adapter/1"
@@ -50,49 +46,17 @@ func (c EndpointConfig) runnerConfig() Config {
 	return Config{Endpoint: c.Endpoint, APIKey: c.APIKey, Model: c.Model, Repetitions: c.Repetitions, Timeout: c.Timeout}
 }
 
-// ManagedServerConfig makes a READY lifecycle receipt, rather than a hand-copied
-// URL, authoritative for the measured endpoint.
-type ManagedServerConfig struct {
-	Directory         string   `json:"directory"`
-	MinimumGeneration uint64   `json:"minimum_generation,omitempty"`
-	ReceiptDigest     string   `json:"receipt_digest,omitempty"`
-	ProtocolFamily    string   `json:"protocol_family"`
-	ProtocolRevision  string   `json:"protocol_revision"`
-	Capabilities      []string `json:"capabilities"`
-	BaseURL           string   `json:"base_url,omitempty"`
-	ModelAlias        string   `json:"model_alias"`
-}
-
-type ManagedServerIdentity struct {
-	ReceiptDigest        string   `json:"receipt_digest"`
-	Generation           uint64   `json:"generation"`
-	ProcessID            int      `json:"process_id"`
-	ProcessStartIdentity string   `json:"process_start_identity"`
-	BaseURL              string   `json:"base_url"`
-	ModelAlias           string   `json:"model_alias"`
-	ProtocolFamily       string   `json:"protocol_family"`
-	ProtocolRevision     string   `json:"protocol_revision"`
-	Capabilities         []string `json:"capabilities"`
-}
-
-type managedArchive struct {
-	Schema         string                  `json:"schema"`
-	Campaign       json.RawMessage         `json:"campaign"`
-	ServerIdentity []ManagedServerIdentity `json:"server_identity_chain"`
-}
-
 // AdapterConfig is the file-backed operator contract for a live campaign.
 // ObservationCommand must emit one Observation JSON object on stdout; lifecycle
 // commands are argv arrays and are never interpreted by a shell.
 type AdapterConfig struct {
-	Schema           string               `json:"schema,omitempty"`
-	RuntimeSource    string               `json:"runtime_source,omitempty"`
-	SourceObservedAt string               `json:"source_observed_at,omitempty"`
-	SourceLicense    string               `json:"source_license,omitempty"`
-	SupportedArms    []string             `json:"supported_arms,omitempty"`
-	APIKeyEnv        string               `json:"api_key_env,omitempty"`
-	Endpoint         EndpointConfig       `json:"endpoint"`
-	ManagedServer    *ManagedServerConfig `json:"managed_server,omitempty"`
+	Schema           string         `json:"schema,omitempty"`
+	RuntimeSource    string         `json:"runtime_source,omitempty"`
+	SourceObservedAt string         `json:"source_observed_at,omitempty"`
+	SourceLicense    string         `json:"source_license,omitempty"`
+	SupportedArms    []string       `json:"supported_arms,omitempty"`
+	APIKeyEnv        string         `json:"api_key_env,omitempty"`
+	Endpoint         EndpointConfig `json:"endpoint"`
 	// ExecutionEngine carries the model-math runtime identity used for evidence
 	// promotion, distinct from endpoint, planner, transport, and hardware backend identity.
 	ExecutionEngine    string               `json:"execution_engine"`
@@ -135,13 +99,8 @@ func validateMaintainedAdapter(cfg AdapterConfig) error {
 	if !slices.Contains(cfg.SupportedArms, cfg.Arm) {
 		return fmt.Errorf("arm %q is not covered by the maintained %s adapter", cfg.Arm, cfg.ExecutionEngine)
 	}
-	if cfg.ManagedServer == nil && (cfg.Endpoint.Endpoint == "" || cfg.Endpoint.Model == "") {
+	if cfg.Endpoint.Endpoint == "" || cfg.Endpoint.Model == "" {
 		return errors.New("endpoint and endpoint.model are required")
-	}
-	if cfg.ManagedServer != nil {
-		if err := validateManagedServerConfig(*cfg.ManagedServer); err != nil {
-			return err
-		}
 	}
 	if cfg.Endpoint.APIKey != "" {
 		return errors.New("inline api_key is refused; use api_key_env")
@@ -287,127 +246,6 @@ func missingAdapterIdentity(id qwen38quant.Identity) []string {
 	return missing
 }
 
-func validateManagedServerConfig(cfg ManagedServerConfig) error {
-	if strings.TrimSpace(cfg.Directory) == "" {
-		return errors.New("managed_server.directory is required")
-	}
-	if cfg.ProtocolFamily == "" || cfg.ProtocolRevision == "" || len(cfg.Capabilities) == 0 || cfg.ModelAlias == "" {
-		return errors.New("managed_server protocol, capabilities, and model_alias are required")
-	}
-	if cfg.ProtocolFamily != serverproduct.ProtocolOpenAIHTTP {
-		return fmt.Errorf("managed_server.protocol_family must be %q", serverproduct.ProtocolOpenAIHTTP)
-	}
-	return nil
-}
-
-type managedServerLifecycle struct {
-	delegate   Lifecycle
-	config     ManagedServerConfig
-	mu         sync.Mutex
-	current    serverlifecycle.ReadyBinding
-	identities []ManagedServerIdentity
-}
-
-func newManagedServerLifecycle(delegate Lifecycle, cfg ManagedServerConfig) (*managedServerLifecycle, error) {
-	if err := validateManagedServerConfig(cfg); err != nil {
-		return nil, err
-	}
-	binding, err := serverlifecycle.ConsumeReady(cfg.Directory, managedExpectation(cfg, true))
-	if err != nil {
-		return nil, fmt.Errorf("managed server READY identity: %w", err)
-	}
-	managed := &managedServerLifecycle{delegate: delegate, config: cfg, current: binding}
-	managed.identities = append(managed.identities, managedIdentity(binding))
-	return managed, nil
-}
-
-func managedExpectation(cfg ManagedServerConfig, pinDigest bool) serverlifecycle.ReadyExpectation {
-	want := serverlifecycle.ReadyExpectation{
-		MinimumGeneration: cfg.MinimumGeneration,
-		ProtocolFamily:    cfg.ProtocolFamily, ProtocolRevision: cfg.ProtocolRevision,
-		Capabilities: slices.Clone(cfg.Capabilities), BaseURL: cfg.BaseURL, ModelAlias: cfg.ModelAlias,
-	}
-	if pinDigest {
-		want.ReceiptDigest = cfg.ReceiptDigest
-	}
-	return want
-}
-
-func exactManagedExpectation(binding serverlifecycle.ReadyBinding, cfg ManagedServerConfig) serverlifecycle.ReadyExpectation {
-	return serverlifecycle.ReadyExpectation{
-		Generation: binding.Receipt.Generation, ProcessID: binding.Receipt.Ownership.ProcessID,
-		ProcessStartIdentity: binding.Receipt.Ownership.ProcessStartIdentity, ReceiptDigest: binding.ReceiptDigest,
-		ProtocolFamily: cfg.ProtocolFamily, ProtocolRevision: cfg.ProtocolRevision,
-		Capabilities: slices.Clone(cfg.Capabilities), BaseURL: binding.Receipt.Endpoint.BaseURL, ModelAlias: binding.Receipt.ModelAlias,
-	}
-}
-
-func (m *managedServerLifecycle) Restart(ctx context.Context) error { return m.delegate.Restart(ctx) }
-
-func (m *managedServerLifecycle) Ready(ctx context.Context) error {
-	if err := m.delegate.Ready(ctx); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	previous := m.current
-	m.mu.Unlock()
-	want := managedExpectation(m.config, false)
-	want.MinimumGeneration = previous.Receipt.Generation + 1
-	want.BaseURL = previous.Receipt.Endpoint.BaseURL
-	want.ModelAlias = previous.Receipt.ModelAlias
-	binding, err := serverlifecycle.ConsumeReady(m.config.Directory, want)
-	if err != nil {
-		return fmt.Errorf("managed server READY identity after restart: %w", err)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.current = binding
-	identity := managedIdentity(binding)
-	if len(m.identities) == 0 || m.identities[len(m.identities)-1].ReceiptDigest != identity.ReceiptDigest {
-		m.identities = append(m.identities, identity)
-	}
-	return nil
-}
-
-func (m *managedServerLifecycle) Revalidate(context.Context) error {
-	m.mu.Lock()
-	current := m.current
-	m.mu.Unlock()
-	_, err := serverlifecycle.ConsumeReady(m.config.Directory, exactManagedExpectation(current, m.config))
-	if err != nil {
-		return fmt.Errorf("managed server READY identity changed: %w", err)
-	}
-	return nil
-}
-
-func (m *managedServerLifecycle) Cleanup(ctx context.Context) error {
-	if err := m.Revalidate(ctx); err != nil {
-		return fmt.Errorf("refuse cleanup of unverified managed process: %w", err)
-	}
-	return m.delegate.Cleanup(ctx)
-}
-
-func (m *managedServerLifecycle) endpoint() EndpointConfig {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return EndpointConfig{Endpoint: m.current.Receipt.Endpoint.BaseURL, Model: m.current.Receipt.ModelAlias}
-}
-
-func (m *managedServerLifecycle) identityChain() []ManagedServerIdentity {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]ManagedServerIdentity(nil), m.identities...)
-}
-
-func managedIdentity(binding serverlifecycle.ReadyBinding) ManagedServerIdentity {
-	r := binding.Receipt
-	return ManagedServerIdentity{
-		ReceiptDigest: binding.ReceiptDigest, Generation: r.Generation, ProcessID: r.Ownership.ProcessID,
-		ProcessStartIdentity: r.Ownership.ProcessStartIdentity, BaseURL: r.Endpoint.BaseURL, ModelAlias: r.ModelAlias,
-		ProtocolFamily: r.Protocol.Family, ProtocolRevision: r.Protocol.Revision, Capabilities: slices.Clone(r.Protocol.Capabilities),
-	}
-}
-
 // RunAdapter loads the frozen corpus and operator config, executes the real
 // endpoint campaign, validates it, and atomically writes the archive and report.
 func RunAdapter(ctx context.Context, configPath, corpusPath, reportPath, archivePath string) error {
@@ -446,39 +284,15 @@ func RunAdapter(ctx context.Context, configPath, corpusPath, reportPath, archive
 			return fmt.Errorf("API key environment %s is empty", cfg.APIKeyEnv)
 		}
 	}
-	var lifecycle Lifecycle = commandLifecycle{restart: cfg.RestartCommand, ready: cfg.ReadyCommand, cleanup: cfg.CleanupCommand}
-	endpoint := cfg.Endpoint.runnerConfig()
-	var managed *managedServerLifecycle
-	if cfg.ManagedServer != nil {
-		managed, err = newManagedServerLifecycle(lifecycle, *cfg.ManagedServer)
-		if err != nil {
-			return err
-		}
-		resolved := managed.endpoint()
-		endpoint.Endpoint, endpoint.Model = resolved.Endpoint, resolved.Model
-		endpoint.BeforeTrial = func(trialCtx context.Context, _ qwen38quant.Fixture, _ int) error {
-			return managed.Revalidate(trialCtx)
-		}
-		lifecycle = managed
-	}
 	campaign, err := (Runner{}).RunCampaign(ctx, CampaignConfig{
-		Endpoint: endpoint, ExecutionEngine: cfg.ExecutionEngine, Arm: cfg.Arm, Expected: cfg.Expected, Command: cfg.Command,
+		Endpoint: cfg.Endpoint.runnerConfig(), ExecutionEngine: cfg.ExecutionEngine, Arm: cfg.Arm, Expected: cfg.Expected, Command: cfg.Command,
 		RequireDevice: cfg.RequireDevice, StaleAfter: cfg.StaleAfter,
 		RollbackThreshold: cfg.RollbackThreshold,
 		Probe:             commandProbe{argv: cfg.ObservationCommand},
-		Lifecycle:         lifecycle,
+		Lifecycle:         commandLifecycle{restart: cfg.RestartCommand, ready: cfg.ReadyCommand, cleanup: cfg.CleanupCommand},
 	}, corpus)
 	if err != nil {
 		return err
-	}
-	if managed != nil {
-		archive, wrapErr := canonicalJSON(managedArchive{Schema: "fak.qwen38-quant-managed-raw/1", Campaign: json.RawMessage(campaign.Archive), ServerIdentity: managed.identityChain()})
-		if wrapErr != nil {
-			return fmt.Errorf("managed archive: %w", wrapErr)
-		}
-		campaign.Archive = archive
-		sum := sha256.Sum256(archive)
-		campaign.Report.RawArchiveSHA256 = hex.EncodeToString(sum[:])
 	}
 	if err := qwen38quant.Validate(campaign.Report, corpus); err != nil {
 		return fmt.Errorf("validate report: %w", err)

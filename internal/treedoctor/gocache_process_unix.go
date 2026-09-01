@@ -3,10 +3,12 @@
 package treedoctor
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 func ActiveGoBuild() (bool, error) {
@@ -22,4 +24,19 @@ func ActiveGoBuild() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func goCacheProcessAlive(pid int) (bool, error) {
+	if pid <= 0 {
+		return false, fmt.Errorf("invalid pid %d", pid)
+	}
+	err := syscall.Kill(pid, 0)
+	switch {
+	case err == nil, errors.Is(err, syscall.EPERM):
+		return true, nil
+	case errors.Is(err, syscall.ESRCH):
+		return false, nil
+	default:
+		return false, err
+	}
 }

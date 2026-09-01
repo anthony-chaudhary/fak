@@ -282,7 +282,39 @@ type Row struct {
 	// the dirs the filesystem actually gave up, never from the plan's intent.
 	GoTmpReaped         int   `json:"gotmp_reaped,omitempty"`
 	GoTmpReclaimedBytes int64 `json:"gotmp_reclaimed_bytes,omitempty"`
-	Incident            bool  `json:"incident,omitempty"`
+	// GoCache records a bounded lifecycle receipt in the same scheduled ledger. Candidate
+	// paths stay in the immediate Result rather than inflating the long-lived JSONL row.
+	GoCache  GoCacheLedgerReceipt `json:"go_cache,omitempty"`
+	Incident bool                 `json:"incident,omitempty"`
+}
+
+// GoCacheLedgerReceipt is the bounded projection of one Go build-cache lifecycle run.
+type GoCacheLedgerReceipt struct {
+	Root             string   `json:"root,omitempty"`
+	BytesBefore      int64    `json:"bytes_before,omitempty"`
+	BytesAfter       int64    `json:"bytes_after,omitempty"`
+	ReclaimedBytes   int64    `json:"reclaimed_bytes,omitempty"`
+	Reaped           int      `json:"reaped,omitempty"`
+	TriggeredBy      []string `json:"triggered_by,omitempty"`
+	ScanComplete     bool     `json:"scan_complete"`
+	IncompleteReason string   `json:"incomplete_reason,omitempty"`
+	Skipped          string   `json:"skipped,omitempty"`
+	Err              string   `json:"err,omitempty"`
+}
+
+func goCacheLedgerReceipt(r treedoctor.GoCacheReport) GoCacheLedgerReceipt {
+	return GoCacheLedgerReceipt{
+		Root:             r.Root,
+		BytesBefore:      r.BytesBefore,
+		BytesAfter:       r.BytesAfter,
+		ReclaimedBytes:   r.ReclaimedBytes,
+		Reaped:           len(r.Reaped),
+		TriggeredBy:      append([]string(nil), r.TriggeredBy...),
+		ScanComplete:     r.ScanComplete,
+		IncompleteReason: r.IncompleteReason,
+		Skipped:          r.Skipped,
+		Err:              r.Err,
+	}
 }
 
 // LooseFolded reports the loose objects this run folded away.
@@ -441,6 +473,7 @@ func (r Result) row() Row {
 
 		GoTmpReaped:         r.GoTmp.ReapCount(),
 		GoTmpReclaimedBytes: r.GoTmp.ReapedBytes,
+		GoCache:             goCacheLedgerReceipt(r.GoCache),
 
 		Incident: r.Incident,
 	}

@@ -1,9 +1,12 @@
 package codexresume
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // WriterOwnershipVerdict is the closed ownership vocabulary for a Codex
@@ -18,11 +21,11 @@ const (
 )
 
 // WriterOwnership is a JSON-safe, read-only ownership receipt for one Codex
-// thread writer lock. Compatibility fields remain alongside the typed resource.
+// thread writer lock. HandleReceiptID binds the PID to the witnessed process start
+// time and resource identity; consumers must never compare PID alone.
 type WriterOwnership struct {
 	ThreadID         string                 `json:"thread_id"`
 	LockPath         string                 `json:"lock_path"`
-	Resource         *WriterResourceHandle  `json:"resource,omitempty"`
 	LockPresent      bool                   `json:"lock_present"`
 	Verdict          WriterOwnershipVerdict `json:"verdict"`
 	PID              int                    `json:"pid,omitempty"`
@@ -56,30 +59,13 @@ func InspectWriterOwnership(threadID, lockPath string) WriterOwnership {
 }
 
 func inspectWriterOwnership(threadID, lockPath string, probe ownershipProbe) WriterOwnership {
-	thread, err := NewCodexThreadIdentity(threadID)
-	if err != nil {
-		return invalidWriterOwnership(threadID, lockPath, err)
-	}
-	resource, err := NewWriterResourceHandle(thread, lockPath)
-	if err != nil {
-		return invalidWriterOwnership(threadID, lockPath, err)
-	}
-	return inspectWriterResourceOwnership(resource, probe)
-}
-
-func inspectWriterResourceOwnership(resource WriterResourceHandle, probe ownershipProbe) WriterOwnership {
 	result := WriterOwnership{
-		ThreadID:       resource.Thread.ID,
-		LockPath:       resource.LockPath,
+		ThreadID:       threadID,
+		LockPath:       lockPath,
 		Verdict:        WriterOwnershipUnknown,
 		EvidenceSource: "filesystem",
 	}
-	if err := resource.Validate(); err != nil {
-		result.Detail = fmt.Sprintf("invalid writer resource handle: %v", err)
-		return result
-	}
-	result.Resource = &resource
-	if _, err := os.Stat(resource.LockPath); err != nil {
+	if _, err := os.Stat(lockPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			result.Verdict = WriterOwnershipAbsent
 			result.Detail = "writer lock is absent"
@@ -92,7 +78,7 @@ func inspectWriterResourceOwnership(resource WriterResourceHandle, probe ownersh
 	if probe == nil {
 		probe = nativeOwnershipProbe{}
 	}
-	witness, err := probe.inspect(resource.LockPath)
+	witness, err := probe.inspect(lockPath)
 	if witness.source != "" {
 		result.EvidenceSource = witness.source
 	}
@@ -110,29 +96,16 @@ func inspectWriterResourceOwnership(resource WriterResourceHandle, probe ownersh
 		return result
 	}
 	owner := witness.owners[0]
-	if owner.pid <= 0 || owner.startToken == 0 {
-		result.Detail = "the native ownership witness did not provide a stable PID and process start token"
-		return result
-	}
 	result.Verdict = WriterOwnershipLiveOwner
 	result.PID = owner.pid
 	result.ProcessStartTime = owner.startTime
 	result.ProcessImage = owner.image
-	result.HandleReceiptID = ownershipReceipt(resource, owner)
+	result.HandleReceiptID = ownershipReceipt(threadID, lockPath, owner)
 	result.Detail = "a native resource witness identified a live writer process"
 	return result
 }
 
-func invalidWriterOwnership(threadID, lockPath string, err error) WriterOwnership {
-	return WriterOwnership{
-		ThreadID:       threadID,
-		LockPath:       lockPath,
-		Verdict:        WriterOwnershipUnknown,
-		EvidenceSource: "validation",
-		Detail:         fmt.Sprintf("invalid writer resource identity: %v", err),
-	}
-}
-
-func ownershipReceipt(resource WriterResourceHandle, owner processOwner) string {
-	return fmt.Sprintf("writer-owner-v1:%s:%d:%016x", resource.ResourceID, owner.pid, owner.startToken)
+func ownershipReceipt(threadID, lockPath string, owner processOwner) string {
+	resource := sha256.Sum256([]byte(strings.ToLower(filepath.Clean(lockPath))))
+	return fmt.Sprintf("writer-v1:%x:%d:%016x", resource[:12], owner.pid, owner.startToken)
 }

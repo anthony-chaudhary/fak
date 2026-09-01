@@ -5,6 +5,7 @@ package windowgate
 import (
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -125,26 +126,19 @@ func restoreTerminalWindow(hwnd uintptr) bool {
 	return true
 }
 
-// TerminalRestore pins the attended terminal window before a managed child
-// starts. RepairAfterStart samples only that window once after a successful
-// start, so sibling windows and later deliberate minimizes are untouched.
-type TerminalRestore struct {
-	hwnd uintptr
-}
-
-// CaptureTerminalRestore resolves the attended terminal exactly once before
-// child start.
-func CaptureTerminalRestore() TerminalRestore {
-	return TerminalRestore{hwnd: resolveTerminalWindow()}
-}
-
-// RepairAfterStart restores the captured terminal only when child startup left
-// that exact window iconic.
-func (r TerminalRestore) RepairAfterStart() bool {
-	if r.hwnd == 0 || !isResolvedTerminalWindowIconic(r.hwnd) {
-		return false
+// StartTerminalRestorePulse repairs a terminal that the just-completed harness
+// launch left minimized. The state is sampled once at this launch boundary: a
+// later transition to minimized is operator intent and must not be undone by a
+// background pulse.
+func StartTerminalRestorePulse(duration, interval time.Duration) {
+	if duration <= 0 || interval <= 0 {
+		return
 	}
-	return restoreResolvedTerminalWindow(r.hwnd)
+	hwnd := resolveTerminalWindow()
+	if hwnd == 0 || !isResolvedTerminalWindowIconic(hwnd) {
+		return
+	}
+	restoreResolvedTerminalWindow(hwnd)
 }
 
 func ancestorPIDs(pid uint32) []uint32 {

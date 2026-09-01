@@ -1,27 +1,6 @@
 {
   "rows": [
     {
-      "id": "gocache-lifecycle-candidatebytes",
-      "canonical": "GoCacheReport.CandidateBytes (planned Go build-cache reclaim bytes)",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "treedoctor.GoCacheReport.CandidateBytes is the measured byte total of stale Go build-cache entries selected by a lifecycle dry run or apply plan.",
-      "distinction": "It reports bytes selected as eligible candidates, not filesystem free space and not the sweep configuration that sets pressure and retention thresholds.",
-      "distinct_from": [
-        "gocache-lifecycle-freebytes",
-        "gocache-lifecycle-options"
-      ],
-      "aliases": [
-        "GoCacheReport.CandidateBytes"
-      ],
-      "grounding": "candidatebytes",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "GoCacheReport",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "gocache-lifecycle-cacheerr",
       "canonical": "GoCacheReport.Err (Go build-cache lifecycle error)",
       "family": "cache",
@@ -36,6 +15,27 @@
         "GoCacheReport.Err"
       ],
       "grounding": "cacheerr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "GoCacheReport",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gocache-lifecycle-candidatebytes",
+      "canonical": "GoCacheReport.CandidateBytes (planned Go build-cache reclaim bytes)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "treedoctor.GoCacheReport.CandidateBytes is the measured byte total of stale Go build-cache entries selected by a lifecycle dry run or apply plan.",
+      "distinction": "It reports bytes selected as eligible candidates, not filesystem free space and not the sweep configuration that sets pressure and retention thresholds.",
+      "distinct_from": [
+        "gocache-lifecycle-freebytes",
+        "gocache-lifecycle-options"
+      ],
+      "aliases": [
+        "GoCacheReport.CandidateBytes"
+      ],
+      "grounding": "candidatebytes",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "GoCacheReport",
@@ -81,6 +81,27 @@
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "SweepGoCache",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gocache-lifecycle-processalive",
+      "canonical": "goCacheProcessAlive (Go-cache lock-owner liveness probe)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "treedoctor.goCacheProcessAlive is the platform-specific PID liveness probe used only to decide whether a pre-existing Go-cache lifecycle lock can be recovered.",
+      "distinction": "It checks the recorded lifecycle-lock owner's process state, not whether a Go build is active and not whether cache entries are stale or reclaimable.",
+      "distinct_from": [
+        "gocache-lifecycle-options",
+        "gocache-lifecycle-freebytes"
+      ],
+      "aliases": [
+        "goCacheProcessAlive"
+      ],
+      "grounding": "gocacheprocessalive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "acquireGoCacheLockWith",
       "verdict": "defined",
       "gaps": []
     }
