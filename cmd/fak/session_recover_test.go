@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,6 +124,7 @@ func TestSessionRecoverPreviewNeedsNoFakDevExecutable(t *testing.T) {
 }
 
 func TestSessionRecoverIsFirstClassAlias(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv := recoveryInventory
 	defer func() { recoveryInventory = oldInv }()
 	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
@@ -188,9 +190,186 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{guardBin, "guard", "--", "codex", "exec", "--cd", `C:\work\fak`, "resume", "t1", "continue this exact task"}
-	if len(cap.got) != 1 || !reflect.DeepEqual(cap.got[0].Argv, want) || cap.got[0].CWD != `C:\work\fak` {
+	if len(cap.got) != 1 {
 		t.Fatalf("launch=%+v", cap.got)
+	}
+	req := cap.got[0]
+	want := []string{guardBin, "session", "recover", "--provider-launch", "codex", "--thread", "t1", "--cwd", `C:\work\fak`, "--prompt-file", req.PromptPath, "--codex", "codex"}
+	if !reflect.DeepEqual(req.Argv, want) || req.CWD != `C:\work\fak` {
+		t.Fatalf("launch=%+v", cap.got)
+	}
+	prompt, err := os.ReadFile(req.PromptPath)
+	if err != nil || string(prompt) != "continue this exact task" {
+		t.Fatalf("prompt=%q err=%v", prompt, err)
+	}
+}
+
+func TestSessionRecoverProviderLaunchDeliversExactPromptAtProviderBoundary(t *testing.T) {
+	const hostile = "first line\n\"quoted\" 'single' ; & | $()\nlast line"
+	for _, tc := range []struct {
+		provider string
+		wantTail []string
+	}{
+		{provider: sessionrecovery.ProviderCodex, wantTail: []string{"fake-codex", "exec", "--cd", "WORKDIR", "resume", "thread-1", "-"}},
+		{provider: sessionrecovery.ProviderClaude, wantTail: []string{"claude", "--print", "--resume", "thread-1"}},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			promptPath := filepath.Join(t.TempDir(), "prompt.txt")
+			if err := os.WriteFile(promptPath, []byte(hostile), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			capturePath := filepath.Join(t.TempDir(), "guard.json")
+			oldCommand := recoveryProviderCommand
+			t.Cleanup(func() { recoveryProviderCommand = oldCommand })
+			recoveryProviderCommand = func(command string, args ...string) *exec.Cmd {
+				helperArgs := []string{"-test.run=^TestSessionRecoverProviderLaunchHelper$", "--", command}
+				helperArgs = append(helperArgs, args...)
+				cmd := exec.Command(os.Args[0], helperArgs...)
+				cmd.Env = append(os.Environ(), "FAK_RECOVERY_PROVIDER_CAPTURE="+capturePath)
+				return cmd
+			}
+			cwd := t.TempDir()
+			args := []string{"--provider-launch", tc.provider, "--thread", "thread-1", "--cwd", cwd, "--prompt-file", promptPath}
+			if tc.provider == sessionrecovery.ProviderCodex {
+				args = append(args, "--codex", "fake-codex")
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runSessionRecoverProviderLaunch(&stdout, &stderr, args); code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, stderr.String())
+			}
+			var got struct {
+				Argv  []string `json:"argv"`
+				Stdin string   `json:"stdin"`
+			}
+			b, err := os.ReadFile(capturePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatal(err)
+			}
+			want := append([]string{got.Argv[0], "guard", "--"}, tc.wantTail...)
+			for i := range want {
+				if want[i] == "WORKDIR" {
+					want[i] = cwd
+				}
+			}
+			if !reflect.DeepEqual(got.Argv, want) || got.Stdin != hostile {
+				t.Fatalf("guard argv=%q stdin=%q want argv=%q stdin=%q", got.Argv, got.Stdin, want, hostile)
+			}
+			if _, err := os.Stat(promptPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("staged prompt still exists after success: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionRecoverProviderLaunchFailurePreservesPromptAndRedactsError(t *testing.T) {
+	const hostile = "secret hostile prompt ; & | $()"
+	promptPath := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte(hostile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldCommand := recoveryProviderCommand
+	t.Cleanup(func() { recoveryProviderCommand = oldCommand })
+	recoveryProviderCommand = func(string, ...string) *exec.Cmd {
+		return exec.Command(os.Args[0], "-test.run=^TestSessionRecoverProviderLaunchFailureHelper$")
+	}
+	var stdout, stderr bytes.Buffer
+	code := runSessionRecoverProviderLaunch(&stdout, &stderr, []string{"--provider-launch", "codex", "--thread", "thread-1", "--cwd", t.TempDir(), "--prompt-file", promptPath})
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), hostile) {
+		t.Fatalf("prompt leaked to error output: %q", stderr.String())
+	}
+	got, err := os.ReadFile(promptPath)
+	if err != nil || string(got) != hostile {
+		t.Fatalf("staged prompt=%q err=%v", got, err)
+	}
+}
+
+func TestSessionRecoverProviderLaunchFailureHelper(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Exit(7)
+	}
+	if strings.Contains(strings.Join(os.Args, " "), "TestSessionRecoverProviderLaunchFailureHelper") {
+		os.Exit(7)
+	}
+}
+
+func TestSessionRecoverProviderLaunchHelper(t *testing.T) {
+	capturePath := os.Getenv("FAK_RECOVERY_PROVIDER_CAPTURE")
+	if capturePath == "" {
+		return
+	}
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 || separator+1 >= len(os.Args) {
+		t.Fatal("provider helper missing argv separator")
+	}
+	stdin, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := struct {
+		Argv  []string `json:"argv"`
+		Stdin string   `json:"stdin"`
+	}{Argv: append([]string(nil), os.Args[separator+1:]...), Stdin: string(stdin)}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(capturePath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionRecoverHostilePromptStaysOutOfLaunchAndReceiptArgv(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
+	const hostile = `" do not merely restate status."']The system cannot find the file specified`
+	oldInv, oldLaunch, oldNow := recoveryInventory, recoveryLaunch, recoveryNow
+	t.Cleanup(func() { recoveryInventory, recoveryLaunch, recoveryNow = oldInv, oldLaunch, oldNow })
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+			Thread:     &sessionrecovery.Thread{ID: "t1", Source: "interactive_tui", CWD: `C:\work\fak`},
+			LatestTurn: &sessionrecovery.Turn{Status: "inProgress", StartedAt: "2026-08-31T12:00:00Z"},
+		}}}, nil
+	}
+	cap := &captureLauncher{}
+	recoveryLaunch = cap
+	recoveryNow = func() time.Time { return time.Date(2026, 8, 31, 12, 1, 0, 0, time.UTC) }
+	receipts := t.TempDir()
+	var out, er bytes.Buffer
+	code := runSessionRecover(&out, &er, []string{"--apply", "--all", "--journal=false", "--prompt", hostile, "--receipts", receipts, "--verify-timeout", "0", "--json"})
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, er.String(), out.String())
+	}
+	if len(cap.got) != 1 {
+		t.Fatalf("launches=%d", len(cap.got))
+	}
+	req := cap.got[0]
+	if strings.Contains(strings.Join(req.Argv, "\x00"), hostile) {
+		t.Fatalf("hostile prompt leaked into launch argv: %q", req.Argv)
+	}
+	prompt, err := os.ReadFile(req.PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(prompt) != hostile {
+		t.Fatalf("prompt=%q want=%q", prompt, hostile)
+	}
+	receipt, err := os.ReadFile(req.ReceiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(receipt), hostile) {
+		t.Fatalf("hostile prompt leaked into receipt: %s", receipt)
 	}
 }
 
@@ -336,8 +515,17 @@ func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := []string{guardBin, "guard", "--", "claude", "--resume", "journal-thread", "continue exactly"}
-	if len(got.Results) != 1 || got.Results[0].CWD != `D:\repos\actual tree` || got.Results[0].Source != "session_journal" || got.Results[0].Provider != sessionrecovery.ProviderClaude || !reflect.DeepEqual(got.Results[0].Argv, wantArgv) {
+	if len(got.Results) != 1 {
+		t.Fatalf("summary=%+v", got)
+	}
+	promptPath := ""
+	for i, arg := range got.Results[0].Argv {
+		if arg == "--prompt-file" && i+1 < len(got.Results[0].Argv) {
+			promptPath = got.Results[0].Argv[i+1]
+		}
+	}
+	wantArgv := []string{guardBin, "session", "recover", "--provider-launch", "claude", "--thread", "journal-thread", "--cwd", `D:\repos\actual tree`, "--prompt-file", promptPath}
+	if got.Results[0].CWD != `D:\repos\actual tree` || got.Results[0].Source != "session_journal" || got.Results[0].Provider != sessionrecovery.ProviderClaude || promptPath == "" || !reflect.DeepEqual(got.Results[0].Argv, wantArgv) {
 		t.Fatalf("summary=%+v", got)
 	}
 }

@@ -37,11 +37,15 @@ FAK_GUARD_API_KEY_ENV=<var> to also bill an Anthropic API key; FAK_MANAGED_CACHE
 and FAK_MANAGED_CACHE=auto restores the bare `claude --resume` (guard's own billing-gated auto).
 
   .\fleet_resume_watchdog.ps1                 # dry-run: log what it WOULD resume
-  .\fleet_resume_watchdog.ps1 -Live           # actually resume (once per session)
+  .\fleet_resume_watchdog.ps1 -Live           # actually resume in a visible window
+  .\fleet_resume_watchdog.ps1 -Live -Headless # explicit unattended opt-out
 #>
 [CmdletBinding()]
 param(
   [switch]$Live,
+  # Live recovery is operator-visible by default. Use -Headless only for an
+  # unattended host where opening a recovery window is undesirable.
+  [switch]$Headless,
   [string]$FleetDir   = '',
   [int]$WindowH       = 6,
   # Max resumes launched per tick. Raised 4 -> 6 (2026-07-10) to gear up the drain once the
@@ -793,21 +797,41 @@ for ($idx = 0; $idx -lt $planCount; $idx++) {
     $launchFile = $ClaudeExe
     [string[]]$launchArgs = $childArgs
   }
-  $proc = Start-Process -FilePath $launchFile `
-    -ArgumentList $launchArgs `
-    -WorkingDirectory $wd -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $out -RedirectStandardError "$out.err"
-  # record in the durable ledger BEFORE anything else, so a crash can't double-resume.
+  $launchMode = if ($Headless) { 'headless' } else { 'visible' }
+  $startArgs = @{
+    FilePath = $launchFile
+    ArgumentList = $launchArgs
+    WorkingDirectory = $wd
+    PassThru = $true
+  }
+  if ($Headless) {
+    $startArgs.WindowStyle = 'Hidden'
+    $startArgs.RedirectStandardOutput = $out
+    $startArgs.RedirectStandardError = "$out.err"
+  }
+  # Record every launch outcome durably, including failures before a child PID
+  # exists, so visible/headless posture remains inspectable after this tick exits.
   # ts is computed PER LAUNCH (not once per tick): the source governor's spacing floor
   # and the launch-spacing witness both read these timestamps, so two launches paced
   # $LaunchSpacingSec apart must not share one stale tick-start second (#2172).
   $attempt = [int]$launchCount[$sid] + 1
-  $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp; phase = 'launched'; attempt = $attempt } | ConvertTo-Json -Compress
+  try {
+    $proc = Start-Process @startArgs
+  } catch {
+    $detail = "Start-Process: $($_.Exception.Message)"
+    $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; cause = $p.disp; phase = 'launch_failed'; attempt = $attempt; launch_mode = $launchMode; detail = $detail } | ConvertTo-Json -Compress
+    Add-Content -Path $ledgerPath -Value $rec
+    $launchCount[$sid] = $attempt
+    Note "  FAILED $sid8 acct=$acct mode=$launchMode -- $detail"
+    Toast "Resume launch failed" "$sid8  ($acct / $($p.project))" 'warn' "resume-failed:$sid" 1440
+    continue
+  }
+  $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp; phase = 'launched'; attempt = $attempt; launch_mode = $launchMode } | ConvertTo-Json -Compress
   Add-Content -Path $ledgerPath -Value $rec
   $launchCount[$sid] = $attempt
   $liveResume[$sid] = $proc.Id
   $launched++
-  Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) (attempt $attempt/$MaxAttempts; re-eligible if it dies again)"
+  Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) mode=$launchMode (attempt $attempt/$MaxAttempts; re-eligible if it dies again)"
   Toast "Resumed dead session" "$sid8  ($acct / $($p.project))" 'info' "resume:$sid" 1440
   # Pace the next spawn (source-governor spacing witness). Skipped at the drain cap (nothing more
   # launches this tick) and after the final plan entry (nothing follows -- no trailing dead time,

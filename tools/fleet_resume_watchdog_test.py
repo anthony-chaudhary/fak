@@ -332,7 +332,8 @@ def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=())
             "claude": claude, "fak": fak, "ledger": ledger, "guard_marker": guard_marker}
 
 
-def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None):
+def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None,
+                  headless=False):
     ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1")
     env = dict(os.environ)
     env["FLEET_STATE_DIR"] = str(tmp_path / "state")
@@ -349,14 +350,16 @@ def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None)
     env.pop("FAK_GUARD_API_KEY_ENV", None)
     for k, v in (env_extra or {}).items():
         env[k] = v
+    args = [_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1),
+            "-Live", "-Probe", "none",
+            "-FleetDir", str(paths["fleet"]), "-RegistryDir", str(paths["reg"]),
+            "-LogDir", str(paths["log"]), "-ClaudeExe", str(paths["claude"]),
+            "-FakExe", str(paths["fak"]),
+            "-LaunchSpacingSec", str(spacing), "-MaxAttempts", str(max_attempts)]
+    if headless:
+        args.append("-Headless")
     return _subprocess.run(
-        [_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1),
-         "-Live", "-Probe", "none",
-         "-FleetDir", str(paths["fleet"]), "-RegistryDir", str(paths["reg"]),
-         "-LogDir", str(paths["log"]), "-ClaudeExe", str(paths["claude"]),
-         "-FakExe", str(paths["fak"]),
-         "-LaunchSpacingSec", str(spacing), "-MaxAttempts", str(max_attempts)],
-        capture_output=True, text=True, timeout=180, env=env)
+        args, capture_output=True, text=True, timeout=180, env=env)
 
 
 def _ledger_rows(paths):
@@ -427,6 +430,45 @@ def test_ps1_rearm_marker_reclaims_capped_session(tmp_path):
                 if x.get("phase") == "launched" and x.get("ts", "") >= "2026-07-10T00:00:00Z"]
     assert launched and launched[-1]["attempt"] == 1, \
         "the post-rearm launch must count from attempt 1, not 9"
+
+
+@_ps1_behavioral
+def test_ps1_live_launch_is_visible_by_default_and_records_mode(tmp_path):
+    sid = "22222222-3333-4444-5555-666666666666"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths)
+    assert r.returncode == 0, r.stdout + r.stderr
+    launched = [x for x in _ledger_rows(paths) if x.get("phase") == "launched"]
+    assert len(launched) == 1, r.stdout
+    assert launched[0]["launch_mode"] == "visible"
+
+
+@_ps1_behavioral
+def test_ps1_headless_is_explicit_and_records_mode(tmp_path):
+    sid = "22222222-3333-4444-5555-777777777777"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths, headless=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    launched = [x for x in _ledger_rows(paths) if x.get("phase") == "launched"]
+    assert len(launched) == 1, r.stdout
+    assert launched[0]["launch_mode"] == "headless"
+
+
+@_ps1_behavioral
+def test_ps1_failed_launch_is_durable_with_mode(tmp_path):
+    sid = "22222222-3333-4444-5555-888888888888"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid])
+    paths["claude"] = tmp_path / "missing-claude.exe"
+    r = _run_ps1_live(tmp_path, paths)
+    assert r.returncode == 0, r.stdout + r.stderr
+    failed = [x for x in _ledger_rows(paths) if x.get("phase") == "launch_failed"]
+    assert len(failed) == 1, r.stdout
+    assert failed[0]["launch_mode"] == "visible"
+    assert failed[0]["attempt"] == 1
+    assert "Start-Process" in failed[0]["detail"]
 
 
 @_ps1_behavioral

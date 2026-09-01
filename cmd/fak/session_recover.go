@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -40,6 +41,7 @@ var recoveryInventorySources = sessiondiag.ReadCodexInventorySources
 var recoveryInventoryRegistryPath = sessionregistry.DefaultPath
 
 var recoveryInventory = collectRecoveryInventory
+var recoveryProviderCommand = exec.Command
 
 func collectRecoveryInventory(since time.Duration) (sessionrecovery.InventoryReport, error) {
 	now := recoveryNow()
@@ -202,6 +204,11 @@ func reconcileHistoricalClaudeAuth(report *sessionrecovery.InventoryReport) {
 }
 
 func runSessionRecover(stdout, stderr io.Writer, args []string) int {
+	for _, arg := range args {
+		if arg == "--provider-launch" || strings.HasPrefix(arg, "--provider-launch=") {
+			return runSessionRecoverProviderLaunch(stdout, stderr, args)
+		}
+	}
 	fs := flag.NewFlagSet("session recover", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	since := fs.Duration("since", 24*time.Hour, "candidate evidence window")
@@ -210,7 +217,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	apply := fs.Bool("apply", false, "deprecated alias for --live")
 	all := fs.Bool("all", false, "with --live, confirm every selected candidate instead of one explicit --thread")
 	cwd := fs.String("cwd", "", "explicit override for cwd_unknown candidates")
-	prompt := fs.String("prompt", "", "optional resume prompt passed as one exact argv element")
+	prompt := fs.String("prompt", "", "optional resume prompt staged in a private file outside native launch argv")
 	journal := fs.Bool("journal", true, "include crash candidates from the session journal")
 	journalPath := fs.String("journal-path", "", "session journal path (default machine journal)")
 	settle := fs.Duration("settle", 0, "optional initial delay before verification")
@@ -304,6 +311,14 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			}
 			resultIndex := recoveryResultIndex(summary.Results, requests[i].ThreadID)
 			if resultIndex < 0 {
+				continue
+			}
+			if err := sessionrecovery.StagePrompt(requests[i]); err != nil {
+				requests[i].Status = "prompt_failed"
+				requests[i].Reason = err.Error()
+				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
+					return 1
+				}
 				continue
 			}
 			wrote, err := sessionrecovery.WriteReceipt(requests[i], recoveryNow())
@@ -404,6 +419,62 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		renderRecoverySummary(stdout, summary)
 	}
 	if summary.Counts.Failed > 0 || summary.Counts.LaunchedUnproven > 0 {
+		return 1
+	}
+	return 0
+}
+
+func runSessionRecoverProviderLaunch(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("session recover provider launch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	provider := fs.String("provider-launch", "", "provider to resume")
+	thread := fs.String("thread", "", "provider thread/session id")
+	cwd := fs.String("cwd", "", "provider working directory")
+	promptFile := fs.String("prompt-file", "", "private continuation prompt file")
+	codexBin := fs.String("codex", "codex", "Codex executable")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*thread) == "" || strings.TrimSpace(*cwd) == "" || strings.TrimSpace(*promptFile) == "" {
+		fmt.Fprintln(stderr, "usage: fak session recover --provider-launch claude|codex --thread ID --cwd DIR --prompt-file FILE [--codex BIN]")
+		return 2
+	}
+	prompt, err := os.ReadFile(*promptFile)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak session recover provider launch: read prompt file:", err)
+		return 1
+	}
+	managerBin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, "fak session recover provider launch: resolve guard executable")
+		return 1
+	}
+	argv := []string{"guard", "--"}
+	switch *provider {
+	case sessionrecovery.ProviderClaude:
+		// Claude print mode consumes the continuation prompt from stdin when no
+		// positional prompt is present. Keep both control and provider argv
+		// independent of prompt bytes; fak guard preserves stdin at the boundary.
+		argv = append(argv, "claude", "--print", "--resume", *thread)
+	case sessionrecovery.ProviderCodex:
+		argv = append(argv, *codexBin, "exec", "--cd", *cwd, "resume", *thread, "-")
+	default:
+		fmt.Fprintf(stderr, "fak session recover provider launch: unsupported provider %q\n", *provider)
+		return 2
+	}
+	cmd := recoveryProviderCommand(managerBin, argv...)
+	cmd.Dir = *cwd
+	cmd.Stdin = strings.NewReader(string(prompt))
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		// Do not include argv or prompt-bearing command diagnostics. The staged
+		// file remains available for an explicit retry after provider failure.
+		fmt.Fprintln(stderr, "fak session recover provider launch: guarded provider failed")
+		return 1
+	}
+	if err := os.Remove(*promptFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(stderr, "fak session recover provider launch: remove staged prompt:", err)
 		return 1
 	}
 	return 0
