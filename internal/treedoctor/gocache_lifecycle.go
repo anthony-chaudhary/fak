@@ -266,9 +266,13 @@ func SweepGoCache(o GoCacheOptions, apply bool) GoCacheReport {
 		return r
 	}
 	for _, e := range chosen {
-		if err := safeCandidate(resolved, e.Path); err != nil {
+		info, err := safeCandidate(resolved, e.Path)
+		if err != nil {
 			r.Err = err.Error()
 			return r
+		}
+		if info.ModTime().After(cutoff) {
+			continue
 		}
 		if err := o.Remove(e.Path); err != nil {
 			r.Err = err.Error()
@@ -440,21 +444,21 @@ func scanGoCache(ctx context.Context, root string, max int, progress func(GoCach
 
 var errEntryBudget = errors.New("entry budget exhausted")
 
-func safeCandidate(root, path string) error {
+func safeCandidate(root, path string) (fs.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("refusing non-regular cache candidate %q", path)
+		return nil, fmt.Errorf("refusing non-regular cache candidate %q", path)
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rel, err := filepath.Rel(root, resolved)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
-		return fmt.Errorf("candidate escapes GOCACHE %q", path)
+		return nil, fmt.Errorf("candidate escapes GOCACHE %q", path)
 	}
-	return nil
+	return info, nil
 }
