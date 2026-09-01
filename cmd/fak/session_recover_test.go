@@ -204,6 +204,70 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	}
 }
 
+func TestSessionRecoverAlreadyReceiptedDoesNotStagePrompt(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
+	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
+	defer func() {
+		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
+	}()
+
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	recoveryNow = func() time.Time { return now }
+	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) { return nil, nil }
+	report := sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+		Thread:     &sessionrecovery.Thread{ID: "t1", Source: "interactive_tui"},
+		LatestTurn: &sessionrecovery.Turn{Status: "inProgress", StartedAt: "2026-09-01T09:00:00Z"},
+	}}}
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) { return report, nil }
+	launcher := &captureLauncher{}
+	recoveryLaunch = launcher
+	recoverySleep = func(time.Duration) {}
+
+	receipts := t.TempDir()
+	managerBin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := sessionrecovery.Select(report, sessionrecovery.Options{
+		ManagerBin:  managerBin,
+		Limit:       1,
+		CWDOverride: `C:\work\fak`,
+		Prompt:      "continue this exact task",
+		ReceiptDir:  receipts,
+	})
+	if len(requests) != 1 {
+		t.Fatalf("requests=%+v", requests)
+	}
+	req := requests[0]
+	if wrote, err := sessionrecovery.WriteReceipt(req, now); err != nil || !wrote {
+		t.Fatalf("precreate receipt wrote=%v err=%v", wrote, err)
+	}
+	if _, err := os.Stat(req.PromptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prompt staged before recovery: err=%v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runSessionRecover(&stdout, &stderr, []string{
+		"--apply", "--all", "--journal=false", "--cwd", `C:\work\fak`,
+		"--prompt", "continue this exact task", "--receipts", receipts, "--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(launcher.got) != 0 {
+		t.Fatalf("already receipted request launched: %+v", launcher.got)
+	}
+	if _, err := os.Stat(req.PromptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("already receipted request left staged prompt: err=%v", err)
+	}
+	var summary sessionrecovery.Summary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Results) != 1 || summary.Results[0].Status != "already_receipted" {
+		t.Fatalf("summary=%+v", summary)
+	}
+}
 func TestSessionRecoverProviderLaunchDeliversExactPromptAtProviderBoundary(t *testing.T) {
 	const hostile = "first line\n\"quoted\" 'single' ; & | $()\nlast line"
 	for _, tc := range []struct {
@@ -273,7 +337,9 @@ func TestSessionRecoverProviderLaunchFailurePreservesPromptAndRedactsError(t *te
 	oldCommand := recoveryProviderCommand
 	t.Cleanup(func() { recoveryProviderCommand = oldCommand })
 	recoveryProviderCommand = func(string, ...string) *exec.Cmd {
-		return exec.Command(os.Args[0], "-test.run=^TestSessionRecoverProviderLaunchFailureHelper$")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSessionRecoverProviderLaunchFailureHelper$")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd
 	}
 	var stdout, stderr bytes.Buffer
 	code := runSessionRecoverProviderLaunch(&stdout, &stderr, []string{"--provider-launch", "codex", "--thread", "thread-1", "--cwd", t.TempDir(), "--prompt-file", promptPath})
@@ -291,9 +357,6 @@ func TestSessionRecoverProviderLaunchFailurePreservesPromptAndRedactsError(t *te
 
 func TestSessionRecoverProviderLaunchFailureHelper(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		os.Exit(7)
-	}
-	if strings.Contains(strings.Join(os.Args, " "), "TestSessionRecoverProviderLaunchFailureHelper") {
 		os.Exit(7)
 	}
 }

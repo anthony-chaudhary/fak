@@ -313,14 +313,6 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			if resultIndex < 0 {
 				continue
 			}
-			if err := sessionrecovery.StagePrompt(requests[i]); err != nil {
-				requests[i].Status = "prompt_failed"
-				requests[i].Reason = err.Error()
-				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
-					return 1
-				}
-				continue
-			}
 			wrote, err := sessionrecovery.WriteReceipt(requests[i], recoveryNow())
 			if err != nil {
 				requests[i].Status = "receipt_failed"
@@ -332,6 +324,15 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			}
 			if !wrote {
 				requests[i].Status = "already_receipted"
+				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
+					return 1
+				}
+				continue
+			}
+			if err := sessionrecovery.StagePrompt(requests[i]); err != nil {
+				requests[i].Status = "prompt_failed"
+				requests[i].Reason = err.Error()
+				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
 				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
 					return 1
 				}
