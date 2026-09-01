@@ -60,6 +60,6 @@ witness: docs/_witnesses/issue-9842/runtime-capabilities-governed-turn.json
 witness: docs/supported/backends.md
 reason: The landed subject says test(runtimecap), but the diff adds only an immutable real-run JSON witness and its documentation link; it changes no test source. The artifact records an already executed fak-native CPU governed turn and therefore supports a documentation/evidence claim, not a test-code claim.
 commit: 2320237bda0f19c1183ed723493e83b40d3f4a18
-type: docs
+type: chore
 witness: experiments/agent-live/guard-opencode-live-witness-2026-09-01.json
 reason: The landed subject says test(guard), but the diff adds only an immutable live-run JSON witness and changes no test source. The artifact records the already executed #10594 guarded-opencode dogfood turn (child exit 0, two gateway 200s from opencode/1.18.25, placeholder 401 no-bypass check, one hash-chained DECIDE ALLOW row with fak audit verify OK — hashes cited inside the artifact) and therefore supports a documentation/evidence claim, not a test-code claim.
