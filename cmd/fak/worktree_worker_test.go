@@ -625,6 +625,89 @@ func TestWorktreeWorkerCapacityUnknownInventoryWarnsAndFailsOpen(t *testing.T) {
 	}
 }
 
+func TestWorktreeWorkerLifecycleRowJoinsPresentMissingAndInvalidIntent(t *testing.T) {
+	root := t.TempDir()
+	present := filepath.Join(root, "present")
+	missing := filepath.Join(root, "missing")
+	invalid := filepath.Join(root, "invalid")
+	for _, path := range []string{present, missing, invalid} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	message := "feat(worktree): expose intent (#10528) (fak workerworktree)"
+	if err := workerworktree.SaveIntent(present, "base-present", message, []string{"z.txt", "a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	intentDir := filepath.Join(filepath.Dir(invalid), ".fak-worker-intents")
+	if err := os.MkdirAll(intentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(intentDir, filepath.Base(invalid)+".json"), []byte("{not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	probes := worktreeWorkerLifecycleProbes{
+		ReadOwner:    func(string) (workerworktree.OwnerStamp, error) { return workerworktree.OwnerStamp{}, os.ErrNotExist },
+		ProcessAlive: func(int) (bool, error) { return false, nil },
+		LeaseLive:    func(string) (bool, error) { return false, nil },
+		Inspect: func(_ string, path string) (worktreeWorkerRevisionEvidence, error) {
+			return worktreeWorkerRevisionEvidence{HeadSHA: "head", BaseSHA: "base", Cleanliness: worktreeEvidenceClean}, nil
+		},
+	}
+
+	presentRow := worktreeWorkerLifecycleRowForPath(root, present, probes)
+	if presentRow.Intent.Status != worktreeWorkerIntentPresent || presentRow.Intent.IssueNumber != 10528 || presentRow.Intent.Message != message || !reflect.DeepEqual(presentRow.Intent.Paths, []string{"a.txt", "z.txt"}) {
+		t.Fatalf("present intent = %+v", presentRow.Intent)
+	}
+	if presentRow.Lifecycle == "" || presentRow.ReapReadiness.Reason == "" || presentRow.Association.State == "" || presentRow.Cleanliness.State == "" {
+		t.Fatalf("present row lost lifecycle evidence: %+v", presentRow)
+	}
+
+	missingRow := worktreeWorkerLifecycleRowForPath(root, missing, probes)
+	if missingRow.Intent.Status != worktreeWorkerIntentMissing || missingRow.Intent.Diagnostic == "" {
+		t.Fatalf("missing intent = %+v", missingRow.Intent)
+	}
+	if missingRow.Lifecycle == "" || missingRow.ReapReadiness.Reason == "" {
+		t.Fatalf("missing intent suppressed lifecycle evidence: %+v", missingRow)
+	}
+
+	invalidRow := worktreeWorkerLifecycleRowForPath(root, invalid, probes)
+	if invalidRow.Intent.Status != worktreeWorkerIntentInvalid || !strings.Contains(invalidRow.Intent.Diagnostic, "decode worker intent") {
+		t.Fatalf("invalid intent = %+v", invalidRow.Intent)
+	}
+	if invalidRow.Lifecycle == "" || invalidRow.ReapReadiness.Reason == "" {
+		t.Fatalf("invalid intent suppressed lifecycle evidence: %+v", invalidRow)
+	}
+}
+
+func TestWorktreeWorkerSnapshotRowsDoNotExportLocalIntent(t *testing.T) {
+	row := worktreeWorkerLifecycleRow{
+		Path: "/private/local/worktree",
+		Intent: worktreeWorkerIntent{
+			Status:      worktreeWorkerIntentPresent,
+			IssueNumber: 10528,
+			Message:     "secret local subject",
+			Paths:       []string{"private/owned.txt"},
+		},
+		Association: worktreeWorkerAssociation{State: worktreeEvidenceAssociated, Lane: "lane-a"},
+		Liveness:    worktreeWorkerLiveness{Owner: worktreeEvidenceLive, Lease: worktreeEvidenceLive},
+		Cleanliness: worktreeWorkerCleanliness{State: worktreeEvidenceDirty, DirtyPaths: []string{"private/dirty.txt"}},
+		Lifecycle:   worktreeLifecycleRetained,
+	}
+	b, err := json.Marshal(worktreeWorkerSnapshotRows([]worktreeWorkerLifecycleRow{row}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, secret := range []string{row.Path, row.Intent.Message, row.Intent.Paths[0], row.Cleanliness.DirtyPaths[0], "issue_number", "intent"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("remote snapshot leaked %q: %s", secret, text)
+		}
+	}
+}
+
 func TestWorktreeWorkerLifecycleInventoryDistinguishesSafeStates(t *testing.T) {
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
