@@ -41,6 +41,7 @@ const (
 // persisted response_item.function_call.id field (not its logical call_id).
 type CheckConfig struct {
 	ThreadID                       string
+	Thread                         ThreadIdentity
 	RolloutPath                    string
 	CodexHome                      string
 	TargetProvider                 string
@@ -52,6 +53,7 @@ type CheckConfig struct {
 // candidate -> compatibility -> admission verdict -> exact recovery action.
 type PreflightResult struct {
 	ThreadID                         string           `json:"thread_id"`
+	Thread                           *ThreadIdentity  `json:"thread,omitempty"`
 	Verdict                          PreflightVerdict `json:"verdict"`
 	Compatibility                    Compatibility    `json:"compatibility"`
 	RolloutPath                      string           `json:"rollout_path,omitempty"`
@@ -107,12 +109,16 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 		TargetWire:                     cfg.TargetWire,
 		RequiredFunctionCallItemPrefix: cfg.RequiredFunctionCallItemPrefix,
 	}
-	if strings.TrimSpace(cfg.ThreadID) == "" {
+	thread, err := resolveCheckThreadIdentity(cfg)
+	if err != nil {
 		result.Verdict = VerdictNotFound
-		result.Detail = "thread id is required"
-		result.RecoveryAction = "supply the exact persisted Codex thread id and rerun preflight"
+		result.Detail = err.Error()
+		result.RecoveryAction = "supply the exact persisted Codex thread UUID and rerun preflight"
 		return result
 	}
+	result.ThreadID = thread.ID
+	result.Thread = &thread
+	cfg.ThreadID = thread.ID
 
 	rolloutPath := cfg.RolloutPath
 	if rolloutPath == "" {
@@ -140,7 +146,12 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 		return result
 	}
 	result.WriterLockPath = filepath.Join(cfg.CodexHome, "thread-writer-locks", cfg.ThreadID+".lock")
-	result.WriterOwnership = inspectWriterOwnership(cfg.ThreadID, result.WriterLockPath, probe)
+	resource, err := NewWriterResourceHandle(thread, result.WriterLockPath)
+	if err != nil {
+		result.WriterOwnership = invalidWriterOwnership(cfg.ThreadID, result.WriterLockPath, err)
+	} else {
+		result.WriterOwnership = inspectWriterResourceOwnership(resource, probe)
+	}
 	result.WriterLockPresent = result.WriterOwnership.LockPresent
 
 	facts, err := inspectHistory(absRollout, cfg.RequiredFunctionCallItemPrefix)
@@ -213,6 +224,29 @@ func preflightWithProbe(cfg CheckConfig, probe ownershipProbe) PreflightResult {
 	result.Verdict = VerdictResumable
 	result.Detail = "persisted function-call item ids satisfy the target wire and no active writer was observed"
 	return result
+}
+
+func resolveCheckThreadIdentity(cfg CheckConfig) (ThreadIdentity, error) {
+	if cfg.Thread != (ThreadIdentity{}) {
+		if err := cfg.Thread.Validate(); err != nil {
+			return ThreadIdentity{}, fmt.Errorf("invalid typed thread identity: %w", err)
+		}
+		if cfg.Thread.Provider != ThreadProviderCodex {
+			return ThreadIdentity{}, fmt.Errorf("unsupported thread provider %q", cfg.Thread.Provider)
+		}
+		if cfg.ThreadID != "" && cfg.ThreadID != cfg.Thread.ID {
+			return ThreadIdentity{}, errors.New("thread identity does not match compatibility thread_id")
+		}
+		return cfg.Thread, nil
+	}
+	if strings.TrimSpace(cfg.ThreadID) == "" {
+		return ThreadIdentity{}, errors.New("thread id is required")
+	}
+	thread, err := NewCodexThreadIdentity(cfg.ThreadID)
+	if err != nil {
+		return ThreadIdentity{}, err
+	}
+	return thread, nil
 }
 
 func (cfg CheckConfig) withDefaults() CheckConfig {

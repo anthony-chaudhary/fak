@@ -95,8 +95,9 @@ usage:
         plus an optional p99-SLA knee without changing the single-point schema.
 
   fak webbench parity-gate --claim-file FILE --artifact FILE
-        Reject a "parity or better" serving claim unless the artifact contains
-        measured vllm, sglang, and fak-fronts-fleet tracks.
+        Reject parity claims without measured vllm, sglang, and fak-fronts-fleet
+        tracks, and reject peak or p99-SLA-knee claims without a matching
+        capacity-valid fak.serving-sweep.v1 receipt.
 
 The metrics most relevant to web agents:
   A/C  net prefill work-elimination vs the naive re-prefill-every-turn harness
@@ -484,7 +485,7 @@ func cmdWebbenchParityGate(argv []string) {
 	fs := flag.NewFlagSet("webbench parity-gate", flag.ExitOnError)
 	claimFile := fs.String("claim-file", "", "file containing claim text")
 	claim := fs.String("claim", "", "inline claim text")
-	artifact := fs.String("artifact", "", "serving parity artifact JSON")
+	artifact := fs.String("artifact", "", "serving parity or sweep artifact JSON")
 	_ = fs.Parse(argv)
 
 	claimText := *claim
@@ -497,17 +498,32 @@ func cmdWebbenchParityGate(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak webbench parity-gate: --claim-file or --claim is required")
 		os.Exit(2)
 	}
-	var rep *webbench.ServingParityReport
-	if *artifact != "" {
-		var err error
-		rep, err = webbench.LoadServingParityReport(*artifact)
-		must(err)
-	}
-	if err := webbench.ValidateParityClaim(claimText, rep); err != nil {
-		fmt.Fprintf(os.Stderr, "serving parity gate: %v\n", err)
+	if err := validateWebbenchClaim(claimText, *artifact); err != nil {
+		fmt.Fprintf(os.Stderr, "serving claim gate: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "serving parity gate: OK")
+	fmt.Fprintln(os.Stderr, "serving claim gate: OK")
+}
+
+func validateWebbenchClaim(claimText, artifactPath string) error {
+	var parity *webbench.ServingParityReport
+	var sweep *webbench.ServingSweepReport
+	if artifactPath != "" {
+		data, err := os.ReadFile(artifactPath)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &parity); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &sweep); err != nil {
+			return err
+		}
+	}
+	if err := webbench.ValidateParityClaim(claimText, parity); err != nil {
+		return err
+	}
+	return webbench.ValidateServingSweepClaim(claimText, sweep)
 }
 
 func parseServingTrackMap(arg string) (map[webbench.ServingTrack]string, error) {
