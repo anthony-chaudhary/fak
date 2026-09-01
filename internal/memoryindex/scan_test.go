@@ -117,7 +117,7 @@ func TestParseWikilinks(t *testing.T) {
 func TestSlugifyReplacesEveryNonAlphanumeric(t *testing.T) {
 	for in, want := range map[string]string{
 		`C:\work\fak`:                    "C--work-fak",
-		`/home/anthony.chaudhary/fak`:    "-home-anthony-chaudhary-fak",
+		`/home/test.user/fak`:            "-home-test-user-fak",
 		`\\wsl.localhost\Ubuntu-24.04\h`: "--wsl-localhost-Ubuntu-24-04-h",
 	} {
 		if got := Slugify(in); got != want {
