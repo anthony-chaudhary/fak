@@ -1,11 +1,11 @@
 ---
-title: "fak — the agent kernel | cheaper long sessions, the right model per call, audited tool-call control"
-description: "fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, and an auditable verdict for every tool call."
+title: "fak — the agent runtime | cheaper long sessions, the right model per call, audited tool-call control"
+description: "fak is an agent runtime: one operator-controlled boundary for cache and context, model routing, tool authority, memory, observability, and native inference. Its Fused Agent Kernel architecture ships as one Go binary."
 ---
 
 # fak documentation
 
-**Primary audience:** people entering the documentation who need to choose a current route by job. `fak` is one Go agent-kernel binary that adjudicates tool calls before they run, reuses shared setup, routes calls, serves repeats locally, and manages context.
+**Primary audience:** people entering the documentation who need to choose a current route by job. **fak is an agent runtime: the operator-controlled boundary for cache and context, model routing, tool authority, memory, observability, and native inference.** Its technical architecture is the **Fused Agent Kernel**—an **agent kernel** shipped as one Go binary. Each operating mode exposes a documented subset of that boundary; use the claims ledger rather than the category label to decide what is shipped.
 
 FAK coordinates the whole agent path, not isolated components. Start with the [canonical architecture map](architecture.md#whole-path-coordination-target) for the five-layer observation → constrained-plan → typed-effect contract, then use the [glossary](glossary.md#whole-path-decision-terms) to keep coordination, orchestration, scheduling, routing, and serving distinct.
 
@@ -17,7 +17,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 |---|---|---|
 | Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
 | Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |
-| Building or integrating an agent or client | [Managed agent runtime](explainers/agent-runtime.md) | Choose an interface, understand ownership, and follow the proposal-to-continuation flow. |
+| Building or integrating an agent or client | [Agent runtime](explainers/agent-runtime.md) | Understand the category and ownership boundary, choose an interface, and follow the proposal-to-continuation flow. |
 | Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
@@ -227,7 +227,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 
 ---
 
-<sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: Fused
+<sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: fak agent runtime, Fused
 Agent Kernel, fak agent kernel, fak manage, fak serve, fak-certified, agent kernel,
 AI agent runtime boundary, long-session prompt cache, model routing for agents, MCP
 tool-call boundary, local GGUF, KV cache, addressable KV cache, self-hosted LLM,

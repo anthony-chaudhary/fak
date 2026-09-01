@@ -1,6 +1,6 @@
 ---
-title: "Agent runtime: ownership, interfaces, and proof"
-description: "A builder-facing map of the host-side fak agent runtime: who owns each boundary, how a tool call crosses the kernel, which interface to choose, and how to prove the path offline."
+title: "Agent runtime: category, ownership, interfaces, and proof"
+description: "fak is the operator-controlled agent-runtime boundary for cache and context, model routing, tool authority, memory, observability, and native inference; this map separates that category from its Fused Agent Kernel architecture and shows current interfaces."
 slug: agent-runtime
 keywords:
   - fak agent runtime
@@ -14,14 +14,30 @@ keywords:
 date: 2026-07-15
 ---
 
-# Agent runtime — ownership, interfaces, and proof
+# Agent runtime — category, ownership, interfaces, and proof
 
-**Audience:** builders integrating with or extending fak's managed, host-side agent loop.
+**Audience:** people evaluating the category and builders integrating with or
+extending fak's managed, host-side agent loop.
 
-The runtime owns the model/tool loop and sends every managed tool call through fak's
-in-process kernel seam before a tool can run. The client supplies the task and chooses an
-integration mode; the model backend produces model turns; a tool implementation owns only
-the admitted external side effect.
+**fak is an agent runtime: the operator-controlled boundary for cache and
+context, model routing, tool authority, memory, observability, and native
+inference.** **Agent runtime** is the simple public category. **Fused Agent
+Kernel**, shortened to **agent kernel**, is the technical architecture and
+historical name: the in-process checkpoint where model proposals meet operator
+policy, reusable state, and evidence.
+
+The category describes fak's owned control surface across its operating modes;
+it does not claim every possible orchestration or runtime feature is shipped, or
+that every mode activates every capability. Gateway and governed-client modes
+retain a client-owned loop, while the managed host-side mode below owns that
+loop. [`CLAIMS.md`](../../CLAIMS.md) and the selected mode's documentation remain
+authoritative for shipped status.
+
+In the managed host-side mode, the runtime owns the model/tool loop and sends
+every managed tool call through the Fused Agent Kernel seam before a tool can
+run. The operator chooses the integration mode and supplies task and
+configuration; the model backend produces model turns; a tool implementation
+owns only the admitted external side effect.
 
 > **Default:** prove this boundary first with the deterministic, no-key
 > `fak agent --offline` path. Then choose a live-provider or server integration from the
@@ -31,7 +47,7 @@ the admitted external side effect.
 
 | Owner | Responsibility | Boundary it does not own |
 |---|---|---|
-| Client or integration | Supplies the task, credentials/configuration, and selected runtime mode. | It does not authorize a managed tool call. |
+| Operator, client, or integration | Selects the runtime mode and supplies the task, credentials, configuration, and policy inputs. | The client does not authorize a managed tool call merely by requesting it. |
 | Host-side agent runtime (`internal/agent`) | Drives model turns, preserves the conversation, presents tools, receives proposed calls, and continues after admitted results. | It does not bypass the kernel to execute managed calls. |
 | Kernel adjudication and policy | Evaluates each proposed call against structural policy and returns an allow or deny verdict. | It does not invent the client task or perform the external side effect. |
 | vDSO and reuse path | Resolves eligible repeated work locally and records dedup/reuse evidence. | A local hit is still part of the mediated path, not a client-side shortcut. |
@@ -78,11 +94,12 @@ typed tool results and receipts, and trace/report evidence. Exact CLI flags and 
 shapes remain authoritative in [`cmd/fak/`](../../cmd/fak/) and the
 [API reference](../fak/api-reference.md).
 
-## Context and support boundary
+## Category and support boundary
 
 | Dimension | Current context |
 |---|---|
-| Mode | This page describes fak-managed host-side execution. Gateway-only and guarded-client modes are valid choices, but they retain a client-owned loop. |
+| Category | Agent runtime names fak's operator-controlled boundary across modes; agent kernel names its technical architecture. Neither label overrides feature-level claim status. |
+| Mode | The detailed flow on this page describes fak-managed host-side execution. Gateway-only and guarded-client modes are valid choices, but they retain a client-owned loop. |
 | Generation | Current behavior; code and tests are authoritative when this explanation and runtime diverge. |
 | Lifecycle | `gen/now` builder route. Historical design notes are provenance, not this contract. |
 | Support boundary | The deterministic offline proof is the first supported diagnostic. Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |

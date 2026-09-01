@@ -1,8 +1,9 @@
 ---
 title: "The fak pitch ladder: one sentence, one paragraph, one page"
-description: "The canonical fak pitch at three zoom levels — one sentence (the tweet), one paragraph (the HN comment), one page (the blog intro) — each honest, self-consistent, and quotable."
+description: "The canonical fak agent-runtime pitch at three zoom levels — one sentence, one paragraph, and one page — with Fused Agent Kernel retained as the technical architecture."
 slug: pitch-ladder
 keywords:
+  - fak agent runtime
   - fak pitch
   - elevator pitch
   - treat the tool call like a syscall
@@ -16,9 +17,10 @@ date: 2026-07-03
 
 # The fak pitch ladder: one sentence, one paragraph, one page
 
-> **The one-sentence pitch:** fak treats every agent tool call like a syscall —
-> the model proposes, the kernel disposes: one static Go binary that makes the
-> same agent loop more controlled, cheaper, and faster.
+> **The one-sentence pitch:** fak is an agent runtime: the operator-controlled
+> boundary for cache and context, model routing, tool authority, memory,
+> observability, and native inference—implemented as the Fused Agent Kernel in
+> one static Go binary.
 
 This is the same pitch at three zoom levels. Quote the rung that fits your
 venue; every rung makes the same claims, so a reader who climbs from the tweet
@@ -26,27 +28,31 @@ to the page never catches the pitch contradicting itself. This artifact is
 dimension **I — Memorable framing & naming** of the
 [concept-popularization epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md),
 and it is the **source for the [README](../../README.md) lead** — if the pitch
-changes, change it here first and re-derive the lead.
+changes, change it here first and re-derive the scoped public front doors.
 
 Every number below is witnessed and traces to
 [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md) and the honesty ledger
 [CLAIMS.md](../../CLAIMS.md). Nothing here claims market adoption, an unrun
 benchmark, or a novelty the 0/29 prior-art audit refutes.
 
-## Rung 1 — one sentence (the tweet)
+## Rung 1 — one sentence (the category)
 
-> fak treats every agent tool call like a syscall — the model proposes, the
-> kernel disposes: one static Go binary that makes the same agent loop more
-> controlled, cheaper, and faster.
+> fak is an agent runtime: the operator-controlled boundary for cache and
+> context, model routing, tool authority, memory, observability, and native
+> inference—implemented as the Fused Agent Kernel in one static Go binary.
 
-30 words. The anchor is the syscall framing: an OS kernel never trusts a
-program's word, and fak applies that same boundary to an AI agent's tool calls.
-Everything else fak does unpacks from that one move.
+The public category is **agent runtime**. The boundary definition says what the
+operator controls; **Fused Agent Kernel** names the technical architecture that
+implements it. The syscall framing remains the shortest explanation of the
+tool-authority seam, not the category a new reader must learn first.
 
 ## Rung 2 — one paragraph (the HN comment)
 
-> fak is a fused agent kernel: one static Go binary you drop in front of the
-> agent you already run (`fak manage -- claude` — repoint one base URL, keep your
+> fak is an agent runtime: the operator-controlled boundary for cache and
+> context, model routing, tool authority, memory, observability, and native
+> inference. Its Fused Agent Kernel architecture is one static Go binary you
+> drop in front of the agent you already run (`fak manage -- claude` — repoint
+> one base URL, keep your
 > model, IDE, and keys). It treats every tool call like a syscall — the model
 > proposes, the kernel disposes — giving each call a reviewable verdict while
 > the kernel reuses the stable work in the session. On a 50-turn × 5-agent run it
@@ -70,7 +76,10 @@ on an Apple M3 Pro), and the novelty concession up front.
 > harness still treats a model's proposed tool call as the thing to run, not the
 > checkpoint where cost, routing, policy, and evidence should be decided.
 >
-> Operating systems solved this problem decades ago. A program never gets to
+> fak is an agent runtime: the operator-controlled boundary for cache and
+> context, model routing, tool authority, memory, observability, and native
+> inference. Its technical architecture is the Fused Agent Kernel. Operating
+> systems solved one part of this problem decades ago: a program never gets to
 > perform a dangerous action on its own say-so — it *proposes* a syscall, and
 > the kernel *disposes*: checks it against policy, then allows, denies, or
 > defers it at a boundary the program cannot reach around. fak applies that
@@ -115,11 +124,13 @@ on an Apple M3 Pro), and the novelty concession up front.
 ## The consistency contract
 
 The rungs must never drift apart. When editing any rung, re-check all three
-against this table and against the [README](../../README.md) lead, which is
-derived from rung 1:
+against this table and the category hierarchy in the [naming authority](naming.md):
 
 | Claim | Sentence | Paragraph | Page |
 |---|---|---|---|
+| Agent runtime is the public category | ✔ anchor | ✔ | ✔ |
+| Fused Agent Kernel / agent kernel is the technical architecture | ✔ | ✔ | ✔ |
+| Operator-controlled cache/context, routing, authority, memory, observability, native inference boundary | ✔ | ✔ mechanism | ✔ unpacked |
 | Tool call as syscall (model proposes, kernel disposes) | ✔ anchor | ✔ | ✔ |
 | One static Go binary, drop-in | ✔ | ✔ (`fak manage -- claude`) | ✔ |
 | Controlled: verdicts, policy, quarantine | "controlled" | ✔ mechanism | ✔ + classifier caveat |
@@ -131,12 +142,14 @@ derived from rung 1:
 Hard rules, inherited from the
 [epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md): quote the tuned
 **~4.1×**, never the naive multiplier unlabeled; no market-adoption claims; no
-benchmark not already run; label simulated as simulated.
+benchmark not already run; label simulated as simulated. The category names an
+owned control boundary; it does not make roadmap-only orchestration or runtime
+features shipped. [`CLAIMS.md`](../../CLAIMS.md) remains the status authority.
 
 ## Related framing artifacts
 
-- [How to find and name fak](naming.md) — the disambiguated search terms the
-  pitch should use (dimension I).
+- [How to find and name fak](naming.md) — the public category, technical name,
+  and disambiguated search terms the pitch should use (dimension I).
 - [Objections & one-line answers](objections.md) — what to say after the pitch
   lands and the pushback starts (dimension I).
 - [Social storyboard](social-storyboard.md) — the pitch cut into a
