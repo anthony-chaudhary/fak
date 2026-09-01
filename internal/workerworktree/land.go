@@ -184,7 +184,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if namesRC != 0 {
 		names = ""
 	}
-	tracker.setScanned(countLandScanFiles(names), int64(len(diff)))
+	tracker.setPatchScope(countPatchScopeFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
 	if len(paths) > 0 && names != "" {
 		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)

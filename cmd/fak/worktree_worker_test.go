@@ -79,12 +79,27 @@ func TestPrepareFailOpenJSONShape(t *testing.T) {
 // TestLandJSONShape proves `fak worktree worker land` emits the applied/committed
 // verdict object.
 func TestLandJSONShape(t *testing.T) {
+	changedPaths := []string{"cmd/fak/worktree_worker.go", "internal/workerworktree/land.go"}
+	patch := []byte("diff --git a/a b/a\n+patch bytes\n")
 	res := workerworktree.Result{OK: true, Applied: true, Committed: true, Cost: &workerworktree.LandCostReceipt{
-		Schema: "fak-worker-land-cost/1", CacheState: "fresh-isolated-index", Phases: []workerworktree.LandPhaseCost{},
+		Schema:          "fak-worker-land-cost/1",
+		PatchScopeFiles: workerworktree.PatchScopeFiles(len(changedPaths)),
+		PatchScopeBytes: workerworktree.PatchScopeBytes(len(patch)),
+		CacheState:      "fresh-isolated-index",
+		Phases:          []workerworktree.LandPhaseCost{},
 	}}
 	got := mustKeys(t, res, "ok", "applied", "committed", "cost")
 	if got["committed"] != true {
 		t.Fatalf("committed = %v, want true", got["committed"])
+	}
+	cost := got["cost"].(map[string]any)
+	if cost["patch_scope_files"] != float64(len(changedPaths)) || cost["patch_scope_bytes"] != float64(len(patch)) {
+		t.Fatalf("patch scope provenance = %v, want files=%d bytes=%d", cost, len(changedPaths), len(patch))
+	}
+	for _, ambiguous := range []string{"scanned_files", "scanned_bytes"} {
+		if _, ok := cost[ambiguous]; ok {
+			t.Fatalf("current cost receipt must not emit ambiguous key %q: %v", ambiguous, cost)
+		}
 	}
 }
 
