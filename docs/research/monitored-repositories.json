@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-31",
+  "updated_at": "2026-09-01",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -3884,6 +3884,107 @@
           "#10464"
         ],
         "completeness_critic": "One bounded follow-up remains intentionally deferred: no individual Python-specific rule was ported because no FAK corpus currently proves a miss; the source-analysis issue requires selecting and witnessing one concrete Go rule before implementation."
+      }
+    },
+    {
+      "repository": "warpfront/hipfire",
+      "url": "https://github.com/warpfront/hipfire",
+      "status": "studied",
+      "priority": 88,
+      "why": "RDNA-native Rust inference engine with strict physical admission, session-safe prefix reuse, transactional adaptive KV, fail-closed replay, architecture-isolated kernels, and unusually strong route/hash-bound evidence and negative-result retention. Reuse existing #9587 and #8395 seams; watch emerging device rollback and mesh work rather than crediting it as shipped.",
+      "last_checked": "2026-09-01",
+      "checked_revision": "0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+      "stars_at_check": 578,
+      "last_push_at_check": "2026-09-01T08:23:08Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md",
+      "refresh_issue": "#10591",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/research/inventory/warpfront-hipfire.json",
+        "indexed_revision": "0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+        "source_classes": [
+          "crates",
+          "kernels",
+          "benchmarks-tests-redline",
+          "autoresearch-agents-operations",
+          "plans-design-specs-investigations",
+          "history-releases-issues-prs",
+          "license-provenance-submodule",
+          "fak-comparison"
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 7,
+        "filed_issue_count": 0,
+        "source_evidence": [
+          {
+            "class": "crates",
+            "evidence": [
+              "crates/hipfire-runtime/src/admission.rs:86@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "crates/hipfire-runtime/src/session_table.rs:135@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "crates/rdna-compute/src/replay.rs:68@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
+            ],
+            "note": "1,200 tracked files inventoried; runtime admission, cache/session ownership, replay, graph, slot, scratch, dispatch and tests deep-read."
+          },
+          {
+            "class": "kernels",
+            "evidence": [
+              "kernels/src/attention_flash_q8_0_reduce_gated_mq_rotate.gfx1100.hip:11@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "kernels/src/attention_dflash_wmma_m32_kstg_FAILED.hip:6@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
+            ],
+            "note": "1,034 tracked files inventoried; architecture isolation and retained failed-kernel evidence sampled deeply."
+          },
+          {
+            "class": "benchmarks-tests-redline",
+            "evidence": [
+              "docs/BENCHMARKS.md:25@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "docs/GOLDEN-REDLINE.md:24@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
+            ],
+            "note": "311 benchmark files, 28 tests, and five Redline corpus files inventoried; measurement/admission and identity contracts deep-read."
+          },
+          {
+            "class": "operations",
+            "evidence": [
+              "autoresearch/ar/driver.py:119@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "tools/change_gate/selector.py:115@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
+            ],
+            "note": "Autoresearch, agent rules, CI, reaping and change-gate surfaces inventoried."
+          },
+          {
+            "class": "history-releases-issues-prs",
+            "evidence": [
+              "https://github.com/warpfront/hipfire/commit/0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "https://github.com/warpfront/hipfire/releases/tag/v0.2.1",
+              "https://github.com/warpfront/hipfire/pull/671"
+            ],
+            "note": "History, 21 releases, issue/PR states, and selected architecture discussions inspected; post-pin PRs are labeled emerging."
+          },
+          {
+            "class": "license-provenance",
+            "evidence": [
+              "LICENSE:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "NOTICE:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              "PRIOR-ART.md:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
+              ".gitmodules:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
+            ],
+            "note": "MIT/Apache bundle and attribution machinery inspected; pinned submodule license remains unverified."
+          },
+          {
+            "class": "fak-comparison",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md",
+              "#9587",
+              "#8395",
+              "#10591"
+            ],
+            "note": "Every candidate has status, disposition, on-axis FAK witness, and explicit issue outcome."
+          }
+        ],
+        "issue_refs": [
+          "#9587",
+          "#8395",
+          "#10591"
+        ],
+        "completeness_critic": "Major tracked source classes were exhaustively inventoried, but the 1,086-document investigation corpus was clustered rather than read line-by-line; older benchmark identity and statistical rigor are uneven; selected active PRs lacked formal review; and the pinned submodule license was not locally verified."
       }
     }
   ]

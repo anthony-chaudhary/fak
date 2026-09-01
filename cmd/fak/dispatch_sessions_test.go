@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // plantResolveSession writes a resolve-<issue>-<stamp> worker log + its .pid/.backend
@@ -419,5 +420,36 @@ func TestDispatchSessionsKeepsLaunchCompatiblePIDLive(t *testing.T) {
 	row := snap.Sessions[0]
 	if !row.Live || row.PIDIdentity != "launch-confirmed" || row.Guard == nil || row.Guard.Handle != "guard-ok" {
 		t.Fatalf("matching PID identity lost live state: %+v", row)
+	}
+}
+
+func TestMatchDispatchWorkerWorktreeProjectsEvidenceWithoutPaths(t *testing.T) {
+	row := dispatchSessionRow{Issue: "10551", Lane: "workerworktree", LeaseID: "lease-10551"}
+	got := matchDispatchWorkerWorktree(row, []workerworktree.StatusEvidence{{IssueNumber: 10551, Lane: "workerworktree", Session: "lease-10551", AssociationKnown: true, CleanupReady: true}})
+	if got == nil || got.State != workerworktree.DisplayCleanupReady || got.Complete {
+		t.Fatalf("projection = %#v", got)
+	}
+	rendered := renderDispatchSessions(dispatchSessionsSnapshot{SessionCount: 1, Sessions: []dispatchSessionRow{{Issue: "10551", Lane: "workerworktree", Backend: "codex", Worker: "resolve-10551", Outcome: "done", WorkerWorktree: got}}})
+	markdown := renderDispatchSessionsMarkdown(dispatchSessionsSnapshot{SessionCount: 1, Sessions: []dispatchSessionRow{{Issue: "10551", Lane: "workerworktree", Backend: "codex", Worker: "resolve-10551", Outcome: "done", WorkerWorktree: got}}})
+	if !strings.Contains(rendered, "worker-worktree=cleanup_ready  complete=false") || !strings.Contains(markdown, "cleanup_ready") {
+		t.Fatalf("missing projection:\n%s\n%s", rendered, markdown)
+	}
+}
+
+func TestMatchDispatchWorkerWorktreeRequiresSafeIdentity(t *testing.T) {
+	got := matchDispatchWorkerWorktree(dispatchSessionRow{Issue: "99", Lane: "docs"}, []workerworktree.StatusEvidence{{IssueNumber: 10551, Lane: "workerworktree", AssociationKnown: true, Dirty: true}})
+	if got != nil {
+		t.Fatalf("unrelated projection = %#v", got)
+	}
+}
+
+func TestMatchDispatchWorkerWorktreeFailsClosedOnAmbiguousAssociation(t *testing.T) {
+	row := dispatchSessionRow{Issue: "10551", Lane: "workerworktree"}
+	got := matchDispatchWorkerWorktree(row, []workerworktree.StatusEvidence{
+		{IssueNumber: 10551, Lane: "workerworktree", AssociationKnown: true, Dirty: true},
+		{IssueNumber: 10551, Lane: "workerworktree", AssociationKnown: true, CleanupReady: true},
+	})
+	if got != nil {
+		t.Fatalf("ambiguous projection = %#v, want nil", got)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -92,7 +93,9 @@ func TestCodexResumePreflightOnlyReportsCompatibilityWithoutPrompt(t *testing.T)
 	}
 	if got.Outcome != codexresume.OutcomeRefused || got.Preflight == nil ||
 		got.Preflight.Verdict != codexresume.VerdictIncompatibleHistory ||
-		got.LaunchPID != 0 {
+		got.Preflight.LookupState != codexresume.LookupFound ||
+		got.Preflight.CodexHome != home || got.Preflight.SessionRoot != filepath.Join(home, "sessions") ||
+		got.LaunchState != codexresume.LaunchNotAttempted || got.LaunchPID != 0 {
 		t.Fatalf("result=%+v", got)
 	}
 }
@@ -340,5 +343,39 @@ func TestCodexResumeAccountRejectsBatch(t *testing.T) {
 	})
 	if code != 2 || !strings.Contains(errOut.String(), "exactly one candidate") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCodexResumePreflightOnlyMissingShowsSelectedRoot(t *testing.T) {
+	home := t.TempDir()
+	threadID := "019ff200-1000-7000-8000-000000000904"
+	var out, errOut bytes.Buffer
+	code := runCodexResume(&out, &errOut, []string{"--json", "--preflight-only", "--codex-home", home, threadID})
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	var got codexresume.Result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Preflight == nil || got.Preflight.LookupState != codexresume.LookupNotFound || got.Preflight.SessionRoot != filepath.Join(home, "sessions") || got.LaunchState != codexresume.LaunchNotAttempted {
+		t.Fatalf("result=%+v", got)
+	}
+}
+
+func TestCodexResumeHumanOutputExplainsFreshProcess(t *testing.T) {
+	old := codexResumeRecover
+	defer func() { codexResumeRecover = old }()
+	codexResumeRecover = func(_ context.Context, check codexresume.CheckConfig, _ codexresume.Config) (codexresume.Result, error) {
+		preflight := codexresume.PreflightResult{ThreadID: check.ThreadID, CodexHome: check.CodexHome, SessionRoot: filepath.Join(check.CodexHome, "sessions"), LookupState: codexresume.LookupFound, Verdict: codexresume.VerdictResumable}
+		return codexresume.Result{ThreadID: check.ThreadID, Preflight: &preflight, Outcome: codexresume.OutcomeExited, LaunchState: codexresume.LaunchStarted, LaunchPID: 4321}, nil
+	}
+	home := t.TempDir()
+	threadID := "019ff200-1000-7000-8000-000000000905"
+	var out, errOut bytes.Buffer
+	_ = runCodexResume(&out, &errOut, []string{"--codex-home", home, threadID, "continue"})
+	text := out.String()
+	if !strings.Contains(text, "fresh Codex process started") || !strings.Contains(text, "pid=4321") || !strings.Contains(text, "lookup=found") || !strings.Contains(text, home) {
+		t.Fatalf("stdout=%q stderr=%q", text, errOut.String())
 	}
 }

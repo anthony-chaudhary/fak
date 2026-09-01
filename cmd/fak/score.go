@@ -39,6 +39,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"dojo-rsi":            cmdDojoRSI,
 	"flow":                cmdFlowScore,
 	"focus":               cmdFocusScore,
+	"generalization":      cmdGeneralizationScorecard,
 	"guard-accuracy":      cmdGuardAccuracy,
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,

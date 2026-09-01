@@ -38,6 +38,24 @@ body:
         P4 Operations: preserved - reason
     validations:
       required: true
+  - type: textarea
+    id: risk-assessment
+    attributes:
+      label: Risk assessment
+      description: >-
+        Proportionate to this work, cover every prompt below. Use None only with
+        a concrete rationale. Reassess whenever scope or implementation changes.
+      placeholder: |-
+        Risk event: What could go wrong?
+        Exposed subject/system: Who or what could be affected?
+        Severity: None/Low/Medium/High/Critical — rationale
+        Likelihood: None/Unlikely/Possible/Likely — rationale
+        Blast radius: Boundaries and maximum credible impact
+        Mitigations/containment: Preventive and limiting controls
+        Rollback: How to restore the prior safe state
+        Negative-path witness: Test or artifact proving failure is contained
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: |

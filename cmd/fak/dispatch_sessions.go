@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/processstart"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 const (
@@ -75,24 +77,25 @@ type dispatchSessionGuard struct {
 // dispatchSessionRow is one dispatch worker session, unifying the runs-dir scope,
 // the audit outcome, and the guard session.
 type dispatchSessionRow struct {
-	Schema      string                `json:"schema"`
-	Issue       string                `json:"issue,omitempty"`
-	Lane        string                `json:"lane,omitempty"`
-	Backend     string                `json:"backend"`
-	Worker      string                `json:"worker"`
-	PID         int                   `json:"pid,omitempty"`
-	PIDAlive    bool                  `json:"pid_alive"`
-	PIDIdentity string                `json:"pid_identity,omitempty"`
-	PIDReason   string                `json:"pid_reason,omitempty"`
-	Live        bool                  `json:"live"`
-	Outcome     string                `json:"outcome"`
-	Reason      string                `json:"reason,omitempty"`
-	Evidence    string                `json:"evidence,omitempty"`
-	AgeSeconds  int64                 `json:"age_seconds"`
-	Started     string                `json:"started,omitempty"`
-	LeaseID     string                `json:"lease_id,omitempty"`
-	Tree        []string              `json:"tree,omitempty"`
-	Guard       *dispatchSessionGuard `json:"guard,omitempty"`
+	Schema         string                           `json:"schema"`
+	Issue          string                           `json:"issue,omitempty"`
+	Lane           string                           `json:"lane,omitempty"`
+	Backend        string                           `json:"backend"`
+	Worker         string                           `json:"worker"`
+	PID            int                              `json:"pid,omitempty"`
+	PIDAlive       bool                             `json:"pid_alive"`
+	PIDIdentity    string                           `json:"pid_identity,omitempty"`
+	PIDReason      string                           `json:"pid_reason,omitempty"`
+	Live           bool                             `json:"live"`
+	Outcome        string                           `json:"outcome"`
+	Reason         string                           `json:"reason,omitempty"`
+	Evidence       string                           `json:"evidence,omitempty"`
+	AgeSeconds     int64                            `json:"age_seconds"`
+	Started        string                           `json:"started,omitempty"`
+	LeaseID        string                           `json:"lease_id,omitempty"`
+	Tree           []string                         `json:"tree,omitempty"`
+	Guard          *dispatchSessionGuard            `json:"guard,omitempty"`
+	WorkerWorktree *workerworktree.StatusProjection `json:"worker_worktree,omitempty"`
 	// Token/cost accounting (#3329), folded from the gateway-usage ledger by the
 	// worker's guard trace-id. All three are omitempty: a session whose trace has no
 	// usage row (or a fleet with no ledger yet) carries none of them, so the snapshot
@@ -248,6 +251,7 @@ func runDispatchSessionsWatch(stdout io.Writer, runsDir, regDir, usagePath strin
 // runs dir fails soft to an empty snapshot (nothing running), matching `dispatch status`.
 func dispatchSessionsScan(runsDir, regDir, usageLedgerPath string, now time.Time) dispatchSessionsSnapshot {
 	workers, _ := dispatchaudit.ScanDir(runsDir)
+	worktreeInputs := dispatchWorkerWorktreeInputs(findRepoRoot(runsDir))
 
 	// Per-trace token/cost economy (#3329): the gateway-usage ledger keyed by the
 	// served trace-id. Empty (nil) when no ledger is present, so the fold is skipped
@@ -310,6 +314,7 @@ func dispatchSessionsScan(runsDir, regDir, usageLedgerPath string, now time.Time
 				live++
 			}
 		}
+		row.WorkerWorktree = matchDispatchWorkerWorktree(row, worktreeInputs)
 		if w.PID > 0 && pidIdentity != "stale" {
 			if g, ok := guardByPID[w.PID]; ok {
 				row.Guard = &dispatchSessionGuard{Handle: g.Handle, TraceID: g.TraceID, AuditPath: g.AuditPath}
@@ -481,6 +486,49 @@ func dispatchSessionGuardField(g *dispatchSessionGuard) string {
 	return g.Handle
 }
 
+func dispatchWorkerWorktreeInputs(repoRoot string) []workerworktree.StatusEvidence {
+	_, paths := workerworktree.Count(repoRoot, nil)
+	rows := worktreeWorkerLifecycleInventory(repoRoot, paths, worktreeWorkerLifecycleProbes{})
+	inputs := make([]workerworktree.StatusEvidence, 0, len(rows))
+	for _, row := range rows {
+		in, err := workerworktree.LoadIntent(row.Path)
+		issue := 0
+		if err == nil {
+			issue = in.IssueNumber
+		}
+		inputs = append(inputs, workerworktree.StatusEvidence{
+			IssueNumber: issue, Lane: row.Association.Lane, Session: row.Association.LeaseID,
+			HeadSHA: row.HeadSHA, BaseSHA: row.BaseSHA,
+			AssociationKnown: row.Association.State == worktreeEvidenceAssociated,
+			OwnerLive:        row.Liveness.Owner == worktreeEvidenceLive, LeaseLive: row.Liveness.Lease == worktreeEvidenceLive,
+			Dirty: row.Cleanliness.State == worktreeEvidenceDirty, CleanupReady: row.ReapReadiness.Reapable,
+		})
+	}
+	return inputs
+}
+
+func matchDispatchWorkerWorktree(row dispatchSessionRow, inputs []workerworktree.StatusEvidence) *workerworktree.StatusProjection {
+	issue, _ := strconv.Atoi(strings.TrimSpace(row.Issue))
+	matched := -1
+	for i, in := range inputs {
+		issueMatch := issue > 0 && in.IssueNumber == issue
+		laneMatch := row.Lane != "" && in.Lane == row.Lane
+		leaseMatch := row.LeaseID != "" && in.Session == row.LeaseID
+		if !issueMatch && !laneMatch && !leaseMatch {
+			continue
+		}
+		if matched >= 0 {
+			return nil // ambiguous association fails closed
+		}
+		matched = i
+	}
+	if matched < 0 {
+		return nil
+	}
+	projection := workerworktree.ProjectStatus(inputs[matched])
+	return &projection
+}
+
 func renderDispatchSessions(snap dispatchSessionsSnapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "dispatch sessions — %d session(s), %d live\n", snap.SessionCount, snap.LiveCount)
@@ -500,6 +548,13 @@ func renderDispatchSessions(snap dispatchSessionsSnapshot) string {
 			dispatchSessionBackendField(s.Backend), s.Outcome,
 			compactDuration(s.AgeSeconds), dispatchSessionGuardField(s.Guard))
 		fmt.Fprintf(&b, "         worker=%s  pid=%d  %s\n", s.Worker, s.PID, s.Reason)
+		if s.WorkerWorktree != nil {
+			fmt.Fprintf(&b, "         worker-worktree=%s  complete=%t", s.WorkerWorktree.State, s.WorkerWorktree.Complete)
+			if s.WorkerWorktree.Commit != "" {
+				fmt.Fprintf(&b, "  commit=%s", s.WorkerWorktree.Commit)
+			}
+			fmt.Fprintln(&b)
+		}
 		if s.Tokens > 0 {
 			fmt.Fprintf(&b, "         tokens=%d  cost~=%.0f  cache-read=%.0f%%\n", s.Tokens, s.Cost, s.CacheReadShare*100)
 		}
@@ -516,16 +571,20 @@ func renderDispatchSessionsMarkdown(snap dispatchSessionsSnapshot) string {
 		fmt.Fprint(&b, "_no dispatch worker sessions_\n")
 		return b.String()
 	}
-	fmt.Fprint(&b, "| live | issue | lane | backend | outcome | age | guard | worker |\n")
-	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|\n")
+	fmt.Fprint(&b, "| live | issue | lane | backend | outcome | worker worktree | age | guard | worker |\n")
+	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|---|\n")
 	for _, s := range snap.Sessions {
 		live := ""
 		if s.Live {
 			live = "●"
 		}
-		fmt.Fprintf(&b, "| %s | #%s | %s | %s | %s | %s | %s | %s |\n",
+		worktreeState := ""
+		if s.WorkerWorktree != nil {
+			worktreeState = string(s.WorkerWorktree.State)
+		}
+		fmt.Fprintf(&b, "| %s | #%s | %s | %s | %s | %s | %s | %s | %s |\n",
 			live, dispatchSessionIssueField(s.Issue), dispatchSessionLaneField(s.Lane),
-			dispatchSessionBackendField(s.Backend), s.Outcome, compactDuration(s.AgeSeconds),
+			dispatchSessionBackendField(s.Backend), s.Outcome, worktreeState, compactDuration(s.AgeSeconds),
 			dispatchSessionGuardField(s.Guard), s.Worker)
 	}
 	return b.String()

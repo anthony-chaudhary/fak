@@ -26,6 +26,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"dojo-rsi",
 		"flow",
 		"focus",
+		"generalization",
 		"guard-accuracy",
 		"guard-rsi",
 		"guard-verdict-rsi",

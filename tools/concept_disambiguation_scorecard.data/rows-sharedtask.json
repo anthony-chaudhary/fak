@@ -126,7 +126,8 @@
         "decision-kernel",
         "decision-scheduler",
         "decision-task",
-        "decision-witness"
+        "decision-witness",
+        "decision-triggerreceipt"
       ],
       "aliases": [],
       "grounding": "DecisionID",

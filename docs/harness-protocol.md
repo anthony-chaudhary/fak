@@ -4,6 +4,8 @@ description: "pkg/harnesskit exposes fak.harness.run/v1, a product-neutral event
 ---
 # Headless run protocol v1
 
+This page is authoritative for run-event semantics. For layer selection, async ownership, queue acknowledgement, and public/private boundaries, see [Builder contract ladder](builder-contract-ladder.md).
+
 `pkg/harnesskit` exposes `fak.harness.run/v1`, a product-neutral event and input contract. Provider request, response, SDK, and transport objects stop at the adapter boundary; public envelopes contain only semantic payloads declared in `protocol.go`.
 
 ## Ordering and replay
