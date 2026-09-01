@@ -252,3 +252,89 @@ func TestHostdiagTrendRejectsBadFlagsAndMalformedLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestHostdiagMacOSResourceIncidentFixtureReplay(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "internal", "hostdiag", "testdata", "macos-resource-incident.diag"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "private-user-private-host.diag")
+	ledger := filepath.Join(dir, "hostdiag.jsonl")
+	if err := os.WriteFile(fixture, source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event, err := hostdiag.ParseMacOSResourceIncident(filepath.Base(fixture), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample := hostdiag.NewProcessSample(
+		time.UnixMilli(event.TimeMS+1000), 20870, time.UnixMilli(event.TimeMS-60_000),
+		"/usr/local/bin/fak", "sha", "rev", "hostdiag", "session", 1, 1, 1, 1,
+	)
+	if err := appendHostdiagRow(ledger, sample, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runHostdiag(&stdout, &stderr, []string{"correlate", "--fixture", fixture, "--ledger", ledger}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	var got hostdiag.Correlation
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.EventName != hostdiag.MacOSResourceIncidentEventName ||
+		got.Status != "historical_unresolved" ||
+		!got.Observational ||
+		got.Correlated ||
+		len(got.Candidates) != 0 ||
+		got.ResourceIncident == nil ||
+		got.ResourceIncident.Artifact.Basename != "macos-resource-incident.diag" {
+		t.Fatalf("correlation = %+v", got)
+	}
+	rawLedger, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rendered := range []string{stdout.String(), string(rawLedger)} {
+		for _, forbidden := range []string{
+			`"windows_event_id"`, `"application_fault"`, `"application_hang"`,
+			"private-user", "private-host", "worker_loop", "flush_buffer",
+		} {
+			if strings.Contains(rendered, forbidden) {
+				t.Fatalf("fixture replay retained %q: %s", forbidden, rendered)
+			}
+		}
+	}
+}
+
+func TestHostdiagMacOSResourceIncidentFixtureRefusesMalformedAndOversize(t *testing.T) {
+	dir := t.TempDir()
+	malformed := filepath.Join(dir, "malformed.diag")
+	if err := os.WriteFile(malformed, []byte("Event: disk writes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oversize := filepath.Join(dir, "oversize.diag")
+	file, err := os.Create(oversize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(hostdiag.MacOSDiagFixtureMaxBytes + 1); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []string{malformed, oversize} {
+		var stdout, stderr bytes.Buffer
+		if rc := runHostdiag(&stdout, &stderr, []string{
+			"correlate", "--fixture", fixture, "--ledger", filepath.Join(dir, "ledger.jsonl"),
+		}); rc == 0 {
+			t.Fatalf("accepted fixture %q: %s", fixture, stdout.String())
+		}
+		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "events:") {
+			t.Fatalf("fixture %q stdout=%q stderr=%q", fixture, stdout.String(), stderr.String())
+		}
+	}
+}

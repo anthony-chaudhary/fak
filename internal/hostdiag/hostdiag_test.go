@@ -1,7 +1,9 @@
 package hostdiag
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -378,5 +380,88 @@ func TestCorrelateRejectsMalformedApplicationHang(t *testing.T) {
 				t.Fatalf("malformed application hang accepted: %+v", event)
 			}
 		})
+	}
+}
+
+func TestCorrelateMacOSResourceIncidentRemainsUnattributed(t *testing.T) {
+	data, err := os.ReadFile("testdata/macos-resource-incident.diag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := ParseMacOSResourceIncident("macos-resource-incident.diag", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample := NewProcessSample(
+		time.UnixMilli(event.TimeMS+1000), 20870, time.UnixMilli(event.TimeMS-60_000),
+		"/usr/local/bin/fak", "sha", "rev", "hostdiag", "session", 1, 1, 1, 1,
+	)
+	got, ok := Correlate(event, []ProcessSample{sample})
+	if !ok {
+		t.Fatal("macOS resource incident was rejected")
+	}
+	if got.Status != "historical_unresolved" || !got.Observational || got.Correlated ||
+		len(got.Candidates) != 0 || got.OwnedLaunch != nil {
+		t.Fatalf("correlation = %+v", got)
+	}
+	if got.ResourceIncident == nil || got.Fault != nil || got.Hang != nil ||
+		got.ResourceIncident.PID != 20870 || got.ResourceIncident.SampledStackEnd != "write(2)" {
+		t.Fatalf("typed incident = %+v", got)
+	}
+	if !strings.Contains(got.Reason, "causal attribution remain unknown") {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"windows_event_id"`, `"application_fault"`, `"application_hang"`, `"candidates"`} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("resource incident emitted %q: %s", forbidden, encoded)
+		}
+	}
+	trend, err := SummarizeTrend(
+		bytes.NewReader(append(encoded, '\n')),
+		time.UnixMilli(event.TimeMS).Add(time.Hour), 24*time.Hour, 24*time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trend.Recent.Total != 1 || trend.Recent.Crash != 0 || trend.Recent.Hang != 0 {
+		t.Fatalf("resource incident was classified as a crash or hang: %+v", trend.Recent)
+	}
+}
+
+func TestMacOSResourceIncidentCorrelationIdentityIncludesTypeAndArtifactDigest(t *testing.T) {
+	data, err := os.ReadFile("testdata/macos-resource-incident.diag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := ParseMacOSResourceIncident("macos-resource-incident.diag", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, ok := Correlate(event, nil)
+	if !ok {
+		t.Fatal("macOS resource incident was rejected")
+	}
+	again, _ := Correlate(event, nil)
+	if first.CorrelationID == "" || again.CorrelationID != first.CorrelationID {
+		t.Fatalf("unstable identity: first=%q again=%q", first.CorrelationID, again.CorrelationID)
+	}
+	changedDigest := event
+	changedDigestIncident := *event.ResourceIncident
+	changedDigest.ResourceIncident = &changedDigestIncident
+	changedDigest.ResourceIncident.Artifact.SHA256 = "sha256:" + strings.Repeat("a", 64)
+	second, ok := Correlate(changedDigest, nil)
+	if !ok || second.CorrelationID == first.CorrelationID {
+		t.Fatalf("artifact digest missing from identity: first=%q second=%q ok=%v", first.CorrelationID, second.CorrelationID, ok)
+	}
+	changedType := event
+	changedTypeIncident := *event.ResourceIncident
+	changedType.ResourceIncident = &changedTypeIncident
+	changedType.ResourceIncident.IncidentType = "other_resource_incident"
+	if correlationIdentityKey(changedType, MacOSResourceIncidentEventName) == correlationIdentityKey(event, MacOSResourceIncidentEventName) {
+		t.Fatal("incident type missing from stable identity key")
 	}
 }
