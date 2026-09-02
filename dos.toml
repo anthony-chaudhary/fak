@@ -1587,7 +1587,12 @@ trailer_stamp = true
 # OFF by default everywhere else) binds an all-digits phase to a commit carrying BOTH the
 # `(fak <leaf>)` trailer (leaf == plan) AND a `(#<issue>)` cite -> `dos verify tools 2911`
 # SHIPPED, doctor verifiability `recognized > 0`. Purely additive; introduces no refusal.
-issue_leaf_stamp = true
+#
+# DISABLED per #10615: the installed dos kernel predates this rung, rejects the unknown
+# key, and DROPS THE WHOLE [stamp] table — silently unbinding `style`, `subject_dirs`,
+# and `trailer_stamp` for every consumer. Config must not outrun the kernel: leave this
+# commented until the fleet's kernels recognize the rung, then re-enable in one move.
+# issue_leaf_stamp = true
 
 # Standing supervisor policy for the generic DOS population loop. Fleet has a
 # static, disjoint lane roster, so a target of three is reachable without the
