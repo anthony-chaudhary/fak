@@ -140,7 +140,7 @@ concurrent = [
   "codexresume",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
-  "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
+  "blobfs", "blobhttp", "ctxplan", "gitgate", "gitresource", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
   # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
@@ -463,6 +463,7 @@ concurrent = [
   "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplease", "wiplifecycle",
   "wipreadiness",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
+  "workspin",
   "placementtax",
   "rollout",
   "deployment",
@@ -1504,6 +1505,7 @@ workflowoutcomestudy = ["internal/workflowoutcomestudy/**"]
 workloadfit = ["internal/workloadfit/**"]
 workshape = ["internal/workshape/**"]
 workspin = ["internal/workspin/**"]
+gitresource = ["internal/gitresource/**"]
 placementtax = ["internal/placementtax/**"]
 rollout = ["internal/rollout/**"]
 deployment = ["internal/deployment/**"]

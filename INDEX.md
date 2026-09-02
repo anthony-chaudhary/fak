@@ -418,6 +418,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Harness creator ten-minute spine witness — 2026-08-15](docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md) -- auto-indexed dated note.
 - [Custom tool registration, model visibility, and deterministic skill programs](docs/notes/CUSTOM-TOOL-REGISTRATION-SKILL-PROGRAMS-2026-08-14.md) -- separates installed, allowed, exposed, and selected tools; defines explicit versioned skill-to-program compilation.
 - [Worktree ledger ownership](docs/notes/WORKTREE-LEDGER-OWNERSHIP-2026-08-13.md) -- auto-indexed dated note.
+- [Git resource ownership and crash-safe cleanup audit](docs/notes/GIT-RESOURCE-OWNERSHIP-AUDIT-2026-09-01.md) -- distinguishes shared repository resources from per-worktree state and types fail-closed cleanup admission after worker or host loss.
 - [Reversible model-visible shorthand indexes for repeated paths](docs/notes/PATH-SHORTHAND-INDEX-RESEARCH-2026-09-01.md) -- surveys OSS and research, defines typed epoch-scoped aliases, and maps the transform onto fak memory/cache layers.
 - [Caveman study: shape-specific context transforms with measured fallback](docs/notes/CONCEPT-STUDY-CAVEMAN-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6668-#6670.
 - [Ponytail study: portable behavioral instructions and their witnesses](docs/notes/CONCEPT-STUDY-PONYTAIL-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6671-#6673.
