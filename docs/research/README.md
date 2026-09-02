@@ -139,4 +139,7 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 - [AI-Ops storage qualification study (2026-08-29)](ai-ops-storage-qualification-study-2026-08-29.md) — artifact-first SSD qualification architecture, license gate, and trace-to-storage-envelope borrow filed as #10267.
 - [Agent-serving composition architecture (2026-08-26)](agent-serving-composition-architecture-study-2026-08-26.md) — evidence-backed composition study and follow-on map.
 - [NVIDIA KVTC study](nvidia-kvtc-study.md) — upstream KV-transfer mechanism study and fak relevance map.
+- [Incumbent inference architecture bottlenecks (2026-08-28)](incumbent-inference-architecture-bottlenecks-2026-08-28.md) — vLLM/SGLang/Dynamo/MAX bottleneck study (#9894): the binding constraint is the interaction cross-product among scheduling, reusable state, specialization, and compilation lifecycle, not one missing kernel.
+- [metrics-service study (2026-08-29)](metrics-service-study-2026-08-29.md) — snapshot-pinned study of an external Go observability runtime (#10287): deadline-aligned collection, normalized validated snapshots, and concurrent sink fan-out, with the bounded borrow/disposition map.
+- [ActaClad/plumbline study (2026-08-31)](plumbline-study-2026-08-31.md) — Python static-analyzer study (#10452): borrow four bounded mechanisms (stable evidence paths, negative fixtures, a new-findings gate, export into existing surfaces); do not adopt a second analyzer framework.
 

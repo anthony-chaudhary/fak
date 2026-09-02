@@ -35,6 +35,12 @@ canonical GPU lease and repeat the issue's TERM-only stop/restore drill, binding
 the exact PID and command before every lifecycle action and requiring at least
 90 continuous seconds of post-restore health and model stability.
 
+## Files
+
+- [issue-comment.md](issue-comment.md) — the verbatim issue comment carrying this HOLD verdict.
+- [receipt.json](receipt.json) — the machine-readable preflight and sample receipt.
+- [stability-samples.tsv](stability-samples.tsv) — the 91 read-only stability samples.
+
 ## Readback
 
 ```console

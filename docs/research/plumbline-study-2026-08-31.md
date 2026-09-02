@@ -49,7 +49,7 @@ The architecture is coherent for a young project: the first commits build the mo
 - Treat static analysis as a bounded interpretation, with explicit unknown/unsupported states rather than implied soundness.
 - Measure rules against negative as well as positive fixtures; a larger rule catalog is not improvement if noise grows.
 - Keep baseline debt visible while allowing a new-findings gate.
-- Export into operators' existing surfaces rather than requiring one bespoke report.
+- Export into operators' existing surfaces rather than adding another standalone report.
 
 ## What FAK should not copy
 

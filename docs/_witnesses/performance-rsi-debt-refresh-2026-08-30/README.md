@@ -48,14 +48,14 @@ Expected current readout: health **B / 80.7**, debt **6**, measured **15/16**, h
 
 ## Files
 
-- `baseline.json` / `baseline.md`: frozen August 28 scorecard baseline
+- [`baseline.json`](baseline.json) / [`baseline.md`](baseline.md): frozen August 28 scorecard baseline
 - `cycle.json`: raw cycle section written by the wrapper
 - `cycle-evidence.json`: composable evidence envelope
 - `cycle-result.json`: receipt hashes and bounded-cycle result
 - `cycle-trace.json`: stage definitions and operator-time basis
 - `cycle-metrics.json`: independent timestamp arithmetic
 - `input.json`: composed current evidence
-- `scorecard.json` / `scorecard.md`: current score and prior comparison
+- [`scorecard.json`](scorecard.json) / [`scorecard.md`](scorecard.md): current score and prior comparison
 - `manifest.json`: baseline/current summary and artifact digests
 
 Issue: #10358.

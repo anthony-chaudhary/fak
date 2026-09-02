@@ -22,7 +22,7 @@
       "canonical": "engine.CacheVerdict (engine cache-capability vocabulary)",
       "family": "cache",
       "kind": "symbol",
-      "definition": "engine.CacheVerdict is the CLOSED vocabulary of wire-neutral engine cache-capability labels — unknown, passive-observe, active-warm, exact-evict, prefix-clone, paged-kv — the only classes a CacheCapability report may use. CacheUnknown is the zero value ('capability not established'), never inferred as a positive; CachePassiveObserve marks an engine that exposes cache symptoms (usage counters) but no control surface to act on. A new engine cannot smuggle in a bespoke class.",
+      "definition": "engine.CacheVerdict is the CLOSED vocabulary of wire-neutral engine cache-capability labels — unknown, passive-observe, active-warm, exact-evict, prefix-clone, paged-kv — the only classes a CacheCapability report may use. CacheUnknown is the zero value ('capability not established'), never inferred as a positive; CachePassiveObserve marks an engine that exposes cache symptoms (usage counters) but no control surface to act on. A new engine cannot add a class outside this list.",
       "distinction": "It is the closed LABEL vocabulary a CacheCapability carries, not the CacheCapability contract that wraps it, and not gateway's ProviderCacheVerdict which classifies a provider's realized cache rather than an engine's declared capability.",
       "distinct_from": ["CacheCapability (wire-neutral engine cache contract)", "ProviderCacheVerdict"],
       "aliases": ["cacheunknown", "cachepassiveobserve"],

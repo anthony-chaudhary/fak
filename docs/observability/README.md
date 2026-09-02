@@ -92,6 +92,10 @@ correlation, artifact, and dashboard boundaries separate:
 - [Grafana operations runbook](native-performance-grafana-runbook.md) separates
   the currently shipped local stack from planned native panels and names the
   receipt/profile checks required before a performance claim.
+- [Grafana panel proof](native-performance-live-proof.md) reproduces the
+  deterministic panel-coverage matrix for the four native-performance
+  dashboards and separates fixture success from the live fak-native Qwen3.8
+  receipt a performance claim additionally requires.
 
 ## Trajectory interpretation and views
 
