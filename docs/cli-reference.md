@@ -523,3 +523,23 @@ this reference stays the front door; every section is preserved verbatim:
 The `fak study-inventory` contract moved to
 [docs/cli/verbs-extended.md](cli/verbs-extended.md#fak-study-inventory); its
 report does not pretend to contain symbols or forge history.
+
+## `fak session-audit posttool`
+
+```text
+fak session-audit posttool [--json] [--root DIR] [--cwd DIR|--here] [--max N]
+```
+
+Attributes the interval AFTER each tool result is recorded and BEFORE the next
+model-emitted record in the native Codex rollout store (#10662): one span per
+`tool_result_recorded → next_model_item`, with tool-execution time kept disjoint
+from the post-tool gap, a per-span context band (`unobserved`, `lt10k`,
+`10k_25k`, `25k_50k`, `50k_100k`, `gte100k`), a per-session call-ordinal bucket
+(`1_20` through `gte201`), and a closed correlation vocabulary (`tool_slow`,
+`stall_capped`, `compaction_in_gap`, `model_reasoning`). Gaps over the 300s
+stall threshold are stall-capped exactly like the critical-path decomposition.
+The default root is `~/.codex/sessions` (honoring `CODEX_HOME`), the flags
+mirror `fak session-audit codex`, and reports export ids, tool names, closed
+tokens, and numbers only. Attribution tokens are correlation aids over journal
+timestamps, not causal latency measurements; see
+[docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md](notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md).
