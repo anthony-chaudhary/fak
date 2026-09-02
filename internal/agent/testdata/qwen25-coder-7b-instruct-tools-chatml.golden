@@ -1,0 +1,26 @@
+<|im_start|>system
+You are a coding agent inside the fak kernel. Be precise.
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "Bash", "description": "Runs a shell command in the workspace and returns its output.", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "The shell command to run."}}, "required": ["command"]}}}
+{"type": "function", "function": {"name": "Read", "description": "Reads a file from the workspace and returns its contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "The file path to read."}}, "required": ["path"]}}}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call><|im_end|>
+<|im_start|>user
+List the Go files in the current directory.<|im_end|>
+<|im_start|>assistant
+<tool_call>
+{"name": "Bash", "arguments": {"command": "ls -la"}}
+</tool_call><|im_end|>
+<|im_start|>user
+Now show the first ten lines of go.mod.<|im_end|>
+<|im_start|>assistant

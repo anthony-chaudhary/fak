@@ -99,7 +99,7 @@ func TestRenderChatMLInjectsToolSchemas(t *testing.T) {
 		t.Fatalf("expected a leading system block, got: %q", got)
 	}
 	sysBlock := got[len("<|im_start|>system\n"):sysEnd]
-	for _, want := range []string{"be brief", "<tools>", `"name":"Bash"`, `"command"`, "</tools>", "<tool_call>"} {
+	for _, want := range []string{"be brief", "<tools>", `"name": "Bash"`, `"command"`, "</tools>", "<tool_call>"} {
 		if !strings.Contains(sysBlock, want) {
 			t.Fatalf("system block missing %q\nblock: %q", want, sysBlock)
 		}
@@ -118,7 +118,7 @@ func TestRenderChatMLToolsNoSystemMessage(t *testing.T) {
 	if !strings.HasPrefix(got, "<|im_start|>system\n") {
 		t.Fatalf("tools with no system message should still emit a leading system block: %q", got)
 	}
-	if !strings.Contains(got, `"name":"ls"`) {
+	if !strings.Contains(got, `"name": "ls"`) {
 		t.Fatalf("tool spec missing: %q", got)
 	}
 }

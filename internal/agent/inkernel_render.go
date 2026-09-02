@@ -335,17 +335,26 @@ func renderTranscript(messages []Message) string {
 	return renderTranscriptTools(messages, nil)
 }
 
-// toolSpecBlock renders the canonical Qwen2.5 tool-spec preamble for the folded system
-// block: the <tools>…</tools> signatures plus the "emit a <tool_call> json object"
-// instruction. It is deterministic (schemas in declaration order) so it is a stable part
-// of every token-prefix when folded into the single leading system block — the constraint
-// that keeps radix KV reuse valid across a tool-using session.
+// toolSpecBlock renders the canonical Qwen tool-spec preamble for the folded system
+// block. It is a byte-faithful port of the tools branch of Qwen/Qwen2.5-Coder-7B-Instruct's
+// chat_template (tokenizer_config.json) — which Qwen3's template repeats verbatim — so the
+// prompt carries the exact tool grammar the checkpoint was trained on: the "# Tools" usage
+// preamble, the <tools>…</tools> signatures serialized the way the template's
+// `tool | tojson` does (json.dumps' default ", "/": " separators; llama.cpp's minja agrees),
+// and the "return a json object … within <tool_call></tool_call> XML tags" instruction
+// ending flush against the turn's <|im_end|>. Matching the trained grammar is load-bearing:
+// Qwen2.5-Coder never emits a native <tool_call> JSON object when the prompt teaches it a
+// different format — it improvises the format it was handed instead (issue #10600; the
+// ornith antl form lives in ornithToolSpecPrefix/Suffix, its own published template). The
+// block is deterministic (schemas in declaration order) so it is a stable part of every
+// token-prefix when folded into the single leading system block — the constraint that keeps
+// radix KV reuse valid across a tool-using session.
 func toolSpecBlock(tools []ToolDef) string {
 	if len(tools) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n\n# Tools\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>")
+	b.WriteString("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>")
 	for _, t := range tools {
 		fn := t.Function
 		params := fn.Parameters
@@ -366,16 +375,71 @@ func toolSpecBlock(tools []ToolDef) string {
 		sig.Function.Name = fn.Name
 		sig.Function.Description = fn.Description
 		sig.Function.Parameters = params
-		enc, err := json.Marshal(sig)
+		enc, err := qwenTojsonSpaced(sig)
 		if err != nil {
 			// A malformed tool schema must not corrupt the prompt; skip it (the gateway
 			// validates schemas upstream, so this is belt-and-suspenders).
 			continue
 		}
 		b.WriteString("\n")
-		b.Write(enc)
+		b.WriteString(enc)
 	}
-	b.WriteString("\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer normally\n</IMPORTANT>")
+	b.WriteString("\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>")
+	return b.String()
+}
+
+// qwenTojsonSpaced serializes v the way the Qwen chat template's `tool | tojson` does:
+// JSON with json.dumps' default separators (", " between items, ": " between keys and
+// values) and no HTML escaping. Go's json.Marshal is compact and escapes <>&, neither of
+// which the trained prompt carries, so the bytes are re-spaced here.
+func qwenTojsonSpaced(v any) (string, error) {
+	var compact bytes.Buffer
+	enc := json.NewEncoder(&compact)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", err
+	}
+	return spacedJSON(strings.TrimSuffix(compact.String(), "\n")), nil // json.Encoder appends a newline
+}
+
+// spacedJSON re-renders JSON text with json.dumps' default separators: whitespace outside
+// strings is dropped and ", " / ": " are inserted between items and keys, so compact and
+// pretty-printed input normalize to the same bytes. One pass suffices because outside a
+// JSON string the only significant characters are the structural ones, and inside a string
+// nothing is rewritten — hence it is exact for any valid JSON, including strings that
+// themselves contain ", " / ": ".
+func spacedJSON(raw string) string {
+	var b strings.Builder
+	b.Grow(len(raw) + len(raw)/4)
+	inString, escaped := false, false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if inString {
+			b.WriteByte(c)
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+			b.WriteByte(c)
+		case ' ', '\t', '\r', '\n':
+			// Insignificant outside a string.
+		case ',':
+			b.WriteString(", ")
+		case ':':
+			b.WriteString(": ")
+		default:
+			b.WriteByte(c)
+		}
+	}
 	return b.String()
 }
 
@@ -427,6 +491,13 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 					toolByID[id] = name
 				}
 				content += qwenToolCallBlock(tc.Function.Name, tc.Function.Arguments)
+			}
+			if m.Content == "" && strings.HasPrefix(content, "\n") {
+				// The template writes <|im_start|>assistant, then '\n' before EACH
+				// tool_call but no content line: the role header's newline already
+				// separates the first call, so the call block's own leading newline
+				// would leave a blank line the checkpoint never saw in training.
+				content = content[1:]
 			}
 		}
 		b.WriteString("<|im_start|>")
@@ -631,7 +702,11 @@ func qwenToolCallArgs(args string) string {
 	if args == "" || !json.Valid([]byte(args)) {
 		return "{}"
 	}
-	return args
+	// The template renders history arguments as `tool_call.arguments | tojson` —
+	// json.dumps' default separators — so valid JSON is re-spaced to that form
+	// regardless of how compactly the client sent it. Unparseable arguments stay
+	// verbatim: mangling them would be worse than rendering them as-is.
+	return spacedJSON(args)
 }
 
 // StopIDs collects the generation stop tokens for a ChatML-family model: the
