@@ -385,7 +385,7 @@ func TestMergeJournalCrashesAccountsAllRowsAndLimitsOnlyCandidates(t *testing.T)
 
 func TestVisibleLauncherRefusesMissingCommandBeforeTerminalSpawn(t *testing.T) {
 	launcher := VisibleLauncher{TerminalBin: filepath.Join(t.TempDir(), "terminal-that-must-not-run.exe")}
-	err := launcher.Launch(Request{CWD: t.TempDir(), Argv: []string{"definitely-missing-session-recovery-command"}})
+	_, err := launcher.Launch(Request{CWD: t.TempDir(), Argv: []string{"definitely-missing-session-recovery-command"}})
 	if err == nil || !strings.Contains(err.Error(), "resolve") {
 		t.Fatalf("err=%v want command-resolution refusal", err)
 	}

@@ -36,13 +36,19 @@ versioned JSON distinguishes `advanced`, `missing_transcript`, and
 `present_no_post_launch_progress`; RED/nonzero on any unproven row or unreadable authority is deliberate.
 Use its rows instead of a hand-written cross-root join or a newest-session guess.
 
-The recovery preview is the authority for the Claude transcript cohort and the Codex
+The recovery preview is the selection authority for the Claude transcript cohort and the Codex
 guard/host-resurrection cohort. Its versioned JSON retains probes, live rows, reset
 waiters, and identity-blocked rows instead of hiding them; only substantive actionable
 rows receive argv. Codex argv uses `codex exec --cd <exact cwd> resume <exact UUID>` and never a picker,
 `--last`, prefix, newest-row guess, or guard handle. Read the reported `witness_path`
 after a live run: a window/process alone remains `launched_unproven`; productive means
 the Claude assistant transcript or Codex thread/turn cursor advanced after launch.
+
+**Current operating limit:** until #9742 closes, a timed-out or non-advancing live
+launch is not guaranteed to have its recovery-created process tree reaped automatically.
+Keep the default `--limit 1`, inspect the exact `witness_path`, and clean up only the
+PID/start-identity tree named by that run. Never treat `launched_unproven` as a
+successful recovery or use it as proof that the original session is active.
 
 The scheduler/tower check is separate and remains read-only:
 
@@ -280,7 +286,7 @@ as part of the audit**:
 
 ## Cross-provider host/login crash recovery
 
-For a host or login crash, use `fak session recover` as the authoritative cohort surface. It joins Claude transcripts, Codex `state_5.sqlite`, guard rows, the Fleet host-resurrection cohort, and OpenCode registry evidence. Keep the default dry run until every substantive row has an exact durable identity.
+For a host or login crash, use `fak session recover` as the authoritative cohort-selection surface. It joins Claude transcripts, Codex `state_5.sqlite`, guard rows, the Fleet host-resurrection cohort, and OpenCode registry evidence. Keep the default dry run until every substantive row has an exact durable identity.
 
 A visible shell, exit code 0, thread timestamp growth, or `task_complete` is not recovery proof. Require a post-launch assistant message or successful tool call/output tied to the original identity. Inspect the transcript for terminal provider errors.
 
