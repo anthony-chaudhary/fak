@@ -338,6 +338,8 @@ type Config struct {
 	UpstreamResponseObserver func(status int, header http.Header)
 	// UpstreamTransportErrorObserver reports only transient dial/read/EOF/reset failures.
 	UpstreamTransportErrorObserver func(error)
+	// UpstreamFailureObserver receives bounded origin-attributed failure receipts.
+	UpstreamFailureObserver func(UpstreamFailureReceipt)
 	// EngineCacheEngine optionally selects a self-hosted serving-engine cache reset
 	// endpoint to call when inbound tool-result admission quarantines bytes before
 	// an upstream proxy turn. Empty disables remote cache reset.
