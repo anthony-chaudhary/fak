@@ -250,12 +250,7 @@ type BroadcastRefusal struct {
 	Detail string                `json:"detail,omitempty"`
 }
 
-func (r *BroadcastRefusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
-	}
-	return string(r.Reason) + ": " + r.Detail
-}
+func (r *BroadcastRefusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 // broadcastRefuse builds a BroadcastRefusal in one line.
 func broadcastRefuse(reason BroadcastRefuseReason, format string, args ...any) *BroadcastRefusal {

@@ -97,12 +97,7 @@ type ConstraintRefusal struct {
 	Detail string                 `json:"detail,omitempty"`
 }
 
-func (r *ConstraintRefusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
-	}
-	return string(r.Reason) + ": " + r.Detail
-}
+func (r *ConstraintRefusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 // constraintRefuse builds a ConstraintRefusal in one line.
 func constraintRefuse(reason ConstraintRefuseReason, format string, args ...any) *ConstraintRefusal {
