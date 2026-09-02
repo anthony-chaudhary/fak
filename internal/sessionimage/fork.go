@@ -94,12 +94,7 @@ type ForkRefusal struct {
 	Detail string           `json:"detail,omitempty"`
 }
 
-func (r *ForkRefusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
-	}
-	return string(r.Reason) + ": " + r.Detail
-}
+func (r *ForkRefusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 // forkRefuse builds a ForkRefusal in one line.
 func forkRefuse(reason ForkRefuseReason, format string, args ...any) *ForkRefusal {

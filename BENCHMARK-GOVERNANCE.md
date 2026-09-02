@@ -338,9 +338,9 @@ fak/
 ├── RADIXATTENTION-RESULTS.md    # RadixAttention detailed results
 └── SESSION-VALUE-STACK-RESULTS.md # Session value-add detailed results
 
-docs/benchmark/
-├── README.md                    # Cross-machine infrastructure overview
-├── QUICKSTART.md                # Get started with multi-node benchmarks
+docs/benchmarks/
+├── BENCH-INFRA-INDEX.md           # Cross-machine infrastructure overview
+├── QUICKSTART.md                  # Get started with multi-node benchmarks
 └── CROSS-MACHINE-INFRASTRUCTURE.md # Full design spec and schema
 
 .claude/skills/

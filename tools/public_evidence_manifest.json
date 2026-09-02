@@ -11,11 +11,11 @@
       "docs/benchmarks/LIVE-RESULTS.md"
     ],
     "experiments/agent-live/production-workload.json": [
-      "docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md",
+      "docs/benchmarks/CROSS-MACHINE-INFRASTRUCTURE.md",
       "docs/production-benchmark-methodology.md"
     ],
     "experiments/agent-live/transcript-adapter-sweep/sweep-summary.json": [
-      "docs/benchmarking/FINAL-ANALYSIS.md"
+      "docs/benchmarks/FINAL-ANALYSIS.md"
     ],
     "experiments/agent-live/turntax-injection-live.json": [
       "TURN-TAX-RESULTS.md",
@@ -132,8 +132,8 @@
       "docs/permission-system-benchmark-methodology.md"
     ],
     "experiments/benchmark/catalog.json": [
-      "docs/benchmark/QUICKSTART.md",
-      "docs/benchmarking/DEEPSWEBENCH-INTEGRATION.md"
+      "docs/benchmarks/QUICKSTART.md",
+      "docs/benchmarks/DEEPSWEBENCH-INTEGRATION.md"
     ],
     "experiments/causal-invalidation-20260620/causalbench-witness-20260620.json": [
       "BENCHMARK-AUTHORITY.md"
@@ -369,7 +369,7 @@
     ],
     "FANOUT-BENCH-RESULTS.md": [
       "CLAIMS.md",
-      "docs/benchmarking/README.md",
+      "docs/benchmarks/LEGACY-BENCH-INDEX.md",
       "docs/cli-reference.md",
       "docs/fak-vs-alternatives-comparison.md"
     ],
@@ -400,7 +400,7 @@
       "CLAIMS.md",
       "GETTING-STARTED.md",
       "STATUS.md",
-      "docs/benchmarking/README.md",
+      "docs/benchmarks/LEGACY-BENCH-INDEX.md",
       "docs/benchmarks/FANOUT-BENCH-RESULTS.md",
       "docs/benchmarks/FLEET-SWEEP-RESULTS.md",
       "docs/benchmarks/KV-QUARANTINE-BRIDGE-RESULTS.md",
@@ -460,7 +460,7 @@
       "BENCHMARK-AUTHORITY.md",
       "CLAIMS.md",
       "HERO-BENCHMARK-2026-06-21.md",
-      "docs/benchmarking/README.md",
+      "docs/benchmarks/LEGACY-BENCH-INDEX.md",
       "docs/benchmarks/TOOL-RESULT-TREE-KV-RESULTS.md",
       "docs/explainers/addressable-kv-cache.md",
       "docs/explainers/sota-optimizations.md",

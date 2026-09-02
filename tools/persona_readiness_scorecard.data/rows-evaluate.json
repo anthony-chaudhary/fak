@@ -14,7 +14,7 @@
         {"id": "citation", "kind": "path_exists", "target": "CITATION.cff", "need": "a machine-readable citation file", "severity": "hard"},
         {"id": "research-notes", "kind": "path_exists", "target": "docs/notes", "need": "the research notes / explainers a researcher reads to study the kernel", "severity": "hard"},
         {"id": "benchmark-data", "kind": "path_exists", "target": "experiments", "need": "committed raw benchmark/results data (not just summary prose)", "severity": "hard"},
-        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmark/QUICKSTART.md", "need": "a benchmark quickstart / methodology so a result can be re-run", "severity": "hard"},
+        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmarks/QUICKSTART.md", "need": "a benchmark quickstart / methodology so a result can be re-run", "severity": "hard"},
         {"id": "citable-doi", "kind": "doc_mentions", "doc": "CITATION.cff", "tokens": ["doi"], "need": "a citable DOI / archival deposit (Zenodo) so the work has a stable academic handle", "severity": "soft"}
       ],
       "verdict": "served",
@@ -37,7 +37,7 @@
         {"id": "industry-scorecard", "kind": "path_exists", "target": "tools/industry_scorecard.py", "need": "the industry scorecard (fak vs the SOTA field, with parity-debt)", "severity": "hard"},
         {"id": "industry-doc", "kind": "path_exists", "target": "docs/industry-scorecard/README.md", "need": "the generated competitive standing doc with dated SOTA sources", "severity": "hard"},
         {"id": "bench-plan", "kind": "path_exists", "target": "docs/bench-plan.md", "need": "a hardware bench plan / coverage matrix with exact go run invocations", "severity": "hard"},
-        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmark/QUICKSTART.md", "need": "a benchmark quickstart so a result is reproducible", "severity": "hard"}
+        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmarks/QUICKSTART.md", "need": "a benchmark quickstart so a result is reproducible", "severity": "hard"}
       ],
       "verdict": "served",
       "gaps": [

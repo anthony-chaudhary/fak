@@ -128,12 +128,7 @@ type RedirectRefusal struct {
 	Detail string               `json:"detail,omitempty"`
 }
 
-func (r *RedirectRefusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
-	}
-	return string(r.Reason) + ": " + r.Detail
-}
+func (r *RedirectRefusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 // redirectRefuse builds a RedirectRefusal in one line.
 func redirectRefuse(reason RedirectRefuseReason, format string, args ...any) *RedirectRefusal {

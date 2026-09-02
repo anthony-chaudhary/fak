@@ -117,8 +117,8 @@ both_completed: true
 <!-- `private GPU-server sweep profile` excluded from the public copy (operator-private lab infra). -->
 | `fak/cmd/demorace/main.go` | Live race server |
 | `fak/cmd/demorace/page.html` | Embedded dashboard |
-| `docs/benchmarking/README.md` | Infrastructure overview |
-| `docs/benchmarking/SESSION-SUMMARY.md` | Session summary |
+| `docs/benchmarks/LEGACY-BENCH-INDEX.md` | Infrastructure overview |
+| `docs/benchmarks/SESSION-SUMMARY.md` | Session summary |
 
 ### Profiles Configured
 

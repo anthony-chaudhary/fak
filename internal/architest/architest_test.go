@@ -63,6 +63,7 @@ var tier = map[string]int{
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
+	"walkfiles":              1, // shared swallow-and-scan filepath.WalkDir primitive (Files: visit regular files, swallow walk-step errors, propagate visit errors); stdlib-only, imports nothing internal, off the hot path (#10405).
 	"dispatchconservation":   1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
 	"dispatchdoa":            1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":              1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.

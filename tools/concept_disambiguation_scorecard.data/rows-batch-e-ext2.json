@@ -285,7 +285,7 @@
       "canonical": "ContextBench (academic context-retrieval benchmark)",
       "family": "context-ctx",
       "kind": "doc-term",
-      "definition": "ContextBench is an external academic code-agent context-retrieval benchmark (separate repo, Nanjing University + UCL research) named in docs/benchmarking/README.md as a context-retrieval comparison surface.",
+      "definition": "ContextBench is an external academic code-agent context-retrieval benchmark (separate repo, Nanjing University + UCL research) named in docs/benchmarks/LEGACY-BENCH-INDEX.md as a context-retrieval comparison surface.",
       "distinction": "Not fak's in-tree security-gate corpus benchmark (ctxbench (security-gate corpus cmd)); ContextBench is a third-party academic retrieval benchmark, not a fak command.",
       "distinct_from": [
         "ctxbench (security-gate corpus cmd)"

@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -155,10 +156,7 @@ func pkgSource(root, dir string) (string, bool) {
 	}
 	var b strings.Builder
 	found := false
-	_ = filepath.WalkDir(full, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
+	_ = walkfiles.Files(full, func(path string, d os.DirEntry) error {
 		name := d.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			return nil

@@ -110,7 +110,7 @@ Every machine must run:
 - **Hardware Matrix**: See [`docs/HARDWARE-MATRIX.md`](../HARDWARE-MATRIX.md) for detailed hardware coverage and benchmark results
 - **Benchmark Authority**: See [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for single source of truth on benchmark claims
 - **Benchmark Governance**: See [`BENCHMARK-GOVERNANCE.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md) for DOS-centric benchmark process
-- **Cross-Machine Infrastructure**: See `docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md` for multi-node benchmark design
+- **Cross-Machine Infrastructure**: See `docs/benchmarks/CROSS-MACHINE-INFRASTRUCTURE.md` for multi-node benchmark design
 
 ## Machine Registry
 

@@ -32,6 +32,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 )
 
 // SCHEMA is the payload schema tag (matches the python SCHEMA constant).
@@ -1050,11 +1051,8 @@ func reachablePublished(rootAbs string) map[string]bool {
 func docsMarkdownRels(rootAbs string) []string {
 	var rels []string
 	docsDir := filepath.Join(rootAbs, "docs")
-	_ = filepath.WalkDir(docsDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+	_ = walkfiles.Files(docsDir, func(p string, d fs.DirEntry) error {
+		if !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}
 		if rel, ok := relPosix(rootAbs, p); ok {

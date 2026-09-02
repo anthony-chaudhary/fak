@@ -60,7 +60,7 @@ python tools/run_sweep.py --list
 ```
 
 ### 7. Documentation Created ✓
-- `docs/benchmarking/README.md` — Comprehensive infrastructure overview
+- `docs/benchmarks/LEGACY-BENCH-INDEX.md` — Comprehensive infrastructure overview
 
 ---
 
@@ -133,8 +133,8 @@ python tools/run_sweep.py --list
 - `tools/glm52_serving_witness.py`
 - `tools/sweep_profiles/quick-smoke.yaml`
 <!-- `private GPU-server sweep profile` excluded from the public copy. -->
-- `docs/benchmarking/README.md`
-- `docs/benchmarking/SESSION-SUMMARY.md` (this file)
+- `docs/benchmarks/LEGACY-BENCH-INDEX.md`
+- `docs/benchmarks/SESSION-SUMMARY.md` (this file)
 
 ### Built
 - `fak/demorace.exe` (10MB)

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 )
 
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
@@ -1098,37 +1099,25 @@ func readCodexLoopLaunchSnapshot(fh *os.File) ([]byte, codexLoopLaunchScan, erro
 
 func discoverRecentCodexLoopSessionPaths(home string, sinceHours float64, limit int) ([]string, error) {
 	root := filepath.Join(home, "sessions")
-	type candidate struct {
-		path  string
-		mtime time.Time
-	}
 	var cutoff time.Time
 	if sinceHours > 0 {
 		cutoff = time.Now().Add(-time.Duration(sinceHours * float64(time.Hour)))
 	}
-	var matches []candidate
-	walkErr := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
-			return nil
-		}
-		info, ierr := d.Info()
-		if ierr != nil {
-			return nil
-		}
-		if !cutoff.IsZero() && info.ModTime().Before(cutoff) {
-			return nil
-		}
-		matches = append(matches, candidate{path: p, mtime: info.ModTime()})
-		return nil
-	})
+	matches, walkErr := collectCodexLoopSessionFiles(root, func(_ string) bool { return true })
 	if errors.Is(walkErr, os.ErrNotExist) {
 		return nil, nil
 	}
 	if walkErr != nil {
 		return nil, fmt.Errorf("walk %s: %w", root, walkErr)
+	}
+	if !cutoff.IsZero() {
+		kept := matches[:0]
+		for _, m := range matches {
+			if !m.mtime.Before(cutoff) {
+				kept = append(kept, m)
+			}
+		}
+		matches = kept
 	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].mtime.After(matches[j].mtime) })
 	limit = normalizedCodexLoopLimit(limit)
@@ -1140,6 +1129,32 @@ func discoverRecentCodexLoopSessionPaths(home string, sinceHours float64, limit 
 		out = append(out, m.path)
 	}
 	return out, nil
+}
+
+// codexLoopSessionFile is one .jsonl session file discovered under the Codex
+// sessions root, carrying the mtime the newest-first sorts order on.
+type codexLoopSessionFile struct {
+	path  string
+	mtime time.Time
+}
+
+// collectCodexLoopSessionFiles walks root for .jsonl session files that match,
+// tolerating walk-step errors and recording each survivor's mtime. Recency
+// filtering and ordering stay with the callers — they differ per verb.
+func collectCodexLoopSessionFiles(root string, match func(name string) bool) ([]codexLoopSessionFile, error) {
+	var files []codexLoopSessionFile
+	err := walkfiles.Files(root, func(p string, d os.DirEntry) error {
+		if !strings.HasSuffix(d.Name(), ".jsonl") || !match(d.Name()) {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		files = append(files, codexLoopSessionFile{path: p, mtime: info.ModTime()})
+		return nil
+	})
+	return files, err
 }
 
 func normalizedCodexLoopLimit(limit int) int {
@@ -1165,27 +1180,8 @@ func resolveCodexLoopSessionPath(codexHome, sessionID, path string) (string, err
 		return "", err
 	}
 	root := filepath.Join(home, "sessions")
-	type candidate struct {
-		path  string
-		mtime time.Time
-	}
-	var matches []candidate
-	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
-			return nil
-		}
-		if !strings.Contains(d.Name(), sessionID) {
-			return nil
-		}
-		info, ierr := d.Info()
-		if ierr != nil {
-			return nil
-		}
-		matches = append(matches, candidate{path: p, mtime: info.ModTime()})
-		return nil
+	matches, err := collectCodexLoopSessionFiles(root, func(name string) bool {
+		return strings.Contains(name, sessionID)
 	})
 	if err != nil {
 		return "", fmt.Errorf("walk %s: %w", root, err)

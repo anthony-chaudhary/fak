@@ -485,51 +485,16 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	finishProfile := onceFinishNativeProfile(s.Close)
 	defer finishProfile()
 	sequenceSelector := controls[nativeProfileSequenceSelector]
-	if sequenceSelector == nativeProfileSelectorOn {
-		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
-			return fmt.Errorf("native performance candidate route unavailable: %w", err)
-		}
+	profiler, err := configureNativeProfileSession(s, controls)
+	if err != nil {
+		return err
 	}
-	var handoffMode model.Qwen35DecodeHandoffMode
-	if err := handoffMode.Set(controls[nativeProfileDecodeHandoffControl]); err != nil {
-		return fmt.Errorf("native performance decode handoff: %w", err)
+	logits, sequenceExecuted, phases, err := runNativeProfileForward(s, vocab, sequenceSelector, phases)
+	if err != nil {
+		return err
 	}
-	if err := s.SetQwen35DecodeHandoffMode(handoffMode); err != nil {
-		return fmt.Errorf("native performance decode handoff unavailable: %w", err)
-	}
-	profiler := model.NewPhaseProfiler()
-	s.PhaseProfiler = profiler
-	prompt := lcgIDs(32, vocab)
+
 	t := time.Now()
-	logits := s.Prefill(prompt)
-	sequenceExecuted := false
-	if sequenceSelector == nativeProfileSelectorOn {
-		var err error
-		sequenceExecuted, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
-		if err != nil {
-			return fmt.Errorf("native performance candidate route failed: %w", err)
-		}
-	} else {
-		_, sequenceExecuted = s.Qwen35GDNDecodePath()
-	}
-	d := time.Since(t)
-	phases = appendNativeProfilePhase(phases, "prefill", d)
-
-	id := 7 % vocab
-	t = time.Now()
-	logits = s.Step(id)
-	d = time.Since(t)
-	phases = appendNativeProfilePhase(phases, "first-token", d)
-
-	t = time.Now()
-	for i := 1; i < 64; i++ {
-		id = (id*48271 + 1) % vocab
-		logits = s.Step(id)
-	}
-	d = time.Since(t)
-	phases = appendNativeProfilePhase(phases, "steady-decode", d)
-
-	t = time.Now()
 	for _, value := range logits {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
 			return fmt.Errorf("native performance verification: non-finite logits")
@@ -556,7 +521,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	if err != nil || resident <= 0 || workingSet == 0 {
 		return fmt.Errorf("native performance profile unavailable: memory capture resident=%d working_set=%d: %w", resident, workingSet, err)
 	}
-	d = time.Since(t)
+	d := time.Since(t)
 	phases = appendNativeProfilePhase(phases, "verification", d)
 	handoffReceipt := s.Qwen35DecodeHandoffReceipt()
 	if err := model.ValidateQwen35DecodeHandoffReceipt(handoffReceipt); err != nil {
@@ -568,65 +533,15 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	d = time.Since(t)
 	phases = appendNativeProfilePhase(phases, "teardown", d)
 
-	artifactFile, err := fileIdentity(*f.gguf)
-	if err != nil {
-		return fmt.Errorf("native performance artifact identity: %w", err)
-	}
-	envelope, err := exactMetalProfileEnvelope(nativeperf.ActiveGraph(), artifactFile)
-	if err != nil {
-		return fmt.Errorf("native performance profile unavailable: %w", err)
-	}
-	if envelope.PromptTokens != 32 || envelope.DecodeTokens != 64 || *f.decodePrompt != envelope.PromptTokens || *f.decodeSteps != envelope.DecodeTokens {
-		return fmt.Errorf("native performance P/T controls do not match envelope: got P=%d T=%d, want P=%d T=%d", *f.decodePrompt, *f.decodeSteps, envelope.PromptTokens, envelope.DecodeTokens)
-	}
-	forwardPath, err := nativeProfileExecutedForwardPath(envelope.ForwardPath, sequenceSelector, sequenceExecuted)
-	if err != nil {
-		return fmt.Errorf("native performance profile unavailable: %w", err)
-	}
-	if *f.name != "qwen38:27b" {
-		return fmt.Errorf("native performance model name %q is not the pinned qwen38:27b identity", *f.name)
-	}
-	host, err := captureNativeHost()
-	if err != nil {
-		return fmt.Errorf("native performance host identity: %w", err)
-	}
-	if err := validateNativeHost(envelope, host); err != nil {
-		return fmt.Errorf("native performance profile unavailable: %w", err)
-	}
-	source, binary, err := captureNativeBuild()
-	if err != nil {
-		return fmt.Errorf("native performance build identity: %w", err)
-	}
-	weights, err := ggufload.OpenWeights(*f.gguf)
-	if err != nil {
-		return fmt.Errorf("native performance artifact config: %w", err)
-	}
-	headerConfig, configErr := weights.File.Config()
-	weights.Close()
-	if configErr != nil {
-		return fmt.Errorf("native performance artifact config: %w", configErr)
-	}
-	loadedConfig, err := nativeModelConfigIdentity(m.Cfg)
+	identity, err := captureNativeProfileIdentity(f, m, sequenceSelector, sequenceExecuted)
 	if err != nil {
 		return err
-	}
-	headerConfigReport, err := nativeModelConfigIdentity(headerConfig)
-	if err != nil {
-		return err
-	}
-	loadedConfigSHA, err := sha256JSON(loadedConfig)
-	if err != nil {
-		return err
-	}
-	headerConfigSHA, err := sha256JSON(headerConfigReport)
-	if err != nil || headerConfigSHA != loadedConfigSHA {
-		return fmt.Errorf("native performance loaded model config does not match exact artifact header")
 	}
 
 	profile := nativeperf.ProfileBundle{
 		Schema:                 nativeperf.ProfileSchema,
-		EnvelopeID:             envelope.ID,
-		Execution:              nativeperf.ExecutionIdentity{Engine: envelope.Engine, ForwardPath: forwardPath, FallbackCount: fallbackCount},
+		EnvelopeID:             identity.envelope.ID,
+		Execution:              nativeperf.ExecutionIdentity{Engine: identity.envelope.Engine, ForwardPath: identity.forwardPath, FallbackCount: fallbackCount},
 		Phases:                 phases,
 		Metal:                  &nativeperf.MetalCounters{CommandBuffers: counters.CommandBuffers, Encoders: counters.Encoders, DispatchMilliseconds: counters.DispatchMilliseconds, WaitMilliseconds: counters.WaitMilliseconds, ResidentBytes: uint64(resident), WorkingSetBytes: workingSet},
 		AttributionUnavailable: &nativeperf.AttributionUnavailable{Reason: nativeperf.AttributionUnavailableCapture, Detail: "fak-native session lifecycle capture does not export per-lever dispatch attribution"},
@@ -645,13 +560,13 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	receipt := nativeProfileReceipt{
 		Schema:              nativeProfileReceiptSchema,
 		ProfileSHA256:       fmt.Sprintf("%x", profileSum),
-		EnvelopeID:          envelope.ID,
-		Artifact:            nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
-		ModelConfig:         loadedConfig,
-		ModelConfigSHA256:   loadedConfigSHA,
-		Host:                host,
-		Source:              source,
-		Binary:              binary,
+		EnvelopeID:          identity.envelope.ID,
+		Artifact:            nativeArtifactIdentity{nativeFileIdentity: identity.artifactFile, Model: identity.envelope.Model, ModelRevision: identity.envelope.ModelRevision},
+		ModelConfig:         identity.loadedConfig,
+		ModelConfigSHA256:   identity.loadedConfigSHA,
+		Host:                identity.host,
+		Source:              identity.source,
+		Binary:              identity.binary,
 		Controls:            controls,
 		Execution:           executionReceipt,
 		Fallbacks:           fallbackReceipt,
@@ -680,6 +595,144 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	fmt.Fprintln(os.Stderr, "wrote", *f.nativeProfileOut)
 	fmt.Fprintln(os.Stderr, "wrote", nativeReceiptPath(*f.nativeProfileOut))
 	return nil
+}
+
+// configureNativeProfileSession applies the profile's session controls (candidate
+// sequence route, decode handoff) and attaches the phase profiler.
+func configureNativeProfileSession(s *model.Session, controls map[string]string) (*model.PhaseProfiler, error) {
+	if controls[nativeProfileSequenceSelector] == nativeProfileSelectorOn {
+		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			return nil, fmt.Errorf("native performance candidate route unavailable: %w", err)
+		}
+	}
+	var handoffMode model.Qwen35DecodeHandoffMode
+	if err := handoffMode.Set(controls[nativeProfileDecodeHandoffControl]); err != nil {
+		return nil, fmt.Errorf("native performance decode handoff: %w", err)
+	}
+	if err := s.SetQwen35DecodeHandoffMode(handoffMode); err != nil {
+		return nil, fmt.Errorf("native performance decode handoff unavailable: %w", err)
+	}
+	profiler := model.NewPhaseProfiler()
+	s.PhaseProfiler = profiler
+	return profiler, nil
+}
+
+// runNativeProfileForward runs the measured forward pass (prefill with the candidate
+// route finalized inside the timed window, first-token, 63 steady steps), appending
+// the "prefill"/"first-token"/"steady-decode" phases; returns final logits + executed.
+func runNativeProfileForward(s *model.Session, vocab int, sequenceSelector string, phases []nativeperf.ProfilePhase) ([]float32, bool, []nativeperf.ProfilePhase, error) {
+	prompt := lcgIDs(32, vocab)
+	t := time.Now()
+	logits := s.Prefill(prompt)
+	sequenceExecuted := false
+	if sequenceSelector == nativeProfileSelectorOn {
+		var err error
+		sequenceExecuted, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if err != nil {
+			return nil, false, phases, fmt.Errorf("native performance candidate route failed: %w", err)
+		}
+	} else {
+		_, sequenceExecuted = s.Qwen35GDNDecodePath()
+	}
+	d := time.Since(t)
+	phases = appendNativeProfilePhase(phases, "prefill", d)
+
+	id := 7 % vocab
+	t = time.Now()
+	logits = s.Step(id)
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "first-token", d)
+
+	t = time.Now()
+	for i := 1; i < 64; i++ {
+		id = (id*48271 + 1) % vocab
+		logits = s.Step(id)
+	}
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "steady-decode", d)
+	return logits, sequenceExecuted, phases, nil
+}
+
+// nativeProfileIdentity is every identity witness the native profile + receipt bind to.
+type nativeProfileIdentity struct {
+	artifactFile    nativeFileIdentity
+	envelope        nativeperf.Envelope
+	forwardPath     string
+	host            nativeHostIdentity
+	source          nativeSourceIdentity
+	binary          nativeFileIdentity
+	loadedConfig    map[string]any
+	loadedConfigSHA string
+}
+
+// captureNativeProfileIdentity collects and cross-checks every identity the native
+// profile attests: artifact bytes, pinned envelope + P/T controls, executed forward
+// path, pinned model name, host + build identities, and loaded-vs-header model config.
+func captureNativeProfileIdentity(f *benchFlags, m *model.Model, sequenceSelector string, sequenceExecuted bool) (nativeProfileIdentity, error) {
+	artifactFile, err := fileIdentity(*f.gguf)
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance artifact identity: %w", err)
+	}
+	envelope, err := exactMetalProfileEnvelope(nativeperf.ActiveGraph(), artifactFile)
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	if envelope.PromptTokens != 32 || envelope.DecodeTokens != 64 || *f.decodePrompt != envelope.PromptTokens || *f.decodeSteps != envelope.DecodeTokens {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance P/T controls do not match envelope: got P=%d T=%d, want P=%d T=%d", *f.decodePrompt, *f.decodeSteps, envelope.PromptTokens, envelope.DecodeTokens)
+	}
+	forwardPath, err := nativeProfileExecutedForwardPath(envelope.ForwardPath, sequenceSelector, sequenceExecuted)
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	if *f.name != "qwen38:27b" {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance model name %q is not the pinned qwen38:27b identity", *f.name)
+	}
+	host, err := captureNativeHost()
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance host identity: %w", err)
+	}
+	if err := validateNativeHost(envelope, host); err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	source, binary, err := captureNativeBuild()
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance build identity: %w", err)
+	}
+	weights, err := ggufload.OpenWeights(*f.gguf)
+	if err != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance artifact config: %w", err)
+	}
+	headerConfig, configErr := weights.File.Config()
+	weights.Close()
+	if configErr != nil {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance artifact config: %w", configErr)
+	}
+	loadedConfig, err := nativeModelConfigIdentity(m.Cfg)
+	if err != nil {
+		return nativeProfileIdentity{}, err
+	}
+	headerConfigReport, err := nativeModelConfigIdentity(headerConfig)
+	if err != nil {
+		return nativeProfileIdentity{}, err
+	}
+	loadedConfigSHA, err := sha256JSON(loadedConfig)
+	if err != nil {
+		return nativeProfileIdentity{}, err
+	}
+	headerConfigSHA, err := sha256JSON(headerConfigReport)
+	if err != nil || headerConfigSHA != loadedConfigSHA {
+		return nativeProfileIdentity{}, fmt.Errorf("native performance loaded model config does not match exact artifact header")
+	}
+	return nativeProfileIdentity{
+		artifactFile:    artifactFile,
+		envelope:        envelope,
+		forwardPath:     forwardPath,
+		host:            host,
+		source:          source,
+		binary:          binary,
+		loadedConfig:    loadedConfig,
+		loadedConfigSHA: loadedConfigSHA,
+	}, nil
 }
 
 // runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
@@ -881,28 +934,35 @@ func openCheckpoint(f *benchFlags, modelName string) *benchckpt.Ledger {
 	return l
 }
 
-func main() {
-	f := parseFlags()
-	validateFlags(f)
-	if *f.nativeProfileCompare != "" {
-		comparison := compareNativeProfileCampaign(*f.nativeProfileCompare)
-		if err := writeProfileComparison(f, comparison); err != nil {
-			fmt.Fprintln(os.Stderr, "native performance comparison:", err)
-			f.exit(1)
-		}
-		return
+// maybeCompareNativeProfiles handles -native-profile-compare: true = process consumed.
+func maybeCompareNativeProfiles(f *benchFlags) bool {
+	if *f.nativeProfileCompare == "" {
+		return false
 	}
-	if *f.qwenSwapReadback != "" {
-		if err := runQwen38PagedSwapReadback(*f.qwenSwapReadback); err != nil {
-			fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback:", err)
-			f.exit(1)
-		}
-		fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback: PASS", *f.qwenSwapReadback)
-		return
+	comparison := compareNativeProfileCampaign(*f.nativeProfileCompare)
+	if err := writeProfileComparison(f, comparison); err != nil {
+		fmt.Fprintln(os.Stderr, "native performance comparison:", err)
+		f.exit(1)
 	}
-	var nativeControls map[string]string
-	var qwenSwapControls map[string]string
-	var qwenSwapMaxBlocks int
+	return true
+}
+
+// maybeRunQwenSwapReadback handles -qwen-swap-readback: true = process consumed.
+func maybeRunQwenSwapReadback(f *benchFlags) bool {
+	if *f.qwenSwapReadback == "" {
+		return false
+	}
+	if err := runQwen38PagedSwapReadback(*f.qwenSwapReadback); err != nil {
+		fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback:", err)
+		f.exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "qwen38 paged-swap readback: PASS", *f.qwenSwapReadback)
+	return true
+}
+
+// resolveBenchControls resolves the controlled environments for the native
+// performance profile and the qwen-swap probe; a control error exits 2.
+func resolveBenchControls(f *benchFlags) (nativeControls map[string]string, qwenSwapControls map[string]string, qwenSwapMaxBlocks int) {
 	if *f.nativeProfileOut != "" {
 		var err error
 		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget, *f.nativeDecodeHandoff)
@@ -919,13 +979,138 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	applyBudget(*f.budget)
-	if *f.nativeProfileReadback != "" {
-		if err := runNativeProfileReadback(*f.nativeProfileReadback); err != nil {
-			fmt.Fprintln(os.Stderr, "native performance readback:", err)
-			os.Exit(1)
+	return nativeControls, qwenSwapControls, qwenSwapMaxBlocks
+}
+
+// maybeRunNativeProfileReadback handles -native-profile-readback: true = consumed.
+func maybeRunNativeProfileReadback(f *benchFlags) bool {
+	if *f.nativeProfileReadback == "" {
+		return false
+	}
+	if err := runNativeProfileReadback(*f.nativeProfileReadback); err != nil {
+		fmt.Fprintln(os.Stderr, "native performance readback:", err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "native performance readback: PASS", *f.nativeProfileReadback)
+	return true
+}
+
+// loadWorkloadIfAny loads the -workload file, or nil; a bad file exits 1.
+func loadWorkloadIfAny(f *benchFlags) *model.BenchWorkload {
+	if *f.workloadPath == "" {
+		return nil
+	}
+	workload, err := model.LoadBenchWorkload(*f.workloadPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "workload:", err)
+		os.Exit(1)
+	}
+	return workload
+}
+
+// loadBenchModel loads the model (deadline-bounded under -smoke). The caller measures
+// loadNanos only AFTER binding transferred weights, so that cost stays in load_ms.
+func loadBenchModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, time.Time) {
+	t0 := time.Now()
+	m, modelName, err := loadModelMaybeDeadline(f, lp)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "load:", err)
+		os.Exit(1)
+	}
+	return m, modelName, t0
+}
+
+// snapshotGGUFLoadProfile attaches load_profile to the report ONLY when a -load-profile*
+// flag asked for it — a profiler created for default-on -load-progress streams to stderr
+// but must not bloat every report's JSON.
+func snapshotGGUFLoadProfile(f *benchFlags, ggufLoadProfiler *ggufload.LoadProfiler, loadNanos int64) *ggufload.LoadProfile {
+	if ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
+		mode, source := ggufLoadProfileIdentity(f)
+		return ggufLoadProfiler.Snapshot(mode, source, loadNanos)
+	}
+	return nil
+}
+
+// quantizeIfNeeded quantizes off the timed path when in Q8 mode; returns ms.
+func quantizeIfNeeded(f *benchFlags, m *model.Model) float64 {
+	if !*f.quant {
+		return 0
+	}
+	tq := time.Now()
+	m.Quantize()
+	return float64(time.Since(tq).Nanoseconds()) / 1e6
+}
+
+// warmupBenchSession pages in weights + JITs allocation paths so only steady-state is timed.
+func warmupBenchSession(newSession func() *model.Session, vocab int) {
+	s := newSession()
+	s.Prefill(lcgIDs(8, vocab))
+	s.Step(s.Cache.Len() % vocab)
+	s.Close()
+}
+
+// assembleBenchReport builds the report's identity half (engine, precision, workers,
+// load/quant timings, workload metadata); the run* helpers append the measured cells.
+func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends []string, m *model.Model, modelName string, loadMS, quantMS float64, workload *model.BenchWorkload, ggufLoadProfile *ggufload.LoadProfile) map[string]any {
+	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
+	report := map[string]any{
+		"app_version":         appversion.Current(),
+		"engine":              engine,
+		"model":               modelName,
+		"model_config":        modelConfigReport(m.Cfg),
+		"precision":           precision,
+		"backend":             backendReport,
+		"load_ms":             loadMS,
+		"quant_ms":            quantMS,
+		"lean":                *f.lean,
+		"q4k":                 *f.q4k,
+		"stream_q4k":          streamQ4KEnabled(f),
+		"metal":               *f.metal,
+		"metal_q4k":           *f.q4k && *f.metal,
+		"quantized_at_load":   *f.lean || *f.q4k,
+		"workers":             model.NumWorkers(),   // global matmul worker budget (prefill and explicit paths)
+		"budget":              model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
+		"q8_decode_workers":   model.Q8DecodeWorkers(),
+		"q8_decode_budget":    model.Q8DecodeWorkerBudget(),
+		"go_threads":          fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d, q8 decode workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers(), model.Q8DecodeWorkers()),
+		"load_worker_control": currentLoadWorkerControl(),
+	}
+	report["source"] = loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f))
+	if ggufLoadProfile != nil {
+		report["load_profile"] = ggufLoadProfile
+	}
+	if *f.q4k {
+		rep := m.ResidentReport()
+		report["resident"] = rep
+		report["resident_summary"] = model.FormatResidentReport(rep)
+	}
+	if workload != nil {
+		report["workload"] = map[string]any{
+			"path":             *f.workloadPath,
+			"schema":           workload.Schema,
+			"name":             workload.Name,
+			"source":           workload.Source,
+			"cases":            len(workload.Cases),
+			"prefill_cap":      *f.workloadPrefillCap,
+			"decode_steps_cap": *f.decodeSteps,
+			"token_ids":        "deterministic LCG IDs at recorded prompt/decode lengths; token values are cost-irrelevant for this compute benchmark",
 		}
-		fmt.Fprintln(os.Stderr, "native performance readback: PASS", *f.nativeProfileReadback)
+	}
+	return report
+}
+
+func main() {
+	f := parseFlags()
+	validateFlags(f)
+	if maybeCompareNativeProfiles(f) {
+		return
+	}
+	if maybeRunQwenSwapReadback(f) {
+		return
+	}
+	nativeControls, qwenSwapControls, qwenSwapMaxBlocks := resolveBenchControls(f)
+	applyBudget(*f.budget)
+	if maybeRunNativeProfileReadback(f) {
 		return
 	}
 
@@ -942,15 +1127,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	var workload *model.BenchWorkload
-	if *f.workloadPath != "" {
-		var err error
-		workload, err = model.LoadBenchWorkload(*f.workloadPath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "workload:", err)
-			os.Exit(1)
-		}
-	}
+	workload := loadWorkloadIfAny(f)
 
 	defer acquireMetalLease(*f.metal)()
 
@@ -962,29 +1139,16 @@ func main() {
 	}
 
 	ggufLoadProfiler := newGGUFLoadProfiler(f)
-
-	t0 := time.Now()
-	m, modelName, err := loadModelMaybeDeadline(f, ggufLoadProfiler)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "load:", err)
-		os.Exit(1)
-	}
+	m, modelName, loadStart := loadBenchModel(f, ggufLoadProfiler)
 	if bindLoadedModelWeights(f, m) {
 		defer f.closeTransferredWeights()
 	}
 	if *f.name != "" {
 		modelName = *f.name
 	}
-	loadNanos := time.Since(t0).Nanoseconds()
+	loadNanos := time.Since(loadStart).Nanoseconds()
 	loadMS := float64(loadNanos) / 1e6
-	var ggufLoadProfile *ggufload.LoadProfile
-	// Attach the machine-readable load_profile to the report only when a -load-profile* flag
-	// asked for it. A profiler created solely for default-on -load-progress streams to stderr
-	// but must not bloat every report's JSON with a phase breakdown nobody requested.
-	if ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
-		mode, source := ggufLoadProfileIdentity(f)
-		ggufLoadProfile = ggufLoadProfiler.Snapshot(mode, source, loadNanos)
-	}
+	ggufLoadProfile := snapshotGGUFLoadProfile(f, ggufLoadProfiler, loadNanos)
 	if *f.loadOnly {
 		runLoadOnly(f, modelName, loadMS, ggufLoadProfile)
 		return
@@ -1002,14 +1166,7 @@ func main() {
 		return
 	}
 
-	// Quantize once up front (off the timed path) when in Q8 mode. newSession stamps the
-	// Quant flag onto every session the benchmark creates so prefill+decode use it.
-	var quantMS float64
-	if *f.quant {
-		tq := time.Now()
-		m.Quantize()
-		quantMS = float64(time.Since(tq).Nanoseconds()) / 1e6
-	}
+	quantMS := quantizeIfNeeded(f, m)
 
 	// -smoke: prove the forward actually runs (load + one decode) and exit BEFORE the full
 	// prefill/decode/workload grid, so a broken forward is caught in one token, not after the
@@ -1043,60 +1200,10 @@ func main() {
 		return
 	}
 
-	// Warm up: first forward pages in all the weights + JITs allocation paths.
-	// Time only steady-state, matching the HF side which also warms up.
-	{
-		s := newSession()
-		s.Prefill(lcgIDs(8, vocab))
-		s.Step(s.Cache.Len() % vocab)
-		s.Close()
-	}
+	warmupBenchSession(newSession, vocab)
 
-	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
-	report := map[string]any{
-		"app_version":         appversion.Current(),
-		"engine":              engine,
-		"model":               modelName,
-		"model_config":        modelConfigReport(m.Cfg),
-		"precision":           precision,
-		"backend":             backendReport,
-		"load_ms":             loadMS,
-		"quant_ms":            quantMS,
-		"lean":                *f.lean,
-		"q4k":                 *f.q4k,
-		"stream_q4k":          streamQ4KEnabled(f),
-		"metal":               *f.metal,
-		"metal_q4k":           *f.q4k && *f.metal,
-		"quantized_at_load":   *f.lean || *f.q4k,
-		"workers":             model.NumWorkers(),   // global matmul worker budget (prefill and explicit paths)
-		"budget":              model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
-		"q8_decode_workers":   model.Q8DecodeWorkers(),
-		"q8_decode_budget":    model.Q8DecodeWorkerBudget(),
-		"go_threads":          fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d, q8 decode workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers(), model.Q8DecodeWorkers()),
-		"load_worker_control": currentLoadWorkerControl(),
-	}
-	report["source"] = loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f))
-	if ggufLoadProfile != nil {
-		report["load_profile"] = ggufLoadProfile
-	}
-	if *f.q4k {
-		rep := m.ResidentReport()
-		report["resident"] = rep
-		report["resident_summary"] = model.FormatResidentReport(rep)
-	}
+	report := assembleBenchReport(f, be, registeredBackends, m, modelName, loadMS, quantMS, workload, ggufLoadProfile)
 	phaseReport := map[string]any{}
-	if workload != nil {
-		report["workload"] = map[string]any{
-			"path":             *f.workloadPath,
-			"schema":           workload.Schema,
-			"name":             workload.Name,
-			"source":           workload.Source,
-			"cases":            len(workload.Cases),
-			"prefill_cap":      *f.workloadPrefillCap,
-			"decode_steps_cap": *f.decodeSteps,
-			"token_ids":        "deterministic LCG IDs at recorded prompt/decode lengths; token values are cost-irrelevant for this compute benchmark",
-		}
-	}
 
 	// Open the per-cell write-ahead checkpoint (if -checkpoint/-resume was passed) now that the
 	// model/precision regime is finalized — its fingerprint binds the recorded cells to this

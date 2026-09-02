@@ -129,12 +129,7 @@ type ParkRefusal struct {
 	Detail string           `json:"detail,omitempty"`
 }
 
-func (r *ParkRefusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
-	}
-	return string(r.Reason) + ": " + r.Detail
-}
+func (r *ParkRefusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 // parkRefuse builds a ParkRefusal in one line.
 func parkRefuse(reason ParkRefuseReason, format string, args ...any) *ParkRefusal {
