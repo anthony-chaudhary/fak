@@ -2023,8 +2023,10 @@ def host_resources() -> dict[str, Any]:
     return {"cores": cores, "free_ram_mb": free_ram_mb, "total_threads": total_threads}
 
 
-def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
-             max_threads: int | None = None) -> dict[str, Any]:
+def _gather_preflight_checks(root: Path, *, max_threads: int | None, work_kind: str,
+                             product: str) -> dict[str, Any]:
+    """Run every preflight check concurrently and fail each uncertain result closed
+    — a check that could not run is a refusal below, never an assumed pass."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         host_f = pool.submit(host_check, root, max_threads=max_threads)
         acct_f = pool.submit(account_check, root, work_kind=work_kind, product=product)
@@ -2064,7 +2066,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
                                "observed_bytes": 0,
                                "required_bytes": required_system_commit_headroom_bytes(),
                                "system_commit_bytes": 0, "system_commit_limit": 0}
-    host_cap_info = host_capacity(**host_res)
+    return {"host": host, "acct": acct, "kern": kern, "seat": seat,
+            "host_res": host_res, "worker_identity": worker_identity,
+            "alive_proc": alive_proc, "fak_bin": fak_bin,
+            "commit_headroom": commit_headroom}
+
+
+def _evaluate_capacity(*, kern: dict[str, Any], seat: dict[str, Any],
+                       host_cap_info: dict[str, Any], alive_proc: int,
+                       max_workers: int) -> dict[str, Any]:
+    """Fold the operator ceiling, the dos target, the host headroom, and the seat
+    pool into the effective cap, then derive live/headroom/limiter and the
+    seat-depletion signal from it."""
     host_cap = host_cap_info.get("host_cap")
 
     target = kern.get("target")
@@ -2127,25 +2140,6 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     limiter = capacity_limiter(max_workers=max_workers, target=target,
                                host_cap_info=host_cap_info, seat=seat,
                                live=live, cap=cap)
-
-    # Weekly-limit seat cooldown (#2610): a 429 with kind=weekly_limit is a VALID
-    # credential whose seat is temporarily quota-capped (distinct from the stale-cred
-    # cases #2059/#2075). The always-on resolve dispatcher persists that hold in
-    # .dispatch-runs/account-cap-*.json (with the announced reset window); honor it
-    # here so a routed-but-capped seat is not re-offered. Only meaningful once the
-    # switcher actually routed an account — a no-account state is REFUSE_NO_ACCOUNT.
-    weekly = (weekly_cap_check(root, product=product, account_tag=acct.get("tag"))
-              if acct.get("available") and acct.get("tag") else {"capped": False})
-
-    # Fail-safe ordering, evaluated top to bottom:
-    #   1. an un-runnable host/kernel safety check  -> REFUSE_INSPECT (never assume safe)
-    #   2. a flagged host                            -> REFUSE_HOST
-    #   3. a depleted seat pool (seats are binding)  -> REFUSE_NO_SEAT
-    #   4. at/over the worker cap                    -> REFUSE_AT_CAP
-    #   5. no available account (incl. switcher err) -> REFUSE_NO_ACCOUNT
-    #   6. routed account weekly-limit capped        -> REFUSE_WEEKLY_CAPPED (#2610)
-    # An account check that merely errored is just "no account available", which
-    # branch 5 already reports — it does not need to pre-empt host/cap.
     # A depleted seat pool (every routable seat already leased to a live worker) is its
     # own typed refusal (#1336): there is NO free seat to hand out, so spawning would
     # double-book a busy seat — refuse with REFUSE_NO_SEAT, distinct from the generic
@@ -2157,6 +2151,38 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     seats_deplete = bool(
         fold_seats and seat.get("depleted") and seats_total <= cap_pre_seat
         and (seat.get("leased") or 0) > 0)
+    return {"host_cap": host_cap, "target": target, "cap": cap,
+            "cap_pre_seat": cap_pre_seat, "fold_seats": fold_seats,
+            "seats_total": seats_total, "alive_kernel": alive_kernel,
+            "live": live, "seat": seat, "headroom": headroom,
+            "limiter": limiter, "seats_deplete": seats_deplete}
+
+
+def _evaluate_verdict(*, host: dict[str, Any], kern: dict[str, Any],
+                      worker_identity: dict[str, Any],
+                      commit_headroom: dict[str, Any], acct: dict[str, Any],
+                      weekly: dict[str, Any], capacity: dict[str, Any],
+                      alive_proc: int, max_workers: int) -> tuple[str, str]:
+    """Apply the fail-safe refusal ordering (ranked in the comment below) to the
+    gathered checks and the folded capacity, returning ``(verdict, reason)``."""
+    seats_deplete = capacity["seats_deplete"]
+    live = capacity["live"]
+    cap = capacity["cap"]
+    headroom = capacity["headroom"]
+    seats_total = capacity["seats_total"]
+    seat = capacity["seat"]
+    alive_kernel = capacity["alive_kernel"]
+    target = capacity["target"]
+    host_cap = capacity["host_cap"]
+    # Fail-safe ordering, evaluated top to bottom:
+    #   1. an un-runnable host/kernel safety check  -> REFUSE_INSPECT (never assume safe)
+    #   2. a flagged host                            -> REFUSE_HOST
+    #   3. a depleted seat pool (seats are binding)  -> REFUSE_NO_SEAT
+    #   4. at/over the worker cap                    -> REFUSE_AT_CAP
+    #   5. no available account (incl. switcher err) -> REFUSE_NO_ACCOUNT
+    #   6. routed account weekly-limit capped        -> REFUSE_WEEKLY_CAPPED (#2610)
+    # An account check that merely errored is just "no account available", which
+    # branch 5 already reports — it does not need to pre-empt host/cap.
     if host.get("error") or kern.get("error"):
         verdict = REFUSE_INSPECT
         reason = (host.get("error") or kern.get("error")
@@ -2213,7 +2239,40 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         verdict = OK_VERDICT
         reason = (f"safe to spawn: host clean, account '{acct.get('tag')}' "
                   f"(t{acct.get('tier')}) free, {live}/{cap} live (headroom {headroom})")
+    return verdict, reason
 
+
+def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
+             max_threads: int | None = None) -> dict[str, Any]:
+    checks = _gather_preflight_checks(root, max_threads=max_threads,
+                                      work_kind=work_kind, product=product)
+    host = checks["host"]
+    acct = checks["acct"]
+    kern = checks["kern"]
+    seat = checks["seat"]
+    worker_identity = checks["worker_identity"]
+    alive_proc = checks["alive_proc"]
+    fak_bin = checks["fak_bin"]
+    commit_headroom = checks["commit_headroom"]
+    host_cap_info = host_capacity(**checks["host_res"])
+    cap_state = _evaluate_capacity(kern=kern, seat=seat,
+                                   host_cap_info=host_cap_info,
+                                   alive_proc=alive_proc, max_workers=max_workers)
+
+    # Weekly-limit seat cooldown (#2610): a 429 with kind=weekly_limit is a VALID
+    # credential whose seat is temporarily quota-capped (distinct from the stale-cred
+    # cases #2059/#2075). The always-on resolve dispatcher persists that hold in
+    # .dispatch-runs/account-cap-*.json (with the announced reset window); honor it
+    # here so a routed-but-capped seat is not re-offered. Only meaningful once the
+    # switcher actually routed an account — a no-account state is REFUSE_NO_ACCOUNT.
+    weekly = (weekly_cap_check(root, product=product, account_tag=acct.get("tag"))
+              if acct.get("available") and acct.get("tag") else {"capped": False})
+    verdict, reason = _evaluate_verdict(host=host, kern=kern,
+                                        worker_identity=worker_identity,
+                                        commit_headroom=commit_headroom,
+                                        acct=acct, weekly=weekly,
+                                        capacity=cap_state,
+                                        alive_proc=alive_proc, max_workers=max_workers)
     bin_refusal = repository_binary_refusal(fak_bin)
     if verdict == OK_VERDICT and bin_refusal:
         if fak_bin.get("historical_override"):
@@ -2238,14 +2297,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "reason": reason,
         "workspace": str(root),
         "fak_bin": fak_bin,
-        "cap": cap,
-        "live": live,
-        "headroom": headroom,
+        "cap": cap_state["cap"],
+        "live": cap_state["live"],
+        "headroom": cap_state["headroom"],
         "max_workers": max_workers,
-        "host_cap": host_cap,
+        "host_cap": cap_state["host_cap"],
         "host_capacity": host_cap_info,
-        "capacity_limiter": limiter,
-        "seat": seat,
+        "capacity_limiter": cap_state["limiter"],
+        "seat": cap_state["seat"],
         "weekly_cap": weekly,
         "host": host,
         "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model", "login_status", "can_serve")},

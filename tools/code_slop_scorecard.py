@@ -852,6 +852,37 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     Identifiers are kept (``normalize_idents=False``) so distinct code with distinct names
     does not false-match and idiomatic Go does not collapse into phantom clusters; only
     literals are normalized — the precision/recall sweet spot for this tree (#780)."""
+    win_locs, per_file = _dup_scan_windows(files)
+    clone_keys = {k for k, locs in win_locs.items() if len(locs) >= CLONE_MIN_OCCURRENCES}
+    blocks = _dup_merge_blocks(per_file, clone_keys)
+    group_sites = _dup_group_sites(blocks)
+    soft, survivors = _dup_survivor_groups(files, group_sites)
+    defects, counts = _dup_classified_defects(files, survivors)
+    groups = len(survivors)
+    score = _clamp(100 - 2 * groups)
+    # Payoff-weighted debt is a pure re-projection of the same survivors (coverage
+    # unchanged): extractable full, pair/local half. Emitted alongside — NOT replacing —
+    # the flat count, so the worst-first loop can read/drive `dup_extractable` (the real
+    # missing-helper number) without moving the headline score/slop_debt (#3140).
+    weighted_debt = round(sum(_DUP_WEIGHTS[k] * n for k, n in counts.items()), 1)
+    detail = ("no copy-paste clones" if groups == 0 else
+              f"{groups} duplicated block(s): {counts['extractable']} extractable · "
+              f"{counts['local']} local · {counts['pair']} pair "
+              f"(payoff-weighted debt {weighted_debt})")
+    return {"kpi": "duplication", "score": score, "detail": detail,
+            "defects": defects, "soft": soft, "subcategories": counts,
+            "subcategory_weights": dict(_DUP_WEIGHTS), "weighted_debt": weighted_debt}
+
+
+def _dup_scan_windows(
+        files: dict[str, str],
+) -> tuple[dict[tuple[str, ...], set[tuple[str, int]]],
+           dict[str, list[tuple[int, int, int, tuple[str, ...]]]]]:
+    """Slide the clone window over every file and collect qualifying windows.
+
+    Returns ``(win_locs, per_file)``: the distinct (file, start_line) sites per
+    normalized token key, and each file's qualifying windows as ascending
+    (tok_idx, start_line, end_line, key) rows."""
     win_locs: dict[tuple[str, ...], set[tuple[str, int]]] = {}  # key -> {(file, start_line)}
     # file -> [(tok_idx, start_line, end_line, key)] for qualifying windows
     per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]] = {}
@@ -887,9 +918,15 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
                 quals.append((start, sline, eline, key))
                 win_locs.setdefault(key, set()).add((rel, sline))
         per_file[rel] = quals
+    return win_locs, per_file
 
-    clone_keys = {k for k, locs in win_locs.items() if len(locs) >= CLONE_MIN_OCCURRENCES}
 
+def _dup_merge_blocks(
+        per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]],
+        clone_keys: set[tuple[str, ...]],
+) -> list[tuple[str, int, int, frozenset[tuple[str, ...]]]]:
+    """Merge per-file clone windows adjacent in the token stream into blocks (a gap
+    of up to one window of non-clone tokens still merges)."""
     # Per file, merge clone windows that are adjacent in the token stream (a gap of up to
     # one window of non-clone tokens still merges) into one block. Counting raw windows
     # would inflate a single duplicated function into dozens of "clones".
@@ -909,7 +946,13 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
                 cur_idx, cur_sl, cur_el, cur_keys = idx, sl, el, {k}
         if cur_idx is not None:
             blocks.append((rel, cur_sl, cur_el, frozenset(cur_keys)))
+    return blocks
 
+
+def _dup_group_sites(
+        blocks: list[tuple[str, int, int, frozenset[tuple[str, ...]]]],
+) -> list[list[tuple[str, int, int]]]:
+    """Union blocks sharing any clone-window key into groups naming every site."""
     # Union blocks that share any clone-window key — the copies of one block, even three
     # imperfectly-aligned copies, land in a single group.
     parent = list(range(len(blocks)))
@@ -939,7 +982,18 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
         if len(sites) >= CLONE_MIN_OCCURRENCES:
             group_sites.append(sites)
     group_sites.sort(key=lambda s: s[0])  # deterministic: by first site
+    return group_sites
 
+
+def _dup_survivor_groups(
+        files: dict[str, str],
+        group_sites: list[list[tuple[str, int, int]]],
+) -> tuple[list[str], list[list[tuple[str, int, int]]]]:
+    """Apply the FP/advisory filters (FIX 1/3/4, builder preamble, behavior
+    divergence, entry-point scaffold, sub-span fragments) to each group.
+
+    Returns ``(soft, survivors)``: the advisory soft signals, and the groups that
+    remain HARD slop-debt candidates."""
     # code-only lines per file (cached) for the FIX-4 in-span loop scan, so a `for`
     # inside a string/comment never false-hits the no-loop recall guard.
     code_cache: dict[str, list[str]] = {}
@@ -949,7 +1003,6 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             code_cache[rel] = code_lines_of(files.get(rel, ""))
         return code_cache[rel]
 
-    defects: list[str] = []
     soft: list[str] = []
     survivors: list[list[tuple[str, int, int]]] = []
     for sites in group_sites:
@@ -1007,7 +1060,16 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
         if max(e - s + 1 for f, s, e in sites) < CLONE_MIN_GROUP_SPAN:
             continue  # sub-6-line fragment: idiomatic, not extractable slop
         survivors.append(sites)
+    return soft, survivors
 
+
+def _dup_classified_defects(
+        files: dict[str, str],
+        survivors: list[list[tuple[str, int, int]]],
+) -> tuple[list[str], dict[str, int]]:
+    """Project surviving groups onto the payoff taxonomy and emit worst-first,
+    capped at CLONE_GROUPS_CAP. Returns ``(defect_lines, subcategory_counts)``."""
+    defects: list[str] = []
     # Re-project the survivors onto the payoff taxonomy and EMIT WORST-FIRST: highest
     # ordering rank (extractable) first, then within a rank the biggest payoff
     # (span x sites) first, so the capped/first-read work-list surfaces the real
@@ -1031,20 +1093,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
         sample = _clone_sample(files.get(f0, ""), s0)
         defects.append(
             f"[{kind}] clone x{len(sites)} (~{span} lines): {shown}{more} — '{sample[:60]}…'")
-    groups = len(survivors)
-    score = _clamp(100 - 2 * groups)
-    # Payoff-weighted debt is a pure re-projection of the same survivors (coverage
-    # unchanged): extractable full, pair/local half. Emitted alongside — NOT replacing —
-    # the flat count, so the worst-first loop can read/drive `dup_extractable` (the real
-    # missing-helper number) without moving the headline score/slop_debt (#3140).
-    weighted_debt = round(sum(_DUP_WEIGHTS[k] * n for k, n in counts.items()), 1)
-    detail = ("no copy-paste clones" if groups == 0 else
-              f"{groups} duplicated block(s): {counts['extractable']} extractable · "
-              f"{counts['local']} local · {counts['pair']} pair "
-              f"(payoff-weighted debt {weighted_debt})")
-    return {"kpi": "duplication", "score": score, "detail": detail,
-            "defects": defects, "soft": soft, "subcategories": counts,
-            "subcategory_weights": dict(_DUP_WEIGHTS), "weighted_debt": weighted_debt}
+    return defects, counts
 
 
 def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:

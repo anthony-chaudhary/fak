@@ -1567,9 +1567,7 @@ RUN_HISTORY_DRILL_LINK = [{
 }]
 
 
-def build_fleet_overview():
-    panels = []
-
+def _fleet_overview_sources_panels(panels):
     panels.append(text_panel(
         "Run Operations home",
         "**Operate current runs, then review completed ones.** The open/live table is a "
@@ -1599,6 +1597,8 @@ def build_fleet_overview():
                        desc="Age of the exporter's last fold; it should stay near the "
                             "Prometheus scrape interval."))
 
+
+def _fleet_overview_live_inventory_panels(panels):
     panels.append(row("Fleet right now (LIVE inventory)", 12))
     panels.append(stat("Sessions", "fak_fleet_sessions or vector(0)", 0, 13, w=3, h=4,
                        desc="Sessions in the durable inventory — the same population "
@@ -1630,6 +1630,8 @@ def build_fleet_overview():
                        desc="Sessions the --max-sessions cardinality bound kept OUT of the "
                             "table below. Non-zero means the table is INCOMPLETE."))
 
+
+def _fleet_overview_open_runs_panels(panels):
     panels.append(row("All open / live runs — click one to drill down", 17))
     panels.append(info_table(
         "Open / live runs (LIVE inventory)",
@@ -1642,6 +1644,11 @@ def build_fleet_overview():
              "here, exactly as it does in the CLI headline. This table never reconstructs "
              "liveness from historical registration state."))
 
+
+def _fleet_overview_completed_runs_panels(panels):
+    """Completed-run review reads the DURABLE root-run registration ledger — a
+    separate projection from the live inventory rows above, so an exited process
+    stays reviewable without being counted as live."""
     panels.append(row("Completed-run review (DURABLE REGISTRATIONS)", 28))
     panels.append(stat("Completed registrations",
                        'sum(fak_fleet_registered_runs_by_state{state="completed"}) or vector(0)',
@@ -1665,6 +1672,8 @@ def build_fleet_overview():
              "witness reference support historical review; provenance remains "
              "`source=durable_registration`. Click its session id to review the run."))
 
+
+def _fleet_overview_inventory_history_panels(panels):
     panels.append(timeseries(
         "Sessions by state over time",
         [('fak_fleet_sessions_by_state{state="RUNNING"}', "RUNNING"),
@@ -1695,6 +1704,8 @@ def build_fleet_overview():
         desc="Where the fleet is running. `unknown` is a session whose descriptor carries "
              "no host stamp, not a missing machine."))
 
+
+def _fleet_overview_usage_panels(panels):
     panels.append(row("Roll-up — historical cost & cache (gateway-usage ledger)", 59))
     panels.append(stat("Sessions folded", "fak_fleet_usage_sessions or vector(0)",
                        0, 60, w=3, h=4,
@@ -1760,6 +1771,8 @@ def build_fleet_overview():
         desc="Where cache reuse is worst. A session that folded no prompt tokens is "
              "ABSENT rather than ranked at 0% — unmeasured must not outrank genuinely bad."))
 
+
+def _fleet_overview_adjudication_panels(panels):
     panels.append(row("Adjudication (fleet)", 80))
     panels.append(timeseries(
         "Kernel verdicts across the fleet",
@@ -1791,6 +1804,16 @@ def build_fleet_overview():
                        desc="Age of the exporter's own fold. It re-folds on every scrape, "
                             "so this should stay near the scrape interval."))
 
+
+def build_fleet_overview():
+    panels = []
+    _fleet_overview_sources_panels(panels)
+    _fleet_overview_live_inventory_panels(panels)
+    _fleet_overview_open_runs_panels(panels)
+    _fleet_overview_completed_runs_panels(panels)
+    _fleet_overview_inventory_history_panels(panels)
+    _fleet_overview_usage_panels(panels)
+    _fleet_overview_adjudication_panels(panels)
     return {
         "uid": "fak-fleet-overview",
         "title": "FAK Run Operations",
