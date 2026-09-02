@@ -35,7 +35,7 @@ Ten KPIs, each 0–100. `debt` = units of HARD code-debt in that KPI. `godoc` is
 | `format` | 100 | 0 | all files gofmt-clean |
 | `honesty` | 100 | 0 | 33 claims, all tagged |
 | `tests` | 100 | 0 | 1034/1034 non-trivial packages tested (100.0%) |
-| `ship_integrity` | 100 | 0 | 16 checkable commit(s) in HEAD~20..HEAD, 0 residual, cleared_rate 1.0 |
+| `ship_integrity` | 100 | 0 | 19 checkable commit(s) in HEAD~20..HEAD, 0 residual, cleared_rate 1.0 |
 
 ## Debt categories
 
