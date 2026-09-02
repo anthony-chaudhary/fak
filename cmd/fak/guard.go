@@ -880,7 +880,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	setGuardCompactionAnchorMode(*compactAnchorHead)
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID: "mock",
+		EngineID: "inkernel",
 		Model:    gatewayModel,
 		BaseURL:  resolvedBase,
 		Provider: up,

@@ -220,12 +220,6 @@ See [`POLICY.md`](POLICY.md) for the manifest schema.
 
 ## 3. Tier 1 — put fak in front of a real model (the practical serving path)
 
-The syscall executor used by `fak serve`, trace replay, and `fak guard` defaults to
-`mock`: a cheap deterministic tool-result path, not synthetic token generation. Use
-`--engine inkernel` only when you intentionally want fak-native model execution.
-Explicit GGUF and real-model paths remain fak-native; fak does not silently switch them
-to llama.cpp.
-
 `fak serve` is an **OpenAI-compatible gateway that adjudicates tool calls**. You serve a
 model with any OpenAI-compatible server; `fak serve --base-url` points at it. On every
 `/v1/chat/completions`, fak calls your upstream model, then **denies / repairs /

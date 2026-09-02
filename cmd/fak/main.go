@@ -873,7 +873,7 @@ func cmdRunTrace(argv []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	verbFlagUsage(fs, "run")
 	trace := fs.String("trace", "", "path to a trace JSON file")
-	engineID := fs.String("engine", "mock", "engine id (default: mock; inkernel: the explicit fak-native model path; cassette)")
+	engineID := fs.String("engine", "inkernel", "engine id (inkernel: the fused in-kernel model; mock; cassette)")
 	vdso := fs.Bool("vdso", true, "enable the vDSO fast path")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)

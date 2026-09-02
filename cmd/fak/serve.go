@@ -209,7 +209,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
 	sf.engineCacheIdleTimeout = fs.Duration("engine-cache-idle-timeout", 0, "SGLang /flush_cache idle timeout, e.g. 30s (0 fails fast)")
 	sf.engineCacheRequireExactSpan = fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
-	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
+	sf.engineID = fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to: inkernel, mock, vllm, sglang, llm-d, dynamo, or another registered driver (default: the fused in-kernel model)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
 	nativeControls := registerNativeControlFlags(fs)
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
