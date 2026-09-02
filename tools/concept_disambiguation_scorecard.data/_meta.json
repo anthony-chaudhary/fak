@@ -12636,6 +12636,11 @@
           "category": "incidental",
           "reason": "Private deterministic issue-comment formatter; it materializes one established worker-worktree projection rather than defining a distinct render concept.",
           "token": "renderSteerLifecycleStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private render helper extracted from renderIssueContract during the #10405 function-split pass; single-package incidental symbol with no cross-concept identity to protect",
+          "token": "renderIssueContractReviews"
         }
       ],
       "id": "render-materialize",
@@ -12699,6 +12704,7 @@
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
+        "renderIssueContractReviews",
         "renderLaunchPosture",
         "renderNextNativePerformance",
         "renderProviders",
