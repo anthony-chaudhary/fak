@@ -7,6 +7,18 @@ description: "Machine-positioned glossary entries (second third), split out of d
 
 Machine-positioned entries, split out of [the concept glossary](concept-glossary.md).
 
+## Reader orientation
+
+**For:** readers resolving a term found in a receipt, refusal, or implementation comment. **TL;DR:** this is the second alphabetically positioned shard; scan stable headings here rather than reading it front to back.
+
+List its entries from a repository checkout:
+
+```bash
+git grep -n '^### ' -- docs/fak/glossary-positions-2.md
+```
+
+Match the exact term from your artifact to a heading, then read its distinction and grounding notes before treating neighboring vocabulary as equivalent.
+
 ### BODY_WITNESS_MISSING
 
 Wire reason token on a shared-task patch result: a body-ref deletion lacked its digest-shaped deletion witness, so the fold holds the patch as quarantined.

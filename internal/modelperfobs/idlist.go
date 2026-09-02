@@ -1,5 +1,3 @@
-//go:build !linux
-
 package modelperfobs
 
 import (
@@ -9,8 +7,6 @@ import (
 	"strings"
 )
 
-// parseIDList mirrors Linux sysfs ID-list parsing so platform-neutral parser
-// tests compile on hosts where NUMA topology discovery is unavailable.
 func parseIDList(s string) ([]int, error) {
 	if strings.TrimSpace(s) == "" {
 		return []int{}, nil

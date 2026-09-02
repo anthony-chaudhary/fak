@@ -8,6 +8,18 @@ description: "The witness/evidence, session/scheduling, gateway/engine, policy/a
 Split out of [the concept glossary](concept-glossary.md); the routing table and the
 cache and guard/gate families remain on that page.
 
+## Reader orientation
+
+**For:** readers tracing how fak names trust, execution, authorization, and context boundaries. **TL;DR:** use this page to distinguish nearby terms before reading code or interpreting a receipt; no prior glossary knowledge is required.
+
+List this page's concept families from a repository checkout:
+
+```bash
+git grep -n '^## ' -- docs/fak/glossary-families-a.md
+```
+
+The output is a quick index into the family whose boundary you need; follow that section's package pointers for implementation details.
+
 ## The witness / evidence family
 
 - **world-state witness** - an external reference (commit hash, blob digest, etag,

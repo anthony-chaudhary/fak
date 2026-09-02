@@ -1,3 +1,8 @@
+---
+title: "Launchguard: bounded supervisor launches"
+description: "How fak launchguard applies a host-local circuit breaker to detached agent and service supervisors with persistent attempt and lease state."
+---
+
 # Launchguard: bounded supervisor launches
 
 `internal/launchguard` is the shared host-local circuit breaker for detached

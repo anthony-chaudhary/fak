@@ -3,6 +3,7 @@ package compute
 import (
 	"fmt"
 	"math"
+	"slices"
 )
 
 // Qwen35GDNCUDAPath is the stable whole-operation identity shared with the
@@ -352,16 +353,21 @@ func validateQwen35GDNGeometry(
 	return hidden, keyDim, valueDim, convDim, nil
 }
 
+func qwen35GDNEntry(
+	normalizedInput, row,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (qwen35GDNInputs, int, int, int, int, []qwen35GDNOperand, error) {
+	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
+	hidden, keyDim, valueDim, convDim, operands, err := in.entry(row, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
+	return in, hidden, keyDim, valueDim, convDim, operands, err
+}
+
 func qwen35GDNSameShape(got, want []int) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(got, want)
 }
 
 func qwen35GDNShapeError(name string, got []int, want string) error {

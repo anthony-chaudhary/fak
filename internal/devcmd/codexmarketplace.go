@@ -770,19 +770,15 @@ func writeCodexMarketplaceAttemptReceipt(candidate string, receipt codexMarketpl
 }
 
 func readCodexMarketplaceAttemptReceipt(path string) (codexMarketplaceAttemptReceipt, error) {
-	var receipt codexMarketplaceAttemptReceipt
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return receipt, err
-	}
-	if err := json.Unmarshal(b, &receipt); err != nil {
-		return receipt, err
-	}
-	return receipt, nil
+	return readCodexMarketplaceReceipt[codexMarketplaceAttemptReceipt](path)
 }
 
 func readCodexMarketplaceInstallReceipt(path string) (codexMarketplaceInstallReceipt, error) {
-	var receipt codexMarketplaceInstallReceipt
+	return readCodexMarketplaceReceipt[codexMarketplaceInstallReceipt](path)
+}
+
+func readCodexMarketplaceReceipt[T any](path string) (T, error) {
+	var receipt T
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return receipt, err

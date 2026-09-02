@@ -707,35 +707,11 @@ func WriteKVCapacityMarkdown(w io.Writer, snapshot KVCapacitySnapshot) error {
 			}
 		}
 	}
-	if len(snapshot.RawMetrics) > 0 {
-		if _, err := fmt.Fprint(w, "\n## Raw adapter metrics\n\n"); err != nil {
-			return err
-		}
-		names := make([]string, 0, len(snapshot.RawMetrics))
-		for name := range snapshot.RawMetrics {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if _, err := fmt.Fprintf(w, "- %s: `%s`\n", name, strings.TrimSpace(string(snapshot.RawMetrics[name]))); err != nil {
-				return err
-			}
-		}
+	if err := writeRawMetrics(w, "Raw adapter metrics", snapshot.RawMetrics); err != nil {
+		return err
 	}
-	if len(snapshot.RawGeometry) > 0 {
-		if _, err := fmt.Fprint(w, "\n## Raw configured geometry\n\n"); err != nil {
-			return err
-		}
-		names := make([]string, 0, len(snapshot.RawGeometry))
-		for name := range snapshot.RawGeometry {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if _, err := fmt.Fprintf(w, "- %s: `%s`\n", name, strings.TrimSpace(string(snapshot.RawGeometry[name]))); err != nil {
-				return err
-			}
-		}
+	if err := writeRawMetrics(w, "Raw configured geometry", snapshot.RawGeometry); err != nil {
+		return err
 	}
 	if len(snapshot.Validation.Issues) > 0 {
 		if _, err := fmt.Fprint(w, "\n## Validation\n\n"); err != nil {
@@ -809,20 +785,40 @@ func derivedMarkdownRows(normalized KVNormalizedMetrics, counters KVCounterDelta
 	}
 }
 
-func writeDerivedUint(w io.Writer, name string, value KVDerivedUint64) error {
-	if value.Value == nil {
-		_, err := fmt.Fprintf(w, "- %s: unavailable (%s, %s; %s)\n", name, value.Method, value.Confidence, value.UnavailableReason)
+func writeRawMetrics(w io.Writer, heading string, metrics map[string]json.RawMessage) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "\n## %s\n\n", heading); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(w, "- %s: %d %s (%s, %s)\n", name, *value.Value, value.Unit, value.Method, value.Confidence)
-	return err
+	names := make([]string, 0, len(metrics))
+	for name := range metrics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := fmt.Fprintf(w, "- %s: `%s`\n", name, strings.TrimSpace(string(metrics[name]))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeDerivedUint(w io.Writer, name string, value KVDerivedUint64) error {
+	return writeDerived(w, name, value.Value, value.Unit, value.Method, value.Confidence, value.UnavailableReason, "%d")
 }
 
 func writeDerivedRatio(w io.Writer, name string, value KVDerivedRatio) error {
-	if value.Value == nil {
-		_, err := fmt.Fprintf(w, "- %s: unavailable (%s, %s; %s)\n", name, value.Method, value.Confidence, value.UnavailableReason)
+	return writeDerived(w, name, value.Value, value.Unit, value.Method, value.Confidence, value.UnavailableReason, "%.6g")
+}
+
+func writeDerived[T uint64 | float64](w io.Writer, name string, value *T, unit KVUnit, method KVDerivationMethod, confidence KVConfidence, unavailableReason, format string) error {
+	if value == nil {
+		_, err := fmt.Fprintf(w, "- %s: unavailable (%s, %s; %s)\n", name, method, confidence, unavailableReason)
 		return err
 	}
-	_, err := fmt.Fprintf(w, "- %s: %.6g %s (%s, %s)\n", name, *value.Value, value.Unit, value.Method, value.Confidence)
+	formatted := fmt.Sprintf(format, *value)
+	_, err := fmt.Fprintf(w, "- %s: %s %s (%s, %s)\n", name, formatted, unit, method, confidence)
 	return err
 }

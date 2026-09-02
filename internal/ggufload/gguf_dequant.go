@@ -316,26 +316,24 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 	}
 	out := reuseF32(scratch, int(elems))
 	switch t.Type {
-	case TensorF32:
-		if err := checkFloatPayload(t, raw, len(out)*4, "f32"); err != nil {
+	case TensorF32, TensorF16, TensorBF16:
+		width, label := plainFloatEncoding(t.Type)
+		if err := checkFloatPayload(t, raw, len(out)*width, label); err != nil {
 			return nil, err
 		}
-		for i := range out {
-			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
-		}
-	case TensorF16:
-		if err := checkFloatPayload(t, raw, len(out)*2, "f16"); err != nil {
-			return nil, err
-		}
-		for i := range out {
-			out[i] = f16At(raw, i*2)
-		}
-	case TensorBF16:
-		if err := checkFloatPayload(t, raw, len(out)*2, "bf16"); err != nil {
-			return nil, err
-		}
-		for i := range out {
-			out[i] = math.Float32frombits(uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16)
+		switch t.Type {
+		case TensorF32:
+			for i := range out {
+				out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
+			}
+		case TensorF16:
+			for i := range out {
+				out[i] = f16At(raw, i*2)
+			}
+		case TensorBF16:
+			for i := range out {
+				out[i] = math.Float32frombits(uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16)
+			}
 		}
 	case TensorQ4_0:
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_0Bytes, "Q4_0"); err != nil {
@@ -462,6 +460,19 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 // blocks (elems divisible by qk) and exactly the size those blocks pack to, returning that
 // expected byte count. It is the shared block-shape guard the per-type dequant cases all ran
 // inline; label is the quant name in the error text (byte-identical to the inlined checks).
+func plainFloatEncoding(typ TensorType) (width int, label string) {
+	switch typ {
+	case TensorF32:
+		return 4, "f32"
+	case TensorF16:
+		return 2, "f16"
+	case TensorBF16:
+		return 2, "bf16"
+	default:
+		panic("plainFloatEncoding called with non-float tensor type")
+	}
+}
+
 // checkFloatPayload verifies a non-quantized (f32/f16/bf16) tensor's raw byte count matches the
 // element count its decode loop will write. want is len(out) scaled by the element byte width;
 // label names the dtype in the error message.

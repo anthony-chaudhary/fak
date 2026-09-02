@@ -7,6 +7,18 @@ description: "Machine-positioned glossary entries (final third), split out of do
 
 Machine-positioned entries, split out of [the concept glossary](concept-glossary.md).
 
+## Reader orientation
+
+**For:** readers looking up later positioned concepts while debugging provider, session, or control behavior. **TL;DR:** treat this page as an indexed reference shard, not a tutorial sequence.
+
+List the available concept headings:
+
+```bash
+git grep -n '^### ' -- docs/fak/glossary-positions-3.md
+```
+
+Select the exact heading named by the code or receipt, then use the entry's "distinct from" text to rule out the nearest false match.
+
 ### ProviderSessionBoundary
 
 A provider-reported replacement conversation that closes one fak trace and opens another inside the same guard process.

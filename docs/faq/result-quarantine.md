@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — The wall — how result quarantine works"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak inspects tool results, quarantines unsafe or secret-shaped content, tracks provenance and taint, and permits controlled recovery."
 ---
 
 # The wall — how result quarantine works

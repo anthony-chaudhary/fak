@@ -1,3 +1,8 @@
+---
+title: "Generalization debt scorecard"
+description: "Measure fak implementations coupled to one model, backend, or provider instead of an interface, adapter, factory, or registry."
+---
+
 # Generalization debt scorecard
 
 `fak score generalization` makes singular production implementations visible when they are coupled to one model, backend, or provider instead of an interface, adapter, factory, or registry.

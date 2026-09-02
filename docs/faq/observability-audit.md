@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Observability, audit, and debugging"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak records decisions, receipts, traces, and audit evidence while controlling sensitive data, retention, and operational overhead."
 ---
 
 # Observability, audit, and debugging

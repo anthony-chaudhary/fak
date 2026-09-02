@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Security and the threat model"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "The fak security model for prompt injection, malicious tools, data exfiltration, confused deputies, policy bypass, and trusted boundaries."
 ---
 
 # Security and the threat model

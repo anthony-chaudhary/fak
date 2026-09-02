@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — The addressable KV cache, in detail"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak reuses provider and local KV caches, measures cache hits, handles prefixes and eviction, and separates cache claims from evidence."
 ---
 
 # The addressable KV cache, in detail

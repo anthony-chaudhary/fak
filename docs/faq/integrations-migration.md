@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Integrations and migration"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How to connect existing agents and SDKs to fak, migrate endpoints safely, preserve streaming and tools, and roll back cleanly."
 ---
 
 # Integrations and migration

@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Performance and the numbers"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak improves agent latency and cost through reuse, routing, caching, and context management, with matched benchmarks and quality gates."
 ---
 
 # Performance and the numbers

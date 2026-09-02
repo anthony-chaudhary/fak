@@ -1,3 +1,8 @@
+---
+title: "Proportionate risk assessment standard"
+description: "Record proportionate risk assessment through fak issue intake, preflight, and witness without creating a parallel review or approval system."
+---
+
 # Proportionate risk assessment
 
 Risk assessment is one field carried through the existing **issue intake → preflight → witness** lifecycle. It is not a parallel review, register, or approval system. Record enough detail for the change's credible failure modes; do not add ceremony where no meaningful hazard exists.

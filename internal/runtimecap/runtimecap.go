@@ -269,10 +269,7 @@ func Probe(opts Options) Report {
 		report.RequestedBackend = request
 		if backend, ok := byName[requested]; ok {
 			request.Status, request.ExactMatch, request.Selected = "available", true, backend.Name()
-			report.ModelExecution = availableExecution(backend)
-			if backend.Name() == "cpu-ref" && strings.TrimSpace(opts.CPUEnvelope) != "" {
-				report.ModelExecution = applyCPUEnvelope(report.ModelExecution, goos, goarch, hostMemory, opts.CPUEnvelope, report.SupportedCPUEnvelopes, "", nil, policy)
-			}
+			report.ModelExecution = executionForBackend(backend, opts.CPUEnvelope, goos, goarch, hostMemory, report.SupportedCPUEnvelopes, policy)
 			return report
 		}
 		reason := unavailableReason(requested, goos, goarch, tags)
@@ -286,10 +283,7 @@ func Probe(opts Options) Report {
 		report.PreferredBackend = request
 		if backend, ok := byName[preferred]; ok {
 			request.Status, request.ExactMatch, request.Selected = "available", true, backend.Name()
-			report.ModelExecution = availableExecution(backend)
-			if backend.Name() == "cpu-ref" && strings.TrimSpace(opts.CPUEnvelope) != "" {
-				report.ModelExecution = applyCPUEnvelope(report.ModelExecution, goos, goarch, hostMemory, opts.CPUEnvelope, report.SupportedCPUEnvelopes, "", nil, policy)
-			}
+			report.ModelExecution = executionForBackend(backend, opts.CPUEnvelope, goos, goarch, hostMemory, report.SupportedCPUEnvelopes, policy)
 			return report
 		}
 		reason := unavailableReason(preferred, goos, goarch, tags)
@@ -322,10 +316,7 @@ func Probe(opts Options) Report {
 	}
 
 	if backend, ok := byName["cpu-ref"]; ok {
-		report.ModelExecution = availableExecution(backend)
-		if strings.TrimSpace(opts.CPUEnvelope) != "" {
-			report.ModelExecution = applyCPUEnvelope(report.ModelExecution, goos, goarch, hostMemory, opts.CPUEnvelope, report.SupportedCPUEnvelopes, "", nil, policy)
-		}
+		report.ModelExecution = executionForBackend(backend, opts.CPUEnvelope, goos, goarch, hostMemory, report.SupportedCPUEnvelopes, policy)
 	} else {
 		report.ModelExecution.Reason = &Reason{
 			Code:        "portable_cpu_reference_unavailable",
@@ -425,70 +416,36 @@ func availableExecution(backend compute.Backend) Execution {
 	}
 }
 
+func executionForBackend(backend compute.Backend, envelopeID, goos, goarch string, host HostMemory, catalog []CPUEnvelope, policy string) Execution {
+	exec := availableExecution(backend)
+	if backend.Name() == "cpu-ref" && strings.TrimSpace(envelopeID) != "" {
+		return applyCPUEnvelope(exec, goos, goarch, host, envelopeID, catalog, "", nil, policy)
+	}
+	return exec
+}
+
 func applyCPUEnvelope(exec Execution, goos, goarch string, host HostMemory, envelopeID string, catalog []CPUEnvelope, fallbackBackend string, fallbackReason *Reason, policy string) Execution {
 	envelopeID = strings.TrimSpace(envelopeID)
 	if envelopeID == "" {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "cpu_fallback_envelope_required",
-			Detail:      "local CPU admission requires an exact supported cpu envelope before payload load",
-			Remediation: "pass --cpu-envelope <id> from supported_cpu_envelopes",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "cpu_fallback_envelope_required", "local CPU admission requires an exact supported cpu envelope before payload load", "pass --cpu-envelope <id> from supported_cpu_envelopes")
 	}
 	env, ok := findCPUEnvelope(catalog, envelopeID)
 	exec.CPUEnvelope = envelopeID
 	if !ok {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "unsupported_cpu_envelope",
-			Detail:      "the requested CPU envelope name is not recognized",
-			Remediation: "choose an exact id from supported_cpu_envelopes; fak will not silently substitute another model or engine",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "unsupported_cpu_envelope", "the requested CPU envelope name is not recognized", "choose an exact id from supported_cpu_envelopes; fak will not silently substitute another model or engine")
 	}
 	if env.GOOS != "" && goos != env.GOOS {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "unsupported_cpu_envelope",
-			Detail:      "the requested CPU envelope is not supported on this operating system",
-			Remediation: "choose a supported_cpu_envelopes row whose goos/goarch exactly matches the host",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "unsupported_cpu_envelope", "the requested CPU envelope is not supported on this operating system", "choose a supported_cpu_envelopes row whose goos/goarch exactly matches the host")
 	}
 	if env.GOARCH != "" && goarch != env.GOARCH {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "unsupported_cpu_envelope",
-			Detail:      "the requested CPU envelope is not supported on this architecture",
-			Remediation: "choose a supported_cpu_envelopes row whose goos/goarch exactly matches the host",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "unsupported_cpu_envelope", "the requested CPU envelope is not supported on this architecture", "choose a supported_cpu_envelopes row whose goos/goarch exactly matches the host")
 	}
 	if host.Known && env.MinimumRAMBytes > 0 && host.TotalBytes > 0 && host.TotalBytes < env.MinimumRAMBytes {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "cpu_fallback_minimum_ram_unmet",
-			Detail:      "the host total RAM is below this CPU envelope's supported minimum",
-			Remediation: "choose a smaller supported CPU envelope or dispatch to a host with more RAM",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "cpu_fallback_minimum_ram_unmet", "the host total RAM is below this CPU envelope's supported minimum", "choose a smaller supported CPU envelope or dispatch to a host with more RAM")
 	}
 	plan := env.memoryPlan()
 	if err := compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, host.TotalBytes, hostFree(host), host.Known, env.HeadroomRatio); err != nil {
-		exec.Runnable = false
-		exec.PayloadCompatibility = payloadCompatibilityRefused
-		exec.Reason = &Reason{
-			Code:        "cpu_fallback_over_budget",
-			Detail:      "the requested CPU envelope exceeds the host memory budget before payload load: " + err.Error(),
-			Remediation: "choose a smaller supported CPU envelope or dispatch to a host with more RAM; fak will not load the payload first",
-		}
-		return exec
+		return refuseCPUEnvelope(exec, "cpu_fallback_over_budget", "the requested CPU envelope exceeds the host memory budget before payload load: "+err.Error(), "choose a smaller supported CPU envelope or dispatch to a host with more RAM; fak will not load the payload first")
 	}
 	exec.Runnable = true
 	exec.PayloadCompatibility = payloadCompatibilitySupported
@@ -508,6 +465,13 @@ func applyCPUEnvelope(exec Execution, goos, goarch string, host HostMemory, enve
 			HostMemory:         host,
 		}
 	}
+	return exec
+}
+
+func refuseCPUEnvelope(exec Execution, code, detail, remediation string) Execution {
+	exec.Runnable = false
+	exec.PayloadCompatibility = payloadCompatibilityRefused
+	exec.Reason = &Reason{Code: code, Detail: detail, Remediation: remediation}
 	return exec
 }
 
@@ -554,53 +518,39 @@ func normalizeHostMemory(host HostMemory) HostMemory {
 
 func supportedCPUEnvelopes() []CPUEnvelope {
 	envelopes := []CPUEnvelope{
-		{
-			ID:                          "qwen25-1p5b-q8-windows-amd64",
-			Model:                       "Qwen2.5-1.5B-Instruct.Q8_0.gguf",
-			Quantization:                "Q8_0",
-			Engine:                      "fak-native",
-			Backend:                     "cpu-ref",
-			GOOS:                        "windows",
-			GOARCH:                      "amd64",
-			MinimumRAMBytes:             8 << 30,
-			MinimumDiskBytes:            2 << 30,
-			HeadroomRatio:               0.15,
-			ExpectedDecodeTokPerSec:     18.42750846670304,
-			ExpectedPrefill256TokPerSec: 193.50481437710533,
-			PerformanceClass:            "local_cpu_degraded_small_q8",
-			QualityEquivalence:          "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
-			Witness:                     "experiments/gpu/crossover-qwen2.5-1.5b-cpu-q8-20260619.json",
-			Demands: []PayloadDemand{
+		cpuEnvelopeFixture(
+			"qwen25-1p5b-q8-windows-amd64", "Qwen2.5-1.5B-Instruct.Q8_0.gguf", "Q8_0", "windows", 8<<30, 2<<30,
+			18.42750846670304, 193.50481437710533, "local_cpu_degraded_small_q8",
+			"experiments/gpu/crossover-qwen2.5-1.5b-cpu-q8-20260619.json",
+			[]PayloadDemand{
 				{Class: string(compute.MemoryWeights), Bytes: 2 << 30, Detail: "qwen25-1.5b-q8 weights"},
 				{Class: string(compute.MemoryKVCache), Bytes: 256 << 20, Detail: "decode kv window"},
 				{Class: string(compute.MemoryActivation), Bytes: 256 << 20, Detail: "prefill/decode activation"},
 			},
-		},
-		{
-			ID:                          "qwen36-27b-q4k-linux-amd64",
-			Model:                       "Qwen3.6-27B-Q4_K_M.gguf",
-			Quantization:                "Q4_K_M",
-			Engine:                      "fak-native",
-			Backend:                     "cpu-ref",
-			GOOS:                        "linux",
-			GOARCH:                      "amd64",
-			MinimumRAMBytes:             253 << 30,
-			MinimumDiskBytes:            20 << 30,
-			HeadroomRatio:               0.15,
-			ExpectedDecodeTokPerSec:     1.05,
-			ExpectedPrefill256TokPerSec: 23.0,
-			PerformanceClass:            "local_cpu_degraded_large_q4k",
-			QualityEquivalence:          "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
-			Witness:                     "docs/notes/CPU-INFERENCE-SCALING-BOX873AF63B-2026-07-11.md",
-			Demands: []PayloadDemand{
+		),
+		cpuEnvelopeFixture(
+			"qwen36-27b-q4k-linux-amd64", "Qwen3.6-27B-Q4_K_M.gguf", "Q4_K_M", "linux", 253<<30, 20<<30,
+			1.05, 23.0, "local_cpu_degraded_large_q4k",
+			"docs/notes/CPU-INFERENCE-SCALING-BOX873AF63B-2026-07-11.md",
+			[]PayloadDemand{
 				{Class: string(compute.MemoryWeights), Bytes: 24 << 30, Detail: "qwen36-27b-q4k resident weights"},
 				{Class: string(compute.MemoryKVCache), Bytes: 2 << 30, Detail: "decode kv window"},
 				{Class: string(compute.MemoryActivation), Bytes: 1 << 30, Detail: "prefill/decode activation"},
 			},
-		},
+		),
 	}
 	sort.Slice(envelopes, func(i, j int) bool { return envelopes[i].ID < envelopes[j].ID })
 	return envelopes
+}
+
+func cpuEnvelopeFixture(id, model, quantization, goos string, minimumRAM, minimumDisk int64, decodeTPS, prefillTPS float64, performanceClass, witness string, demands []PayloadDemand) CPUEnvelope {
+	return CPUEnvelope{
+		ID: id, Model: model, Quantization: quantization, Engine: "fak-native", Backend: "cpu-ref",
+		GOOS: goos, GOARCH: "amd64", MinimumRAMBytes: minimumRAM, MinimumDiskBytes: minimumDisk, HeadroomRatio: 0.15,
+		ExpectedDecodeTokPerSec: decodeTPS, ExpectedPrefill256TokPerSec: prefillTPS, PerformanceClass: performanceClass,
+		QualityEquivalence: "same fak-native engine and exact GGUF artifact; only latency degrades, never the engine or model identity",
+		Witness:            witness, Demands: demands,
+	}
 }
 
 func (e CPUEnvelope) memoryPlan() compute.MemoryPlan {

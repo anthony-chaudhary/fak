@@ -3,6 +3,7 @@ package compute
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -667,15 +668,7 @@ func appendGraphPath(prefix, suffix []int) []int {
 }
 
 func graphPathsEqual(left, right []int) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(left, right)
 }
 
 func graphPathHasPrefix(path, prefix []int) bool {

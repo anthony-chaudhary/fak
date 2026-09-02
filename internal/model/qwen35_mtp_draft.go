@@ -135,10 +135,12 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 // Drafter returns the polymodel seam used by the native speculative loop.
 func (d *Qwen35MTPDraftSession) Drafter() polymodel.Drafter {
 	if d == nil {
-		return func([]int) []int { return nil }
+		return nilQwen35MTPDraft
 	}
 	return d.Propose
 }
+
+func nilQwen35MTPDraft([]int) []int { return nil }
 
 // Err returns the first draft-session runtime failure.
 func (d *Qwen35MTPDraftSession) Err() error {

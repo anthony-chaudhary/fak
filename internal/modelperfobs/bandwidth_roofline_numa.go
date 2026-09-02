@@ -164,10 +164,9 @@ func BuildNUMARooflineMatrix(c NUMARooflineCapture) (NUMARooflineMatrix, error) 
 	pairs := make([]NUMARooflinePair, 0, len(c.Pairs))
 	for _, p := range c.Pairs {
 		key := [2]int{p.RequestedCPUNode, p.RequestedMemoryNode}
-		if seen[key] {
+		if !registerNUMAPair(seen, key) {
 			return NUMARooflineMatrix{}, fmt.Errorf("duplicate NUMA node pair cpu=%d memory=%d", key[0], key[1])
 		}
-		seen[key] = true
 		if !eligible[key[0]] || !eligible[key[1]] {
 			return NUMARooflineMatrix{}, fmt.Errorf("NUMA pair cpu=%d memory=%d uses offline, memoryless, or cpuset-ineligible node", key[0], key[1])
 		}
@@ -201,10 +200,9 @@ func BuildNUMARooflineMatrix(c NUMARooflineCapture) (NUMARooflineMatrix, error) 
 	}
 	for _, o := range c.Omissions {
 		key := [2]int{o.RequestedCPUNode, o.RequestedMemoryNode}
-		if seen[key] {
+		if !registerNUMAPair(seen, key) {
 			return NUMARooflineMatrix{}, fmt.Errorf("duplicate NUMA node pair cpu=%d memory=%d", key[0], key[1])
 		}
-		seen[key] = true
 		if strings.TrimSpace(o.OmissionReason) == "" {
 			return NUMARooflineMatrix{}, fmt.Errorf("omitted NUMA pair cpu=%d memory=%d lacks an explicit reason", key[0], key[1])
 		}
@@ -231,6 +229,14 @@ func BuildNUMARooflineMatrix(c NUMARooflineCapture) (NUMARooflineMatrix, error) 
 		}
 	}
 	return NUMARooflineMatrix{Schema: NUMARooflineMatrixSchema, Scope: "host-memory", MachineClass: c.MachineClass, Method: "externally-launched-numactl-copy-roofline-with-independent-cpu-and-page-placement-verification", TrafficAccounting: "copy-bytes-read-plus-bytes-written", DRAMIsolation: "not-proven", WorkingSetBytes: c.WorkingSetBytes, PeakBufferBytes: c.PeakBufferBytes, TargetDurationMS: c.TargetDurationMS, RuntimeBudgetMS: c.RuntimeBudgetMS, Topology: c.Topology, Pairs: pairs, Omissions: append([]NUMARooflinePairCapture(nil), c.Omissions...)}, nil
+}
+
+func registerNUMAPair(seen map[[2]int]bool, key [2]int) bool {
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	return true
 }
 
 func medianFloat64(v []float64) float64 {

@@ -1,6 +1,6 @@
 ---
 title: "fak learning path — L600"
-description: "A staged part of the fak learning path, split out of LEARNING-PATH.md so each stage stays a bounded read."
+description: "The L600 mastery stage covers benchmark honesty, proof discipline, kernel extension, and the final hands-on checkpoint."
 ---
 
 # L600 — Mastery: benchmarks, honesty discipline, and extending the kernel

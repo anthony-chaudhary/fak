@@ -224,7 +224,7 @@ func parseNVIDIAProfileCSV(r io.Reader, o NVIDIAProfileOptions) (NVIDIAProfileRe
 			return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, fmt.Errorf("launch %s has duplicate metric %s", id, metric)
 		}
 		target.seen = true
-		if nvidiaUnavailable(value) {
+		if deviceMetricUnavailable(value) {
 			continue
 		}
 		if !nvidiaProfileBaseUnit(metric, unit) {

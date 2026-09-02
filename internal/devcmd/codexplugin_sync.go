@@ -183,11 +183,8 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 		r.FailureStage, r.Detail = "stage", err.Error()
 		return r, err
 	}
-	stagedArtifacts, err := pluginArtifacts(stage)
-	if err != nil || !sameArtifacts(sourceArtifacts, stagedArtifacts) {
-		if err == nil {
-			err = errors.New("staged artifact hashes differ from source")
-		}
+	err = verifyPluginArtifacts(sourceArtifacts, stage, "staged")
+	if err != nil {
 		r.FailureStage, r.Detail = "verify_stage", err.Error()
 		return r, err
 	}
@@ -226,11 +223,8 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 		return r, err
 	}
 	stage = ""
-	installedArtifacts, err := pluginArtifacts(destination)
-	if err != nil || !sameArtifacts(sourceArtifacts, installedArtifacts) {
-		if err == nil {
-			err = errors.New("installed artifact hashes differ from source")
-		}
+	err = verifyPluginArtifacts(sourceArtifacts, destination, "installed")
+	if err != nil {
 		r.FailureStage, r.Detail = "verify_install", err.Error()
 		return r, rollback("verify_install", err)
 	}
@@ -462,6 +456,17 @@ func artifactDrift(want, got []codexPluginArtifact) []string {
 	}
 	sort.Strings(drift)
 	return drift
+}
+
+func verifyPluginArtifacts(source []codexPluginArtifact, destination, label string) error {
+	artifacts, err := pluginArtifacts(destination)
+	if err != nil {
+		return err
+	}
+	if !sameArtifacts(source, artifacts) {
+		return fmt.Errorf("%s artifact hashes differ from source", label)
+	}
+	return nil
 }
 
 func sameArtifacts(a, b []codexPluginArtifact) bool {

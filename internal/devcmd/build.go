@@ -190,9 +190,9 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak build: recording %s build timings (cache: inherited/uncontrolled)\n", *profile)
 	}
 
-	phaseStart := buildNow()
-	provenance, err := buildGatherProvenance(root)
-	receipt.Phases = append(receipt.Phases, finishedBuildPhase("provenance", phaseStart, buildNow(), 0, err))
+	provenance, err := runBuildPhase(&receipt, "provenance", func() (buildProvenance, error) {
+		return buildGatherProvenance(root)
+	})
 	if err != nil {
 		return finishBuild(stdout, stderr, *asJSON, overallStart, receiptPath, &receipt, 1,
 			fmt.Errorf("provenance failed: %w", err))
@@ -202,9 +202,9 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	receipt.PackageCount = provenance.PackageCount
 	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain, settings, pgo)
 
-	phaseStart = buildNow()
-	err = buildPrepareOutput(output)
-	receipt.Phases = append(receipt.Phases, finishedBuildPhase("output_prepare", phaseStart, buildNow(), 0, err))
+	_, err = runBuildPhase(&receipt, "output_prepare", func() (struct{}, error) {
+		return struct{}{}, buildPrepareOutput(output)
+	})
 	if err != nil {
 		return finishBuild(stdout, stderr, *asJSON, overallStart, receiptPath, &receipt, 1,
 			fmt.Errorf("prepare output directory for %s: %w", output, err))
@@ -213,7 +213,7 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	if !*asJSON {
 		fmt.Fprintf(stderr, "fak build: %s\n", renderBuildCommand(receipt.Command))
 	}
-	phaseStart = buildNow()
+	phaseStart := buildNow()
 	buildCode, runErr := buildExecute(canonicalBuildExecution(receipt.Command, pgoSnapshot), stderr)
 	compileErr := runErr
 	if compileErr == nil && buildCode != 0 {
@@ -229,9 +229,9 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 			fmt.Errorf("compile/link failed; inspect the child output above: %w", compileErr))
 	}
 
-	phaseStart = buildNow()
-	artifact, err := buildInspectArtifact(output)
-	receipt.Phases = append(receipt.Phases, finishedBuildPhase("artifact", phaseStart, buildNow(), 0, err))
+	artifact, err := runBuildPhase(&receipt, "artifact", func() (buildArtifact, error) {
+		return buildInspectArtifact(output)
+	})
 	if err != nil {
 		return finishBuild(stdout, stderr, *asJSON, overallStart, receiptPath, &receipt, 1,
 			fmt.Errorf("artifact inspection failed for %s: %w", output, err))
@@ -288,6 +288,13 @@ func defaultBuildOutput() string {
 
 func prepareBuildOutput(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0o755)
+}
+
+func runBuildPhase[T any](receipt *buildReceipt, name string, operation func() (T, error)) (T, error) {
+	start := buildNow()
+	result, err := operation()
+	receipt.Phases = append(receipt.Phases, finishedBuildPhase(name, start, buildNow(), 0, err))
+	return result, err
 }
 
 func finishedBuildPhase(name string, start, end time.Time, exitCode int, err error) buildPhase {

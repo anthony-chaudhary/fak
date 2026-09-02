@@ -8,6 +8,18 @@ description: "The scorecard/debt, eviction, decision, render/materialize, plan, 
 Split out of [the concept glossary](concept-glossary.md); the routing table and the
 cache and guard/gate families remain on that page.
 
+## Reader orientation
+
+**For:** readers comparing fak's measurement, planning, loop, and operator-surface vocabulary. **TL;DR:** start here when two operational terms sound interchangeable, then use each entry's "distinct from" boundary to choose the right one.
+
+List the operational families covered by this page:
+
+```bash
+git grep -n '^## ' -- docs/fak/glossary-families-b.md
+```
+
+Use the matching line number as the next reading stop, then follow its local links when the entry names a deeper contract.
+
 ## The scorecard / debt family
 
 - **scorecard** - one deterministic measurement of a surface that folds into a single

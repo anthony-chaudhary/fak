@@ -8,6 +8,16 @@ description: "Machine-positioned glossary entries (first third), split out of do
 Machine-positioned entries, split out of [the concept glossary](concept-glossary.md)
 (which stays the landing surface for new `fak concept position` appends).
 
+## Practical inspection
+
+Search the first positioned-entry shard by its stable entry headings:
+
+```bash
+git grep -n '^### ' -- docs/fak/glossary-positions-1.md
+```
+
+Use an exact heading from the output when linking to or checking a positioned concept; new entries still go through `fak concept position` at the landing glossary.
+
 ### SilentCacheInvalidation
 
 The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent).

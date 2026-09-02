@@ -103,21 +103,13 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 
 	// Generated disambiguation index: invoke the committed public writer inside
 	// the extracted tip so neither this binary nor peer-dirty files can mask drift.
-	if detail, checked, ok := checkDisambiguationGenerated(dir); !checked {
-		res.Skipped = append(res.Skipped, "disambiguation-generated")
-	} else if !ok {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "disambiguation-generated", Detail: detail})
-	}
+	detail, checked, ok := checkDisambiguationGenerated(dir)
+	recordOptionalCIPreflightCheck(&res, "disambiguation-generated", detail, checked, ok)
 
 	// The self-study inventory is default-on when the committed artifact exists. The check runs
 	// against the already-extracted tip, never against the shared working tree.
-	if detail, checked, ok := checkStudySelfInventory(dir); !checked {
-		res.Skipped = append(res.Skipped, "study-self-inventory")
-	} else if !ok {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "study-self-inventory", Detail: detail})
-	}
+	detail, checked, ok = checkStudySelfInventory(dir)
+	recordOptionalCIPreflightCheck(&res, "study-self-inventory", detail, checked, ok)
 
 	if checked, detail, werr := armbenchWitnessDrift(dir); werr != nil {
 		res.OK = false
@@ -190,6 +182,17 @@ func gofmtList(dir string) ([]string, error) {
 		files = append(files, filepath.ToSlash(ln))
 	}
 	return files, nil
+}
+
+func recordOptionalCIPreflightCheck(res *ciPreflightResult, step string, detail string, checked, ok bool) {
+	if !checked {
+		res.Skipped = append(res.Skipped, step)
+		return
+	}
+	if !ok {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: step, Detail: detail})
+	}
 }
 
 func checkDisambiguationGenerated(dir string) (detail string, checked, ok bool) {

@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Inside fak serve (the gateway)"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak serve handles OpenAI, Anthropic, and MCP traffic, including endpoint routing, streaming, sessions, caching, and gateway modes."
 ---
 
 # Inside fak serve (the gateway)

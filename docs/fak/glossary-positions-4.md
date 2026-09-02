@@ -7,6 +7,18 @@ description: "Machine-positioned glossary entries (final part), split out of doc
 
 Machine-positioned entries, split out of [the concept glossary](concept-glossary.md).
 
+## Reader orientation
+
+**For:** readers tracing the newest positioned concepts, including TUI and operator-facing adapters. **TL;DR:** use the heading index to locate the named concept, then verify its stated package or command boundary in the repository.
+
+List this shard's stable headings:
+
+```bash
+git grep -n '^### ' -- docs/fak/glossary-positions-4.md
+```
+
+The matching heading is the checkpoint: its definition should explain what the concept owns and what adjacent layer it deliberately does not own.
+
 ### loadTUISessions (TUI session-list loader)
 
 loadTUISessions is the cmd/fak input adapter that loads a gateway SessionListResponse either from an operator-provided JSON snapshot or from the live /v1/fak/sessions endpoint for TUI rendering and control selection.

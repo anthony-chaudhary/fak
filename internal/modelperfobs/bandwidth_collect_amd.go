@@ -202,9 +202,8 @@ func parseAMDSMIQuantity(raw json.RawMessage) (*float64, string, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, "", nil
 	}
-	var unavailable string
-	if err := json.Unmarshal(raw, &unavailable); err == nil {
-		if amdUnavailable(unavailable) {
+	if unavailable, ok := unavailableMetric(raw); ok {
+		if deviceMetricUnavailable(unavailable) {
 			return nil, "", nil
 		}
 		return nil, "", fmt.Errorf("unexpected string %q", unavailable)
@@ -219,8 +218,8 @@ func parseAMDSMIQuantity(raw json.RawMessage) (*float64, string, error) {
 	if len(quantity.Value) == 0 {
 		return nil, "", fmt.Errorf("quantity has no value")
 	}
-	if err := json.Unmarshal(quantity.Value, &unavailable); err == nil {
-		if amdUnavailable(unavailable) {
+	if unavailable, ok := unavailableMetric(quantity.Value); ok {
+		if deviceMetricUnavailable(unavailable) {
 			return nil, "", nil
 		}
 		return nil, "", fmt.Errorf("unexpected value %q", unavailable)
@@ -235,9 +234,12 @@ func parseAMDSMIQuantity(raw json.RawMessage) (*float64, string, error) {
 	return &value, strings.TrimSpace(quantity.Unit), nil
 }
 
-func amdUnavailable(s string) bool {
-	s = strings.TrimSpace(strings.ToLower(s))
-	return s == "" || s == "n/a" || s == "not supported" || s == "[not supported]"
+func unavailableMetric(raw json.RawMessage) (string, bool) {
+	var unavailable string
+	if err := json.Unmarshal(raw, &unavailable); err != nil {
+		return "", false
+	}
+	return unavailable, true
 }
 
 // parseRDCIMemoryRates parses rdci dmon's stable field-name table. RDC's
@@ -290,7 +292,7 @@ func parseRDCIMemoryRates(data []byte, gpu string) (LiveBandwidth, error) {
 }
 
 func parseRDCIRate(s string) (*float64, error) {
-	if amdUnavailable(s) {
+	if deviceMetricUnavailable(s) {
 		return nil, nil
 	}
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)

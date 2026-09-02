@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Sessions, recall, and persistence"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak manages long-running sessions, context compaction, recall, resume state, memory trust, and safe restoration of dropped context."
 ---
 
 # Sessions, recall, and persistence
