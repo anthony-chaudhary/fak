@@ -1,0 +1,31 @@
+{
+  "schema": "fak.model-incumbent-preflight/1",
+  "issue": 9714,
+  "observed_at": "2026-09-02T16:09:05Z",
+  "read_only": true,
+  "launchd_target": "gui/<uid>/com.fak.qwen36-model",
+  "listener_port": 8090,
+  "expected_owner": {
+    "service_label": "com.fak.qwen36-model",
+    "launchd_job_present": false,
+    "launchd_job_pid": 0,
+    "launchd_plist_path": "",
+    "launchd_job_binds_listener": false
+  },
+  "incumbent": {
+    "listener_present": true,
+    "listener_pid": 709,
+    "command_sha256": "sha256:a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "command_matches_preserved_identity": true,
+    "owner_label_sha256": "sha256:b567298df044cecdac3cf921d7cb971e4665db7b5407fb634647a910e3abbdb7",
+    "owner_resolved": true,
+    "health_status": 200,
+    "models_status": 200,
+    "model_alias": "qwen3.6-27b",
+    "alias_matches": true
+  },
+  "verdict": "EXPECTED_JOB_ABSENT",
+  "reason": "alternate_launchd_supervisor_owns_incumbent",
+  "public_safe_note": "uid scrubbed for the tracked copy; digests, port, alias, and verdict are public-safe by construction",
+  "witness_class": "read_only_observation_no_mutation"
+}
