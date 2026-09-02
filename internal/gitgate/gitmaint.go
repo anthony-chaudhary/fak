@@ -67,6 +67,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 )
 
 // MaintRunner runs a git command with working dir `dir`, returning combined
@@ -482,10 +484,7 @@ func probeSessionLeases(gitDir string) []string {
 	}
 	root := filepath.Join(gitDir, filepath.FromSlash(leaseLockPrefix))
 	var out []string
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
+	_ = walkfiles.Files(root, func(p string, d os.DirEntry) error {
 		if rel, rerr := filepath.Rel(gitDir, p); rerr == nil {
 			out = append(out, filepath.ToSlash(rel))
 		}
@@ -689,13 +688,7 @@ func probeLocks(gitDir string) []string {
 func walkLockFiles(gitDir, sub string) []string {
 	root := filepath.Join(gitDir, sub)
 	var out []string
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
+	_ = walkfiles.Files(root, func(p string, d os.DirEntry) error {
 		if strings.HasSuffix(d.Name(), ".lock") {
 			if rel, rerr := filepath.Rel(gitDir, p); rerr == nil {
 				out = append(out, rel)

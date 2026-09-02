@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 )
 
 // Meta identifies one rollout, read from its FIRST session_meta record only. A
@@ -214,8 +216,8 @@ func rolloutPaths(root string, limit int) ([]string, error) {
 		mtime time.Time
 	}
 	var out []cand
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+	err := walkfiles.Files(root, func(p string, d os.DirEntry) error {
+		if !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
 		info, ierr := d.Info()

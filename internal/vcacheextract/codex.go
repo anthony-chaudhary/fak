@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 )
 
 const Schema = "fak-vcache-codex-session-extract/1"
@@ -169,10 +170,7 @@ func FindSession(home, threadID string) (string, error) {
 		mod  int64
 	}
 	var candidates []candidate
-	err := filepath.WalkDir(sessions, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
+	err := walkfiles.Files(sessions, func(path string, d os.DirEntry) error {
 		name := d.Name()
 		if !strings.HasSuffix(name, ".jsonl") || !strings.Contains(name, threadID) {
 			return nil
@@ -211,8 +209,8 @@ func FindLatestSession(home string, since time.Time) (string, error) {
 		mod  time.Time
 	}
 	var candidates []candidate
-	err := filepath.WalkDir(sessions, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+	err := walkfiles.Files(sessions, func(path string, d os.DirEntry) error {
+		if !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
 		info, statErr := d.Info()

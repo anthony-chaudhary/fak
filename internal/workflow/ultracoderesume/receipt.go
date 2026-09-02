@@ -52,12 +52,18 @@ type Refusal struct {
 	Detail string        `json:"detail,omitempty"`
 }
 
-func (r *Refusal) Error() string {
-	if r.Detail == "" {
-		return string(r.Reason)
+// refusalString renders a closed-reason refusal the one way every *Refusal
+// error in this package does: the reason token alone, or "REASON: detail"
+// when a detail is attached. The string form is for logs and error plumbing;
+// callers switch on Reason, never parse Detail (the Refusal doc).
+func refusalString(reason, detail string) string {
+	if detail == "" {
+		return reason
 	}
-	return string(r.Reason) + ": " + r.Detail
+	return reason + ": " + detail
 }
+
+func (r *Refusal) Error() string { return refusalString(string(r.Reason), r.Detail) }
 
 func refuse(reason RefusalReason, format string, args ...any) *Refusal {
 	return &Refusal{Reason: reason, Detail: fmt.Sprintf(format, args...)}

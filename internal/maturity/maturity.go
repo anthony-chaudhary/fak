@@ -51,6 +51,7 @@ package maturity
 import (
 	"bufio"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/walkfiles"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"os"
 	"path/filepath"
@@ -504,13 +505,7 @@ func parseLaneTrees(path string) []string {
 // scanLeaf reports whether the leaf dir has non-test code, test code, and a
 // Benchmark func. One shallow read of the directory (the leaf's own files).
 func scanLeaf(dir string) (hasCode, hasTests, hasBench bool) {
-	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
+	_ = walkfiles.Files(dir, func(p string, d os.DirEntry) error {
 		name := d.Name()
 		if !strings.HasSuffix(name, ".go") {
 			return nil
@@ -527,7 +522,6 @@ func scanLeaf(dir string) (hasCode, hasTests, hasBench bool) {
 		hasCode = true
 		return nil
 	})
-	_ = err
 	return hasCode, hasTests, hasBench
 }
 
@@ -568,7 +562,9 @@ func scanReachableWithGraph(root string, graph map[string]map[string]struct{}) m
 }
 
 // internalImportGraph maps each internal leaf to the set of internal leaves it
-// imports (non-test files only).
+// imports (non-test files only). A leaf's dep set is exactly the imports under
+// its own directory minus the self-edge, so it delegates to importsUnder rather
+// than carrying a second copy of that walk.
 func internalImportGraph(internalRoot string) map[string]map[string]struct{} {
 	graph := map[string]map[string]struct{}{}
 	entries, err := os.ReadDir(internalRoot)
@@ -580,24 +576,8 @@ func internalImportGraph(internalRoot string) map[string]map[string]struct{} {
 			continue
 		}
 		leaf := e.Name()
-		deps := map[string]struct{}{}
-		_ = filepath.WalkDir(filepath.Join(internalRoot, leaf), func(p string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			name := d.Name()
-			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-				return nil
-			}
-			if b, e := os.ReadFile(p); e == nil {
-				for _, m := range importRe.FindAllStringSubmatch(string(b), -1) {
-					if m[1] != leaf {
-						deps[m[1]] = struct{}{}
-					}
-				}
-			}
-			return nil
-		})
+		deps := importsUnder(filepath.Join(internalRoot, leaf))
+		delete(deps, leaf)
 		graph[leaf] = deps
 	}
 	return graph
@@ -607,10 +587,7 @@ func internalImportGraph(internalRoot string) map[string]map[string]struct{} {
 // file under root.
 func importsUnder(root string) map[string]struct{} {
 	out := map[string]struct{}{}
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
+	_ = walkfiles.Files(root, func(p string, d os.DirEntry) error {
 		name := d.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			return nil
