@@ -1,5 +1,6 @@
 # INDEX — the full map of the fak repo
 
+- [docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md](docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md) — the #10662 post-tool latency span: `tool_result_recorded → next_model_item` definition, disjointness rule, closed band/ordinal/attribution vocabularies, and the `fak session-audit posttool` readout.
 - [docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md](docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md) — production-sized, repository-derived Qwen3.8 paged-swap codec round-trip witness for issue #9617.
 
 
