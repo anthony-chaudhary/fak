@@ -1,8 +1,8 @@
 {
   "schema": "fak-popularization-readiness-scorecard.data/1",
   "meta": {
-    "as_of": "2026-07-18",
-    "fak_version": "v0.41.0",
+    "as_of": "2026-09-01",
+    "fak_version": "v0.45.0",
     "title": "fak popularization-readiness scorecard — does the front door convert?",
     "_doc": "Each row is one stage of the front-door conversion funnel a first-time visitor walks (land -> orient -> trust -> install -> act), scored on whether the affordances that stage needs to keep the visitor moving actually exist in the tree. The scorecard cross-checks every affordance against the real tree (a path that exists, a doc that mentions a token, a fenced command, a resolving CLI verb, a tagged CLAIMS section), so the score cannot be gamed by editing data alone: to stop a stage leaking you ADD the real affordance. This is dimension K (adoption measurement) of the concept-popularization epic (docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md). Regenerate the doc: python tools/popularization_readiness_scorecard.py --markdown-dir docs/popularization-scorecard"
   },

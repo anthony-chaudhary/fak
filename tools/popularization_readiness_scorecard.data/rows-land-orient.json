@@ -9,9 +9,9 @@
       "effort": "glance",
       "entry_doc": "README.md",
       "affordances": [
-        {"id": "identity-line", "kind": "doc_mentions", "doc": "README.md", "tokens": ["turns a tool-using agent into a managed agent", "Fused Agent Kernel"], "match": "any", "need": "a one-sentence 'what fak is' the visitor can grasp in a glance, near the top of the README", "severity": "hard"},
+        {"id": "identity-line", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fast, enforceable boundary between your agent and every tool call"], "match": "any", "need": "a one-sentence 'what fak is' the visitor can grasp in a glance, near the top of the README (the current front-door line: 'One binary puts a fast, enforceable boundary between your agent and every tool call')", "severity": "hard"},
         {"id": "hero-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak guard --", "fak routebench", "fak preflight"], "need": "a copy-pasteable hero command in a fenced block, so the visitor sees a runnable first move without scrolling", "severity": "hard"},
-        {"id": "headline-number", "kind": "doc_mentions", "doc": "README.md", "tokens": ["4.1", "less work"], "match": "any", "need": "the honest headline benchmark number on the front page (the tuned ~4.1x, not the naive figure)", "severity": "hard"},
+        {"id": "headline-number", "kind": "doc_mentions", "doc": "README.md", "tokens": ["decode tok/s", "measured throughput"], "match": "any", "need": "the honest headline benchmark numbers on the front page — measured decode tok/s per hardware family, each with claim boundaries beside it and a receipt link (the #9751 latest-hardware front page)", "severity": "hard"},
         {"id": "numbers-are-sourced", "kind": "doc_mentions", "doc": "README.md", "tokens": ["BENCHMARK-AUTHORITY", "CLAIMS.md"], "match": "any", "need": "the headline number is anchored to a source (benchmark authority + the honesty ledger) so it reads as real, not marketing", "severity": "hard"},
         {"id": "hero-visual", "kind": "any_path_exists", "targets": ["visuals/hero-video.mp4", "visuals/hero-video.gif"], "need": "a hero visual the front page can lead with — one picture/video that makes the win legible in seconds", "severity": "soft"}
       ],
