@@ -2,6 +2,8 @@
 
 This zero-network example turns a **bounded typed receipt** into a deterministic proposal for one narrowly matched development loop. It is deliberately not an event bus: it reads one JSON object, applies admission gates, prints one decision receipt, and performs no launch, issue write, or other mutation.
 
+Requires: Go 1.26+ (the repository toolchain). No API key, network, model, or GPU.
+
 ```powershell
 go run ./examples/receipt-trigger-rsi -selfcheck
 ```
@@ -13,6 +15,10 @@ Or classify a receipt:
 ```
 
 The output uses `RUN`, `SKIP`, `DEFER`, `MERGE`, or `REROUTE`, a closed stable reason, a normalized signature, an effect identity for deduplication, and an `outcome_link` that a later outcome receipt can join without embedding logs or secrets.
+
+## What you'll see
+
+A captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md): the `selfcheck: PASS (...)` line and the `RUN` decision receipt for the guard-crash example above. Both invocations complete in under a second on a warm build cache (the first `go run` compiles the package once), and the identical input prints the identical decision — the signature and effect id are pure functions of the receipt fields.
 
 ## Safety contract
 

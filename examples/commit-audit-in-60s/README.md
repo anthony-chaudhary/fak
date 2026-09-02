@@ -34,8 +34,11 @@ the commit touched)` — so the demo is deterministic and CI-usable. `dos` is a 
 Python wheel; install it once:
 
 ```bash
-pip install "dos-kernel>=0.29"   # compatibility floor; the bare `dos` package is an unrelated squatter, the name is `dos-kernel`
+pip install "dos-kernel==0.29.0"   # the pinned floor `run.sh` expects; the bare `dos` package is an unrelated squatter, the name is `dos-kernel`
 ```
+
+After this one install the demo runs offline: the verdicts are computed locally
+from the git object store, with no network call at run time.
 
 ## Run it
 

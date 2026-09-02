@@ -23,6 +23,27 @@ The command is run exactly as supplied. There is **no automatic fallback** to
 llama.cpp, Ollama, LM Studio, or any other external engine. The receipt preserves
 the operator-selected benchmark, engine label, and scrubbed command.
 
+## What you'll see
+
+A captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md): the `inventory`
+hardware block plus catalog excerpt, a sealed receipt produced by a trivial
+`/bin/echo hello` child, the `VERIFIED` line from `verify`, and the no-upload
+`submit` packet. On a warm build cache, `inventory` completes in under a second
+and each of `run`/`verify` completes in under a second; the first `go run` of the
+example pays a one-time compile. A real benchmark child takes however long that
+child takes — the receipt records its duration either way.
+
+## Scope — what this does not claim
+
+This example demonstrates the receipt *workflow*, not engine performance: it does
+not claim any speed or quality number for the capture host, and the captured
+receipt runs a trivial child (`/bin/echo hello`) — deliberately not a model
+benchmark — so its duration and digest fields demonstrate the sealed-receipt
+mechanics only. The catalog `run` recipes are shown for discovery and are not
+executed automatically. What this does not claim either: that a submitted receipt
+was reviewed by anyone but its operator — the scrubber covers common secret
+shapes and cannot identify every application-specific secret.
+
 The legacy example entry point delegates to the same implementation:
 
 ```console
