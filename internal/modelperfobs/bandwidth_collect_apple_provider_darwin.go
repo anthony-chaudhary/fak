@@ -206,7 +206,10 @@ func runAppleMemoryProviderCommand(ctx context.Context, name string, args ...str
 	if name != "/usr/bin/powermetrics" {
 		return nil, fmt.Errorf("unsupported Apple memory provider command %q", name)
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
+	// The program is spelled as a literal (not `name`) so the architest
+	// interpreter-free gate can prove the exec target is a compiled binary; the
+	// guard above has already rejected every other selector value.
+	cmd := exec.CommandContext(ctx, "/usr/bin/powermetrics", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // The impure shell. Everything here shells to git or gh; the fold it feeds is
@@ -411,8 +413,26 @@ func isScratchName(base string) bool {
 // runIn runs a command in a directory and returns its combined output. Combined
 // rather than stdout-only because git and go report the diagnostics that matter
 // on stderr, and a caller handed only stdout would see an empty failure.
+//
+// The program is resolved through a switch of string literals (not passed
+// straight to exec) so the architest interpreter-free gate can prove every exec
+// target is a compiled binary; any other selector is refused, which keeps the
+// set fail-closed if a future caller typos a program name.
 func runIn(ctx context.Context, dir string, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	var cmd *exec.Cmd
+	switch name {
+	case "git":
+		cmd = exec.CommandContext(ctx, "git", args...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+	case "gh":
+		cmd = exec.CommandContext(ctx, "gh", args...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+	case "go":
+		cmd = exec.CommandContext(ctx, "go", args...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+	default:
+		return "", fmt.Errorf("flowmetrics runIn: unsupported program %q (allowed: git, gh, go)", name)
+	}
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
