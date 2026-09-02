@@ -53,7 +53,7 @@
       "effort": "minimal",
       "entry_doc": "README.md",
       "affordances": [
-        {"id": "identity", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fak in one line", "turns a tool-using agent into a managed agent"], "need": "a quotable one-sentence identity near the top of the front page", "severity": "hard"},
+        {"id": "identity", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fast, enforceable boundary between your agent and every tool call"], "need": "a quotable one-sentence identity near the top of the front page (the current front-door line: 'One binary puts a fast, enforceable boundary between your agent and every tool call')", "severity": "hard"},
         {"id": "honesty-ledger", "kind": "path_exists", "target": "CLAIMS.md", "need": "an honesty ledger tagging every claim shipped/simulated/stub", "severity": "hard"},
         {"id": "competitive-comparison", "kind": "any_path_exists", "targets": ["docs/industry-scorecard/README.md", "docs/fak-vs-alternatives-comparison.md"], "need": "an honest comparison vs the SOTA field", "severity": "hard"},
         {"id": "license", "kind": "path_exists", "target": "LICENSE", "need": "a clear open-source license", "severity": "hard"},

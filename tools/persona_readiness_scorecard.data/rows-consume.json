@@ -13,7 +13,7 @@
         {"id": "install-script", "kind": "path_exists", "target": "install.sh", "need": "a curl|sh installer that fetches the right prebuilt binary and verifies its checksum", "severity": "hard"},
         {"id": "download-pointer", "kind": "doc_mentions", "doc": "README.md", "tokens": ["releases/latest", "install.sh", "prebuilt"], "match": "any", "need": "a no-toolchain download path on the front page (release archive or install.sh)", "severity": "hard"},
         {"id": "offline-first-run", "kind": "fenced_command", "docs": ["README.md", "GETTING-STARTED.md", "docs/cli-reference.md"], "tokens": ["fak preflight", "fak agent --offline", "cmd/fak preflight"], "need": "a copy-pasteable no-key/no-GPU first command in a fenced block", "severity": "hard"},
-        {"id": "static-binary-claim", "kind": "claim_section", "section": "The product", "tags": ["SHIPPED"], "need": "the honesty ledger backs the one-static-binary, no-dependencies claim", "severity": "hard"},
+        {"id": "static-binary-claim", "kind": "claim_section", "section": "Claims", "tags": ["SHIPPED"], "need": "the honesty ledger backs the one-static-binary, no-dependencies claim (CLAIMS.md tags the product claim SHIPPED with a witness page; the ledger is a single ## Claims section of tagged claim links since the #9232 managed index)", "severity": "hard"},
         {"id": "package-manager", "kind": "doc_mentions", "doc": "README.md", "tokens": ["brew install", "winget", "scoop install"], "match": "any", "need": "a package-manager install (Homebrew/winget/scoop) for the dev who will not even curl", "severity": "soft"}
       ],
       "verdict": "served",
