@@ -41,6 +41,29 @@ import (
 // launch adapters are free to rewrite. Its fields stay private and every slice accessor
 // clones, so a broker, trampoline, or exec-boundary transform cannot mutate the semantic
 // command or the resolved profile in place.
+// registerGuardAdmissionFlag declares the guard/manage --native-admission-token-budget
+// flag: the same name, default, and semantics as serve's (serve.go), extracted here so
+// the surface can be parsed and asserted in tests. The default is the gateway's shipping
+// policy budget, never a literal, so the two doors cannot drift apart on it.
+func registerGuardAdmissionFlag(fs *flag.FlagSet) *int {
+	return fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget,
+		"with --gguf (a fak-native in-kernel model): cap the total token footprint admitted by the request scheduler; must be positive (default 8192). Same flag and semantics as `fak serve`. Raise it when the wrapped harness's FIRST prompt alone exceeds the default — opencode 1.18's system+tools floor prompt is ~45k tokens, so the managed seat sheds every turn (429 \"request tokens exceed scheduler token budget\") until this is raised (#10597).")
+}
+
+// newGuardNativeAdmissionController is the guard/manage twin of
+// newServeNativeAdmissionController: same admission gate, same policy seam, sourced
+// from the guard launch flag set instead of serveFlags. The startup note names the
+// launching verb (manage or guard) so the bound readback stays honest about which
+// front door installed it.
+func newGuardNativeAdmissionController(commandName string, budget int) (*gateway.AdmissionController, gateway.StartupMessage, error) {
+	policy, err := nativeAdmissionPolicyForBudget(budget)
+	if err != nil {
+		return nil, gateway.StartupMessage{}, err
+	}
+	return gateway.NewAdmissionController(policy), newServeStartupMessage(commandName, "native-admission-token-budget", "info",
+		fmt.Sprintf("native scheduler admission token budget=%d", policy.TokenBudget)), nil
+}
+
 func cmdGuard(argv []string) {
 	cmdManageCommand("guard", argv)
 }
@@ -143,6 +166,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
 	guardNativeFlags := registerGuardNativeControlFlags(fs)
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
+	nativeAdmissionTokenBudget := registerGuardAdmissionFlag(fs)
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
@@ -662,6 +686,13 @@ func cmdManageCommand(commandName string, argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
 		os.Exit(2)
 	}
+	// Same wording serve refuses a non-positive --native-admission-token-budget with:
+	// a typo must fail loud at launch, never silently boot a seat whose scheduler
+	// budget was not the one the operator declared.
+	if *nativeAdmissionTokenBudget <= 0 {
+		fmt.Fprintf(os.Stderr, "fak guard: --native-admission-token-budget must be positive (got %d)\n", *nativeAdmissionTokenBudget)
+		os.Exit(2)
+	}
 	if maxDurationLimit < 0 {
 		fmt.Fprintln(os.Stderr, "fak guard: --max-duration must be non-negative")
 		os.Exit(2)
@@ -999,6 +1030,18 @@ func cmdManageCommand(commandName string, argv []string) {
 	must(err)
 	if loadProfile != nil {
 		srv.SetModelLoadProfile(loadProfile)
+	}
+	// LOCAL in-kernel model (--gguf, #10597): install the operator's
+	// --native-admission-token-budget on the managed gateway exactly as `fak serve`
+	// does, so a harness whose first prompt exceeds the default 8192 (opencode 1.18's
+	// ~45k-token floor) is admitted instead of 429-shed every turn. The condition
+	// mirrors gateway.New's auto-attach (in-kernel model + tokenizer, no proxy
+	// upstream): alongside/remote/base-url seats keep the prior behavior byte-for-byte.
+	if inKernelModel != nil && inKernelTok != nil && strings.TrimSpace(resolvedBase) == "" {
+		controller, admissionNote, err := newGuardNativeAdmissionController(commandName, *nativeAdmissionTokenBudget)
+		must(err)
+		srv.SetAdmissionController(controller)
+		srv.AddStartupMessages(admissionNote)
 	}
 
 	// 4. Serve in the background. The gateway lives EXACTLY as long as the child: its
