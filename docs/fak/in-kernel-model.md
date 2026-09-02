@@ -18,17 +18,21 @@ weights additionally need **Python 3.10+**; the fetch script creates a venv and 
 `torch`/`transformers` for you.
 
 > This page holds what used to be §4 of `GETTING-STARTED.md`, moved here so the newcomer
-> route reads end to end without it (#5468). The material below is unchanged.
+> route reads end to end without it (#5468). It now calls out the safe syscall default
+> separately from the explicit in-kernel developer path.
 
-The kernel can dispatch an allowed tool call to a **real pure-Go SmolLM2 forward pass it
-owns** (`--engine inkernel`), decoding over a kernel-owned KV cache. This is the deepest
-fusion: the model runs inside the kernel address space, and it's reachable via
-`/v1/fak/syscall`.
+The syscall surfaces default to the cheap deterministic `mock` executor; they do not run
+synthetic model decode unless you opt in. Pass `--engine inkernel` to dispatch an allowed
+tool call to a **pure-Go forward pass fak owns**, decoding over a kernel-owned KV cache.
+This is the deepest fusion: the model runs inside the kernel address space, and it is
+reachable via `/v1/fak/syscall`. Explicit GGUF and exported real-model paths remain
+fak-native; there is no llama.cpp fallback.
 
 ## Synthetic weights — instant, zero download
 
-By default `--engine inkernel` runs a small **deterministic synthetic checkpoint**, so the
-decode path works with no model export:
+When explicitly selected without real weights, `--engine inkernel` runs a small
+**deterministic synthetic checkpoint**, so the decode path works with no model export.
+This is a developer smoke path, not the default syscall executor:
 
 ```bash
 ./fak serve --addr 127.0.0.1:8137 --engine inkernel --model smollm2-inkernel &

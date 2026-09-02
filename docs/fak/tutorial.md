@@ -547,6 +547,11 @@ A JSON list of `{"data":[{"id":"…","object":"model"}], …}` means it's ready.
 
 ### 4.5 Start `fak serve` in front of it
 
+Allowed `fak_syscall` calls use the deterministic `mock` executor by default, so starting
+`serve` does not run the synthetic in-kernel decoder. Select `--engine inkernel`
+explicitly for fak-native model execution; explicit GGUF and real-model paths stay
+fak-native and never fall back to llama.cpp.
+
 ```sh
 ./fak serve --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \

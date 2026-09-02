@@ -94,7 +94,7 @@ func runGuardReplay(fixturePath, wire, policyPath, auditPath string, noAudit boo
 	defer upstream.Close()
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:             "inkernel",
+		EngineID:             "mock",
 		Model:                model,
 		Provider:             provider,
 		BaseURL:              replayUpstreamBase(provider, upstream.URL),
