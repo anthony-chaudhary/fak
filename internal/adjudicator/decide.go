@@ -409,26 +409,8 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// SELF_MODIFY: a write-shaped call whose target matches a protected glob is a
 	// PROVABLE refusal. Bounded disclosure: the witness carries ONLY the offending
 	// glob, never the whole policy (deny channel is not a policy oracle).
-	if pr.runs(cl, rungSelfModify) && writeShapedLower(lowerTool) {
-		target := targetPath(args)
-		if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
-			if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
-				return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}
-			}
-			return p.soften(abi.Verdict{
-				Kind:    abi.VerdictDeny,
-				Reason:  abi.ReasonSelfModify,
-				By:      "monitor",
-				Payload: abi.WitnessPayload{Claim: g},
-				// Three different rungs below cite SELF_MODIFY and disclose only the
-				// glob, so on the wire they are one undifferentiated bucket. The rule
-				// id separates them (#5863) — and it is what decides whether a
-				// SELF_MODIFY on a `cd fak && …` compound came in through a path ARG or
-				// through the shell command line, the hypothesis the journal could not
-				// confirm.
-				Meta: denyRule(abi.DenyRuleSelfModifyPath),
-			}, nil)
-		}
+	if v, ok := a.selfModifyPathVerdict(ctx, p, c, lowerTool, args, cl, pr); ok {
+		return v
 	}
 
 	// SELF_MODIFY via the SHELL path (#172 Hole 1): a Bash/exec tool carries its
@@ -507,22 +489,8 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// the rung needs no policy field and fires under the zero Policy too; it is mandatory
 	// for every class (mustRun's default), so a RungProfile can never elide it. Bounded
 	// disclosure: the witness names only the offending host + class, never the policy.
-	if pr.runs(cl, rungEgress) {
-		if host, label := egressfloor.Classify(c.Tool, args, p.EgressExtraDenyHosts...); host != "" {
-			return abi.Verdict{
-				Kind:    abi.VerdictDeny,
-				Reason:  egressfloor.ReasonEgressBlock,
-				By:      "monitor",
-				Payload: abi.WitnessPayload{Claim: label + ": " + host},
-			}
-		}
-		// The operator-configurable band of the SAME rung, deliberately AFTER the
-		// hardwired check above: block/allow lists and the restrict posture (egresslist.go).
-		// Running second is what makes the floor un-openable — an allow rule naming the
-		// metadata host never gets asked, because Classify has already returned.
-		if v, ok := egressListVerdict(state.egressList, p, c.Tool, args); ok {
-			return v
-		}
+	if v, ok := egressRungVerdict(p, state.egressList, c.Tool, args, cl, pr); ok {
+		return v
 	}
 	if v, ok := researchEgressVerdict(c.Tool, args, p.ResearchEgressAllowHosts); ok {
 		return v
@@ -537,21 +505,150 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// in-process checker here and DEFERs (fail open — lint is a quality signal,
 	// not a security gate). Bounded disclosure: the witness names only the first
 	// finding, never the file content.
-	if pr.runs(cl, rungLintWrite) && p.LintWrites && wholeFileWrite(c.Tool) {
-		if w := lintWriteMalformed(targetPath(args), args); w != "" {
-			return p.soften(abi.Verdict{
-				Kind:    abi.VerdictDeny,
-				Reason:  abi.ReasonMalformed,
-				By:      "monitor",
-				Payload: abi.WitnessPayload{Claim: w},
-			}, advisoryNotes)
+	if v, ok := lintWriteRungVerdict(p, c, args, advisoryNotes, cl, pr); ok {
+		return v
+	}
+
+	redactedArgs, redacted := applyRedactionTransforms(p, argPreds, args, cl, pr)
+
+	// REVERSIBILITY (#2156): before any path that would otherwise dispatch the
+	// call (redact-transform, affirmative allow, or admit-and-log default allow),
+	// hold irreversible/outward-facing calls behind a deterministic preview token.
+	// Hard refusals above still win first, and a normally denied call is not handed
+	// a preview token it cannot use.
+	rev := a.runReversibilityRung(ctx, p, c, args, redactedArgs, redacted, lowerTool, cl, pr)
+	if rev.handled {
+		return rev.verdict
+	}
+	args, redactedArgs, redacted = rev.args, rev.redactedArgs, rev.redacted
+	confirmedWithToken := rev.confirmedWithToken
+
+	// TRANSFORM: redact a secret-shaped arg field before dispatch. An advisory
+	// arg-rule note rides the transform's Meta so the logged trial is not lost
+	// when the call is repaired-and-dispatched rather than plainly allowed.
+	if redacted {
+		if ref, ok := putJSON(ctx, redactedArgs); ok {
+			v := abi.Verdict{Kind: abi.VerdictTransform, By: "monitor",
+				Payload: abi.TransformPayload{NewArgs: ref}}
+			if len(advisoryNotes) > 0 {
+				v.Meta = map[string]string{"advisory_violations": strings.Join(advisoryNotes, "; ")}
+			}
+			return v
 		}
 	}
 
+	// Affirmative allow.
+	if v, ok := affirmativeAllowVerdict(ctx, p, c.Tool, args, confirmedWithToken, advisoryNotes); ok {
+		return v
+	}
+
+	// exec_command's readOnlyHint is a classification request, not authority.
+	// Structural refusals and explicit policy decisions above keep precedence;
+	// only the narrow positive grammar may replace the default deny below.
+	if v, ok := a.execCommandReadOnlyVerdict(c, args); ok {
+		return v
+	}
+
+	// Nothing affirmatively allowed it — fail-closed default deny.
+	if confirmedWithToken && (p.admitAndLogLower(c.Tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
+		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+			return v
+		}
+	}
+	return defaultDeny(p, c.Tool, lowerTool, advisoryNotes)
+}
+
+// selfModifyPathVerdict is the SELF_MODIFY rung for write-shaped calls carrying a
+// path ARG: a target matching a protected glob is a PROVABLE refusal. Bounded
+// disclosure: the witness carries ONLY the offending glob, never the whole policy
+// (deny channel is not a policy oracle). The shell-command and synth-tool halves
+// of the rung stay inline in Adjudicate, where the architest wiring gates pin
+// their calls. Returns the resolved verdict and whether it decided this call.
+func (a *Adjudicator) selfModifyPathVerdict(ctx context.Context, p Policy, c *abi.ToolCall, lowerTool string, args map[string]any, cl class, pr *RungProfile) (abi.Verdict, bool) {
+	if !pr.runs(cl, rungSelfModify) || !writeShapedLower(lowerTool) {
+		return abi.Verdict{}, false
+	}
+	target := targetPath(args)
+	if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
+		if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
+			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}, true
+		}
+		return p.soften(abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonSelfModify,
+			By:      "monitor",
+			Payload: abi.WitnessPayload{Claim: g},
+			// Three different rungs cite SELF_MODIFY and disclose only the
+			// glob, so on the wire they are one undifferentiated bucket. The rule
+			// id separates them (#5863) — and it is what decides whether a
+			// SELF_MODIFY on a `cd fak && …` compound came in through a path ARG or
+			// through the shell command line, the hypothesis the journal could not
+			// confirm.
+			Meta: denyRule(abi.DenyRuleSelfModifyPath),
+		}, nil), true
+	}
+	return abi.Verdict{}, false
+}
+
+// egressRungVerdict is the EGRESS rung: a tool call that reaches a blocked
+// NETWORK DESTINATION is refused with the egressfloor class witness. The blocked
+// set is HARDWIRED in egressfloor (these addresses are never a legitimate
+// destination), so the rung needs no policy field and fires under the zero
+// Policy too; it is mandatory for every class (mustRun's default), so a
+// RungProfile can never elide it. Bounded disclosure: the witness names only
+// the offending host + class, never the policy. Returns the verdict and whether
+// it decided this call.
+func egressRungVerdict(p Policy, egressList *egresslist.List, tool string, args map[string]any, cl class, pr *RungProfile) (abi.Verdict, bool) {
+	if !pr.runs(cl, rungEgress) {
+		return abi.Verdict{}, false
+	}
+	if host, label := egressfloor.Classify(tool, args, p.EgressExtraDenyHosts...); host != "" {
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  egressfloor.ReasonEgressBlock,
+			By:      "monitor",
+			Payload: abi.WitnessPayload{Claim: label + ": " + host},
+		}, true
+	}
+	// The operator-configurable band of the SAME rung, deliberately AFTER the
+	// hardwired check above: block/allow lists and the restrict posture (egresslist.go).
+	// Running second is what makes the floor un-openable — an allow rule naming the
+	// metadata host never gets asked, because Classify has already returned.
+	if v, ok := egressListVerdict(egressList, p, tool, args); ok {
+		return v, true
+	}
+	return abi.Verdict{}, false
+}
+
+// lintWriteRungVerdict is the LINT-WRITES rung (opt-in, #536): a whole-file write
+// of unparseable code is refused MALFORMED with a bounded file:line:col witness.
+// The Go/JSON grammars parse in-process (stdlib, no exec); any other language has
+// no in-process checker here and DEFERs (fail open). Bounded disclosure: the
+// witness names only the first finding, never the file content. Returns the
+// verdict and whether it decided this call.
+func lintWriteRungVerdict(p Policy, c *abi.ToolCall, args map[string]any, advisoryNotes []string, cl class, pr *RungProfile) (abi.Verdict, bool) {
+	if !pr.runs(cl, rungLintWrite) || !p.LintWrites || !wholeFileWrite(c.Tool) {
+		return abi.Verdict{}, false
+	}
+	if w := lintWriteMalformed(targetPath(args), args); w != "" {
+		return p.soften(abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonMalformed,
+			By:      "monitor",
+			Payload: abi.WitnessPayload{Claim: w},
+		}, advisoryNotes), true
+	}
+	return abi.Verdict{}, false
+}
+
+// applyRedactionTransforms prepares the dispatch-time argument transform: the CLI
+// grammar attenuation (an argument transform, not a textual advisory — a valid
+// read-only command with forbidden gh search scope qualifiers is rewritten before
+// dispatch; a non-read-only form was denied above) and the rungTransform
+// secret-field redaction. Returns the transformed args (nil when nothing was
+// rewritten) and whether any transform is pending.
+func applyRedactionTransforms(p Policy, argPreds []ArgPredicate, args map[string]any, cl class, pr *RungProfile) (map[string]any, bool) {
 	redactedArgs, redacted := map[string]any(nil), false
-	// CLI grammar attenuation is an argument transform, not a textual advisory.
-	// A valid read-only command with forbidden gh search scope qualifiers is
-	// rewritten before dispatch; a non-read-only form was denied above.
 	for _, pred := range argPreds {
 		if pred.Kind != ArgCLIReadOnly {
 			continue
@@ -572,18 +669,35 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 			redactedArgs, redacted = more, true
 		}
 	}
+	return redactedArgs, redacted
+}
 
-	// REVERSIBILITY (#2156): before any path that would otherwise dispatch the
-	// call (redact-transform, affirmative allow, or admit-and-log default allow),
-	// hold irreversible/outward-facing calls behind a deterministic preview token.
-	// Hard refusals above still win first, and a normally denied call is not handed
-	// a preview token it cannot use.
+// reversibilityRungResult carries the reversibility rung's state mutations back
+// to Adjudicate: the rung may replace the dispatch args (stripping the
+// confirmation arg) and re-run the redaction over them, so Adjudicate must adopt
+// the post-rung values on its transform/allow paths. handled/verdict carry an
+// early verdict (the untracked-removal allow, the autorepair transform, or the
+// hold); when handled is false the caller continues with the returned state.
+type reversibilityRungResult struct {
+	args               map[string]any
+	redactedArgs       map[string]any
+	redacted           bool
+	confirmedWithToken bool
+	verdict            abi.Verdict
+	handled            bool
+}
+
+// runReversibilityRung is the REVERSIBILITY rung (#2156): before any path that
+// would otherwise dispatch the call, hold irreversible/outward-facing calls
+// behind a deterministic preview token. Hard refusals before it still win first,
+// and a normally denied call is not handed a preview token it cannot use.
+func (a *Adjudicator) runReversibilityRung(ctx context.Context, p Policy, c *abi.ToolCall, args map[string]any, redactedArgs map[string]any, redacted bool, lowerTool string, cl class, pr *RungProfile) reversibilityRungResult {
 	confirmedWithToken := false
 	if pr.runs(cl, rungReversibility) && (redacted || wouldAdmit(p, c.Tool, lowerTool)) {
 		if a.selfAuthoredUntrackedRemoval(c, args) {
-			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/reversibility", Meta: map[string]string{
+			return reversibilityRungResult{handled: true, verdict: abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/reversibility", Meta: map[string]string{
 				"witness": "trace-authored-git-untracked",
-			}}
+			}}}
 		}
 		env, ok := ReversibilityConfirmed(c.Tool, args)
 		if !ok {
@@ -605,7 +719,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 					if !strings.EqualFold(c.Tool, env.RewriteTool) {
 						newTool = env.RewriteTool // cross-tool sidestep (e.g. MCP git_push -> Bash)
 					}
-					return abi.Verdict{
+					return reversibilityRungResult{handled: true, verdict: abi.Verdict{
 						Kind:    abi.VerdictTransform,
 						By:      "monitor/reversibility",
 						Payload: abi.TransformPayload{NewArgs: ref, NewTool: newTool},
@@ -614,10 +728,10 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 							"reversibility_class":        string(env.Class),
 							"reversibility_substitution": env.RewriteCommand,
 						},
-					}
+					}}
 				}
 			}
-			return reversibilityGateVerdict(env)
+			return reversibilityRungResult{handled: true, verdict: reversibilityGateVerdict(env)}
 		}
 		confirmedWithToken = env.Class != ReversibilityReversible && hasConfirmationArg(args)
 		if confirmedWithToken {
@@ -629,55 +743,34 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 			}
 		}
 	}
+	return reversibilityRungResult{args: args, redactedArgs: redactedArgs, redacted: redacted, confirmedWithToken: confirmedWithToken}
+}
 
-	// TRANSFORM: redact a secret-shaped arg field before dispatch. An advisory
-	// arg-rule note rides the transform's Meta so the logged trial is not lost
-	// when the call is repaired-and-dispatched rather than plainly allowed.
-	if redacted {
-		if ref, ok := putJSON(ctx, redactedArgs); ok {
-			v := abi.Verdict{Kind: abi.VerdictTransform, By: "monitor",
-				Payload: abi.TransformPayload{NewArgs: ref}}
-			if len(advisoryNotes) > 0 {
-				v.Meta = map[string]string{"advisory_violations": strings.Join(advisoryNotes, "; ")}
-			}
-			return v
-		}
-	}
-
-	// Affirmative allow.
-	if p.Allow[c.Tool] {
+// affirmativeAllowVerdict resolves the affirmative-allow rung: an explicit Allow
+// entry or an AllowPrefix match admits the call (stripping a spent confirmation
+// arg first when the reversibility rung confirmed with a token). Returns the
+// verdict and whether an affirmative allow matched; a false result falls through
+// to the read-only-hint and default-deny rungs.
+func affirmativeAllowVerdict(ctx context.Context, p Policy, tool string, args map[string]any, confirmedWithToken bool, advisoryNotes []string) (abi.Verdict, bool) {
+	if p.Allow[tool] {
 		if confirmedWithToken {
 			if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
-				return v
+				return v, true
 			}
 		}
-		return allowWithNotes("monitor", advisoryNotes)
+		return allowWithNotes("monitor", advisoryNotes), true
 	}
 	for _, pre := range p.AllowPrefix {
-		if strings.HasPrefix(c.Tool, pre) {
+		if strings.HasPrefix(tool, pre) {
 			if confirmedWithToken {
 				if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
-					return v
+					return v, true
 				}
 			}
-			return allowWithNotes("monitor", advisoryNotes)
+			return allowWithNotes("monitor", advisoryNotes), true
 		}
 	}
-
-	// exec_command's readOnlyHint is a classification request, not authority.
-	// Structural refusals and explicit policy decisions above keep precedence;
-	// only the narrow positive grammar may replace the default deny below.
-	if v, ok := a.execCommandReadOnlyVerdict(c, args); ok {
-		return v
-	}
-
-	// Nothing affirmatively allowed it — fail-closed default deny.
-	if confirmedWithToken && (p.admitAndLogLower(c.Tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
-		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
-			return v
-		}
-	}
-	return defaultDeny(p, c.Tool, lowerTool, advisoryNotes)
+	return abi.Verdict{}, false
 }
 
 // complainFor reports whether a tool is in the per-tool complain set (#670). A nil
