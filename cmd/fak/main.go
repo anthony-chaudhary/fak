@@ -119,6 +119,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, args))
 	case "temp-artifacts":
 		os.Exit(runTempArtifacts(os.Stdout, os.Stderr, args))
+	case "workspin":
+		cmdWorkspin(args)
 	case "codex-resume":
 		cmdCodexResume(args)
 	case "sessionjournal":

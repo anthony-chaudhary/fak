@@ -779,6 +779,7 @@ var tier = map[string]int{
 	"extensionfault":             1, // stdlib-only optional extension subprocess fault-isolation primitive.
 	"optsdefault":                1, // stdlib-only shared scorecard Options defaults (empty root, zero now).
 	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
+	"workspin":                   1, // stdlib-only deterministic busywork-trend classifier over bounded commit/issue observations; folded by the CLI (#10609).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

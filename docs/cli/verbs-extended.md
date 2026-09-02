@@ -279,6 +279,18 @@ On Windows, selection checks each exact candidate path against both `Win32_Proce
 
 Producer audit for this fallback: committed `os.MkdirTemp("", "fak-…")` build/cleanroom producers such as `cmd/fak/commit_buildcheck.go`, `cmd/fak/prepush_build.go`, `internal/committedtree`, `internal/devcmd/buildcheck`, `internal/nightrun/prebuild`, and `internal/workerworktree` own directories and use local cleanup where deterministic. Committed direct `os.CreateTemp` producers use non-allowlisted control extensions such as `.md`, `.json`, `.txt`, `.patch`, and `.index`. The incident's direct `.exe`, `.tar`, and `.zip` names have no committed deterministic producer to repair, so this bounded fallback owns interrupted and manual verification artifacts without widening those producer contracts.
 
+## `fak workspin`
+
+Run the bounded busywork-trend audit over recent repository activity (#10609):
+
+```text
+fak workspin [--repo DIR] [--since DURATION] [--buckets N] [--bucket DURATION] [--high-activity N] [--sustained N] [--issues FILE] [--now RFC3339] [--json]
+```
+
+The audit reads the bounded commit history window (default 28 days), classifies each observation deterministically — witnessed delivery (a `(fak <leaf>)` commit stamp or an explicitly marked delivery observation), maintenance (conventional chore/docs/test prefixes and small bounded diffs), or unwitnessed activity — and folds the observations into fixed time buckets. The verdict is fail-closed: `spinning` is reported only after `--sustained` consecutive buckets reach `--high-activity` observations with zero witnessed delivery. Occasional small cleanup amid delivered work stays healthy, and low activity is never mislabeled as spinning.
+
+`--issues` optionally adds issue observations from a JSON array or JSONL file so issue motion participates without requiring GitHub availability. `--now` pins the window end for deterministic replay. `--json` emits the `fak-workspin/1` report: verdict, reasons, bucket width, and the contributing buckets with their activity, maintenance, and delivery counts.
+
 ## `fak server`: own a loopback inference server
 
 `fak server` manages one local-process server instance through a receipt-backed lifecycle:
