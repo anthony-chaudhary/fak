@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/reportledger"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 
@@ -253,6 +254,13 @@ type LedgerRow struct {
 	HumanDir     string  `json:"human_dir,omitempty"`
 }
 
+// LedgerDate implements reportledger.Dated: the tick date the trend orders by.
+func (r LedgerRow) LedgerDate() string { return r.Date }
+
+// LedgerGeneratedAt implements reportledger.Dated: the same-run stamp that
+// breaks same-day ties and excludes a row's own prior generation.
+func (r LedgerRow) LedgerGeneratedAt() string { return r.GeneratedAt }
+
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
 	return LedgerRow{
@@ -302,7 +310,7 @@ func AppendLedgerLine(row LedgerRow) (string, error) {
 // "improved", a fall in either (with no rise) is "regressed". With no prior row it is
 // "new".
 func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
-	last, ok := latestBefore(row, prior)
+	last, ok := reportledger.LatestBefore(row, prior)
 	if !ok {
 		return Trend{
 			Direction:      "new",
@@ -342,14 +350,6 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		Summary: fmt.Sprintf("programs %s; kernel metric %+.3f (%.3f->%.3f), cache metric %+.3f (%.3f->%.3f), human metric %+.3f (%.3f->%.3f) vs %s",
 			dir, kDelta, last.KernelMetric, row.KernelMetric, cDelta, last.CacheMetric, row.CacheMetric, hDelta, last.HumanMetric, row.HumanMetric, last.Date),
 	}
-}
-
-// latestBefore returns the most recent prior row (by date, then generated_at),
-// excluding a row with the exact same generated_at (idempotent re-append).
-func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
-	return jsonlledger.LatestBefore(row, prior,
-		func(r LedgerRow) string { return r.Date },
-		func(r LedgerRow) string { return r.GeneratedAt })
 }
 
 // --- render + gate ----------------------------------------------------------

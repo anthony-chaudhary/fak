@@ -28,11 +28,11 @@ func (c *cudaBackend) Qwen35GDNSequence(
 	tokens, hidden := normalizedInput.Shape[0], normalizedInput.Shape[1]
 	row := normalizedInput
 	row.Shape = []int{hidden}
-	_, keyDim, valueDim, convDim, err := validateQwen35GDNGeometry(row, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
+	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
+	_, keyDim, valueDim, convDim, operands, err := in.entry(row, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	operands := qwen35GDNOperands(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if err := c.validateQwen35GDNOperands(operands, convState, recurrentState); err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
+	"github.com/anthony-chaudhary/fak/internal/reportledger"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -225,6 +226,13 @@ type LedgerRow struct {
 	ReleaseAction           string `json:"release_action"`
 	ReleaseCommitsBehind    int    `json:"release_commits_behind,omitempty"`
 }
+
+// LedgerDate implements reportledger.Dated: the tick date the trend orders by.
+func (r LedgerRow) LedgerDate() string { return r.Date }
+
+// LedgerGeneratedAt implements reportledger.Dated: the same-run stamp that
+// breaks same-day ties and excludes a row's own prior generation.
+func (r LedgerRow) LedgerGeneratedAt() string { return r.GeneratedAt }
 
 // --- pure interpretation of the sub-tool payloads --------------------------
 
@@ -465,7 +473,7 @@ func RowFromReport(r Report) LedgerRow {
 // health moves standing; the starting point is an arbitrary 1000-base index.
 func ProjectStanding(row LedgerRow, prior []LedgerRow) LedgerRow {
 	row.StandingHealthBP, row.StandingDifficulty = standingHealthBP(row)
-	last, ok := latestBefore(row, prior)
+	last, ok := reportledger.LatestBefore(row, prior)
 	if !ok {
 		row.StandingScore = standingBase
 		return row
@@ -538,7 +546,7 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 	if row.StandingScore == 0 {
 		row = ProjectStanding(row, prior)
 	}
-	last, ok := latestBefore(row, prior)
+	last, ok := reportledger.LatestBefore(row, prior)
 	if !ok {
 		return Trend{
 			Direction:            "new",
@@ -643,16 +651,6 @@ func trendDirection(debtDelta, standingDelta int, standingComparable bool) strin
 		return "regressed"
 	}
 	return "flat"
-}
-
-// latestBefore returns the most recent prior row, comparing by (date, then
-// generated_at) so a same-day re-run trends against the earlier same-day tick.
-// A row with the exact same generated_at as `row` is excluded (idempotent
-// re-append).
-func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
-	return jsonlledger.LatestBefore(row, prior,
-		func(r LedgerRow) string { return r.Date },
-		func(r LedgerRow) string { return r.GeneratedAt })
 }
 
 // AppendLedgerLine renders the JSONL line for a row (no trailing newline). The

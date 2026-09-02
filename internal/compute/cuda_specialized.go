@@ -227,18 +227,11 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	if err := c.faultLatch.Admit("qwen35-gdn-decode"); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	hidden, keyDim, valueDim, convDim, err := validateQwen35GDNGeometry(
-		normalizedInput,
-		inProjQKV, inProjZ, inProjB, inProjA,
-		conv1D, aLog, dtBias, norm, outProj,
-		convState, recurrentState,
-		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel,
-		rmsNormEpsilon,
-	)
+	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
+	hidden, keyDim, valueDim, convDim, operands, err := in.entry(normalizedInput, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	operands := qwen35GDNOperands(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if err := c.validateQwen35GDNOperands(operands, convState, recurrentState); err != nil {

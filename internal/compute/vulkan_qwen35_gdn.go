@@ -27,22 +27,9 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
 	rmsNormEpsilon float32,
 ) (output, nextConvState, nextRecurrentState Tensor, err error) {
-	_, _, _, _, err = validateQwen35GDNGeometry(
-		normalizedInput,
-		inProjQKV, inProjZ, inProjB, inProjA,
-		conv1D, aLog, dtBias, norm, outProj,
-		convState, recurrentState,
-		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel,
-		rmsNormEpsilon,
-	)
-	if err != nil {
+	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
+	if err := in.validateVulkanEntry(normalizedInput, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
-	}
-	operands := qwen35GDNOperands(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState)
-	for _, operand := range operands {
-		if _, ok := operand.t.buf.(*vulkanBuf); !ok {
-			return Tensor{}, Tensor{}, Tensor{}, fmt.Errorf("compute: vulkan Qwen GDN %s is not Vulkan-resident; no host fallback", operand.name)
-		}
 	}
 
 	mixed := v.MatMul(inProjQKV, normalizedInput)
@@ -59,6 +46,27 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 	output = v.MatMul(outProj, core)
 	return output, convState, recurrentState, nil
 }
+
+// validateVulkanEntry admits a decode-shaped GDN call onto the Vulkan path:
+// shared geometry validation first, then a residency check over every operand
+// with no host fallback.
+func (in qwen35GDNInputs) validateVulkanEntry(
+	input Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) error {
+	_, _, _, _, operands, err := in.entry(input, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
+	if err != nil {
+		return err
+	}
+	for _, operand := range operands {
+		if _, ok := operand.t.buf.(*vulkanBuf); !ok {
+			return fmt.Errorf("compute: vulkan Qwen GDN %s is not Vulkan-resident; no host fallback", operand.name)
+		}
+	}
+	return nil
+}
+
 func (v *vulkanBackend) Qwen35GDNPreprojected(
 	mixed, z, beta, alpha, conv1D, aLog, dtBias, norm, convState, recurrentState Tensor,
 	tokens, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,

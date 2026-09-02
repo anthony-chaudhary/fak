@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/generation"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/reportledger"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
@@ -517,6 +518,13 @@ type LedgerRow struct {
 	EpicOverallPct   float64 `json:"epic_overall_pct"`
 }
 
+// LedgerDate implements reportledger.Dated: the tick date the trend orders by.
+func (r LedgerRow) LedgerDate() string { return r.Date }
+
+// LedgerGeneratedAt implements reportledger.Dated: the same-run stamp that
+// breaks same-day ties and excludes a row's own prior generation.
+func (r LedgerRow) LedgerGeneratedAt() string { return r.GeneratedAt }
+
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
 	d := r.Maturity.Dist
@@ -557,7 +565,7 @@ func AppendLedgerLine(row LedgerRow) (string, error) {
 // roadmap pct — a climb up OR a roadmap gain is "improved"; a rung drop or lost
 // children is "regressed". With no prior row the trend is "new".
 func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
-	last, ok := latestBefore(row, prior)
+	last, ok := reportledger.LatestBefore(row, prior)
 	if !ok {
 		return Trend{
 			Direction:  "new",
@@ -597,15 +605,6 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 			dir, matDelta, last.MaturityProgress, row.MaturityProgress, maturedDelta,
 			epicDelta, last.EpicOverallPct, row.EpicOverallPct, last.Date),
 	}
-}
-
-// latestBefore returns the most recent prior row, comparing by (date, then
-// generated_at). A row with the exact same generated_at as `row` is excluded
-// (idempotent re-append), mirroring cadencereport.
-func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
-	return jsonlledger.LatestBefore(row, prior,
-		func(r LedgerRow) string { return r.Date },
-		func(r LedgerRow) string { return r.GeneratedAt })
 }
 
 // --- render + gate ----------------------------------------------------------

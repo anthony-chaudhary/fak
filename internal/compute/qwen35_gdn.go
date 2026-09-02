@@ -191,6 +191,47 @@ func qwen35GDNAllocations(namePrefix, nameSeparator string, scratchRows, outputR
 	}
 }
 
+// qwen35GDNInputs bundles the operand tensors every Qwen3.5 GDN entry point
+// threads through geometry validation and operand residency checks. Each
+// backend binds its method parameters once and reuses the derived helpers
+// instead of re-spelling the operand pack at every seam.
+type qwen35GDNInputs struct {
+	normalizedInput, inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor
+}
+
+// entry validates the shared entry-point geometry and builds the operand list
+// the backend residency checks walk. input is the tensor whose leading shape is
+// hidden: the decode paths pass normalizedInput itself, while the sequence path
+// validates a shape-flattened view of the same tensor (its operands keep the
+// panel tensor). On failure every entry point propagates the zero output
+// triple.
+func (in qwen35GDNInputs) entry(
+	input Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (hidden, keyDim, valueDim, convDim int, operands []qwen35GDNOperand, err error) {
+	hidden, keyDim, valueDim, convDim, err = validateQwen35GDNGeometry(
+		input,
+		in.inProjQKV, in.inProjZ, in.inProjB, in.inProjA,
+		in.conv1D, in.aLog, in.dtBias, in.norm, in.outProj,
+		in.convState, in.recurrentState,
+		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel,
+		rmsNormEpsilon,
+	)
+	if err != nil {
+		return 0, 0, 0, 0, nil, err
+	}
+	operands = qwen35GDNOperands(
+		in.normalizedInput,
+		in.inProjQKV, in.inProjZ, in.inProjB, in.inProjA,
+		in.conv1D, in.aLog, in.dtBias, in.norm, in.outProj,
+		in.convState, in.recurrentState,
+	)
+	return hidden, keyDim, valueDim, convDim, operands, nil
+}
+
 func validateQwen35GDNGeometry(
 	normalizedInput,
 	inProjQKV, inProjZ, inProjB, inProjA,
