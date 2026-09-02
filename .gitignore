@@ -493,6 +493,15 @@ fak.exe
 # (not relocation) is the fix; root-scoped /fak.exe.* catches every suffix without hiding fak.exe.
 /fak.exe.*
 
+# Same containment rule on the POSIX side: when the installed binary is the in-checkout
+# /fak, internal/selfinstall leaves its transaction state beside it — the verified
+# rollback slot fak.self-update-prior (launchstate.go) and the live install-identity
+# fak.self-update-identity.json (identity.go IdentityStatePath). Both are runtime state
+# owned by selfinstall, NOT repo output: the identity json is what a later
+# `fak self-update` reads to verify/roll back, so never delete or relocate it; root-scoped
+# /fak.self-update-* catches every suffix without hiding /fak.
+/fak.self-update-*
+
 # transient stderr captured by the dogfood launchers (committed evidence is the
 # probe JSON next to it, not the log)
 experiments/agent-live/*-stderr.log
