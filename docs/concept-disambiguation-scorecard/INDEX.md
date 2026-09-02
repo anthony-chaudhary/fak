@@ -278,8 +278,8 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `cacheerr` | **GoCacheReport.Err (Go build-cache lifecycle error)** | cache / symbol | gocache-lifecycle-freebytes, gocache-lifecycle-options |
 |  | `CacheEventRecorder (engine event seam) <br><small>cacheeventrecorder</small>` | **CacheEventRecorder (engine event seam)** | cache / symbol | cachemeta, enginecache |
 |  | `cacheeventresult` | **CacheEventRecorder (engine event seam)** | cache / symbol | cachemeta, enginecache |
-|  | `cachefill` | **cache-fill fixture** | cache / artifact | cache-fill-observability, prompt-cache, vcache |
-|  | `cache-fill fixture <br><small>cachefill fixture</small>` | **cache-fill fixture** | cache / artifact | cache-fill-observability, prompt-cache, vcache |
+|  | `cachefill` | **cache-fill fixture** | cache / concept | prompt-cache, vcache, x-cache-cacheobs |
+|  | `cache-fill fixture <br><small>cachefill fixture</small>` | **cache-fill fixture** | cache / concept | prompt-cache, vcache, x-cache-cacheobs |
 |  | `cachegen` | **LMCache/MLCache (external KV-cache study refs)** | cache / doc-term | KV cache, L3 disaggregated cache (study), cachemeta |
 |  | `cachegeometrymu` | **cache implementation surface for cachegeometrymu** | cache / symbol | promptcachekey |
 |  | `CacheGiB` | **CacheGiB** | cache / symbol | enginecache, x-cache-cachehit, x-goal25-cache-cachebit |

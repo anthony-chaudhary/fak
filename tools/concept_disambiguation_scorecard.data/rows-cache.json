@@ -437,13 +437,13 @@
       "id": "cache-fill-fixture",
       "canonical": "cache-fill fixture",
       "family": "cache",
-      "kind": "artifact",
+      "kind": "concept",
       "definition": "A deterministic test payload written by the vCache fixture generator so the inspection command can exercise manifest and payload validation without contacting a live provider cache.",
-      "distinction": "It is generated TEST INPUT for cache inspection, not an operation that warms a provider prompt cache and not cachefill telemetry or policy.",
+      "distinction": "It is generated TEST INPUT for cache inspection, not an operation that warms a provider prompt cache and not cacheobs, the cache-lifecycle telemetry tap.",
       "distinct_from": [
         "vcache",
         "prompt-cache",
-        "cache-fill-observability"
+        "x-cache-cacheobs"
       ],
       "aliases": [
         "cachefill fixture"

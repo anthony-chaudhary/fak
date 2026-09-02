@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **18** (clarity 2 + coverage 16) |
+| **Disambiguation-debt (drive to 0)** | **16** (clarity 0 + coverage 16) |
 | **Crystal-clear concepts (and climbing)** | **1001** crystal of 2721 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2838 / 2854** (99.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 214 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **81** of 3850 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.6/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2721 concepts - score 98.9/100 (grade A) - disambiguation-debt 18
+concept-disambiguation chart - 2721 concepts - score 99.6/100 (grade A) - disambiguation-debt 16
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 1001
@@ -118,8 +118,8 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **214 / 214** (214 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1882 / 4882 |
-| Dangling `distinct_from` references (drive to 0) | 1 |
+| Boundaries drawn (mutual / total) | 1882 / 4883 |
+| Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
 
@@ -200,7 +200,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **CachePhaseLatency (phase bucket)** - modelperfobs.CachePhaseLatency is one immutable value bucket in a cache-phase latency receipt: a normalized prefill, decode, or other phase label paired with its observation count and accumulated duration. |
 | * | crystal | symbol | cache | **CachePhaseLatencyReceipt (reconciled snapshot)** - modelperfobs.CachePhaseLatencyReceipt is the stable exported snapshot that places the unlabeled observation and duration totals beside the fixed-order prefill, decode, and other CachePhaseLatency buckets from which those totals are derived. |
 | * | crystal | symbol | cache | **CachePhaseLatencyRecorder (bounded accumulator)** - modelperfobs.CachePhaseLatencyRecorder is the concurrency-safe live accumulator that normalizes caller-supplied phase labels into the closed prefill, decode, and other vocabulary, clamps negative durations, and derives CachePhaseLatencyReceipt snapshots from its counters. |
-| * | crystal | artifact | cache | **cache-fill fixture** - A deterministic test payload written by the vCache fixture generator so the inspection command can exercise manifest and payload validation without contacting a live provider cache. |
+| * | crystal | concept | cache | **cache-fill fixture** - A deterministic test payload written by the vCache fixture generator so the inspection command can exercise manifest and payload validation without contacting a live provider cache. |
 | * | crystal | symbol | cache | **local_cache_hit** - A served prompt token reused from a KV prefix already resident on THIS box (an in-session prefix or a shared local KV store); one of the three cacheobs provenance-axis buckets (#3896, vLLM's by_source label). |
 | * | crystal | symbol | cache | **Qwen3.8 cache campaign** - Versioned exact-model workflow-cache benchmark corpus and fold for the first-class Qwen3.8 default. |
 | * | crystal | symbol | cache | **CacheGiB** - coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through. |
@@ -2991,14 +2991,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
-| well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3000/4882 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 3001/4883 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2721 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
+| separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_separated` | 100 | 0 | all 214 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
