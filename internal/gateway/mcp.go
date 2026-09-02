@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +13,9 @@ import (
 	"path"
 	"reflect"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
@@ -553,17 +556,64 @@ func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (Wi
 	// engine) or a model id, neither of which can read a file. k.Syscall honors a non-empty
 	// c.Engine, so this is what dispatches a miss to readEngine.
 	tc.Engine = agent.FakReadEngineID
+	started := time.Now()
 	r, v := s.k.Syscall(ctx, tc)
+	duration := time.Since(started)
 	wv := renderVerdict(v, resultMeta(r))
 	var env *ResultEnvelope
 	if r != nil {
+		payload := resolveBytes(ctx, r.Payload)
+		payload = fakReadReceipt(payload, r, duration)
 		env = &ResultEnvelope{
 			Status:  statusName(r.Status),
-			Content: string(resolveBytes(ctx, r.Payload)),
+			Content: string(payload),
 			Meta:    r.Meta,
 		}
 	}
 	return wv, env, nil
+}
+
+// fakReadReceipt adds the additive fak_read/1 receipt to the legacy JSON payload. Existing
+// file_path/content/error fields are preserved. The receipt is rebuilt after every syscall so
+// a cached payload can never falsely retain the cold-read outcome or its latency.
+func fakReadReceipt(payload []byte, r *abi.Result, duration time.Duration) []byte {
+	var body map[string]any
+	if json.Unmarshal(payload, &body) != nil {
+		return payload
+	}
+	outcome := "executed_cold_read"
+	witness := "filesystem_read"
+	if r != nil && r.Meta != nil && r.Meta["served_by"] == "vdso" {
+		outcome = "verified_fresh_reuse"
+		witness = "vdso"
+	}
+	byteCount := 0
+	if encoded, ok := body["content_base64"].(string); ok {
+		if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+			byteCount = len(decoded)
+		}
+	} else if content, ok := body["content"].(string); ok {
+		byteCount = len([]byte(content))
+	}
+	receipt := map[string]any{
+		"schema":             "fak-read-receipt/1",
+		"outcome":            outcome,
+		"bytes":              byteCount,
+		"duration_ns":        duration.Nanoseconds(),
+		"freshness_verified": true,
+		"witness":            witness,
+	}
+	if code, ok := body["error_code"].(string); ok {
+		receipt["freshness_verified"] = false
+		receipt["witness"] = "filesystem_read_attempt"
+		receipt["error"] = map[string]any{"code": code, "source": body["error_source"]}
+	}
+	body["receipt"] = receipt
+	out, err := json.Marshal(body)
+	if err != nil {
+		return payload
+	}
+	return out
 }
 
 // fakReadBatch is the additive batch form of fak_read. Each path crosses fakRead on its
@@ -717,7 +767,7 @@ func toolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_read",
-			"description": "Read files through the fak kernel instead of the built-in Read tool. When a file was read before and has not changed, fak serves the cached contents WITHOUT touching disk (a verified-fresh cache hit); otherwise it reads the file. Prefer {file_paths:[...]} for independent reads so one call expresses their width; {file_path} remains the unchanged single-file form. Every path is adjudicated and cached independently, and batch results stay in request order.",
+			"description": "Read files through the fak kernel instead of the built-in Read tool. When a file was read before and has not changed, fak serves the cached contents WITHOUT touching disk (a verified-fresh cache hit); otherwise it reads the file. Each result preserves file_path/content/error compatibility and adds receipt {schema,outcome,bytes,duration_ns,freshness_verified,witness,error?}; outcome is executed_cold_read or verified_fresh_reuse, and typed errors expose code/source without raw filesystem text. Prefer {file_paths:[...]} for independent reads so one call expresses their width; {file_path} remains the unchanged single-file form. Every path is adjudicated and cached independently, and batch results stay in request order.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {

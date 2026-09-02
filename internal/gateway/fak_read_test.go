@@ -22,6 +22,13 @@ func (readAdj) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	return abi.Verdict{Kind: abi.VerdictAllow, By: "test"}
 }
 
+type deferReadAdj struct{}
+
+func (deferReadAdj) Caps() []abi.Capability { return nil }
+func (deferReadAdj) Adjudicate(context.Context, *abi.ToolCall) abi.Verdict {
+	return abi.Verdict{Kind: abi.VerdictDefer, By: "test"}
+}
+
 // TestFakRead_ServesFreshHitNotStale is the end-to-end #795 vToolcall witness: a second
 // fak_read of an unchanged file is served from the vDSO with NO disk read (VDSOHits++,
 // EngineCalls flat), and after a Write/Edit to that path the next fak_read MISSES and reads
@@ -81,8 +88,15 @@ func TestFakRead_ServesFreshHitNotStale(t *testing.T) {
 	// Call 2: HIT — served from the vDSO, NO disk read, NO engine dispatch.
 	got2 := read()
 	c2 := srv.k.Counters()
-	if got2 != got1 {
-		t.Fatalf("call 2 content = %q, want identical to call 1 %q", got2, got1)
+	var body1, body2 map[string]any
+	if err := json.Unmarshal([]byte(got1), &body1); err != nil {
+		t.Fatalf("call 1 payload: %v", err)
+	}
+	if err := json.Unmarshal([]byte(got2), &body2); err != nil {
+		t.Fatalf("call 2 payload: %v", err)
+	}
+	if body2["content"] != body1["content"] {
+		t.Fatalf("call 2 content = %q, want identical file bytes %q", body2["content"], body1["content"])
 	}
 	if c2.VDSOHits <= c1.VDSOHits {
 		t.Fatalf("call 2 was NOT served from the vDSO (VDSOHits %d -> %d): the cache hit did not fire",
@@ -229,5 +243,171 @@ func TestNewArmsAdvertisedFakReadRoute(t *testing.T) {
 		if payload.FilePath != files[i] || payload.Content != want[files[i]] || item.Result.Meta["engine"] != agent.FakReadEngineID {
 			t.Fatalf("batch result[%d] payload=%+v meta=%+v", i, payload, item.Result.Meta)
 		}
+	}
+}
+
+func decodeFakReadPayload(t testing.TB, env *ResultEnvelope) map[string]any {
+	t.Helper()
+	if env == nil {
+		t.Fatal("nil fak_read result")
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(env.Content), &body); err != nil {
+		t.Fatalf("decode fak_read payload: %v", err)
+	}
+	return body
+}
+
+func receiptOf(t testing.TB, body map[string]any) map[string]any {
+	t.Helper()
+	r, ok := body["receipt"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing receipt: %v", body)
+	}
+	return r
+}
+
+func TestFakReadReceiptOutcomesAndNoLeak(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+	root := t.TempDir()
+	agent.RegisterReadEngine(root)
+	path := filepath.Join(root, "receipt.txt")
+	if err := os.WriteFile(path, []byte("receipt-secret-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v := vdso.New(vdso.DefaultCacheSize)
+	v.SetGranularity(vdso.Resource)
+	abi.RegisterFastPath(1, v)
+	abi.RegisterEmitter(v)
+	srv, err := New(Config{EngineID: "fakread", Model: "m", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	read := func(p string) map[string]any {
+		_, env, err := srv.fakRead(context.Background(), p, "receipt-trace", "git:fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decodeFakReadPayload(t, env)
+	}
+	cold := read(path)
+	coldReceipt := receiptOf(t, cold)
+	if coldReceipt["outcome"] != "executed_cold_read" || coldReceipt["witness"] != "filesystem_read" {
+		t.Fatalf("cold receipt=%v", coldReceipt)
+	}
+	if coldReceipt["bytes"] != float64(len("receipt-secret-body")) || coldReceipt["duration_ns"].(float64) < 0 {
+		t.Fatalf("cold accounting=%v", coldReceipt)
+	}
+	hit := read(path)
+	hitReceipt := receiptOf(t, hit)
+	if hitReceipt["outcome"] != "verified_fresh_reuse" || hitReceipt["witness"] != "vdso" {
+		t.Fatalf("hit receipt=%v", hitReceipt)
+	}
+	if hit["content"] != cold["content"] {
+		t.Fatalf("reuse changed bytes")
+	}
+
+	missing := read(filepath.Join(root, "missing-secret-name.txt"))
+	missingReceipt := receiptOf(t, missing)
+	errMeta, ok := missingReceipt["error"].(map[string]any)
+	if !ok || errMeta["code"] != "not_found" || errMeta["source"] != "filesystem" {
+		t.Fatalf("typed error=%v", missingReceipt)
+	}
+	encoded, _ := json.Marshal(missingReceipt)
+	if strings.Contains(string(encoded), "receipt-secret-body") || strings.Contains(string(encoded), "missing-secret-name") || strings.Contains(string(encoded), root) {
+		t.Fatalf("receipt leaked content/path: %s", encoded)
+	}
+}
+
+func TestFakReadNeverStaleAcrossMutationClasses(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+	root := t.TempDir()
+	agent.RegisterReadEngine(root)
+	path := filepath.Join(root, "mutate.txt")
+	v := vdso.New(vdso.DefaultCacheSize)
+	v.SetGranularity(vdso.Resource)
+	abi.RegisterFastPath(1, v)
+	abi.RegisterEmitter(v)
+	srv, err := New(Config{EngineID: "fakread", Model: "m", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	invalidate := func() {
+		args, _ := json.Marshal(map[string]string{"file_path": path, "old_string": "x", "new_string": "y"})
+		v.Emit(abi.Event{Kind: abi.EvComplete, Call: &abi.ToolCall{Tool: "Edit", Args: abi.Ref{Kind: abi.RefInline, Inline: args}}, Result: &abi.Result{Status: abi.StatusOK, Meta: map[string]string{}}})
+	}
+	read := func() map[string]any {
+		_, env, err := srv.fakRead(context.Background(), path, "mutate-trace", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decodeFakReadPayload(t, env)
+	}
+	for _, want := range []string{"aaaa", "bbbb", "x", "growth-value"} {
+		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		invalidate()
+		body := read()
+		if body["content"] != want {
+			t.Fatalf("stale after mutation: got %q want %q", body["content"], want)
+		}
+		if receiptOf(t, body)["outcome"] != "executed_cold_read" {
+			t.Fatalf("mutation reused stale entry: %v", body)
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	invalidate()
+	if body := read(); receiptOf(t, body)["error"].(map[string]any)["code"] != "not_found" {
+		t.Fatalf("delete=%v", body)
+	}
+	if err := os.WriteFile(path, []byte("recreated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	invalidate()
+	if body := read(); body["content"] != "recreated" {
+		t.Fatalf("recreate=%v", body)
+	}
+}
+
+func TestFakReadPreservesDefaultDeny(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, deferReadAdj{})
+	root := t.TempDir()
+	agent.RegisterReadEngine(root)
+	path := filepath.Join(root, "must-not-read.txt")
+	if err := os.WriteFile(path, []byte("denied-secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Config{EngineID: "fakread", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	before := srv.k.Counters()
+	verdict, env, err := srv.fakRead(context.Background(), path, "deny-trace", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := srv.k.Counters()
+	if verdict.Kind != "DENY" || verdict.Reason != "DEFAULT_DENY" {
+		t.Fatalf("verdict=%+v", verdict)
+	}
+	if env == nil || env.Status != "ERROR" || env.Content != "" {
+		t.Fatalf("denied read leaked a payload: %+v", env)
+	}
+	if after.EngineCalls != before.EngineCalls {
+		t.Fatalf("denied read reached engine: before=%+v after=%+v", before, after)
 	}
 }

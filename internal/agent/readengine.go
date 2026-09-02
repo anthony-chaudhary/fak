@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -69,31 +71,45 @@ func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 // bytes (or a JSON error object on any failure). The result is always JSON so the MCP wire
 // shape is stable; a successful read returns {"file_path":..., "content":...}.
 func (e readEngine) read(pathArg string) (result []byte, isError bool) {
-	errf := func(format string, a ...any) ([]byte, bool) {
-		b, _ := json.Marshal(map[string]any{"error": fmt.Sprintf(format, a...)})
+	errResult := func(code, source, message string) ([]byte, bool) {
+		b, _ := json.Marshal(map[string]any{
+			"error":        "fak_read: " + message,
+			"error_code":   code,
+			"error_source": source,
+		})
 		return b, true
 	}
 	if pathArg == "" {
-		return errf("fak_read: missing required field: file_path")
+		return errResult("missing_path", "input", "missing required field: file_path")
 	}
 	abs := pathArg
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(e.root, abs)
 	}
 	abs = filepath.Clean(abs)
-	// Confinement: the cleaned absolute path must stay inside the root. filepath.Rel of a
-	// path outside the root yields a "../" prefix; refuse it. (EvalSymlinks is deliberately
-	// NOT applied — it would touch the filesystem for a path we may refuse anyway; the Rel
-	// check on the cleaned path stops the common ".." traversal, and the engine is read-
-	// only so the worst case is reading a symlinked file inside the tree.)
 	if rel, err := filepath.Rel(e.root, abs); err != nil || rel == ".." || hasDotDotPrefix(rel) {
-		return errf("fak_read: path escapes the read root: %s", pathArg)
+		return errResult("path_escape", "confinement", "path escapes the read root")
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
-		return errf("fak_read: %v", err)
+		if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
+			return errResult("is_directory", "filesystem", "path is a directory")
+		}
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return errResult("not_found", "filesystem", "file not found")
+		case errors.Is(err, os.ErrPermission):
+			return errResult("permission_denied", "filesystem", "permission denied")
+		default:
+			return errResult("io_error", "filesystem", "filesystem read failed")
+		}
 	}
-	b, _ := json.Marshal(map[string]any{"file_path": pathArg, "content": string(data)})
+	body := map[string]any{"file_path": pathArg, "content": string(data)}
+	if !utf8.Valid(data) {
+		body["encoding"] = "base64"
+		body["content_base64"] = base64.StdEncoding.EncodeToString(data)
+	}
+	b, _ := json.Marshal(body)
 	return b, false
 }
 

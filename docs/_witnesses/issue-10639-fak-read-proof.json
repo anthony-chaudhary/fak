@@ -1,0 +1,136 @@
+{
+  "schema": "fak-read-proof/1",
+  "issue": 10639,
+  "base": "db49ad57054d32d5514a3e28bbfe207912e6c5aa",
+  "generated_at": "2026-09-01",
+  "scope": {
+    "included": "fak_read outcome receipt, adversarial correctness, discovery/schema semantics, and equal-fixture baseline",
+    "excluded": "#10018 paged-ref restoration"
+  },
+  "contract": {
+    "receipt_schema": "fak-read-receipt/1",
+    "outcomes": [
+      "executed_cold_read",
+      "verified_fresh_reuse"
+    ],
+    "fields": [
+      "bytes",
+      "duration_ns",
+      "freshness_verified",
+      "witness",
+      "error.code",
+      "error.source"
+    ],
+    "compatibility": "legacy file_path, content, and top-level error fields are preserved; binary reads add content_base64 for exact bytes",
+    "default_deny": "verified by a deferred adjudicator folding to DEFAULT_DENY without an engine call or payload",
+    "never_stale": "resource-epoch invalidation forces a cold read after same-size rewrite, truncation, growth, delete, and recreate"
+  },
+  "deterministic": {
+    "command": "go test ./internal/agent ./internal/gateway -run 'FakRead|ReadEngine|DeferMCPTools' -count=1 -timeout=60s",
+    "result": "pass",
+    "packages": {
+      "github.com/anthony-chaudhary/fak/internal/agent": "ok 0.044s",
+      "github.com/anthony-chaudhary/fak/internal/gateway": "ok 0.056s"
+    },
+    "cases": [
+      "missing path",
+      "not found",
+      "directory",
+      "Unicode and space path",
+      "empty content",
+      "binary exact-byte round trip",
+      "large content",
+      "cold read versus verified-fresh reuse",
+      "same-size rewrite",
+      "truncation",
+      "growth",
+      "delete and recreate",
+      "concurrent reads",
+      "path escape confinement",
+      "typed stable errors without path/content leakage",
+      "default-deny without engine execution",
+      "deferred tool discovery and schema"
+    ]
+  },
+  "fuzz": [
+    {
+      "command": "go test ./internal/agent -run '^$' -fuzz FuzzReadEngineRoundTrip -fuzztime=2s -parallel=1 -timeout=30s",
+      "result": "pass",
+      "executions": 2468,
+      "new_interesting": 3
+    },
+    {
+      "command": "go test ./internal/gateway -run '^$' -fuzz FuzzFakReadPayloadRoundTrip -fuzztime=2s -parallel=1 -timeout=30s",
+      "result": "pass",
+      "executions": 1099,
+      "new_interesting": 5
+    }
+  ],
+  "benchmark_environment": {
+    "goos": "windows",
+    "goarch": "amd64",
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "fixture_bytes": 65536
+  },
+  "benchmarks": [
+    {
+      "command": "go test ./internal/agent ./internal/gateway -run '^$' -bench 'Benchmark(ReadEngine|FakRead)$' -benchmem -count=1",
+      "name": "BenchmarkReadEngine-32",
+      "iterations": 3032,
+      "ns_per_op": 425862,
+      "mb_per_s": 153.89,
+      "bytes_per_op": 909740,
+      "allocs_per_op": 21
+    },
+    {
+      "command": "go test ./internal/agent ./internal/gateway -run '^$' -bench 'Benchmark(ReadEngine|FakRead)$' -benchmem -count=1",
+      "results": [
+        {
+          "name": "BenchmarkFakRead/direct_os_readfile-32",
+          "iterations": 33904,
+          "ns_per_op": 33171,
+          "mb_per_s": 1975.72,
+          "bytes_per_op": 74311,
+          "allocs_per_op": 5
+        },
+        {
+          "name": "BenchmarkFakRead/cold_guarded_read-32",
+          "iterations": 475,
+          "ns_per_op": 3635849,
+          "mb_per_s": 18.02,
+          "bytes_per_op": 3992167,
+          "allocs_per_op": 151
+        },
+        {
+          "name": "BenchmarkFakRead/verified_fresh_reuse-32",
+          "iterations": 421,
+          "ns_per_op": 2465050,
+          "mb_per_s": 26.59,
+          "bytes_per_op": 2640441,
+          "allocs_per_op": 163
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "The gateway benchmark includes full adjudication, kernel, and receipt serialization overhead; verified-fresh reuse remains much slower than direct os.ReadFile on this Windows host.",
+    "These measurements are a local baseline, not a production performance claim."
+  ],
+  "validation": {
+    "scoped_validate": {
+      "command": "fak validate --mine <exact changed paths>",
+      "result": "infrastructure failure before validation",
+      "detail": "detached-worktree gitdir was incorrectly prefixed under WSL; focused isolated-worktree tests are the completion gate"
+    },
+    "full_package_probe": {
+      "command": "go test ./internal/agent ./internal/gateway -count=1 -timeout=180s",
+      "result": "unrelated existing failures",
+      "failing_tests": [
+        "internal/agent TestStreamAnthropicRaw_RetriesInBandOverloadedThenStreams",
+        "internal/agent TestInKernelForwardEmitsLiftableToolCall",
+        "internal/agent TestComplete_Transient502RecoversOnAlternateTarget",
+        "internal/gateway TestResponsesFunctionCallOutputRejectsUnsupportedShapeBeforePlanner (object, empty_array, image_part, missing_text, non_string_text)"
+      ]
+    }
+  }
+}
