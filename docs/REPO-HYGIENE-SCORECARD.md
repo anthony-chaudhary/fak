@@ -15,11 +15,11 @@ This is the measuring stick for the repo-3x program — the structural counterpa
 
 | Metric | Value |
 |---|---|
-| **Hygiene-debt (total HARD defects)** | **14** |
+| **Hygiene-debt (total HARD defects)** | **13** |
 | **a11y-debt (accessibility HARD defects)** | **0** |
-| Composite score | 85.6/100 (grade B) |
+| Composite score | 86.3/100 (grade B) |
 | Advisory (soft) signals | 598 |
-| Debt by group | verbosity:10 · organization:4 · indexing:0 · accessibility:0 |
+| Debt by group | verbosity:10 · organization:3 · indexing:0 · accessibility:0 |
 
 ## Per-KPI
 
@@ -28,8 +28,8 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | verbosity | `bloat` | 0 | 10 | 10 oversized, 14 long |
-| organization | `dir_discipline` | 52 | 4 | 4 near-duplicate dir group(s) |
-| accessibility | `plain_language` | 65 | 0 | 234 dense doc(s), 497 doc(s) with undefined acronyms, 23 literal-reader idiom(s) |
+| organization | `dir_discipline` | 64 | 3 | 3 near-duplicate dir group(s) |
+| accessibility | `plain_language` | 65 | 0 | 234 dense doc(s), 498 doc(s) with undefined acronyms, 23 literal-reader idiom(s) |
 | verbosity | `redundancy` | 80 | 0 | 0 near-duplicate pair(s), 8 candidate(s) |
 | accessibility | `ai_tells` | 85 | 0 | no AI-tell phrases |
 | accessibility | `jargon` | 86 | 0 | 312 naked first-screen jargon term(s) (0.3/doc) |
@@ -54,9 +54,8 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 - oversized doc docs/generated/disambiguation/canonical-terms.md (1024 lines > 1000) — split into sections or trim
 - oversized doc docs/generated/verb-surface.md (1073 lines > 1000) — split into sections or trim
 
-### `dir_discipline` (organization) — 4 defect(s), score 52
+### `dir_discipline` (organization) — 3 defect(s), score 64
 - near-duplicate sibling dirs: ['config', 'configs'] — merge into one
-- near-duplicate sibling dirs: ['docs/benchmark', 'docs/benchmarking', 'docs/benchmarks'] — merge into one
 - near-duplicate sibling dirs: ['internal/ctxplan', 'internal/ctxplans'] — merge into one
 - near-duplicate sibling dirs: ['internal/market', 'internal/marketing'] — merge into one
 

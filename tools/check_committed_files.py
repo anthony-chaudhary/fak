@@ -79,7 +79,7 @@ SOFT_JUNK = [
 EXEMPT_DATA_DIRS = ("experiments/", "testdata/", "internal/", "fak/experiments/", "fak/testdata/")
 # Specific tracked files that trip a soft rule but are intentionally kept.
 KEEP_EXCEPTIONS = {
-    "fak/demorace-err.log",  # cited as evidence in docs/benchmarking/FINAL-ANALYSIS.md
+    "fak/demorace-err.log",  # cited as evidence in docs/benchmarks/FINAL-ANALYSIS.md
 }
 
 # One-run worker fuel is control-plane residue, not a reusable project prompt. Keep this

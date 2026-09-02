@@ -371,7 +371,7 @@ python tools/bench_chart.py \
 python tools/bench_chart.py \
   --model smollm2-135m \
   --format png \
-  --output docs/benchmark/throughput-2025-01-06.png
+  --output docs/benchmarks/throughput-2025-01-06.png
 ```
 
 ### Chart Output

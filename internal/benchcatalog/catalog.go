@@ -161,7 +161,7 @@ var registry = []Bench{
 		Summary: "Aggregates the committed benchmark score.json results into a cross-model score matrix and re-derives every ratio, so a drifted or overclaimed number fails the scan  -  the record-and-verify half of the benchmark loop.",
 		Run:     "go run ./cmd/benchscore -root experiments/benchmark/runs",
 		Flags:   []string{"-root  -  directory tree scanned for score.json files", "-json  -  emit JSON instead of the markdown matrix"},
-		Doc:     "docs/benchmark/ARM64-QKERNEL-SCORE.md",
+		Doc:     "docs/benchmarks/ARM64-QKERNEL-SCORE.md",
 	},
 	{
 		Name: "browseractionbench", Kind: KindCmd, Need: NeedNone,

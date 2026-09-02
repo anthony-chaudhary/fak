@@ -40,5 +40,5 @@ present, so missing weights are visible instead of silently faking a race.
 This demo is for live serving behavior on the current machine. It does not claim a portable
 wall-clock benchmark, does not use missing model rungs as evidence, and does not compare
 against cold-cache baselines as the headline. For benchmark framing, see
-[`../../docs/benchmarking/README.md`](../../docs/benchmarking/README.md) and
+[`../../docs/benchmarks/LEGACY-BENCH-INDEX.md`](../../docs/benchmarks/LEGACY-BENCH-INDEX.md) and
 [`../../CLAIMS.md`](../../CLAIMS.md).
