@@ -1,6 +1,7 @@
 package vdso
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -122,7 +123,16 @@ func (v *VDSO) resolveWitness(c *abi.ToolCall, r *abi.Result) string {
 			}
 		}
 	}
-	return defaultWitnessOf(c, r)
+	if w := defaultWitnessOf(c, r); w != "" {
+		return w
+	}
+	if c != nil {
+		args := v.bytes(context.Background(), c.Args)
+		if w := deriveFileWitness(c.Tool, args); w != "" {
+			return w
+		}
+	}
+	return ""
 }
 
 // emitCache builds a cachemeta entry from a tier-2 identity and dispatches it to the
