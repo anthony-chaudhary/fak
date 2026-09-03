@@ -472,3 +472,66 @@ func TestMaxQueuedTokensShed(t *testing.T) {
 		t.Fatalf("stats after schedule: running=%d waiting=%d queuedTokens=%d, want 1/0/0", st.Running, st.Waiting, st.QueuedTokens)
 	}
 }
+
+// TestDecodeTTLSchedulerWitness (#9914):
+// First witness: queues two requests, advances a fake clock, expires only the old request,
+// and proves the scheduler continues the fresh request.
+func TestDecodeTTLSchedulerWitness(t *testing.T) {
+	c := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 16, AgingRounds: 1})
+
+	// Admit a blocking request so subsequent requests must queue
+	c.Offer(SeqRequest{TraceID: "blocking", Tokens: 10})
+
+	t0 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+
+	// Queue request A: short TTL 100ms
+	vA := c.Offer(SeqRequest{
+		TraceID:   "req_old_a",
+		Tokens:    10,
+		CreatedAt: t0,
+		DecodeTTL: 100 * time.Millisecond,
+	})
+	if vA != VerdictQueued {
+		t.Fatalf("expected req_old_a queued, got %v", vA)
+	}
+
+	// Queue request B: fresh TTL 500ms
+	vB := c.Offer(SeqRequest{
+		TraceID:   "req_fresh_b",
+		Tokens:    10,
+		CreatedAt: t0,
+		DecodeTTL: 500 * time.Millisecond,
+	})
+	if vB != VerdictQueued {
+		t.Fatalf("expected req_fresh_b queued, got %v", vB)
+	}
+
+	if st := c.Stats(); st.Waiting != 2 {
+		t.Fatalf("expected 2 waiters, got %d", st.Waiting)
+	}
+
+	// Advance fake clock past req_old_a's TTL (+200ms) but BEFORE req_fresh_b's TTL
+	fakeNow := t0.Add(200 * time.Millisecond)
+
+	expired := c.ExpireRequests(fakeNow)
+	if len(expired) != 1 || expired[0] != "req_old_a" {
+		t.Fatalf("expected only [req_old_a] expired, got %v", expired)
+	}
+
+	if st := c.Stats(); st.Waiting != 1 || st.Expired != 1 {
+		t.Fatalf("expected 1 waiter remaining and 1 expired; got waiting=%d, expired=%d", st.Waiting, st.Expired)
+	}
+
+	// Complete the blocking request
+	c.Complete("blocking")
+
+	// Verify the scheduler continues and admits the fresh request B
+	admitted := c.Schedule()
+	if len(admitted) != 1 || admitted[0].TraceID != "req_fresh_b" {
+		t.Fatalf("expected scheduler to continue fresh request [req_fresh_b], got %v", admitted)
+	}
+
+	if st := c.Stats(); st.Running != 1 || st.Waiting != 0 {
+		t.Fatalf("expected 1 running, 0 waiting; got running=%d, waiting=%d", st.Running, st.Waiting)
+	}
+}
