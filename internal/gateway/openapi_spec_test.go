@@ -46,6 +46,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/events":                "/v1/fak/events",
 	"/v1/fak/vcache/score":          "/v1/fak/vcache/score",
 	"/v1/fak/vcache/actions":        "/v1/fak/vcache/actions",
+	"/v1/fak/usage/cache-alignment": "/v1/fak/usage/cache-alignment",
 	"/v1/fak/session-audit/actions": "/v1/fak/session-audit/actions",
 	"/v1/fak/ctxvalue":              "/v1/fak/ctxvalue",
 	"/v1/fak/revoke":                "/v1/fak/revoke",

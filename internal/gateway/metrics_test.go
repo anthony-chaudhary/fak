@@ -978,12 +978,25 @@ func TestInferenceTurnLogIsStructured(t *testing.T) {
 		CacheCreationInputTokens: 1,
 	}, "end_turn", 1500*time.Millisecond, true)
 
-	if len(lines) != 1 {
-		t.Fatalf("got %d inference log lines, want 1: %v", len(lines), lines)
+	// Two structured lines per completed turn: the gateway_inference_turn event
+	// and its gateway_usage_record sibling (#10670). Select by event name so the
+	// assertions below stay about the inference line's own shape.
+	if len(lines) != 2 {
+		t.Fatalf("got %d inference log lines, want 2 (turn + usage-record sibling): %v", len(lines), lines)
 	}
 	var ev map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
-		t.Fatalf("inference log is not JSON: %v\n%s", err, lines[0])
+	for _, line := range lines {
+		var candidate map[string]any
+		if err := json.Unmarshal([]byte(line), &candidate); err != nil {
+			t.Fatalf("inference log is not JSON: %v\n%s", err, line)
+		}
+		if candidate["event"] == "gateway_inference_turn" {
+			ev = candidate
+			break
+		}
+	}
+	if ev == nil {
+		t.Fatalf("no gateway_inference_turn line among: %v", lines)
 	}
 	for k, want := range map[string]any{
 		"event":                       "gateway_inference_turn",

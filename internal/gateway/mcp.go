@@ -937,6 +937,77 @@ func ToolDescriptorsForResolver() []map[string]any {
 	return toolDescriptors()
 }
 
+// validateToolDescriptors verifies that every registered MCP tool provides a
+// well-formed, provider-conforming OpenAPI 3.0 schema at startup (#10769).
+// Fails loud rather than discover schema dialect incompatibilities at runtime.
+func validateToolDescriptors() error {
+	for _, td := range toolDescriptors() {
+		name, _ := td["name"].(string)
+		if name == "" {
+			return errors.New("gateway: tool descriptor missing name")
+		}
+		desc, _ := td["description"].(string)
+		if desc == "" {
+			return fmt.Errorf("gateway: tool %q missing description", name)
+		}
+		raw, ok := td["inputSchema"].(json.RawMessage)
+		if !ok || len(raw) == 0 {
+			continue
+		}
+		var schemaObj map[string]any
+		if err := json.Unmarshal(raw, &schemaObj); err != nil {
+			return fmt.Errorf("gateway: tool %q inputSchema is not valid JSON: %w", name, err)
+		}
+		if err := validateOpenAPISchemaNode(name, schemaObj); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOpenAPISchemaNode(path string, schema map[string]any) error {
+	stype, _ := schema["type"].(string)
+	if req, ok := schema["required"].([]any); ok {
+		if !strings.EqualFold(stype, "object") {
+			return fmt.Errorf("gateway: schema %s.required only allowed for type object (got %q)", path, stype)
+		}
+		props, _ := schema["properties"].(map[string]any)
+		for _, r := range req {
+			rStr, _ := r.(string)
+			if props == nil || props[rStr] == nil {
+				return fmt.Errorf("gateway: schema %s.required property %q not declared in properties", path, rStr)
+			}
+		}
+	}
+	for _, key := range []string{"anyOf", "any_of", "oneOf", "one_of", "allOf", "all_of"} {
+		if alts, ok := schema[key].([]any); ok {
+			for i, alt := range alts {
+				if altMap, ok := alt.(map[string]any); ok {
+					subPath := fmt.Sprintf("%s.%s[%d]", path, key, i)
+					if err := validateOpenAPISchemaNode(subPath, altMap); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	if props, ok := schema["properties"].(map[string]any); ok {
+		for k, child := range props {
+			if childMap, ok := child.(map[string]any); ok {
+				if err := validateOpenAPISchemaNode(path+".properties."+k, childMap); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		if err := validateOpenAPISchemaNode(path+".items", items); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // toolRegistryNames returns the bare names of every tool in the built-in
 // registry, in registry order. It is the universe compileToolExposeAllow
 // validates --expose patterns against and exposedToolDescriptors filters.
