@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -275,16 +277,29 @@ func (m *Model) qwen35MTPF32Tensor(name string, wantShape []int) ([]float32, err
 	if !ok {
 		return nil, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "present", Got: "missing"}
 	}
-	if !strings.EqualFold(meta.Dtype, "F32") {
-		return nil, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32", Got: meta.Dtype}
+	if !strings.EqualFold(meta.Dtype, "F32") && !strings.EqualFold(meta.Dtype, "BF16") {
+		return nil, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or BF16", Got: meta.Dtype}
 	}
 	if !sameIntShape(meta.Shape, wantShape) {
 		return nil, &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprint(meta.Shape)}
 	}
-	wantBytes := 4
-	for _, dim := range wantShape {
-		wantBytes *= dim
+	elems, err := tensorShapeElems(name, wantShape)
+	if err != nil {
+		return nil, err
 	}
+	if strings.EqualFold(meta.Dtype, "BF16") && meta.Nbytes == elems*2 {
+		if meta.Offset < 0 || meta.Offset+meta.Nbytes > len(m.raw) {
+			return nil, &Qwen35MTPForwardError{Stage: "weight storage", Tensor: name, Want: fmt.Sprintf("%d bytes inside model payload", elems*2), Got: fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw))}
+		}
+		rawSlice := m.raw[meta.Offset : meta.Offset+meta.Nbytes]
+		out := make([]float32, elems)
+		for i := 0; i < elems; i++ {
+			u16 := binary.LittleEndian.Uint16(rawSlice[i*2 : i*2+2])
+			out[i] = math.Float32frombits(uint32(u16) << 16)
+		}
+		return out, nil
+	}
+	wantBytes := 4 * elems
 	if meta.Nbytes != wantBytes || meta.Offset < 0 || meta.Offset+meta.Nbytes > len(m.raw) {
 		return nil, &Qwen35MTPForwardError{Stage: "weight storage", Tensor: name, Want: fmt.Sprintf("%d bytes inside model payload", wantBytes), Got: fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw))}
 	}

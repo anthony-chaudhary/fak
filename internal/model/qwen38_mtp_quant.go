@@ -11,6 +11,7 @@ type Qwen38MTPTensorFormat string
 
 const (
 	Qwen38MTPFormatF32  Qwen38MTPTensorFormat = "F32"
+	Qwen38MTPFormatBF16 Qwen38MTPTensorFormat = "BF16"
 	Qwen38MTPFormatQ4K  Qwen38MTPTensorFormat = "Q4_K"
 	Qwen38MTPFormatNone Qwen38MTPTensorFormat = ""
 )
@@ -117,16 +118,16 @@ func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
 		if !ok {
 			return layout, true, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "F32 norm", Got: "missing"}
 		}
-		if !strings.EqualFold(meta.Dtype, "F32") {
-			return layout, true, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 norm", Got: meta.Dtype}
+		if !strings.EqualFold(meta.Dtype, "F32") && !strings.EqualFold(meta.Dtype, "BF16") {
+			return layout, true, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or BF16 norm", Got: meta.Dtype}
 		}
-		if err := validateQwen38MTPF32Meta(m, name, meta, wantShape); err != nil {
+		if err := validateQwen38MTPF32OrBF16Meta(m, name, meta, wantShape); err != nil {
 			return layout, true, err
 		}
 		if m.q4kw[name] != nil || m.q8w[name] != nil || m.kqw[name] != nil {
-			return layout, true, &Qwen35MTPForwardError{Stage: "weight precision", Tensor: name, Want: "one F32 norm representation", Got: "duplicate or quantized norm representation"}
+			return layout, true, &Qwen35MTPForwardError{Stage: "weight precision", Tensor: name, Want: "one F32 or BF16 norm representation", Got: "duplicate or quantized norm representation"}
 		}
-		layout.TensorTypes[name] = "F32"
+		layout.TensorTypes[name] = strings.ToUpper(meta.Dtype)
 	}
 	layout.Format = matrixFormat
 	return layout, true, nil
@@ -189,8 +190,14 @@ func (m *Model) qwen38MTPMatrixFormat(name string, wantShape []int) (Qwen38MTPTe
 
 	switch {
 	case hasF32:
+		if strings.EqualFold(meta.Dtype, "BF16") {
+			if err := validateQwen38MTPBF16Meta(m, name, meta, wantShape); err != nil {
+				return Qwen38MTPFormatNone, err
+			}
+			return Qwen38MTPFormatBF16, nil
+		}
 		if !strings.EqualFold(meta.Dtype, "F32") {
-			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or Q4_K", Got: meta.Dtype}
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32, BF16, or Q4_K", Got: meta.Dtype}
 		}
 		if err := validateQwen38MTPF32Meta(m, name, meta, wantShape); err != nil {
 			return Qwen38MTPFormatNone, err
@@ -233,6 +240,41 @@ func validateQwen38MTPF32Meta(m *Model, name string, meta tensorMeta, wantShape 
 		}
 	}
 	return nil
+}
+
+func validateQwen38MTPBF16Meta(m *Model, name string, meta tensorMeta, wantShape []int) error {
+	if !sameIntShape(meta.Shape, wantShape) {
+		return &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprint(meta.Shape)}
+	}
+	elems, err := tensorShapeElems(name, wantShape)
+	if err != nil {
+		return err
+	}
+	wantBytes := elems * 2
+	if meta.Nbytes != wantBytes && meta.Nbytes != elems*4 {
+		return &Qwen35MTPForwardError{
+			Stage:  "weight storage",
+			Tensor: name,
+			Want:   fmt.Sprintf("%d or %d bytes inside model payload", wantBytes, elems*4),
+			Got:    fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw)),
+		}
+	}
+	if meta.Offset < 0 || meta.Offset > len(m.raw)-meta.Nbytes {
+		return &Qwen35MTPForwardError{
+			Stage:  "weight storage",
+			Tensor: name,
+			Want:   "valid offset inside model payload",
+			Got:    fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw)),
+		}
+	}
+	return nil
+}
+
+func validateQwen38MTPF32OrBF16Meta(m *Model, name string, meta tensorMeta, wantShape []int) error {
+	if strings.EqualFold(meta.Dtype, "BF16") {
+		return validateQwen38MTPBF16Meta(m, name, meta, wantShape)
+	}
+	return validateQwen38MTPF32Meta(m, name, meta, wantShape)
 }
 
 func (f *Qwen35MTPForward) qwen38MTPFuse(priorHidden, currentEmbedding []float32) ([]float32, error) {
