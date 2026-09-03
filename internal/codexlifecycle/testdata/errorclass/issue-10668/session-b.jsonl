@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-01T09:00:00.000Z","type":"session_meta","payload":{"id":"errorclass-1002","model_provider":"fak","cli_version":"0.144.4","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-09-01T09:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"S","model_context_window":258400}}
+{"timestamp":"2026-09-01T09:00:30.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"S","last_agent_message":"stream ended: HTTP 502 Bad Gateway after 3 attempts, then HTTP 400 on retry","duration_ms":29000}}
+{"timestamp":"2026-09-01T09:01:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"T","model_context_window":258400}}
+{"timestamp":"2026-09-01T09:01:05.000Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"T","reason":"interrupted","duration_ms":5000}}
+{"timestamp":"2026-09-01T09:0

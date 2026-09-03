@@ -41,6 +41,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditCodex(stdout, stderr, argv[1:])
 	case "posttool":
 		return runSessionAuditPosttool(stdout, stderr, argv[1:])
+	case "reconcile":
+		return runSessionAuditReconcile(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sessionAuditUsage(stdout)
 		return 0
@@ -66,6 +68,8 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "            (native Codex rollout store: typed critical-path + tool-outcome corpus report)")
 	fmt.Fprintln(w, "       fak session-audit posttool [--json] [--root DIR] [--cwd DIR|--here] [--max N]")
 	fmt.Fprintln(w, "            (post-tool model latency attribution by context band and call ordinal)")
+	fmt.Fprintln(w, "       fak session-audit reconcile [--json] [--root DIR] [--cwd DIR|--here] [--fresh-mins N] [--max N]")
+	fmt.Fprintln(w, "            (started-vs-terminal task accounting: the raw gap and the post-synthesis residual)")
 }
 
 type rootFlags []string

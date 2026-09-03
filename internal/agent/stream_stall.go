@@ -46,13 +46,15 @@ import (
 	"time"
 )
 
-// stallKindIdle and stallKindNoProgress name WHICH deadline tripped a stallReader, carried
-// on UpstreamStalledError so the operator log separates "the upstream went silent on the
-// wire" from "the upstream kept the socket warm with keepalives but never advanced the
-// turn". Both are stalls to the gateway (a 504 upstream_stalled); only the cause differs.
+// stallKindIdle, stallKindNoProgress, and stallKindMaxDuration name WHICH deadline tripped
+// a stallReader, carried on UpstreamStalledError so the operator log separates "the upstream
+// went silent on the wire" from "the upstream kept the socket warm with keepalives but never
+// advanced the turn" from "the stream outlived its absolute max-duration budget". All three
+// are stalls to the gateway (a 504 upstream_stalled); only the cause differs.
 const (
-	stallKindIdle       = "idle"
-	stallKindNoProgress = "no-progress"
+	stallKindIdle          = "idle"
+	stallKindNoProgress    = "no-progress"
+	stallKindMaxDuration   = "max-duration"
 )
 
 // ErrUpstreamStalled is the sentinel a streaming read returns when the upstream produced
@@ -80,13 +82,18 @@ type UpstreamStalledError struct {
 	Err  error
 }
 
-// Error formats the elapsed window, naming the no-progress case distinctly so an operator
-// reading the log is not told "silent" about an upstream that was in fact still pinging.
+// Error formats the elapsed window, naming the no-progress and max-duration cases distinctly
+// so an operator reading the log is not told "silent" about an upstream that was in fact
+// still pinging, or "idle" about a stream that was ended by its absolute budget.
 func (e *UpstreamStalledError) Error() string {
-	if e.Kind == stallKindNoProgress {
+	switch e.Kind {
+	case stallKindNoProgress:
 		return fmt.Sprintf("planner: upstream stalled after %s with no content progress (keepalives only)", e.Idle)
+	case stallKindMaxDuration:
+		return fmt.Sprintf("planner: upstream stream ended by max-duration bound after %s", e.Idle)
+	default:
+		return fmt.Sprintf("planner: upstream stalled after %s idle", e.Idle)
 	}
-	return fmt.Sprintf("planner: upstream stalled after %s idle", e.Idle)
 }
 
 // Unwrap returns the underlying ErrUpstreamStalled sentinel for errors.Is/As.
@@ -100,6 +107,17 @@ func (e *UpstreamStalledError) Unwrap() error { return e.Err }
 // stall, so the now-returning Read can be reported as ErrUpstreamStalled rather than the
 // raw "use of closed connection" the close produces. A normal io.EOF or a client cancel
 // (which closes the body from elsewhere with tripped still false) passes through verbatim.
+//
+// The reader carries up to THREE deadlines answering different questions:
+//   - LIVENESS (bytes) — the idle timer above. `ping` re-arms it, and should.
+//   - PROGRESS (content) — a second, longer timer (the planner's StreamProgressTimeout config
+//     field, resolved by streamProgressWindow) armed when the body is wrapped and re-armed
+//     ONLY through noteProgress, which the SSE decode loops call for a
+//     frame that advances the TURN (content_block_start/delta, message_delta, a finish reason,
+//     a tool-call fragment) and deliberately NOT for `ping`/keepalive frames.
+//   - MAX-DURATION (absolute budget) — a third timer armed once when the stream opens, never
+//     re-armed by bytes or progress, that ends a stream outliving its configured total budget.
+//     Default OFF (zero window). When armed, it fires exactly once at the configured deadline.
 type stallReader struct {
 	rc     io.ReadCloser
 	window time.Duration
@@ -112,23 +130,31 @@ type stallReader struct {
 	progressWindow time.Duration
 	progressTimer  *time.Timer
 
+	// maxDurationWindow/maxDurationTimer are the THIRD deadline (#10672): armed once at
+	// stream open with the absolute total-duration budget (FAK_STREAM_MAX_DURATION_S).
+	// Never re-armed by bytes or progress — it is the hard ceiling a HEALTHY stream cannot
+	// outlive. Zero means OFF (the default, preserving all existing behavior).
+	maxDurationWindow time.Duration
+	maxDurationTimer  *time.Timer
+
 	mu      sync.Mutex
 	tripped bool   // a timer fired and closed rc — the next Read error is a stall
-	kind    string // which deadline fired: stallKindIdle or stallKindNoProgress
+	kind    string // which deadline fired: stallKindIdle, stallKindNoProgress, or stallKindMaxDuration
 	closed  bool   // rc has been closed (by Close or a timer) — close exactly once
 }
 
-// newStallReader wraps rc with an idle (inter-byte) deadline of window and a content
-// PROGRESS deadline of progressWindow. A non-positive window disables the corresponding
-// deadline (that half of the reader is a transparent pass-through), so a caller can opt
-// out without a branch at the call site. A progressWindow shorter than window is raised
-// to window: the progress deadline is by construction the outer, more forgiving one, and
-// letting it undercut the byte deadline would only mislabel a plain dead socket.
-func newStallReader(rc io.ReadCloser, window, progressWindow time.Duration) *stallReader {
+// newStallReader wraps rc with an idle (inter-byte) deadline of window, a content
+// PROGRESS deadline of progressWindow, and an absolute MAX-DURATION deadline of
+// maxDurationWindow. A non-positive window disables the corresponding deadline (that
+// half of the reader is a transparent pass-through), so a caller can opt out without a
+// branch at the call site. A progressWindow shorter than window is raised to window: the
+// progress deadline is by construction the outer, more forgiving one, and letting it
+// undercut the byte deadline would only mislabel a plain dead socket.
+func newStallReader(rc io.ReadCloser, window, progressWindow, maxDurationWindow time.Duration) *stallReader {
 	if progressWindow > 0 && progressWindow < window {
 		progressWindow = window
 	}
-	s := &stallReader{rc: rc, window: window, progressWindow: progressWindow}
+	s := &stallReader{rc: rc, window: window, progressWindow: progressWindow, maxDurationWindow: maxDurationWindow}
 	if window > 0 {
 		// Create the timer already stopped; Read arms it per call. AfterFunc has no
 		// channel to drain, so Stop/Reset alone manage its lifecycle cleanly.
@@ -140,13 +166,18 @@ func newStallReader(rc io.ReadCloser, window, progressWindow time.Duration) *sta
 		// clock on "no content since the stream opened" starts when the stream opens.
 		s.progressTimer = time.AfterFunc(progressWindow, func() { s.trip(stallKindNoProgress) })
 	}
+	if maxDurationWindow > 0 {
+		// Armed once at stream open, never re-armed. This is the absolute budget ceiling.
+		s.maxDurationTimer = time.AfterFunc(maxDurationWindow, func() { s.trip(stallKindMaxDuration) })
+	}
 	return s
 }
 
-// trip is the timer callback for both deadlines: the named window elapsed, so either the
-// upstream is silent (idle) or it is warm but not advancing the turn (no-progress). Close
-// the body to unblock the parked Read and record which deadline fired. Whichever timer
-// arrives first wins; the second finds the reader already closed and returns.
+// trip is the timer callback for all three deadlines: the named window elapsed, so either
+// the upstream is silent (idle), it is warm but not advancing the turn (no-progress), or
+// the stream outlived its absolute max-duration budget (max-duration). Close the body to
+// unblock the parked Read and record which deadline fired. Whichever timer arrives first
+// wins; the others find the reader already closed and return.
 func (s *stallReader) trip(kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,10 +211,14 @@ func (s *stallReader) noteProgress() {
 func (s *stallReader) stallCause() (string, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.kind == stallKindNoProgress {
+	switch s.kind {
+	case stallKindNoProgress:
 		return stallKindNoProgress, s.progressWindow
+	case stallKindMaxDuration:
+		return stallKindMaxDuration, s.maxDurationWindow
+	default:
+		return stallKindIdle, s.window
 	}
-	return stallKindIdle, s.window
 }
 
 // Read arms the idle timer for window, performs one underlying Read, then stops the timer.
@@ -192,6 +227,8 @@ func (s *stallReader) stallCause() (string, time.Duration) {
 // which is exactly how the parked Read gets unblocked. A post-trip error is mapped to
 // ErrUpstreamStalled; any other error (including io.EOF and a context cancel) is returned
 // unchanged.
+// Note: the max-duration timer is armed ONCE at stream open (in newStallReader) and is
+// never re-armed by Read — it is the absolute budget ceiling.
 func (s *stallReader) Read(p []byte) (int, error) {
 	if s.timer != nil {
 		s.timer.Reset(s.window)
@@ -211,14 +248,17 @@ func (s *stallReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Close stops both deadlines and closes the wrapped body, idempotently — an explicit defer
-// and either timer callback may reach it, so the underlying body is closed exactly once.
+// Close stops all deadlines and closes the wrapped body, idempotently — an explicit defer
+// and any timer callback may reach it, so the underlying body is closed exactly once.
 func (s *stallReader) Close() error {
 	if s.timer != nil {
 		s.timer.Stop()
 	}
 	if s.progressTimer != nil {
 		s.progressTimer.Stop()
+	}
+	if s.maxDurationTimer != nil {
+		s.maxDurationTimer.Stop()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -239,6 +279,16 @@ func (s *stallReader) Close() error {
 // whole-request timeout could never fire.
 func streamStallTimeout() time.Duration {
 	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", 60*time.Second, 5, 600)
+}
+
+// streamMaxDuration is the absolute total-duration deadline for a streamed turn.
+// Default OFF (0 = no deadline). When set via FAK_STREAM_MAX_DURATION_S, it is clamped
+// to a sane [5s, 3600s] band (1 hour ceiling — a window longer than the whole-request
+// timeout could never fire, and 600s is the current whole-request floor). A stream that
+// outlives this budget is ended with UpstreamStalledError{Kind: "max-duration"} so the
+// gateway maps, logs, and receipts it identically to the other stall causes.
+func streamMaxDuration() time.Duration {
+	return envClampedTimeout("FAK_STREAM_MAX_DURATION_S", 0, 5, 3600)
 }
 
 // DefaultStreamProgressTimeout is the CONTENT-progress deadline a planner uses when its

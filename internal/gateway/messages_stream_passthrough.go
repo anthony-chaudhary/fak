@@ -113,6 +113,23 @@ type anthropicPassthrough struct {
 	// -1 when none is open. A warm-continue closes a dangling block before the continuation
 	// opens a fresh one, so the resumed stream stays well-formed.
 	openClientBlock int
+
+	// --- heartbeat & checkpoint (#10672) ---------------------------------------
+	// hb holds the heartbeat config for typed progress heartbeats.
+	hb *heartbeatConfig
+	// hbTicker and hbDone manage the heartbeat goroutine lifecycle.
+	hbTicker *time.Ticker
+	hbDone   chan struct{}
+	// checkpointDir is the directory for durable partial-output checkpoints.
+	checkpointDir string
+	// incidentDir is the directory for incident packets.
+	incidentDir string
+	// traceID is the trace ID for this turn (for checkpoint/incident correlation).
+	traceID string
+	// model is the model ID for this turn (for checkpoint).
+	model string
+	// began is the turn start time (for elapsed_ms in checkpoint/incident).
+	began time.Time
 }
 
 // reqModel is the model id the client asked for on this relayed turn, or "" when the
@@ -139,6 +156,23 @@ func (p *anthropicPassthrough) start() {
 		return
 	}
 	p.started = true
+	p.hb = newHeartbeatConfig()
+	if p.hb.enabled {
+		p.hbTicker = time.NewTicker(p.hb.interval)
+		p.hbDone = make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-p.hbTicker.C:
+					p.hb.emitHeartbeat(p.w)
+				case <-p.hbDone:
+					return
+				case <-p.r.Context().Done():
+					return
+				}
+			}
+		}()
+	}
 	h := p.w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
@@ -146,6 +180,7 @@ func (p *anthropicPassthrough) start() {
 	h.Set("X-Accel-Buffering", "no")
 	p.w.WriteHeader(http.StatusOK)
 	p.send = anthropicSSESender(p.w, p.flusher)
+	p.hb.markStreamStart()
 }
 
 // flushHeldTools adjudicates every buffered tool_use block as one batch (exact parity with
@@ -328,6 +363,10 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			// text_delta is captured — thinking deltas are not prefill-replayable.
 			if d.Delta.Type == "text_delta" {
 				p.asstText.WriteString(d.Delta.Text)
+				// Record heartbeat event for typed progress heartbeats (#10672).
+				if p.hb != nil {
+					p.hb.recordEvent(len(d.Delta.Text))
+				}
 			}
 		}
 
@@ -416,14 +455,34 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 
 	p := &anthropicPassthrough{
-		s: s, w: w, r: r, req: req, reqTrace: reqTrace, turn: sessionTurn, flusher: flusher,
-		passIdx:         map[int]int{},
-		toolBuf:         map[int]*sseToolAccum{},
+		s:              s,
+		w:              w,
+		r:              r,
+		req:            req,
+		reqTrace:       reqTrace,
+		turn:           sessionTurn,
+		flusher:        flusher,
+		passIdx:        map[int]int{},
+		toolBuf:        map[int]*sseToolAccum{},
 		openClientBlock: -1,
+		checkpointDir:  "",
+		incidentDir:    "",
+		traceID:        reqTrace,
+		model:          req.Model,
+		began:          time.Now(),
 	}
 	began := time.Now()
 
 	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, p.onEvent)
+	// Ensure heartbeat ticker is cleaned up on all exit paths.
+	defer func() {
+		if p.hbTicker != nil {
+			p.hbTicker.Stop()
+		}
+		if p.hbDone != nil {
+			close(p.hbDone)
+		}
+	}()
 	// #3353 warm-continue: a worker that dies mid-turn (client bytes already flowing) is
 	// recovered by replaying the already-delivered assistant text as a prefill turn on a
 	// fresh worker with the token budget decremented, so the caller sees ONE unbroken turn
@@ -447,13 +506,36 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			// Carry the distinct error type to the client when we can classify it (a stall),
 			// so a harness sees "upstream_stalled" rather than an opaque api_error.
 			errType := "api_error"
-			if errors.As(err, new(*agent.UpstreamStalledError)) {
+			statusClass := "error"
+			boundPolicy := "max-duration=off"
+			var ue *agent.UpstreamStalledError
+			if errors.As(err, &ue) {
 				errType = "upstream_stalled"
+				statusClass = "stall"
+				if ue.Kind == "max-duration" {
+					statusClass = "bound:max-stream-duration"
+					boundPolicy = "max-duration=5s"
+				}
 			}
 			p.send("error", map[string]any{
 				"type":  "error",
 				"error": map[string]any{"type": errType, "message": "upstream model error"},
 			})
+
+			// Write partial-output checkpoint (#10672): capture the exact assistant text
+			// already relayed to the client so a resume can continue from the last good state.
+			cc := newCheckpointConfig()
+			elapsedMS := time.Since(began).Milliseconds()
+			var ttftMS int64
+			if !p.firstTokenAt.IsZero() {
+				ttftMS = p.firstTokenAt.Sub(began).Milliseconds()
+			}
+			cc.writeCheckpoint("anthropic_messages", reqTrace, p.reqModel(), "mid_stream", elapsedMS, p.asstText.String(), estimateTokens(p.asstText.String()), boundPolicy, "stream-death")
+
+			// Write mid-stream incident packet (#10672).
+			ic := newIncidentConfig()
+			ic.writeIncident("anthropic_messages", "mid_stream", statusClass, boundPolicy, errType, ttftMS, elapsedMS, int64(len(p.asstText.String())), 1, elapsedMS-ttftMS)
+
 			return true
 		case p.wroteError:
 			// A clean terminal HTTP error is already on the wire, so the CLIENT has its
