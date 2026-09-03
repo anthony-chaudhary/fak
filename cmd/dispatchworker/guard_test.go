@@ -737,6 +737,75 @@ func TestGuardWrapOpencodeSkipsWithoutBaseURLButWrapsWithOne(t *testing.T) {
 	}
 }
 
+func TestOpencodeCompactShedLine(t *testing.T) {
+	// Go half of the OpenCode-native compact shed-line parity (#4661).
+	// Mirror of tools/dispatch_worker_test.py test_opencode_compact_shed_line.
+	const shed = opencodeCompactShedLineTokens
+	if shed != 96000 {
+		t.Fatalf("opencode shed line diverged from 96000: %d", shed)
+	}
+	if shed != claudeGuardCompactHistoryBudget {
+		t.Fatalf("opencode shed line %d != claude budget %d", shed, claudeGuardCompactHistoryBudget)
+	}
+	if shed != codexCompactTokenLimit {
+		t.Fatalf("opencode shed line %d != codex limit %d", shed, codexCompactTokenLimit)
+	}
+
+	overlay := opencodeCompactionOverlay([]string{"opencode", "run", "-m", "zai-coding-plan/glm-5.2", "dispatch"})
+	if overlay == nil {
+		t.Fatal("expected compaction overlay for glm-5.2")
+	}
+
+	providerMap, _ := overlay["provider"].(map[string]any)
+	zaiMap, _ := providerMap["zai-coding-plan"].(map[string]any)
+	modelsMap, _ := zaiMap["models"].(map[string]any)
+	glm52Map, _ := modelsMap["glm-5.2"].(map[string]any)
+	limitMap, _ := glm52Map["limit"].(map[string]any)
+
+	compactionMap, _ := overlay["compaction"].(map[string]any)
+	auto, _ := compactionMap["auto"].(bool)
+	reserved, _ := compactionMap["reserved"].(int)
+
+	input, _ := limitMap["input"].(int)
+	context, _ := limitMap["context"].(int)
+	output, _ := limitMap["output"].(int)
+
+	if !auto {
+		t.Errorf("compaction.auto must be true")
+	}
+	if input-reserved != shed {
+		t.Errorf("derived opencode compaction trigger input (%d) - reserved (%d) != shed (%d)", input, reserved, shed)
+	}
+	if context != 1000000 {
+		t.Errorf("expected context 1000000, got %d", context)
+	}
+	if output != 131072 {
+		t.Errorf("expected output 131072, got %d", output)
+	}
+	if shed >= context-output {
+		t.Errorf("shed line %d must be less than context - output (%d)", shed, context-output)
+	}
+
+	defaultArgv, _ := buildCommand("recall", "opencode")
+	defaultOverlay := opencodeCompactionOverlay(defaultArgv)
+	if defaultOverlay == nil {
+		t.Fatal("expected default overlay for recall opencode")
+	}
+	dProviderMap, _ := defaultOverlay["provider"].(map[string]any)
+	dZaiMap, _ := dProviderMap["zai-coding-plan"].(map[string]any)
+	dModelsMap, _ := dZaiMap["models"].(map[string]any)
+	if _, ok := dModelsMap["glm-5.2"]; !ok {
+		t.Error("expected glm-5.2 in default models")
+	}
+	for name, mAny := range dModelsMap {
+		mMap, _ := mAny.(map[string]any)
+		lMap, _ := mMap["limit"].(map[string]any)
+		if lInput, _ := lMap["input"].(int); lInput != shed {
+			t.Errorf("%s missed shed line: input=%d", name, lInput)
+		}
+	}
+}
+
 func TestGuardedLaunchCommandOptsOutWhenDisabled(t *testing.T) {
 	raw, _ := buildCommand("gateway", "claude")
 	fak := filepath.Join(t.TempDir(), "fak")
