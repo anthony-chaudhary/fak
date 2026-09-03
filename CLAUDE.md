@@ -30,9 +30,12 @@ The five that will bite you if you skip them:
   A bare un-stamped subject stays NOT_SHIPPED. The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md)
   skill mechanizes this rule end to end — lint the subject, stage-and-commit exactly your
   paths under a lock, and verify only your paths landed. (Full convention in [`AGENTS.md`](AGENTS.md).)
-- **Default is to ship** — once the tree is green (`make ci`), commit AND push
-  unprompted. Stay on the trunk, never force-push, defer to the guard (`OFF_TRUNK` / a peer
-  merge in flight). Full default + verify command in [`AGENTS.md`](AGENTS.md).
+- **Default is to ship green work unprompted** — once the tree is green (`make ci`), commit AND push
+  unprompted. "Green" requires shift-left proof: for changes touching executable CLI verbs,
+  gateway adapters, or runtime logic, execute real paths in dogfood or integration tests
+  rather than relying on mock-only or shallow tests. Stay on the trunk, never force-push,
+  defer to the guard (`OFF_TRUNK` / a peer merge in flight). Full default + verify command
+  in [`AGENTS.md`](AGENTS.md).
 - **Delegate substantive work and enforce capability-aware scoping** — use guarded
   headless agents or equivalent isolated workers for investigation, implementation, tests,
   and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,

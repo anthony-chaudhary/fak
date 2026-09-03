@@ -230,6 +230,7 @@ above.
 | CRASH_RESTART_EXHAUSTED | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
 | DISAMBIGUATION_TIMEOUT | refusal | floor-absent | no enforcing floor declared — bounded timeout refusal vocabulary |
 | DOOM_LOOP | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| E2E_OVER_MOCKS | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | FILE_ADMISSION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | FLEETBUS_APPLY_REFUSED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | FLEETBUS_EXPIRED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
@@ -286,6 +287,7 @@ above.
 | ROUNDTRIP_LOSSY | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | RUN_STATUS_CLAIMED_FIELD | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | SESSION_CEILING_SATURATED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| SHIFT_LEFT_UNPROVEN | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | SKILL_DESC_BUDGET_EXCEEDED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | SKILL_DESC_BUDGET_STALE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | STALE_BASE_DELETION | refusal | floor-declared | `Floor:` cite in the dos.toml block |

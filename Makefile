@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -231,6 +231,19 @@ garden-check:
 
 dogfood-recent:
 	@python3 tools/recent_feature_dogfood.py
+
+# dogfood-test (#10821): hermetic, fast test verifying the dogfood launcher's
+# bounded-wait loops, dead-PID fail-fast logic, and provider graduation gates.
+dogfood-test:
+	@bash scripts/dogfood-claude_test.sh
+	@echo "dogfood-test OK"
+
+# test-integration (#10822): multi-process local loopback integration tests verifying
+# real HTTP/SSE gateway proxying, tool call adjudication, and child supervision.
+test-integration: build
+	@echo "running integration test suite..."
+	go test -count=1 -run "Integration|E2E" ./internal/gateway ./cmd/fak
+	@echo "test-integration OK"
 
 # performance-rsi-health: deterministic live-repository loop-health grade and
 # named debt evidence from the issue-9768 dogfood receipt. This grades the

@@ -18,7 +18,7 @@ exercises the **real seam** end to end â€” as minimal and as *working* as p
   ([`docs/run-the-demos.md`](run-the-demos.md)): one command, deterministic, no
   key, no network, no GPU, with a `-selfcheck` invariant.
 - **Library leaf / verb** â†’ a test that drives the real object **plus** one
-  captured live run of the verb (a `--json`/`--dry-run` invocation is fine).
+  captured live run of the verb (a `--json`/`--dry-run` invocation or loopback integration run is fine; mocks hide integration bugs).
 - **Process / doctrine change** â†’ the machinery that makes it a default (a
   gate, a skill, a verb), not a paragraph asking agents to remember it.
 
