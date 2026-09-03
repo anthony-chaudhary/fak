@@ -284,6 +284,9 @@ func replicaFallbackAllowed(ctx context.Context, err error) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
+	if IsHaltException(err) {
+		return false
+	}
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
