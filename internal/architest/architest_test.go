@@ -789,6 +789,9 @@ var tier = map[string]int{
 	"toolbound":                  1,
 	"overtonscore":               1,
 	"dataslot":                   1,
+	"orgdebt":                    1,
+	"tb4bench":                   4,
+	"servingsim":                 1, // trace-driven discrete-event LLM serving simulator; stdlib-only (#10841).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
