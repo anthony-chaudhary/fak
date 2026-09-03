@@ -59,15 +59,11 @@ func collectHostSnapshot() (hostSnapshot, error) {
 			s.availability.MemoryPressure = true
 		}
 	}
-	if b, e := os.ReadFile("/proc/pressure/memory"); e == nil {
-		if parseProcPressureMemory(string(b), &s.host) {
-			s.availability.MemoryPressure = true
-		}
+	if readAndParseProc("/proc/pressure/memory", parseProcPressureMemory, &s.host) {
+		s.availability.MemoryPressure = true
 	}
-	if b, e := os.ReadFile("/proc/vmstat"); e == nil {
-		if parseProcVMStat(string(b), &s.host) {
-			s.availability.MemoryPressure = true
-		}
+	if readAndParseProc("/proc/vmstat", parseProcVMStat, &s.host) {
+		s.availability.MemoryPressure = true
 	}
 	if f, e := os.Open("/proc/self/io"); e == nil {
 		defer f.Close()
@@ -266,4 +262,11 @@ func scanFields(r io.Reader, visit func([]string)) {
 	for scanner.Scan() {
 		visit(strings.Fields(scanner.Text()))
 	}
+}
+
+func readAndParseProc(path string, parser func(string, *HostSignals) bool, host *HostSignals) bool {
+	if b, e := os.ReadFile(path); e == nil {
+		return parser(string(b), host)
+	}
+	return false
 }

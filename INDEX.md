@@ -289,6 +289,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md`](docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md) — strategic priority and architectural doctrine shifting mainstream development to the native fak harness: low-ego market realism, field-borrowing posture, 4-arm next-best alternative (NBA) benchmarking against OpenCode, Codex, Cursor, and Claude Code, and upstream feature adaptation matrix.
 - [`docs/notes/MULTI-DIMENSIONAL-MATURITY-CURVE-2026-09-03.md`](docs/notes/MULTI-DIMENSIONAL-MATURITY-CURVE-2026-09-03.md) — operational doctrine advancing the 6-dimensional capability maturity curve from minimal tested spines to full runtime verification.
 - [`docs/notes/SHIFT-LEFT-COMPOSABLE-LIFECYCLE-NO-STATIC-DAEMONS-2026-09-03.md`](docs/notes/SHIFT-LEFT-COMPOSABLE-LIFECYCLE-NO-STATIC-DAEMONS-2026-09-03.md) — shift-left invariant and operational doctrine prohibiting unmanaged static background daemons in developer environments.
 - [`docs/notes/CONCEPT-GOVERNED-DBT-SEMANTICS-BEFORE-RAW-SQL-2026-09-03.md`](docs/notes/CONCEPT-GOVERNED-DBT-SEMANTICS-BEFORE-RAW-SQL-2026-09-03.md) — architectural concept and research specification establishing the governed dbt semantics adapter before raw SQL: static artifact ingestion, column reflection, and bidirectional lineage with dormant raw SQL (#10653).

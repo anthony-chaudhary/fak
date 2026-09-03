@@ -462,6 +462,11 @@ var leafClassifications = []LeafClassification{{Leaf: "internal/blastradius", Di
 		Capabilities: []string{"tokenization"},
 		Reason:       "tokenizer implements model-compatible BPE encoding, decoding, pretokenization, and incremental decode; tokenization is contracted separately",
 	},
+	{
+		Leaf: "internal/agent", Disposition: DispositionCapability,
+		Capabilities: []string{"native_agent_harness"},
+		Reason:       "native host-side agentic loop with in-kernel vDSO tool caching, write barrier, and deterministic state",
+	},
 }
 
 var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_intersection", NativePath: "internal/blastradius/blastradius.go", Workload: "same broken package, reverse dependency graph, lease trees, queued issue paths, and exact affected/excluded oracle", Metrics: []string{"radius_precision", "radius_recall", "lease_hold_precision", "lease_hold_recall", "issue_hold_precision", "issue_hold_recall", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "broken-tree intersection only", Class: TunedBaseline, Source: "internal/blastradius/compare.go"}, {Name: "DOS leases", Class: FirstClassIntegration, Integration: "dos", Source: "internal/blastradius/compare.go"}, {Name: "Bazel query reverse dependencies", Class: NextBest, Source: "https://bazel.build/query/guide"}, {Name: "Pants dependents", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected graph", Class: NextBest, Source: "https://nx.dev"}, {Name: "Kubernetes Lease impact labels", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"}}, Witness: "../../docs/notes/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"}},
@@ -1088,6 +1093,26 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "fak + LLMLingua-2 compressor", Class: FirstClassIntegration, Integration: "headroom/lingua", Source: "https://github.com/anthony-chaudhary/fak/issues/3204"},
 		},
 		Integrations: []string{"headroom/lingua"},
+	},
+	{
+		Capability: "native_agent_harness",
+		NativePath: "internal/agent/loop.go",
+		Workload:   "multi-turn coding agent benchmark with read/write/edit/bash tools across repo tasks",
+		Metrics:    []string{"task_success", "turns", "hit_rate", "input_tokens", "output_tokens", "latency_ms", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "OpenCode CLI (direct tool execution)", Class: TunedBaseline, Source: "https://github.com/opencode-ai/opencode", BaselineTopology: ReplacementTreatment, TreatmentTopology: ReplacementTreatment},
+			{Name: "OpenAI Codex CLI", Class: NextBest, Source: "https://github.com/openai/codex", TreatmentTopology: ReplacementTreatment},
+			{Name: "Cursor Agent", Class: NextBest, Source: "https://www.cursor.com", TreatmentTopology: ReplacementTreatment},
+			{Name: "Claude Code", Class: NextBest, Source: "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code", TreatmentTopology: ReplacementTreatment},
+			{Name: "fak + OpenCode", Class: FirstClassIntegration, Integration: "opencode", Source: "docs/integrations/opencode.md", TreatmentTopology: AdditiveTreatment},
+			{Name: "fak + OpenAI Codex", Class: FirstClassIntegration, Integration: "codex", Source: "docs/integrations/openai-codex.md", TreatmentTopology: AdditiveTreatment},
+			{Name: "fak + Cursor", Class: FirstClassIntegration, Integration: "cursor", Source: "docs/integrations/cursor.md", TreatmentTopology: AdditiveTreatment},
+			{Name: "fak + Claude Code", Class: FirstClassIntegration, Integration: "claude", Source: "docs/integrations/claude.md", TreatmentTopology: AdditiveTreatment},
+		},
+		Integrations:      []string{"opencode", "codex", "cursor", "claude"},
+		Witness:           "../../docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md",
+		TreatmentTopology: ReplacementTreatment,
+		CandidateTopology: ReplacementTreatment,
 	},
 }
 
