@@ -9246,6 +9246,16 @@
           "category": "incidental",
           "reason": "dev-only admission policy override for bounded smokes on pressure-critical hosts",
           "token": "FAK_ADMISSION_POLICY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy configuration struct for multi-tenant hierarchical policy algebra",
+          "token": "PrivacyPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Combined policy composition struct for multi-tenant hierarchical policy algebra",
+          "token": "CombinedPolicy"
         }
       ],
       "exclude": [
@@ -9269,6 +9279,7 @@
         "CapabilityID",
         "CapabilityRemoved",
         "CapabilitySnapshot",
+        "CombinedPolicy",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
         "ConfigMaxPostures",
@@ -9310,6 +9321,7 @@
         "PolicySchema",
         "PrefixPosture",
         "PreflightRefuseWIPLimit",
+        "PrivacyPolicy",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
