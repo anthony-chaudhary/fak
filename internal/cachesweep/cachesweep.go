@@ -9,6 +9,16 @@
 // sweep early-stopping at 99% of it — so `--compact-history-budget` and the radixkv LRU
 // budget can be sized from EVIDENCE (a curve + a knee) instead of intuition.
 //
+// Non-equivalence with opttarget.SavingsVsBudget:
+// This package is explicitly non-equivalent to opttarget.SavingsVsBudget.
+// cachesweep replays hierarchical token sequences through a prefix tree (radixkv)
+// with longest-prefix matching, edge splitting, and token-level LRU eviction to
+// measure prefix-token reuse ratio. In contrast, opttarget.SavingsVsBudget replays
+// discrete scalar keys through a flat LRU cache with all-or-nothing key hit/miss
+// accounting without prefix sharing or tree structure. The curves, budgets (cached
+// tokens vs entry count), and knee criteria reflect distinct caching disciplines
+// and cannot be used interchangeably.
+//
 // The heavy lifting — longest-prefix matching, LRU-leaf eviction, edge splits — is NOT
 // reinvented here: every pass runs the proven internal/radixkv engine in pure-accounting
 // mode (kv=nil). This package only drives that engine across budgets and folds the
@@ -21,9 +31,16 @@
 package cachesweep
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"io"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
+	"github.com/anthony-chaudhary/fak/internal/sweepcert"
 )
 
 // DefaultKneeFraction is the ROI-knee threshold as a fraction of the infinite-cache
@@ -33,13 +50,15 @@ import (
 const DefaultKneeFraction = 0.99
 
 // Access is one prefix-access in a replay trace: the token-id sequence the request
-// presented to the cache, plus a logical timestamp used ONLY by the write-delay overlay.
+// presented to the cache, plus a logical timestamp used ONLY by the write-delay overlay
+// and an optional caller identifier.
 // TimeNs is named for the upstream write_delay_ns knob but is unitless here — it just has
 // to be consistent with Options.WriteDelayNs (the CLI defaults it to the access ordinal
 // when a trace carries no timestamps, so a delay is then measured in access-steps).
 type Access struct {
-	Tokens []int `json:"tokens"`
-	TimeNs int64 `json:"t_ns,omitempty"`
+	Tokens   []int  `json:"tokens"`
+	TimeNs   int64  `json:"t_ns,omitempty"`
+	CallerID string `json:"caller_id,omitempty"`
 }
 
 // Trace is an ordered sequence of prefix-accesses — the replay workload. The order is
@@ -57,6 +76,38 @@ func (tr Trace) TotalTokens() int64 {
 	return n
 }
 
+// TraceDigest computes a deterministic SHA256 hex string over trace accesses
+// (tokens, timestamps, caller ids).
+func TraceDigest(tr Trace) string {
+	h := sha256.New()
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(len(tr.Accesses)))
+	h.Write(b[:])
+	for _, a := range tr.Accesses {
+		binary.BigEndian.PutUint64(b[:], uint64(len(a.CallerID)))
+		h.Write(b[:])
+		if len(a.CallerID) > 0 {
+			io.WriteString(h, a.CallerID)
+		}
+		binary.BigEndian.PutUint64(b[:], uint64(a.TimeNs))
+		h.Write(b[:])
+		binary.BigEndian.PutUint64(b[:], uint64(len(a.Tokens)))
+		h.Write(b[:])
+		for _, tok := range a.Tokens {
+			binary.BigEndian.PutUint64(b[:], uint64(tok))
+			h.Write(b[:])
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// BudgetOmission records a declared budget point that was omitted from measurement
+// with an explicit rationale (e.g. out-of-memory or timeout).
+type BudgetOmission struct {
+	Budget int    `json:"budget"`
+	Reason string `json:"reason"`
+}
+
 // Point is one (budget → realized reuse) sample on the sweep curve. Budget 0 denotes the
 // unbounded pass (the infinite-cache ceiling).
 type Point struct {
@@ -68,7 +119,11 @@ type Point struct {
 }
 
 // Result is the full sweep report: the finite-budget curve, the infinite-cache ceiling,
-// and the ROI knee. It is JSON-serializable (the CLI emits it verbatim under --json).
+// the ROI knee, and the sweepcert certification fields. It is JSON-serializable (the CLI
+// emits it verbatim under --json).
+//
+// Explicit non-equivalence note: Result reflects prefix-tree reuse (radixkv), explicitly
+// non-equivalent to opttarget.SavingsVsBudget (discrete scalar key LRU).
 type Result struct {
 	Curve        []Point `json:"curve"`          // one Point per finite budget, ascending
 	Ceiling      Point   `json:"ceiling"`        // the unbounded (budget=0) pass — the hit-rate ceiling
@@ -78,6 +133,13 @@ type Result struct {
 	WriteDelayNs int64   `json:"write_delay_ns"` // the visibility-latency overlay applied (0 = disabled)
 	Accesses     int     `json:"accesses"`       // trace length
 	TotalTokens  int64   `json:"total_tokens"`   // Σ access len (constant across budgets)
+
+	// sweepcert certification fields
+	EnvelopeDigest   string              `json:"envelope_digest,omitempty"`
+	KneeStatus       string              `json:"knee_status,omitempty"`
+	KneeReason       string              `json:"knee_reason,omitempty"`
+	SupportingPoints []string            `json:"supporting_points,omitempty"`
+	Interval         *sweepcert.Interval `json:"interval,omitempty"`
 }
 
 // Options configure a sweep.
@@ -86,6 +148,8 @@ type Options struct {
 	// ascending, and non-positive values are dropped (budget 0 means "unbounded" to
 	// radixkv and is already covered by the ceiling pass).
 	Budgets []int
+	// Omissions are declared budget points that are omitted from measurement.
+	Omissions []BudgetOmission
 	// KneeFraction is the knee threshold as a fraction of the ceiling; <=0 uses
 	// DefaultKneeFraction (0.99).
 	KneeFraction float64
@@ -97,8 +161,12 @@ type Options struct {
 }
 
 // Sweep replays the trace at each finite budget plus one unbounded pass and folds the
-// realized reuse into a curve + ceiling + knee. It is pure and deterministic: identical
-// (trace, options) inputs always produce an identical Result.
+// realized reuse into a curve + ceiling + knee certified via sweepcert. It is pure and
+// deterministic: identical (trace, options) inputs always produce an identical Result.
+//
+// Non-equivalence note: Sweep evaluates prefix-tree reuse (radixkv) with longest-prefix
+// matching and token budgets, explicitly non-equivalent to opttarget.SavingsVsBudget
+// which evaluates discrete scalar key LRU caches.
 func Sweep(tr Trace, opt Options) Result {
 	kneeFrac := opt.KneeFraction
 	if kneeFrac <= 0 {
@@ -115,10 +183,26 @@ func Sweep(tr Trace, opt Options) Result {
 	// only misses are cold prefixes and — when enabled — the write-delay window.
 	res.Ceiling = replay(tr, 0, opt.WriteDelayNs)
 
-	budgets := normalizeBudgets(opt.Budgets)
-	res.Curve = make([]Point, 0, len(budgets))
+	omittedMap := make(map[int]string, len(opt.Omissions))
+	for _, o := range opt.Omissions {
+		if o.Budget > 0 {
+			omittedMap[o.Budget] = o.Reason
+		}
+	}
+
+	budgetList := make([]int, 0, len(opt.Budgets)+len(opt.Omissions))
+	budgetList = append(budgetList, opt.Budgets...)
+	for _, o := range opt.Omissions {
+		budgetList = append(budgetList, o.Budget)
+	}
+	allBudgets := normalizeBudgets(budgetList)
+
+	res.Curve = make([]Point, 0, len(allBudgets))
 	threshold := kneeFrac * res.Ceiling.ReuseRatio
-	for _, b := range budgets {
+	for _, b := range allBudgets {
+		if _, omitted := omittedMap[b]; omitted {
+			continue
+		}
 		p := replay(tr, b, opt.WriteDelayNs)
 		res.Curve = append(res.Curve, p)
 		// Smallest budget crossing the knee wins: budgets ascend, so the first crossing
@@ -128,6 +212,93 @@ func Sweep(tr Trace, opt Options) Result {
 			res.KneeReached = true
 		}
 	}
+
+	traceDigest := TraceDigest(tr)
+	coordinates := make([]float64, len(allBudgets))
+	for i, b := range allBudgets {
+		coordinates[i] = float64(b)
+	}
+	axis := sweepcert.Axis{
+		Name:        "budget",
+		Unit:        "tokens",
+		Coordinates: coordinates,
+	}
+	envelope := sweepcert.Envelope{
+		Axis: axis,
+		Bindings: []sweepcert.Binding{
+			{Name: "knee_fraction", Value: strconv.FormatFloat(kneeFrac, 'g', -1, 64)},
+			{Name: "trace_digest", Value: traceDigest},
+			{Name: "write_delay_ns", Value: strconv.FormatInt(opt.WriteDelayNs, 10)},
+		},
+	}
+
+	digest, err := sweepcert.CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		res.KneeStatus = string(sweepcert.FindingInvalid)
+		res.KneeReason = err.Error()
+		return res
+	}
+	res.EnvelopeDigest = digest
+
+	points := make([]sweepcert.Point, 0, len(allBudgets))
+	byBudget := make(map[int]Point, len(res.Curve))
+	for _, p := range res.Curve {
+		byBudget[p.Budget] = p
+	}
+	for _, b := range allBudgets {
+		id := "budget:" + strconv.Itoa(b)
+		if reason, omitted := omittedMap[b]; omitted {
+			if strings.TrimSpace(reason) == "" {
+				reason = "omitted by options"
+			}
+			points = append(points, sweepcert.Point{
+				ID:             id,
+				Coordinate:     float64(b),
+				Status:         sweepcert.PointNotMeasured,
+				EnvelopeDigest: digest,
+				Observations: map[string]sweepcert.Observation{
+					"reuse_ratio": {
+						Status: sweepcert.ObservationNotMeasured,
+						Reason: reason,
+					},
+				},
+			})
+		} else {
+			p := byBudget[b]
+			ratioVal := p.ReuseRatio
+			points = append(points, sweepcert.Point{
+				ID:             id,
+				Coordinate:     float64(b),
+				Status:         sweepcert.PointMeasured,
+				EnvelopeDigest: digest,
+				Observations: map[string]sweepcert.Observation{
+					"reuse_ratio": {
+						Status: sweepcert.ObservationMeasured,
+						Value:  &ratioVal,
+						Provenance: sweepcert.Provenance{
+							Source:         "fak-radixkv",
+							Method:         "prefix-cache-replay",
+							Unit:           "ratio",
+							EnvelopeDigest: digest,
+						},
+					},
+				},
+			})
+		}
+	}
+
+	evidence := sweepcert.Evidence{
+		Envelope:       envelope,
+		EnvelopeDigest: digest,
+		Points:         points,
+	}
+
+	finding := sweepcert.FirstThreshold(evidence, "reuse_ratio", sweepcert.ThresholdDirectAbove, threshold)
+	res.KneeStatus = string(finding.Status)
+	res.KneeReason = finding.Reason
+	res.SupportingPoints = finding.SupportingPoints
+	res.Interval = finding.Interval
+
 	return res
 }
 

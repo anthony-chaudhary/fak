@@ -3,7 +3,11 @@ package cachesweep
 import (
 	"math"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/opttarget"
+	"github.com/anthony-chaudhary/fak/internal/sweepcert"
 )
 
 // fixtureTrace is the hand-verified acceptance workload. It exercises the three behaviors
@@ -140,5 +144,325 @@ func TestNormalizeBudgets(t *testing.T) {
 	want := []int{2, 4, 8}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeBudgets = %v, want %v", got, want)
+	}
+}
+
+func TestTraceDigest(t *testing.T) {
+	base := Trace{Accesses: []Access{
+		{Tokens: []int{1, 2, 3}, TimeNs: 10, CallerID: "c1"},
+		{Tokens: []int{4, 5}, TimeNs: 20, CallerID: "c2"},
+	}}
+	d1 := TraceDigest(base)
+	d2 := TraceDigest(base)
+	if d1 != d2 || len(d1) != 64 {
+		t.Fatalf("TraceDigest determinism failure: %q vs %q", d1, d2)
+	}
+
+	// Token sensitivity
+	tMod := Trace{Accesses: []Access{
+		{Tokens: []int{1, 2, 4}, TimeNs: 10, CallerID: "c1"},
+		{Tokens: []int{4, 5}, TimeNs: 20, CallerID: "c2"},
+	}}
+	if TraceDigest(tMod) == d1 {
+		t.Fatalf("TraceDigest insensitive to tokens")
+	}
+
+	// Timestamp sensitivity
+	timeMod := Trace{Accesses: []Access{
+		{Tokens: []int{1, 2, 3}, TimeNs: 11, CallerID: "c1"},
+		{Tokens: []int{4, 5}, TimeNs: 20, CallerID: "c2"},
+	}}
+	if TraceDigest(timeMod) == d1 {
+		t.Fatalf("TraceDigest insensitive to timestamps")
+	}
+
+	// CallerID sensitivity
+	callerMod := Trace{Accesses: []Access{
+		{Tokens: []int{1, 2, 3}, TimeNs: 10, CallerID: "c3"},
+		{Tokens: []int{4, 5}, TimeNs: 20, CallerID: "c2"},
+	}}
+	if TraceDigest(callerMod) == d1 {
+		t.Fatalf("TraceDigest insensitive to caller ID")
+	}
+}
+
+func TestSweepCertificationMeasured(t *testing.T) {
+	res := Sweep(fixtureTrace(), Options{Budgets: []int{2, 4, 8}})
+	if res.KneeStatus != "measured" {
+		t.Fatalf("KneeStatus = %q, want measured", res.KneeStatus)
+	}
+	if !strings.HasPrefix(res.EnvelopeDigest, "sha256:") {
+		t.Fatalf("EnvelopeDigest = %q, want sha256: prefix", res.EnvelopeDigest)
+	}
+	wantSupporting := []string{"budget:2", "budget:4", "budget:8"}
+	if !reflect.DeepEqual(res.SupportingPoints, wantSupporting) {
+		t.Fatalf("SupportingPoints = %v, want %v", res.SupportingPoints, wantSupporting)
+	}
+	if res.Interval == nil || res.Interval.LowerPointID != "budget:2" || res.Interval.UpperPointID != "budget:4" {
+		t.Fatalf("Interval = %+v, want lower budget:2 upper budget:4", res.Interval)
+	}
+}
+
+func TestSweepCertificationOmission(t *testing.T) {
+	res := Sweep(fixtureTrace(), Options{
+		Budgets: []int{2, 8},
+		Omissions: []BudgetOmission{
+			{Budget: 4, Reason: "allocation failure"},
+		},
+	})
+	if res.KneeStatus != "not_identifiable" {
+		t.Fatalf("KneeStatus = %q, want not_identifiable", res.KneeStatus)
+	}
+	if len(res.Curve) != 2 {
+		t.Fatalf("Curve has %d points, want 2", len(res.Curve))
+	}
+	if res.Interval == nil || res.Interval.LowerPointID != "budget:2" || res.Interval.UpperPointID != "budget:8" {
+		t.Fatalf("Interval = %+v, want lower budget:2 upper budget:8", res.Interval)
+	}
+}
+
+func TestSweepCertificationLeftRightCensored(t *testing.T) {
+	// Left-censored: budget 4 already clears 99% of ceiling
+	left := Sweep(fixtureTrace(), Options{Budgets: []int{4, 8}})
+	if left.KneeStatus != "left_censored" {
+		t.Fatalf("left KneeStatus = %q, want left_censored", left.KneeStatus)
+	}
+	if left.Interval == nil || left.Interval.UpperPointID != "budget:4" {
+		t.Fatalf("left Interval = %+v, want upper budget:4", left.Interval)
+	}
+
+	// Right-censored: neither budget 2 nor 3 reaches threshold
+	right := Sweep(fixtureTrace(), Options{Budgets: []int{2, 3}})
+	if right.KneeStatus != "right_censored" {
+		t.Fatalf("right KneeStatus = %q, want right_censored", right.KneeStatus)
+	}
+	if right.Interval == nil || right.Interval.LowerPointID != "budget:3" {
+		t.Fatalf("right Interval = %+v, want lower budget:3", right.Interval)
+	}
+}
+
+func TestSweepCertificationInvalidAxis(t *testing.T) {
+	res := Sweep(fixtureTrace(), Options{Budgets: []int{4}})
+	if res.KneeStatus != "invalid" {
+		t.Fatalf("KneeStatus = %q, want invalid", res.KneeStatus)
+	}
+	if !strings.Contains(res.KneeReason, "at least two declared coordinates") {
+		t.Fatalf("KneeReason = %q, want coordinate count error", res.KneeReason)
+	}
+}
+
+func TestSweepEnvelopeBindsTraceDigestAndSemantics(t *testing.T) {
+	baseTrace := fixtureTrace()
+	baseOpts := Options{Budgets: []int{2, 4, 8}, WriteDelayNs: 0}
+	baseRes := Sweep(baseTrace, baseOpts)
+	if !strings.HasPrefix(baseRes.EnvelopeDigest, "sha256:") {
+		t.Fatalf("base EnvelopeDigest = %q, want sha256: prefix", baseRes.EnvelopeDigest)
+	}
+
+	// 1. Altering trace tokens changes EnvelopeDigest
+	tokenModTrace := fixtureTrace()
+	tokenModTrace.Accesses[0].Tokens = []int{9, 9, 9}
+	tokenModRes := Sweep(tokenModTrace, baseOpts)
+	if tokenModRes.EnvelopeDigest == baseRes.EnvelopeDigest {
+		t.Fatalf("EnvelopeDigest did not change when altering trace tokens: %q", tokenModRes.EnvelopeDigest)
+	}
+
+	// 2. Altering access count changes EnvelopeDigest
+	countModTrace := fixtureTrace()
+	countModTrace.Accesses = append(countModTrace.Accesses, Access{
+		Tokens: []int{1, 2, 3},
+		TimeNs: int64(len(countModTrace.Accesses)),
+	})
+	countModRes := Sweep(countModTrace, baseOpts)
+	if countModRes.EnvelopeDigest == baseRes.EnvelopeDigest {
+		t.Fatalf("EnvelopeDigest did not change when altering access count: %q", countModRes.EnvelopeDigest)
+	}
+	if countModRes.Accesses == baseRes.Accesses {
+		t.Fatalf("access count was not altered: got %d want %d", countModRes.Accesses, len(countModTrace.Accesses))
+	}
+
+	// 3. Altering write delay changes EnvelopeDigest
+	delayModOpts := baseOpts
+	delayModOpts.WriteDelayNs = 10
+	delayModRes := Sweep(baseTrace, delayModOpts)
+	if delayModRes.EnvelopeDigest == baseRes.EnvelopeDigest {
+		t.Fatalf("EnvelopeDigest did not change when altering write delay: %q", delayModRes.EnvelopeDigest)
+	}
+}
+
+func TestSweepKneeCertificationInteriorMeasured(t *testing.T) {
+	// fixtureTrace() ceiling is 11/15 (0.7333). With KneeFraction 0.99, threshold is 0.726.
+	// Budget 2 yields 9/15 (0.600) < 0.726.
+	// Budget 4 yields 11/15 (0.7333) >= 0.726 (interior crossing).
+	// Budget 8 yields 11/15 (0.7333) >= 0.726.
+	res := Sweep(fixtureTrace(), Options{Budgets: []int{2, 4, 8}})
+	if res.KneeStatus != string(sweepcert.FindingMeasured) {
+		t.Fatalf("KneeStatus = %q, want %q", res.KneeStatus, sweepcert.FindingMeasured)
+	}
+	if !res.KneeReached {
+		t.Fatalf("expected KneeReached to be true")
+	}
+	if res.Knee.Budget != 4 {
+		t.Fatalf("Knee budget = %d, want 4", res.Knee.Budget)
+	}
+	if res.Interval == nil {
+		t.Fatalf("Interval is nil, want populated interval for measured knee")
+	}
+	if res.Interval.LowerPointID != "budget:2" || res.Interval.UpperPointID != "budget:4" {
+		t.Fatalf("Interval = %+v, want LowerPointID: budget:2, UpperPointID: budget:4", res.Interval)
+	}
+	wantSupporting := []string{"budget:2", "budget:4", "budget:8"}
+	if !reflect.DeepEqual(res.SupportingPoints, wantSupporting) {
+		t.Fatalf("SupportingPoints = %v, want %v", res.SupportingPoints, wantSupporting)
+	}
+}
+
+func TestSweepKneeCertificationLeftCensored(t *testing.T) {
+	// First sampled budget (4) immediately clears the 99% ceiling threshold (0.726).
+	// The crossing occurred at or before the first sampled coordinate.
+	res := Sweep(fixtureTrace(), Options{Budgets: []int{4, 8}})
+	if res.KneeStatus != string(sweepcert.FindingLeftCensored) {
+		t.Fatalf("KneeStatus = %q, want %q", res.KneeStatus, sweepcert.FindingLeftCensored)
+	}
+	if !res.KneeReached {
+		t.Fatalf("expected KneeReached to be true for left-censored crossing")
+	}
+	if res.Knee.Budget != 4 {
+		t.Fatalf("Knee budget = %d, want 4", res.Knee.Budget)
+	}
+	if res.Interval == nil {
+		t.Fatalf("Interval is nil, want populated interval for left-censored knee")
+	}
+	if res.Interval.UpperPointID != "budget:4" {
+		t.Fatalf("Interval.UpperPointID = %q, want budget:4", res.Interval.UpperPointID)
+	}
+	if res.Interval.LowerPointID != "" {
+		t.Fatalf("Interval.LowerPointID = %q, want empty (unbounded left)", res.Interval.LowerPointID)
+	}
+}
+
+func TestSweepKneeCertificationRightCensored(t *testing.T) {
+	// All sampled budgets (2, 3) fail to cross the 99% ceiling threshold (0.726).
+	// Budget 2: 9/15 (0.600), Budget 3: 10/15 (0.6667).
+	res := Sweep(fixtureTrace(), Options{Budgets: []int{2, 3}})
+	if res.KneeStatus != string(sweepcert.FindingRightCensored) {
+		t.Fatalf("KneeStatus = %q, want %q", res.KneeStatus, sweepcert.FindingRightCensored)
+	}
+	if res.KneeReached {
+		t.Fatalf("KneeReached = true, want false when all points fail threshold")
+	}
+	if res.Interval == nil {
+		t.Fatalf("Interval is nil, want populated interval for right-censored knee")
+	}
+	if res.Interval.LowerPointID != "budget:3" {
+		t.Fatalf("Interval.LowerPointID = %q, want budget:3", res.Interval.LowerPointID)
+	}
+	if res.Interval.UpperPointID != "" {
+		t.Fatalf("Interval.UpperPointID = %q, want empty (unbounded right)", res.Interval.UpperPointID)
+	}
+}
+
+func TestSweepKneeCertificationMissingPointNotIdentifiable(t *testing.T) {
+	// Declare budgets 2 and 8, with budget 4 declared as an explicit omission.
+	res := Sweep(fixtureTrace(), Options{
+		Budgets: []int{2, 8},
+		Omissions: []BudgetOmission{
+			{Budget: 4, Reason: "allocation failure"},
+		},
+	})
+	if res.KneeStatus != string(sweepcert.FindingNotIdentifiable) {
+		t.Fatalf("KneeStatus = %q, want %q", res.KneeStatus, sweepcert.FindingNotIdentifiable)
+	}
+	if res.Interval == nil {
+		t.Fatalf("Interval is nil, want interval spanning the gap")
+	}
+	if res.Interval.LowerPointID != "budget:2" || res.Interval.UpperPointID != "budget:8" {
+		t.Fatalf("Interval = %+v, want LowerPointID: budget:2, UpperPointID: budget:8", res.Interval)
+	}
+
+	// Verify absence of zero-filling:
+	// The omitted point must NOT be inserted into Curve with a fabricated 0.0 reuse ratio.
+	if len(res.Curve) != 2 {
+		t.Fatalf("Curve has %d points, want exactly 2 measured points (no zero-filled omission)", len(res.Curve))
+	}
+	for _, p := range res.Curve {
+		if p.Budget == 4 {
+			t.Fatalf("omitted budget 4 was zero-filled into Curve: %+v", p)
+		}
+		if p.ReuseRatio <= 0 {
+			t.Fatalf("measured point unexpectedly zero: %+v", p)
+		}
+	}
+}
+
+func TestSweepReconcileOpttargetNonEquivalence(t *testing.T) {
+	// cachesweep and opttarget.SavingsVsBudget are explicitly non-equivalent:
+	// 1. cachesweep replays hierarchical token sequences through a prefix tree (radixkv)
+	//    with longest-prefix matching, edge splitting, and token-level LRU eviction to
+	//    measure prefix-token reuse ratio.
+	// 2. opttarget.SavingsVsBudget replays discrete scalar keys through a flat LRU cache
+	//    with all-or-nothing key hit/miss accounting without prefix sharing or tree structure.
+
+	// Trace with shared prefix [1, 2] and divergent suffixes [3] vs [4].
+	tr := Trace{Accesses: []Access{
+		{Tokens: []int{1, 2, 3}, TimeNs: 0},
+		{Tokens: []int{1, 2, 4}, TimeNs: 1},
+	}}
+
+	sweepRes := Sweep(tr, Options{Budgets: []int{2, 4, 8}})
+
+	// In cachesweep, access 1 reuses prefix [1, 2] (2 tokens) out of 3 tokens requested.
+	if sweepRes.Ceiling.ReusedTokens != 2 {
+		t.Fatalf("cachesweep ceiling reused = %d, want 2", sweepRes.Ceiling.ReusedTokens)
+	}
+	if !approx(sweepRes.Ceiling.ReuseRatio, 2.0/6.0) {
+		t.Fatalf("cachesweep ceiling ratio = %v, want %v", sweepRes.Ceiling.ReuseRatio, 2.0/6.0)
+	}
+	// At budget 4, the resident tree holds [1, 2, 3] and [4] (4 tokens total), achieving full ceiling reuse.
+	if sweepRes.Curve[1].ReusedTokens != 2 {
+		t.Fatalf("cachesweep budget 4 reused = %d, want 2", sweepRes.Curve[1].ReusedTokens)
+	}
+	// cachesweep certifies the sweep envelope and status via sweepcert.
+	if sweepRes.EnvelopeDigest == "" || sweepRes.KneeStatus == "" {
+		t.Fatalf("cachesweep did not produce sweepcert certification: %+v", sweepRes)
+	}
+
+	// Model the same workload as discrete request keys in opttarget:
+	// Access 0 is key 1, Access 1 is key 2 (two distinct requests).
+	requestKeys := []int{1, 2}
+	optBudgets := []int{1, 2, 3}
+	optCurve, err := opttarget.SavingsVsBudget(requestKeys, optBudgets)
+	if err != nil {
+		t.Fatalf("opttarget.SavingsVsBudget failed: %v", err)
+	}
+
+	// In opttarget, discrete scalar keys have all-or-nothing hit semantics.
+	// Since keys 1 and 2 are distinct, access 1 misses completely despite the shared [1, 2] prefix.
+	for _, p := range optCurve.Points {
+		if p.Savings != 0 || p.HitRate != 0 {
+			t.Fatalf("opttarget discrete keys unexpectedly hit (savings=%v, hit_rate=%v); want 0 due to all-or-nothing semantics", p.Savings, p.HitRate)
+		}
+	}
+
+	// Even if flattened into a scalar token stream, opttarget manages flat entry counts,
+	// not token-tree capacities or prefix-sharing structures.
+	flatTokens := []int{1, 2, 3, 1, 2, 4}
+	flatCurve, err := opttarget.SavingsVsBudget(flatTokens, []int{1, 2, 3, 4})
+	if err != nil {
+		t.Fatalf("opttarget.SavingsVsBudget flatTokens failed: %v", err)
+	}
+
+	// At budget 2 in opttarget (2 entry capacity), flat LRU evicts tokens without
+	// prefix hierarchy: hits = 0 out of 6.
+	// In contrast, cachesweep at budget 2 prefix-caches [1, 2] and achieves 2 reused tokens.
+	if flatCurve.Points[1].Savings != 0 {
+		t.Fatalf("opttarget flat tokens at budget 2 savings = %v, want 0", flatCurve.Points[1].Savings)
+	}
+
+	// Furthermore, the knee criteria are mathematically distinct:
+	// - cachesweep: smallest budget reaching KneeFraction (0.99) of infinite-cache ceiling.
+	// - opttarget: last budget where marginal savings per unit budget >= 10% of peak marginal gain.
+	if sweepRes.KneeFraction != DefaultKneeFraction {
+		t.Fatalf("cachesweep knee fraction = %v, want %v", sweepRes.KneeFraction, DefaultKneeFraction)
 	}
 }
