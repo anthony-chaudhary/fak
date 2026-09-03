@@ -128,6 +128,12 @@ func WithResponseProfileSource(source string) RunOption {
 	return func(c *runConfig) { c.responseProfileSource = strings.TrimSpace(source) }
 }
 
+// WithGracefulDrain configures the loop to perform a graceful drain and final
+// synthesis turn with tools disabled when the turn cap or budget stop condition is reached.
+func WithGracefulDrain(enabled bool) RunOption {
+	return func(c *runConfig) { c.gracefulDrain = enabled }
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -150,6 +156,7 @@ type runConfig struct {
 	toolTerminalWake      *ToolTerminalWakeQueue
 	finalGate             func() (bool, string)
 	responseProfileSource string
+	gracefulDrain         bool
 	// observer is the typed loop-progress sink (#5148, WithProgressObserver in
 	// loop_observe.go). nil => every emitProgress is a no-op and the loop is
 	// byte-for-byte the historical loop.

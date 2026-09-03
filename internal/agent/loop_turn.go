@@ -51,7 +51,39 @@ func (r *armRunner) run(ctx context.Context, maxTurns int) error {
 	// The loop hit the turn cap with a speculation still pending: squash it (it was never
 	// confirmed by an authoritative call), so no provisional effect leaks past the run.
 	r.speculation.resolve(ctx, nil, r.metrics)
+	if r.cfg != nil && r.cfg.gracefulDrain && r.metrics.FinalAnswer == "" {
+		if err := r.runSynthesisTurn(ctx, maxTurns); err != nil {
+			return err
+		}
+	}
 	r.finalizeFak()
+	return nil
+}
+
+func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
+	r.metrics.GracefulDrained = true
+	turnSink := r.sink
+	comp, err := r.complete(ctx, r.messages, nil, turnSink)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return fmt.Errorf("synthesis turn: nil completion")
+	}
+	r.metrics.Turns++
+	r.metrics.PromptTokens += comp.Usage.PromptTokens
+	r.metrics.CompletionTokens += comp.Usage.CompletionTokens
+	if r.cfg != nil {
+		r.cfg.debitTurn(comp.Usage)
+	}
+	asst := comp.Message
+	asst.Role = RoleAssistant
+	r.messages = append(r.messages, asst)
+	r.metrics.FinalAnswer = asst.Content
+	r.metrics.SynthesizedFinalTurn = true
+	if r.cfg != nil {
+		r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
+	}
 	return nil
 }
 

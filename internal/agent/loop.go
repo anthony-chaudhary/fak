@@ -46,6 +46,9 @@ type ArmMetrics struct {
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
 
+	GracefulDrained      bool `json:"graceful_drained,omitempty"`
+	SynthesizedFinalTurn bool `json:"synthesized_final_turn,omitempty"`
+
 	// ElapsedMs is the arm's observed wall-clock in milliseconds. It is populated
 	// ONLY on the live lane (a real network model actually blocks on each turn); the
 	// offline/deterministic-mock lane leaves it zero (omitted) because a microsecond
