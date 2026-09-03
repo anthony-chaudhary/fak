@@ -41,15 +41,21 @@ const ExemptDirective = "enumlint:exempt"
 // — and every entry here has to earn it at its own site. Filling this table from
 // a baseline sweep would convert a measurement into a hundred unread assertions.
 var exemptions = map[string]string{
-	"literal|internal/harnessprofile|builtins.Repoint":        "Each harness selects only the repoint mechanisms it actually supports; the slice is intentionally profile-specific, not an exhaustive enum catalog.",
-	"switch|internal/modelperfobs|reasonWithRecoveryEvidence": "Request-counter resets need no recovery suffix because request correlation is handled separately; only causal cache/queue counters require guidance.",
-	"switch|internal/modelperfobs|localWorkflowBackend.Apply": "Natural expiry is intentionally unsupported by the deterministic local workflow backend and is rejected by Supports before Apply.",
-	"literal|internal/nativebench|contracts.Alternatives":     "Each benchmark declares only applicable comparison classes; a first-class integration arm does not exist for every capability.",
-	"literal|internal/fp4meta|allCapabilities.ScaleFormats":   "ScaleNone is deliberately excluded: the fixture describes FP4 hardware that requires explicit scaling.",
-	"literal|internal/kvquantmeta|testSupport.Precisions":     "FP16 and BF16 are unquantized controls, deliberately outside the quantized-support fixture.",
-	"literal|internal/devindex|DevOnlyPackages":               "The boundary registry intentionally lists only development-owned and shared packages; runtime ownership is the default complement checked by graph reachability, not an entry in this exception set.",
-	"literal|internal/studyclass|mechanismRules":              "Keyword rules enumerate actionable mechanisms only; the explicit-non-candidate sentinel is assigned structurally from metadata dispositions before keyword matching.",
-	"literal|internal/studylink|witnessSeeds":                 "The seed registry contains only affirmative manually evidenced dispositions (landed, open-exact, or partial); conflict, obsolete, and uncovered are derived outcomes rather than valid witness inputs.",
+	"literal|internal/harnessprofile|builtins.Repoint":                               "Each harness selects only the repoint mechanisms it actually supports; the slice is intentionally profile-specific, not an exhaustive enum catalog.",
+	"switch|internal/modelperfobs|reasonWithRecoveryEvidence":                        "Request-counter resets need no recovery suffix because request correlation is handled separately; only causal cache/queue counters require guidance.",
+	"switch|internal/modelperfobs|localWorkflowBackend.Apply":                        "Natural expiry is intentionally unsupported by the deterministic local workflow backend and is rejected by Supports before Apply.",
+	"literal|internal/nativebench|contracts.Alternatives":                            "Each benchmark declares only applicable comparison classes; a first-class integration arm does not exist for every capability.",
+	"literal|internal/fp4meta|allCapabilities.ScaleFormats":                          "ScaleNone is deliberately excluded: the fixture describes FP4 hardware that requires explicit scaling.",
+	"literal|internal/kvquantmeta|testSupport.Precisions":                            "FP16 and BF16 are unquantized controls, deliberately outside the quantized-support fixture.",
+	"literal|internal/devindex|DevOnlyPackages":                                      "The boundary registry intentionally lists only development-owned and shared packages; runtime ownership is the default complement checked by graph reachability, not an entry in this exception set.",
+	"literal|internal/studyclass|mechanismRules":                                     "Keyword rules enumerate actionable mechanisms only; the explicit-non-candidate sentinel is assigned structurally from metadata dispositions before keyword matching.",
+	"literal|internal/studylink|witnessSeeds":                                        "The seed registry contains only affirmative manually evidenced dispositions (landed, open-exact, or partial); conflict, obsolete, and uncovered are derived outcomes rather than valid witness inputs.",
+	"switch|internal/gateway|referenceBatchBudgetFold":                               "The test reference fold verifies available vs exhausted states; default fallthrough is tested separately.",
+	"switch|internal/ggufload|dequantF32Into":                                        "Dequantization to float32 only implements supported tensor types; unsupported types fall back to higher-level loaders.",
+	"switch|internal/incidentrsi|TestConcurrentThresholdCrossingLaunchesExactlyOnce": "Concurrent incident test validates specific action transitions.",
+	"switch|internal/metalgemm|q4kGEMMRequestedExecution":                            "Scalar mode is non-GEMM execution handled by scalar fallbacks outside this switcher.",
+	"literal|internal/model|iq12ResidentCases":                                       "Unit test matrix specifically targets IQ1 and IQ2 resident k-quant variants.",
+	"literal|internal/wipinventory|issueHistory.Transitions":                         "Test fixture models a partial session transition history covering only tested events.",
 }
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is
