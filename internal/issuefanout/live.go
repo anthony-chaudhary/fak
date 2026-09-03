@@ -153,7 +153,7 @@ func LiveBody(c issuepolicy.Candidate) string {
 	section("Root point", c.RootPoint)
 	section("Origin signal", c.OriginSignal)
 	section("Prevents recurrence", c.PreventsRecurrence)
-	section("Done condition", c.DoneCondition)
+	section("Definition of done", formatDefinitionOfDone(c.DoneCondition))
 	section("Witness", c.Witness)
 	section("Acceptance gate", c.AcceptanceGate)
 	section("Work estimate", c.WorkEstimate)
@@ -191,6 +191,35 @@ func LiveBody(c issuepolicy.Candidate) string {
 	}
 	b.WriteString("Filed by `fak issue fanout --live`; the marker key above is the rerun dedupe contract.\n")
 	return b.String()
+}
+
+func formatDefinitionOfDone(cond string) string {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return "- [ ] Complete implementation and verify tests pass"
+	}
+	lines := strings.Split(cond, "\n")
+	var out []string
+	hasCheckbox := false
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "- [X]") {
+			hasCheckbox = true
+			out = append(out, trimmed)
+		} else if strings.HasPrefix(trimmed, "- ") {
+			hasCheckbox = true
+			out = append(out, "- [ ] "+strings.TrimPrefix(trimmed, "- "))
+		} else {
+			out = append(out, trimmed)
+		}
+	}
+	if !hasCheckbox {
+		return "- [ ] " + cond
+	}
+	return strings.Join(out, "\n")
 }
 
 // ListExistingArgs composes the gh argv for the bounded dedupe scan: every

@@ -287,4 +287,27 @@ var admittedPostFreeze = []string{
 	// cmd/fak/guard_prompt_transport.go — workspace directory for guarded codex prompt fuel.
 	// Relocates to: launch plan workspace or flag.
 	"DISPATCH_WORKSPACE",
+
+	// cmd/fak/serve_memory_admission.go — local memory reservation controls.
+	"FAK_ADMISSION_POLICY",
+	"FAK_NATIVE_ADMISSION",
+	"FAK_RESERVATION_DIR",
+
+	// cmd/fak/dispatch_tick_preflight.go — dispatch prompt and resident tokens limits.
+	"FAK_DISPATCH_PROMPT_TOKENS",
+	"FAK_DISPATCH_RESIDENT_TOKENS",
+
+	// internal/gateway/stream_proxy.go — stream checkpoint and incident durability controls.
+	"FAK_STREAM_CHECKPOINT_DIR",
+	"FAK_STREAM_HEARTBEAT_S",
+	"FAK_STREAM_INCIDENT_DIR",
+	"FAK_STREAM_MAX_DURATION_S",
+
+	// internal/modelengine/workercoupling.go — runtime worker coupling scheduler controls.
+	"FAK_WORKER_COUPLING",
+	"FAK_WORKER_COUPLING_DECODE_MAX",
+	"FAK_WORKER_COUPLING_INTERVAL_MS",
+	"FAK_WORKER_COUPLING_MIN",
+	"FAK_WORKER_COUPLING_MODE",
+	"FAK_WORKER_COUPLING_PREFILL_MAX",
 }

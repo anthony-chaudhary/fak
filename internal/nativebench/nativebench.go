@@ -1031,6 +1031,16 @@ func validateClassifications(classifications []LeafClassification, cs []Contract
 }
 
 func Validate(cs []Contract) []Finding {
+	root, err := os.Getwd()
+	if err == nil {
+		if mr, err := moduleRoot(root); err == nil {
+			root = mr
+		}
+	}
+	return ValidateRoot(cs, root)
+}
+
+func ValidateRoot(cs []Contract, root string) []Finding {
 	var findings []Finding
 	seen := map[string]bool{}
 	for _, c := range cs {
@@ -1089,11 +1099,53 @@ func Validate(cs []Contract) []Finding {
 		}
 		if c.Witness == "" {
 			findings = append(findings, Finding{c.Capability, "benchmark witness is missing"})
-		} else if _, err := os.Stat(filepath.Clean(c.Witness)); err != nil {
-			findings = append(findings, Finding{c.Capability, fmt.Sprintf("benchmark witness %q is not readable: %v", c.Witness, err)})
+		} else {
+			target := resolveArmPath(root, c.Witness)
+			if _, err := os.Stat(target); err != nil {
+				findings = append(findings, Finding{c.Capability, fmt.Sprintf("benchmark witness %q is not readable: %v", c.Witness, err)})
+			}
 		}
 	}
 	return findings
+}
+
+func resolveArmPath(root, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	clean := filepath.Clean(path)
+	if root != "" {
+		pkgTarget := filepath.Join(root, "internal", "nativebench", clean)
+		if _, err := os.Stat(pkgTarget); err == nil {
+			return pkgTarget
+		}
+		rootTarget := filepath.Join(root, clean)
+		if _, err := os.Stat(rootTarget); err == nil {
+			return rootTarget
+		}
+	}
+	if _, err := os.Stat(clean); err == nil {
+		return clean
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if mr, err := moduleRoot(wd); err == nil && mr != root {
+			modulePkgTarget := filepath.Join(mr, "internal", "nativebench", clean)
+			if _, err := os.Stat(modulePkgTarget); err == nil {
+				return modulePkgTarget
+			}
+			moduleRootTarget := filepath.Join(mr, clean)
+			if _, err := os.Stat(moduleRootTarget); err == nil {
+				return moduleRootTarget
+			}
+		}
+	}
+	if root != "" {
+		if strings.HasPrefix(clean, "..") {
+			return filepath.Join(root, "internal", "nativebench", clean)
+		}
+		return filepath.Join(root, clean)
+	}
+	return clean
 }
 
 func DiscoverNativeLeaves(root string) ([]string, error) {
@@ -1128,7 +1180,7 @@ func DiscoverNativeLeaves(root string) ([]string, error) {
 
 func AuditRoot(root string) Report {
 	cs := All()
-	fs := Validate(cs)
+	fs := ValidateRoot(cs, root)
 	fs = append(fs, validateClassifications(leafClassifications, cs)...)
 	leaves, err := DiscoverNativeLeaves(root)
 	coverage := Coverage{DispositionCounts: make(map[LeafDisposition]int)}

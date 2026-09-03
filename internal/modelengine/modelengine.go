@@ -72,6 +72,8 @@ const maxPromptTokens = 64
 type Engine struct {
 	once                sync.Once
 	m                   *model.Model
+	isSynthetic         bool
+	modelName           string
 	cfg                 model.Config
 	q4k                 bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
 	q4kGateUpOutputSlab bool
@@ -117,12 +119,33 @@ func (e *Engine) model() *model.Model {
 		if dir := os.Getenv("FAK_MODEL_DIR"); dir != "" {
 			if m, err := model.Load(dir); err == nil {
 				e.m, e.cfg = m, m.Cfg
+				e.modelName = "smollm2-inkernel"
+				e.isSynthetic = false
 				return
 			}
 		}
 		e.m = model.NewSynthetic(e.cfg)
+		e.modelName = "smollm2-synthetic"
+		e.isSynthetic = true
 	})
 	return e.m
+}
+
+// ModelName returns the honest identity of the backing weights:
+// "smollm2-synthetic" when using synthetic in-memory weights,
+// or "smollm2-inkernel" when real/preloaded weights were installed (#10664).
+func (e *Engine) ModelName() string {
+	if e == nil {
+		return "smollm2-synthetic"
+	}
+	e.model()
+	if e.isSynthetic {
+		return "smollm2-synthetic"
+	}
+	if e.modelName != "" {
+		return e.modelName
+	}
+	return "smollm2-inkernel"
 }
 
 // Preload installs an already-constructed model as this engine's backing weights,
@@ -134,7 +157,11 @@ func (e *Engine) Preload(m *model.Model) {
 	if e == nil || m == nil {
 		return
 	}
-	e.once.Do(func() { e.m, e.cfg = m, m.Cfg })
+	e.once.Do(func() {
+		e.m, e.cfg = m, m.Cfg
+		e.modelName = "smollm2-inkernel"
+		e.isSynthetic = false
+	})
 }
 
 // Preload installs preloaded weights on the registered Default engine.
@@ -150,7 +177,12 @@ func (e *Engine) PreloadQ4K(m *model.Model) {
 	if e == nil || m == nil {
 		return
 	}
-	e.once.Do(func() { e.m, e.cfg = m, m.Cfg; e.q4k = true })
+	e.once.Do(func() {
+		e.m, e.cfg = m, m.Cfg
+		e.q4k = true
+		e.modelName = "smollm2-inkernel"
+		e.isSynthetic = false
+	})
 }
 
 // PreloadQ4K installs preloaded resident-Q4_K weights on the registered Default engine.

@@ -81,13 +81,14 @@ func TestOperationalRowsAreClassifiedAndQualityNeutral(t *testing.T) {
 		{"kind": "CONFIG_SWAP"},
 		{"kind": "RESTART_HOP"},
 		{"kind": "CAPABILITY_GRANT"},
+		{"kind": "CHILD_EXIT", "reason": "clean_exit"},
 		{"kind": "NOVEL_CONTROL"},
 	})
 	fold := FoldRows([]string{p})
-	if fold.OperationalRows != 3 {
-		t.Fatalf("OperationalRows = %d, want 3", fold.OperationalRows)
+	if fold.OperationalRows != 4 {
+		t.Fatalf("OperationalRows = %d, want 4", fold.OperationalRows)
 	}
-	for _, kind := range []string{"CONFIG_SWAP", "RESTART_HOP", "CAPABILITY_GRANT"} {
+	for _, kind := range []string{"CONFIG_SWAP", "RESTART_HOP", "CAPABILITY_GRANT", "CHILD_EXIT"} {
 		if got := fold.ByOperationalKind[kind]; got != 1 {
 			t.Errorf("ByOperationalKind[%s] = %d, want 1", kind, got)
 		}
@@ -121,6 +122,23 @@ func TestUpstreamBadRequestIsProviderOutcomeNotUnknownVerdict(t *testing.T) {
 	}
 	if got, want := VerdictQuality(fold), 50.0; got != want {
 		t.Fatalf("quality = %v, want %v; provider outcomes must not dilute the verdict denominator", got, want)
+	}
+}
+
+func TestCleanChildExitTwoRowWitnessDoesNotEmitUnknownVerdict(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
+		{"kind": "CHILD_EXIT", "verdict": "CHILD_EXIT", "reason": "clean_exit", "exit_code": 0},
+	})
+	fold := FoldRows([]string{p})
+	if fold.UnknownVerdict != 0 {
+		t.Fatalf("UnknownVerdict = %d, want 0", fold.UnknownVerdict)
+	}
+	if fold.OperationalRows != 1 {
+		t.Fatalf("OperationalRows = %d, want 1", fold.OperationalRows)
+	}
+	if got := VerdictQuality(fold); got != 100.0 {
+		t.Fatalf("VerdictQuality = %v, want 100.0", got)
 	}
 }
 

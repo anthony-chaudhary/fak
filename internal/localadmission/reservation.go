@@ -45,6 +45,7 @@ type ReservationRequest struct {
 	OwnerPID int             `json:"owner_pid"`
 	Plan     MemoryPlan      `json:"plan"`
 	Host     AdmissionSample `json:"host"`
+	Policy   string          `json:"policy,omitempty"`
 }
 
 type Reservation struct {
@@ -59,6 +60,8 @@ type Reservation struct {
 type ReservationDecision struct {
 	Admit              bool         `json:"admit"`
 	Reason             string       `json:"reason"`
+	RemedyHint         string       `json:"remedy_hint,omitempty"`
+	AdmissionPolicy    string       `json:"admission_policy,omitempty"`
 	CapacityBytes      int64        `json:"capacity_bytes"`
 	ReservedBytes      int64        `json:"reserved_bytes"`
 	RequestedPeakBytes int64        `json:"requested_peak_bytes"`
@@ -89,9 +92,20 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 		d.Reason = "pressure_unknown"
 		return d, nil
 	}
+	policy := req.Policy
 	if req.Host.Pressure == PressureCritical {
-		d.Reason = "pressure_critical"
-		return d, nil
+		if policy == "dev" {
+			d.AdmissionPolicy = "dev-override"
+		} else {
+			d.Reason = "pressure_critical"
+			if req.Host.TotalBytes > 0 {
+				compPct := float64(req.Host.CompressedBytes) / float64(req.Host.TotalBytes) * 100.0
+				d.RemedyHint = fmt.Sprintf("fleet-wide ambient pressure (compressed %.1f%%): free memory, reboot, or use the dev override (policy=dev)", compPct)
+			} else {
+				d.RemedyHint = "fleet-wide ambient pressure: free memory, reboot, or use the dev override (policy=dev)"
+			}
+			return d, nil
+		}
 	}
 	if req.Host.AllocatableBytes <= 0 {
 		d.Reason = "capacity_unknown"

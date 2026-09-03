@@ -44,7 +44,7 @@ var KnownVerdicts = map[string]bool{
 // decisions. The fold reports them explicitly but excludes them from verdict quality;
 // adding an operational row must not make an unrelated verdict defect look better.
 var KnownOperationalKinds = map[string]bool{
-	"CONFIG_SWAP": true, "RESTART_HOP": true, "CAPABILITY_GRANT": true,
+	"CONFIG_SWAP": true, "RESTART_HOP": true, "CAPABILITY_GRANT": true, "CHILD_EXIT": true,
 }
 
 // KnownProviderOutcomeKinds are provider-turn outcomes, not kernel decision
@@ -189,10 +189,15 @@ func FoldRows(paths []string) Fold {
 				continue
 			}
 			kind := strings.ToUpper(strings.TrimSpace(scorecard.StringValue(row["kind"])))
-			if KnownOperationalKinds[kind] {
+			verdictVal := strings.ToUpper(strings.TrimSpace(scorecard.StringValue(row["verdict"])))
+			if KnownOperationalKinds[kind] || KnownOperationalKinds[verdictVal] {
 				fold.TotalRows++
 				fold.OperationalRows++
-				fold.ByOperationalKind[kind]++
+				opKind := kind
+				if opKind == "" {
+					opKind = verdictVal
+				}
+				fold.ByOperationalKind[opKind]++
 				continue
 			}
 			if KnownProviderOutcomeKinds[kind] {

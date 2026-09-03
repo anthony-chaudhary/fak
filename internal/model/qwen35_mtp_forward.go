@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -130,8 +132,8 @@ func (f *Qwen35MTPForward) Close() {
 
 // Forward executes one native Qwen3.8 MTP draft position:
 //
-//  1. normalize prior target hidden and current token embedding separately;
-//  2. concatenate [hidden, embedding] and apply mtp.fc;
+//  1. normalize current token embedding and prior target hidden separately;
+//  2. concatenate [embedding, hidden] and apply mtp.fc;
 //  3. execute the exact retained mtp.layers.0 decoder tensors;
 //  4. apply mtp.norm and the shared target LM head.
 func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []float32) ([]float32, error) {
@@ -160,8 +162,8 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 }
 
 // Qwen35MTPFuse implements the checkpoint-defined pre-layer path exactly:
-// normalize the prior target hidden state and current token embedding
-// independently, concatenate them in that order, then apply mtp.fc.
+// normalize the current token embedding and prior target hidden state
+// independently, concatenate [embedding, hidden] in that order, then apply mtp.fc.
 func (m *Model) Qwen35MTPFuse(priorHidden, currentEmbedding []float32) ([]float32, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
@@ -202,8 +204,10 @@ func (m *Model) Qwen35MTPFuse(priorHidden, currentEmbedding []float32) ([]float3
 
 	eps := float32(m.Cfg.RMSNormEps)
 	fusedInput := make([]float32, 0, 2*h)
-	fusedInput = append(fusedInput, rmsnorm(priorHidden, hiddenNorm, eps)...)
-	fusedInput = append(fusedInput, rmsnorm(currentEmbedding, embeddingNorm, eps)...)
+	normedEmbedding := rmsnormCfg(currentEmbedding, embeddingNorm, eps, m.Cfg)
+	normedHidden := rmsnormCfg(priorHidden, hiddenNorm, eps, m.Cfg)
+	fusedInput = append(fusedInput, normedEmbedding...)
+	fusedInput = append(fusedInput, normedHidden...)
 	return parMatRows(fc, fusedInput, h, 2*h), nil
 }
 
@@ -273,16 +277,29 @@ func (m *Model) qwen35MTPF32Tensor(name string, wantShape []int) ([]float32, err
 	if !ok {
 		return nil, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "present", Got: "missing"}
 	}
-	if !strings.EqualFold(meta.Dtype, "F32") {
-		return nil, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32", Got: meta.Dtype}
+	if !strings.EqualFold(meta.Dtype, "F32") && !strings.EqualFold(meta.Dtype, "BF16") {
+		return nil, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or BF16", Got: meta.Dtype}
 	}
 	if !sameIntShape(meta.Shape, wantShape) {
 		return nil, &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprint(meta.Shape)}
 	}
-	wantBytes := 4
-	for _, dim := range wantShape {
-		wantBytes *= dim
+	elems, err := tensorShapeElems(name, wantShape)
+	if err != nil {
+		return nil, err
 	}
+	if strings.EqualFold(meta.Dtype, "BF16") && meta.Nbytes == elems*2 {
+		if meta.Offset < 0 || meta.Offset+meta.Nbytes > len(m.raw) {
+			return nil, &Qwen35MTPForwardError{Stage: "weight storage", Tensor: name, Want: fmt.Sprintf("%d bytes inside model payload", elems*2), Got: fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw))}
+		}
+		rawSlice := m.raw[meta.Offset : meta.Offset+meta.Nbytes]
+		out := make([]float32, elems)
+		for i := 0; i < elems; i++ {
+			u16 := binary.LittleEndian.Uint16(rawSlice[i*2 : i*2+2])
+			out[i] = math.Float32frombits(uint32(u16) << 16)
+		}
+		return out, nil
+	}
+	wantBytes := 4 * elems
 	if meta.Nbytes != wantBytes || meta.Offset < 0 || meta.Offset+meta.Nbytes > len(m.raw) {
 		return nil, &Qwen35MTPForwardError{Stage: "weight storage", Tensor: name, Want: fmt.Sprintf("%d bytes inside model payload", wantBytes), Got: fmt.Sprintf("offset=%d nbytes=%d payload=%d", meta.Offset, meta.Nbytes, len(m.raw))}
 	}

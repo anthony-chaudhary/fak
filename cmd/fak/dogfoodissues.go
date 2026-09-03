@@ -31,6 +31,7 @@ func cmdDogfoodIssues(argv []string) { os.Exit(runDogfoodIssues(os.Stdout, os.St
 // of calling os.Exit, and takes its streams explicitly. Exit codes: 0 ok, 1 a live
 // gh create/edit failed, 2 usage/parse/IO error.
 var dogfoodIssuesSync = dogfoodissues.Sync
+var dogfoodIssuesFetchExisting = dogfoodissues.FetchExistingIssues
 
 func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dogfood-issues", flag.ContinueOnError)

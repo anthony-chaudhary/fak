@@ -923,6 +923,9 @@ func compileSecretPatterns(pats []string) ([]*regexp.Regexp, error) {
 	}
 	out := make([]*regexp.Regexp, 0, len(pats))
 	for i, p := range pats {
+		if err := ValidateRegexSafety(p); err != nil {
+			return nil, fmt.Errorf("secret_patterns[%d] %q: %w", i, p, err)
+		}
 		re, err := regexp.Compile(p)
 		if err != nil {
 			return nil, fmt.Errorf("secret_patterns[%d] %q: %w", i, p, err)
@@ -1037,6 +1040,9 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 			pred.Kind = adjudicator.ArgAllowGlob
 			pred.Glob = r.AllowGlob
 		case r.DenyRegex != "":
+			if err := ValidateRegexSafety(r.DenyRegex); err != nil {
+				return nil, fmt.Errorf("arg_rules[%d]: invalid deny_regex: %w", i, err)
+			}
 			re, err := regexp.Compile(r.DenyRegex)
 			if err != nil {
 				return nil, fmt.Errorf("arg_rules[%d]: invalid deny_regex: %w", i, err)

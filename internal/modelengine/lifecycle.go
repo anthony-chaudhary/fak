@@ -34,7 +34,7 @@ func (e *Engine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest,
 // not just raw ids (#463); a nil tok (the byte-level default) omits both, leaving the
 // payload byte-identical to the pre-tokenizer path.
 func assembleResult(ctx context.Context, tool string, promptLen int, gen []int, tok NLTokenizer) *abi.Result {
-	return assembleSyscallResult(ctx, tool, EngineID, "smollm2-inkernel", promptLen, gen, tok)
+	return assembleSyscallResult(ctx, tool, EngineID, Default.ModelName(), promptLen, gen, tok)
 }
 
 // assembleSyscallResult builds the syscall decode result shared by the buffered lifecycle

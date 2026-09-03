@@ -903,3 +903,41 @@ func readQwenSwapUsageRows(t *testing.T, path string) []modelperfobs.QwenSwapUsa
 	}
 	return rows
 }
+
+// TestNativePreemptSpillsBeforeDropWhenTierPriced verifies #3414:
+// When DemoteBeforeDrop is enabled and tier restore cost undercuts full re-prefill,
+// a scheduler configured with Mode = NativePreemptRecompute automatically spills
+// (swaps) to host rather than dropping.
+func TestNativePreemptSpillsBeforeDropWhenTierPriced(t *testing.T) {
+	m := model.NewSynthetic(SyntheticConfig())
+	calls := issue31Calls()
+	want := drainIssue31Scheduler(t, m, calls, NativePreemptionPolicy{})
+
+	// 1. Default/Unpriced: DemoteBeforeDrop=false preserves pure recompute (0 swap bytes)
+	_, statsDefault := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
+		Mode:             NativePreemptRecompute,
+		MaxBlocks:        1,
+		BlockTokens:      128,
+		DemoteBeforeDrop: false,
+	})
+	if statsDefault.RecomputeCount != 1 || statsDefault.SwapBytes != 0 {
+		t.Fatalf("default recompute: recompute=%d swapBytes=%d, want 1/0", statsDefault.RecomputeCount, statsDefault.SwapBytes)
+	}
+
+	// 2. DemoteBeforeDrop=true and tier is cheaply priced (restore undercuts recompute)
+	got, statsSpill := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
+		Mode:                   NativePreemptRecompute, // configured as recompute, but tier restore undercuts!
+		MaxBlocks:              1,
+		BlockTokens:            128,
+		DemoteBeforeDrop:       true,
+		TierRestoreCostPerByte: 0.001, // cheap tier restore
+		RecomputeCostPerToken:  1.0,   // expensive recompute
+	})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("demote-before-drop changed output: got %v, want %v", got, want)
+	}
+	if statsSpill.SwapPreemptions != 1 || statsSpill.SwapBytes == 0 {
+		t.Fatalf("tier-priced spill: swapPreemptions=%d swapBytes=%d, want 1/>0 (must spill-before-drop)",
+			statsSpill.SwapPreemptions, statsSpill.SwapBytes)
+	}
+}

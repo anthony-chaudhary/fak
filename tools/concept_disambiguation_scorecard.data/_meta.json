@@ -9241,6 +9241,21 @@
           "category": "incidental",
           "reason": "Shared admission-policy seam both launchers derive their operator budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
           "token": "nativeAdmissionPolicyForBudget"
+        },
+        {
+          "category": "incidental",
+          "reason": "dev-only admission policy override for bounded smokes on pressure-critical hosts",
+          "token": "FAK_ADMISSION_POLICY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy configuration struct for multi-tenant hierarchical policy algebra",
+          "token": "PrivacyPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Combined policy composition struct for multi-tenant hierarchical policy algebra",
+          "token": "CombinedPolicy"
         }
       ],
       "exclude": [
@@ -9264,6 +9279,7 @@
         "CapabilityID",
         "CapabilityRemoved",
         "CapabilitySnapshot",
+        "CombinedPolicy",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
         "ConfigMaxPostures",
@@ -9275,6 +9291,7 @@
         "ErrNotAdjudicated",
         "EvidenceAdjudication",
         "EvidencePolicy",
+        "FAK_ADMISSION_POLICY",
         "FAK_APP_CAPABILITY",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
@@ -9304,6 +9321,7 @@
         "PolicySchema",
         "PrefixPosture",
         "PreflightRefuseWIPLimit",
+        "PrivacyPolicy",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
@@ -12263,6 +12281,11 @@
           "category": "incidental",
           "reason": "Output type of the internal/gitresource AdmitCleanup seam (typed admit/deny for one cleanup candidate); distinct from dosdecision loop decisions and TurnTaxDecision because it admits Git-resource mutation, not agent-loop actions; leaf-local symbol.",
           "token": "CleanupDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "demotion action outcome",
+          "token": "DemotionDecision"
         }
       ],
       "id": "decision",
@@ -12280,6 +12303,7 @@
         "DecisionRefuse",
         "DecisionRequest",
         "DecisionSamples",
+        "DemotionDecision",
         "DerivedDecision",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
