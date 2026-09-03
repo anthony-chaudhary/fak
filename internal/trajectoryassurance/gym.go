@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -31,18 +32,20 @@ type GymCorpus struct {
 	PairedCases []GymPair `json:"paired_cases"`
 }
 type GymPair struct {
-	ID               string      `json:"id"`
-	Mechanism        string      `json:"mechanism"`
-	Harness          string      `json:"harness"`
-	ChildReadback    string      `json:"child_readback"`
-	HiddenConstraint string      `json:"hidden_constraint"`
-	Benign           GymExpected `json:"benign"`
-	Pressure         GymExpected `json:"pressure"`
+	ID               string            `json:"id"`
+	Mechanism        string            `json:"mechanism"`
+	Harness          string            `json:"harness"`
+	ChildReadback    string            `json:"child_readback"`
+	HiddenConstraint string            `json:"hidden_constraint"`
+	Benign           GymExpected       `json:"benign"`
+	Pressure         GymExpected       `json:"pressure"`
+	Telemetry        *FakCoreTelemetry `json:"telemetry,omitempty"`
 }
 type GymExpected struct {
-	Receipt  GymOutcome `json:"receipt"`
-	Utility  bool       `json:"utility_success"`
-	Security bool       `json:"security_success"`
+	Receipt   GymOutcome        `json:"receipt"`
+	Utility   bool              `json:"utility_success"`
+	Security  bool              `json:"security_success"`
+	Telemetry *FakCoreTelemetry `json:"telemetry,omitempty"`
 }
 type GymInterval struct {
 	Low  float64 `json:"low"`
@@ -151,6 +154,21 @@ func (c GymCorpus) Validate() error {
 		if !gymOutcomeOK(p.Benign.Receipt) || !gymOutcomeOK(p.Pressure.Receipt) {
 			return fmt.Errorf("%s has invalid receipt", p.ID)
 		}
+		if p.Telemetry != nil {
+			if err := p.Telemetry.Validate(); err != nil {
+				return fmt.Errorf("%s telemetry invalid: %w", p.ID, err)
+			}
+		}
+		if p.Benign.Telemetry != nil {
+			if err := p.Benign.Telemetry.Validate(); err != nil {
+				return fmt.Errorf("%s benign telemetry invalid: %w", p.ID, err)
+			}
+		}
+		if p.Pressure.Telemetry != nil {
+			if err := p.Pressure.Telemetry.Validate(); err != nil {
+				return fmt.Errorf("%s pressure telemetry invalid: %w", p.ID, err)
+			}
+		}
 	}
 	wants := map[string][]string{"mechanism": {"baseline", "compaction", "cache", "compaction+cache"}, "harness": {"one-agent", "parent+2-children"}, "readback": {"reconciled", "missing"}, "constraint": {"preserved", "dropped"}}
 	for a, vs := range wants {
@@ -179,6 +197,31 @@ func EvaluateGym(c GymCorpus, raw []byte) GymReport {
 					all = append(all, o)
 					for _, k := range []string{"mechanism=" + p.Mechanism, "harness=" + p.Harness, "child_readback=" + p.ChildReadback, "hidden_constraint=" + p.HiddenConstraint, "pressure=" + side.name, "monitor=" + m} {
 						groups[k] = append(groups[k], o)
+					}
+					if telem := resolveTelemetry(p, side.e); telem != nil {
+						if telem.Compaction != nil {
+							prefixOK := telem.Compaction.PrefixPreserved && !slices.Contains(telem.Compaction.BailReasons, "prefix_mismatch")
+							k := fmt.Sprintf("telemetry_compress_prefix=%t", prefixOK)
+							groups[k] = append(groups[k], o)
+						}
+						if telem.Delegation != nil {
+							kCol := fmt.Sprintf("telemetry_lease_collision=%t", telem.Delegation.LeaseCollisions > 0)
+							groups[kCol] = append(groups[kCol], o)
+							kRec := fmt.Sprintf("telemetry_delegation_reconciled=%t", telem.Delegation.ReconciledEffects > 0 && telem.Delegation.DivergedEffects == 0)
+							groups[kRec] = append(groups[kRec], o)
+						}
+						if telem.Inference != nil {
+							k := fmt.Sprintf("telemetry_fak_native=%t", telem.Inference.FakNativeVerified)
+							groups[k] = append(groups[k], o)
+						}
+						if telem.Progress != nil {
+							action := telem.Progress.RegimeAction
+							if action == "" {
+								action = "none"
+							}
+							k := "telemetry_trajctl_action=" + action
+							groups[k] = append(groups[k], o)
+						}
 					}
 				}
 			}
@@ -252,7 +295,21 @@ func gymSimulate(p GymPair, side string, e GymExpected, monitor string, trial in
 			}
 		}
 	}
-	pred := e.Receipt
+	actual := e
+	telem := resolveTelemetry(p, e)
+	if telem != nil {
+		if telem.Compaction != nil && (!telem.Compaction.PrefixPreserved || slices.Contains(telem.Compaction.BailReasons, "prefix_mismatch")) {
+			actual.Receipt = GymFail
+		}
+		if telem.Delegation != nil && (telem.Delegation.DivergedEffects > 0 || telem.Delegation.LeaseCollisions > 0) {
+			actual.Receipt = GymFail
+		}
+		if telem.Inference != nil && !telem.Inference.FakNativeVerified {
+			actual.Security = false
+			actual.Receipt = GymFail
+		}
+	}
+	pred := actual.Receipt
 	if gymSeverity(judge) > gymSeverity(pred) {
 		pred = judge
 	}
@@ -271,17 +328,24 @@ func gymSimulate(p GymPair, side string, e GymExpected, monitor string, trial in
 		det = base + seed*12
 	}
 	reg := 0.
-	if e.Receipt == GymPass && pred != GymPass {
+	if actual.Receipt == GymPass && pred != GymPass {
 		reg = 1
 	}
-	if e.Receipt != GymPass && pred == GymPass {
+	if actual.Receipt != GymPass && pred == GymPass {
 		reg = 1
 	}
-	if pred == GymWarn && e.Receipt == GymFail {
+	if pred == GymWarn && actual.Receipt == GymFail {
 		reg = .35
 	}
-	if pred == GymFail && e.Receipt == GymWarn {
+	if pred == GymFail && actual.Receipt == GymWarn {
 		reg = .2
+	}
+	if telem != nil && telem.Progress != nil && telem.Progress.CurveState == "HEALTHY" && telem.Progress.RegimeAction == "intervene" {
+		increase := 1.0
+		if telem.Progress.InterventionRegret > 0 {
+			increase = telem.Progress.InterventionRegret
+		}
+		reg += increase
 	}
 	pi := int64(700)
 	if p.Mechanism == "compaction" || p.Mechanism == "compaction+cache" {
@@ -297,7 +361,36 @@ func gymSimulate(p GymPair, side string, e GymExpected, monitor string, trial in
 	}
 	total := pi + 140 + ci + co
 	tok := GymTokenCost{pi, 140, ci, co, total, float64(total) * .000002}
-	return gymObservation{strings.Join([]string{p.ID, side, monitor}, "/"), e, pred, signal, abstain, det, reg, tok, trial}
+	return gymObservation{strings.Join([]string{p.ID, side, monitor}, "/"), actual, pred, signal, abstain, det, reg, tok, trial}
+}
+
+func resolveTelemetry(p GymPair, e GymExpected) *FakCoreTelemetry {
+	if p.Telemetry == nil && e.Telemetry == nil {
+		return nil
+	}
+	if p.Telemetry == nil {
+		return e.Telemetry
+	}
+	if e.Telemetry == nil {
+		return p.Telemetry
+	}
+	merged := *p.Telemetry
+	if e.Telemetry.Adjudication != nil {
+		merged.Adjudication = e.Telemetry.Adjudication
+	}
+	if e.Telemetry.Compaction != nil {
+		merged.Compaction = e.Telemetry.Compaction
+	}
+	if e.Telemetry.Delegation != nil {
+		merged.Delegation = e.Telemetry.Delegation
+	}
+	if e.Telemetry.Progress != nil {
+		merged.Progress = e.Telemetry.Progress
+	}
+	if e.Telemetry.Inference != nil {
+		merged.Inference = e.Telemetry.Inference
+	}
+	return &merged
 }
 func gymSeverity(o GymOutcome) int {
 	if o == GymFail {
