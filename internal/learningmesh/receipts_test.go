@@ -1,6 +1,7 @@
 package learningmesh
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -81,6 +82,9 @@ func TestReceiptWitnessMatchesCapturedOutput(t *testing.T) {
 		raw, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte("\r\n")) {
+			raw = bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
 		}
 		inputs = append(inputs, ReceiptInput{Path: filepath.ToSlash(filepath.Join("docs", "_witnesses", "issue-9886", name)), Bytes: raw})
 	}
