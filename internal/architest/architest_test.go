@@ -797,6 +797,8 @@ var tier = map[string]int{
 	"cache":                      1,
 	"benchsnapshot":              1,
 	"promptcomp":                 1,
+	"orgdebt":                    1,
+	"tb4bench":                   4,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
