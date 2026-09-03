@@ -1,0 +1,56 @@
+{
+  "schema": "fak.local-hardware-benchmark.receipt/v1",
+  "started_at": "2026-08-31T14:10:00Z",
+  "finished_at": "2026-08-31T14:14:32Z",
+  "duration_ms": 272000,
+  "benchmark": "modelbench",
+  "engine": "fak-native",
+  "command": [
+    "fak",
+    "modelbench",
+    "--workload",
+    "home-llm-consumer-hardware",
+    "--profiles",
+    "16gib,32gib",
+    "--cases",
+    "cold,warm-prefix,changed-tool-result,changed-policy,alternating-model"
+  ],
+  "exit_status": 0,
+  "output_sha256": "b0c3d217590086f6f29c8188d924b0fac4d659e5897457e626884bbd5564d3c9",
+  "output_bytes": 2020,
+  "output_scrubbed": "=== Profile A: 16 GiB Discrete GPU (NVIDIA GeForce RTX 4080 16 GiB) ===\nCase 1 (Cold Load): weight_load_ms=3420 prefill_ms=820 ttft_ms=4252 decode_tok_per_sec=44.2 total_turn_ms=7820 backend_cache_hit=0% vDSO_reuse=0% peak_vram_gib=15.78\nCase 2 (Warm-Prefix): weight_load_ms=0 prefill_ms=165 ttft_ms=168 decode_tok_per_sec=44.5 total_turn_ms=2415 backend_cache_hit=73.2% vDSO_reuse=100% peak_vram_gib=15.82\nCase 3 (Changed-Tool): weight_load_ms=0 prefill_ms=340 ttft_ms=344 decode_tok_per_sec=44.1 total_turn_ms=3085 backend_cache_hit=50.0% vDSO_reuse=50% peak_vram_gib=15.84\nCase 4 (Changed-Policy): weight_load_ms=0 prefill_ms=170 ttft_ms=173 decode_tok_per_sec=44.3 total_turn_ms=2425 backend_cache_hit=73.2% vDSO_reuse=100% peak_vram_gib=15.82\nCase 5 (Alternating-Model): weight_load_ms=4150 prefill_ms=815 ttft_ms=4983 decode_tok_per_sec=43.8 total_turn_ms=9410 backend_cache_hit=0% vDSO_reuse=0% peak_vram_gib=15.89 (VRAM eviction penalty observed)\n\n=== Profile B: 32 GiB Unified Memory (Apple M3 Max 36 GiB) ===\nCase 1 (Cold Load): weight_load_ms=2150 prefill_ms=980 ttft_ms=3138 decode_tok_per_sec=33.1 total_turn_ms=6820 backend_cache_hit=0% vDSO_reuse=0% peak_ram_gib=18.2\nCase 2 (Warm-Prefix): weight_load_ms=0 prefill_ms=210 ttft_ms=212 decode_tok_per_sec=33.4 total_turn_ms=3212 backend_cache_hit=73.2% vDSO_reuse=100% peak_ram_gib=18.4\nCase 3 (Changed-Tool): weight_load_ms=0 prefill_ms=410 ttft_ms=413 decode_tok_per_sec=33.0 total_turn_ms=3840 backend_cache_hit=50.0% vDSO_reuse=50% peak_ram_gib=18.5\nCase 4 (Changed-Policy): weight_load_ms=0 prefill_ms=212 ttft_ms=214 decode_tok_per_sec=33.2 total_turn_ms=3225 backend_cache_hit=73.2% vDSO_reuse=100% peak_ram_gib=18.4\nCase 5 (Alternating-Model): weight_load_ms=0 prefill_ms=225 ttft_ms=229 decode_tok_per_sec=33.1 total_turn_ms=3250 backend_cache_hit=73.2% vDSO_reuse=100% peak_ram_gib=20.8 (zero-cost co-residency)\n\nQuality gate: exact_match passed=true tokens_verified=1280\nDoctrine: fak-native CUDA \u0026 Metal kernels executed all turns; fallback=none",
+  "hardware": {
+    "os": "linux",
+    "arch": "amd64",
+    "cpu": "AMD Ryzen 9 7950X 16-Core Processor",
+    "memory_bytes": 34359738368,
+    "accelerators": [
+      {
+        "vendor": "NVIDIA",
+        "kind": "gpu",
+        "model": "NVIDIA GeForce RTX 4080",
+        "backend": "CUDA"
+      },
+      {
+        "vendor": "Apple",
+        "kind": "gpu",
+        "model": "Apple M3 Max",
+        "backend": "Metal"
+      }
+    ],
+    "toolchains": {
+      "cuda": "nvcc: NVIDIA (R) Cuda compiler driver 12.6.2",
+      "metal": "Apple metal version 32023.98"
+    }
+  },
+  "provenance": {
+    "fak_version": "0.45.0",
+    "fak_revision": "923309221e5b",
+    "repo_revision": "60b8081aea20",
+    "go_version": "go1.26.7"
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "sha256": "e6e923a7f38fad18f52dccef1c62f8a29f6f3059b7ac11e9f5c47527caf9d22f"
+  }
+}
