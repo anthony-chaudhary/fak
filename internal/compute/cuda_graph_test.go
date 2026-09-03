@@ -217,6 +217,52 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 	}
 	cb.GraphReset()
 
+	if cb.IsCapturing() {
+		t.Fatal("#10716: IsCapturing() must report false before capture begins")
+	}
+
+	// Verify lifecycle tracking: GraphBegin arms capturing, GraphAbort clears it.
+	if cb.GraphBegin() {
+		if !cb.IsCapturing() {
+			t.Fatal("#10716: IsCapturing() must report true while capture is open")
+		}
+		cb.GraphAbort()
+		if cb.IsCapturing() {
+			t.Fatal("#10716: IsCapturing() must report false after GraphAbort")
+		}
+	}
+
+	// Verify lifecycle tracking: GraphBegin arms capturing, GraphEndLaunch clears it.
+	// Test unconditional upload behavior during capture vs elision outside capture.
+	dummy := cb.UploadClass(NewF32(cb, []int{4}, []float32{0, 0, 0, 0}), F32, MemoryActivation, "test-constant")
+	var lastParam uint64
+	paramA := []float32{1.0, 2.0, 3.0, 4.0}
+	paramB := []float32{5.0, 6.0, 7.0, 8.0}
+
+	// Outside capture: first upload sets lastParam.
+	cb.UploadConstantParam(dummy, paramA, 100, &lastParam)
+	if lastParam != 100 {
+		t.Fatalf("#10716: expected lastParam=100 outside capture, got %d", lastParam)
+	}
+
+	// Under stream capture: alternating layer configs are unconditionally emitted.
+	if cb.GraphBegin() {
+		if !cb.IsCapturing() {
+			t.Fatal("#10716: IsCapturing() must report true during capture")
+		}
+		// Layer 0: paramA (key 100)
+		cb.UploadConstantParam(dummy, paramA, 100, &lastParam)
+		// Layer 1: paramB (key 200)
+		cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
+		// Layer 0 again with paramB: must NOT be skipped under capture even though lastParam == 200.
+		cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
+
+		cb.GraphAbort()
+		if cb.IsCapturing() {
+			t.Fatal("#10716: IsCapturing() must report false after capture is aborted")
+		}
+	}
+
 	cfg, host := asyncWitnessCfg()
 	m0 := newSynth(cb, cfg, host)
 	m1 := newSynth(cb, cfg, host)
@@ -239,6 +285,10 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 
 	if !cap0 || !cap1 {
 		t.Fatal("graph capture must engage for both alternating configurations")
+	}
+
+	if cb.IsCapturing() {
+		t.Fatal("#10716: IsCapturing() must report false after stepDevGraph completion")
 	}
 
 	out0Replay, _ := m0.stepDevGraph(100)
