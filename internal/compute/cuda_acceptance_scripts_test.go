@@ -14,6 +14,9 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 	if err != nil {
 		t.Skip("bash is required to exercise build_cuda.sh")
 	}
+	if out, err := exec.Command(bash, "-c", "exit 0").CombinedOutput(); err != nil {
+		t.Skipf("bash is not operational: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 	script, err := os.ReadFile("build_cuda.sh")
 	if err != nil {
 		t.Fatal(err)

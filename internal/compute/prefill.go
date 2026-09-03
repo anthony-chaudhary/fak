@@ -379,3 +379,33 @@ func ResetPrefillGraph(be Backend) {
 		gc.GraphReset()
 	}
 }
+
+// ConstantParamUploader is the optional capability a backend implements for
+// capture-aware constant and parameter uploads (#10716).
+type ConstantParamUploader interface {
+	UploadConstantParam(dst Tensor, data []float32, paramKey uint64, lastUploaded *uint64)
+}
+
+// UploadConstantParam uploads parameter or constant float32 data into dst. Under
+// stream/graph capture, the upload is emitted unconditionally so that replayed graph
+// executions are self-contained and contain every parameter assignment. Outside capture,
+// uploads with matching paramKey may be skipped (#10716).
+func UploadConstantParam(dst Tensor, data []float32, paramKey uint64, lastUploaded *uint64) {
+	if uploader, ok := dst.be.(ConstantParamUploader); ok {
+		uploader.UploadConstantParam(dst, data, paramKey, lastUploaded)
+		return
+	}
+	capturing := false
+	if capturer, ok := dst.be.(interface{ IsCapturing() bool }); ok {
+		capturing = capturer.IsCapturing()
+	}
+	if !capturing && lastUploaded != nil && *lastUploaded == paramKey {
+		return
+	}
+	if hb, ok := dst.buf.(HostBuffer); ok && len(data) > 0 {
+		copy(hb.F32(), data)
+	}
+	if lastUploaded != nil {
+		*lastUploaded = paramKey
+	}
+}

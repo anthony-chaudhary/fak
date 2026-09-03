@@ -15,7 +15,7 @@
     },
     "fak": {
       "type": "local",
-      "command": ["fak", "serve", "--stdio", "--policy", "examples/opencode-policy.json"],
+      "command": ["fak", "serve", "--stdio", "--defer-tools=false", "--policy", "examples/opencode-policy.json"],
       "environment": {},
       "enabled": true
     }

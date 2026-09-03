@@ -99,7 +99,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		sessionUsage(stderr)
 		return 2
 	}
-	if verb == "resume" {
+	if verb == "resume" || verb == "pause" {
 		for _, a := range args {
 			if a == "--all" || a == "-all" || strings.HasPrefix(a, "--all=") || strings.HasPrefix(a, "-all=") {
 				want = 0
@@ -108,8 +108,8 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	if len(args) < want {
-		if verb == "resume" {
-			fmt.Fprintf(stderr, "fak session resume: missing argument(s); want 1 (pass <id> or --all)\n")
+		if verb == "resume" || verb == "pause" {
+			fmt.Fprintf(stderr, "fak session %s: missing argument(s); want 1 (pass <id> or --all)\n", verb)
 		} else {
 			fmt.Fprintf(stderr, "fak session %s: missing argument(s); want %d\n", verb, want)
 		}
@@ -127,7 +127,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the raw JSON instead of the human table")
 	ifRev := fs.Uint64("if-rev", 0, "optimistic-concurrency guard: apply only if the session's current rev matches (0 = no guard)")
 	reason := fs.String("reason", "", "reason token recorded on throttle/stop")
-	all := fs.Bool("all", false, "resume: resume all paused sessions")
+	all := fs.Bool("all", false, "pause/resume: apply to all matching sessions")
 	turns := fs.Int("turns", sessionFlagUnset, "budget: remaining turns (-1 = unbounded)")
 	tokens := fs.Int("tokens", sessionFlagUnset, "budget: remaining output tokens (-1 = unbounded)")
 	contextTokens := fs.Int("context-tokens", sessionFlagUnset, "budget: remaining prompt/context tokens (0 = off)")
@@ -210,6 +210,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		// call. Rides the same run-state verb wire, so the gateway stays vocabulary-blind.
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "terminating", *reason, *ifRev)
 	case "pause":
+		if *all {
+			return c.pauseAll(stdout, stderr, *asJSON, *reason)
+		}
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "paused", *reason, *ifRev)
 	case "resume":
 		if *all {
@@ -299,6 +302,57 @@ func (c *sessionClient) runVerb(stdout, stderr io.Writer, asJSON bool, id, state
 	return c.renderState(stdout, stderr, asJSON, func() (gateway.SessionState, error) {
 		return c.control(id, "run", gateway.SessionControlRequest{Run: state, Reason: reason, IfRev: ifRev})
 	})
+}
+
+// pauseAll holds every currently running or throttled session via GET /v1/fak/sessions and
+// POST /v1/fak/session/{id}/run.
+func (c *sessionClient) pauseAll(stdout, stderr io.Writer, asJSON bool, reason string) int {
+	if reason == "" {
+		reason = "operator batch pause"
+	}
+	list, err := c.list()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session pause --all: %v\n", err)
+		return 1
+	}
+	var active []gateway.SessionState
+	for _, st := range list.Sessions {
+		if strings.EqualFold(st.Run, "running") || strings.EqualFold(st.Run, "throttled") {
+			active = append(active, st)
+		}
+	}
+	if len(active) == 0 {
+		if asJSON {
+			return emitSessionJSON(stdout, stderr, map[string]any{
+				"count":    0,
+				"paused":   0,
+				"sessions": []gateway.SessionState{},
+			})
+		}
+		fmt.Fprintln(stdout, "no running or throttled sessions to pause")
+		return 0
+	}
+	var paused []gateway.SessionState
+	for _, st := range active {
+		next, err := c.control(st.TraceID, "run", gateway.SessionControlRequest{Run: "paused", Reason: reason})
+		if err != nil {
+			fmt.Fprintf(stderr, "pause %s: %v\n", st.TraceID, err)
+			continue
+		}
+		paused = append(paused, next)
+	}
+	if asJSON {
+		return emitSessionJSON(stdout, stderr, map[string]any{
+			"count":    len(paused),
+			"paused":   len(paused),
+			"sessions": paused,
+		})
+	}
+	for _, st := range paused {
+		fmt.Fprintln(stdout, formatSessionState(st))
+	}
+	fmt.Fprintf(stdout, "%d session(s) paused\n", len(paused))
+	return 0
 }
 
 // resumeAll un-pauses every currently paused session via GET /v1/fak/sessions and
@@ -882,7 +936,7 @@ func sessionUsage(w io.Writer) {
   fak session stop     <id> [--reason R]      request a clean stop (drain at the next boundary)
   fak session terminate <id> [--reason R]     forceful stop: cancel in-flight work at the next
                                                safe point (no new tool calls; no drain cleanup)
-  fak session pause    <id>                   hold at the next turn boundary
+  fak session pause    [<id>|--all] [--reason R]  hold one session or all active sessions at the next turn boundary
   fak session resume   [<id>|--all]           un-pause one session or all paused sessions
   fak session throttle <id> [--reason R]      slow without pausing
   fak session run      <id> <state>           set running|throttled|paused|draining|terminating|stopped

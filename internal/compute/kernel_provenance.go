@@ -195,6 +195,7 @@ func (m KernelProvenanceManifest) ValidateTree(root string) error {
 		if err != nil {
 			return fmt.Errorf("kernel %q destination: %w", entry.ID, err)
 		}
+		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 		if !bytes.Contains(data, []byte(entry.Attribution)) {
 			return fmt.Errorf("kernel %q destination %q is missing declared attribution", entry.ID, entry.Destination)
 		}

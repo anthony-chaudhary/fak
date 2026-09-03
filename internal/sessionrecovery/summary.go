@@ -102,7 +102,11 @@ func NewSummary(mode string, report InventoryReport, requests []Request, now tim
 			result.BaselineCursor, result.BaselineAt = progressCursor(baseline)
 		}
 		if req.Status == "candidate" {
-			result.SelectionReason = "crashed session has an in-progress turn and no live process tree"
+			if req.Reason == "terminal_loss" {
+				result.SelectionReason = "terminal_loss: provider inProgress with positively absent live process ancestry"
+			} else {
+				result.SelectionReason = "crashed session has an in-progress turn and no live process tree"
+			}
 		} else if req.Reason != "" {
 			result.SelectionReason = req.Reason
 		}

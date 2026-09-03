@@ -166,6 +166,10 @@ type cudaBackend struct {
 	// refuse typed instead of computing on a suspect context. nil admits everything, so a
 	// backend constructed without a latch (older tests) behaves exactly as before.
 	faultLatch *DeviceFaultLatch
+	// capturing tracks whether a CUDA graph capture is currently open on g_stream (#10716).
+	// Under capture, parameter and constant memory uploads must be emitted unconditionally
+	// into the stream so replayed graph executions do not read stale host-cached state.
+	capturing bool
 }
 
 // cudaFaultReconstructBudget bounds how many context reconstructions a poisoned session may
