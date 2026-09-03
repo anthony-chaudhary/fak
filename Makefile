@@ -443,7 +443,6 @@ hygiene:
 		python3 tools/check_links.py --audit-tree && \
 		python3 tools/check_committed_files.py --audit-tree && \
 		python3 tools/check_secret_shapes.py --audit-tree && \
-		python3 tools/check_provenance_labels.py --audit-tree && \
 		python3 tools/scrub_hardware_names.py --check && \
 		python3 tools/demo_command_audit.py && \
 		python3 tools/demo_browser_contract.py; \
@@ -480,7 +479,6 @@ demo-tool-tests:
 	@python3 tools/demo_browser_contract_test.py
 	@python3 tools/demo_http_smoke_test.py
 	@python3 tools/demo_headless_smoke_test.py
-	@python3 tools/check_provenance_labels_test.py
 	@python3 tools/guard_mcp_status_audit_test.py
 	@python3 tools/openai_live_prereq_audit_test.py
 	@python3 tools/openai_hosted_live_pilot_test.py

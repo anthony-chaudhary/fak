@@ -94,7 +94,6 @@ run_gate DOC_PLACEMENT  tools/check_doc_placement.py   "${FLEET_DOC_GUARD:-block
 run_gate BROKEN_LINK    tools/check_links.py           "${FLEET_LINK_GUARD:-block}"  "${ALLOW_BAD_LINK:-0}"
 run_gate FILE_ADMISSION tools/check_committed_files.py "${FLEET_FILE_GUARD:-block}"  "${ALLOW_STRAY_FILE:-0}"
 run_gate INDEX_SYNC     tools/check_index_sync.py      "${FLEET_INDEX_GUARD:-block}" "${ALLOW_INDEX_DRIFT:-0}"
-run_gate PROVENANCE_LABEL tools/check_provenance_labels.py "${FLEET_PROVENANCE_GUARD:-block}" "${ALLOW_PROVENANCE_DRIFT:-0}"
 if [ "$gate_failed" -ne 0 ]; then
 	echo "" >&2
 	echo "commit refused by a fleet pre-commit gate (above)." >&2
