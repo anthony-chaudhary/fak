@@ -36,9 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 66 skill(s); resident floor = 31724 bytes (~7931 tokens);
-  description floor = 31724 B; name-only floor = 894 B; at-rest card floor = 15679 bytes
-  at-rest intent slice (#5560): 11567 B (~2891 tokens) across 66 skill(s)
+skill footprint [interactive]: 66 skill(s); resident floor = 31717 bytes (~7929 tokens);
+  description floor = 31717 B; name-only floor = 894 B; at-rest card floor = 15677 bytes
+  at-rest intent slice (#5560): 11566 B (~2891 tokens) across 66 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -61,7 +61,7 @@ head is pinned here so a drift is legible in review.
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 47234 → 31724 B (-15510, 66 skills)** — the live `SkillResolver`
+**Last re-pin: 47234 → 31717 B (-15517, 66 skills)** — the live `SkillResolver`
 measurement proves the description reduction while retaining two additional skills. The
 gate banks that measured corpus reduction; future growth retains the same narrow ratchet
 band.
@@ -94,7 +94,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **31724**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **31717**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
