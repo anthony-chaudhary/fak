@@ -29,7 +29,7 @@ const selfUpdateManifestSchema = "fak.self-update-manifest/v2"
 var selfUpdateManifestPublicKey = mustSelfUpdateManifestKey("11qYAYdk9Jf73B6NfP3qF0PW0mCz9v7sS5Yp2wT0G0A=")
 
 var (
-	selfUpdateManifestHTTPClient = http.DefaultClient
+	selfUpdateManifestHTTPClient = &http.Client{Timeout: 30 * time.Second}
 	selfUpdateManifestNow        = time.Now
 )
 

@@ -502,10 +502,10 @@ Unknown or not-yet selections fail before the run. Response profiles do not chan
 ## Verbs
 
 The command surface has two executable boundaries. The shipped **`fak` runtime** is
-the product — what an adopter or operator touches (`manage`, `serve`, `agent`,
+the product — what an adopter or operator touches (`guard`, `manage`, `serve`, `agent`,
 `run`, `preflight`, `policy`, `attest`, `audit`, `egress`, `info`, `session`,
-`ps`/`top`, `signal`, `resume`, `doctor`, `recover`, `model`, `codex`,
-`self-update`, `version`, `help`). `fak help` and `fak help --all` describe that
+`ps`/`top`, `signal`, `resume`, `doctor`, `recover`, `model`, `codex`, `ablate`,
+`vcache`, `answer-shape`, `codelint`, `self-update`, `version`, `help`). `fak help` and `fak help --all` describe that
 runtime. Repository workflows, scorecards, benches, and issue/docs tooling live
 in the separate **`fak-dev`** executable; `fak-dev help` lists them. The legacy
 `fak dev <verb>` spelling is a compatibility handoff to a sibling or
@@ -516,7 +516,48 @@ this reference stays the front door; every section is preserved verbatim:
 
 - the per-verb deep catalog (idempotency, architecture, and the rest of the shipped runtime): [verbs.md](cli/verbs.md)
 - the appended verb contracts (launch, workpattern, stale-work, skill compile, the study-* verbs, server, new-model): [verbs-extended.md](cli/verbs-extended.md)
+- the out-of-band operator control plane (session, signal, ps, top): [operator-control-plane.md](operator-control-plane.md)
 - the kernel map: file table, one-breath contract, witness-closed shipped table, honest limits, and wave-0 build history: [kernel-map.md](cli/kernel-map.md)
+
+## `fak guard`
+
+```text
+fak guard [flags] [--] <agent command...>
+```
+
+Fronts an interactive or autonomous agent with the in-process capability floor, audit journal, and result quarantine. Proposed tool calls are checked before execution.
+
+## `fak ablate`
+
+```text
+fak ablate [--sweep vdso|all] [--trace TRACE.json] [--rungs] [--json]
+```
+
+Runs deterministic N-arm self-ablation sweeps over frozen tool-call traces to isolate token and latency deltas across runtime and policy levers.
+
+## `fak vcache`
+
+```text
+fak vcache <status|prove|prove-telemetry|actions|apply-actions|score> [--json]
+```
+
+Virtual provider-cache governor and status interface: inspects warm prefix state, tracks planned and applied cache actions, and emits token-savings proof and refutation scorecards.
+
+## `fak answer-shape`
+
+```text
+fak answer-shape --text <file|-> [--max-repeat FRACTION] [--max-chars N] [--json]
+```
+
+Evaluates consumer-facing output shape, verbosity, and repetition: witnesses whether a candidate answer loops or runs away, exiting non-zero on degeneration.
+
+## `fak codelint`
+
+```text
+fak codelint PATH...
+```
+
+Write-time code linting over agent-written code (Go and JSON parsed in-process, Python/CUDA checked via toolchain), catching structural syntax and type errors.
 
 ## `fak study-inventory`
 

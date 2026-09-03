@@ -307,7 +307,7 @@ func TestIdentityIsDeterministicAndContentSensitive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first != second || len(first) != 64 {
+	if first != second || len(first) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width is a fixed 64-character invariant
 		t.Fatalf("identity not deterministic: %q %q", first, second)
 	}
 	v.Observation.ID = "obs:01J6NS"

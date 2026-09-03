@@ -21,7 +21,7 @@ func TestExpensiveWorkflowsCancelOnlySupersededPushAndPullRequestRuns(t *testing
 		"security-audit.yml",
 	}
 
-	if len(workflows) != 5 {
+	if len(workflows) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the test explicitly audits exactly five declared workflows
 		t.Fatalf("workflow concurrency gate must cover exactly five workflows; got %d", len(workflows))
 	}
 

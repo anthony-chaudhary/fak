@@ -29,7 +29,7 @@ func TestVCacheFixturePutInspectCapturedProof(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &put); err != nil {
 		t.Fatalf("decode put: %v\n%s", err, stdout)
 	}
-	if !put.Stored || put.Schema != vcacheFixturePutSchema || len(put.Digest) != 64 {
+	if !put.Stored || put.Schema != vcacheFixturePutSchema || len(put.Digest) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest is a fixed 64-character invariant
 		t.Fatalf("put report = %+v", put)
 	}
 	if put.Metadata.Tool != "fixture.lookup" || put.Metadata.Producer != "vdso" || put.Metadata.Plane != "tool_result" || put.Metadata.Eligibility != "read_only+idempotent" {

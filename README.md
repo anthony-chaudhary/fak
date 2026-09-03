@@ -4,7 +4,7 @@
 
 # fak — the fast local runtime for coding agents
 
-**One binary puts a fast, cache-accelerated runtime between your coding agent and every tool call.**
+**fak is an agent runtime: one binary puts a fast, cache-accelerated boundary between your coding agent and every tool call.**
 
 > **In short:** run coding agents locally with workflow batching and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
 
