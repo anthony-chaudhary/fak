@@ -1,0 +1,173 @@
+{
+  "schema": "fak.issue-9495-metal-profile-bundle/1",
+  "issue": 9495,
+  "parent_issue": 8922,
+  "umbrella_issue": 9430,
+  "target": "qwen38-27b-q4km-m3pro-p32-t64",
+  "artifact": {
+    "model": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "execution": {
+    "engine": "fak-native",
+    "backend": "metal",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "prompt_tokens": 32,
+    "decode_tokens": 64,
+    "fallback_count": 0,
+    "total_fallbacks": 0,
+    "promised_cpu_fallbacks": 0
+  },
+  "hardware": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "memory_bytes": 38654705664,
+    "memory_gib": 36,
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "phase_breakdown": {
+    "host_materialization_ms": 24329.352542,
+    "prefill_ms": 32971.988708,
+    "decode_ms": 19497.087625,
+    "first_token_ms": 2523.281666,
+    "steady_decode_ms": 16973.805959,
+    "verification_ms": 25.327459,
+    "teardown_ms": 0.15925,
+    "total_wall_ms": 76823.915584
+  },
+  "phases": [
+    {
+      "name": "load-setup",
+      "description": "host materialization and session setup",
+      "start_milliseconds": 0.0,
+      "duration_milliseconds": 24329.352542
+    },
+    {
+      "name": "prefill",
+      "description": "prompt prefill (P=32)",
+      "start_milliseconds": 24329.352542,
+      "duration_milliseconds": 32971.988708
+    },
+    {
+      "name": "first-token",
+      "description": "first token generation",
+      "start_milliseconds": 57301.34125,
+      "duration_milliseconds": 2523.281666
+    },
+    {
+      "name": "steady-decode",
+      "description": "steady token decode (T=63 tokens)",
+      "start_milliseconds": 59824.622916,
+      "duration_milliseconds": 16973.805959
+    },
+    {
+      "name": "verification",
+      "description": "quality and token verification",
+      "start_milliseconds": 76798.428875,
+      "duration_milliseconds": 25.327459
+    },
+    {
+      "name": "teardown",
+      "description": "session teardown and memory recovery",
+      "start_milliseconds": 76823.75633399999,
+      "duration_milliseconds": 0.15925
+    }
+  ],
+  "metal": {
+    "command_buffer_count": 14833,
+    "encoder_count": 23025,
+    "host_wait_time_ms": 39772.66442775726,
+    "gpu_execution_time_ms": 15322.027541660646,
+    "command_buffers": 14833,
+    "encoders": 23025,
+    "dispatch_milliseconds": 15322.027541660646,
+    "wait_milliseconds": 39772.66442775726,
+    "resident_bytes": 24595492864,
+    "working_set_bytes": 18288771072
+  },
+  "constraint_driver": {
+    "selected_driver": "synchronization / host-wait amortization",
+    "bottleneck_class": "synchronization-bound",
+    "confidence": "medium",
+    "recommended_lever_id": "metal.command-buffer-amortization",
+    "evidence": [
+      "Metal wait time (39772.66 ms) is 234.3% of steady decode (16973.81 ms), exceeding the >=30% synchronization threshold",
+      "14833 command buffers across 23025 encoders exhibit per-op dispatch and synchronization overhead",
+      "Host wait time (39.77 s) exceeds GPU execution time (15.32 s) by 2.6x"
+    ]
+  },
+  "native_performance_profile": {
+    "schema": "fak-native-performance-profile/v1",
+    "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+    "execution": {
+      "engine": "fak-native",
+      "forward_path": "metal/qwen35-hybrid-session-v1",
+      "fallback_count": 0
+    },
+    "phases": [
+      {
+        "name": "load-setup",
+        "start_milliseconds": 0.0,
+        "duration_milliseconds": 24329.352542
+      },
+      {
+        "name": "prefill",
+        "start_milliseconds": 24329.352542,
+        "duration_milliseconds": 32971.988708
+      },
+      {
+        "name": "first-token",
+        "start_milliseconds": 57301.34125,
+        "duration_milliseconds": 2523.281666
+      },
+      {
+        "name": "steady-decode",
+        "start_milliseconds": 59824.622916,
+        "duration_milliseconds": 16973.805959
+      },
+      {
+        "name": "verification",
+        "start_milliseconds": 76798.428875,
+        "duration_milliseconds": 25.327459
+      },
+      {
+        "name": "teardown",
+        "start_milliseconds": 76823.75633399999,
+        "duration_milliseconds": 0.15925
+      }
+    ],
+    "metal": {
+      "command_buffers": 14833,
+      "encoders": 23025,
+      "dispatch_milliseconds": 15322.027541660646,
+      "wait_milliseconds": 39772.66442775726,
+      "resident_bytes": 24595492864,
+      "working_set_bytes": 18288771072
+    },
+    "attribution_unavailable": {
+      "reason": "capture-tool-does-not-export-dispatch-attribution",
+      "detail": "fak-native session lifecycle capture does not export per-lever dispatch attribution"
+    }
+  },
+  "capture_metadata": {
+    "capture_command": "FAK_METAL_STREAM_Q4K=1 FAK_Q4K=1 ./fak-modelbench -gguf <exact-gguf> -name qwen38:27b -q4k -metal -decode-prompt=32 -decode-steps=64 -prefill-sizes=32 -prefill-reps=1 -decode-reps=1 -native-performance-profile=metal_profile_bundle.json",
+    "capture_source_revision": "4062891638e99bb6cc40a2328caa5265b0fb9ae2",
+    "source_clean": true,
+    "scrubbed_hashes": {
+      "raw_event_digest": "fc5a52c4ab0e605b38831ca26f277240241b236e0136f47586076f62a9f4ce47",
+      "fallback_stream_digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "receipt_binding_sha256": "5c0d8322540b6772dad708efd2b22d6ef16370dd723b6c16cdc25974476bf10b",
+      "binary_sha256": "f43e784e4cce43486e9ef1709ff6daa64650461c81264723befb70edbda010ed",
+      "profile_sha256": "2c20871e18bba94de44274a6f5803ace9eab109f082985db857624d4d5fea9f1",
+      "companion_receipt_sha256": "6ef2454f956cae42baefbcdea733a3f2e28c5085866b50835b9dbded561359c8",
+      "restored_owner_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d"
+    },
+    "zero_fallback_verified": true,
+    "reproducible": true
+  }
+}
