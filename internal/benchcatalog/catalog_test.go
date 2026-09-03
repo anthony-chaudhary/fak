@@ -259,3 +259,27 @@ func TestOfflineSubsetOfAll(t *testing.T) {
 		t.Error("Get returned ok for an unregistered name")
 	}
 }
+
+func TestArmbenchAndNativeBenchmarksMetadataParity(t *testing.T) {
+	arm, ok := Get("armbench")
+	if !ok {
+		t.Fatal("armbench missing from catalog")
+	}
+	if arm.Need != NeedNone {
+		t.Errorf("armbench need = %v, want NeedNone (selfcheck runs offline)", arm.Need)
+	}
+	if arm.Run != "fak armbench selfcheck" {
+		t.Errorf("armbench run = %q, want 'fak armbench selfcheck'", arm.Run)
+	}
+
+	nb, ok := Get("native-benchmarks")
+	if !ok {
+		t.Fatal("native-benchmarks missing from catalog")
+	}
+	if nb.Need != NeedNone {
+		t.Errorf("native-benchmarks need = %v, want NeedNone (audits obligations offline)", nb.Need)
+	}
+	if nb.Run != "fak native-benchmarks -json" {
+		t.Errorf("native-benchmarks run = %q, want 'fak native-benchmarks -json'", nb.Run)
+	}
+}
