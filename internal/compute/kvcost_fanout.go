@@ -44,7 +44,7 @@ func KVEvictionCostFanout(s KVSpanStats) float64 {
 		fanout = 1
 	}
 	recomputeValue := saturatingMulInt64(int64(s.Tokens), int64(fanout))
-	reuseProbability := float64(s.Hits + 1) // Laplace smoothing — see KVEvictionCost's doc.
+	reuseProbability := KVReuseTerm(s) // Unified reuse term seam (#3411)
 	return float64(recomputeValue) * reuseProbability / float64(s.Bytes)
 }
 

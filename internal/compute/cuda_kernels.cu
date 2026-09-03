@@ -1501,6 +1501,33 @@ extern "C" void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, i
   k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
 }
 
+// ---- RMSNorm: warp-per-row (fitting widths <= 1024) -----------------------------
+__global__ void k_rmsnorm_warp_per_row(const float *X, const float *W, float *Y, int rows, int n, float eps) {
+  int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+  int lane = threadIdx.x % 32;
+  if (warp_id >= rows) return;
+  const float *x = X + (size_t)warp_id * n;
+  float *y = Y + (size_t)warp_id * n;
+  float local = 0.f;
+  for (int i = lane; i < n; i += 32) local += x[i] * x[i];
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    local += __shfl_down_sync(0xffffffff, local, offset);
+  }
+  float mean = __shfl_sync(0xffffffff, local, 0) / (float)n;
+  float inv = rsqrtf(mean + eps);
+  for (int i = lane; i < n; i += 32) y[i] = x[i] * inv * W[i];
+}
+
+extern "C" void fcuda_rmsnorm_dispatched_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps) {
+  if (n <= 1024) {
+    int warps = 8;
+    int blocks = (rows + warps - 1) / warps;
+    k_rmsnorm_warp_per_row<<<blocks, warps * 32, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
+  } else {
+    k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
+  }
+}
+
 // ---- Fused RMSNorm + Residual Add ----------------------------------------------
 __global__ void k_rmsnorm_fused_residual_add(
     const float *X, const float *ResidualIn, const float *W,

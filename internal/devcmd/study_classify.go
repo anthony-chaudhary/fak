@@ -1,6 +1,7 @@
 package devcmd
 
 import (
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -227,7 +228,16 @@ func readValidatedStudyCorpus(path string) (studyforge.Corpus, error) {
 		return studyforge.Corpus{}, fmt.Errorf("open corpus for strict decode: %w", err)
 	}
 	defer f.Close()
-	dec := json.NewDecoder(f)
+	var r io.Reader = f
+	if strings.HasSuffix(path, ".gz") {
+		zr, err := gzip.NewReader(f)
+		if err != nil {
+			return studyforge.Corpus{}, fmt.Errorf("open gzip corpus for strict decode: %w", err)
+		}
+		defer zr.Close()
+		r = zr
+	}
+	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
 	var strict studyforge.Corpus
 	if err := dec.Decode(&strict); err != nil {

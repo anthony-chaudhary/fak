@@ -86,6 +86,11 @@ type KVSpanStats struct {
 	// Sharers <= 1 (the zero value included) makes KVEvictionCostFanout reduce exactly to
 	// KVEvictionCost, so every existing caller that never sets it is byte-identical to today.
 	Sharers int
+	// IntervalSum is the cumulative logical access gap across subsequent accesses (#2669).
+	// Used by KVReuseEstimate to derive mean inter-arrival.
+	IntervalSum uint64
+	// IntervalCount is the number of access intervals recorded (#2669).
+	IntervalCount int
 }
 
 // KVCacheHint is the closed vocabulary of adjudicated agent cache-control priors (#2225/#805
@@ -142,7 +147,7 @@ func KVEvictionCost(s KVSpanStats) float64 {
 	if s.Bytes <= 0 {
 		return math.Inf(1)
 	}
-	reuseProbability := float64(s.Hits + 1) // Laplace smoothing — see doc comment.
+	reuseProbability := KVReuseTerm(s) // Unified reuse term seam (#3411)
 	recomputeCost := float64(s.Tokens)
 	return recomputeCost * reuseProbability / float64(s.Bytes)
 }

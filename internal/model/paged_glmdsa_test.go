@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"math"
 	"testing"
 )
@@ -69,4 +70,161 @@ func assertFloat64BitsEqual(t *testing.T, name string, want, got []float64) {
 				name, i, math.Float64bits(got[i]), math.Float64bits(want[i]), got[i], want[i])
 		}
 	}
+}
+
+func TestPagedGLMDsaBudgetAndOverflowChecks(t *testing.T) {
+	// Base valid config
+	baseCfg := Config{
+		ModelType:     "glm-dsa",
+		NumLayers:     4,
+		NumHeads:      8,
+		QKNopeHeadDim: 64,
+		QKRopeHeadDim: 64,
+		VHeadDim:      64,
+		IndexHeadDim:  32,
+	}
+
+	t.Run("NegativeOrZeroLayers", func(t *testing.T) {
+		for _, layers := range []int{0, -1, -100} {
+			cfg := baseCfg
+			cfg.NumLayers = layers
+			_, err := newPagedGLMDsaKVCache(cfg, 16)
+			if err == nil {
+				t.Fatalf("expected error for NumLayers=%d, got nil", layers)
+			}
+			var bErr *PagedGLMDsaBudgetError
+			if !errors.As(err, &bErr) {
+				t.Fatalf("expected *PagedGLMDsaBudgetError, got %T: %v", err, err)
+			}
+			if bErr.Field != "NumLayers" || bErr.Reason != "non-positive layers" {
+				t.Fatalf("unexpected budget error: %+v", bErr)
+			}
+		}
+	})
+
+	t.Run("NegativeOrZeroBlockTokens", func(t *testing.T) {
+		for _, bt := range []int{0, -1, -16} {
+			_, err := newPagedGLMDsaKVCache(baseCfg, bt)
+			if err == nil {
+				t.Fatalf("expected error for blockTokens=%d, got nil", bt)
+			}
+			var bErr *PagedGLMDsaBudgetError
+			if !errors.As(err, &bErr) {
+				t.Fatalf("expected *PagedGLMDsaBudgetError, got %T: %v", err, err)
+			}
+			if bErr.Field != "blockTokens" || bErr.Reason != "non-positive block tokens" {
+				t.Fatalf("unexpected budget error: %+v", bErr)
+			}
+		}
+	})
+
+	t.Run("NegativeOrZeroStrides", func(t *testing.T) {
+		// Zero/negative QK
+		cfgQK := baseCfg
+		cfgQK.QKNopeHeadDim = 0
+		cfgQK.QKRopeHeadDim = 0
+		_, err := newPagedGLMDsaKVCache(cfgQK, 16)
+		if err == nil {
+			t.Fatal("expected error for zero kStride, got nil")
+		}
+		var bErr *PagedGLMDsaBudgetError
+		if !errors.As(err, &bErr) || bErr.Field != "kStride" {
+			t.Fatalf("expected kStride budget error, got: %v", err)
+		}
+
+		// Zero/negative V
+		cfgV := baseCfg
+		cfgV.VHeadDim = 0
+		_, err = newPagedGLMDsaKVCache(cfgV, 16)
+		if err == nil {
+			t.Fatal("expected error for zero vStride, got nil")
+		}
+		if !errors.As(err, &bErr) || bErr.Field != "vStride" {
+			t.Fatalf("expected vStride budget error, got: %v", err)
+		}
+
+		// Zero/negative Index
+		cfgIdx := baseCfg
+		cfgIdx.IndexHeadDim = 0
+		_, err = newPagedGLMDsaKVCache(cfgIdx, 16)
+		if err == nil {
+			t.Fatal("expected error for zero IndexHeadDim, got nil")
+		}
+		if !errors.As(err, &bErr) || bErr.Field != "IndexHeadDim" {
+			t.Fatalf("expected IndexHeadDim budget error, got: %v", err)
+		}
+	})
+
+	t.Run("MultiplicationOverflow", func(t *testing.T) {
+		cfgHuge := baseCfg
+		cfgHuge.NumHeads = 1 << 25
+		cfgHuge.QKNopeHeadDim = 1 << 25
+		_, err := newPagedGLMDsaKVCache(cfgHuge, 16)
+		if err == nil {
+			t.Fatal("expected error for huge overflowing stride, got nil")
+		}
+		var bErr *PagedGLMDsaBudgetError
+		if !errors.As(err, &bErr) {
+			t.Fatalf("expected *PagedGLMDsaBudgetError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("BudgetLimitExceeded", func(t *testing.T) {
+		saved := PagedGLMDsaByteBudget
+		defer func() { PagedGLMDsaByteBudget = saved }()
+
+		// Set budget to 10 KiB
+		PagedGLMDsaByteBudget = 10 * 1024
+
+		// Base config with 16 blockTokens:
+		// kStride = 8 * 128 = 1024 floats = 4096 bytes per block
+		// vStride = 8 * 64 = 512 floats = 2048 bytes per block
+		// idxStride = 32 floats = 256 bytes per block
+		// 1 block = 2*4096 + 2048 + 2*256 = 10752 bytes per layer
+		// 4 layers = 43008 bytes > 10240 bytes budget
+		_, err := newPagedGLMDsaKVCache(baseCfg, 16)
+		if err == nil {
+			t.Fatal("expected allocation budget error, got nil")
+		}
+		var bErr *PagedGLMDsaBudgetError
+		if !errors.As(err, &bErr) {
+			t.Fatalf("expected *PagedGLMDsaBudgetError, got %T: %v", err, err)
+		}
+		if bErr.Reason != "allocation budget exceeded" || bErr.Limit != 10*1024 {
+			t.Fatalf("unexpected budget error: %+v", bErr)
+		}
+
+		// Just-above budget vs just-below budget:
+		// 1 layer with small dimensions
+		smallCfg := Config{
+			ModelType:     "glm-dsa",
+			NumLayers:     1,
+			NumHeads:      1,
+			QKNopeHeadDim: 4,
+			QKRopeHeadDim: 4,
+			VHeadDim:      4,
+			IndexHeadDim:  4,
+		}
+		// blockTokens = 2
+		// kStride = 1 * 8 = 8 floats -> 2 * 8 * 4 = 64 bytes
+		// 2*K = 128 bytes
+		// vStride = 1 * 4 = 4 floats -> 2 * 4 * 4 = 32 bytes
+		// idxStride = 4 floats (f64) -> 2 * 4 * 8 = 64 bytes
+		// 2*Index = 128 bytes
+		// Total for 1 block = 128 + 32 + 128 = 288 bytes
+		PagedGLMDsaByteBudget = 288
+		p, err := newPagedGLMDsaKVCache(smallCfg, 2)
+		if err != nil {
+			t.Fatalf("expected success at exact budget, got %v", err)
+		}
+		if p == nil {
+			t.Fatal("expected non-nil paged cache")
+		}
+
+		PagedGLMDsaByteBudget = 287
+		_, err = newPagedGLMDsaKVCache(smallCfg, 2)
+		if err == nil {
+			t.Fatal("expected failure at just-below budget, got nil")
+		}
+	})
 }

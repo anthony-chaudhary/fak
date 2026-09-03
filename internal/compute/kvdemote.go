@@ -204,7 +204,7 @@ func PlanKVDemotion(spans []KVSpanStats, deficitBytes int64, tiers []KVTierProfi
 		if s.Bytes <= 0 {
 			continue // unknown footprint frees nothing measurable — never a demotion candidate
 		}
-		reuseProbability := float64(s.Hits + 1) // Laplace smoothing — see KVEvictionCost's doc.
+		reuseProbability := KVReuseTerm(s) // Unified reuse term seam (#3411)
 
 		if spillComparable {
 			for _, t := range spillRungs {
