@@ -381,6 +381,24 @@ func TestHeaderAlignmentCatchesOneSidedDrift(t *testing.T) {
 	}
 }
 
+func TestLegendCoverageResolvesSplitInfoFormat(t *testing.T) {
+	f := cleanFixtures()
+	// Move guardInfoLegend out of info.go into info_format.go
+	delete(f, "cmd/fak/info.go")
+	f["cmd/fak/info.go"] = "package main\nfunc runInfo() {}\n"
+	f["cmd/fak/info_format.go"] = `package main
+func guardInfoLegend() string {
+	return "cache floor turns inflight up"
+}
+`
+	root := writeTree(t, f)
+	p := Build(Options{Root: root})
+	legend := kpiByKey(p, "legend_coverage")
+	if len(legend.Defects) != 0 {
+		t.Fatalf("expected 0 defects when legend is in info_format.go, got: %v", legend.Defects)
+	}
+}
+
 func kpiByKey(p scorecard.Payload, key string) scorecard.KPI {
 	for _, k := range p.KPIs {
 		if k.Key == key {
