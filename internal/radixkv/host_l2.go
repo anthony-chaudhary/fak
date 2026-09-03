@@ -186,12 +186,16 @@ func (t *Tree) makeHostSnapshotRoom(delta int64, exclude *node) bool {
 }
 
 func (t *Tree) hostSnapshotVictim(exclude *node) *node {
+	strat := t.evictionStrategy()
+	if prep, ok := strat.(TreePreparer); ok {
+		prep.PrepareTree(t)
+	}
 	var victim *node
 	t.forEachNode(func(n *node) {
 		if n == exclude || n.refs > 0 || n.hostSnapshot == nil {
 			return
 		}
-		if victim == nil || t.evictionStrategy().Priority(n).less(t.evictionStrategy().Priority(victim)) {
+		if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
 			victim = n
 		}
 	})
