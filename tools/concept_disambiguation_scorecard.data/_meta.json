@@ -1594,12 +1594,30 @@
           "category": "incidental",
           "reason": "JSON key for estimated operator-attention cost in seconds",
           "token": "estimated_attention_s"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask struct",
+          "token": "TreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask builder",
+          "token": "BuildTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask validator",
+          "token": "ValidateTreeAttentionMask"
         }
       ],
       "id": "attention",
       "ignore": [
+        "BuildTreeAttentionMask",
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
+        "TreeAttentionMask",
+        "ValidateTreeAttentionMask",
         "attentions",
         "attentive",
         "estimated_attention_s",
@@ -7414,6 +7432,11 @@
           "category": "incidental",
           "reason": "private implementation struct carrying native probe results; not an operator-facing proof concept",
           "token": "ownershipWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal revocation timestamp and reason mapping",
+          "token": "RevocationEntry"
         }
       ],
       "id": "witness-proof",
@@ -7457,6 +7480,7 @@
         "ReceiptsDigest",
         "RefutesWitness",
         "ResolutionUnwitnessed",
+        "RevocationEntry",
         "RuntimeTerminalWitness",
         "SOURCE_WITNESSED",
         "STATE_TRANSITION_WITNESS_OK",
