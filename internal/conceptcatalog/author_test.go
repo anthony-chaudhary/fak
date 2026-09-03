@@ -463,8 +463,12 @@ func scorecardE2EFixture(t *testing.T, gap string) (Catalog, string) {
 
 func scorecardRun(t *testing.T, root string, args ...string) (string, error) {
 	t.Helper()
+	python, err := ResolvePython()
+	if err != nil {
+		t.Fatalf("resolve python: %v", err)
+	}
 	base := []string{filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--data", filepath.Join(root, DataRel)}
-	cmd := exec.Command("python", append(base, args...)...)
+	cmd := exec.Command(python, append(base, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

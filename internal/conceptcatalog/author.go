@@ -334,12 +334,9 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 		}
 	}
 	outDir := filepath.Join(shadow, "generated")
-	python, err := exec.LookPath("python")
+	python, err := ResolvePython()
 	if err != nil {
-		python, err = exec.LookPath("python3")
-	}
-	if err != nil {
-		return Plan{}, snap, fmt.Errorf("canonical generation unsupported: Python interpreter not found (tried python and python3)")
+		return Plan{}, snap, fmt.Errorf("canonical generation unsupported: %w", err)
 	}
 	cmd := exec.Command(python, script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir, "--json")
 	cmd.Dir = root
