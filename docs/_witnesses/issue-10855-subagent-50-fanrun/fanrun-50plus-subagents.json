@@ -1,0 +1,110 @@
+{
+  "schema": "fanrun/1",
+  "provenance": {
+    "app_version": "dev",
+    "command": "cmd/fanrun --agents 1,4,16,32,50,64,128,256",
+    "go_version": "go1.26.7",
+    "os": "windows",
+    "arch": "amd64",
+    "generated_by": "fak/internal/bench (fanrun: live one-goal→N-subagent capstone)"
+  },
+  "host": {
+    "cpu_count": 32,
+    "go_threads": 32,
+    "has_gpu": false
+  },
+  "profile": {
+    "version": "fak.benchmark-concept.v1",
+    "name": "research-goal",
+    "goal_pool": 8,
+    "plan_reads": 4,
+    "p_shared": 0.55,
+    "p_private": 0.15,
+    "p_alias": 0.06,
+    "p_pure": 0.06,
+    "p_static": 0.04,
+    "p_write": 0
+  },
+  "shared_goal": true,
+  "prefix_len": 2048,
+  "sub_turns": 8,
+  "trials": 1,
+  "reps": 0,
+  "seed": 1592652270,
+  "task": "Customer mia_li_3668 wants to book the cheapest direct flight from SFO to JFK on 2026-07-01. First look up their account, then check the refund policy, then find the flights, tell them the cheapest price converted to EUR, and finally book that flight.",
+  "agent_grid": [1, 4, 16, 32, 50, 64, 128, 256],
+  "cells": [
+    {
+      "agents": 1,
+      "agents_wall_serial_ms": 0.5229,
+      "per_agent_ms_mean": 0.5229,
+      "agents_per_sec_serial": 1912.4,
+      "cross_hits": 0,
+      "tasks_completed": 1,
+      "prefix_tokens_elided": 0
+    },
+    {
+      "agents": 4,
+      "agents_wall_serial_ms": 0.5186,
+      "per_agent_ms_mean": 0.12965,
+      "agents_per_sec_serial": 7713.1,
+      "cross_hits": 9,
+      "tasks_completed": 4,
+      "prefix_tokens_elided": 6144
+    },
+    {
+      "agents": 16,
+      "agents_wall_serial_ms": 2.6118,
+      "per_agent_ms_mean": 0.16323,
+      "agents_per_sec_serial": 6126.0,
+      "cross_hits": 45,
+      "tasks_completed": 16,
+      "prefix_tokens_elided": 30720
+    },
+    {
+      "agents": 32,
+      "agents_wall_serial_ms": 4.1737,
+      "per_agent_ms_mean": 0.13042,
+      "agents_per_sec_serial": 7667.1,
+      "cross_hits": 93,
+      "tasks_completed": 32,
+      "prefix_tokens_elided": 63488
+    },
+    {
+      "agents": 50,
+      "agents_wall_serial_ms": 6.2062,
+      "per_agent_ms_mean": 0.12412,
+      "agents_per_sec_serial": 8056.5,
+      "cross_hits": 147,
+      "tasks_completed": 50,
+      "prefix_tokens_elided": 100352
+    },
+    {
+      "agents": 64,
+      "agents_wall_serial_ms": 7.7746,
+      "per_agent_ms_mean": 0.12148,
+      "agents_per_sec_serial": 8231.9,
+      "cross_hits": 189,
+      "tasks_completed": 64,
+      "prefix_tokens_elided": 129024
+    },
+    {
+      "agents": 128,
+      "agents_wall_serial_ms": 14.4922,
+      "per_agent_ms_mean": 0.11322,
+      "agents_per_sec_serial": 8832.3,
+      "cross_hits": 381,
+      "tasks_completed": 128,
+      "prefix_tokens_elided": 260096
+    },
+    {
+      "agents": 256,
+      "agents_wall_serial_ms": 28.8296,
+      "per_agent_ms_mean": 0.11261,
+      "agents_per_sec_serial": 8879.8,
+      "cross_hits": 765,
+      "tasks_completed": 256,
+      "prefix_tokens_elided": 522240
+    }
+  ]
+}
