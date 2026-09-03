@@ -59,7 +59,7 @@ type MCPToolFilterStatus struct {
 // recovery tool is hidden, no cold tail exists, or emergency ablation is set:
 // a bad optimization must cost tokens, never capabilities.
 func (s *Server) toolsListView() ([]map[string]any, MCPToolFilterStatus) {
-	return s.toolsListViewWithAblation(envEnabled("FAK_ABLATE_MCP_TOOL_FILTER"))
+	return s.toolsListViewWithAblation(s.disableMCPDefer || envEnabled("FAK_ABLATE_MCP_TOOL_FILTER"))
 }
 
 func (s *Server) toolsListViewWithAblation(ablate bool) ([]map[string]any, MCPToolFilterStatus) {

@@ -273,3 +273,40 @@ func TestTableResumeAllWakesAllPausedSessions(t *testing.T) {
 		t.Fatalf("second ResumeAll returned %d sessions, want 0", len(second))
 	}
 }
+
+// TestTablePauseAllHoldsActiveSessions proves Table.PauseAll transitions every Running and
+// Throttled session to Paused with the given reason, while leaving already Paused or Stopped
+// sessions alone.
+func TestTablePauseAllHoldsActiveSessions(t *testing.T) {
+	tbl := NewTable()
+	tbl.Transition("act-1", Running, "")
+	tbl.Transition("act-2", Throttled, "slow")
+	tbl.Transition("paused-1", Paused, "manual-hold")
+	tbl.Transition("stopped-1", Stopped, "done")
+
+	paused := tbl.PauseAll("operator batch pause")
+	if len(paused) != 2 {
+		t.Fatalf("PauseAll returned %d sessions, want 2", len(paused))
+	}
+	if paused[0].TraceID != "act-1" || paused[0].Run != Paused || paused[0].Reason != "operator batch pause" {
+		t.Errorf("act-1 pause mismatch: %+v", paused[0])
+	}
+	if paused[1].TraceID != "act-2" || paused[1].Run != Paused || paused[1].Reason != "operator batch pause" {
+		t.Errorf("act-2 pause mismatch: %+v", paused[1])
+	}
+
+	// Already paused session keeps its original reason.
+	if p := tbl.Get("paused-1"); p.Run != Paused || p.Reason != "manual-hold" {
+		t.Errorf("paused-1 was modified: %+v", p)
+	}
+	// Stopped session remains Stopped.
+	if s := tbl.Get("stopped-1"); s.Run != Stopped {
+		t.Errorf("stopped-1 was modified: %+v", s)
+	}
+
+	// Calling PauseAll again when no running/throttled sessions exist returns empty.
+	second := tbl.PauseAll("again")
+	if len(second) != 0 {
+		t.Fatalf("second PauseAll returned %d sessions, want 0", len(second))
+	}
+}

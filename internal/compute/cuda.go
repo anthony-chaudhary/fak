@@ -196,7 +196,11 @@ func (c *cudaBackend) GraphBegin() bool {
 	// outside capture, so the cudaMalloc's here are legal and the captured forward is then served
 	// entirely from the free list.
 	C.fcuda_graph_prewarm(C.int(graphPrewarmDepth))
-	return C.fcuda_graph_begin() == 0
+	if C.fcuda_graph_begin() == 0 {
+		c.capturing = true
+		return true
+	}
+	return false
 }
 
 // graphPrewarmDepth is the spare-buffer headroom per pool size class seeded before each capture.
@@ -210,6 +214,7 @@ const graphPrewarmDepth = 128
 func (c *cudaBackend) GraphEndLaunch() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	c.capturing = false
 	if C.fcuda_graph_end_launch() != 0 {
 		panic("compute: cuda graph capture/launch failed")
 	}
@@ -223,6 +228,7 @@ func (c *cudaBackend) GraphReset() {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	c.capturing = false
 	C.fcuda_graph_reset()
 }
 
@@ -233,7 +239,46 @@ func (c *cudaBackend) GraphReset() {
 func (c *cudaBackend) GraphAbort() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	c.capturing = false
 	C.fcuda_graph_abort()
+}
+
+// IsCapturing reports whether a CUDA graph capture is currently open on g_stream (#10716).
+// Constant and parameter uploads consult this to bypass host-side skip caching.
+func (c *cudaBackend) IsCapturing() bool {
+	if c == nil {
+		return false
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.capturing
+}
+
+// UploadConstantParam uploads parameter or constant float32 data into dst. Under
+// stream capture (c.capturing is true), the upload is emitted unconditionally so
+// that replayed graph executions are self-contained and contain every parameter
+// assignment. Outside capture, uploads with matching paramKey may be elided (#10716).
+func (c *cudaBackend) UploadConstantParam(dst Tensor, data []float32, paramKey uint64, lastUploaded *uint64) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if !c.capturing && lastUploaded != nil && *lastUploaded == paramKey {
+		return
+	}
+	if len(data) == 0 {
+		if lastUploaded != nil {
+			*lastUploaded = paramKey
+		}
+		return
+	}
+	buf := c.cudaBufForSubmit(dst)
+	nbytes := len(data) * F32.Bytes()
+	if nbytes > buf.n {
+		panic("compute: UploadConstantParam destination buffer too small")
+	}
+	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&data[0]), C.size_t(nbytes))
+	if lastUploaded != nil {
+		*lastUploaded = paramKey
+	}
 }
 
 // DeviceMemory reports CUDA VRAM total plus the current free bytes from cudaMemGetInfo.

@@ -95,6 +95,17 @@ func TestDeferMCPToolsAblationFailsOpen(t *testing.T) {
 	}
 }
 
+func TestDeferMCPToolsDisableMCPDeferFailsOpen(t *testing.T) {
+	s := &Server{disableMCPDefer: true}
+	got, receipt := s.toolsListView()
+	if receipt.Mode != "bypass" || receipt.Reason != "ablation" {
+		t.Fatalf("receipt=%+v want bypass/ablation", receipt)
+	}
+	if len(got) != len(s.exposedToolDescriptors()) || receipt.SavedBytes != 0 {
+		t.Fatalf("disableMCPDefer did not restore full list: %+v", receipt)
+	}
+}
+
 func TestDeferMCPToolsHiddenRecoveryFailsOpen(t *testing.T) {
 	s := &Server{exposeAllow: func(name string) bool { return name != "fak_tools_search" }}
 	got, receipt := s.toolsListView()

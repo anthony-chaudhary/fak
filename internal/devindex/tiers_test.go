@@ -165,3 +165,18 @@ func TestTierOfCanonicalizesAliases(t *testing.T) {
 		t.Error("TierOf invented a tier for an unknown token")
 	}
 }
+
+func TestVerbClassificationsCoverIssue10895Verbs(t *testing.T) {
+	for _, verb := range []string{"lsp", "opencode", "workspin", "amd-setup"} {
+		tier, ok := TierOf(verb)
+		if !ok || tier != TierDev {
+			t.Errorf("TierOf(%q) = (%v, %v), want (TierDev, true)", verb, tier, ok)
+		}
+	}
+	for _, verb := range []string{"lsp", "opencode", "workspin"} {
+		v, ok := manifestVerbByName(verb)
+		if !ok || v.Synopsis == "" {
+			t.Errorf("manifestVerbByName(%q) = (%+v, %v), want non-empty synopsis", verb, v, ok)
+		}
+	}
+}

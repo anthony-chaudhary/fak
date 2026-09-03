@@ -386,6 +386,97 @@ func TestSelectTwelveParentCohortDefaultUnboundedSelectsAll(t *testing.T) {
 	}
 }
 
+func TestTerminalLossDiscoveryFromProviderProcessDisagreement(t *testing.T) {
+	report := InventoryReport{}
+	// 12 missing-ancestry parents with turn inProgress and NO live process trees.
+	for i := 0; i < 12; i++ {
+		sid := fmt.Sprintf("terminal-loss-%02d", i)
+		report.Sessions = append(report.Sessions, Session{
+			Thread:     &Thread{ID: sid, Source: "interactive_tui", CWD: `C:\work\fak`},
+			Provider:   ProviderCodex,
+			Category:   CategorySubstantive,
+			Action:     ActionRecover,
+			LatestTurn: &Turn{ID: "turn-abc", Status: "inProgress", StartedAt: "2026-08-31T10:00:00Z"},
+			// No ProcessTrees: positively absent live process ancestry.
+		})
+	}
+	// Session with matching live process tree: must be suppressed (status "live" or "already_active").
+	report.Sessions = append(report.Sessions, Session{
+		Thread:       &Thread{ID: "live-session", Source: "interactive_tui", CWD: `C:\work\fak`},
+		Provider:     ProviderCodex,
+		Category:     CategorySubstantive,
+		Action:       ActionRecover,
+		LatestTurn:   &Turn{ID: "turn-live", Status: "inProgress", StartedAt: "2026-08-31T10:00:00Z"},
+		ProcessTrees: []ProcessTree{{RootPID: 12345, HasCodex: true}},
+	})
+	// Session with completed turn: must NOT be selected.
+	report.Sessions = append(report.Sessions, Session{
+		Thread:     &Thread{ID: "completed-session", Source: "interactive_tui", CWD: `C:\work\fak`},
+		Provider:   ProviderCodex,
+		Category:   CategorySubstantive,
+		Action:     ActionRecover,
+		LatestTurn: &Turn{ID: "turn-done", Status: "completed", StartedAt: "2026-08-31T09:00:00Z"},
+	})
+	// Session with failed turn: must NOT be selected.
+	report.Sessions = append(report.Sessions, Session{
+		Thread:     &Thread{ID: "failed-session", Source: "interactive_tui", CWD: `C:\work\fak`},
+		Provider:   ProviderCodex,
+		Category:   CategorySubstantive,
+		Action:     ActionRecover,
+		LatestTurn: &Turn{ID: "turn-fail", Status: "failed", StartedAt: "2026-08-31T09:00:00Z"},
+	})
+	// Session where process inspection failed: must return "unknown", never assume recoverable.
+	report.Sessions = append(report.Sessions, Session{
+		Thread:     &Thread{ID: "unknown-session", Source: "interactive_tui", CWD: `C:\work\fak`},
+		Provider:   ProviderCodex,
+		Category:   CategorySubstantive,
+		Action:     "unknown",
+		Reason:     "process_inspection_failed",
+		LatestTurn: &Turn{ID: "turn-unk", Status: "inProgress", StartedAt: "2026-08-31T10:00:00Z"},
+	})
+
+	requests := Select(report, Options{Limit: 0, ReceiptDir: t.TempDir()})
+	candidateCount := 0
+	for _, req := range requests {
+		switch req.ThreadID {
+		case "live-session":
+			if req.Status == "candidate" {
+				t.Fatalf("live session was selected as candidate: %+v", req)
+			}
+		case "completed-session", "failed-session":
+			if req.Status == "candidate" {
+				t.Fatalf("completed/failed session was selected as candidate: %+v", req)
+			}
+		case "unknown-session":
+			if req.Status == "candidate" || req.Status != "unknown" {
+				t.Fatalf("unknown session got status %q, want 'unknown': %+v", req.Status, req)
+			}
+		default:
+			if strings.HasPrefix(req.ThreadID, "terminal-loss-") {
+				if req.Status != "candidate" || req.Reason != "terminal_loss" {
+					t.Fatalf("missing-ancestry parent %+v wanted candidate with terminal_loss reason", req)
+				}
+				candidateCount++
+			}
+		}
+	}
+	if candidateCount != 12 {
+		t.Fatalf("selected candidates = %d, want 12", candidateCount)
+	}
+
+	summary := NewSummary("preview", report, requests, time.Now())
+	if summary.Counts.Actionable != 12 || summary.Counts.Selected != 12 {
+		t.Fatalf("summary counts = %+v, want actionable=12 selected=12", summary.Counts)
+	}
+	for _, res := range summary.Results {
+		if strings.HasPrefix(res.ThreadID, "terminal-loss-") {
+			if !strings.Contains(res.SelectionReason, "terminal_loss") {
+				t.Errorf("result selection reason %q missing terminal_loss: %+v", res.SelectionReason, res)
+			}
+		}
+	}
+}
+
 func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
 	classified := []sessionjournal.Classified{
 		{Session: sessionjournal.Session{ID: "already", CWD: `C:\authoritative`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
