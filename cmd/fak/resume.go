@@ -1368,6 +1368,7 @@ func runResumeBackoff(stdout, stderr io.Writer, args []string) int {
 	ceiling := fs.Duration("ceiling", time.Hour, "maximum delay")
 	window := fs.Duration("window", time.Hour, "coalescing window")
 	threshold := fs.Int("park-threshold", 3, "distinct sessions before parking")
+	crashLoopBudget := fs.Int("crash-loop-budget", 3, "maximum attempts for an unchanged crash signature before quarantine")
 	if !parseFlags(fs, args) || *session == "" || *signature == "" {
 		fmt.Fprintln(stderr, "fak resume backoff: --session and --signature are required")
 		return 2
@@ -1384,7 +1385,7 @@ func runResumeBackoff(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 	}
-	d := resumebackoff.Decide(resumebackoff.Input{Session: *session, Signature: *signature, Now: time.Now().UTC(), History: history, Base: *base, Ceiling: *ceiling, Window: *window, ParkThreshold: *threshold})
+	d := resumebackoff.Decide(resumebackoff.Input{Session: *session, Signature: *signature, Now: time.Now().UTC(), History: history, Base: *base, Ceiling: *ceiling, Window: *window, ParkThreshold: *threshold, CrashLoopBudget: *crashLoopBudget})
 	if err := json.NewEncoder(stdout).Encode(d); err != nil {
 		return 1
 	}

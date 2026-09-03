@@ -8,6 +8,7 @@ import (
 
 const ReasonSignatureParked = "SIGNATURE_PARKED"
 const ReasonBackoff = "SIGNATURE_BACKOFF"
+const ReasonCrashLoopQuarantined = "CRASH_LOOP_QUARANTINED"
 
 type Event struct {
 	Session, Signature string
@@ -19,6 +20,7 @@ type Input struct {
 	History               []Event
 	Base, Ceiling, Window time.Duration
 	ParkThreshold         int
+	CrashLoopBudget       int
 }
 type Decision struct {
 	Eligible     bool          `json:"eligible"`
@@ -27,6 +29,7 @@ type Decision struct {
 	Delay        time.Duration `json:"delay"`
 	NextEligible time.Time     `json:"next_eligible,omitempty"`
 	Parked       bool          `json:"parked"`
+	Quarantined  bool          `json:"quarantined,omitempty"`
 	Sessions     []string      `json:"sessions,omitempty"`
 }
 
@@ -43,6 +46,9 @@ func Decide(in Input) Decision {
 	if in.ParkThreshold <= 0 {
 		in.ParkThreshold = 3
 	}
+	if in.CrashLoopBudget <= 0 {
+		in.CrashLoopBudget = 3
+	}
 	sessions := map[string]bool{}
 	cutoff := in.Now.Add(-in.Window)
 	var own []Event
@@ -53,7 +59,7 @@ func Decide(in Input) Decision {
 		if !e.At.Before(cutoff) {
 			sessions[e.Session] = true
 		}
-		if e.Session == in.Session {
+		if e.Session == in.Session && !e.At.Before(cutoff) {
 			own = append(own, e)
 		}
 	}
@@ -82,6 +88,16 @@ func Decide(in Input) Decision {
 	}
 	sort.Slice(own, func(i, j int) bool { return own[i].At.Before(own[j].At) })
 	repeat := len(own)
+	if repeat >= in.CrashLoopBudget {
+		return Decision{
+			Eligible:    false,
+			Reason:      ReasonCrashLoopQuarantined,
+			Repeat:      repeat,
+			Parked:      true,
+			Quarantined: true,
+			Sessions:    names,
+		}
+	}
 	delay := in.Base
 	for i := 1; i < repeat; i++ {
 		if delay >= in.Ceiling/2 {

@@ -141,7 +141,7 @@ func runResumeWatchdogTick(stdout, stderr io.Writer, argv []string) int {
 	if targetedPlan == "" {
 		var candidateReport sessiondiag.WatchdogCandidateReport
 		plan, candidateReport = rwMergeSessiondiagCandidates(plan, *windowH)
-		if len(candidateReport.Candidates) > 0 || len(candidateReport.Exclusions) > 0 {
+		if !*statusOnly && (len(candidateReport.Candidates) > 0 || len(candidateReport.Exclusions) > 0) {
 			note("  candidates: included=%d excluded=%d source=sessiondiag", len(candidateReport.Candidates), len(candidateReport.Exclusions))
 		}
 	}
@@ -341,10 +341,20 @@ func runResumeWatchdogTick(stdout, stderr io.Writer, argv []string) int {
 			continue
 		}
 		signature := rwResumeStormSignature(p)
-		backoff := resumebackoff.Decide(resumebackoff.Input{Session: p.Session, Signature: signature, Now: time.Now().UTC(), History: backoffHistory})
+		backoff := resumebackoff.Decide(resumebackoff.Input{
+			Session:         p.Session,
+			Signature:       signature,
+			Now:             time.Now().UTC(),
+			History:         backoffHistory,
+			CrashLoopBudget: rwCrashLoopBudget(),
+		})
 		if !backoff.Eligible {
-			note("  SKIP %s â€” %s repeat=%d next=%s", sid8, backoff.Reason, backoff.Repeat, backoff.NextEligible.Format(time.RFC3339))
-			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "signature": signature, "phase": "deferred", "reason": backoff.Reason, "repeat": backoff.Repeat, "next_eligible": backoff.NextEligible})
+			phase := "deferred"
+			if backoff.Quarantined || backoff.Reason == resumebackoff.ReasonCrashLoopQuarantined {
+				phase = "quarantined"
+			}
+			note("  SKIP %s — %s repeat=%d next=%s", sid8, backoff.Reason, backoff.Repeat, backoff.NextEligible.Format(time.RFC3339))
+			rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": p.Session, "signature": signature, "phase": phase, "reason": backoff.Reason, "repeat": backoff.Repeat, "next_eligible": backoff.NextEligible})
 			continue
 		}
 		acct := rwAccountTag(p.Account)
