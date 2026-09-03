@@ -129,6 +129,14 @@ func TestSuperloopFleetStatusFoldsTheSameWalkNumbers(t *testing.T) {
 			t.Errorf("status %s = %d but the walk says %d — the fold recounted instead of reading", d.name, d.status, d.fromWalk)
 		}
 	}
+	if got.Rollup != nil {
+		if got.Rollup.Members != walk.Rollup.Members ||
+			got.Rollup.Walked != walk.Rollup.Walked ||
+			got.Rollup.Unmeasured != walk.Rollup.Unmeasured ||
+			got.Rollup.Dark != walk.Rollup.Dark {
+			t.Errorf("status rollup %+v != walk rollup %+v", got.Rollup, walk.Rollup)
+		}
+	}
 	if got.Satisfied != walk.Satisfied || got.Verdict != walk.Verdict {
 		t.Errorf("status verdict/satisfied = %q/%t, walk says %q/%t", got.Verdict, got.Satisfied, walk.Verdict, walk.Satisfied)
 	}

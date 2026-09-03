@@ -570,6 +570,24 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 		fmt.Fprintf(w, "  orphaned %d — emitting follow-on work nobody advances (%s)\n",
 			rep.Orphaned, relay.ReasonOrphanedFollowon)
 	}
+	if rep.Rollup.Members > 0 {
+		var extra []string
+		if rep.Rollup.Spinning > 0 {
+			extra = append(extra, fmt.Sprintf("spinning %d", rep.Rollup.Spinning))
+		}
+		if rep.Rollup.Orphaned > 0 {
+			extra = append(extra, fmt.Sprintf("orphaned %d", rep.Rollup.Orphaned))
+		}
+		if rep.Rollup.Shortfall > 0 {
+			extra = append(extra, fmt.Sprintf("shortfall %d", rep.Rollup.Shortfall))
+		}
+		extraStr := ""
+		if len(extra) > 0 {
+			extraStr = "  " + strings.Join(extra, "  ")
+		}
+		fmt.Fprintf(w, "  rollup: leaves %d  walked %d  unmeasured %d  dark %d%s\n",
+			rep.Rollup.Members, rep.Rollup.Walked, rep.Rollup.Unmeasured, rep.Rollup.Dark, extraStr)
+	}
 	if rep.IssueTarget > 0 {
 		// The intent declares a headline issue target (run-the-night's ~200 overnight).
 		// When the dispatch ledger made live progress measurable, the walk folds it in

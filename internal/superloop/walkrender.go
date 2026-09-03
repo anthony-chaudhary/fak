@@ -194,6 +194,38 @@ func walkVerdict(s Super, rep WalkReport) (verdict, finding, reason, next string
 				s.Name, rep.IssueShortfall, rep.IssueTarget, rep.IssueProgressed),
 			"progress the remaining issues: " + worklistHead(rep)
 	}
+	if !rep.Rollup.Satisfied {
+		if rep.Rollup.Unmeasured > 0 {
+			return "ACTION", "superloop_unmeasured",
+				fmt.Sprintf("walking %q: %d/%d rolled-up leaf member(s) could not be read across the descend tree (debt %d)",
+					s.Name, rep.Rollup.Unmeasured, rep.Rollup.Members, rep.TotalDebt),
+				"repair/read the unmeasured leaf member(s) first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Dark > 0 {
+			return "ACTION", "superloop_dark",
+				fmt.Sprintf("walking %q: %d rolled-up leaf loop(s) have gone DARK across the descend tree; revive them before chasing debt (debt %d)",
+					s.Name, rep.Rollup.Dark, rep.TotalDebt),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Spinning > 0 {
+			return "ACTION", "superloop_spinning",
+				fmt.Sprintf("walking %q: %d rolled-up leaf loop(s) are SPINNING (%s) across the descend tree (debt %d)",
+					s.Name, rep.Rollup.Spinning, relay.ReasonNoProgress, rep.TotalDebt),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Orphaned > 0 {
+			return "ACTION", "superloop_orphaned",
+				fmt.Sprintf("walking %q: %d rolled-up leaf loop(s) are ORPHANED (%s) across the descend tree (debt %d)",
+					s.Name, rep.Rollup.Orphaned, relay.ReasonOrphanedFollowon, rep.TotalDebt),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Shortfall > 0 {
+			return "ACTION", "superloop_issue_shortfall",
+				fmt.Sprintf("walking %q: debt at-or-below floor, but rolled-up headline shortfall %d still owed across the descend tree",
+					s.Name, rep.Rollup.Shortfall),
+				"progress the remaining issues: " + worklistHead(rep)
+		}
+	}
 	target := ""
 	if rep.IssueProgressMeasured && rep.IssueTarget > 0 {
 		target = fmt.Sprintf("; headline %d/%d issue(s) progressed", rep.IssueProgressed, rep.IssueTarget)

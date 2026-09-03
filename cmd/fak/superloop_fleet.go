@@ -71,21 +71,22 @@ func runSuperloopFleet(stdout, stderr io.Writer, argv []string) int {
 // superloopFleetReport is the folded status readout: the tend-fleet walk reduced to
 // the meta-walker's three dimension counts plus the worst-first head.
 type superloopFleetReport struct {
-	Schema     string              `json:"schema"`
-	Intent     string              `json:"intent"`
-	Verdict    string              `json:"verdict"`
-	Finding    string              `json:"finding"`
-	Satisfied  bool                `json:"satisfied"`
-	Members    int                 `json:"members"`
-	Walked     int                 `json:"walked"`
-	Unmeasured int                 `json:"unmeasured"`
-	Dark       int                 `json:"dark"`
-	Spinning   int                 `json:"spinning,omitempty"`
-	Orphaned   int                 `json:"orphaned,omitempty"`
-	TotalDebt  int                 `json:"total_debt"`
-	Floor      int                 `json:"floor"`
-	Head       *superloop.WorkItem `json:"head,omitempty"`
-	NextAction string              `json:"next_action"`
+	Schema     string                   `json:"schema"`
+	Intent     string                   `json:"intent"`
+	Verdict    string                   `json:"verdict"`
+	Finding    string                   `json:"finding"`
+	Satisfied  bool                     `json:"satisfied"`
+	Members    int                      `json:"members"`
+	Walked     int                      `json:"walked"`
+	Unmeasured int                      `json:"unmeasured"`
+	Dark       int                      `json:"dark"`
+	Spinning   int                      `json:"spinning,omitempty"`
+	Orphaned   int                      `json:"orphaned,omitempty"`
+	TotalDebt  int                      `json:"total_debt"`
+	Floor      int                      `json:"floor"`
+	Head       *superloop.WorkItem      `json:"head,omitempty"`
+	NextAction string                   `json:"next_action"`
+	Rollup     *superloop.RollupSummary `json:"rollup,omitempty"`
 }
 
 // superloopFleetWalk is the one shared read both read-only verbs fold: look the
@@ -129,6 +130,7 @@ func superloopFleetStatus(stdout, stderr io.Writer, argv []string) int {
 		TotalDebt:  rep.TotalDebt,
 		Floor:      rep.Floor,
 		NextAction: rep.NextAction,
+		Rollup:     &rep.Rollup,
 	}
 	if len(rep.Worklist) > 0 {
 		head := rep.Worklist[0]
@@ -147,6 +149,10 @@ func superloopFleetStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "superloop fleet: %s — %s (%s)\n", report.Intent, report.Verdict, report.Finding)
 	fmt.Fprintf(stdout, "  members %d  walked %d  unmeasured %d  |  dark %d  spinning %d  orphaned %d  |  debt %d (floor %d)\n",
 		report.Members, report.Walked, report.Unmeasured, report.Dark, report.Spinning, report.Orphaned, report.TotalDebt, report.Floor)
+	if report.Rollup != nil && report.Rollup.Members > 0 {
+		fmt.Fprintf(stdout, "  rollup: leaves %d  walked %d  unmeasured %d  dark %d\n",
+			report.Rollup.Members, report.Rollup.Walked, report.Rollup.Unmeasured, report.Rollup.Dark)
+	}
 	fmt.Fprintf(stdout, "  ranked worst-first on the product liveness × progress × follow-on (fleetwalk.go, #4958)\n")
 	if report.Head != nil {
 		fmt.Fprintf(stdout, "  worst: %s %s (debt %d) — %s\n", report.Head.Member.Kind, report.Head.Member.Ref, report.Head.Debt, report.Head.Detail)
