@@ -469,6 +469,7 @@ concurrent = [
   "deployment",
   "extensionfault",
   "timeaware",
+  "schemaadapter",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -639,6 +640,7 @@ autopick = [
   "rollout",
   "deployment",
   "extensionfault",
+  "schemaadapter",
   # new-leaf:lane
 ]
 
@@ -1512,6 +1514,7 @@ rollout = ["internal/rollout/**"]
 deployment = ["internal/deployment/**"]
 extensionfault = ["internal/extensionfault/**"]
 timeaware = ["internal/timeaware/**"]
+schemaadapter = ["internal/schemaadapter/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
