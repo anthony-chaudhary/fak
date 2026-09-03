@@ -103,6 +103,19 @@ func provenVisualVars() guardInfoVars {
 	return v
 }
 
+func TestCodexCacheReuseCapturedRenderUsesDisjointDenominator(t *testing.T) {
+	v := provenVisualVars()
+	v.VCache.HitRate = float64(45_312) / float64(46_799)
+
+	captured := strings.Join(renderInfoCacheView(newGuardInfoPanelCtx(v, newGuardInfoTrend(4), 120)), "\n")
+	if !strings.Contains(captured, "97%") {
+		t.Fatalf("Codex cache pane must render ~97%% reuse from 45,312/46,799:\n%s", captured)
+	}
+	if strings.Contains(captured, "49%") {
+		t.Fatalf("Codex cache pane double-counted cached input in its denominator:\n%s", captured)
+	}
+}
+
 func TestManagedCodexAgentAndSavingsCapturedRender(t *testing.T) {
 	v := provenVisualVars()
 	v.Sessions = []guardInfoSession{{
