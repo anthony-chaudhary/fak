@@ -443,3 +443,62 @@ func TestGuardResourceMonitorFailureReceiptBindsRunningActivation(t *testing.T) 
 		}
 	}
 }
+
+func TestGuardChildResourceDarwinContainmentDeterminism(t *testing.T) {
+	policy := guardResourcePolicy{
+		Metric:       procguard.MemoryMetricRSS,
+		MaxTreeBytes: 50 << 20,
+	}
+	snapshot := procguard.MemorySnapshot{
+		Metric:    procguard.MemoryMetricRSS,
+		TreeBytes: 55 << 20,
+		Processes: []procguard.MemoryProcess{
+			{PID: 105, Name: "child", Bytes: 30 << 20},
+			{PID: 101, Name: "root", Bytes: 15 << 20},
+			{PID: 109, Name: "worker", Bytes: 10 << 20},
+		},
+	}
+
+	d1 := decideGuardResource(policy, snapshot)
+	d2 := decideGuardResource(policy, snapshot)
+
+	if d1.Reason != d2.Reason || d1.Stop != d2.Stop || d1.Offender.PID != d2.Offender.PID {
+		t.Fatalf("decisions differ: %+v vs %+v", d1, d2)
+	}
+	if !slices.Equal(d1.OwnedPIDs, d2.OwnedPIDs) {
+		t.Fatalf("owned PIDs order non-deterministic: %v vs %v", d1.OwnedPIDs, d2.OwnedPIDs)
+	}
+
+	rawDetail := "collector=/tmp/private/ps.txt token=secret-key pid=101"
+	s1 := scrubGuardResourceDetail(rawDetail)
+	s2 := scrubGuardResourceDetail(rawDetail)
+	if s1 != s2 {
+		t.Fatalf("scrubbing non-deterministic: %q vs %q", s1, s2)
+	}
+
+	// Concurrent race and determinism test across parallel workers
+	const workers = 20
+	errCh := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func(id int) {
+			for j := 0; j < 50; j++ {
+				d := decideGuardResource(policy, snapshot)
+				if !d.Stop || d.Reason != "CHILD_TREE_RSS_LIMIT" || d.Offender.PID != 105 {
+					errCh <- fmt.Errorf("unexpected decision in worker %d: %+v", id, d)
+					return
+				}
+				if !slices.Equal(d.OwnedPIDs, []int{101, 105, 109}) {
+					errCh <- fmt.Errorf("unexpected PIDs in worker %d: %v", id, d.OwnedPIDs)
+					return
+				}
+			}
+			errCh <- nil
+		}(i)
+	}
+
+	for i := 0; i < workers; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+}

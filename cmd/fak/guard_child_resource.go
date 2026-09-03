@@ -136,6 +136,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	for _, process := range s.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 	}
+	sort.Ints(d.OwnedPIDs)
 	headroom := procguard.EvaluateSystemCommitHeadroom(s, p.MinSystemHeadroom)
 	d.HeadroomBytes = headroom.ObservedBytes
 	if len(s.Processes) > 0 {
