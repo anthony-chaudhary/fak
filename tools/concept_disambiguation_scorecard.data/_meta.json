@@ -1217,6 +1217,41 @@
           "category": "incidental",
           "reason": "constructor for sliding window hit rate tracker",
           "token": "NewSlidingCacheMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "modelengine dynamic worker coupling operation kind for cache restore and load",
+          "token": "OpCacheLoad"
+        },
+        {
+          "category": "incidental",
+          "reason": "string representation for modelengine OpCacheLoad",
+          "token": "cache_load"
+        },
+        {
+          "category": "incidental",
+          "reason": "configuration parameter for modelengine cache load workers",
+          "token": "MaxCacheLoadWorkers"
+        },
+        {
+          "category": "incidental",
+          "reason": "hardware topology calculation for modelengine cache load workers",
+          "token": "cacheLoadMaxWorkersFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "environment variable for modelengine cache load worker limit",
+          "token": "FAK_WORKER_COUPLING_CACHE_LOAD_MAX"
+        },
+        {
+          "category": "incidental",
+          "reason": "environment variable alias for modelengine cache load worker limit",
+          "token": "FAK_WORKER_COUPLING_CACHE_MAX"
+        },
+        {
+          "category": "incidental",
+          "reason": "telemetry field for modelengine active cache load workers",
+          "token": "CacheLoadWorkers"
         }
       ],
       "id": "cache",
@@ -1234,6 +1269,7 @@
         "CacheLevers",
         "CacheLineage",
         "CacheLineageChanged",
+        "CacheLoadWorkers",
         "CacheLookupMS",
         "CacheReadRate",
         "CacheResetDetected",
@@ -1260,6 +1296,8 @@
         "FAK_TOKEN_CACHE_MAX_BYTES",
         "FAK_TOKEN_CACHE_MAX_ENTRIES",
         "FAK_TOKEN_CACHE_TEMP_GRACE",
+        "FAK_WORKER_COUPLING_CACHE_LOAD_MAX",
+        "FAK_WORKER_COUPLING_CACHE_MAX",
         "FreshRuntimeConstants",
         "InputCached",
         "InputCachedPerMillion",
@@ -1267,10 +1305,12 @@
         "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
         "ManagedProviderCache",
+        "MaxCacheLoadWorkers",
         "NewCacheStateAllowlist",
         "NewSlidingCacheMetrics",
         "NonCache",
         "NonCacheParity",
+        "OpCacheLoad",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "ProviderCacheWriteTokens",
@@ -1310,6 +1350,7 @@
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheEntryPresent",
+        "cacheLoadMaxWorkersFor",
         "cacheMissing",
         "cachePrompt",
         "cacheRatio",
@@ -1330,6 +1371,7 @@
         "cache_evictions",
         "cache_future_dated",
         "cache_hits",
+        "cache_load",
         "cache_misses",
         "cache_no_longer_verifies",
         "cache_read_at_fire",
