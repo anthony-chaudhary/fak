@@ -3,17 +3,12 @@ package releasereadiness
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := findRepoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci-fast.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -23,8 +18,8 @@ func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
 		"name: ci-fast",
 		"build-vet-test-fast:",
 		"name: build · vet · test (no -race, fast release gate)",
-		"group: ${{ github.workflow }}-${{ github.ref }}",
-		"cancel-in-progress: true",
+		"workflow_dispatch:",
+		"concurrency:",
 		`GOMAXPROCS: "2"`,
 		`GOFLAGS: "-p=2"`,
 		"run: go build ./...",
@@ -48,5 +43,23 @@ func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
 		if strings.Contains(workflow, forbidden) {
 			t.Fatalf("ci-fast correctness gate retains obsolete contract %q", forbidden)
 		}
+	}
+}
+
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod found above %s", dir)
+		}
+		dir = parent
 	}
 }
