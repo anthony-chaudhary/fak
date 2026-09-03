@@ -41,6 +41,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Default documentation lookup, HEAD-only reachability census, and task-specific build/test witnesses: [`docs/dev-tooling.md`](docs/dev-tooling.md)
 - Shift-left task organization — author human-readable outcome, scope, dependencies, acceptance, witness, placement, and lane before dispatch: [`docs/shift-left-task-organization.md`](docs/shift-left-task-organization.md)
 - New-work defaults — ship the applied end-to-end spine first, prove its operating envelope, optimize against it, then fan out the hardening backlog with `fak issue fanout` (3 is the floor, not the target): [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md)
+- Positive workspace management — positive workspace construction over punitive default-deny, immutable FROZEN safety floor vs permissive convenience surface, avoiding capability laundering and doom-loops: [`docs/positive-workspace-management.md`](docs/positive-workspace-management.md)
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
