@@ -124,3 +124,28 @@ func TestMCPToolSchemasConformToOpenAPIAndGemini(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateToolDescriptorsPassesAtBoot(t *testing.T) {
+	if err := validateToolDescriptors(); err != nil {
+		t.Fatalf("validateToolDescriptors failed for registered tools: %v", err)
+	}
+}
+
+func TestValidateOpenAPISchemaNodeCatchesBareRequiredAnyOf(t *testing.T) {
+	broken := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool": map[string]any{"type": "string"},
+		},
+		"anyOf": []any{
+			map[string]any{"required": []any{"tool"}},
+		},
+	}
+	err := validateOpenAPISchemaNode("broken", broken)
+	if err == nil {
+		t.Fatal("expected validateOpenAPISchemaNode to reject bare required anyOf, got nil")
+	}
+	if !strings.Contains(err.Error(), "only allowed for type object") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

@@ -901,6 +901,33 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/usage/cache-alignment:
+    get:
+      tags: [fak-native]
+      summary: Read the per-request provider prompt-cache alignment window
+      description: |
+        Returns the `fak.gateway.usage-alignment.v1` report over the last N
+        completed model requests (#10670): each request's stable usage record
+        (request ordinal, wire, input/output/reasoning/cached token counts,
+        cache-write tokens, cached ratio) plus its reconciliation against fak's
+        native warm-state receipt — `aligned`, `misaligned`, or `warm_unknown`.
+        The canonical alignment threshold is echoed in the response. Counts and
+        ratios only; no prompt or content fields.
+      parameters:
+        - name: n
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 1024 }
+          description: How many of the most recent completed requests to report (bounded by the retained window).
+      responses:
+        '200':
+          description: The cache-alignment report over the queried window.
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/session-audit/actions:
     get:
       tags: [fak-native]
