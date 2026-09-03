@@ -1,0 +1,61 @@
+{
+  "benchmark": "terminal-bench-4",
+  "version": "1.0",
+  "tasks": [
+    {
+      "task_id": "tb4-synth-01-syntax-fix",
+      "category": "refactor",
+      "prompt": "Fix the syntax error in main.py so it prints 'fixed'.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo 'print(\"broken\"' > main.py",
+      "verification_oracle": "#!/bin/bash\ngrep -q \"fixed\" main.py\n",
+      "verification_oracle_hash": "sha256:0eb9d4e6fd5f10e4c5a2a293ba142585a16c5d2390d3409783de3ed92c9f950b",
+      "timeout_seconds": 30,
+      "budget_turns": 5
+    },
+    {
+      "task_id": "tb4-synth-02-git-rebase",
+      "category": "git",
+      "prompt": "Rebase feature branch onto main and resolve conflicts.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "git init",
+      "verification_oracle": "#!/bin/bash\ngit log -1 --oneline\n",
+      "verification_oracle_hash": "sha256:7ae8c975f882de9d3087548fa85be704990e70d3e5a84548aad5f80e1bc6bb07",
+      "timeout_seconds": 30,
+      "budget_turns": 5
+    },
+    {
+      "task_id": "tb4-synth-03-bash-pipeline",
+      "category": "sysadmin",
+      "prompt": "Process log files into output.log using awk and sed.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "touch input.log",
+      "verification_oracle": "#!/bin/bash\ntest -f output.log\n",
+      "verification_oracle_hash": "sha256:f97010256cf60706ad261c292fdbaf50aad9dad892f5b4fd1bb6732ea2411ff1",
+      "timeout_seconds": 30,
+      "budget_turns": 5
+    },
+    {
+      "task_id": "tb4-synth-04-env-debug",
+      "category": "build",
+      "prompt": "Configure missing PORT environment variable in .env file.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "touch .env",
+      "verification_oracle": "#!/bin/bash\ngrep -q \"PORT=8080\" .env\n",
+      "verification_oracle_hash": "sha256:c101f4c158d8cb66ae9c57d8810eac97d058ce50c06250f25407dcba6372b8d8",
+      "timeout_seconds": 30,
+      "budget_turns": 5
+    },
+    {
+      "task_id": "tb4-synth-05-file-refactor",
+      "category": "refactor",
+      "prompt": "Refactor Go package into pkg/refactored.go.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "mkdir -p pkg",
+      "verification_oracle": "#!/bin/bash\ntest -f pkg/refactored.go\n",
+      "verification_oracle_hash": "sha256:fef68e04c0a8e310341b2dd40dc3bff4035228804fbfd7e469701dd9af30f4a1",
+      "timeout_seconds": 30,
+      "budget_turns": 5
+    }
+  ]
+}
