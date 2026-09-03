@@ -1,0 +1,250 @@
+{
+  "schema": "fak-study-inventory/1",
+  "repository": "lightseekorg/tokenspeed",
+  "url": "https://github.com/lightseekorg/tokenspeed",
+  "pinned_revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
+  "indexed_at": "2026-09-02",
+  "mode": "exhaustive",
+  "subsystems": [
+    {
+      "name": "scheduler-cpp-control-plane",
+      "path": "tokenspeed-scheduler/csrc/",
+      "files": [
+        "fsm/states.h",
+        "fsm/forward_states.h",
+        "fsm/forward_events.h",
+        "fsm/pd_events.h",
+        "fsm/pd_states.h",
+        "fsm/base_event.h",
+        "scheduler/scheduler.h",
+        "scheduler/scheduler.cpp",
+        "scheduler/operations/forward.h",
+        "scheduler/operations/forward.cpp",
+        "scheduler/operations/cache.h",
+        "scheduler/operations/cache.cpp",
+        "scheduler/request.h",
+        "scheduler/request.cpp",
+        "scheduler/types.h",
+        "cache/coordinator/cache_coordinator.h",
+        "cache/coordinator/cache_coordinator.cpp",
+        "cache/coordinator/cache_admission.cpp",
+        "cache/coordinator/group_geometry.h",
+        "cache/core/block_pool.h",
+        "cache/core/cache_types.h",
+        "cache/core/cache_block_ref.h",
+        "cache/core/cache_config.h",
+        "cache/prefix/prefix_index.h",
+        "cache/prefix/prefix_matcher.h",
+        "cache/prefix/prefix_hasher.h",
+        "cache/tier/transfer.h",
+        "cache/tier/transfer_manager.h",
+        "resource/allocator/req_pool_allocator.h",
+        "core/token_container.h"
+      ],
+      "description": "C++ finite-state machine control plane for request lifecycle, scheduling, and cache coordination. Compile-time state safety via std::variant."
+    },
+    {
+      "name": "scheduler-python-execution-plane",
+      "path": "tokenspeed-scheduler/python/tokenspeed_scheduler/",
+      "files": [
+        "__init__.py"
+      ],
+      "description": "Python bindings for the C++ scheduler. Thin wrapper; heavy lifting in C++."
+    },
+    {
+      "name": "kernel-registry-selection",
+      "path": "tokenspeed-kernel/python/tokenspeed_kernel/",
+      "files": [
+        "registry.py",
+        "selection.py",
+        "signature.py",
+        "platform.py",
+        "__init__.py"
+      ],
+      "description": "Pluggable kernel system with FormatSignature, capability gating, per-family oracles, and selection objectives (latency/throughput/portability/determinism/debug)."
+    },
+    {
+      "name": "kernel-operations",
+      "path": "tokenspeed-kernel/python/tokenspeed_kernel/ops/",
+      "files": [
+        "attention/__init__.py",
+        "gemm/__init__.py",
+        "moe/__init__.py",
+        "sampling/__init__.py",
+        "quantization/__init__.py",
+        "activation/__init__.py",
+        "layernorm/__init__.py",
+        "transform/__init__.py",
+        "hyperconnection/__init__.py",
+        "mhc/__init__.py"
+      ],
+      "description": "Individual kernel implementations registered via @register_kernel decorator. Includes MHA, MLA, DSA, DSV4, MoE, sampling, quantization, etc."
+    },
+    {
+      "name": "mla-kernels",
+      "path": "tokenspeed-mla/python/tokenspeed_mla/",
+      "files": [
+        "mla_prefill.py",
+        "mla_decode.py",
+        "mla_decode_fp16.py",
+        "mla_decode_fp8.py",
+        "fmha.py",
+        "mla_helpers.py",
+        "mla_kv_pack_quantize_fp8.py",
+        "__init__.py"
+      ],
+      "description": "MLA (Multi-head Latent Attention) prefill and decode kernels for Blackwell. CuTe DSL JIT + optional AOT binary backend. fold_sq_factor for small-head decode."
+    },
+    {
+      "name": "entrypoint-async-llm",
+      "path": "python/tokenspeed/runtime/entrypoints/",
+      "files": [
+        "engine.py",
+        "engine_base.py",
+        "control_server.py",
+        "sglang_compat_http.py"
+      ],
+      "description": "Engine entrypoint with tokenizer manager, scheduler subprocess, detokenizer. Headless mode for SMG integration via msgpack ZMQ."
+    },
+    {
+      "name": "event-loop-scheduler-worker",
+      "path": "python/tokenspeed/runtime/engine/event_loop.py",
+      "files": [
+        "event_loop.py"
+      ],
+      "description": "Main scheduler worker loop. Builds device side, runs event_loop with in_flight_depth overlap, commits forward results, advances scheduler."
+    },
+    {
+      "name": "execution-device-side",
+      "path": "python/tokenspeed/runtime/execution/",
+      "files": [
+        "device.py",
+        "model_executor.py",
+        "model_runner.py",
+        "forward_batch_info.py",
+        "forward_thread.py",
+        "cuda_graph_wrapper.py",
+        "breakable_cuda_graph.py",
+        "prefill_graph.py",
+        "cache_loc_kernel.py",
+        "input_buffer.py",
+        "workspace.py"
+      ],
+      "description": "Device-side execution: model runners, CUDA graphs, forward threads, prefill graphs, cache location kernels."
+    },
+    {
+      "name": "models",
+      "path": "python/tokenspeed/runtime/models/",
+      "files": [
+        "deepseek_v4.py",
+        "deepseek_v3.py",
+        "kimi_k3.py",
+        "qwen3_5.py",
+        "glm53_flash.py",
+        "inkling.py",
+        "llama.py",
+        "registry.py",
+        "base/compiler.py",
+        "base/placement.py"
+      ],
+      "description": "Model implementations with local-SPMD compiler generating collective communication from module-boundary annotations."
+    },
+    {
+      "name": "attention-backends",
+      "path": "python/tokenspeed/runtime/layers/attention/backends/",
+      "files": [
+        "tokenspeed_mla.py",
+        "flashmla.py",
+        "mla.py",
+        "mha.py",
+        "msa.py",
+        "dsa.py",
+        "deepseek_v4.py",
+        "hybrid_linear_attn.py",
+        "hybrid_kda.py",
+        "trtllm.py",
+        "trtllm_mla.py"
+      ],
+      "description": "Attention backend implementations integrating kernel selection with KV cache recipes."
+    },
+    {
+      "name": "kv-cache-recipes",
+      "path": "python/tokenspeed/runtime/layers/attention/kv_cache/recipes/",
+      "files": [
+        "spec.py",
+        "plan.py",
+        "deepseek_v4.py",
+        "kimi_k3.py",
+        "glm53_flash.py",
+        "inkling.py",
+        "qwen35.py",
+        "qwen4_exp.py",
+        "ordinary.py",
+        "base.py"
+      ],
+      "description": "Per-model KV cache layout specifications and admission plans."
+    },
+    {
+      "name": "epd-disaggregation",
+      "path": "python/tokenspeed/runtime/epd/",
+      "files": [
+        "prefill_admission.py",
+        "prefill_hooks.py",
+        "encode_executor.py",
+        "encode_loop.py",
+        "encode_scheduler.py",
+        "entities.py",
+        "mooncake/conn.py",
+        "mooncake/encode.py",
+        "mooncake/prefill.py",
+        "mooncake/receiver.py",
+        "mooncake/sender.py"
+      ],
+      "description": "Encode-Prefill-Disaggregation: encode workers compute vision embeddings, ship via Mooncake to prefill node."
+    }
+  ],
+  "source_classes_covered": [
+    "readme_docs",
+    "architecture_design",
+    "runtime_source",
+    "tests_fixtures",
+    "history_changelog_releases",
+    "open_closed_issues_prs_discussions",
+    "roadmap_todos",
+    "license_provenance",
+    "fak_selfquery_witness",
+    "candidate_matrix",
+    "completeness_critic",
+    "issue_tracking"
+  ],
+  "candidate_count": 12,
+  "filed_issue_count": 4,
+  "completeness_critic": "Exhaustive fan-out across scheduler (C++ FSM + Python), kernel registry/selection, MLA, entrypoint, event loop, models/layers. Skipped third-party vendored code (CUTLASS, FlashInfer, DeepEP). All load-bearing subsystems opened.",
+  "issue_refs": [
+    "#10741",
+    "#10743",
+    "#10748",
+    "#10749",
+    "#10750"
+  ],
+  "non_tree_study": {
+    "github_issues_prs_discussions": {
+      "method": "gh api graphql repository(owner:lightseekorg,name:tokenspeed) issues(first:100,states:[OPEN,CLOSED]) pullRequests(first:100,states:[OPEN,CLOSED,MERGED]) discussions(first:100)",
+      "note": "Repository is new (2026); issue/PR/discussion counts are low. Primary signal is code + README + PyTorch blog."
+    },
+    "fak_selfquery_witness": {
+      "queries": [
+        "fak capabilities \"C++ FSM typed request lifecycle transitions compile-time safety\"",
+        "fak capabilities \"overlap scheduling in-flight depth CPU-GPU pipeline\"",
+        "fak capabilities \"declarative kernel registry format signature capability gating oracle\"",
+        "fak capabilities \"capacity retraction victim selection recoverable snapshot host cache\""
+      ],
+      "note": "Candidate-specific FAK queries confirmed PARTIAL/ABSENT on-axis for core scheduler/kernel techniques."
+    },
+    "candidate_matrix": {
+      "evidence": "docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md#candidate-borrows"
+    }
+  },
+  "license": "MIT",
+  "license_compatible": true
+}
