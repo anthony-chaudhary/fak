@@ -77,12 +77,17 @@ func comparisonIdentity(c ComparisonCriterion) (ComparisonIdentity, error) {
 	return ComparisonIdentity{OutputClass: c.OutputClass, CriterionID: c.ID, CriterionVersion: c.Version, CriterionDigest: digest}, nil
 }
 
-func validateComparisonIdentity(r ExperimentReceipt) error {
+// ComparisonIdentityFor derives the expected comparison identity for an experiment receipt.
+func ComparisonIdentityFor(r ExperimentReceipt) (ComparisonIdentity, error) {
 	criterion, err := ResolveComparisonCriterion(r)
 	if err != nil {
-		return err
+		return ComparisonIdentity{}, err
 	}
-	want, err := comparisonIdentity(criterion)
+	return comparisonIdentity(criterion)
+}
+
+func validateComparisonIdentity(r ExperimentReceipt) error {
+	want, err := ComparisonIdentityFor(r)
 	if err != nil {
 		return err
 	}

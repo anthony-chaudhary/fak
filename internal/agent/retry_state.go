@@ -77,7 +77,7 @@ type rejectedResponseRetry struct {
 // error returned in err.
 func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanner, s *retryState, resp *http.Response, raw []byte, attempt int, ctl rejectedResponseRetry) (retry, rewind bool, err error) {
 	status := resp.StatusCode
-	if transientTargetStatus(status) && ctl.triedTransientRetry != nil && ctl.triedTransientTarget != nil {
+	if p != nil && p.TransientTargetFunc != nil && transientTargetStatus(status) && ctl.triedTransientRetry != nil && ctl.triedTransientTarget != nil {
 		if !*ctl.triedTransientRetry {
 			*ctl.triedTransientRetry = true
 			s.noteImmediateRetry(status, raw, resp.Header, ctl.bodyCap)

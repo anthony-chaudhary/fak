@@ -1,1 +1,3 @@
 {"schema":"fak-memory-value-ledger/1","ts":"2026-07-03T19:08:50Z","intent":"continue the memory-value program: R2 loop-turn recall","store":"C:/work/fak/.claude/memory","fresh":1,"withheld_stale":0,"lessons":0}
+{"schema":"fak-memory-value-ledger/1","ts":"2026-08-27T00:48:16Z","intent":"resolve issue #8692 bounded native dense Qwen GPU host placement","store":"<repo>/.claude/memory","fresh":1,"withheld_stale":0,"lessons":0}
+{"schema":"fak-memory-value-ledger/1","ts":"2026-09-01T11:01:29Z","intent":"issue 10558 treedoctor go cache stale deletion race","store":"<repo>/.claude/memory","fresh":1,"withheld_stale":0,"lessons":0}

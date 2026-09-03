@@ -52,6 +52,7 @@ type releaseShipOptions struct {
 	waitCI               bool
 	skipCI               bool
 	skipDryRun           bool
+	adoptAncestorCI      bool
 	ciAppearTimeout      time.Duration
 	keepWorktree         bool
 	worktreeDir          string
@@ -173,6 +174,7 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.BoolVar(&opts.waitCI, "wait-ci", opts.waitCI, "watch a pending CI run before tagging")
 	fs.BoolVar(&opts.skipCI, "skip-ci", false, "skip CI folding in release_tag; intended for emergency/operator use")
 	fs.BoolVar(&opts.skipDryRun, "skip-dry-run", opts.skipDryRun, "emergency escape hatch: skip the release-substrate dry-run witness at the cut (default runs it; it is tag-based and passes on a real bump). The tag step always reuses the cut's same-commit verdict.")
+	fs.BoolVar(&opts.adoptAncestorCI, "adopt-ancestor-ci", false, "allow adopting a completed green trunk ancestor CI run when exact source SHA has no decisive conclusion (#7324)")
 	fs.StringVar(&opts.readinessFile, "readiness", opts.readinessFile, "work-delivery JSON containing ready state and its explicit witnessed release-readiness receipt (required with --execute)")
 	fs.DurationVar(&opts.ciAppearTimeout, "ci-appear-timeout", opts.ciAppearTimeout, "how long to wait for a just-pushed CI run to appear before release_tag folds it")
 	fs.BoolVar(&opts.keepWorktree, "keep-worktree", false, "leave the detached worktree on disk")
@@ -1363,20 +1365,81 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
 	}
 	if len(rows) == 0 {
+		if opts.adoptAncestorCI {
+			return releaseShipAdoptAncestorCI(result, root, opts, sha, map[string]any{"ok": false, "status": "missing", "source_sha": sha})
+		}
 		return map[string]any{"ok": false, "status": "missing", "source_sha": sha}
 	}
 	row := rows[0]
 	conclusion := strings.ToLower(stringFromAny(row["conclusion"]))
 	workflowStatus := strings.ToLower(stringFromAny(row["status"]))
 	state := releaseShipCIState(workflowStatus, conclusion)
+	if state == "green" {
+		return map[string]any{
+			"ok":              true,
+			"status":          state,
+			"workflow_status": workflowStatus,
+			"conclusion":      conclusion,
+			"source_sha":      sha,
+			"run":             row,
+		}
+	}
+	if opts.adoptAncestorCI {
+		return releaseShipAdoptAncestorCI(result, root, opts, sha, map[string]any{
+			"ok":              false,
+			"status":          state,
+			"workflow_status": workflowStatus,
+			"conclusion":      conclusion,
+			"source_sha":      sha,
+			"run":             row,
+		})
+	}
 	return map[string]any{
-		"ok":              state == "green",
+		"ok":              false,
 		"status":          state,
 		"workflow_status": workflowStatus,
 		"conclusion":      conclusion,
 		"source_sha":      sha,
 		"run":             row,
 	}
+}
+
+func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts releaseShipOptions, sha string, fallback map[string]any) map[string]any {
+	workflows := []string{opts.workflow}
+	if opts.workflow != "ci-fast.yml" {
+		workflows = append(workflows, "ci-fast.yml")
+	}
+	for _, wf := range workflows {
+		args := []string{"run", "list", "--workflow", wf, "--branch", opts.trunk, "--status", "completed", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt"}
+		code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
+		if code != 0 {
+			continue
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			continue
+		}
+		for _, row := range rows {
+			conc := strings.ToLower(stringFromAny(row["conclusion"]))
+			rsha := strings.TrimSpace(stringFromAny(row["headSha"]))
+			if conc == "success" && rsha != "" {
+				mCode, _ := releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", rsha, sha}, nil, releaseShipMergeBaseCommandTimeout)
+				if mCode == 0 {
+					return map[string]any{
+						"ok":                   true,
+						"status":               "green",
+						"workflow_status":      "completed",
+						"conclusion":           "success",
+						"source_sha":           sha,
+						"adopted_ancestor_sha": rsha,
+						"workflow":             wf,
+						"run":                  row,
+					}
+				}
+			}
+		}
+	}
+	return fallback
 }
 
 func releaseShipCIState(status, conclusion string) string {
@@ -1395,106 +1458,4 @@ func releaseShipCIState(status, conclusion string) string {
 	default:
 		return "failed"
 	}
-}
-
-// releaseShipPayloadOK reads the "ok" verdict out of a release-ship gate payload. An absent
-// payload is NOT ok: a gate that never ran must never read as a gate that passed -- which is
-// the whole reason these two gates need a reader of their own rather than a bare
-// payload["ok"] assertion. The source-CI and the target-ancestry gates publish the same
-// shaped map and both can be skipped, so one reader serves both.
-func releaseShipPayloadOK(payload map[string]any) bool {
-	if payload == nil {
-		return false
-	}
-	ok, _ := payload["ok"].(bool)
-	return ok
-}
-
-func releaseShipNeedsTargetAncestry(opts releaseShipOptions) bool {
-	source := strings.TrimSpace(opts.sourceBranch)
-	target := strings.TrimSpace(opts.trunk)
-	return source != "" && target != "" && source != target
-}
-
-func releaseShipDirectPromotionRequiresOpenPR(opts releaseShipOptions) bool {
-	source := strings.TrimSpace(opts.sourceBranch)
-	target := strings.TrimSpace(opts.trunk)
-	return opts.execute && !opts.openPR && !opts.allowDirectPromotion && source != "" && target != "" && source != target
-}
-
-func releaseShipTargetAncestry(result *releaseShipResult, root string, opts releaseShipOptions, sourceSHA string) map[string]any {
-	targetRef := opts.remote + "/" + opts.trunk
-	if strings.TrimSpace(sourceSHA) == "" {
-		return map[string]any{"ok": false, "status": "missing_source_sha", "target_ref": targetRef}
-	}
-	code, out := releaseShipCmd(result, root, "git", []string{"rev-parse", "--verify", targetRef + "^{commit}"}, nil, time.Minute)
-	if code != 0 {
-		return map[string]any{"ok": false, "status": "target_unresolvable", "target_ref": targetRef, "tail": tail(out)}
-	}
-	targetSHA := strings.TrimSpace(out)
-	payload := map[string]any{
-		"target_ref": targetRef,
-		"target_sha": targetSHA,
-		"source_ref": opts.sourceBranch,
-		"source_sha": sourceSHA,
-	}
-	if sameSHA(targetSHA, sourceSHA) {
-		payload["ok"] = true
-		payload["status"] = "same"
-		return payload
-	}
-	code, out = releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", targetSHA, sourceSHA}, nil, time.Minute)
-	switch code {
-	case 0:
-		payload["ok"] = true
-		payload["status"] = "ancestor"
-	case 1:
-		payload["ok"] = false
-		payload["status"] = "non_fast_forward"
-	default:
-		payload["ok"] = false
-		payload["status"] = "ancestor_check_failed"
-		payload["tail"] = tail(out)
-	}
-	return payload
-}
-
-func cleanupReleaseShipWorktree(root, wt string) map[string]any {
-	code, out := releaseShipRunCommand(root, "git", []string{"worktree", "remove", "--force", wt}, nil, 5*time.Minute)
-	payload := map[string]any{
-		"ok":        code == 0,
-		"path":      wt,
-		"exit_code": code,
-	}
-	if code != 0 {
-		payload["tail"] = tail(out)
-	}
-	pruneCode, pruneOut := releaseShipRunCommand(root, "git", []string{"worktree", "prune"}, nil, time.Minute)
-	payload["prune_exit_code"] = pruneCode
-	if pruneCode != 0 {
-		payload["prune_tail"] = tail(pruneOut)
-	}
-	return payload
-}
-
-func readReleaseReadiness(path string) (workdelivery.WorkUnit, workdelivery.Receipt, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
-	}
-	var envelope struct {
-		Unit          workdelivery.WorkUnit                `json:"unit"`
-		Receipt       workdelivery.Receipt                 `json:"receipt"`
-		Qualification *installedLaunchQualificationReceipt `json:"installed_launch_qualification,omitempty"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
-	}
-	if err := envelope.Unit.Validate(); err != nil {
-		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
-	}
-	if err := validateInstalledLaunchQualification(envelope.Qualification); err != nil {
-		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
-	}
-	return envelope.Unit, envelope.Receipt, nil
 }

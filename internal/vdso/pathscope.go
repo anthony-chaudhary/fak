@@ -39,9 +39,10 @@ const filesNamespace = "files"
 
 // filePathArgKeys are the argument keys, in priority order, under which a file-shaped tool
 // names its target path. file_path is the Claude Code harness convention (Read/Edit/Write);
-// path is the generic fallback. Both read-shaped (Read) and write-shaped (Edit/Write) tools
-// use the same keys, so a Read and an Edit of one file extract the identical raw path.
-var filePathArgKeys = []string{"file_path", "path", "filename", "filepath"}
+// filePath is the camelCase convention (OpenCode/Cursor/Claude); path is the generic fallback.
+// Both read-shaped (Read) and write-shaped (Edit/Write) tools use the same keys, so a Read
+// and an Edit of one file extract the identical raw path.
+var filePathArgKeys = []string{"file_path", "filePath", "path", "filename", "filepath", "target_file", "source_file", "file"}
 
 // fileEntityOf returns the canonical filesystem path a file-shaped tool call targets, or ""
 // when the call names no single path (e.g. Bash, or a glob/grep over a directory). The
@@ -113,6 +114,10 @@ func fileShapedButUnnamed(args []byte) bool {
 	if len(args) == 0 {
 		return false
 	}
+	// Pattern-based search tools (Glob, Grep) specify a pattern, not a single file_path.
+	if ExtractToolPattern(args) != "" {
+		return false
+	}
 	var m map[string]json.RawMessage
 	if json.Unmarshal(args, &m) != nil {
 		return false
@@ -137,6 +142,14 @@ func fileShapedButUnnamed(args []byte) bool {
 // coarser granularities a read already reaches its target depth via the namespace/root
 // chain, and a per-path leaf would be stranded by a namespace-level write it should ignore.
 func (v *VDSO) fileReadChain(args []byte) []string {
+	if v.GranularityOf() != Resource {
+		return nil
+	}
+	// If this call carries a pattern (Glob / Grep), bind the directory tag.
+	if ExtractToolPattern(args) != "" {
+		dir := ExtractToolDirectory(args)
+		return []string{rootTag, filesNamespace, "files:dir:" + dir}
+	}
 	ent := v.fileLeafEntity(args)
 	if ent == "" {
 		return nil
@@ -160,11 +173,20 @@ func (v *VDSO) fileLeafEntity(args []byte) string {
 // own leaf — or nil when the write names no single path (so the caller falls back to the
 // namespace/root flush, which over-invalidates soundly). A write to path P bumps
 // "files:P", which strands exactly the reads whose chain contains "files:P" (that file's
-// reads) and leaves every other file's cached reads warm.
+// reads) and leaves every other file's cached reads warm. In addition, it bumps the
+// directory tag so any directory search (Glob/Grep) covering this path is invalidated.
 func (v *VDSO) fileWriteTags(args []byte) []string {
 	ent := v.fileLeafEntity(args)
 	if ent == "" {
 		return nil
 	}
-	return []string{filePathTag(ent)}
+	tags := []string{filePathTag(ent)}
+	dir := filepath.ToSlash(filepath.Dir(ent))
+	if dir != "" {
+		tags = append(tags, "files:dir:"+dir)
+	}
+	if dir != "." && !filepath.IsAbs(ent) {
+		tags = append(tags, "files:dir:.")
+	}
+	return tags
 }

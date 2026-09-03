@@ -1,3 +1,8 @@
+---
+title: "metrics-service study — aligned evidence and operator observability"
+description: "Study of metrics-service Go observability runtime, aligned fleet snapshots, and dashboard drift auditing."
+---
+
 # metrics-service study — aligned evidence and operator observability
 
 **Observed:** 2026-08-29  
@@ -148,7 +153,7 @@ Intentionally not treated as current implementation proof:
 
 - old broad plans, `pr/`, `reference/`, and early observability documents when recent code contradicted or superseded them;
 - exhaustive panel-by-panel dashboard JSON review;
-- live Grafana/InfluxDB/DGX deployment, production soak, or network mutation;
+- live Grafana/InfluxDB/`DGX` deployment, production soak, or network mutation;
 - historical snapshot/archive binaries;
 - the two pre-existing untracked target files.
 

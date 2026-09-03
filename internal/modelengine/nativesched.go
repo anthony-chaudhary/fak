@@ -17,6 +17,7 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,6 +90,8 @@ type NativeScheduler struct {
 	preemptRound int64
 	preemptStats NativePreemptionStats
 
+	coupler *WorkerCoupler
+
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
 	stopped chan struct{}
@@ -122,6 +125,37 @@ func (s *NativeScheduler) SetMaxRunning(n int) {
 	s.maxRunning = n
 	s.mu.Unlock()
 	s.signal()
+}
+
+// SetWorkerCoupler installs a custom or reconfigured worker coupler on this scheduler.
+func (s *NativeScheduler) SetWorkerCoupler(c *WorkerCoupler) {
+	s.mu.Lock()
+	s.coupler = c
+	s.mu.Unlock()
+}
+
+// WorkerCoupler returns the active worker coupler.
+func (s *NativeScheduler) WorkerCoupler() *WorkerCoupler {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coupler
+}
+
+// WorkerCouplingStats returns telemetry for this scheduler's worker coupler.
+func (s *NativeScheduler) WorkerCouplingStats() WorkerCouplingStats {
+	coupler := s.WorkerCoupler()
+	if coupler == nil {
+		return WorkerCouplingStats{}
+	}
+	return coupler.Stats()
+}
+
+// WriteWorkerCouplingMetrics renders Prometheus-format metrics for the worker coupler.
+func (s *NativeScheduler) WriteWorkerCouplingMetrics(b *strings.Builder) {
+	coupler := s.WorkerCoupler()
+	if coupler != nil {
+		coupler.WriteMetrics(b)
+	}
 }
 
 // SetQ4KGateUpOutputSlab selects the explicit session-owned slab for Q4_K lanes.
@@ -235,6 +269,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		wake:          make(chan struct{}, 1),
 		stopped:       make(chan struct{}),
 		drainDonation: true,
+		coupler:       NewDefaultWorkerCoupler(),
 	}
 }
 
@@ -319,7 +354,9 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		}
 	}
 	prefillStarted := s.now()
-	logits := sess.Prefill(prompt)
+	logits := RunWithOp(s.coupler, OpPrefill, func() []float32 {
+		return sess.Prefill(prompt)
+	})
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
 	if s.captureQwenState {
 		executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
@@ -451,6 +488,13 @@ func (s *NativeScheduler) signal() {
 	}
 }
 
+func (s *NativeScheduler) effectiveMaxRunningLocked() int {
+	if s.coupler != nil {
+		return s.coupler.CoupledMaxRunning(s.maxRunning)
+	}
+	return s.maxRunning
+}
+
 // run is the single scheduler loop. Each iteration recomputes the running set: it
 // compacts retired lanes out, then promotes waiting lanes into the freed slots (FIFO,
 // up to maxRunning) — so the per-step batch geometry tracks admissions and completions
@@ -545,10 +589,11 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	s.readmitPreemptedLocked()
 	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
 	// cancelled while it was still waiting is retired here rather than promoted.
+	maxRun := s.effectiveMaxRunningLocked()
 	if s.promotionPicker != nil && len(s.waiting) > 1 {
 		slots := len(s.waiting)
-		if s.maxRunning > 0 {
-			slots = s.maxRunning - len(s.lanes)
+		if maxRun > 0 {
+			slots = maxRun - len(s.lanes)
 		}
 		c := make([]PromotionCandidate, len(s.waiting))
 		for i, ln := range s.waiting {
@@ -576,7 +621,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			ln.finish(nil, ln.ctx.Err())
 			continue
 		}
-		if s.maxRunning > 0 && len(s.lanes) >= s.maxRunning {
+		if maxRun > 0 && len(s.lanes) >= maxRun {
 			kept = append(kept, ln)
 			continue
 		}
@@ -661,7 +706,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane) {
 			return
 		}
 		decodeStarted := s.now()
-		ln.logits = ln.sess.Step(next)
+		ln.logits = RunWithOp(s.coupler, OpDecode, func() []float32 {
+			return ln.sess.Step(next)
+		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		select {
 		case <-s.wake:
@@ -691,7 +738,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	if len(cont) == 1 {
 		for i, ln := range cont {
 			decodeStarted := s.now()
-			ln.logits = ln.sess.Step(ids[i])
+			ln.logits = RunWithOp(s.coupler, OpDecode, func() []float32 {
+				return ln.sess.Step(ids[i])
+			})
 			s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		}
 		return
@@ -705,7 +754,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	}
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
 	decodeStarted := s.now()
-	out := bs.StepBatch(ids)
+	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
+		return bs.StepBatch(ids)
+	})
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
 		s.mu.Lock()

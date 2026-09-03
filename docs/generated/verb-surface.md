@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1103<br>
-rows: 1077<br>
-unverified rows: 0 / 1077<br>
-source-only rows absent from help: 852
+parsed files: 1112<br>
+rows: 1083<br>
+unverified rows: 0 / 1083<br>
+source-only rows absent from help: 858
 
 ## Surface table
 
@@ -108,12 +108,12 @@ source-only rows absent from help: 852
 | `fak benchmarks run context-join` | `fak vcache context-join` core (issue #1607): it ingests the same provider-cache turn stream `fak vcache observe` reads (--transcript / --telemetry) plus a stream of managed-context lifecycle events (… | runVCacheContextJoin / internal/vcacheobserve | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run context-witness` |  | runVCacheContextWitness / internal/abi, internal/adjudicator, internal/agent, internal/appversion, internal/gateway, internal/guardtrace, internal/guardvars, internal/ifc, internal/journal, internal/maputil, internal/metrics, internal/policy, internal/ratelimit, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | STRUCTURAL | `DEFAULT_DENY` | **SOURCE ONLY** |
 | `fak benchmarks run help` |  | vcacheUsage | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
-| `fak benchmarks run inspect` |  | runVCacheInspect / internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak benchmarks run inspect` |  | runVCacheInspect / internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run observe` | `fak vcache observe` core: it ingests REAL provider-cache telemetry — one or more Claude Code transcripts (.jsonl) and/or a session-telemetry JSONL — groups the turns by prefix family, runs the sh… | runVCacheObserve / internal/vcachecal, internal/vcachegov, internal/vcacheobserve | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run prove` |  | runVCacheProve / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run prove-recall` |  | runVCacheProveRecall / internal/vcachechain | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run prove-telemetry` |  | runVCacheProveTelemetry / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
-| `fak benchmarks run put` |  | runVCacheFixturePut / internal/abi, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak benchmarks run put` |  | runVCacheFixturePut / internal/abi, internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run score` |  | runVCacheScore / internal/cachevalueledger, internal/vcachecal, internal/vcachechain, internal/vcachegov, internal/vcacheobserve, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run session-history` |  | runSessionHistory / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run session-mine` |  | runSessionMine / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
@@ -586,6 +586,11 @@ source-only rows absent from help: 852
 | `fak model canary-gate` |  | runModelCanaryGate / internal/modelops | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model canary-run` |  | runModelCanaryRun | `case` arm of the dispatch switch in cmdModel() | RUNTIME | — | **SOURCE ONLY** |
 | `fak model help` |  |  | `case` arm of the dispatch switch in cmdModel() | N/A | — | **SOURCE ONLY** |
+| `fak model incumbent` |  | cmdModelIncumbent | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model incumbent help` |  |  | `case` arm of the dispatch switch in cmdModelIncumbent() | N/A | — | **SOURCE ONLY** |
+| `fak model incumbent install` |  | runModelIncumbentInstall | `case` arm of the dispatch switch in cmdModelIncumbent() | NONE | — | **SOURCE ONLY** |
+| `fak model incumbent preflight` |  | runModelIncumbentPreflight | `case` arm of the dispatch switch in cmdModelIncumbent() | NONE | — | **SOURCE ONLY** |
+| `fak model incumbent render` |  | runModelIncumbentRender | `case` arm of the dispatch switch in cmdModelIncumbent() | NONE | — | **SOURCE ONLY** |
 | `fak model load` | downloads (or cache-hits) the file a model ref names and prints its local path | cmdModelLoad / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | yes |
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model plan` |  | runModelPlan / internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
@@ -1000,23 +1005,23 @@ source-only rows absent from help: 852
 | `fak vcache context-witness context-join` | `fak vcache context-join` core (issue #1607): it ingests the same provider-cache turn stream `fak vcache observe` reads (--transcript / --telemetry) plus a stream of managed-context lifecycle events (… | runVCacheContextJoin / internal/vcacheobserve | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness context-witness` |  | runVCacheContextWitness / internal/abi, internal/adjudicator, internal/agent, internal/appversion, internal/gateway, internal/guardtrace, internal/guardvars, internal/ifc, internal/journal, internal/maputil, internal/metrics, internal/policy, internal/ratelimit, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | STRUCTURAL | `DEFAULT_DENY` | **SOURCE ONLY** |
 | `fak vcache context-witness help` |  | vcacheUsage | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
-| `fak vcache context-witness inspect` |  | runVCacheInspect / internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak vcache context-witness inspect` |  | runVCacheInspect / internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness observe` | `fak vcache observe` core: it ingests REAL provider-cache telemetry — one or more Claude Code transcripts (.jsonl) and/or a session-telemetry JSONL — groups the turns by prefix family, runs the sh… | runVCacheObserve / internal/vcachecal, internal/vcachegov, internal/vcacheobserve | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness prove` |  | runVCacheProve / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness prove-recall` |  | runVCacheProveRecall / internal/vcachechain | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness prove-telemetry` |  | runVCacheProveTelemetry / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
-| `fak vcache context-witness put` |  | runVCacheFixturePut / internal/abi, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak vcache context-witness put` |  | runVCacheFixturePut / internal/abi, internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness score` |  | runVCacheScore / internal/cachevalueledger, internal/vcachecal, internal/vcachechain, internal/vcachegov, internal/vcacheobserve, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness session-history` |  | runSessionHistory / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness session-mine` |  | runSessionMine / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache context-witness status` |  | runVCacheStatus / internal/sessionaudit, internal/vcachechain, internal/vcachegov, internal/vcacheobserve, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache help` |  | vcacheUsage | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
-| `fak vcache inspect` |  | runVCacheInspect / internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak vcache inspect` |  | runVCacheInspect / internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache observe` | `fak vcache observe` core: it ingests REAL provider-cache telemetry — one or more Claude Code transcripts (.jsonl) and/or a session-telemetry JSONL — groups the turns by prefix family, runs the sh… | runVCacheObserve / internal/vcachecal, internal/vcachegov, internal/vcacheobserve | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache prove` |  | runVCacheProve / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | yes |
 | `fak vcache prove-recall` |  | runVCacheProveRecall / internal/vcachechain | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache prove-telemetry` |  | runVCacheProveTelemetry / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | yes |
-| `fak vcache put` |  | runVCacheFixturePut / internal/abi, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak vcache put` |  | runVCacheFixturePut / internal/abi, internal/pathutil, internal/vdso | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache score` |  | runVCacheScore / internal/cachevalueledger, internal/vcachecal, internal/vcachechain, internal/vcachegov, internal/vcacheobserve, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-history` |  | runSessionHistory / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-history benchmark` |  | runSessionHistoryBenchmark / internal/sessionmine | `if` arm of the dispatch in runSessionHistory() | NONE | — | **SOURCE ONLY** |
@@ -1080,6 +1085,7 @@ source-only rows absent from help: 852
 | `fak workflow resume` | verb body | workflowResume / internal/abi, internal/interspersedflags, internal/witness, internal/workflow | `case` arm of the dispatch switch in runWorkflow() | NONE | — | **SOURCE ONLY** |
 | `fak workflow seed` | prints the canonical fak-native seed template | workflowSeed / internal/workflowlint | `case` arm of the dispatch switch in runWorkflow() | NONE | — | **SOURCE ONLY** |
 | `fak workpattern` | mine recurring work patterns from source or recorded trajectories | cmdWorkpattern / internal/codelint, internal/trajectory, internal/worktype | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak workspin` |  | cmdWorkspin / internal/windowgate, internal/workspin | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak worktree` | guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main | cmdWorktreeVerb | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak worktree help` |  | worktreeWorkerUsage | `case` arm of the dispatch switch in cmdWorktreeVerb() | NONE | — | **SOURCE ONLY** |
 | `fak worktree worker` | routes `fak worktree worker <op>` to the matching internal/workerworktree primitive and prints exactly one JSON object, mirroring the tools/worker_worktree.py CLI contract | cmdWorktreeWorker | `case` arm of the dispatch switch in cmdWorktreeVerb() | NONE | — | **SOURCE ONLY** |

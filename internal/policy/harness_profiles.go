@@ -93,10 +93,16 @@ type capturedShellExecutor struct {
 	RequiredDangerClasses []string                `json:"required_danger_classes"`
 }
 
+type capturedHostTool struct {
+	Name           string `json:"name"`
+	Classification string `json:"classification"`
+}
+
 type capturedToolSchemaDoc struct {
 	Schema         string                       `json:"schema"`
 	Provenance     capturedToolSchemaProvenance `json:"provenance"`
 	ShellExecutors []capturedShellExecutor      `json:"shell_executors"`
+	HostTools      []capturedHostTool           `json:"host_tools,omitempty"`
 }
 
 // normalizeDangerRegex collapses a leading inline case-insensitive flag so a
@@ -429,6 +435,22 @@ func lintCapturedToolSchema(captured capturedToolSchemaDoc, prof harnessProfiles
 			if _, captured := capturedByName[tool]; !captured {
 				problems = append(problems, fmt.Sprintf("Codex shell alias %q is missing from the captured tool schema", tool))
 			}
+		}
+	}
+
+	for _, hostTool := range captured.HostTools {
+		if hostTool.Classification != "host_plumbing" {
+			problems = append(problems, fmt.Sprintf("harness %q (version %s): tool %q is unclassified (%q); review required",
+				captured.Provenance.Product, captured.Provenance.Version, hostTool.Name, hostTool.Classification))
+			continue
+		}
+		if !allowed(hostTool.Name) {
+			problems = append(problems, fmt.Sprintf("harness %q (version %s): missing required host plumbing tool %q; remediation: admit it in cmd/fak/guard-default-policy.json and harness-profiles.json",
+				captured.Provenance.Product, captured.Provenance.Version, hostTool.Name))
+		}
+		if !codexRequired[hostTool.Name] {
+			problems = append(problems, fmt.Sprintf("harness %q (version %s): tool %q is classified as required host plumbing but missing from harness-profiles.json; remediation: add to required_tools",
+				captured.Provenance.Product, captured.Provenance.Version, hostTool.Name))
 		}
 	}
 	return problems

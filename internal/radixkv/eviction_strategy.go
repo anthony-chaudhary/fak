@@ -103,13 +103,29 @@ func (s slruStrategy) Priority(n *node) victimKey {
 	return victimKey{seg: seg, age: n.lastUsed}
 }
 
+// TreePreparer is an optional interface a VictimStrategy can implement to inspect
+// the tree and precompute page/chunk occupancy before victim selection.
+type TreePreparer interface {
+	PrepareTree(t *Tree)
+}
+
+// lowestScoreFirstStrategy is the value-aware LowestScoreFirst / cost-aware strategy
+// providing explicit backward compatibility with Issue #10721 requirements.
+type lowestScoreFirstStrategy struct{ costAwareStrategy }
+
+func (lowestScoreFirstStrategy) Name() string { return "lowest-score-first" }
+
 // victimStrategies is the string-keyed factory registry (SGLang's get_eviction_strategy
 // table). Seed entries reproduce the two legacy enum behaviors byte-for-byte; slru is the
 // first policy the open seam adds. RegisterVictimStrategy extends it in-package.
 var victimStrategies = map[string]func() VictimStrategy{
-	"lru":        func() VictimStrategy { return lruStrategy{} },
-	"cost-aware": func() VictimStrategy { return costAwareStrategy{} },
-	"slru":       func() VictimStrategy { return slruStrategy{protectThreshold: slruProtectThreshold} },
+	"lru":                func() VictimStrategy { return lruStrategy{} },
+	"cost-aware":         func() VictimStrategy { return costAwareStrategy{} },
+	"lowest-score-first": func() VictimStrategy { return lowestScoreFirstStrategy{costAwareStrategy{}} },
+	"slru":               func() VictimStrategy { return slruStrategy{protectThreshold: slruProtectThreshold} },
+	"page-aware":         func() VictimStrategy { return NewPageAwareStrategy(nil) },
+	"page-aligned":       func() VictimStrategy { return NewPageAwareStrategy(nil) },
+	"chunk-aware":        func() VictimStrategy { return NewPageAwareStrategy(nil) },
 }
 
 // RegisterVictimStrategy adds (or replaces) a named eviction strategy. Call it from an init
@@ -161,12 +177,25 @@ func (t *Tree) SetEvictionStrategy(name string) error {
 		return err
 	}
 	t.strategy = s
-	if s.Name() == "cost-aware" {
-		t.policy = EvictionCostAware
-	} else {
-		t.policy = EvictionLRU
+	if tb, ok := s.(interface{ bindTree(*Tree) }); ok {
+		tb.bindTree(t)
 	}
-	t.SetAdmissionEnabled(s.Name() == "cost-aware")
+	if t.pageTracker != nil {
+		if ts, ok := s.(interface{ SetTracker(PageOccupancyTracker) }); ok {
+			ts.SetTracker(t.pageTracker)
+		}
+	}
+	switch s.Name() {
+	case "cost-aware", "lowest-score-first":
+		t.policy = EvictionCostAware
+		t.SetAdmissionEnabled(true)
+	case "page-aware", "page-aligned", "chunk-aware":
+		t.policy = EvictionPageAware
+		t.SetAdmissionEnabled(false)
+	default:
+		t.policy = EvictionLRU
+		t.SetAdmissionEnabled(false)
+	}
 	return nil
 }
 

@@ -67,7 +67,7 @@ func TestInfoObservationStateRenderMatrix(t *testing.T) {
 			surfaces := map[string]string{
 				"compact": renderGuardInfoLine(v),
 				"visual":  renderGuardInfoVisualBlock(v, tr, 240, 0),
-				"tabbed":  renderGuardInfoInteractiveBlock(infoViewState{active: viewCache}, v, tr, 240, 0),
+				"tabbed":  renderGuardInfoInteractiveBlock(infoViewState{active: viewOverview}, v, tr, 240, 0),
 			}
 			for surface, captured := range surfaces {
 				for _, want := range []string{wantSessions, wantCache} {

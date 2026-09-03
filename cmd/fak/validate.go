@@ -321,38 +321,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		res.OK = false
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-select", Detail: graphErr.Error()})
 	} else {
-		for file, pkg := range baseFileToPkg {
-			if _, exists := fileToPkg[file]; !exists {
-				fileToPkg[file] = pkg
-			}
-		}
-		for pkg, imports := range baseEdges {
-			edges[pkg] = appendUniqueStrings(edges[pkg], imports...)
-		}
-		phase = recorder.start("test_select")
-		changedPkgs := affectedtests.ChangedPackages(fileToPkg, paths)
-		selected := affectedtests.Select(edges, changedPkgs)
-		livePkgs := make(map[string]bool, len(fileToPkg))
-		for _, pkg := range fileToPkg {
-			livePkgs[pkg] = true
-		}
-		var liveChangedPkgs []string
-		for _, pkg := range changedPkgs {
-			if livePkgs[pkg] { // omit a package deleted by this delta
-				liveChangedPkgs = append(liveChangedPkgs, pkg)
-			}
-		}
-		for _, pkg := range liveChangedPkgs {
-			res.Tested = append(res.Tested, pkg)
-		}
-		var buildPkgs []string
-		for _, pkg := range selected {
-			if livePkgs[pkg] { // omit a package deleted by this delta
-				buildPkgs = append(buildPkgs, pkg)
-			}
-		}
-		phase.finish(nil)
-		buildTargets := packagePatternsForRoot(dir, buildPkgs, fileToPkg)
+		buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
 		if !*testOnly && len(buildTargets) > 0 {
 			// The base is a committed tip; only changed packages and their importer closure
 			// can become newly red. Rebuilding ./... made two-file checks scale with the
@@ -434,6 +403,39 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// selectValidatePackages restores deleted-path graph context, then records live
+// changed packages for tests and returns the live importer closure for build/vet.
+func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir string, paths []string, fileToPkg map[string]string, edges map[string][]string, baseFileToPkg map[string]string, baseEdges map[string][]string) []string {
+	for file, pkg := range baseFileToPkg {
+		if _, exists := fileToPkg[file]; !exists {
+			fileToPkg[file] = pkg
+		}
+	}
+	for pkg, imports := range baseEdges {
+		edges[pkg] = appendUniqueStrings(edges[pkg], imports...)
+	}
+	phase := recorder.start("test_select")
+	changedPkgs := affectedtests.ChangedPackages(fileToPkg, paths)
+	selected := affectedtests.Select(edges, changedPkgs)
+	livePkgs := make(map[string]bool, len(fileToPkg))
+	for _, pkg := range fileToPkg {
+		livePkgs[pkg] = true
+	}
+	for _, pkg := range changedPkgs {
+		if livePkgs[pkg] { // omit a package deleted by this delta
+			res.Tested = append(res.Tested, pkg)
+		}
+	}
+	var buildPkgs []string
+	for _, pkg := range selected {
+		if livePkgs[pkg] { // omit a package deleted by this delta
+			buildPkgs = append(buildPkgs, pkg)
+		}
+	}
+	phase.finish(nil)
+	return packagePatternsForRoot(dir, buildPkgs, fileToPkg)
 }
 
 func normalizeMinePaths(root string, raw []string) ([]string, error) {
@@ -1462,68 +1464,4 @@ func renderValidate(w io.Writer, res validateResult) {
 		}
 		fmt.Fprintln(w)
 	}
-}
-
-func writeValidateTestContext(w io.Writer, res validateResult) {
-	if res.Runner != "" {
-		fmt.Fprintf(w, "runner: %s\n", res.Runner)
-	}
-	if res.TestScope != "" {
-		fmt.Fprintf(w, "tests: %s (%s)\n", res.TestScope, res.TestRun)
-	}
-}
-
-func recordValidateFailure(res *validateResult, phase validateActivePhase, step, detail string, cause error) {
-	phase.finishAs("failed", cause.Error())
-	res.OK = false
-	res.Failures = append(res.Failures, ciPreflightFailure{Step: step, Detail: detail})
-}
-
-func finishValidatePhaseOrTimeout(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, err error, asJSON bool) (int, bool) {
-	phase.finish(err)
-	if recorder.ctx.Err() == nil {
-		return 0, false
-	}
-	return finishValidateTimeout(stdout, res, recorder, name, asJSON), true
-}
-
-func finishValidateRequiredPhase(stdout, stderr io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, err error, asJSON bool, failureMessage string) (int, bool) {
-	if code, timedOut := finishValidatePhaseOrTimeout(stdout, res, recorder, phase, name, err, asJSON); timedOut {
-		return code, true
-	}
-	if err == nil {
-		return 0, false
-	}
-	fmt.Fprintln(stderr, failureMessage)
-	return 2, true
-}
-
-func finishValidateContextPhase(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, asJSON bool) (int, bool) {
-	if recorder.ctx.Err() == nil {
-		return 0, false
-	}
-	phase.finish(recorder.ctx.Err())
-	return finishValidateTimeout(stdout, res, recorder, name, asJSON), true
-}
-
-func runValidateCheckPhase(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, failure error, asJSON bool, run func() (string, bool)) (int, bool) {
-	detail, ok := run()
-	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, name, asJSON); timedOut {
-		return code, true
-	}
-	if ok {
-		phase.finish(nil)
-	} else {
-		recordValidateFailure(res, phase, name, detail, failure)
-	}
-	return 0, false
-}
-
-func validateTimeoutPhase(res validateResult) string {
-	for i := len(res.Phases) - 1; i >= 0; i-- {
-		if res.Phases[i].Status == "timeout" {
-			return res.Phases[i].Name
-		}
-	}
-	return "unknown"
 }

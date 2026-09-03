@@ -85,6 +85,12 @@ func Speculatable(c *abi.ToolCall) (SpecReason, bool) {
 	if c == nil {
 		return SpecRefusedNilCall, false
 	}
+	if IsClaudeNativeReadTool(c.Tool) || ((c.Tool == "Bash" || c.Tool == "bash") && isReadOnlyBashCall(c)) {
+		if destructive(c) {
+			return SpecRefusedDestructive, false
+		}
+		return SpecOK, true
+	}
 	if !metaTrue(c, "readOnlyHint") {
 		return SpecRefusedNotReadOnly, false
 	}

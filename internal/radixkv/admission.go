@@ -192,6 +192,9 @@ func (t *Tree) prospectiveTokenVictims(required int) ([]compute.KVSpanStats, boo
 	})
 
 	strategy := t.evictionStrategy()
+	if prep, ok := strategy.(TreePreparer); ok {
+		prep.PrepareTree(t)
+	}
 	freed := 0
 	var victims []compute.KVSpanStats
 	for freed < required {
@@ -263,6 +266,9 @@ func (t *Tree) prospectiveSnapshotVictims(required int64, exclude *node) ([]comp
 		var best *node
 		var bestKey victimKey
 		strategy := t.evictionStrategy()
+		if prep, ok := strategy.(TreePreparer); ok {
+			prep.PrepareTree(t)
+		}
 		var walk func(*node)
 		walk = func(n *node) {
 			if n != exclude && !selected[n] && n.refs == 0 && n.snapshot != nil {

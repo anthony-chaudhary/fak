@@ -633,6 +633,7 @@
       "class": "subprocess_tool",
       "reference": "ps",
       "consumer_domains": [
+        "cmd",
         "internal"
       ],
       "status": "used",

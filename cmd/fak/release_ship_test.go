@@ -2269,3 +2269,34 @@ func TestReleaseReadinessConsumesInstalledLaunchQualification(t *testing.T) {
 		t.Fatalf("failed qualification error = %v, want typed not-ready refusal", err)
 	}
 }
+
+func TestReleaseShipAdoptsReachableAncestorCI(t *testing.T) {
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--commit", "head-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
+			return 0, `[{"databaseId": 111, "status": "completed", "conclusion": "cancelled", "headSha": "head-sha"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt"):
+			return 0, `[{"databaseId": 100, "status": "completed", "conclusion": "success", "headSha": "ancestor-sha", "updatedAt": "2026-09-02T12:00:00Z"}]`
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "head-sha"):
+			return 0, ""
+		default:
+			t.Fatalf("unexpected command: %s %v", name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	opts := releaseShipOptions{
+		workflow:        "ci-fast.yml",
+		trunk:           "main",
+		adoptAncestorCI: true,
+	}
+	var res releaseShipResult
+	ci := releaseShipSourceCI(&res, t.TempDir(), opts, "head-sha")
+	if !releaseShipPayloadOK(ci) {
+		t.Fatalf("expected CI to be adopted as green, got: %+v", ci)
+	}
+	if ci["adopted_ancestor_sha"] != "ancestor-sha" {
+		t.Fatalf("expected adopted_ancestor_sha = ancestor-sha, got: %+v", ci["adopted_ancestor_sha"])
+	}
+}

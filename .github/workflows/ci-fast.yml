@@ -18,17 +18,29 @@ on:
   push:
     branches: [main, master, fak-v0.1]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Exact trunk commit SHA to pin and run without supersession"
+        required: false
+        type: string
+      intent:
+        description: "Run intent ('release' runs to completion without push supersession)"
+        required: false
+        default: "release"
+        type: string
 
 permissions:
   contents: read
 
 # Queue control (CI/CD run-speed): converge each branch or PR ref on its newest
-# head. A push to main now supersedes that ref's obsolete in-flight run instead of
-# retaining one 30-minute gate per historical SHA. The newest head still runs the
-# complete decisive package set, and release_decide ignores cancelled conclusions.
+# head. Normal pushes coalesce and cancel in-progress runs so obsolete runs don't
+# waste capacity. Declared release intents (workflow_dispatch) pin their run to a
+# distinct concurrency group with cancel-in-progress: false so supersession
+# starvation cannot block releases (#7324).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == '')) && format('release-{0}', inputs.sha != '' && inputs.sha || github.run_id) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref)) }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == '')) }}
 
 jobs:
   build-vet-test-fast:
@@ -49,6 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha != '' && inputs.sha || github.ref }}
           # Full history + tags: the release-substrate tests read the release
           # note AT the tag, which a default shallow checkout doesn't fetch.
           fetch-depth: 0

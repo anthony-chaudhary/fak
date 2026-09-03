@@ -1207,6 +1207,16 @@
           "category": "incidental",
           "reason": "private per-family evaluator extracted from evalArgPredicates in the behavior-preserving god-function split (#8783); mechanical sub-step, not a distinct concept",
           "token": "evalBuildCacheCleanArgRule"
+        },
+        {
+          "category": "incidental",
+          "reason": "vLLM borrowed sliding window hit rate tracker",
+          "token": "SlidingCacheMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "constructor for sliding window hit rate tracker",
+          "token": "NewSlidingCacheMetrics"
         }
       ],
       "id": "cache",
@@ -1258,6 +1268,7 @@
         "July4CacheValueAutospawn",
         "ManagedProviderCache",
         "NewCacheStateAllowlist",
+        "NewSlidingCacheMetrics",
         "NonCache",
         "NonCacheParity",
         "OrgPolicyCachePath",
@@ -1273,6 +1284,7 @@
         "RestartCacheHits",
         "RunCacheSourceSelfTest",
         "SharedPrefixProviderCache",
+        "SlidingCacheMetrics",
         "SubCacheWarmReplay",
         "TestMicroCacheWitnessCapturesOnOffProviderCounters",
         "TestMicroCacheWitnessRefusesSingleEndpoint",

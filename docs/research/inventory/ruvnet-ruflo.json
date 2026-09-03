@@ -8,8 +8,8 @@
     "files": 5517,
     "directories": 1542,
     "bytes": 81506669,
-    "runtime_files": 2334,
-    "test_files": 625,
+    "runtime_files": 2315,
+    "test_files": 645,
     "docs_files": 2015,
     "text_lines": 1613340
   },
@@ -525,8 +525,8 @@
       "files": 31,
       "directories": 3,
       "bytes": 299952,
-      "runtime_files": 19,
-      "test_files": 11,
+      "runtime_files": 0,
+      "test_files": 31,
       "docs_files": 1,
       "text_lines": 7310,
       "languages": [
@@ -559,7 +559,6 @@
       ],
       "source_classes": [
         "readme_docs",
-        "runtime_source",
         "tests_fixtures"
       ]
     },

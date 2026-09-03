@@ -694,6 +694,7 @@ type guardChildSpawnMetadata struct {
 	Envelope     toolprocgate.CapabilityEnvelope
 	RegistryPath string
 	LaunchPlan   guardLaunchPlan
+	PromptFuel   *promptFuel
 }
 
 type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
@@ -950,6 +951,14 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 		plan = newGuardLaunchPlan(command)
 	}
 	plan = plan.withExecutableCommand(command)
+	// A guarded Codex dispatch owns replayable prompt fuel instead of inheriting
+	// guard's one-shot stdin. Verify and materialize a fresh reader before broker
+	// admission or child construction so missing/tampered fuel cannot execute a
+	// child, initially or on any supervised relaunch.
+	replayPrompt, err := meta.PromptFuel.reader()
+	if err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
 	// Decide from the semantic command before prompt transport can move a `-p`
 	// prompt off argv (#4852). Headless runs remain windowless; attended roots
 	// retain a console capable of hosting their TUI.
@@ -984,7 +993,9 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 		return toolprocgate.SpawnGrant{}, nil, err
 	}
 	bindGuardRegistration(child, reg)
-	if promptOnStdin {
+	if replayPrompt != nil {
+		child.Stdin = replayPrompt
+	} else if promptOnStdin {
 		child.Stdin = strings.NewReader(stdinPrompt)
 	}
 	// #3597: headless workers must not allocate an unattended pane. Do not infer

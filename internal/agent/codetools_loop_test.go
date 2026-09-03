@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/codetools"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // codetools_loop_test.go — the OWNED-LOOP witness for #6703.
@@ -431,6 +432,7 @@ func TestOwnedLoopCarriesReadVersionThroughStaleAndFreshEdit(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package fixture\n\nconst Value = 10\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	vdso.Default.BumpWorld()
 
 	staleMetrics, staleLog := runCodeToolLoop(t, root, []codeToolScript{{codetools.ToolEdit,
 		mustSelfcheckArgs(map[string]any{"file_path": "value.go", "old_string": "Value = 1", "new_string": "Value = 2", "expected_version": observed.Version})}})
@@ -449,7 +451,7 @@ func TestOwnedLoopCarriesReadVersionThroughStaleAndFreshEdit(t *testing.T) {
 		{codetools.ToolRead, `{"file_path":"value.go"}`},
 		{codetools.ToolEdit, `{"file_path":"value.go","old_string":"Value = 10","new_string":"Value = 2"}`},
 	})
-	if freshMetrics.EngineCalls != 2 || len(codeToolRows(freshLog)) != 2 {
+	if (freshMetrics.EngineCalls+freshMetrics.VDSOHits) != 2 || len(codeToolRows(freshLog)) != 2 {
 		t.Fatalf("owned-loop fresh flow mediation: metrics=%+v log=%+v", freshMetrics, freshLog)
 	}
 	freshReceipt := lastResultFromMessages(lastRecordingMessages)

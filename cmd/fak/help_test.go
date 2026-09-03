@@ -203,7 +203,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 	exempt := map[string]bool{
 		"version": true, "help": true, "ps": true, "up": true,
 		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
-		"progress": true, "ultracode": true,
+		"progress": true, "ultracode": true, "build": true, "self-update": true,
 	}
 	for _, g := range overviewGroups {
 		for _, e := range g.entries {

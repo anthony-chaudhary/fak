@@ -9,8 +9,8 @@ This guide shows how to put `fak` in front of [OpenCode](https://opencode.ai/), 
 open-source terminal coding agent. Every tool call OpenCode proposes is adjudicated by the
 kernel before it runs: denied by structure, repaired, or quarantined.
 
-OpenCode reads the repo's [`AGENT.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENT.md) / [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for
-project context; they point back here.
+OpenCode auto-loads the repo's [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — the same file Codex reads — for project context, combined with the
+[`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) instruction declared in the repo's `opencode.json`; `AGENTS.md` points back here.
 
 ## Two integration paths
 

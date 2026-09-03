@@ -79,6 +79,12 @@ type AdmissionPolicy struct {
 	// (429) once the queue is at this bound — the backpressure limit. ≤0 = unbounded
 	// (never sheds; the historical "queue forever" behavior).
 	MaxWaiting int
+	// MaxQueuedTokens caps the cumulative token volume across all currently waiting
+	// requests in the queue (vLLM max_num_queued_tokens TTFT-QoS queue admission cap, #10727).
+	// A request that would cause queued tokens to exceed this ceiling is shed (429)
+	// before long-prompt floods destroy TTFT service levels for concurrent requests.
+	// ≤0 disables this bound.
+	MaxQueuedTokens int
 	// AgingRounds is the starvation guard: a waiting request's effective priority improves
 	// by one for every AgingRounds rounds it is passed over. ≤0 disables aging (raw
 	// priority stands and a higher-priority flood can starve a low-priority waiter).
@@ -87,13 +93,15 @@ type AdmissionPolicy struct {
 
 // DefaultAdmissionPolicy returns the shipping defaults: a 256-sequence running cap (the
 // vLLM V1 default), an 8192-token batched-admission budget, a 1024-deep waiting bound
-// before shedding, and aging every round so no waiter is ever starved.
+// before shedding, a 65536-token queued volume cap, and aging every round so no waiter
+// is ever starved.
 func DefaultAdmissionPolicy() AdmissionPolicy {
 	return AdmissionPolicy{
-		MaxNumSeqs:  256,
-		TokenBudget: 8192,
-		MaxWaiting:  1024,
-		AgingRounds: 1,
+		MaxNumSeqs:      256,
+		TokenBudget:     8192,
+		MaxWaiting:      1024,
+		MaxQueuedTokens: 65536,
+		AgingRounds:     1,
 	}
 }
 
@@ -174,6 +182,7 @@ type AdmissionStats struct {
 	Running       int   // running-set size right now (gauge)
 	Waiting       int   // waiting-queue depth right now (gauge)
 	TokensInUse   int   // token budget held by the running set right now (gauge)
+	QueuedTokens  int   // token volume across currently waiting requests right now (gauge)
 	MaxWaitRounds int64 // oldest current waiter's age in rounds (starvation visibility, gauge)
 	Admitted      int64 // cumulative requests promoted into the running set (counter)
 	Queued        int64 // cumulative requests placed on the waiting queue (counter)
@@ -185,15 +194,16 @@ type AdmissionStats struct {
 // zero value is not usable — build one with NewAdmissionController. It is safe for
 // concurrent use (the gateway request path and the loop both touch it).
 type AdmissionController struct {
-	mu      sync.Mutex
-	policy  AdmissionPolicy
-	budgets []batchBudget         // independent capacity axes folded for every admission
-	running map[string]SeqRequest // admitted, holding budget, keyed by TraceID
-	tokens  int                   // Σ running[*].Tokens, maintained incrementally
-	waiting []waitEntry           // waiting queue, re-sorted by effective priority each round
-	round   int64                 // monotone admission-round counter (drives aging)
-	stats   AdmissionStats        // cumulative counters (gauges are derived in Stats)
-	seq     uint64                // internal per-request suffix for duplicate caller traces
+	mu           sync.Mutex
+	policy       AdmissionPolicy
+	budgets      []batchBudget         // independent capacity axes folded for every admission
+	running      map[string]SeqRequest // admitted, holding budget, keyed by TraceID
+	tokens       int                   // Σ running[*].Tokens, maintained incrementally
+	waiting      []waitEntry           // waiting queue, re-sorted by effective priority each round
+	queuedTokens int                   // Σ waiting[*].req.Tokens, maintained incrementally (#10727)
+	round        int64                 // monotone admission-round counter (drives aging)
+	stats        AdmissionStats        // cumulative counters (gauges are derived in Stats)
+	seq          uint64                // internal per-request suffix for duplicate caller traces
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -297,12 +307,18 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 		return VerdictAdmitted
 	}
 	// The request must wait. Shed it if the waiting queue is already at its bound — the
-	// backpressure surface that replaces unbounded queueing.
+	// backpressure surface that replaces unbounded queueing. Also enforce the queued-token
+	// volume cap (#10727) before long-prompt floods destroy TTFT service levels.
 	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
 		c.stats.Shed++
 		return VerdictShed
 	}
+	if c.policy.MaxQueuedTokens > 0 && c.queuedTokens+req.Tokens > c.policy.MaxQueuedTokens {
+		c.stats.Shed++
+		return VerdictShed
+	}
 	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round})
+	c.queuedTokens += req.Tokens
 	c.stats.Queued++
 	return VerdictQueued
 }
@@ -342,8 +358,14 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed}
 	}
+	if c.policy.MaxQueuedTokens > 0 && c.queuedTokens+req.Tokens > c.policy.MaxQueuedTokens {
+		c.stats.Shed++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictShed, Reason: "queued token volume exceeds cap"}
+	}
 	ready := make(chan struct{})
 	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round, ready: ready})
+	c.queuedTokens += req.Tokens
 	c.stats.Queued++
 	c.scheduleLocked()
 	c.mu.Unlock()
@@ -406,6 +428,7 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			break // head-of-line: do not let a lower-priority request skip a blocked one
 		}
 		c.admitLocked(e.req)
+		c.queuedTokens -= e.req.Tokens
 		if e.ready != nil {
 			close(e.ready)
 		}
@@ -413,6 +436,9 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 		if check.status == batchBudgetReached {
 			break
 		}
+	}
+	if c.queuedTokens < 0 {
+		c.queuedTokens = 0
 	}
 	// The admitted set is the sorted prefix; keep the rest. Copy so the released entries
 	// are not retained by the backing array across later Offer appends.
@@ -457,6 +483,10 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 	defer c.mu.Unlock()
 	for i, e := range c.waiting {
 		if e.req.TraceID == traceID {
+			c.queuedTokens -= e.req.Tokens
+			if c.queuedTokens < 0 {
+				c.queuedTokens = 0
+			}
 			c.waiting = append(c.waiting[:i], c.waiting[i+1:]...)
 			return
 		}
@@ -513,6 +543,7 @@ func (c *AdmissionController) Stats() AdmissionStats {
 	st.Running = len(c.running)
 	st.Waiting = len(c.waiting)
 	st.TokensInUse = c.tokens
+	st.QueuedTokens = c.queuedTokens
 	st.MaxWaitRounds = c.maxWaitRoundsLocked()
 	return st
 }
@@ -548,6 +579,8 @@ func (c *AdmissionController) WriteMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "%swaiting %d\n", schedMetricPrefix, st.Waiting)
 	writeHelpType(b, schedMetricPrefix+"tokens_in_use", "Token admission budget currently held by the running set.", "gauge")
 	fmt.Fprintf(b, "%stokens_in_use %d\n", schedMetricPrefix, st.TokensInUse)
+	writeHelpType(b, schedMetricPrefix+"queued_tokens", "Token volume across sequences currently waiting for admission.", "gauge")
+	fmt.Fprintf(b, "%squeued_tokens %d\n", schedMetricPrefix, st.QueuedTokens)
 	writeHelpType(b, schedMetricPrefix+"max_num_seqs", "Configured max-num-seqs running-set cap (0 = uncapped).", "gauge")
 	fmt.Fprintf(b, "%smax_num_seqs %d\n", schedMetricPrefix, c.policy.MaxNumSeqs)
 	writeHelpType(b, schedMetricPrefix+"max_wait_rounds", "Oldest current waiter's age in admission rounds (starvation visibility).", "gauge")

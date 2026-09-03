@@ -1,3 +1,8 @@
+---
+title: "AI-Ops storage-qualification field study"
+description: "Analysis of AI-Ops artifact-first SSD qualification controller and lessons for storage-backed inference envelopes."
+---
+
 # AI-Ops storage-qualification field study
 
 Status: complete source study; borrow decisions are snapshot-scoped.
@@ -13,14 +18,14 @@ Status: complete source study; borrow decisions are snapshot-scoped.
 
 ## Result
 
-AI-Ops is an artifact-first SSD qualification controller for agentic-AI workloads. It resolves a declarative configuration into a staged CPU, DGX, Bench, or FIO plan; executes it locally or remotely; records run/profile state; reconstructs typed analysis data from artifacts; classifies bottlenecks and derives SSD requirements; then renders scorecards and optional publication output. The Go web UI is a ports-and-adapters shell over the Python CLI and artifact tree rather than a second qualification engine.
+AI-Ops is an artifact-first SSD qualification controller for agentic-AI workloads. It resolves a declarative configuration into a staged CPU, `DGX`, Bench, or FIO plan; executes it locally or remotely; records run/profile state; reconstructs typed analysis data from artifacts; classifies bottlenecks and derives SSD requirements; then renders scorecards and optional publication output. The Go web UI is a ports-and-adapters shell over the Python CLI and artifact tree rather than a second qualification engine.
 
 The useful lesson for fak is not the repository's broad orchestration shapeâ€”fak already has stronger typed receipts, workload profiles, correctness gates, and replayable tuning in `internal/computetune`. The useful remaining axis is narrower: AI-Ops turns workload observations into an explicit **resource qualification recommendation** (required latency, IOPS, bandwidth, endurance, and capacity), while fak's current compute tuning selects an implementation candidate for a declared profile. That is a distinct decision product worth considering for storage-backed inference envelopes.
 
 ## Architecture and control flow
 
 1. `aiops` enters through `aiops.cli:main`; config loading prefers JSON and retains a legacy YAML path (`pyproject.toml:18-19`; `aiops/cli.py:46-66@ca8aef4`).
-2. Plan builders convert resolved configuration into CPU, DGX, or FIO-comparison steps (`aiops/runner/plan_builders.py:101-176@ca8aef4`).
+2. Plan builders convert resolved configuration into CPU, `DGX`, or FIO-comparison steps (`aiops/runner/plan_builders.py:101-176@ca8aef4`).
 3. `RunPlan.execute` owns preflight, lifecycle, step dispatch, interruption, observer notification, and finalization (`aiops/runner/sequencer.py:209-225,329-358,529-593@ca8aef4`).
 4. `RunTracker` persists aggregate run state and profile transitions, projecting them into SQLite catalog records (`aiops/runner/run_tracker.py:53-161@ca8aef4`; `aiops/catalog/db.py:24-79@ca8aef4`).
 5. Observers receive run, step, analysis, publish, error, and interrupt events; observer failures are isolated from benchmark execution (`aiops/runner/observers.py:31-73@ca8aef4`; `aiops/runner/sequencer.py:36-45@ca8aef4`).

@@ -106,6 +106,22 @@ type node struct {
 	refs     int    // active leases; a leaf with refs>0 is never LRU-evicted
 	lastUsed uint64 // logical clock of the most recent match/insert touching this node — LRU key
 	hits     int    // subsequent demand lookups that found this node resident
+	chunkID  int    // physical backing page / allocation chunk identifier (0 = unassigned)
+}
+
+// ChunkID returns the physical backing page or allocation chunk identifier for this node.
+func (n *node) ChunkID() int {
+	if n == nil {
+		return 0
+	}
+	return n.chunkID
+}
+
+// SetChunkID assigns the physical backing page or allocation chunk identifier for this node.
+func (n *node) SetChunkID(id int) {
+	if n != nil {
+		n.chunkID = id
+	}
 }
 
 // EvictionPolicy selects the budget-pressure victim rule. The zero value is pure LRU,
@@ -116,12 +132,15 @@ type EvictionPolicy uint8
 const (
 	EvictionLRU EvictionPolicy = iota
 	EvictionCostAware
+	EvictionPageAware
 )
 
 func (p EvictionPolicy) String() string {
 	switch p {
 	case EvictionCostAware:
 		return "cost-aware"
+	case EvictionPageAware:
+		return "page-aware"
 	default:
 		return "lru"
 	}
@@ -182,8 +201,9 @@ type Tree struct {
 	// open victim seam (#3890, eviction_strategy.go): a nil strategy is pure LRU, so a bare
 	// New() tree is byte-identical to before. SetEvictionPolicy routes through the strategy
 	// registry and keeps policy in sync, so both dials share one victimLeaf argmin.
-	policy   EvictionPolicy
-	strategy VictimStrategy
+	policy      EvictionPolicy
+	strategy    VictimStrategy
+	pageTracker PageOccupancyTracker
 
 	// retention is the signed prefix-cache retention override (#4039): once set via
 	// SetRetention it supersedes maxTokens with ctxresidency's signed grammar --
@@ -196,6 +216,7 @@ type Tree struct {
 
 	evictions       int // LRU leaf evictions
 	costEvictions   int // cost-aware leaf evictions
+	pageEvictions   int // page-aware leaf evictions
 	policyEvictions int // EvictNode calls (the fak differentiator)
 	splits          int // edge splits performed (a structural RadixAttention event)
 
@@ -454,6 +475,7 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		plen:     parent.plen + oi,
 		lastUsed: child.lastUsed,
 		hits:     child.hits,
+		chunkID:  child.chunkID,
 	}
 	if child.kv != nil {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
@@ -657,11 +679,15 @@ func (t *Tree) makeSnapshotRoom(delta int64, exclude *node) bool {
 }
 
 func (t *Tree) snapshotVictim(exclude *node) *node {
+	strat := t.evictionStrategy()
+	if prep, ok := strat.(TreePreparer); ok {
+		prep.PrepareTree(t)
+	}
 	var victim *node
 	var walk func(*node)
 	walk = func(n *node) {
 		if n != exclude && n.refs == 0 && n.snapshot != nil {
-			if victim == nil || t.evictionStrategy().Priority(n).less(t.evictionStrategy().Priority(victim)) {
+			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
 				victim = n
 			}
 		}
@@ -694,6 +720,10 @@ func (t *Tree) InsertWithLogits(boundary *node, suffix []int, kv *model.KVCache,
 }
 
 func (t *Tree) insertWithLogits(boundary *node, suffix []int, kv *model.KVCache, logits []float32, comparisons []admissionComparison) (*node, bool) {
+	return t.insertWithLogitsAndChunk(boundary, suffix, kv, logits, comparisons, 0)
+}
+
+func (t *Tree) insertWithLogitsAndChunk(boundary *node, suffix []int, kv *model.KVCache, logits []float32, comparisons []admissionComparison, chunkID int) (*node, bool) {
 	if boundary == nil {
 		return nil, false
 	}
@@ -714,10 +744,13 @@ func (t *Tree) insertWithLogits(boundary *node, suffix []int, kv *model.KVCache,
 		if logits != nil {
 			boundary.logits = append([]float32(nil), logits...)
 		}
+		if chunkID != 0 {
+			boundary.chunkID = chunkID
+		}
 		t.noteAdmissionRecovery(keyHash)
 		return boundary, true // already fully cached; keep the boundary lease for the caller to Done
 	}
-	leaf := t.attachLeaf(boundary, suffix, kv, logits, stamp)
+	leaf := t.attachLeafWithChunk(boundary, suffix, kv, logits, stamp, chunkID)
 	leaf.refs++ // lease the in-flight request's own leaf...
 	if boundary.refs > 0 {
 		boundary.refs-- // ...and release the prefix lease Lookup took (the leaf now guards the path)
@@ -733,6 +766,10 @@ func (t *Tree) insertWithLogits(boundary *node, suffix []int, kv *model.KVCache,
 // (prewarm.go) share; each caller applies its own lease/recency bookkeeping and
 // eviction pass on the returned leaf.
 func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64) *node {
+	return t.attachLeafWithChunk(boundary, suffix, kv, logits, lastUsed, 0)
+}
+
+func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64, chunkID int) *node {
 	// Thrash probe (#3393): the new leaf's full path is (root→boundary)+suffix — if that
 	// exact key was just evicted, this attach is the re-insert that proves the eviction
 	// premature. Covers both demand Insert and WarmInsert; a Lookup-consumed entry is
@@ -748,6 +785,12 @@ func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logit
 		logits:   append([]float32(nil), logits...),
 		plen:     boundary.plen + len(s),
 		lastUsed: lastUsed,
+		chunkID:  chunkID,
+	}
+	if chunkID == 0 && t.pageTracker != nil {
+		if id := t.pageTracker.ChunkID(leaf); id != 0 {
+			leaf.chunkID = id
+		}
 	}
 	boundary.children[s[0]] = leaf
 	t.tokens += len(s)
@@ -802,6 +845,9 @@ func (t *Tree) evictToBudget() {
 		if t.policy == EvictionCostAware {
 			t.costEvictions++
 		}
+		if t.policy == EvictionPageAware {
+			t.pageEvictions++
+		}
 	}
 }
 
@@ -818,6 +864,9 @@ func (t *Tree) victimLeaf() *node {
 
 func (t *Tree) selectVictimLeaf(record bool) *node {
 	strat := t.evictionStrategy()
+	if prep, ok := strat.(TreePreparer); ok {
+		prep.PrepareTree(t)
+	}
 	var best *node
 	var bestKey victimKey
 	candidates, locked := 0, 0
@@ -1046,6 +1095,7 @@ type Stats struct {
 	MaxDepthTokens          int   // longest cached prefix
 	Evictions               int   // LRU leaf evictions performed
 	CostEvictions           int   // cost-aware leaf evictions performed
+	PageEvictions           int   `json:"page_evictions,omitempty"` // page-aware leaf evictions performed
 	PolicyEvictions         int   // EvictNode calls
 	Splits                  int   // edge splits performed
 	MaxTokens               int   // configured LRU budget (0 = unbounded)
@@ -1129,6 +1179,7 @@ func (t *Tree) Stats() Stats {
 	s := Stats{
 		Evictions:             t.evictions,
 		CostEvictions:         t.costEvictions,
+		PageEvictions:         t.pageEvictions,
 		PolicyEvictions:       t.policyEvictions,
 		Splits:                t.splits,
 		MaxTokens:             t.effectiveMaxTokens(),

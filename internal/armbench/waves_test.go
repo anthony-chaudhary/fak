@@ -34,7 +34,7 @@ func TestGPUWaveReachesConcurrencyEightAndReceiptsDeterministically(t *testing.T
 		}
 		seenDevices[*req.GPUIndex] = true
 	}
-	if len(seenDevices) != 8 {
+	if len(seenDevices) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST test runs exactly 8 parallel trials
 		t.Fatalf("provider saw devices %v, want eight distinct assignments", seenDevices)
 	}
 	if got := p.maxActive(); got != 8 {
@@ -47,7 +47,7 @@ func TestGPUWaveReachesConcurrencyEightAndReceiptsDeterministically(t *testing.T
 	if got.err != nil {
 		t.Fatalf("Execute: %v", got.err)
 	}
-	if len(got.run.Trials) != 8 {
+	if len(got.run.Trials) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST test runs exactly 8 parallel trials
 		t.Fatalf("ledger rows = %d, want 8", len(got.run.Trials))
 	}
 	for i, row := range got.run.Trials {

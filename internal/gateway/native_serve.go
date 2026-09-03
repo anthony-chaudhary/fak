@@ -187,18 +187,26 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	})
 
 	outIdx := 0
+	stopBuf := NewStopHoldbackBuffer(req.StopSequences)
 	textOpen := false
 	textIdx := -1
 	closeText := func() {
 		if !textOpen {
 			return
 		}
+		if tail := stopBuf.Flush(); tail != "" {
+			send("content_block_delta", map[string]any{
+				"type": "content_block_delta", "index": textIdx,
+				"delta": map[string]any{"type": "text_delta", "text": tail},
+			})
+		}
 		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
 		textOpen = false
 		textIdx = -1
 	}
 	emitText := func(text string) error {
-		if text == "" {
+		safe := stopBuf.Append(text)
+		if safe == "" {
 			return nil
 		}
 		if !textOpen {
@@ -212,7 +220,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		}
 		send("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": textIdx,
-			"delta": map[string]any{"type": "text_delta", "text": text},
+			"delta": map[string]any{"type": "text_delta", "text": safe},
 		})
 		return nil
 	}

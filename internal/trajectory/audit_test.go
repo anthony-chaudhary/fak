@@ -122,6 +122,49 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	if codex.UsageRecords != 1 {
 		t.Fatalf("Codex applied usage records = %d, want final cumulative row only", codex.UsageRecords)
 	}
+	if codex.CodexCache == nil {
+		t.Fatal("Codex cache observation is nil")
+	}
+	if codex.CodexCache.LastTokenUsageCachedInputMin == nil || codex.CodexCache.LastTokenUsageCachedInputMax == nil {
+		t.Fatalf("Codex cache bounds = min:%v max:%v", codex.CodexCache.LastTokenUsageCachedInputMin, codex.CodexCache.LastTokenUsageCachedInputMax)
+	}
+	if got := *codex.CodexCache; got.TranscriptProducer != AuditSourceCodex ||
+		got.ModelProvider != "openai" ||
+		got.ModelProviderSource != "session_meta.model_provider" ||
+		got.LastTokenUsageCachedInputSamples != 2 ||
+		*got.LastTokenUsageCachedInputMin != 40 ||
+		*got.LastTokenUsageCachedInputMax != 40 ||
+		got.PhysicalProviderCacheResidency != "not_inferable_from_cached_input_tokens" ||
+		got.FakOwnedCacheCoverage != "not_observed_by_codex_token_count" {
+		t.Fatalf("Codex cache observation = %+v", got)
+	}
+
+	var codexJSON bytes.Buffer
+	if err := WriteAuditJSONL(&codexJSON, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"codex_cache":{"transcript_producer":"codex","model_provider":"openai","model_provider_source":"session_meta.model_provider"`,
+		`"last_token_usage_cached_input_samples":2`,
+		`"last_token_usage_cached_input_min":40`,
+		`"last_token_usage_cached_input_max":40`,
+		`"physical_provider_cache_residency":"not_inferable_from_cached_input_tokens"`,
+		`"fak_owned_cache_coverage":"not_observed_by_codex_token_count"`,
+	} {
+		if !strings.Contains(codexJSON.String(), want) {
+			t.Fatalf("audit JSONL missing %q:\n%s", want, codexJSON.String())
+		}
+	}
+	for _, want := range []string{
+		"## Codex per-request cache observations",
+		"| `codex-session` | `codex` | `openai` | 2 | 40 | 40 |",
+		"`cached_input_tokens` is emitted by the transcript producer for the configured provider path; it does not prove physical provider cache residency or process-local ownership.",
+		"fak-owned caches are not observed by Codex `token_count` rows",
+	} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("audit markdown missing %q:\n%s", want, rendered.String())
+		}
+	}
 
 	denominators := map[string]AuditDenominatorRow{}
 	for _, row := range result.Denominators {
@@ -132,6 +175,59 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	}
 	if got := denominators[AuditSourceCodex]; got.UsageRecordsSeen != 2 || got.UsageRecordsExact != 2 || got.UsageRecordsApplied != 1 {
 		t.Fatalf("Codex denominator = %+v", got)
+	}
+}
+
+func TestAuditCodexCacheBoundsPreserveCumulativeAccounting(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "bounded-cache.jsonl")
+	lines := []string{
+		`{"type":"session_meta","payload":{"id":"bounded-cache","model_provider":"fak"}}`,
+		`{"type":"session_meta","payload":{"id":"copied-parent","model_provider":"openai"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"cached_input_tokens":0},"total_token_usage":{"input_tokens":100,"cached_input_tokens":10,"cache_write_input_tokens":5,"output_tokens":10}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"cached_input_tokens":80},"total_token_usage":{"input_tokens":200,"cached_input_tokens":30,"cache_write_input_tokens":10,"output_tokens":20}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"cached_input_tokens":40},"total_token_usage":{"input_tokens":300,"cached_input_tokens":60,"cache_write_input_tokens":20,"output_tokens":30}}}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 {
+		t.Fatalf("refusals = %+v", result.Refusals)
+	}
+	if len(result.Transcripts) != 1 {
+		t.Fatalf("transcripts = %d, want 1", len(result.Transcripts))
+	}
+	row := result.Transcripts[0]
+	wantTokens := AuditTokens{InputTokens: 220, OutputTokens: 30, CacheReadTokens: 60, CacheCreateTokens: 20}
+	if row.Tokens != wantTokens || row.UsageRecords != 1 {
+		t.Fatalf("cumulative accounting = tokens:%+v usage_records:%d, want %+v/1", row.Tokens, row.UsageRecords, wantTokens)
+	}
+	if row.CodexCache == nil || row.CodexCache.LastTokenUsageCachedInputMin == nil || row.CodexCache.LastTokenUsageCachedInputMax == nil {
+		t.Fatalf("cache observation = %+v", row.CodexCache)
+	}
+	if got := row.CodexCache; got.ModelProvider != "fak" ||
+		got.LastTokenUsageCachedInputSamples != 3 ||
+		*got.LastTokenUsageCachedInputMin != 0 ||
+		*got.LastTokenUsageCachedInputMax != 80 {
+		t.Fatalf("cache observation = %+v", got)
+	}
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"model_provider":"fak"`,
+		`"last_token_usage_cached_input_samples":3`,
+		`"last_token_usage_cached_input_min":0`,
+		`"last_token_usage_cached_input_max":80`,
+	} {
+		if !strings.Contains(jsonl.String(), want) {
+			t.Fatalf("JSONL missing %q:\n%s", want, jsonl.String())
+		}
 	}
 }
 

@@ -621,7 +621,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		if statusErr != nil {
 			return nil, nil, statusErr
 		}
-		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
+		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && (!transientRetryTried || !transientTargetTried))) {
 			attempt--
 		}
 		if retry {

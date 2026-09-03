@@ -31,6 +31,7 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
 	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
+	writeAuditCodexCacheObservations(&out, result.Transcripts)
 	out.WriteString("\n## Transcript schema drift\n\n")
 	if len(result.SchemaDrift) == 0 {
 		out.WriteString("No event-type or field-shape drift from the checked-in baseline.\n")
@@ -165,6 +166,34 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		return fmt.Errorf("trajectory audit: write markdown: %w", err)
 	}
 	return nil
+}
+
+func writeAuditCodexCacheObservations(out *strings.Builder, transcripts []AuditTranscriptRow) {
+	rows := make([]AuditTranscriptRow, 0)
+	for _, transcript := range transcripts {
+		if transcript.CodexCache != nil {
+			rows = append(rows, transcript)
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	out.WriteString("\n## Codex per-request cache observations\n\n")
+	out.WriteString("| Transcript | Transcript producer | Configured provider path | Samples | Observed min | Observed max |\n")
+	out.WriteString("|---|---|---|---:|---:|---:|\n")
+	for _, transcript := range rows {
+		observation := transcript.CodexCache
+		provider := "not recorded"
+		if observation.ModelProvider != "" {
+			provider = "`" + escapeAuditMarkdown(observation.ModelProvider) + "`"
+		}
+		fmt.Fprintf(out, "| `%s` | `%s` | %s | %d | %s | %s |\n",
+			escapeAuditMarkdown(transcript.TranscriptID), escapeAuditMarkdown(observation.TranscriptProducer), provider,
+			observation.LastTokenUsageCachedInputSamples,
+			auditInt(observation.LastTokenUsageCachedInputMin), auditInt(observation.LastTokenUsageCachedInputMax))
+	}
+	out.WriteString("\n`cached_input_tokens` is emitted by the transcript producer for the configured provider path; it does not prove physical provider cache residency or process-local ownership. ")
+	out.WriteString("fak-owned caches are not observed by Codex `token_count` rows and require fak telemetry for attribution.\n")
 }
 
 func auditBuildsMarkdown(builds []AuditBuildIdentity) string {

@@ -86,17 +86,25 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 
 	outIdx := 0
+	stopBuf := NewStopHoldbackBuffer(req.StopSequences)
 	textOpen := false
 	textIdx := -1
 	closeText := func() {
 		if textOpen {
+			if tail := stopBuf.Flush(); tail != "" {
+				sendLocked("content_block_delta", map[string]any{
+					"type": "content_block_delta", "index": textIdx,
+					"delta": map[string]any{"type": "text_delta", "text": tail},
+				})
+			}
 			sendLocked("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
 			textOpen = false
 			textIdx = -1
 		}
 	}
 	emitText := func(text string) error {
-		if text == "" {
+		safe := stopBuf.Append(text)
+		if safe == "" {
 			return nil
 		}
 		start()
@@ -111,7 +119,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		}
 		sendLocked("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": textIdx,
-			"delta": map[string]any{"type": "text_delta", "text": text},
+			"delta": map[string]any{"type": "text_delta", "text": safe},
 		})
 		return nil
 	}
