@@ -202,8 +202,8 @@ func (m *Model) Qwen35MTPFuse(priorHidden, currentEmbedding []float32) ([]float3
 
 	eps := float32(m.Cfg.RMSNormEps)
 	fusedInput := make([]float32, 0, 2*h)
-	normedEmbedding := rmsnorm(currentEmbedding, embeddingNorm, eps)
-	normedHidden := rmsnorm(priorHidden, hiddenNorm, eps)
+	normedEmbedding := rmsnormCfg(currentEmbedding, embeddingNorm, eps, m.Cfg)
+	normedHidden := rmsnormCfg(priorHidden, hiddenNorm, eps, m.Cfg)
 	fusedInput = append(fusedInput, normedEmbedding...)
 	fusedInput = append(fusedInput, normedHidden...)
 	return parMatRows(fc, fusedInput, h, 2*h), nil
