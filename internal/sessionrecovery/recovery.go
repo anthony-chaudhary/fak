@@ -130,6 +130,7 @@ type Options struct {
 	PromptPath  string
 	ReceiptDir  string
 	CodexBin    string
+	Interactive bool
 	Now         time.Time
 	Since       time.Duration
 }
@@ -254,16 +255,22 @@ func recoveryResumeArgv(opts Options, provider, threadID, cwd string) []string {
 		if provider == ProviderClaude {
 			return claudeResumeArgv(opts.ManagerBin, threadID)
 		}
-		return codexResumeArgv(opts.ManagerBin, opts.CodexBin, threadID, cwd)
+		return codexResumeArgv(opts.ManagerBin, opts.CodexBin, threadID, cwd, opts.Interactive)
 	}
 	argv := []string{opts.ManagerBin, "session", "recover", "--provider-launch", provider, "--thread", threadID, "--cwd", cwd, "--prompt-file", opts.PromptPath}
+	if opts.Interactive {
+		argv = append(argv, "--interactive")
+	}
 	if provider == ProviderCodex {
 		argv = append(argv, "--codex", opts.CodexBin)
 	}
 	return argv
 }
 
-func codexResumeArgv(managerBin, codexBin, threadID, cwd string) []string {
+func codexResumeArgv(managerBin, codexBin, threadID, cwd string, interactive bool) []string {
+	if interactive {
+		return []string{managerBin, "guard", "--", codexBin, "resume", threadID}
+	}
 	// Recovery waves must not open several interactive Codex TUIs. `exec resume`
 	// accepts the exact state_5 UUID and runs independently in its wrapper window.
 	// Keep --cd in provider argv as well as the launcher's starting directory:

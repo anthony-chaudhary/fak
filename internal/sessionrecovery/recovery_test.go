@@ -188,6 +188,25 @@ func TestSelectAdmitsOnlyExactDeadCodexCLI(t *testing.T) {
 	}
 }
 
+func TestSelectInteractiveCodexPreservesNativeResumeTUI(t *testing.T) {
+	deadID := "93380001-0000-4000-8000-000000000001"
+	report := InventoryReport{Sessions: []Session{{
+		Thread:        &Thread{ID: deadID, Source: "interactive_tui", CWD: `C:\work\fak`},
+		Harness:       ProviderCodex,
+		HarnessSource: "legacy_codex_inventory",
+		LatestTurn:    &Turn{Status: "inProgress"},
+	}}}
+	threads := map[string]bool{deadID: true}
+	got := Select(report, Options{ManagerBin: "fak", CodexBin: "codex", Threads: threads, Limit: 1, Interactive: true, ReceiptDir: t.TempDir()})
+	if len(got) != 1 {
+		t.Fatalf("requests=%+v", got)
+	}
+	wantArgv := []string{"fak", "guard", "--", "codex", "resume", deadID}
+	if !reflect.DeepEqual(got[0].Argv, wantArgv) {
+		t.Fatalf("interactive Codex request argv=%v, want %v", got[0].Argv, wantArgv)
+	}
+}
+
 func TestSelectExplicitIneligibleAndMissingThreadsReturnReasons(t *testing.T) {
 	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "done", Source: "interactive_tui", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "completed"}}}}
 	got := Select(report, Options{Threads: map[string]bool{"done": true, "missing": true}, Limit: 2})
