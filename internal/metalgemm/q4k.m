@@ -1264,13 +1264,21 @@ int mg_q4k_upload_span(const unsigned char* raw, size_t nbytes, size_t offset, i
     int nblk = 0;
     long bytes = 0;
     if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0 || (size_t)bytes > nbytes - offset) return -1;
-    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:(void*)raw
-                                              length:(NSUInteger)nbytes
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    size_t page_offset = offset % page;
+    size_t base_offset = offset - page_offset;
+    size_t buf_len = (size_t)q4k_page_round((long)(bytes + (long)page_offset));
+    if (base_offset + buf_len > nbytes) {
+        buf_len = nbytes - base_offset;
+    }
+    void* buf_ptr = (void*)(raw + base_offset);
+    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:buf_ptr
+                                              length:(NSUInteger)buf_len
                                              options:MTLResourceStorageModeShared
                                          deallocator:nil];
     if (b == nil) return -1;
     int id = q4k_register_buffer(b, out, in, nblk);
-    if (id >= 0) gQ4[id].offset = (NSUInteger)offset;
+    if (id >= 0) gQ4[id].offset = (NSUInteger)page_offset;
     return id;
 }
 int mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in) {

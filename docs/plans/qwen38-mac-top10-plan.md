@@ -33,7 +33,7 @@ Historical Qwen3.6 artifacts and receipts, including the Qwen3.6 laptop evidence
 
 Ship `10 / 10 KEEP`: ten issue-bound Mac items with positive net-true end-to-end movement, preserved quality, `engine=fak-native`, zero fallback, and immutable accepted receipts.
 
-Current result: `0 / 10 KEEP`.
+Current result: `1 / 10 KEEP`.
 
 Rejected experiments, default-off candidates, enabling-only commits, synthetic-only tests, and comparator-only runs remain evidence but do not advance the numerator.
 
@@ -58,7 +58,7 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 
 ## Ordered phases
 
-- [ ] M1 - No-copy streamed Q4_K Metal spans (#8325; mechanism #9073 shipped, exact campaign #9482 HOLD)
+- [x] M1 - No-copy streamed Q4_K Metal spans (#8325; mechanism #9073 shipped, exact campaign #9482 KEEP)
 - [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9230/#9257; mechanism #9456 shipped, exact receipt child #9525 blocked after #8325)
 - [ ] M3 - Q8 projection-to-GDN device handoff (#9216; mechanism #9486 shipped, exact Mac receipt outstanding)
 - [ ] M4 - Coarse resident hybrid decode graph (#8324; mechanism-only #9488 closed from landed commit, while the exact-artifact performance receipt remains with #8324/#9430)
@@ -148,6 +148,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 
 ## Execution log
 
+- 2026-09-03: M1 exact campaign #9482 completed with balanced C/M/M/C/C/M execution; candidate mapped 184/184 Q4_K tensors (8.33 GB zero-copy Metal residency with 0 fallbacks); median first-token latency improved by 42.5% (4368.5 ms vs 7603.1 ms) and median prefill improved by 15.7% (18304.9 ms vs 21713.3 ms); M1 earns 1/10 KEEP under #9430 and closes #8325/#9482.
 - 2026-08-30: issue #10317 made the three-axis progress vocabulary canonical, preserved prior `HOLD`/`REJECT` outcomes as evidence history, separated delivery from performance credit, and reframed all ten rows with an actionable next movement; the strict fak-native gate and `0 / 10` performance-qualified result are unchanged.
 - 2026-08-27: proved the existing #9050 top-ten plan targets RTX/WSL, not macOS, and excluded it from this objective.
 - 2026-08-27: read the authoritative eight-lever Metal graph and selected only two measured prerequisites to form the ten-item execution queue.
