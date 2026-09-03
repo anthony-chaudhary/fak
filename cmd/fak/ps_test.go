@@ -9,10 +9,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // runPSAt drives runPS against addr and returns (stdout, stderr, exit).
@@ -212,5 +215,77 @@ func TestPSTopNonTTYDefaultsToOneSnapshot(t *testing.T) {
 	}
 	if n := strings.Count(out, "TRACE"); n != 1 {
 		t.Fatalf("non-TTY top rendered %d frames, want 1:\n%s", n, out)
+	}
+}
+
+func TestPSTableRendersActivityColumns(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/fak/sessions", func(w http.ResponseWriter, r *http.Request) {
+		writeTestJSON(w, 200, gateway.SessionListResponse{
+			Count: 1,
+			Sessions: []gateway.SessionState{
+				{
+					TraceID:  "tr-act",
+					Run:      "running",
+					Priority: 1,
+					Rev:      10,
+					Budget:   gateway.SessionBudget{TurnsLeft: 5, TokensLeft: 1000},
+					Activity: gateway.ActionCounts{
+						Tools:   5,
+						Execs:   3,
+						Fail:    1,
+						Effects: 2,
+					},
+				},
+			},
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	out, errb, code := runPSAt(t, ts.URL, false)
+	if code != 0 {
+		t.Fatalf("ps exit = %d (%s)", code, errb)
+	}
+	for _, wantCol := range []string{"TOOLS", "EXECS", "FAIL", "EFFECTS"} {
+		if !strings.Contains(out, wantCol) {
+			t.Fatalf("table header missing %q:\n%s", wantCol, out)
+		}
+	}
+
+	var foundRow bool
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 12 && fields[0] == "tr-act" {
+			foundRow = true
+			if fields[7] != "5" || fields[8] != "3" || fields[9] != "1" || fields[10] != "2" {
+				t.Fatalf("table row activity metrics mismatch: got tools=%s execs=%s fail=%s effects=%s, want 5 3 1 2 in line: %q",
+					fields[7], fields[8], fields[9], fields[10], line)
+			}
+		}
+	}
+	if !foundRow {
+		t.Fatalf("did not find formatted table row for tr-act in:\n%s", out)
+	}
+
+	jsonOut, jsonErr, jsonCode := runPSAt(t, ts.URL, false, "--json")
+	if jsonCode != 0 {
+		t.Fatalf("ps --json exit = %d (%s)", jsonCode, jsonErr)
+	}
+	for _, wantJSON := range []string{`"activity"`, `"tools"`, `"execs"`, `"fail"`, `"effects"`} {
+		if !strings.Contains(jsonOut, wantJSON) {
+			t.Fatalf("ps --json missing %q:\n%s", wantJSON, jsonOut)
+		}
+	}
+	var resp gateway.SessionListResponse
+	if err := json.Unmarshal([]byte(jsonOut), &resp); err != nil {
+		t.Fatalf("failed to decode ps --json output: %v\n%s", err, jsonOut)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 session in json, got %d", len(resp.Sessions))
+	}
+	gotAct := resp.Sessions[0].Activity
+	if gotAct.Tools != 5 || gotAct.Execs != 3 || gotAct.Fail != 1 || gotAct.Effects != 2 {
+		t.Fatalf("decoded json activity mismatch: %+v, want tools=5 execs=3 fail=1 effects=2", gotAct)
 	}
 }

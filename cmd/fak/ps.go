@@ -221,16 +221,18 @@ func renderPSTable(w io.Writer, list gateway.SessionListResponse) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "TRACE\tSTATE\tTURNS\tTOKENS\tCTX\tPRIO\tREV\tREASON")
+	fmt.Fprintln(tw, "TRACE\tSTATE\tTURNS\tTOKENS\tCTX\tPRIO\tREV\tTOOLS\tEXECS\tFAIL\tEFFECTS\tREASON")
 	for _, st := range list.Sessions {
 		reason := st.Reason
 		if reason == "" {
 			reason = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
 			st.TraceID, st.Run,
 			budgetAxis(st.Budget.TurnsLeft), budgetAxis(st.Budget.TokensLeft), contextBudgetAxis(st.Budget.ContextTokensLeft),
-			st.Priority, st.Rev, reason)
+			st.Priority, st.Rev,
+			st.Activity.Tools, st.Activity.Execs, st.Activity.Fail, st.Activity.Effects,
+			reason)
 	}
 	_ = tw.Flush()
 	fmt.Fprintf(w, "%d session(s)\n", list.Count)

@@ -61,6 +61,7 @@ type SessionState struct {
 	// read-only, like Time; the zero value (axis unconfigured, nothing observed)
 	// marshals away via omitzero so the pre-#2762 wire shape is unchanged.
 	Throughput SessionThroughput `json:"throughput,omitempty,omitzero"`
+	Activity   ActionCounts      `json:"activity,omitempty,omitzero"`
 	Rev        uint64            `json:"rev"`
 }
 
@@ -208,6 +209,17 @@ type SessionThroughput struct {
 	MinTokensPerSec      float64 `json:"min_tokens_per_sec,omitempty"`
 	ObservedTokensPerSec float64 `json:"observed_tokens_per_sec,omitempty"`
 }
+
+// ActionCounts records tool execution and effect activity metrics.
+type ActionCounts struct {
+	Tools   int `json:"tools,omitempty"`
+	Execs   int `json:"execs,omitempty"`
+	Fail    int `json:"fail,omitempty"`
+	Effects int `json:"effects,omitempty"`
+}
+
+// IsZero reports whether no actions have been counted, for json omitzero.
+func (a ActionCounts) IsZero() bool { return a == (ActionCounts{}) }
 
 // SessionControlRequest is the gateway-parsed body of POST
 // /v1/fak/session/{trace_id}/{verb}. Exactly the field named by the verb is read;
