@@ -327,6 +327,13 @@ func (s *MemStore) List() ([]Descriptor, error) {
 	return out, nil
 }
 
+// DriverName returns the driver identifier "memory".
+func (s *MemStore) DriverName() string { return "memory" }
+
+func init() {
+	RegisterStoreDriver("memory", NewMemStore())
+}
+
 // errBlankDescriptorID is returned when a register/put is attempted with no ID — the
 // ID is the addressable key, so a blank one is a programming error, fail-closed.
 var errBlankDescriptorID = registryError("descriptor id must be non-empty")
