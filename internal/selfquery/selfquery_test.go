@@ -138,7 +138,7 @@ func TestQueryMemoryReturnsToolsAndDrivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := cat.Query(Request{Query: "memory", Plane: PlaneAll})
+	resp, err := cat.Query(Request{Query: "memory", Plane: PlaneAll, All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

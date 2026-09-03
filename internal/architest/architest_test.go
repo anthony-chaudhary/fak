@@ -54,6 +54,7 @@ var tier = map[string]int{
 	"storagepressure":    3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
 	"wipreadiness":       1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
 	"timeaware":          1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
+	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
