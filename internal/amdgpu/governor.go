@@ -572,12 +572,18 @@ func BuildPlan(cfg GovernorConfig, opts ...Option) (*GovernorReport, error) {
 				plan.RecommendedRunAs = "Run PowerShell as Administrator"
 			} else {
 				plan.ElevationReason = "modifying Linux sysfs parameters (/sys/class/drm and /sys/module/ttm) requires root (uid 0) or sudo"
-				plan.RecommendedRunAs = "sudo fak amd-setup --apply"
+				plan.RecommendedRunAs = "sudo fak-dev amd-setup --apply"
 			}
 		}
 	}
 
 	return plan, nil
+}
+
+// appliedAction tracks a successfully applied sysfs configuration write for rollback.
+type appliedAction struct {
+	target        string
+	originalValue string
 }
 
 // Apply executes the planned hardware governor and memory limit writes.
@@ -622,41 +628,67 @@ func Apply(plan *GovernorReport, opts ...Option) (*ApplyResult, error) {
 		}, errors.New(errText)
 	}
 
+	applied := make([]appliedAction, 0, len(plan.Actions))
 	appliedActions := make([]ActionItem, 0, len(plan.Actions))
-	errs := make([]string, 0)
 
 	for _, action := range plan.Actions {
+		// Before writing action.TargetValue, record action.TargetFile and action.Current.
+		currentAction := appliedAction{
+			target:        action.Path,
+			originalValue: action.Current,
+		}
+
+		var failErr string
+
 		// Write parameter with trailing newline as expected by Linux sysfs.
 		payload := []byte(action.Target + "\n")
 		if err := env.fs.WriteFile(action.Path, payload, 0644); err != nil {
-			errs = append(errs, fmt.Sprintf("failed to write %q to %s: %v", action.Target, action.Path, err))
-			continue
+			failErr = fmt.Sprintf("failed to write %q to %s: %v", action.Target, action.Path, err)
+		} else {
+			// Read back parameter immediately to verify kernel accepted the write.
+			data, err := env.fs.ReadFile(action.Path)
+			if err != nil {
+				failErr = fmt.Sprintf("failed to read-back %s after write: %v", action.Path, err)
+			} else {
+				readBack := strings.TrimSpace(string(data))
+				if readBack != strings.TrimSpace(action.Target) {
+					failErr = fmt.Sprintf("read-back verification mismatch for %s: got %q, want %q", action.Path, readBack, action.Target)
+				}
+			}
 		}
 
-		// Read back parameter immediately to verify kernel accepted the write.
-		data, err := env.fs.ReadFile(action.Path)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("failed to read-back %s after write: %v", action.Path, err))
-			continue
-		}
-		readBack := strings.TrimSpace(string(data))
-		if readBack != strings.TrimSpace(action.Target) {
-			errs = append(errs, fmt.Sprintf("read-back verification mismatch for %s: got %q, want %q", action.Path, readBack, action.Target))
-			continue
+		if failErr != "" {
+			var rollbackErrs []string
+			for i := len(applied) - 1; i >= 0; i-- {
+				prev := applied[i]
+				if rbErr := env.fs.WriteFile(prev.target, []byte(prev.originalValue), 0644); rbErr != nil {
+					rollbackErrs = append(rollbackErrs, fmt.Sprintf("failed to restore %s to %q: %v", prev.target, prev.originalValue, rbErr))
+				}
+			}
+
+			errs := []string{failErr}
+			var retErr error
+			if len(rollbackErrs) > 0 {
+				rbDetails := strings.Join(rollbackErrs, "; ")
+				errs = append(errs, fmt.Sprintf("rollback failed: %s", rbDetails))
+				retErr = fmt.Errorf("%s; rollback failed: %s", failErr, rbDetails)
+			} else {
+				errs = append(errs, "rollback succeeded")
+				retErr = fmt.Errorf("%s; rollback succeeded", failErr)
+			}
+
+			return &ApplyResult{
+				Success:      false,
+				AppliedCount: 0,
+				Actions:      nil,
+				Errors:       errs,
+				Plan:         plan,
+				Verified:     false,
+			}, retErr
 		}
 
+		applied = append(applied, currentAction)
 		appliedActions = append(appliedActions, action)
-	}
-
-	if len(errs) > 0 {
-		return &ApplyResult{
-			Success:      false,
-			AppliedCount: len(appliedActions),
-			Actions:      appliedActions,
-			Errors:       errs,
-			Plan:         plan,
-			Verified:     false,
-		}, fmt.Errorf("failed to apply all actions: %s", strings.Join(errs, "; "))
 	}
 
 	return &ApplyResult{

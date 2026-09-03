@@ -3,6 +3,7 @@ package amdgpu
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -312,6 +313,9 @@ func TestLinuxPlanDryRunNeedsUpdate(t *testing.T) {
 	if !plan.NeedsElevation {
 		t.Fatal("plan should require elevation when non-root")
 	}
+	if plan.RecommendedRunAs != "sudo fak-dev amd-setup --apply" {
+		t.Fatalf("recommended run as = %q, want %q", plan.RecommendedRunAs, "sudo fak-dev amd-setup --apply")
+	}
 	if len(plan.Cards) != 1 {
 		t.Fatalf("expected 1 card, got %d", len(plan.Cards))
 	}
@@ -409,6 +413,9 @@ func TestLinuxApplyRefusalWithoutElevation(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("Apply should have failed without elevation")
+	}
+	if !strings.Contains(err.Error(), "sudo fak-dev amd-setup --apply") {
+		t.Fatalf("expected error to contain %q, got %q", "sudo fak-dev amd-setup --apply", err.Error())
 	}
 	if result.Success {
 		t.Fatal("result.Success should be false")
@@ -537,6 +544,15 @@ func TestLinuxApplyReadBackVerificationFailure(t *testing.T) {
 	}
 	if len(result.Errors) == 0 {
 		t.Fatal("expected error details in result.Errors")
+	}
+	if !strings.Contains(err.Error(), "rollback succeeded") {
+		t.Fatalf("expected error to indicate rollback succeeded, got: %v", err)
+	}
+
+	// Verify that card0 was restored to its original value "auto" via rollback
+	card0Val := strings.TrimSpace(string(mockFS.files["/sys/class/drm/card0/device/power_dpm_force_performance_level"]))
+	if card0Val != "auto" {
+		t.Fatalf("card0 sysfs file not restored to original value; got %q, want %q", card0Val, "auto")
 	}
 }
 
@@ -927,4 +943,147 @@ func TestApplyResultJSON(t *testing.T) {
 	if !decoded.Success || decoded.AppliedCount != 1 || !decoded.Verified {
 		t.Fatalf("decoded mismatch: %+v", decoded)
 	}
+}
+
+// failingPathFS simulates a write failure for a specific path.
+type failingPathFS struct {
+	*MockFS
+	failingPath string
+	err         error
+}
+
+func (f *failingPathFS) WriteFile(p string, d []byte, perm os.FileMode) error {
+	if filepath.ToSlash(filepath.Clean(p)) == f.failingPath {
+		return f.err
+	}
+	return f.MockFS.WriteFile(p, d, perm)
+}
+
+// dynamicFailFS allows intercepting WriteFile with custom logic (e.g. failing during rollback).
+type dynamicFailFS struct {
+	*MockFS
+	writeHook func(p string, d []byte) error
+}
+
+func (f *dynamicFailFS) WriteFile(p string, d []byte, perm os.FileMode) error {
+	if f.writeHook != nil {
+		if err := f.writeHook(p, d); err != nil {
+			return err
+		}
+	}
+	return f.MockFS.WriteFile(p, d, perm)
+}
+
+func TestApply_RollbackOnFailure(t *testing.T) {
+	t.Run("second action write failure restores first action sysfs file", func(t *testing.T) {
+		mockFS := setupMockLinuxSysfs()
+		failFS := &failingPathFS{
+			MockFS:      mockFS,
+			failingPath: "/sys/module/ttm/parameters/pages_limit",
+			err:         errors.New("simulated write error: permission denied"),
+		}
+
+		cfg := GovernorConfig{
+			TargetDPMLevel: "high",
+			SysfsRoot:      "/sys",
+			ProcRoot:       "/proc",
+		}
+
+		plan, err := BuildPlan(cfg,
+			WithFS(failFS),
+			WithGOOS("linux"),
+			WithElevation(func() bool { return true }),
+		)
+		if err != nil {
+			t.Fatalf("BuildPlan failed: %v", err)
+		}
+		if len(plan.Actions) != 2 {
+			t.Fatalf("expected 2 actions, got %d", len(plan.Actions))
+		}
+
+		result, err := Apply(plan,
+			WithFS(failFS),
+			WithElevation(func() bool { return true }),
+		)
+		if err == nil {
+			t.Fatal("expected Apply to fail")
+		}
+		if result.Success {
+			t.Fatal("result.Success should be false")
+		}
+		if result.Verified {
+			t.Fatal("result.Verified should be false")
+		}
+		if result.AppliedCount != 0 {
+			t.Fatalf("result.AppliedCount = %d, want 0", result.AppliedCount)
+		}
+		if !strings.Contains(err.Error(), "simulated write error: permission denied") {
+			t.Fatalf("expected error to contain write failure, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "rollback succeeded") {
+			t.Fatalf("expected error to indicate rollback succeeded, got: %v", err)
+		}
+
+		// Verify that card0 was restored to its original value "auto"
+		card0Val := strings.TrimSpace(string(mockFS.files["/sys/class/drm/card0/device/power_dpm_force_performance_level"]))
+		if card0Val != "auto" {
+			t.Fatalf("card0 sysfs file was not restored to original value; got %q, want %q", card0Val, "auto")
+		}
+	})
+
+	t.Run("rollback error details included when rollback fails", func(t *testing.T) {
+		mockFS := setupMockLinuxSysfs()
+		card0Path := "/sys/class/drm/card0/device/power_dpm_force_performance_level"
+		ttmPath := "/sys/module/ttm/parameters/pages_limit"
+
+		card0Writes := 0
+		dynFS := &dynamicFailFS{
+			MockFS: mockFS,
+			writeHook: func(p string, d []byte) error {
+				clean := filepath.ToSlash(filepath.Clean(p))
+				if clean == card0Path {
+					card0Writes++
+					if card0Writes > 1 {
+						return errors.New("simulated rollback permission error on card0")
+					}
+				}
+				if clean == ttmPath {
+					return errors.New("simulated ttm apply error")
+				}
+				return nil
+			},
+		}
+
+		cfg := GovernorConfig{
+			TargetDPMLevel: "high",
+			SysfsRoot:      "/sys",
+			ProcRoot:       "/proc",
+		}
+
+		plan, err := BuildPlan(cfg,
+			WithFS(dynFS),
+			WithGOOS("linux"),
+			WithElevation(func() bool { return true }),
+		)
+		if err != nil {
+			t.Fatalf("BuildPlan failed: %v", err)
+		}
+
+		result, err := Apply(plan,
+			WithFS(dynFS),
+			WithElevation(func() bool { return true }),
+		)
+		if err == nil {
+			t.Fatal("expected Apply to fail")
+		}
+		if result.Success {
+			t.Fatal("result.Success should be false")
+		}
+		if !strings.Contains(err.Error(), "rollback failed") {
+			t.Fatalf("expected error to indicate rollback failed, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "simulated rollback permission error on card0") {
+			t.Fatalf("expected error to include rollback failure details, got: %v", err)
+		}
+	})
 }
