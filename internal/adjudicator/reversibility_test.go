@@ -818,3 +818,126 @@ func TestAdjudicateReversibilityGateDoesNotOverrideHardDeny(t *testing.T) {
 		t.Fatalf("hard policy deny must win over preview confirmation: got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
+
+func TestDatabaseDestinationFence(t *testing.T) {
+	cases := []struct {
+		name        string
+		tool        string
+		args        map[string]any
+		wantBlocked bool
+		wantHost    string
+	}{
+		{
+			name:        "local localhost url",
+			tool:        "bash",
+			args:        map[string]any{"command": "psql postgres://user:pass@localhost:5432/app"},
+			wantBlocked: false,
+		},
+		{
+			name:        "local 127.0.0.1 url",
+			tool:        "bash",
+			args:        map[string]any{"command": "psql postgres://user:pass@127.0.0.1:5432/app"},
+			wantBlocked: false,
+		},
+		{
+			name:        "local container alias db",
+			tool:        "bash",
+			args:        map[string]any{"command": "mysql -h db -u root -p secret app"},
+			wantBlocked: false,
+		},
+		{
+			name:        "remote internal host blocked",
+			tool:        "bash",
+			args:        map[string]any{"command": "psql postgres://user:pass@prod-db.internal:5432/app"},
+			wantBlocked: true,
+			wantHost:    "prod-db.internal",
+		},
+		{
+			name:        "remote amazon rds host blocked",
+			tool:        "bash",
+			args:        map[string]any{"command": "psql -h remote.rds.amazonaws.com -U admin app"},
+			wantBlocked: true,
+			wantHost:    "remote.rds.amazonaws.com",
+		},
+		{
+			name:        "structured argument remote url",
+			tool:        "db_query",
+			args:        map[string]any{"database_url": "postgres://user:pass@staging-db.corp.net:5432/app"},
+			wantBlocked: true,
+			wantHost:    "staging-db.corp.net",
+		},
+		{
+			name:        "structured argument local url",
+			tool:        "db_query",
+			args:        map[string]any{"database_url": "postgres://user:pass@localhost:5432/app"},
+			wantBlocked: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host, blocked, reason := ClassifyDatabaseDestination(tc.tool, tc.args)
+			if blocked != tc.wantBlocked {
+				t.Fatalf("blocked = %v, want %v (host=%s, reason=%s)", blocked, tc.wantBlocked, host, reason)
+			}
+			if tc.wantBlocked && host != tc.wantHost {
+				t.Errorf("host = %q, want %q", host, tc.wantHost)
+			}
+			if tc.wantBlocked && reason != ReasonProductionDBBlock {
+				t.Errorf("reason = %q, want %q", reason, ReasonProductionDBBlock)
+			}
+		})
+	}
+}
+
+func TestDatabaseMutationReversibility(t *testing.T) {
+	cases := []struct {
+		name      string
+		cmd       string
+		wantClass ReversibilityClass
+		wantHint  string
+	}{
+		{
+			name:      "truncate table is irreversible",
+			cmd:       "psql -c 'TRUNCATE TABLE users;'",
+			wantClass: ReversibilityIrreversible,
+			wantHint:  "TRUNCATE",
+		},
+		{
+			name:      "alter table is irreversible",
+			cmd:       "mysql -e 'ALTER TABLE accounts ADD COLUMN status VARCHAR(20);'",
+			wantClass: ReversibilityIrreversible,
+			wantHint:  "ALTER",
+		},
+		{
+			name:      "prisma reset is irreversible",
+			cmd:       "npx prisma migrate reset --force",
+			wantClass: ReversibilityIrreversible,
+			wantHint:  "snapshot",
+		},
+		{
+			name:      "alembic downgrade is irreversible",
+			cmd:       "alembic downgrade -1",
+			wantClass: ReversibilityIrreversible,
+			wantHint:  "snapshot",
+		},
+		{
+			name:      "goose down is irreversible",
+			cmd:       "goose down",
+			wantClass: ReversibilityIrreversible,
+			wantHint:  "snapshot",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := ClassifyReversibility("bash", map[string]any{"command": tc.cmd})
+			if env.Class != tc.wantClass {
+				t.Errorf("class = %v, want %v", env.Class, tc.wantClass)
+			}
+			if !strings.Contains(env.DryRunHint, tc.wantHint) {
+				t.Errorf("hint %q does not contain %q", env.DryRunHint, tc.wantHint)
+			}
+		})
+	}
+}
