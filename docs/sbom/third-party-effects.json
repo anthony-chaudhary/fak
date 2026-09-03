@@ -705,6 +705,18 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "sysctl",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "system_profiler",
       "consumer_domains": [
         "cmd"
