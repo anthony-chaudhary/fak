@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -73,11 +72,7 @@ func TestExecutableAdaptersShareGoldenDecisionsAndReceipts(t *testing.T) {
 		})
 	}
 
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test source path")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "..", "..", ".."))
+	root := findRepoRoot(t)
 	for _, rel := range []string{filepath.Join("cmd", "fak", "selfupdate.go"), filepath.Join("cmd", "fak-selfupdate", "main.go")} {
 		body, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {
@@ -90,11 +85,7 @@ func TestExecutableAdaptersShareGoldenDecisionsAndReceipts(t *testing.T) {
 }
 
 func TestStandaloneCheckInspectsTargetWithoutExecutingIt(t *testing.T) {
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test source path")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "..", "..", ".."))
+	root := findRepoRoot(t)
 	standalone := filepath.Join(t.TempDir(), "fak-selfupdate"+exeSuffix())
 	build := exec.Command("go", "build", "-o", standalone, "./cmd/fak-selfupdate")
 	build.Dir = root
@@ -112,5 +103,23 @@ func TestStandaloneCheckInspectsTargetWithoutExecutingIt(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("standalone inspection executed stale target; marker err=%v", err)
+	}
+}
+
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod found above %s", dir)
+		}
+		dir = parent
 	}
 }
