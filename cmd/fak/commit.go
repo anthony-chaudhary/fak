@@ -265,6 +265,19 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak commit: %v\n", err)
 		return 1
 	}
+	res = finalizeCommitEvidence(stderr, root, res, buildCheck, buildCheckOutcome, *push, *requireIssue)
+
+	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak commit", *asJSON, res, func(w io.Writer) {
+		renderCommitResult(w, res)
+	}); code != 0 {
+		return code
+	}
+	return commitExitCode(res)
+}
+
+// finalizeCommitEvidence attaches the prospective-tree gate and the delivery/review
+// receipts before the result is scored and rendered.
+func finalizeCommitEvidence(stderr io.Writer, root string, res safecommit.Result, buildCheck safecommit.BuildCheckResult, buildCheckOutcome safecommit.BuildCheckOutcome, push, requireIssue bool) safecommit.Result {
 	// Attach the gate's outcome BEFORE scoring: a commit admitted without its prospective tree
 	// ever being compiled must not be graded like one that passed the gate (#6006).
 	res.BuildCheck = &buildCheck
@@ -274,9 +287,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	res = safecommit.FinalizeEvidence(res, safecommit.EvidenceContract{
 		CompletionClass: completionClass,
-		RequirePush:     *push,
-		RequireClosure:  *requireIssue,
-		ClosureBound:    *requireIssue,
+		RequirePush:     push,
+		RequireClosure:  requireIssue,
+		ClosureBound:    requireIssue,
 	})
 	if res.Committed {
 		artifacts := make([]workdelivery.Artifact, 0, len(res.Paths))
@@ -302,13 +315,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak commit: append review refusal: %v\n", err)
 		}
 	}
-
-	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak commit", *asJSON, res, func(w io.Writer) {
-		renderCommitResult(w, res)
-	}); code != 0 {
-		return code
-	}
-	return commitExitCode(res)
+	return res
 }
 
 // renderCommitSyncAdvisory reports the relationship to origin using safesync's existing
