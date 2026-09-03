@@ -296,7 +296,8 @@ func (s *NativeScheduler) readmitPreemptedLocked() {
 	blocked := false
 	for _, ln := range s.preempted {
 		need := s.laneKVBlocksLocked(ln)
-		if blocked || (s.maxRunning > 0 && len(s.lanes) >= s.maxRunning) {
+		maxRun := s.effectiveMaxRunningLocked()
+		if blocked || (maxRun > 0 && len(s.lanes) >= maxRun) {
 			blocked = true
 			kept = append(kept, ln)
 			continue
@@ -326,7 +327,9 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 		history := make([]int, 0, len(ln.prompt)+len(ln.gen))
 		history = append(history, ln.prompt...)
 		history = append(history, ln.gen...)
-		ln.logits = copyF32(sess.Prefill(history))
+		ln.logits = copyF32(RunWithOp(s.coupler, OpPrefill, func() []float32 {
+			return sess.Prefill(history)
+		}))
 		ln.sess = sess
 	case NativePreemptSwap:
 		var cache *model.KVCache
