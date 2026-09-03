@@ -514,3 +514,55 @@ func TestSessionCLIResumeAll(t *testing.T) {
 	}
 }
 
+func TestSessionCLIPauseAll(t *testing.T) {
+	g := &stubGateway{
+		curRev: 1,
+		sessions: []gateway.SessionState{
+			{TraceID: "r-1", Run: "running", Rev: 1},
+			{TraceID: "t-1", Run: "throttled", Rev: 2},
+			{TraceID: "p-1", Run: "paused", Rev: 3},
+		},
+	}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	// 1. Pause all active sessions.
+	out, errb, code := runSessionAt(t, ts.URL, "pause", "--all", "--reason", "maint")
+	if code != 0 {
+		t.Fatalf("pause --all exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, "r-1") || !strings.Contains(out, "t-1") || !strings.Contains(out, "2 session(s) paused") {
+		t.Fatalf("pause --all output unexpected: %q", out)
+	}
+	if len(g.bodies) != 2 {
+		t.Fatalf("control calls = %d, want 2", len(g.bodies))
+	}
+	for _, b := range g.bodies {
+		if b.Run != "paused" || b.Reason != "maint" {
+			t.Errorf("control body mismatch: %+v", b)
+		}
+	}
+
+	// 2. Pause all with --json when no sessions are active.
+	g.sessions = []gateway.SessionState{
+		{TraceID: "p-1", Run: "paused", Rev: 1},
+	}
+	g.bodies = nil
+	out, errb, code = runSessionAt(t, ts.URL, "pause", "--all", "--json")
+	if code != 0 {
+		t.Fatalf("pause --all --json exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, `"paused": 0`) {
+		t.Fatalf("pause --all --json output unexpected: %q", out)
+	}
+
+	// 3. pause with missing args (neither id nor --all).
+	var out3, errb3 bytes.Buffer
+	code = runSession(&out3, &errb3, []string{"pause"})
+	if code != 2 {
+		t.Fatalf("pause with no args exit = %d, want 2", code)
+	}
+	if !strings.Contains(errb3.String(), "--all") {
+		t.Fatalf("expected usage message to mention --all, got: %q", errb3.String())
+	}
+}

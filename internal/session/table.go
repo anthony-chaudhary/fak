@@ -306,6 +306,52 @@ func (t *Table) ResumeAll(reason string) []State {
 	return out
 }
 
+// PauseAll finds every active session (Running or Throttled) in the table,
+// transitions it to Paused with the provided reason (holding it at the next turn
+// boundary in WaitResume), and returns the updated States in deterministic (sorted
+// TraceID) order. Sessions already Paused, Draining, Stopped, or Terminating are untouched.
+func (t *Table) PauseAll(reason string) []State {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	var active []string
+	for trace, cur := range t.state {
+		if cur.Run == Running || cur.Run == Throttled {
+			active = append(active, trace)
+		}
+	}
+	sort.Strings(active)
+	out := make([]State, 0, len(active))
+	type event struct {
+		st   State
+		from RunState
+	}
+	var events []event
+	obs := t.transObs
+	for _, trace := range active {
+		cur := t.getLocked(trace)
+		if cur.Run != Running && cur.Run != Throttled {
+			continue
+		}
+		from := cur.Run
+		cur.Run = Paused
+		cur.Reason = reason
+		st := t.putLocked(cur)
+		out = append(out, st)
+		if obs != nil && notableTransition(from, Paused) {
+			events = append(events, event{st: st, from: from})
+		}
+	}
+	t.mu.Unlock()
+	if obs != nil {
+		for _, ev := range events {
+			obs(transitionEvent(ev.st, ev.from, Paused))
+		}
+	}
+	return out
+}
+
 // SetBudget re-sets a session's remaining allotment live — raise to extend/speed
 // up, cut to slow down or to let an urgent session pass. A terminal session rejects
 // the change. Pass Unbounded on an axis to clear its cap.
