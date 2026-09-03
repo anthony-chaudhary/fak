@@ -48,6 +48,27 @@ func TestResolveEmbeddedAlias(t *testing.T) {
 	}
 }
 
+func TestResolveGLM53FlashAliases(t *testing.T) {
+	withCacheRoot(t)
+	cases := []struct {
+		alias string
+		want  string
+	}{
+		{"glm-5.3-flash", "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0"},
+		{"glm-5.3-flash:bf16", "hf://zai-org/GLM-5.3-Flash-BF16@f12e0fe1f6b2ea274c11a569582edfd99d993c5e"},
+		{"glm53", "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.alias, func(t *testing.T) {
+			got, expanded := Resolve(tc.alias)
+			if !expanded || got != tc.want {
+				t.Fatalf("Resolve(%q) = (%q, %v); want (%q, true)", tc.alias, got, expanded, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveQwen25HalfBForGuard(t *testing.T) {
 	withCacheRoot(t)
 	const want = "hf://Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf"

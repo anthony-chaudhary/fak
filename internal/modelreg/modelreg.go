@@ -120,6 +120,11 @@ var Catalog = map[string]string{
 	"ornith:35b-fp8":  "hf://deepreinforce-ai/Ornith-1.0-35B-FP8",
 	"ornith:397b":     "hf://deepreinforce-ai/Ornith-1.0-397B",
 	"ornith:397b-fp8": "hf://deepreinforce-ai/Ornith-1.0-397B-FP8",
+	// GLM-5.3-Flash — Z.ai's fast hybrid multimodal MoE model.
+	// FP8 and BF16 checkpoints are pinned to exact revisions per epic #9433.
+	"glm-5.3-flash":      "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
+	"glm-5.3-flash:bf16": "hf://zai-org/GLM-5.3-Flash-BF16@f12e0fe1f6b2ea274c11a569582edfd99d993c5e",
+	"glm53":              "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
 }
 
 // codingAliases is the set of Catalog aliases that are CODING-tuned and emit the
