@@ -43,7 +43,11 @@ type auditParseState struct {
 	codexRawTotal         *auditCodexRawTokens
 	codexCompleted        AuditTokens
 	codexVersion          string
+	codexModelProvider    string
 	codexResetArmed       bool
+	codexCacheSamples     int
+	codexCacheMin         int64
+	codexCacheMax         int64
 	usageSeen             int
 	usageExact            int
 	usageDuplicates       int
@@ -170,6 +174,21 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	state.row.StorageDistribution = state.distribution.storageRows()
 	state.row.UnknownExemplars = state.distribution.exemplars.snapshot()
 	state.row.fragmentDigest = hex.EncodeToString(fragmentHasher.Sum(nil))
+	if source == AuditSourceCodex {
+		state.row.CodexCache = &AuditCodexCacheObservation{
+			TranscriptProducer:               AuditSourceCodex,
+			ModelProvider:                    state.codexModelProvider,
+			ModelProviderSource:              "session_meta.model_provider",
+			LastTokenUsageCachedInputSamples: state.codexCacheSamples,
+			PhysicalProviderCacheResidency:   "not_inferable_from_cached_input_tokens",
+			FakOwnedCacheCoverage:            "not_observed_by_codex_token_count",
+		}
+		if state.codexCacheSamples > 0 {
+			minimum, maximum := state.codexCacheMin, state.codexCacheMax
+			state.row.CodexCache.LastTokenUsageCachedInputMin = &minimum
+			state.row.CodexCache.LastTokenUsageCachedInputMax = &maximum
+		}
+	}
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
@@ -335,6 +354,9 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 		if version, ok := payload["cli_version"].(string); ok {
 			state.codexVersion = strings.TrimSpace(version)
 		}
+		if provider, ok := payload["model_provider"].(string); ok {
+			state.codexModelProvider = strings.TrimSpace(provider)
+		}
 		for _, key := range []string{"id", "session_id"} {
 			if id, ok := payload[key].(string); ok && strings.TrimSpace(id) != "" {
 				state.row.TranscriptID = id
@@ -368,6 +390,7 @@ func parseCodexAuditUsage(payload map[string]any, line int, rel string, state *a
 		return
 	}
 	state.usageSeen++
+	observeCodexLastTokenUsage(info, line, rel, state, refusals)
 	total, ok := info["total_token_usage"].(map[string]any)
 	if !ok {
 		*refusals = append(*refusals, newAuditRefusal(AuditSourceCodex, rel, line, "codex_total_usage_missing", "cumulative total_token_usage is required; last_token_usage is not summed"))
@@ -413,6 +436,31 @@ func parseCodexAuditUsage(payload map[string]any, line int, rel string, state *a
 	state.usageExact++
 	state.row.Tokens = state.codexCompleted
 	state.row.Tokens.add(raw.normalized())
+}
+
+func observeCodexLastTokenUsage(info map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
+	raw, exists := info["last_token_usage"]
+	if !exists || raw == nil {
+		return
+	}
+	last, ok := raw.(map[string]any)
+	if !ok {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourceCodex, rel, line, "codex_last_usage_not_object", "last_token_usage must be an object or null"))
+		return
+	}
+	cachedInput, err := auditRequiredInt(last, "cached_input_tokens")
+	if err != nil {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourceCodex, rel, line, "codex_last_cached_input_tokens", err.Error()))
+		return
+	}
+	if state.codexCacheSamples == 0 {
+		state.codexCacheMin = cachedInput
+		state.codexCacheMax = cachedInput
+	} else {
+		state.codexCacheMin = min(state.codexCacheMin, cachedInput)
+		state.codexCacheMax = max(state.codexCacheMax, cachedInput)
+	}
+	state.codexCacheSamples++
 }
 
 func (t auditCodexRawTokens) atLeast(previous auditCodexRawTokens) bool {

@@ -72,6 +72,20 @@ func (t *AuditTokens) add(other AuditTokens) {
 	t.CacheReadTokens += other.CacheReadTokens
 }
 
+// AuditCodexCacheObservation keeps bounded per-request cache telemetry separate
+// from cumulative accounting. The provider path is configuration provenance,
+// not proof of where provider-side cache state physically resided.
+type AuditCodexCacheObservation struct {
+	TranscriptProducer               string `json:"transcript_producer"`
+	ModelProvider                    string `json:"model_provider,omitempty"`
+	ModelProviderSource              string `json:"model_provider_source"`
+	LastTokenUsageCachedInputSamples int    `json:"last_token_usage_cached_input_samples"`
+	LastTokenUsageCachedInputMin     *int64 `json:"last_token_usage_cached_input_min,omitempty"`
+	LastTokenUsageCachedInputMax     *int64 `json:"last_token_usage_cached_input_max,omitempty"`
+	PhysicalProviderCacheResidency   string `json:"physical_provider_cache_residency"`
+	FakOwnedCacheCoverage            string `json:"fak_owned_cache_coverage"`
+}
+
 // AuditDenominatorRow is the denominator for one source parser. RecordTypes makes
 // schema drift observable without treating harmless metadata records as usage;
 // FixtureFilesExcluded makes narrowly classified fixture exclusions observable.
@@ -105,6 +119,7 @@ type AuditTranscriptRow struct {
 	Models               []string                      `json:"models"`
 	BuildIdentities      []AuditBuildIdentity          `json:"build_identities"`
 	Tokens               AuditTokens                   `json:"tokens"`
+	CodexCache           *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
 	ToolCalls            int                           `json:"tool_calls"`
 	ToolErrors           int                           `json:"tool_errors"`
 	Distribution         []AuditDistributionRow        `json:"distribution,omitempty"`
