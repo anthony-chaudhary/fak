@@ -111,6 +111,13 @@ const (
 	// minute/day limit, so the token fields stay zero in the account metadata.
 	GroqCompoundRequestsPerMinute = 30
 	GroqCompoundRequestsPerDay    = 250
+	// OpenRouterProviderKey is the account-roster provider key for OpenRouter's
+	// OpenAI-compatible wire.
+	OpenRouterProviderKey = "openrouter"
+	// OpenRouterAPIKeyEnv is the credential env-var name OpenRouter examples use.
+	OpenRouterAPIKeyEnv = "OPENROUTER_API_KEY"
+	// OpenRouterOpenAIBaseURL is OpenRouter's OpenAI-compatible API root.
+	OpenRouterOpenAIBaseURL = "https://openrouter.ai/api/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -145,6 +152,9 @@ const (
 	// Anthropic-compatible DeepSeek endpoint is represented as KindAnthropic with
 	// DeepSeekAnthropicBaseURL, so generic /models readiness does not mis-probe it.
 	KindDeepSeek ProviderKind = DeepSeekProviderKey
+	// KindOpenRouter is OpenRouter's OpenAI-compatible Chat Completions wire.
+	// It is a provider marketplace that routes to 300+ upstream models.
+	KindOpenRouter ProviderKind = OpenRouterProviderKey
 	// KindLocal is an on-box, OpenAI-compatible server (ollama / vLLM / llama.cpp /
 	// the in-kernel model). It is the ONLY local kind, so locality is exactly
 	// Kind == KindLocal — there is no separate flag. A call routed to it is
@@ -167,7 +177,7 @@ const (
 // knownKind reports whether k is one of the closed ProviderKind set.
 func knownKind(k ProviderKind) bool {
 	switch k {
-	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindLocal, KindFleet:
+	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindOpenRouter, KindLocal, KindFleet:
 		return true
 	}
 	return false
@@ -195,6 +205,8 @@ func KindBaseURL(k ProviderKind) string {
 		return "https://api.x.ai/v1"
 	case KindDeepSeek:
 		return DeepSeekOpenAIBaseURL
+	case KindOpenRouter:
+		return OpenRouterOpenAIBaseURL
 	}
 	return ""
 }
@@ -827,6 +839,7 @@ func DefaultRoster() Roster {
 			},
 			{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 OpenAI-compatible API: 1M context, 384K max output"},
 			{ID: "deepseek-anthropic", Kind: KindAnthropic, BaseURL: DeepSeekAnthropicBaseURL, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 Anthropic-compatible API; visible to acceptance, not probed as OpenAI /models"},
+			{ID: "openrouter", Kind: KindOpenRouter, CredEnv: OpenRouterAPIKeyEnv, Label: "OpenRouter marketplace (300+ models via OpenAI-compatible wire; credential stays in OPENROUTER_API_KEY)"},
 		},
 		Default: "openai-personal",
 		Bindings: []Binding{
@@ -843,6 +856,8 @@ func DefaultRoster() Roster {
 			{Model: "deepseek-pro-anthropic", Account: "deepseek-anthropic", UpstreamModel: DeepSeekV4ProModel},
 			{Model: "deepseek-chat-compat", Account: "deepseek", UpstreamModel: "deepseek-chat", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " non-thinking mode"},
 			{Model: "deepseek-reasoner-compat", Account: "deepseek", UpstreamModel: "deepseek-reasoner", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " thinking mode"},
+			{Model: "openrouter-free", Account: "openrouter", UpstreamModel: "openrouter/auto"},
+			{Model: "openrouter-best", Account: "openrouter", UpstreamModel: "openrouter/best"},
 		},
 	}
 }

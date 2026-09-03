@@ -64,6 +64,7 @@ type ProviderContract struct {
 var providerContracts = []ProviderContract{
 	openAIProviderContract(),
 	anthropicProviderContract(),
+	openRouterProviderContract(),
 }
 
 // DefaultProviderContracts returns a detached, deterministically ordered registry snapshot.
@@ -200,6 +201,24 @@ func anthropicProviderContract() ProviderContract {
 		RetryStatusCodes: known("408,409,429,5xx; x-should-retry overrides", retry), RateLimitHeaders: unknown[string](retry), SessionResume: notApplicable[string](sdk),
 		SupportMaturity: known("production", audit),
 		ServiceTiers:    known(ServiceTierContract{Supported: []ServiceTierBinding{{Mode: ServiceModeStandard}, {Mode: ServiceModeFast, WireValue: "auto"}}, RequestField: "service_tier", RealizedField: "usage.service_tier", CacheOnSwitch: "invalidates", PremiumPrice: KnowledgeUnknown, Fallback: "provider_may_realize_standard"}, FactSource{URL: "https://docs.anthropic.com/en/api/service-tiers", Ref: "observed-2026-08-25", Path: "service_tier", ObservedAt: "2026-08-25"}),
+	}
+}
+
+func openRouterProviderContract() ProviderContract {
+	sdk := FactSource{URL: "https://github.com/OpenRouterTeam/ai-sdk-provider", Ref: "b96b20799eadeb72a180ef021b85254fc1500746", Path: "src/index.ts", ObservedAt: "2026-08-18"}
+	docs := FactSource{URL: "https://openrouter.ai/docs", Ref: "observed-2026-08-18", Path: "provider selection and routing", ObservedAt: "2026-08-18"}
+	catalog := FactSource{URL: "https://openrouter.ai/api/v1/models", Ref: "observed-2026-08-18", Path: "live catalog snapshot", ObservedAt: "2026-08-18"}
+	return ProviderContract{
+		Provider: "openrouter", Family: "openrouter", ModelScope: "*",
+		Endpoint:   known("https://openrouter.ai/api/v1", FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "src/index.ts", ObservedAt: sdk.ObservedAt}),
+		AuthEnv:    known("OPENROUTER_API_KEY", FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "src/index.ts", ObservedAt: sdk.ObservedAt}),
+		APIDialect: known("openai-compatible", sdk), ContextTokens: unknown[int](catalog), MaxOutputTokens: unknown[int](catalog),
+		ToolCalls: known(true, sdk), ParallelToolCalls: known(true, sdk), StructuredOutput: unknown[bool](sdk), StreamingEvents: known("chat.completion.chunk", sdk),
+		PromptCaching:   known(false, FactSource{URL: docs.URL, Ref: docs.Ref, Path: "prompt-caching", ObservedAt: docs.ObservedAt}),
+		CacheTTLSeconds: notApplicable[int](sdk), MaxCacheBreakpoints: notApplicable[int](sdk), UsageDetails: notApplicable[string](sdk),
+		RetryStatusCodes: known("408,409,429,5xx", sdk), RateLimitHeaders: unknown[string](sdk), SessionResume: notApplicable[string](sdk),
+		SupportMaturity: known("production", docs),
+		ServiceTiers:    known(ServiceTierContract{Supported: []ServiceTierBinding{{Mode: ServiceModeStandard}, {Mode: ServiceModeFast, WireValue: "priority"}}, RequestField: "provider.sort", RealizedField: "", CacheOnSwitch: "preserved", PremiumPrice: KnowledgeUnknown, Fallback: "provider_may_realize_default"}, FactSource{URL: docs.URL, Ref: docs.Ref, Path: "provider-selection", ObservedAt: docs.ObservedAt}),
 	}
 }
 
