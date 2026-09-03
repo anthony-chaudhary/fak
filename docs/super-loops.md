@@ -95,6 +95,7 @@ folded debt arrives as one measured row, so nothing is counted twice:
 ```
 superloop walk: improve-quality — ACTION (superloop_debt)
   aggregate debt 1009 (floor 0)  members 6  walked 5  unmeasured 0  dark 0
+  rollup (2 intents): 11 leaf member(s)  walked 11  unmeasured 0  dark 0  containers 1
 
   worst-first — enter these in order:
   #  MEMBER                    DEBT  ACTION
@@ -106,6 +107,13 @@ superloop walk: improve-quality — ACTION (superloop_debt)
 
   → worst-first: superloop "sweep-surfaces" — descend: `fak superloop walk sweep-surfaces`
 ```
+
+### Knowing the denominator — direct vs roll-up
+
+A super loop distinguishes two denominators:
+
+- **Direct candidate denominator (`members`)** — the members evaluated directly at this intent's altitude (e.g. 6 in `improve-quality`: 5 evaluated plus 1 container pointer; or the expanded candidate count in `tend-fleet`). By conservation: `Walked + Unmeasured + Containers == Members`.
+- **Roll-up leaf denominator (`rollup.leaf_members`)** — the true population of terminal leaves (scorecards, loops, utilization pools, trajectory curves) evaluated across the entire descend tree. When sub-superloops are shared (fan-in > 1, such as `drain-issues`), distinct leaves are counted once, preserving the once-only invariant without double-counting. An unmeasured or dark leaf anywhere in the subtree is tracked in `rollup.unmeasured` and `rollup.dark` rather than being masked by the parent container.
 
 ## What the walk reads on a loop member — three dimensions, not just liveness
 

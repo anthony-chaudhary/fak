@@ -1257,11 +1257,34 @@
           "category": "incidental",
           "reason": "Asymmetric KV cache byte sizing helper (#10731)",
           "token": "KVCacheBytesAsymmetric"
+        },
+        {
+          "category": "incidental",
+          "reason": "asymmetric kv cache bytes calculation",
+          "token": "AsymmetricKVCacheBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "asymmetric kv cache budget report struct",
+          "token": "AsymmetricKVCacheBudgetReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "asymmetric kv cache multi-layer struct",
+          "token": "AsymmetricKVCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "asymmetric kv cache constructor",
+          "token": "NewAsymmetricKVCache"
         }
       ],
       "id": "cache",
       "ignore": [
         "ApplyCachePricing",
+        "AsymmetricKVCache",
+        "AsymmetricKVCacheBudgetReport",
+        "AsymmetricKVCacheBytes",
         "CACHE_SCOPE",
         "CacheAvoidedTokens",
         "CacheCachedPromptTokens",
@@ -1312,6 +1335,7 @@
         "KVCacheBytesAsymmetric",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
+        "NewAsymmetricKVCache",
         "NewCacheStateAllowlist",
         "NewSlidingCacheMetrics",
         "NonCache",
@@ -10068,6 +10092,11 @@
           "category": "incidental",
           "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
           "token": "readyCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "max context tokens for budget calculation",
+          "token": "MaxContextTokensForBudget"
         }
       ],
       "exclude": [
@@ -10091,6 +10120,7 @@
         "FullContextInputTokens",
         "IsCopiedContext",
         "LookupSnapshotTieredContext",
+        "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
         "RestoreCalls",

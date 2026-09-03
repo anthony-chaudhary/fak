@@ -558,8 +558,13 @@ func superloopFlagName(arg string) string {
 
 func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 	fmt.Fprintf(w, "superloop walk: %s — %s (%s)\n", rep.Name, rep.Verdict, rep.Finding)
-	fmt.Fprintf(w, "  aggregate debt %d (floor %d)  members %d  walked %d  unmeasured %d  dark %d\n",
-		rep.TotalDebt, rep.Floor, rep.Members, rep.Walked, rep.Unmeasured, rep.Dark)
+	if rep.DeclaredMembers > 0 && rep.DeclaredMembers != rep.Members {
+		fmt.Fprintf(w, "  aggregate debt %d (floor %d)  members %d (%d declared)  walked %d  unmeasured %d  dark %d\n",
+			rep.TotalDebt, rep.Floor, rep.Members, rep.DeclaredMembers, rep.Walked, rep.Unmeasured, rep.Dark)
+	} else {
+		fmt.Fprintf(w, "  aggregate debt %d (floor %d)  members %d  walked %d  unmeasured %d  dark %d\n",
+			rep.TotalDebt, rep.Floor, rep.Members, rep.Walked, rep.Unmeasured, rep.Dark)
+	}
 	if rep.Spinning > 0 {
 		// #4956: a member can be live on cadence and still produce nothing verified.
 		fmt.Fprintf(w, "  spinning %d — ticking on cadence with zero advanced verified progress (%s)\n",
@@ -570,23 +575,19 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 		fmt.Fprintf(w, "  orphaned %d — emitting follow-on work nobody advances (%s)\n",
 			rep.Orphaned, relay.ReasonOrphanedFollowon)
 	}
-	if rep.Rollup.Members > 0 {
-		var extra []string
+	if rep.Rollup.Intents > 1 {
+		fmt.Fprintf(w, "  rollup (%d intents): %d leaf member(s)  walked %d  unmeasured %d  dark %d",
+			rep.Rollup.Intents, rep.Rollup.LeafMembers, rep.Rollup.Walked, rep.Rollup.Unmeasured, rep.Rollup.Dark)
 		if rep.Rollup.Spinning > 0 {
-			extra = append(extra, fmt.Sprintf("spinning %d", rep.Rollup.Spinning))
+			fmt.Fprintf(w, "  spinning %d", rep.Rollup.Spinning)
 		}
 		if rep.Rollup.Orphaned > 0 {
-			extra = append(extra, fmt.Sprintf("orphaned %d", rep.Rollup.Orphaned))
+			fmt.Fprintf(w, "  orphaned %d", rep.Rollup.Orphaned)
 		}
-		if rep.Rollup.Shortfall > 0 {
-			extra = append(extra, fmt.Sprintf("shortfall %d", rep.Rollup.Shortfall))
+		if rep.Rollup.Containers > 0 {
+			fmt.Fprintf(w, "  containers %d", rep.Rollup.Containers)
 		}
-		extraStr := ""
-		if len(extra) > 0 {
-			extraStr = "  " + strings.Join(extra, "  ")
-		}
-		fmt.Fprintf(w, "  rollup: leaves %d  walked %d  unmeasured %d  dark %d%s\n",
-			rep.Rollup.Members, rep.Rollup.Walked, rep.Rollup.Unmeasured, rep.Rollup.Dark, extraStr)
+		fmt.Fprintln(w)
 	}
 	if rep.IssueTarget > 0 {
 		// The intent declares a headline issue target (run-the-night's ~200 overnight).

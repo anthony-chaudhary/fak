@@ -1005,9 +1005,73 @@ type MemberStatus struct {
 	// checkable against dos_check_reason, never free text (the ProgressReason
 	// discipline, #4957).
 	FollowOnReason string `json:"follow_on_reason,omitempty"`
-	// Rollup preserves the subwalk's roll-up metrics when this status represents
-	// a descended sub-superloop (issue #10916).
-	Rollup *RollupSummary `json:"rollup,omitempty"`
+	// Subwalk carries the full folded report summary of a descended sub-super-loop
+	// (KindSuperloop), preserving its roll-up metrics, leaf counts, and denominator
+	// so the parent walk can compute a true aggregate roll-up. Nil for non-superloop members.
+	Subwalk *SubwalkSummary `json:"subwalk,omitempty"`
+}
+
+// SubwalkSummary is the summary of a descended sub-super-loop walk preserved by
+// [SubwalkStatus] on a [MemberStatus]. It records the sub-walk's verdict, debt,
+// and both its direct and recursive leaf denominator metrics so the parent walk can
+// fold a true aggregate roll-up across the entire tree.
+type SubwalkSummary struct {
+	Intent           string         `json:"intent"`
+	Title            string         `json:"title,omitempty"`
+	Verdict          string         `json:"verdict"`
+	Finding          string         `json:"finding"`
+	Satisfied        bool           `json:"satisfied"`
+	TotalDebt        int            `json:"total_debt"`
+	Floor            int            `json:"floor"`
+	Members          int            `json:"members"`
+	Walked           int            `json:"walked"`
+	Unmeasured       int            `json:"unmeasured"`
+	Dark             int            `json:"dark"`
+	Spinning         int            `json:"spinning,omitempty"`
+	Orphaned         int            `json:"orphaned,omitempty"`
+	IssueTarget      int            `json:"issue_target,omitempty"`
+	IssueProgressed  int            `json:"issue_progressed,omitempty"`
+	IssueShortfall   int            `json:"issue_shortfall,omitempty"`
+	Rollup           RollupSummary  `json:"rollup"`
+	LeafStatuses     []MemberStatus `json:"leaf_statuses,omitempty"`
+	DescendedIntents []string       `json:"descended_intents,omitempty"`
+}
+
+// RollupSummary is the hierarchical aggregate roll-up across this intent and all
+// descended sub-super-loops. It provides the true leaf-level denominator and
+// health roll-up, deduplicating leaves across shared sub-super-loops so each
+// distinct surface in the fleet is counted exactly once.
+type RollupSummary struct {
+	// Intents is the count of super-loop intents in this roll-up hierarchy
+	// (1 for a leaf intent with no sub-super-loops; >1 when descending).
+	Intents int `json:"intents"`
+
+	// DescendedIntents lists the names of every super loop intent included in this
+	// roll-up (sorted, deduplicated).
+	DescendedIntents []string `json:"descended_intents,omitempty"`
+
+	// LeafMembers is the true leaf denominator: total distinct leaf surfaces/members
+	// evaluated across the whole hierarchy. By conservation:
+	// LeafMembers == Walked + Unmeasured.
+	LeafMembers int `json:"leaf_members"`
+	Walked      int `json:"walked"`
+	Unmeasured  int `json:"unmeasured"`
+	Dark        int `json:"dark"`
+	Spinning    int `json:"spinning,omitempty"`
+	Orphaned    int `json:"orphaned,omitempty"`
+	Containers  int `json:"containers,omitempty"`
+
+	// Debt & Target
+	TotalDebt       int `json:"total_debt"`
+	Floor           int `json:"floor"`
+	IssueTarget     int `json:"issue_target,omitempty"`
+	IssueProgressed int `json:"issue_progressed,omitempty"`
+	IssueShortfall  int `json:"issue_shortfall,omitempty"`
+
+	// Satisfied is true iff the entire rolled-up tree is satisfied:
+	// no unmeasured leaves, no dark loops, no spinning, no orphaned,
+	// debt <= floor, and no issue shortfall.
+	Satisfied bool `json:"satisfied"`
 }
 
 // WorkItem is one worst-first entry in the walk's plan: enter this member next, and
@@ -1071,31 +1135,6 @@ type BudgetRow struct {
 	Hold      string `json:"hold,omitempty"`
 }
 
-// RollupSummary aggregates the leaf population across the whole descend tree,
-// deduplicating leaves from shared sub-walks by member key (#10916).
-type RollupSummary struct {
-	Members    int  `json:"members"`
-	Walked     int  `json:"walked"`
-	Unmeasured int  `json:"unmeasured"`
-	Dark       int  `json:"dark"`
-	Spinning   int  `json:"spinning,omitempty"`
-	Orphaned   int  `json:"orphaned,omitempty"`
-	Shortfall  int  `json:"shortfall,omitempty"`
-	Satisfied  bool `json:"satisfied"`
-
-	leaves []MemberStatus
-}
-
-// Leaves returns a copy of the deduplicated leaf member statuses that formed this roll-up.
-func (r RollupSummary) Leaves() []MemberStatus {
-	if len(r.leaves) == 0 {
-		return nil
-	}
-	out := make([]MemberStatus, len(r.leaves))
-	copy(out, r.leaves)
-	return out
-}
-
 // WalkReport is the folded intent-level verdict + the worst-first worklist: the
 // answer to "I asked to <intent> — what is the status of everything under it, and
 // what should I enter first?"
@@ -1125,10 +1164,15 @@ type WalkReport struct {
 	// decoration. 0 when there is no target, no measurement, or the target is met.
 	IssueShortfall int  `json:"issue_shortfall,omitempty"`
 	Satisfied      bool `json:"satisfied"`
-	Members        int  `json:"members"`
-	Walked         int  `json:"walked"`
-	Unmeasured     int  `json:"unmeasured"`
-	Dark           int  `json:"dark"`
+	// Members is the evaluated direct member count (the direct denominator).
+	// When template members expand (KindLoopFleet, KindTrajectory), it reflects
+	// the expanded candidate count so Walked + Unmeasured + Containers == Members.
+	Members int `json:"members"`
+	// DeclaredMembers is the count of declared member templates on the intent (len(s.Members)).
+	DeclaredMembers int `json:"declared_members,omitempty"`
+	Walked          int `json:"walked"`
+	Unmeasured      int `json:"unmeasured"`
+	Dark            int `json:"dark"`
 	// Spinning counts measured members whose progress verdict is SPINNING —
 	// ticking on cadence with zero advanced verified progress (#4956). Like Dark
 	// it blocks Satisfied: a fleet that fires without producing is not tended.
@@ -1136,12 +1180,20 @@ type WalkReport struct {
 	// Orphaned counts measured members whose follow-on verdict is ORPHANED —
 	// emitting work nobody advances (#4957). Like Dark and Spinning it blocks
 	// Satisfied: a loop whose output piles up unowned is not tended.
-	Orphaned int            `json:"orphaned,omitempty"`
+	Orphaned int `json:"orphaned,omitempty"`
+	// Containers is the count of unread container / descend-pointer members at this direct level.
+	Containers int `json:"containers,omitempty"`
+
+	// Rollup is the hierarchical aggregate roll-up across this intent and all descended
+	// sub-super-loops. It provides the true leaf-level denominator and health roll-up.
+	Rollup RollupSummary `json:"rollup"`
+
+	// LeafStatuses contains the distinct evaluated leaf member statuses across the
+	// roll-up, deduplicated by member key.
+	LeafStatuses []MemberStatus `json:"leaf_statuses,omitempty"`
+
 	Worklist []WorkItem     `json:"worklist"`
 	Statuses []MemberStatus `json:"statuses"`
-	// Rollup represents the aggregate leaf population across the whole descend tree,
-	// deduplicating leaves from shared sub-walks by member key (#10916).
-	Rollup RollupSummary `json:"rollup"`
 	// Budget is the intent's declared generation-budget envelope folded into one row
 	// per contract dimension (Time/Tokens/Workers/Review), each carrying the declared
 	// cap and the per-worklist-member share. Always four rows: an unbudgeted dimension
@@ -1257,6 +1309,8 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		IssueTarget:           s.IssueTarget,
 		IssueProgressMeasured: cfg.issueProgressMeasured,
 		IssueProgressed:       cfg.issueProgressed,
+		DeclaredMembers:       len(s.Members),
+		Members:               len(s.Members),
 		Statuses:              statuses,
 	}
 
@@ -1269,6 +1323,7 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 	ranked := append([]MemberStatus(nil), statuses...)
 	for _, st := range statuses {
 		if st.Container {
+			rep.Containers++
 			continue // a descend-pointer: not weighed, not counted (see MemberStatus).
 		}
 		if st.Measured {
@@ -1287,10 +1342,119 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 			rep.Orphaned++
 		}
 	}
-	// Truthfully report evaluated candidate members (Walked + Unmeasured, issue #10916).
-	rep.Members = rep.Walked + rep.Unmeasured
-	if rep.Members == 0 && len(statuses) == 0 {
-		rep.Members = len(s.Members)
+
+	// When template members expand (e.g. KindLoopFleet:all or KindTrajectory:open),
+	// the evaluated direct candidate denominator is Walked + Unmeasured + Containers.
+	if rep.Walked+rep.Unmeasured > rep.Members {
+		rep.Members = rep.Walked + rep.Unmeasured + rep.Containers
+	}
+
+	descendedIntents := map[string]bool{s.Name: true}
+	leafMap := make(map[string]MemberStatus)
+	var rollupContainers int
+	var subwalkShortfall int
+	var subwalkTarget int
+	var subwalkProgressed int
+
+	for _, st := range statuses {
+		if st.Container {
+			rollupContainers++
+			continue
+		}
+		if st.Subwalk != nil {
+			descendedIntents[st.Subwalk.Intent] = true
+			for _, in := range st.Subwalk.DescendedIntents {
+				descendedIntents[in] = true
+			}
+			subwalkShortfall += st.Subwalk.IssueShortfall
+			subwalkTarget += st.Subwalk.IssueTarget
+			subwalkProgressed += st.Subwalk.IssueProgressed
+			rollupContainers += st.Subwalk.Rollup.Containers
+
+			if len(st.Subwalk.LeafStatuses) > 0 {
+				for _, ls := range st.Subwalk.LeafStatuses {
+					k := memberKey(ls.Member)
+					if _, exists := leafMap[k]; !exists {
+						leafMap[k] = ls
+					}
+				}
+			} else {
+				k := memberKey(st.Member)
+				if _, exists := leafMap[k]; !exists {
+					synth := st
+					if st.Subwalk.Unmeasured > 0 {
+						synth.Measured = false
+					}
+					if st.Subwalk.Dark > 0 {
+						synth.Dark = true
+					}
+					leafMap[k] = synth
+				}
+			}
+		} else {
+			k := memberKey(st.Member)
+			if _, exists := leafMap[k]; !exists {
+				leafMap[k] = st
+			}
+		}
+	}
+
+	rep.Rollup.Intents = len(descendedIntents)
+	rep.Rollup.Floor = s.Floor
+	rep.Rollup.Containers = rollupContainers
+
+	descendedList := make([]string, 0, len(descendedIntents))
+	for in := range descendedIntents {
+		descendedList = append(descendedList, in)
+	}
+	sort.Strings(descendedList)
+	rep.Rollup.DescendedIntents = descendedList
+
+	keys := make([]string, 0, len(leafMap))
+	for k := range leafMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		rep.LeafStatuses = append(rep.LeafStatuses, leafMap[k])
+	}
+
+	if rep.Rollup.Intents == 1 {
+		rep.Rollup.LeafMembers = rep.Walked + rep.Unmeasured
+		rep.Rollup.Walked = rep.Walked
+		rep.Rollup.Unmeasured = rep.Unmeasured
+		rep.Rollup.Dark = rep.Dark
+		rep.Rollup.Spinning = rep.Spinning
+		rep.Rollup.Orphaned = rep.Orphaned
+		rep.Rollup.TotalDebt = rep.TotalDebt
+		rep.Rollup.IssueTarget = rep.IssueTarget
+		rep.Rollup.IssueProgressed = rep.IssueProgressed
+		rep.Rollup.IssueShortfall = rep.IssueShortfall
+		rep.Rollup.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.Spinning == 0 && rep.Orphaned == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0
+	} else {
+		for _, ls := range rep.LeafStatuses {
+			if ls.Measured {
+				rep.Rollup.Walked++
+				rep.Rollup.TotalDebt += ls.Debt
+			} else {
+				rep.Rollup.Unmeasured++
+			}
+			if ls.Dark {
+				rep.Rollup.Dark++
+			}
+			if ls.Progress == ProgressSpinning {
+				rep.Rollup.Spinning++
+			}
+			if ls.FollowOn == FollowonOrphaned {
+				rep.Rollup.Orphaned++
+			}
+		}
+		rep.Rollup.LeafMembers = rep.Rollup.Walked + rep.Rollup.Unmeasured
+		rep.Rollup.IssueTarget = rep.IssueTarget + subwalkTarget
+		rep.Rollup.IssueProgressed = rep.IssueProgressed + subwalkProgressed
+		rep.Rollup.IssueShortfall = rep.IssueShortfall + subwalkShortfall
+		rep.Rollup.TotalDebt += rep.Rollup.IssueShortfall
+		rep.Rollup.Satisfied = rep.Rollup.Unmeasured == 0 && rep.Rollup.Dark == 0 && rep.Rollup.Spinning == 0 && rep.Rollup.Orphaned == 0 && rep.Rollup.TotalDebt <= s.Floor && rep.Rollup.IssueShortfall == 0
 	}
 
 	// Classify the worklist-bound members into the gardening/throughput/neutral mix and
@@ -1394,118 +1558,8 @@ func Walk(s Super, statuses []MemberStatus, opts ...WalkOpt) WalkReport {
 		rep.IssueShortfall = s.IssueTarget - cfg.issueProgressed
 	}
 
-	// Compute RollupSummary representing the aggregate leaf population across
-	// the whole descend tree, deduplicating leaves from shared sub-walks
-	// by member key (#10916).
-	leafMap := make(map[string]MemberStatus)
-	var leafOrder []string
-	shortfalls := make(map[string]int)
-	if rep.IssueShortfall > 0 {
-		shortfalls[s.Name] = rep.IssueShortfall
-	}
-
-	for _, st := range statuses {
-		if st.Container {
-			continue
-		}
-		if st.Rollup != nil {
-			// Subwalk status: incorporate its rolled-up leaves and shortfalls.
-			if st.Rollup.Shortfall > 0 {
-				shortfalls[st.Member.Ref] = st.Rollup.Shortfall
-			}
-			leaves := st.Rollup.leaves
-			if len(leaves) == 0 && st.Rollup.Members > 0 {
-				key := memberKey(st.Member)
-				if _, ok := leafMap[key]; !ok {
-					leafMap[key] = st
-					leafOrder = append(leafOrder, key)
-				}
-			} else {
-				for _, leaf := range leaves {
-					key := memberKey(leaf.Member)
-					if existing, ok := leafMap[key]; ok {
-						// Merge worst-case leaf health for deduplicated leaf.
-						if !leaf.Measured {
-							existing.Measured = false
-						}
-						if leaf.Dark {
-							existing.Dark = true
-						}
-						if leaf.Progress == ProgressSpinning {
-							existing.Progress = ProgressSpinning
-							existing.ProgressReason = leaf.ProgressReason
-						}
-						if leaf.FollowOn == FollowonOrphaned {
-							existing.FollowOn = FollowonOrphaned
-							existing.FollowOnReason = leaf.FollowOnReason
-						}
-						if leaf.Debt > existing.Debt {
-							existing.Debt = leaf.Debt
-						}
-						leafMap[key] = existing
-					} else {
-						leafMap[key] = leaf
-						leafOrder = append(leafOrder, key)
-					}
-				}
-			}
-		} else {
-			// Direct leaf member.
-			key := memberKey(st.Member)
-			if existing, ok := leafMap[key]; ok {
-				if !st.Measured {
-					existing.Measured = false
-				}
-				if st.Dark {
-					existing.Dark = true
-				}
-				if st.Progress == ProgressSpinning {
-					existing.Progress = ProgressSpinning
-					existing.ProgressReason = st.ProgressReason
-				}
-				if st.FollowOn == FollowonOrphaned {
-					existing.FollowOn = FollowonOrphaned
-					existing.FollowOnReason = st.FollowOnReason
-				}
-				if st.Debt > existing.Debt {
-					existing.Debt = st.Debt
-				}
-				leafMap[key] = existing
-			} else {
-				leafMap[key] = st
-				leafOrder = append(leafOrder, key)
-			}
-		}
-	}
-
-	var rollup RollupSummary
-	for _, sf := range shortfalls {
-		rollup.Shortfall += sf
-	}
-	rollup.Members = len(leafMap)
-	rollup.leaves = make([]MemberStatus, 0, len(leafMap))
-	for _, key := range leafOrder {
-		leaf := leafMap[key]
-		rollup.leaves = append(rollup.leaves, leaf)
-		if leaf.Measured {
-			rollup.Walked++
-		} else {
-			rollup.Unmeasured++
-		}
-		if leaf.Dark {
-			rollup.Dark++
-		}
-		if leaf.Progress == ProgressSpinning {
-			rollup.Spinning++
-		}
-		if leaf.FollowOn == FollowonOrphaned {
-			rollup.Orphaned++
-		}
-	}
-	rollup.Satisfied = rollup.Unmeasured == 0 && rollup.Dark == 0 && rollup.Spinning == 0 && rollup.Orphaned == 0 && rollup.Shortfall == 0
-	rep.Rollup = rollup
-
-	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.Spinning == 0 && rep.Orphaned == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0 && rep.Rollup.Satisfied
+	directSatisfied := rep.Unmeasured == 0 && rep.Dark == 0 && rep.Spinning == 0 && rep.Orphaned == 0 && rep.TotalDebt <= s.Floor && rep.IssueShortfall == 0
+	rep.Satisfied = directSatisfied && rep.Rollup.Satisfied
 	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = walkVerdict(s, rep)
 	return rep
 }
@@ -1571,38 +1625,86 @@ func divideBudget(b GenerationBudget, n int) ([]BudgetRow, Allocation) {
 // carrying debt 2. The shortfall is 0 whenever the sub-walk declares no target or met
 // it, so this is a no-op for shortfall-free subs and the 1-unit floor still guards the
 // zero-shortfall unsatisfied case (dark/unmeasured members with no headline).
+//
+// Subwalk preserves the sub-walk's roll-up summary, leaf counts, and denominator so
+// the parent walk can compute a true hierarchical aggregate roll-up without losing
+// sight of the underlying population.
 func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
 	debt := rep.TotalDebt + rep.IssueShortfall
 	if !rep.Satisfied && debt <= 0 {
 		debt = 1
 	}
-	rollup := rep.Rollup
-	if rollup.Members == 0 && rep.Members > 0 {
-		rollup.Members = rep.Members
-		rollup.Walked = rep.Walked
-		rollup.Unmeasured = rep.Unmeasured
-		rollup.Dark = rep.Dark
-		rollup.Spinning = rep.Spinning
-		rollup.Orphaned = rep.Orphaned
-		rollup.Shortfall = rep.IssueShortfall
-		rollup.Satisfied = rep.Satisfied
-	} else if rollup.Members == 0 && (rep.Unmeasured > 0 || rep.Dark > 0 || rep.Spinning > 0 || rep.Orphaned > 0 || rep.TotalDebt > 0) {
-		rollup.Walked = rep.Walked
-		rollup.Unmeasured = rep.Unmeasured
-		rollup.Dark = rep.Dark
-		rollup.Spinning = rep.Spinning
-		rollup.Orphaned = rep.Orphaned
-		rollup.Shortfall = rep.IssueShortfall
-		rollup.Satisfied = rep.Satisfied
-		rollup.Members = rollup.Walked + rollup.Unmeasured
+	dark := rep.Dark > 0 || rep.Rollup.Dark > 0
+	var prog MemberProgress
+	var progReason string
+	if rep.Spinning > 0 || rep.Rollup.Spinning > 0 {
+		prog = ProgressSpinning
+		progReason = relay.ReasonNoProgress
 	}
+	var followOn MemberFollowon
+	var followOnReason string
+	if rep.Orphaned > 0 || rep.Rollup.Orphaned > 0 {
+		followOn = FollowonOrphaned
+		followOnReason = relay.ReasonOrphanedFollowon
+	}
+
+	leaves := rep.Rollup.LeafMembers
+	if leaves == 0 {
+		leaves = rep.Members
+	}
+	unm := rep.Unmeasured
+	if rep.Rollup.Unmeasured > unm {
+		unm = rep.Rollup.Unmeasured
+	}
+	darkCount := rep.Dark
+	if rep.Rollup.Dark > darkCount {
+		darkCount = rep.Rollup.Dark
+	}
+
+	detail := fmt.Sprintf("descended: %s (%s) — debt %d, shortfall %d, unmeasured %d, dark %d across %d member(s)",
+		rep.Verdict, rep.Finding, rep.TotalDebt, rep.IssueShortfall, unm, darkCount, leaves)
+
+	descended := make([]string, 0, len(rep.Rollup.DescendedIntents)+1)
+	descended = append(descended, rep.Name)
+	for _, in := range rep.Rollup.DescendedIntents {
+		if in != rep.Name {
+			descended = append(descended, in)
+		}
+	}
+	sort.Strings(descended)
+
+	sub := &SubwalkSummary{
+		Intent:           rep.Name,
+		Title:            rep.Title,
+		Verdict:          rep.Verdict,
+		Finding:          rep.Finding,
+		Satisfied:        rep.Satisfied,
+		TotalDebt:        rep.TotalDebt,
+		Floor:            rep.Floor,
+		Members:          rep.Members,
+		Walked:           rep.Walked,
+		Unmeasured:       rep.Unmeasured,
+		Dark:             rep.Dark,
+		Spinning:         rep.Spinning,
+		Orphaned:         rep.Orphaned,
+		IssueTarget:      rep.IssueTarget,
+		IssueProgressed:  rep.IssueProgressed,
+		IssueShortfall:   rep.IssueShortfall,
+		Rollup:           rep.Rollup,
+		LeafStatuses:     rep.LeafStatuses,
+		DescendedIntents: descended,
+	}
+
 	return MemberStatus{
-		Member:   m,
-		Measured: true,
-		Debt:     debt,
-		Dark:     rep.Dark > 0 || rollup.Dark > 0,
-		Rollup:   &rollup,
-		Detail: fmt.Sprintf("descended: %s (%s) — debt %d, shortfall %d, unmeasured %d, dark %d across %d member(s)",
-			rep.Verdict, rep.Finding, rep.TotalDebt, rep.IssueShortfall, rep.Unmeasured, rep.Dark, rep.Members),
+		Member:         m,
+		Measured:       true,
+		Debt:           debt,
+		Dark:           dark,
+		Progress:       prog,
+		ProgressReason: progReason,
+		FollowOn:       followOn,
+		FollowOnReason: followOnReason,
+		Detail:         detail,
+		Subwalk:        sub,
 	}
 }

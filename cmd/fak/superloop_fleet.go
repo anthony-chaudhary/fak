@@ -84,9 +84,9 @@ type superloopFleetReport struct {
 	Orphaned   int                      `json:"orphaned,omitempty"`
 	TotalDebt  int                      `json:"total_debt"`
 	Floor      int                      `json:"floor"`
+	Rollup     *superloop.RollupSummary `json:"rollup,omitempty"`
 	Head       *superloop.WorkItem      `json:"head,omitempty"`
 	NextAction string                   `json:"next_action"`
-	Rollup     *superloop.RollupSummary `json:"rollup,omitempty"`
 }
 
 // superloopFleetWalk is the one shared read both read-only verbs fold: look the
@@ -129,8 +129,8 @@ func superloopFleetStatus(stdout, stderr io.Writer, argv []string) int {
 		Orphaned:   rep.Orphaned,
 		TotalDebt:  rep.TotalDebt,
 		Floor:      rep.Floor,
-		NextAction: rep.NextAction,
 		Rollup:     &rep.Rollup,
+		NextAction: rep.NextAction,
 	}
 	if len(rep.Worklist) > 0 {
 		head := rep.Worklist[0]
@@ -149,9 +149,10 @@ func superloopFleetStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "superloop fleet: %s — %s (%s)\n", report.Intent, report.Verdict, report.Finding)
 	fmt.Fprintf(stdout, "  members %d  walked %d  unmeasured %d  |  dark %d  spinning %d  orphaned %d  |  debt %d (floor %d)\n",
 		report.Members, report.Walked, report.Unmeasured, report.Dark, report.Spinning, report.Orphaned, report.TotalDebt, report.Floor)
-	if report.Rollup != nil && report.Rollup.Members > 0 {
-		fmt.Fprintf(stdout, "  rollup: leaves %d  walked %d  unmeasured %d  dark %d\n",
-			report.Rollup.Members, report.Rollup.Walked, report.Rollup.Unmeasured, report.Rollup.Dark)
+	if report.Rollup != nil && report.Rollup.Intents > 1 {
+		fmt.Fprintf(stdout, "  rollup (%d intents): %d leaf member(s)  walked %d  unmeasured %d  |  dark %d  spinning %d  orphaned %d\n",
+			report.Rollup.Intents, report.Rollup.LeafMembers, report.Rollup.Walked, report.Rollup.Unmeasured,
+			report.Rollup.Dark, report.Rollup.Spinning, report.Rollup.Orphaned)
 	}
 	fmt.Fprintf(stdout, "  ranked worst-first on the product liveness × progress × follow-on (fleetwalk.go, #4958)\n")
 	if report.Head != nil {
