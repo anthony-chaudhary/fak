@@ -200,3 +200,18 @@ func assertFloat64(t *testing.T, name string, got *float64, want float64) {
 		t.Fatalf("%s=%v want %v", name, got, want)
 	}
 }
+
+func TestReadAndParseProcHostSignals(t *testing.T) {
+	var host HostSignals
+	called := false
+	parser := func(content string, h *HostSignals) bool {
+		called = true
+		return true
+	}
+	if readAndParseProc("/nonexistent/proc/test", parser, &host) {
+		t.Fatal("expected false for nonexistent path")
+	}
+	if called {
+		t.Fatal("parser should not be called for nonexistent path")
+	}
+}
