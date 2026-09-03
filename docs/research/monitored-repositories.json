@@ -4,6 +4,36 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "wkljohn/ds4-strix-halo-tp-odinlink",
+      "url": "https://github.com/wkljohn/ds4-strix-halo-tp-odinlink",
+      "status": "studied",
+      "priority": 1,
+      "why": "High-performance C99/HIP inference engine for DeepSeek-V4 and GLM-5 on dual AMD Strix Halo APU clusters, featuring Tensor Parallelism over USB4 OdinLink and RoCE v2, contiguous range expert sharding, direct slab RDMA, AVX-512 WC streaming copy, Wave32 KDA linear recurrence, and direct I/O.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "48e10779d4723e40a8949d0ba59c262d35379a03",
+      "stars_at_check": 15,
+      "last_push_at_check": "2026-09-02T12:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-DS4-STRIX-HALO-TP-ODINLINK-2026-09-02.md",
+      "receipt_id": "study_dc99f78a887e2ab60a9ccf5807650b6da85ac992d7f69d96b335360c55892811",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "48e10779d4723e40a8949d0ba59c262d35379a03",
+        "subsystem_count": 5,
+        "candidate_count": 8,
+        "filed_issue_count": 8,
+        "issue_refs": [
+          "#10755",
+          "#10756",
+          "#10758",
+          "#10759",
+          "#10760",
+          "#10761",
+          "#10762",
+          "#10763"
+        ]
+      }
+    },
+    {
       "repository": "OpenRouterTeam/go-sdk",
       "url": "https://github.com/OpenRouterTeam/go-sdk",
       "status": "studied",
