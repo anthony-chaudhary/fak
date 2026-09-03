@@ -139,6 +139,8 @@ func TestCurrentOperationalAndFixtureRefsAreClassified(t *testing.T) {
 		"cmd/microcontextdemo/natural_multitool.go":          RefClassFixture,
 		"internal/devcmd/ci_preflight.go":                    RefClassDevelopmentSource,
 		"internal/selfinstall/roles.go":                      RefClassPublicFrontDoor,
+		"internal/selfupdate/cmd/selfupdate.go":              RefClassPublicFrontDoor,
+		"scripts/overnight-check.sh":                         RefClassDevelopmentSource,
 		"internal/workdelivery/testdata/e2e/happy-path.json": RefClassFixture,
 	}
 	for path, class := range want {
