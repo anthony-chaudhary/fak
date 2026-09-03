@@ -647,7 +647,7 @@ func TestSelfUpdateReceiptCarriesReusedBuildProvenance(t *testing.T) {
 		receipt.BuildProvenance.SourceCommit == receipt.BuildProvenance.ArtifactSourceCommit ||
 		receipt.BuildProvenance.BuildInputDigest == "" || receipt.BuildProvenance.ArtifactDigest == "" ||
 		receipt.BuildProvenance.BuildEnvelope["GOVERSION"] == "" ||
-		receipt.BuildProvenance.AppVersion != "1.2.3" {
+		receipt.BuildProvenance.AppVersion != "1.2.3" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("reused build provenance = %+v", receipt.BuildProvenance)
 	}
 }
