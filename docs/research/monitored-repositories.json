@@ -4,6 +4,34 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "syv-ai/qwen38-27b-rtx3090",
+      "url": "https://github.com/syv-ai/qwen38-27b-rtx3090",
+      "status": "studied",
+      "priority": 1,
+      "why": "Consumer 24GB GPU serving stack for Qwen3.8-27B featuring Lookup-Augmented Block Drafting (381 tok/s decode), split-KV multi-query speculative attention, 16-bit GDN recurrent state, AutoRound negative-scale Marlin fixes, and 40k draft vocab truncation.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "8d832f8758ae4fd36c29a15d3c45888922bc4377",
+      "stars_at_check": 1400,
+      "last_push_at_check": "2026-09-03T08:57:21Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-QWEN38-27B-RTX3090-2026-09-03.md",
+      "receipt_id": "study_69a87c504d53efb41a243ad7f233c19d5293ecbb611869ed64292ad229fd7c2d",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "8d832f8758ae4fd36c29a15d3c45888922bc4377",
+        "subsystem_count": 6,
+        "candidate_count": 9,
+        "filed_issue_count": 6,
+        "issue_refs": [
+          "#11099",
+          "#11100",
+          "#11101",
+          "#11102",
+          "#11103",
+          "#11104"
+        ]
+      }
+    },
+    {
       "repository": "youssofal/mtplx",
       "url": "https://github.com/youssofal/mtplx",
       "status": "studied",
