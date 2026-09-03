@@ -147,12 +147,8 @@ func (c *Catalog) CheckFreshnessAgainstHEAD() ([]Drift, error) {
 				continue
 			}
 			seen[clean] = true
-			if !tree[path.Clean(clean)] {
-				out = append(out, Drift{
-					Kind:    DriftDeadDocLinkHEAD,
-					Subject: clean,
-					Reason:  "INDEX.md at HEAD links " + title + " -> " + clean + " but HEAD's tree does not contain it (a fresh checkout has a dead link)",
-				})
+			if d := checkDeadLinkHEAD(tree, clean, "INDEX.md", title+" -> "+clean, DriftDeadDocLinkHEAD); d != nil {
+				out = append(out, *d)
 			}
 		}
 	}
@@ -166,12 +162,8 @@ func (c *Catalog) CheckFreshnessAgainstHEAD() ([]Drift, error) {
 				continue
 			}
 			seen[clean] = true
-			if !tree[path.Clean(clean)] {
-				out = append(out, Drift{
-					Kind:    DriftDeadLLMSLinkHEAD,
-					Subject: clean,
-					Reason:  "llms.txt at HEAD links " + clean + " but HEAD's tree does not contain it (a fresh checkout has a dead link)",
-				})
+			if d := checkDeadLinkHEAD(tree, clean, "llms.txt", clean, DriftDeadLLMSLinkHEAD); d != nil {
+				out = append(out, *d)
 			}
 		}
 	}
@@ -182,4 +174,15 @@ func (c *Catalog) CheckFreshnessAgainstHEAD() ([]Drift, error) {
 		return out[i].Subject < out[j].Subject
 	})
 	return out, nil
+}
+
+func checkDeadLinkHEAD(tree map[string]bool, clean, label, desc string, kind DriftKind) *Drift {
+	if !tree[path.Clean(clean)] {
+		return &Drift{
+			Kind:    kind,
+			Subject: clean,
+			Reason:  fmt.Sprintf("%s at HEAD links %s but HEAD's tree does not contain it (a fresh checkout has a dead link)", label, desc),
+		}
+	}
+	return nil
 }

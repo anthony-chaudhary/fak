@@ -13,8 +13,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 )
 
 // signalStub serves the run-control + steer routes and records what it saw.
@@ -195,5 +197,135 @@ func TestSignalUsageAndArity(t *testing.T) {
 	}
 	if code := runSignal(&out, &errb, []string{"pause"}); code != 2 {
 		t.Fatalf("missing id exit = %d, want 2", code)
+	}
+}
+
+func TestSignalSteerResolvesDynamicGatewayFromIndex(t *testing.T) {
+	t.Setenv("FAK_ADDR", "")
+	t.Setenv("FAK_KEY", "")
+	g := &signalStub{}
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		g.handler().ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+
+	dir := t.TempDir()
+	row := guardsessions.NewRow("tr-dyn-1", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now()).
+		WithGateway(ts.URL, "read-only-bearer-token")
+	if err := guardsessions.Record(dir, row); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSignal(&out, &errb, []string{"steer", row.Handle, "--text", "steer to dynamic", "--reg-dir", dir})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, errb.String())
+	}
+	if g.lastPath != "/v1/fak/session/tr-dyn-1/steer" {
+		t.Fatalf("path = %q, want /v1/fak/session/tr-dyn-1/steer", g.lastPath)
+	}
+	if g.lastSteer.Text != "steer to dynamic" {
+		t.Fatalf("text = %q, want 'steer to dynamic'", g.lastSteer.Text)
+	}
+	if strings.Contains(gotAuth, "read-only-bearer-token") {
+		t.Fatalf("control request must not reuse the read-scoped published bearer, got auth header: %q", gotAuth)
+	}
+	if !strings.Contains(out.String(), "steered tr-dyn-1") {
+		t.Fatalf("stdout=%q, want 'steered tr-dyn-1'", out.String())
+	}
+}
+
+func TestSignalSteerIndexAmbiguityReportsCandidates(t *testing.T) {
+	t.Setenv("FAK_ADDR", "")
+	dir := t.TempDir()
+	row1 := guardsessions.NewRow("tr-ambig-1", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now()).
+		WithGateway("http://127.0.0.1:50001", "tok1")
+	row1.Handle = "handle-ambig-1"
+	row2 := guardsessions.NewRow("tr-ambig-2", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now()).
+		WithGateway("http://127.0.0.1:50002", "tok2")
+	row2.Handle = "handle-ambig-2"
+	if err := guardsessions.Record(dir, row1); err != nil {
+		t.Fatal(err)
+	}
+	if err := guardsessions.Record(dir, row2); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSignal(&out, &errb, []string{"steer", "handle-ambig", "--text", "hello", "--reg-dir", dir})
+	if code != 3 {
+		t.Fatalf("ambiguous exit = %d, want 3 (stderr=%s)", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "matches 2 guard sessions — narrow the prefix") {
+		t.Fatalf("stderr=%q, want ambiguity message naming 2 sessions", errb.String())
+	}
+}
+
+func TestSignalSteerMissingGatewayURLReportsActionableError(t *testing.T) {
+	t.Setenv("FAK_ADDR", "")
+	dir := t.TempDir()
+	row := guardsessions.NewRow("tr-nogw-1", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now())
+	row.GatewayURL = ""
+	if err := guardsessions.Record(dir, row); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSignal(&out, &errb, []string{"steer", row.Handle, "--text", "hello", "--reg-dir", dir})
+	if code != 1 {
+		t.Fatalf("missing gateway exit = %d, want 1 (stderr=%s)", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "published no gateway_url") {
+		t.Fatalf("stderr=%q, want missing gateway_url explanation", errb.String())
+	}
+}
+
+func TestSignalSteerExplicitAddrPrecedence(t *testing.T) {
+	g1 := &signalStub{}
+	ts1 := httptest.NewServer(g1.handler())
+	defer ts1.Close()
+
+	g2 := &signalStub{}
+	ts2 := httptest.NewServer(g2.handler())
+	defer ts2.Close()
+
+	dir := t.TempDir()
+	row := guardsessions.NewRow("tr-prec-1", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now()).
+		WithGateway(ts1.URL, "tok1")
+	if err := guardsessions.Record(dir, row); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSignal(&out, &errb, []string{"steer", row.Handle, "--text", "explicit wins", "--addr", ts2.URL, "--reg-dir", dir})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, errb.String())
+	}
+	if g2.lastPath != "/v1/fak/session/"+row.Handle+"/steer" {
+		t.Fatalf("ts2 path = %q, want hit on ts2", g2.lastPath)
+	}
+	if g1.lastPath != "" {
+		t.Fatalf("ts1 was hit unexpectedly: %q", g1.lastPath)
+	}
+}
+
+func TestSignalSteerTransportFailureActionable(t *testing.T) {
+	t.Setenv("FAK_ADDR", "")
+	dir := t.TempDir()
+	row := guardsessions.NewRow("tr-dead-1", "claude", os.Getpid(), `C:\work\x`, "", "", time.Now()).
+		WithGateway("http://127.0.0.1:59999", "tok")
+	if err := guardsessions.Record(dir, row); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runSignal(&out, &errb, []string{"steer", row.Handle, "--text", "hello", "--reg-dir", dir})
+	if code != 1 {
+		t.Fatalf("transport failure exit = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "fak signal steer:") {
+		t.Fatalf("stderr=%q, want actionable steer error", errb.String())
 	}
 }

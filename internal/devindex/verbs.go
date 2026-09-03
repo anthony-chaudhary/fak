@@ -243,6 +243,7 @@ var verbManifest = []Verb{
 	{Name: "loop-map", Synopsis: "the agentic-loop map: the stages, levers, and child issues of the dev-experience epic", Lane: "cmd"},
 	{Name: "loop-score", Synopsis: "score a single loop run's outcome", Lane: "cmd"},
 	{Name: "ls", Synopsis: "alias for 'fak model ls': list known model aliases + cache status", Lane: "cmd"},
+	{Name: "lsp", Synopsis: "in-process Language Server Protocol (LSP) server for syntax validation and diagnostics over stdio", Lane: "cmd"},
 	{Name: "macbench", Synopsis: "the Mac local-inference benchmark suite (run/watch/watch-status/recover)", Lane: "cmd"},
 	{Name: "macfit", Synopsis: "compute whether a model fits in Mac unified memory (weights + KV/context vs capacity minus reserve)", Lane: "cmd"},
 	{Name: "marketing", Synopsis: "the marketing Slack surface", Lane: "cmd"},
@@ -274,6 +275,7 @@ var verbManifest = []Verb{
 	{Name: "node", Synopsis: "the compute-node registry (register/list nodes)", Lane: "cmd"},
 	{Name: "node-compare", Synopsis: "compare fleet compute-node result files side by side into one cross-node report", Lane: "cmd"},
 	{Name: "nodeusage", Synopsis: "the compute-node-usage Slack surface for #node-usage", Lane: "cmd"},
+	{Name: "opencode", Synopsis: "OpenCode integration launcher (opencode routed through the kernel)", Lane: "cmd"},
 	{Name: "operator", Synopsis: "the human pacing brief: fold cadence/program/milestone into human/agent/watch/background buckets", Lane: "cmd"},
 	{Name: "org", Synopsis: "inspect org-policy posture and which control channel owns each capability", Lane: "cmd"},
 	{Name: "orient", Synopsis: "task-scoped convention orientation for path globs: lane, arch tier, owning tests, stamp, and live lease", Lane: "devindex"},
@@ -415,6 +417,7 @@ var verbManifest = []Verb{
 	{Name: "workflow", Synopsis: "keep ultracode Workflow scripts fak-native: lint for self-index/memory/shared-path use + seed the template", Lane: "cmd"},
 	{Name: "workflow-audit", Synopsis: "classify .github/workflows branch/tag refs against the branch-role contract; gate unclassified dev-path refs", Lane: "cmd"},
 	{Name: "workpattern", Synopsis: "mine recurring work patterns from source or recorded trajectories", Lane: "cmd"},
+	{Name: "workspin", Synopsis: "audit repository commit and issue activity to detect sustained churn without delivery", Lane: "cmd"},
 	{Name: "worktree", Synopsis: "guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main", Lane: "cmd"},
 	{Name: "worktype", Synopsis: "attribute session token spend and outcomes to classified work types", Lane: "cmd"},
 }
