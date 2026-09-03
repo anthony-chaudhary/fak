@@ -415,6 +415,18 @@ type gatewayMetrics struct {
 	vcacheGovernor     *vcacheGovernorDecisionJournal
 	vcacheWarmth       *vcacheWarmthDemotionJournal
 
+	// usageMu guards the per-request usage-record window (#10670): the ONE
+	// stable row per completed request (ordinal + provider token axes + cache
+	// alignment), retained drop-oldest to usageRecordCap so the
+	// /v1/fak/usage/cache-alignment read answers "last N" live instead of via
+	// offline journal forensics. Purely observational (Law A2) — nothing in the
+	// request path reads it — and kept off inferenceMu like the vcache families:
+	// one fold per served turn at the same chokepoint.
+	usageMu             sync.Mutex
+	usageRecords        []UsageRecord
+	usageOrdinals       map[string]uint64
+	usageRecordsDropped bool
+
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as
 	// end_turn (else the client hangs hunting for the dropped tool_use block — the v0.15.0
@@ -1117,8 +1129,15 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	// a Claude family's rather than being understated by the double-counted cached span.
 	cacheRead := usage.CachedPromptTokens()
 	uncachedPrompt := usage.UncachedPromptTokens()
-	s.metrics.observeVCacheTurn(traceID, time.Now().UnixMilli(),
+	// One timestamp shared by the native vcache row and the per-request usage
+	// record (#10670), so the two join exactly instead of by a fragile
+	// nearest-millisecond match.
+	nowMillis := time.Now().UnixMilli()
+	s.metrics.observeVCacheTurn(traceID, nowMillis,
 		uncachedPrompt, cacheRead, usage.CacheCreationInputTokens)
+	// The stable per-request usage record (#10670): exactly one row per
+	// completed request, after the native plane above so its join receipts exist.
+	usageRec, usageRecOK := s.metrics.recordUsageTurn(traceID, wire, stream, usage, nowMillis)
 	// Roll the per-session managed-context record (ctxvalue.go) on the same always-on
 	// rung: every served turn, all wires, before any sink gating, so the long-session
 	// context report is answerable even with --log and --debug-stats off.
@@ -1166,6 +1185,12 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 		return
 	}
 	s.logf("%s", b)
+	// The sibling per-request usage-record event (#10670) — same sink, same
+	// trace attribution, emitted exactly once per completed request so a log
+	// reader pairs the two lines by trace_id + request_ordinal.
+	if usageRecOK {
+		s.emitUsageRecordEvent(traceID, usageRec)
+	}
 }
 
 // beginInflight records a request as live and returns a token to release it with.

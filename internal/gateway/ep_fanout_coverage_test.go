@@ -199,6 +199,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/fak/events":                epExemptNoDecode,
 	"/v1/fak/vcache/score":          epExemptNoDecode,
 	"/v1/fak/vcache/actions":        epExemptNoDecode,
+	"/v1/fak/usage/cache-alignment": epExemptNoDecode,
 	"/v1/fak/session-audit/actions": epExemptNoDecode,
 	"/v1/fak/ctxvalue":              epExemptNoDecode,
 	"/v1/fak/revoke":                epExemptNoDecode,
