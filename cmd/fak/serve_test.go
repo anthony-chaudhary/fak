@@ -129,3 +129,21 @@ func TestResolveServeMetal(t *testing.T) {
 		t.Fatal("FAK_METAL on a non-Metal build must fail loud, same as --metal")
 	}
 }
+
+func TestServeDeferToolsFlag(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse empty: %v", err)
+	}
+	if !*sf.deferTools {
+		t.Fatal("--defer-tools must default to true")
+	}
+
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--defer-tools=false"}); err != nil {
+		t.Fatalf("parse --defer-tools=false: %v", err)
+	}
+	if *sf2.deferTools {
+		t.Fatal("--defer-tools=false must set flag to false")
+	}
+}
