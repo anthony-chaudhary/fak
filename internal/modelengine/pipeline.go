@@ -34,6 +34,7 @@ type PipelineEngine struct {
 	downstream model.StageTransport
 	tok        NLTokenizer
 	maxTokens  int
+	coupler    *WorkerCoupler
 
 	// TCPTransport is a request/reply stream over one net.Conn; serialize Send users so
 	// concurrent admitted requests cannot interleave length-prefixed frames.
@@ -43,7 +44,23 @@ type PipelineEngine struct {
 // NewPipelineEngine builds a lifecycle-capable PP head engine. first must be the
 // First stage. If first is not also Last, downstream must reach the next ServeBand worker.
 func NewPipelineEngine(first model.PipelineStage, downstream model.StageTransport) *PipelineEngine {
-	return &PipelineEngine{first: first, downstream: downstream, maxTokens: genTokens}
+	return &PipelineEngine{first: first, downstream: downstream, maxTokens: genTokens, coupler: NewDefaultWorkerCoupler()}
+}
+
+// SetWorkerCoupler installs a custom worker coupler on the pipeline engine.
+func (e *PipelineEngine) SetWorkerCoupler(c *WorkerCoupler) {
+	if e == nil {
+		return
+	}
+	e.coupler = c
+}
+
+// WorkerCoupler returns the active worker coupler.
+func (e *PipelineEngine) WorkerCoupler() *WorkerCoupler {
+	if e == nil {
+		return nil
+	}
+	return e.coupler
 }
 
 // SetTokenizer matches Engine.SetTokenizer for hosts that preload a real tokenizer.
@@ -120,7 +137,9 @@ func (e *PipelineEngine) run(r *pipelineRequest, putCtx context.Context, tool st
 			return
 		}
 		e.mu.Lock()
-		logits, err := model.RunPipelineAcrossWorkers(ids, e.first, e.downstream)
+		logits, err := RunWithOpErr(e.coupler, OpPipeline, func() ([][]float32, error) {
+			return model.RunPipelineAcrossWorkers(ids, e.first, e.downstream)
+		})
 		e.mu.Unlock()
 		if err != nil {
 			r.err = err

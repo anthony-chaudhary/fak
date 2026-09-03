@@ -77,6 +77,7 @@ type Engine struct {
 	q4kGateUpOutputSlab bool
 	schedOnce           sync.Once
 	sched               *NativeScheduler
+	coupler             *WorkerCoupler
 
 	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
 	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
@@ -236,10 +237,74 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 		if p := nativePreemptionPolicyFromEnv(); p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
+		if e.coupler != nil {
+			sched.SetWorkerCoupler(e.coupler)
+		}
 		e.sched = sched
 	})
 	return e.sched
 }
+
+// SetWorkerCoupler installs a custom or reconfigured worker coupler on this engine.
+func (e *Engine) SetWorkerCoupler(c *WorkerCoupler) {
+	if e == nil {
+		return
+	}
+	e.coupler = c
+	if e.sched != nil {
+		e.sched.SetWorkerCoupler(c)
+	}
+}
+
+// WorkerCoupler returns this engine's active worker coupler.
+func (e *Engine) WorkerCoupler() *WorkerCoupler {
+	if e == nil {
+		return nil
+	}
+	return e.nativeScheduler().WorkerCoupler()
+}
+
+// WorkerCouplingStats reads this engine's live worker coupling state.
+func (e *Engine) WorkerCouplingStats() WorkerCouplingStats {
+	if e == nil {
+		return WorkerCouplingStats{}
+	}
+	return e.nativeScheduler().WorkerCouplingStats()
+}
+
+// SetWorkerCouplingConfig reconfigures the live worker coupling configuration.
+func (e *Engine) SetWorkerCouplingConfig(p WorkerCouplingConfig) {
+	if e == nil {
+		return
+	}
+	c := e.WorkerCoupler()
+	if c != nil {
+		c.SetConfig(p)
+	}
+}
+
+// WriteWorkerCouplingMetrics renders Prometheus metrics for this engine's worker coupler.
+func (e *Engine) WriteWorkerCouplingMetrics(b *strings.Builder) {
+	if e == nil {
+		return
+	}
+	e.nativeScheduler().WriteWorkerCouplingMetrics(b)
+}
+
+// SetWorkerCoupler updates the package Default engine worker coupler.
+func SetWorkerCoupler(c *WorkerCoupler) { Default.SetWorkerCoupler(c) }
+
+// DefaultWorkerCoupler reads the package Default engine's active worker coupler.
+func DefaultWorkerCoupler() *WorkerCoupler { return Default.WorkerCoupler() }
+
+// DefaultWorkerCouplingStats reads the package Default engine's live worker coupling state.
+func DefaultWorkerCouplingStats() WorkerCouplingStats { return Default.WorkerCouplingStats() }
+
+// SetWorkerCouplingConfig updates the package Default engine worker coupling configuration.
+func SetWorkerCouplingConfig(p WorkerCouplingConfig) { Default.SetWorkerCouplingConfig(p) }
+
+// WriteWorkerCouplingMetrics renders Prometheus metrics for the package Default engine.
+func WriteWorkerCouplingMetrics(b *strings.Builder) { Default.WriteWorkerCouplingMetrics(b) }
 
 // SetKVPreemptionPolicy reconfigures this engine's live native scheduler. If the
 // scheduler has not started yet, this initializes the env-backed scheduler first.
