@@ -25,6 +25,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -205,6 +207,10 @@ type VDSO struct {
 	revSubs         subList[Revocation]
 	revocations     int64 // refutations observed (integrity-bus event count)
 
+	// fileWitnesses maps a normalized file path or directory to its active external witnesses.
+	// Used for causal revocation when an external write (Write, Edit) touches that path.
+	fileWitnesses map[string]map[string]struct{}
+
 	// cachemeta emission (§2.5). cacheSink observes tier-2 lifecycle events as
 	// cachemeta entries; witnessAdapters are per-tool external-witness extractors.
 	// resultStore is the opt-in durable write-through delegate. All are opt-in
@@ -293,7 +299,7 @@ func (v *VDSO) gateMiss(c *abi.ToolCall) (*abi.Result, bool) {
 	switch {
 	case destructive(c):
 		return v.missed(c, MissDestructive)
-	case !metaTrue(c, "readOnlyHint") || !metaTrue(c, "idempotentHint"):
+	case !isReadOnlyCall(c):
 		return v.missed(c, MissMissingHints)
 	case !toolCacheIdentityKnown(c):
 		return v.missed(c, MissMissingHints)
@@ -321,6 +327,11 @@ type entry struct {
 	filledAt            time.Time               // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
 	replication         ResultReplicationStatus // resident-only by default; upgraded only after durable acknowledgement
 	producerDiagnostics string                  // canonical replay-safe producer diagnostic receipt
+	filePath            string                  // target path or directory
+	fileMtime           int64                   // mtime unix nano when cached
+	fileSize            int64                   // size in bytes when cached
+	contentHash         string                  // content hash when cached
+	isDir               bool                    // true for directory validation (Glob/Grep)
 }
 
 // clock reads the vDSO's time source (injectable for tests; time.Now in production).
@@ -337,21 +348,22 @@ func New(capacity int) *VDSO {
 		capacity = DefaultCacheSize
 	}
 	return &VDSO{
-		pure:         map[string]PureFunc{},
-		static:       map[string][]byte{},
-		shareable:    map[string]bool{},
-		cap:          capacity,
-		cache:        map[string]*list.Element{},
-		lru:          list.New(),
-		cacheGen:     1,
-		nodes:        map[string]uint64{},
-		nodeCap:      DefaultNodeEpochLimit,
-		nodeLRU:      list.New(),
-		nodeIndex:    map[string]*list.Element{},
-		revoked:      map[string]uint64{},
-		revokedCap:   DefaultRevokedWitnessLimit,
-		revokedLRU:   list.New(),
-		revokedIndex: map[string]*list.Element{},
+		pure:          map[string]PureFunc{},
+		static:        map[string][]byte{},
+		shareable:     map[string]bool{},
+		cap:           capacity,
+		cache:         map[string]*list.Element{},
+		lru:           list.New(),
+		cacheGen:      1,
+		nodes:         map[string]uint64{},
+		nodeCap:       DefaultNodeEpochLimit,
+		nodeLRU:       list.New(),
+		nodeIndex:     map[string]*list.Element{},
+		revoked:       map[string]uint64{},
+		revokedCap:    DefaultRevokedWitnessLimit,
+		revokedLRU:    list.New(),
+		revokedIndex:  map[string]*list.Element{},
+		fileWitnesses: map[string]map[string]struct{}{},
 	}
 }
 
@@ -413,6 +425,7 @@ func (v *VDSO) ResizeTier2(req Tier2ResizeRequest) (Tier2ResizeReceipt, error) {
 		e := back.Value.(*entry)
 		v.lru.Remove(back)
 		delete(v.cache, e.key)
+		v.untrackFileWitnessLocked(e.filePath, e.witness)
 		abi.UnpinResolved(e.ref)
 		v.evictions++
 		evicted = append(evicted, emitJob{key: e.key, ref: e.ref, witness: e.witness})
@@ -521,7 +534,13 @@ func WriteShapeNeedles() []string { return append([]string(nil), writeShapeNeedl
 // annotation routes a call to the vDSO, but a write-shaped name or an explicit
 // destructive flag OVERRIDES the hint — we never trust the annotation alone.
 func destructive(c *abi.ToolCall) bool {
+	if c == nil {
+		return false
+	}
 	if metaTrue(c, "destructive") {
+		return true
+	}
+	if (c.Tool == "Bash" || c.Tool == "bash") && !isReadOnlyBashCall(c) {
 		return true
 	}
 	return IsWriteShaped(c.Tool)
@@ -576,7 +595,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 	}
 
 	// tier 1: pure registry, gated on read-only+idempotent and not destructive.
-	if metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint") && !destructive(c) {
+	if isReadOnlyCall(c) && !destructive(c) {
 		v.mu.Lock()
 		f, ok := v.pure[c.Tool]
 		v.mu.Unlock()
@@ -601,7 +620,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 	}
 
 	// tier 2: content-addressed cache, gated identically and world-versioned.
-	if metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint") && !destructive(c) {
+	if isReadOnlyCall(c) && !destructive(c) {
 		args := v.bytes(ctx, c.Args)
 		// Resource-mode soundness gate: refuse to serve a read that can't name its
 		// entity (it would be invalidated by no entity-fine write) — go to the engine.
@@ -619,10 +638,29 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			if v.revokedLocked(e.witness) {
 				v.lru.Remove(el)
 				delete(v.cache, e.key)
+				v.untrackFileWitnessLocked(e.filePath, e.witness)
 				abi.UnpinResolved(e.ref) // left the cache (under v.mu) -> release its CAS pin
 				rk, rref, rwit := e.key, e.ref, e.witness
 				v.mu.Unlock()
 				v.emitCache(CacheRevoke, rk, rref, rwit)
+				return v.missed(c, MissWitnessRevoked)
+			}
+			// Disk verification gate: verify file exists and read mtime / content hash so cache
+			// is strictly invalidated if file changes on disk.
+			if !v.checkDiskFreshnessLocked(e) {
+				v.lru.Remove(el)
+				delete(v.cache, e.key)
+				v.untrackFileWitnessLocked(e.filePath, e.witness)
+				abi.UnpinResolved(e.ref)
+				rk, rref, rwit := e.key, e.ref, e.witness
+				if rwit != "" {
+					epoch := atomic.AddUint64(&v.trustEpoch, 1)
+					v.rememberRevokedLocked(rwit, epoch)
+				}
+				v.mu.Unlock()
+				if rwit != "" {
+					v.emitCache(CacheRevoke, rk, rref, rwit)
+				}
 				return v.missed(c, MissWitnessRevoked)
 			}
 			v.lru.MoveToFront(el)
@@ -724,9 +762,12 @@ func (v *VDSO) Emit(ev abi.Event) {
 		var wargs []byte
 		if v.GranularityOf() != Global {
 			wargs = v.bytes(context.Background(), c.Args)
+		} else if c != nil {
+			wargs = v.bytes(context.Background(), c.Args)
 		}
 		tags := v.writeTags(c, wargs)
 		v.bumpAndPublish(c, tags)
+		v.revokeOnWrite(c, wargs)
 		return
 	}
 	_, _ = v.StoreResult(context.Background(), c, r)
@@ -740,7 +781,7 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 	if c == nil || r == nil || r.Status != abi.StatusOK || destructive(c) {
 		return ResultStoreReceipt{}, nil
 	}
-	if !(metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint")) {
+	if !isReadOnlyCall(c) {
 		return ResultStoreReceipt{}, nil
 	}
 	if !toolCacheIdentityKnown(c) {
@@ -890,15 +931,25 @@ func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, wi
 		if _, ok := v.cache[key]; ok {
 			return nil, nil
 		}
-		el := v.lru.PushFront(&entry{
+		fPath, fMtime, fSize, fHash, isDir, _ := extractFileValidation(c, args)
+		e := &entry{
 			key:                 key,
 			ref:                 ref,
 			witness:             witness,
 			filledAt:            v.clock(),
 			replication:         ResultResidentOnly,
 			producerDiagnostics: producerDiagnostics,
-		})
+			filePath:            fPath,
+			fileMtime:           fMtime,
+			fileSize:            fSize,
+			contentHash:         fHash,
+			isDir:               isDir,
+		}
+		el := v.lru.PushFront(e)
 		v.cache[key] = el
+		if fPath != "" && witness != "" {
+			v.recordFileWitnessLocked(fPath, witness)
+		}
 		atomic.AddInt64(&v.fills, 1)
 		// Pin the CAS bytes UNDER v.mu, before the entry is reachable to any Lookup,
 		// so a concurrent eviction on a bounded store cannot drop a digest this tier-2
@@ -915,6 +966,7 @@ func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, wi
 			ce := back.Value.(*entry)
 			v.lru.Remove(back)
 			delete(v.cache, ce.key)
+			v.untrackFileWitnessLocked(ce.filePath, ce.witness)
 			abi.UnpinResolved(ce.ref) // left the cache -> release its CAS pin
 			v.evictions++
 			evicted = append(evicted, emitJob{key: ce.key, ref: ce.ref, witness: ce.witness})
@@ -1028,6 +1080,168 @@ func (v *VDSO) StaticTools() []string {
 	v.mu.Unlock()
 	sort.Strings(out)
 	return out
+}
+
+// checkDiskFreshnessLocked verifies that a file-backed or directory-backed entry
+// is still bit-identical and fresh on disk. Called with v.mu held.
+func (v *VDSO) checkDiskFreshnessLocked(e *entry) bool {
+	if e.filePath == "" || e.fileMtime == 0 {
+		return true // not disk-backed or synthetic test entry
+	}
+	if e.isDir {
+		st, err := os.Stat(e.filePath)
+		if err != nil || !st.IsDir() {
+			return false
+		}
+		if st.ModTime().UnixNano() != e.fileMtime {
+			return false
+		}
+		return true
+	}
+	st, err := os.Stat(e.filePath)
+	if err != nil || st.IsDir() {
+		return false
+	}
+	if st.ModTime().UnixNano() != e.fileMtime {
+		return false
+	}
+	if e.fileSize != 0 && st.Size() != e.fileSize {
+		return false
+	}
+	if e.contentHash != "" {
+		b, err := os.ReadFile(e.filePath)
+		if err != nil {
+			return false
+		}
+		h := sha256.Sum256(b)
+		if hex.EncodeToString(h[:])[:24] != e.contentHash {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *VDSO) recordFileWitnessLocked(path, witness string) {
+	if path == "" || witness == "" {
+		return
+	}
+	if v.fileWitnesses == nil {
+		v.fileWitnesses = make(map[string]map[string]struct{})
+	}
+	if v.fileWitnesses[path] == nil {
+		v.fileWitnesses[path] = make(map[string]struct{})
+	}
+	v.fileWitnesses[path][witness] = struct{}{}
+	// Only directory-level searches (Glob/Grep, whose witness starts with "dir:")
+	// are indexed under parent directories. File reads are keyed specifically to their file.
+	if strings.HasPrefix(witness, "dir:") {
+		dir := filepath.ToSlash(filepath.Dir(path))
+		if dir != "" {
+			if v.fileWitnesses[dir] == nil {
+				v.fileWitnesses[dir] = make(map[string]struct{})
+			}
+			v.fileWitnesses[dir][witness] = struct{}{}
+		}
+		if dir != "." && !filepath.IsAbs(path) {
+			if v.fileWitnesses["."] == nil {
+				v.fileWitnesses["."] = make(map[string]struct{})
+			}
+			v.fileWitnesses["."][witness] = struct{}{}
+		}
+	}
+}
+
+func (v *VDSO) untrackFileWitnessLocked(path, witness string) {
+	if path == "" || witness == "" || v.fileWitnesses == nil {
+		return
+	}
+	if m := v.fileWitnesses[path]; m != nil {
+		delete(m, witness)
+		if len(m) == 0 {
+			delete(v.fileWitnesses, path)
+		}
+	}
+}
+
+func (v *VDSO) revokeOnWrite(c *abi.ToolCall, wargs []byte) int {
+	var witnesses []string
+	path := ExtractToolPath(wargs)
+	v.mu.Lock()
+	if path != "" && v.fileWitnesses != nil {
+		seen := make(map[string]bool)
+		// 1. Revoke all witnesses directly registered for this specific file path
+		for w := range v.fileWitnesses[path] {
+			if !seen[w] {
+				seen[w] = true
+				witnesses = append(witnesses, w)
+			}
+		}
+		// 2. In parent directories, revoke only directory search witnesses (Glob/Grep),
+		// NOT sibling file witnesses!
+		for _, dir := range []string{filepath.ToSlash(filepath.Dir(path)), "."} {
+			for w := range v.fileWitnesses[dir] {
+				if strings.HasPrefix(w, "dir:") && !seen[w] {
+					seen[w] = true
+					witnesses = append(witnesses, w)
+				}
+			}
+		}
+	} else if path == "" && v.fileWitnesses != nil {
+		// Untargeted write (e.g. mutating Bash command) — revoke all active file witnesses
+		seen := make(map[string]bool)
+		for _, set := range v.fileWitnesses {
+			for w := range set {
+				if !seen[w] {
+					seen[w] = true
+					witnesses = append(witnesses, w)
+				}
+			}
+		}
+	}
+	if c != nil && c.Meta != nil {
+		if w := c.Meta["witness"]; w != "" {
+			witnesses = append(witnesses, w)
+		}
+	}
+	v.mu.Unlock()
+
+	evicted := 0
+	for _, w := range witnesses {
+		evicted += v.Revoke(w)
+	}
+	return evicted
+}
+
+// RevokePath causally revokes all cached entries associated with the given file path or directory.
+func (v *VDSO) RevokePath(path string) (evicted int) {
+	canon := fileCanonPath(path)
+	if canon == "" {
+		canon = path
+	}
+	v.mu.Lock()
+	var witnesses []string
+	if v.fileWitnesses != nil {
+		seen := make(map[string]bool)
+		for w := range v.fileWitnesses[canon] {
+			if !seen[w] {
+				seen[w] = true
+				witnesses = append(witnesses, w)
+			}
+		}
+		for _, dir := range []string{filepath.ToSlash(filepath.Dir(canon)), "."} {
+			for w := range v.fileWitnesses[dir] {
+				if strings.HasPrefix(w, "dir:") && !seen[w] {
+					seen[w] = true
+					witnesses = append(witnesses, w)
+				}
+			}
+		}
+	}
+	v.mu.Unlock()
+	for _, w := range witnesses {
+		evicted += v.Revoke(w)
+	}
+	return evicted
 }
 
 func atou(n uint64) string {
