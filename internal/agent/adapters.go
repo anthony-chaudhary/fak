@@ -1426,32 +1426,6 @@ func sanitizeSchemaRequired(m map[string]any) {
 	}
 }
 
-// mapSchemaTypes walks a decoded JSON Schema value and rewrites every "type" field's
-// string value through conv (in place), recursing into nested maps and arrays. It is
-// the shared engine behind the two case-folding directions: uppercaseSchemaTypes (the
-// outbound Gemini convention) and gemini_server.go's lowercase normalization on inbound.
-func mapSchemaTypes(v any, conv func(string) string) any {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, val := range x {
-			if k == "type" {
-				if s, ok := val.(string); ok {
-					x[k] = conv(s)
-					continue
-				}
-			}
-			x[k] = mapSchemaTypes(val, conv)
-		}
-	case []any:
-		for i, val := range x {
-			x[i] = mapSchemaTypes(val, conv)
-		}
-	}
-	return v
-}
-
-func uppercaseSchemaTypes(v any) any { return mapSchemaTypes(v, strings.ToUpper) }
-
 // ParseResponse decodes a Gemini generateContent response into a Completion: the
 // first candidate's text parts become content and its functionCall parts become tool
 // calls, the finishReason is lowercased (or "tool_calls" when calls are present), and
