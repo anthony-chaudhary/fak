@@ -752,3 +752,21 @@ func TestRuntimeProofDefaultMetadataFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestMetalgemmRuntimeProofRecorded(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	proofs, err := loadRuntimeProofs(root)
+	if err != nil {
+		t.Fatalf("loadRuntimeProofs: %v", err)
+	}
+	proof, ok := proofs["metalgemm"]
+	if !ok {
+		t.Fatalf("missing metalgemm runtime proof in runtime-proofs.json")
+	}
+	if proof.Command != "fak sota internal/metalgemm/decode.m" {
+		t.Fatalf("unexpected command for metalgemm: %q", proof.Command)
+	}
+	if proof.OutputContains != "internal/metalgemm" {
+		t.Fatalf("unexpected output_contains for metalgemm: %q", proof.OutputContains)
+	}
+}
