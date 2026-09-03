@@ -132,3 +132,75 @@ func TestResultCompleteRequiresEveryReadBack(t *testing.T) {
 		t.Fatal("result not json stable")
 	}
 }
+
+func TestDefaultPlanIncludesHighPerformancePowerAndLongPaths(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := buildWindowsSetupSpec(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.TunePower {
+		t.Error("expected TunePower to be true by default")
+	}
+	if !p.LongPaths {
+		t.Error("expected LongPaths to be true by default")
+	}
+	procs := strings.ToLower(strings.Join(p.Processes, " "))
+	for _, proc := range []string{"gh.exe", "wsl.exe", "python.exe", "ninja.exe"} {
+		if !strings.Contains(procs, proc) {
+			t.Errorf("processes omit %s", proc)
+		}
+	}
+	allPaths := strings.ToLower(strings.Join(p.Paths, ";"))
+	for _, sub := range []string{"opencode", "fak-gotmp"} {
+		if !strings.Contains(allPaths, sub) {
+			t.Errorf("paths omit %s", sub)
+		}
+	}
+}
+
+func TestPowerShellGeneratesHighPerformanceAndLongPathsScript(t *testing.T) {
+	p := SetupSpec{
+		Paths:     []string{`C:\src\fak`},
+		Processes: []string{"go.exe"},
+		Group:     "239.1.2.3",
+		Port:      9876,
+		TunePower: true,
+		LongPaths: true,
+	}
+	script := PowerShell(p, `C:\tmp\result.json`, true)
+	for _, want := range []string{
+		"VIDEOCONLOCK", "AWAYMODE", "STANDBYIDLE", "PROCTHROTTLEMIN", "SYSCOOLPOL",
+		"LongPathsEnabled", "active_scheme_high_performance", "videoconlock_ac_disabled",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script omits %q", want)
+		}
+	}
+}
+
+func TestResultCompleteRequiresPowerAndSettingsWhenPresent(t *testing.T) {
+	r := Result{
+		Paths:     []Item{{Present: true}},
+		Processes: []Item{{Present: true}},
+		Firewall:  []Item{{Present: true}, {Present: true}},
+		Profiles:  []Item{{Present: true}, {Present: true}, {Present: true}},
+		Power:     []Item{{Value: "active_scheme_high_performance", Present: true}},
+		Settings:  []Item{{Value: "filesystem_long_paths_enabled", Present: true}},
+	}
+	if !r.Complete() {
+		t.Fatal("complete result with power and settings rejected")
+	}
+	r.Power[0].Present = false
+	if r.Complete() {
+		t.Fatal("incomplete power result accepted")
+	}
+	r.Power[0].Present = true
+	r.Settings[0].Present = false
+	if r.Complete() {
+		t.Fatal("incomplete settings result accepted")
+	}
+}

@@ -20,6 +20,8 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 	apply := fs.Bool("apply", false, "request UAC once and install the development allow list")
 	jsonOut := fs.Bool("json", false, "print the plan or verification result as JSON")
 	repo := fs.String("repo", ".", "fak repository root")
+	tunePower := fs.Bool("tune-power", true, "configure high performance power plan and Modern Standby background execution")
+	longPaths := fs.Bool("long-paths", true, "enable win32 long filesystem paths")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -32,12 +34,18 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak-dev windows-setup: %v\n", err)
 		return 2
 	}
+	plan.TunePower = *tunePower
+	plan.LongPaths = *longPaths
 	if !*apply {
 		b, _ := plan.JSON()
 		if *jsonOut {
 			fmt.Fprintln(stdout, string(b))
 		} else {
-			fmt.Fprintf(stdout, "Windows developer allow-list plan: %d paths, %d processes, fleet spine %s:%d\nRun with --apply to request UAC once and install it.\n", len(plan.Paths), len(plan.Processes), plan.Group, plan.Port)
+			powerDesc := ""
+			if plan.TunePower {
+				powerDesc = ", high performance power plan"
+			}
+			fmt.Fprintf(stdout, "Windows developer allow-list plan: %d paths, %d processes, fleet spine %s:%d%s\nRun with --apply to request UAC once and install it.\n", len(plan.Paths), len(plan.Processes), plan.Group, plan.Port, powerDesc)
 		}
 		return 0
 	}
@@ -77,5 +85,11 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "READY: Windows Security allows native fak tests and fleet-spine multicast (%s:%d).\n", plan.Group, plan.Port)
+	if plan.TunePower {
+		fmt.Fprintln(stdout, "READY: Host power configured for high performance and background execution.")
+	}
+	if plan.LongPaths {
+		fmt.Fprintln(stdout, "READY: Win32 long paths enabled.")
+	}
 	return 0
 }
