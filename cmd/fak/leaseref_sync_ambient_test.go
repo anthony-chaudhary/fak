@@ -7,6 +7,7 @@ package main
 // region hold actually drives it at the before-decide / after-write boundaries.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -428,5 +429,185 @@ func TestLoopDriveEnsureRunsAmbientSyncAtBoundaries(t *testing.T) {
 	}
 	if !sawPushAfterWrite {
 		t.Fatalf("renew never ran the after-write push sync: %+v", got)
+	}
+}
+
+// TestIntentClaimAndReleaseAmbientSync verifies that fak intent claim and release
+// invoke the ambient sync boundary (fetch before decide, push after write) and
+// preserve nonfatal degradation when the remote transport is degraded (#10849).
+func TestIntentClaimAndReleaseAmbientSync(t *testing.T) {
+	dir := initRegionTestRepo(t)
+
+	type rec struct {
+		surface loopdrive.LeaseRefSyncSurface
+		written bool
+	}
+	var got []rec
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = func(surface loopdrive.LeaseRefSyncSurface, store *leaseref.Store, remote string, written bool) loopdrive.LeaseRefSyncReport {
+		got = append(got, rec{surface, written})
+		return loopdrive.LeaseRefSyncReport{Outcome: loopdrive.LeaseRefSyncDegraded, Reason: loopdrive.ReasonLeaseRefSyncTransport, Fatal: false}
+	}
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	var stdout, stderr bytes.Buffer
+	// 1. fak intent claim: should run fetch before decide and push after write.
+	code := runIntent(&stdout, &stderr, []string{"claim", "--dir", dir, "--target", "issue #10849", "--holder", "worker-1", "--ttl", "300"})
+	if code != 0 {
+		t.Fatalf("intent claim failed with code %d: %s", code, stderr.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for claim (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceIntentClaim || got[0].written {
+		t.Errorf("claim first sync = %+v, want surface intent_claim and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceIntentClaim || !got[1].written {
+		t.Errorf("claim second sync = %+v, want surface intent_claim and written=true", got[1])
+	}
+
+	// 2. Conflicting claim: should run fetch before decide, but NOT push since claim is refused.
+	got = nil
+	stdout.Reset()
+	stderr.Reset()
+	code = runIntent(&stdout, &stderr, []string{"claim", "--dir", dir, "--target", "issue #10849", "--holder", "worker-2", "--ttl", "300"})
+	if code != 3 { // INTENT_COLLISION
+		t.Fatalf("conflicting claim code = %d, want 3", code)
+	}
+	if len(got) != 1 || got[0].written {
+		t.Fatalf("conflicting claim should only run fetch before decide: %+v", got)
+	}
+
+	// 3. fak intent release: should run fetch before decide and push after write.
+	got = nil
+	stdout.Reset()
+	stderr.Reset()
+	code = runIntent(&stdout, &stderr, []string{"release", "--dir", dir, "--target", "issue #10849"})
+	if code != 0 {
+		t.Fatalf("intent release failed with code %d: %s", code, stderr.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for release (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceIntentRelease || got[0].written {
+		t.Errorf("release first sync = %+v, want surface intent_release and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceIntentRelease || !got[1].written {
+		t.Errorf("release second sync = %+v, want surface intent_release and written=true", got[1])
+	}
+}
+
+// TestLeaserefAcquireReleaseRenewAmbientSync verifies that fak leaseref acquire, renew,
+// and release invoke the ambient sync boundary (fetch before decide, push after write)
+// and preserve nonfatal degradation when the remote transport is degraded (#10849).
+func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
+	dir := initRegionTestRepo(t)
+
+	type rec struct {
+		surface loopdrive.LeaseRefSyncSurface
+		written bool
+	}
+	var got []rec
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = func(surface loopdrive.LeaseRefSyncSurface, store *leaseref.Store, remote string, written bool) loopdrive.LeaseRefSyncReport {
+		got = append(got, rec{surface, written})
+		return loopdrive.LeaseRefSyncReport{Outcome: loopdrive.LeaseRefSyncDegraded, Reason: loopdrive.ReasonLeaseRefSyncTransport, Fatal: false}
+	}
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	var stdout, stderr bytes.Buffer
+	// 1. fak leaseref acquire
+	code := runLeaseref(&stdout, &stderr, []string{"acquire", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1", "--ttl", "300"})
+	if code != 0 {
+		t.Fatalf("leaseref acquire failed with code %d: %s", code, stderr.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for acquire (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceLeaserefAcquire || got[0].written {
+		t.Errorf("acquire first sync = %+v, want surface leaseref_acquire and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceLeaserefAcquire || !got[1].written {
+		t.Errorf("acquire second sync = %+v, want surface leaseref_acquire and written=true", got[1])
+	}
+
+	// 2. fak leaseref renew
+	got = nil
+	stdout.Reset()
+	stderr.Reset()
+	code = runLeaseref(&stdout, &stderr, []string{"renew", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1", "--ttl", "600"})
+	if code != 0 {
+		t.Fatalf("leaseref renew failed with code %d: %s", code, stderr.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for renew (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRenew || got[0].written {
+		t.Errorf("renew first sync = %+v, want surface leaseref_renew and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRenew || !got[1].written {
+		t.Errorf("renew second sync = %+v, want surface leaseref_renew and written=true", got[1])
+	}
+
+	// 3. fak leaseref release (fenced)
+	got = nil
+	stdout.Reset()
+	stderr.Reset()
+	code = runLeaseref(&stdout, &stderr, []string{"release", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1"})
+	if code != 0 {
+		t.Fatalf("leaseref release failed with code %d: %s", code, stderr.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for release (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || got[0].written {
+		t.Errorf("release first sync = %+v, want surface leaseref_release and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || !got[1].written {
+		t.Errorf("release second sync = %+v, want surface leaseref_release and written=true", got[1])
+	}
+}
+
+// TestDispatchLaneLeaseAmbientSync verifies that acquireDispatchLaneLease invokes
+// the ambient sync boundary with LeaseRefSyncSurfaceDispatchPreflight and preserves
+// nonfatal degradation when the remote transport fails (#10849).
+func TestDispatchLaneLeaseAmbientSync(t *testing.T) {
+	dir := initRegionTestRepo(t)
+
+	type rec struct {
+		surface loopdrive.LeaseRefSyncSurface
+		written bool
+	}
+	var got []rec
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = func(surface loopdrive.LeaseRefSyncSurface, store *leaseref.Store, remote string, written bool) loopdrive.LeaseRefSyncReport {
+		got = append(got, rec{surface, written})
+		return loopdrive.LeaseRefSyncReport{Outcome: loopdrive.LeaseRefSyncDegraded, Reason: loopdrive.ReasonLeaseRefSyncTransport, Fatal: false}
+	}
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	// 1. Clean acquire
+	res := acquireDispatchLaneLease(dir, "lane-10849", "gateway", []string{"internal/gateway/**"}, 600, "")
+	if acquired, _ := res["acquired"].(bool); !acquired {
+		t.Fatalf("dispatch lane lease acquire should succeed despite degraded sync: %+v", res)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sync calls for dispatch preflight acquire (fetch then push), got %d: %+v", len(got), got)
+	}
+	if got[0].surface != loopdrive.LeaseRefSyncSurfaceDispatchPreflight || got[0].written {
+		t.Errorf("dispatch preflight first sync = %+v, want surface dispatch_preflight and written=false", got[0])
+	}
+	if got[1].surface != loopdrive.LeaseRefSyncSurfaceDispatchPreflight || !got[1].written {
+		t.Errorf("dispatch preflight second sync = %+v, want surface dispatch_preflight and written=true", got[1])
+	}
+
+	// 2. Conflicting acquire
+	got = nil
+	res2 := acquireDispatchLaneLease(dir, "lane-10849-peer", "gateway", []string{"internal/gateway/**"}, 600, "")
+	if refused, _ := res2["refused"].(bool); !refused {
+		t.Fatalf("conflicting dispatch lane lease should refuse: %+v", res2)
+	}
+	if len(got) != 1 || got[0].written {
+		t.Fatalf("refused acquire should only run fetch before decide: %+v", got)
 	}
 }
