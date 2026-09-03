@@ -474,6 +474,7 @@ concurrent = [
   "overtonscore",
   "walkfiles",
   "reportledger",
+  "control",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -649,6 +650,7 @@ autopick = [
   "overtonscore",
   "walkfiles",
   "reportledger",
+  "control",
   # new-leaf:lane
 ]
 
@@ -874,7 +876,7 @@ egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refr
 ablate = ["internal/ablate/**"]
 accountobs = ["internal/accountobs/**"]
 accountprobe = ["internal/accountprobe/**"]
-accounts = ["internal/accounts/**"]
+accounts = ["internal/accounts/**", "cmd/fak/accounts*.go"]
 affectedtests = ["internal/affectedtests/**"]
 agentdemo = ["internal/agentdemo/**"]
 agenticbench = ["internal/agenticbench/**"]
@@ -914,7 +916,7 @@ cachevalueledger = ["internal/cachevalueledger/**"]
 cachevaluepost = ["internal/cachevaluepost/**"]
 cachevaluereport = ["internal/cachevaluereport/**"]
 cachewitness = ["internal/cachewitness/**"]
-cadencereport = ["internal/cadencereport/**"]
+cadencereport = ["internal/cadencereport/**", "docs/cadence/**"]
 callavoid = ["internal/callavoid/**"]
 catchupscore = ["internal/catchupscore/**"]
 chatops = ["internal/chatops/**"]
@@ -1180,7 +1182,7 @@ systemservice = ["internal/systemservice/**"]
 taskdecision = ["internal/taskdecision/**"]
 taskgraph = ["internal/taskgraph/**"]
 taskidentity = ["internal/taskidentity/**"]
-terminalbench = ["internal/terminalbench/**"]
+terminalbench = ["internal/terminalbench/**", "cmd/terminalbench/**"]
 terminalrisk = ["internal/terminalrisk/**"]
 testroute = ["internal/testroute/**"]
 timeoutphase = ["internal/timeoutphase/**"]
@@ -1527,6 +1529,7 @@ toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
 walkfiles = ["internal/walkfiles/**"]
 reportledger = ["internal/reportledger/**"]
+control = ["internal/control/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1789,6 +1792,148 @@ refusal  = true
 summary  = "A commit adds a new internal/<leaf>/ non-test Go file with no row in the architest tier table (internal/architest/architest_test.go). Left to land, TestEveryPackageDeclaresTier reds the whole module and `fak sync push` refuses on the drift, so one hand-made leaf stalls every peer's push. Caught at the author's own commit boundary instead. Advisory by default; blocks only under FLEET_TIER_GUARD=block."
 fix      = "Add `\"<leaf>\": <tier>,` before the `// new-leaf:tier` marker in internal/architest/architest_test.go (the lowest tier whose role the leaf fits), or run `fak new-leaf <leaf> --tier <tier>`, and stage the tier table in the SAME commit. One-shot escape: ALLOW_UNTIERED_LEAF=1; soften fleet-wide: FLEET_TIER_GUARD=warn|off."
 see_also = ["internal/hooks/gate_untieredleaf.go", "internal/hooks/gate_tierdeclared.go", "internal/newleaf", "fak new-leaf", "fak hooks pre-commit"]
+
+# The whole-tree tier-declared hygiene and pre-push gate (#4950, #10540): ensures every
+# internal/<leaf> package declares a support tier in internal/architest/architest_test.go.
+[reasons.TIER_DECLARED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Whole-tree architecture tier gate: an internal/<leaf> package holding tracked Go files has no row in the architest tier table (internal/architest/architest_test.go), which would red the trunk."
+fix      = "Add `\"<leaf>\": <tier>,` before the `// new-leaf:tier` marker in internal/architest/architest_test.go (or run `fak new-leaf <leaf> --tier <tier>`). Floor: internal/hooks/gate_tierdeclared.go. Verify with `fak hygiene --gates TIER_DECLARED`."
+see_also = ["internal/hooks/gate_tierdeclared.go", "internal/hooks/gate_untieredleaf.go", "internal/architest/architest_test.go", "fak hygiene"]
+
+[reasons.POLICY_BLOCK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An explicit policy rule or argument safety constraint denied the proposed tool call. Floor: internal/adjudicator/decide.go"
+fix      = "Inspect the policy manifest (e.g. cmd/fak/guard-default-policy.json). Pick an allowed tool alternative or amend arguments to avoid destructive patterns (e.g. avoid `rm -rf`, `sudo`, or raw block device writes)."
+see_also = ["internal/adjudicator/decide.go", "internal/policy", "cmd/fak/guard-default-policy.json"]
+
+[reasons.DEFAULT_DENY]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The proposed tool is not affirmatively permitted by any loaded capability floor policy rule. Floor: internal/adjudicator/decide.go"
+fix      = "Add the tool name to the policy manifest's allow list (e.g. cmd/fak/guard-default-policy.json or examples/opencode-policy.json) or configure an operator overlay via `fak guard allow`."
+see_also = ["internal/adjudicator/decide.go", "internal/policy", "cmd/fak/guard-default-policy.json"]
+
+[reasons.TRUST_VIOLATION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A tool result failed context-MMU quarantine or IFC taint tracking due to unsafe or untrusted content. Floor: internal/adjudicator/decide.go"
+fix      = "Inspect the tool result for exfiltration patterns, high taint, or unsafe content. Clear the taint marker or page out poisoned content before admitting to context."
+see_also = ["internal/adjudicator/decide.go", "internal/ctxmmu", "internal/ifc"]
+
+[reasons.MALFORMED]
+category = "MISROUTE"
+refusal  = true
+summary  = "The tool arguments did not parse as valid JSON or violated the tool's required input grammar/schema. Floor: internal/preflight/preflight.go"
+fix      = "Format tool arguments as valid, well-formed JSON matching the tool's declared schema and parameter types."
+see_also = ["internal/preflight/preflight.go", "internal/grammar", "internal/abi/reasons.go"]
+
+[reasons.SECRET_EXFIL]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The tool call arguments or result matched a sensitive credential pattern attempting egress. Floor: internal/adjudicator/decide.go"
+fix      = "Scrub private credentials, API keys, and secrets from tool arguments and outbound payloads before dispatch."
+see_also = ["internal/adjudicator/decide.go", "internal/secretgate", "internal/normgate"]
+
+[reasons.SECRET_REDACTED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A credential span in a tool result was masked in place by the kernel's redaction filter. Floor: internal/adjudicator/decide.go"
+fix      = "Advisory notification: the secret was redacted in place and the remaining result was admitted safely."
+see_also = ["internal/adjudicator/decide.go", "internal/normgate"]
+
+[reasons.EGRESS_BLOCK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The tool call attempted network egress to a blocked host (such as cloud metadata 169.254.169.254 or an unlisted domain). Floor: internal/egressfloor/egressfloor.go"
+fix      = "Do not dial cloud instance metadata or restricted hosts. Add external domains to research_allow_hosts in policy manifest if egress is legitimately authorized."
+see_also = ["internal/egressfloor/egressfloor.go", "internal/adjudicator/decide_egress.go"]
+
+[reasons.OVERSIZE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The tool result or payload exceeded the context-admission budget. Floor: internal/ctxmmu/ctxmmu.go"
+fix      = "Bound tool outputs using limit parameters, pagination, or spill files to stay within the context size budget."
+see_also = ["internal/ctxmmu/ctxmmu.go", "internal/toolproc"]
+
+[reasons.UNKNOWN_TOOL]
+category = "MISROUTE"
+refusal  = true
+summary  = "The invoked tool name is not registered in the kernel's tool catalog. Floor: internal/adjudicator/decide.go"
+fix      = "Consult the active tool catalog (via fak_tools_search or tools/list) and use a registered tool name."
+see_also = ["internal/adjudicator/decide.go", "internal/toolcatalog"]
+
+[reasons.SHELL_DIALECT]
+category = "MISROUTE"
+refusal  = false
+summary  = "A command was submitted in the wrong shell dialect for the tool (e.g. PowerShell cmdlet to Bash). Floor: cmd/fak/guard-default-policy.json"
+fix      = "Use the correct shell tool (PowerShell for cmdlets, Bash for POSIX shell commands)."
+see_also = ["cmd/fak/guard-default-policy.json", "internal/adjudicator"]
+
+[reasons.PII_REDACTED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A general-PII span (email/phone/PAN/IBAN) was masked in place by the kernel redaction floor. Floor: internal/adjudicator/decide.go"
+fix      = "Advisory notification: PII was redacted in place and the remaining result was admitted safely."
+see_also = ["internal/adjudicator/decide.go", "internal/normgate"]
+
+[reasons.PII_EXFIL]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The payload matched a PII pattern under a fail-closed posture, sealing the entire result. Floor: internal/adjudicator/decide.go"
+fix      = "Remove personal identifiable information from tool inputs and outbound results."
+see_also = ["internal/adjudicator/decide.go", "internal/normgate"]
+
+[reasons.RESULT_SECRET_DISCOVERED]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A tool result was discovered to contain secret material upon return from the host tool. Floor: internal/adjudicator/decide.go"
+fix      = "Advisory notification: secret was captured on discovery and subjected to result-side quarantine."
+see_also = ["internal/adjudicator/decide.go", "internal/normgate"]
+
+[reasons.MEMORY_NEAR_DUPLICATE]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A memory write operation was identified as a near-duplicate of an existing memory cell. Floor: internal/ctxmmu/memwrite.go"
+fix      = "Advisory notification: near-duplicate memory was coalesced or pruned to prevent memory bloating."
+see_also = ["internal/ctxmmu/memwrite.go", "internal/memq"]
+
+[reasons.MODULE_REV_STALE]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "A recalled module analysis or action is pinned to an older module revision (r<rev>+g<sha>) while trunk or ledger holds a newer rev."
+fix      = "Refresh the module version with `fak version modules` or re-index the working tree before taking action."
+see_also = ["internal/modver", "docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md"]
+
+[reasons.LEASE_HELD]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The requested workspace tree or lane is locked by an active exclusive lease held by another session. Floor: internal/adjudicator/decide.go"
+fix      = "Wait for the active session to complete its lease or select an independent, non-conflicting lane with `dos arbitrate`."
+see_also = ["internal/adjudicator/decide.go", "dos arbitrate"]
+
+[reasons.RATE_LIMITED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Request exceeded the gateway token or request rate limit. Floor: internal/ratelimit/ratelimit.go"
+fix      = "Back off and retry after the cooldown period elapses."
+see_also = ["internal/ratelimit/ratelimit.go", "internal/gateway"]
+
+[reasons.MISROUTE]
+category = "MISROUTE"
+refusal  = true
+summary  = "The tool call was routed to an incorrect or unsupported engine/adapter. Floor: internal/adjudicator/decide.go"
+fix      = "Re-route the tool call to the correct registered execution engine or correct parameter format."
+see_also = ["internal/adjudicator/decide.go", "internal/abi"]
+
+[reasons.UNWITNESSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The required corroborating witness or test proof artifact was not supplied. Floor: internal/witness/witness.go"
+fix      = "Execute the required verification or test suite and supply the resulting witness token."
+see_also = ["internal/witness/witness.go", "dos verify"]
 
 # The reversibility preview-confirm gate (#3306, #2776): an irreversible or
 # outward-facing tool call is HELD (REQUIRE_WITNESS/ESCALATE) pending an echoed

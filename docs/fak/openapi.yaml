@@ -1874,8 +1874,142 @@ paths:
         '202':
           description: Accepted — a notification (no `id`) was received; no body is returned.
         '400': { $ref: '#/components/responses/BadRequest' }
-         '401': { $ref: '#/components/responses/Unauthorized' }
-         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/control/apply:
+    post:
+      tags: [serving-control]
+      summary: Shift-left validate, preview diff, or hot-swap dynamic inference configuration
+      description: Evaluates candidate configuration against syntactic schema and relational invariants. If dry_run=true, computes structural diff, VRAM delta, drain time, and transition risk level without mutating active state. If applied, increments ConfigEpoch monotonically, maintains double-buffered LKG, and arms the canary rollback watchdog.
+      parameters:
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: When true, preview validation, diff, and resource impact without applying mutations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ControlApplyRequest' }
+      responses:
+        '200':
+          description: Validation result, diff, resource impact, and updated epoch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlApplyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/control/apply:
+    post:
+      tags: [serving-control]
+      summary: Shift-left validate, preview diff, or hot-swap dynamic inference configuration (fak alias)
+      description: Evaluates candidate configuration against syntactic schema and relational invariants. If dry_run=true, computes structural diff, VRAM delta, drain time, and transition risk level without mutating active state.
+      parameters:
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ControlApplyRequest' }
+      responses:
+        '200':
+          description: Validation result, diff, resource impact, and updated epoch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlApplyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/control/events:
+    get:
+      tags: [serving-control]
+      summary: Read control plane audit event stream
+      description: Returns the journaled audit event stream of configuration mutations, LKG promotions, and automated canary rollbacks.
+      responses:
+        '200':
+          description: The stream of audit events.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEvent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/control/events:
+    get:
+      tags: [serving-control]
+      summary: Read control plane audit event stream (fak alias)
+      description: Returns the journaled audit event stream of configuration mutations, LKG promotions, and automated canary rollbacks.
+      responses:
+        '200':
+          description: The stream of audit events.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEvent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/control/telemetry:
+    post:
+      tags: [serving-control]
+      summary: Ingest serving telemetry for canary watchdog evaluation
+      description: Ingests an observed serving telemetry sample (speculative acceptance rate, TTFT p99 latency, 5xx error rate) and triggers automatic microsecond rollback to LKG if degradation boundaries are breached.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelemetrySample' }
+      responses:
+        '200':
+          description: Evaluation outcome and current active configuration epoch.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggered: { type: boolean }
+                  trigger: { type: string }
+                  detail: { type: string }
+                  config_epoch: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/control/telemetry:
+    post:
+      tags: [serving-control]
+      summary: Ingest serving telemetry for canary watchdog evaluation (fak alias)
+      description: Ingests an observed serving telemetry sample and evaluates canary stabilization or rollback triggers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelemetrySample' }
+      responses:
+        '200':
+          description: Evaluation outcome and current active configuration epoch.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   # -------------------------------------------------------------------------
   # Agent-to-Agent (A2A) protocol — task-based async control surface
@@ -2345,6 +2479,80 @@ components:
         status: { type: string }
         config_epoch: { type: integer }
         config: { $ref: '#/components/schemas/ScalarConfig' }
+
+    ControlApplyRequest:
+      type: object
+      properties:
+        dry_run: { type: boolean }
+        completion_deadline_ms: { type: integer }
+        stream_progress_timeout_ms: { type: integer }
+        max_waiting_seqs: { type: integer }
+        compact_history_budget: { type: integer }
+        compact_anchor_head: { type: integer }
+        log_level: { type: string }
+        speculative_draft_depth: { type: integer }
+        speculative_acceptance_threshold: { type: number }
+        max_batch_tokens: { type: integer }
+        max_model_len: { type: integer }
+        max_num_seqs: { type: integer }
+        priority_strategy: { type: string }
+        preemption_strategy: { type: string }
+        target_kv_blocks: { type: integer }
+        block_size_bytes: { type: integer }
+        max_preallocated_draft_slots: { type: integer }
+        available_vram_bytes: { type: integer }
+        model_weights_bytes: { type: integer }
+        activation_headroom_bytes: { type: integer }
+        declared_latency_sla_ms: { type: number }
+
+    ResourceImpact:
+      type: object
+      properties:
+        vram_delta_bytes: { type: integer }
+        vram_delta_mb: { type: number }
+        estimated_drain_ms: { type: integer }
+        drain_required: { type: boolean }
+        risk_level: { type: string, enum: [LOW, MEDIUM, HIGH_DRAIN_REQUIRED] }
+        details:
+          type: array
+          items: { type: string }
+
+    FieldDiff:
+      type: object
+      properties:
+        from: {}
+        to: {}
+
+    ControlApplyResponse:
+      type: object
+      properties:
+        status: { type: string }
+        config_epoch: { type: integer }
+        valid: { type: boolean }
+        diff:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/FieldDiff' }
+        impact: { $ref: '#/components/schemas/ResourceImpact' }
+
+    AuditEvent:
+      type: object
+      properties:
+        seq: { type: integer }
+        event: { type: string }
+        timestamp: { type: string, format: date-time }
+        from_epoch: { type: integer }
+        to_epoch: { type: integer }
+        trigger: { type: string }
+        detail: { type: string }
+
+    TelemetrySample:
+      type: object
+      properties:
+        speculative_acceptance_rate: { type: number }
+        ttft_p99_ms: { type: number }
+        error_5xx_rate: { type: number }
+        total_requests: { type: integer }
+        errors_5xx: { type: integer }
 
     PolicyReloadResponse:
       type: object

@@ -45,6 +45,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
+	"control":         2, // dynamic inference configuration control plane: shift-left validation, relational invariants, dry-run diff, and canary auto-rollback watchdog (#10869).
 	"agentquery":      2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
 	"bgloop":          2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
 	"cmdutil":         2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
@@ -789,8 +790,6 @@ var tier = map[string]int{
 	"toolbound":                  1,
 	"overtonscore":               1,
 	"dataslot":                   1,
-	"orgdebt":                    1,
-	"tb4bench":                   4,
 	"servingsim":                 1, // trace-driven discrete-event LLM serving simulator; stdlib-only (#10841).
 	"cache":                      1,
 	"benchsnapshot":              1,
