@@ -4,6 +4,30 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "FlashML-org/FreeToken",
+      "url": "https://github.com/FlashML-org/FreeToken",
+      "status": "studied",
+      "priority": 1,
+      "why": "Edge-native MoE serving engine with direct NVMe PLE n-gram table streaming (0.1-0.4ms) with CUDA stream memops for Qwen3.8-Flash-Next, bandwidth-adaptive PCIe-vs-CPU expert miss co-execution (q* policy), and GLM-5.3-Flash 45-layer hybrid KDA/DSA execution.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "03c28d2b154484f84397e42731a9b97f340322b5",
+      "stars_at_check": 1850,
+      "last_push_at_check": "2026-09-03T10:01:57Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-FREETOKEN-2026-09-03.md",
+      "receipt_id": "study_8fc6130243ee492e8b2934b77ab93b267f3bacd24792a96f62186627bcb6e391",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "03c28d2b154484f84397e42731a9b97f340322b5",
+        "subsystem_count": 8,
+        "candidate_count": 5,
+        "filed_issue_count": 2,
+        "issue_refs": [
+          "#11037",
+          "#11038"
+        ]
+      }
+    },
+    {
       "repository": "paul-gauthier/aider",
       "url": "https://github.com/paul-gauthier/aider",
       "status": "studied",

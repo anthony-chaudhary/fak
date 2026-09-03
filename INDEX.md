@@ -289,6 +289,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-FREETOKEN-2026-09-03.md`](docs/notes/CONCEPT-STUDY-FREETOKEN-2026-09-03.md) — pinned follow-up study of FreeToken (FlashML-org/FreeToken@03c28d2) triggered by Shuo Yang's announcement of Qwen3.8-Flash-Next running at 68.3 tok/s on an RTX 5090 with 63GB host RAM: direct NVMe streaming of 51GB PLE tables with CUDA stream memops (#11037), bandwidth-adaptive MoE miss partitioning (#11038), and GLM-5.3-Flash 45-layer hybrid KDA/DSA execution (#9441); receipt `study_8fc6130243ee492e8b2934b77ab93b267f3bacd24792a96f62186627bcb6e391`.
+
 - [`docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md`](docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md) — pinned comparative study of landmark OSS agentic software development systems (Aider, SWE-agent, Cline, Continue, Agentless): PageRank RepoMap, windowed ACI file viewing, AST skeletonization, delta-linting, in-memory syntax gating, Myers diff streaming, Architect/Editor split, shadow git checkpoints, and .worktreeinclude; receipt `study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784`; filed #10966-#10986.
 
 - [`docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md`](docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md) — strategic priority and architectural doctrine shifting mainstream development to the native fak harness: low-ego market realism, field-borrowing posture, 4-arm next-best alternative (NBA) benchmarking against OpenCode, Codex, Cursor, and Claude Code, and upstream feature adaptation matrix.
