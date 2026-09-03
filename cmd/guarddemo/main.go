@@ -68,6 +68,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/demoutil"
 
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 //go:embed page.html
@@ -486,6 +488,18 @@ func runSelfcheck() int {
 			fmt.Printf("                   mismatch: %v\n", check.Mismatches())
 		}
 	}
+
+	// Child process-tree memory containment: verify host memory snapshot probe.
+	ran++
+	snapshot, supported, detail := procguard.CollectMemorySnapshot(os.Getpid())
+	containmentOK := supported && detail == "" && snapshot.TreeBytes > 0
+	containmentStatus := "PASS"
+	if !containmentOK {
+		containmentStatus = "FAIL"
+		failed++
+	}
+	fmt.Printf("  %-16s %s   snapshot probe verified (pid=%d metric=%s tree=%d bytes) · consistency=ok\n",
+		"child-contain", containmentStatus, os.Getpid(), snapshot.Metric, snapshot.TreeBytes)
 
 	fmt.Println()
 	if ran == 0 {
