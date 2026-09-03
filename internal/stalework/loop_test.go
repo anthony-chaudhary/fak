@@ -25,7 +25,11 @@ func validLoopIssue(number int, candidate Candidate, state string) IssueSnapshot
 	digest := EvidenceDigest(candidate)
 	contract := contractCandidate(candidate, digest)
 	title, body := renderIssue(contract, candidate, digest)
-	return IssueSnapshot{Number: number, Title: title, Body: body, State: state, URL: "https://example.invalid/issues/" + contract.Key}
+	labels := make([]issuepolicy.IssueLabel, len(contract.Labels))
+	for i, l := range contract.Labels {
+		labels[i] = issuepolicy.IssueLabel{Name: l}
+	}
+	return IssueSnapshot{Number: number, Title: title, Body: body, State: state, Labels: labels, URL: "https://example.invalid/issues/" + contract.Key}
 }
 
 func TestBuildLoopRefusesDispatchUntilDedicatedIssueExists(t *testing.T) {
