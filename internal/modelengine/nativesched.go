@@ -79,6 +79,8 @@ type NativeScheduler struct {
 	sessionProfiler     func(NativeSessionLifecycle) *model.PhaseProfiler
 	captureQwenState    bool
 	qwenStateReceipts   []model.Qwen35MetalStateIdentityReceipt
+	qwenPrefillTokens   int
+	qwenPrefillCap      *residentQ4KPrefillCapability
 	closed              bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
@@ -106,6 +108,11 @@ type NativeScheduler struct {
 	drainDonation     bool
 	blockedDrains     int
 	donatedIterations uint64
+	iteration         uint64
+
+	closeSession       func(*model.Session)
+	observeNativeEvent func(nativeSchedulerEvent)
+	beforeModelExecute func(nativeSchedulerEventKind, *schedLane)
 }
 
 // NativeSessionLifecycle identifies whether a scheduler-created model session is
@@ -262,7 +269,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 	if prepare == nil {
 		prepare = defaultSchedPrepare
 	}
-	return &NativeScheduler{
+	s := &NativeScheduler{
 		m:             m,
 		prepare:       prepare,
 		now:           time.Now,
@@ -270,7 +277,12 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		stopped:       make(chan struct{}),
 		drainDonation: true,
 		coupler:       NewDefaultWorkerCoupler(),
+		closeSession:  func(sess *model.Session) { sess.Close() },
 	}
+	if m != nil && m.Q4KCount() > 0 {
+		s.qwenPrefillCap = &residentQ4KPrefillCapability{model: m}
+	}
+	return s
 }
 
 // SetDrainDonation selects whether a blocked Complete drain may execute native
@@ -305,12 +317,11 @@ func (s *NativeScheduler) Caps() []abi.Capability {
 // WeightBearing declares that the native scheduler runs model-forwards.
 func (s *NativeScheduler) WeightBearing() bool { return true }
 
-// Admit registers one request: it prefills the prompt synchronously (so the lane
-// enters the batch with its first logits ready), enqueues the lane on the WAITING
-// queue, and nudges the scheduler loop. The loop promotes it into the running set
-// (subject to maxRunning) between steps; decoding then proceeds in the shared
-// StepBatch loop. A surviving lane's output is independent of when it is promoted —
-// each lane owns its KV and StepBatch is bit-exact regardless of co-batch membership.
+// Admit registers one request. By default it preserves the historical synchronous
+// prefill-before-enqueue path. An explicitly enabled, supported Qwen Q4_K lane instead
+// enters WAITING in PREFILLING state and lets runIteration advance one bounded prompt
+// chunk before returning to decode work. A surviving lane's output remains independent
+// of promotion timing because each lane owns its KV and decode state.
 func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	return s.AdmitWithHint(ctx, c, dispatchtick.WaveHint{})
 }
@@ -353,50 +364,66 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 			return nil, err
 		}
 	}
-	prefillStarted := s.now()
-	logits := RunWithOp(s.coupler, OpPrefill, func() []float32 {
-		return sess.Prefill(prompt)
-	})
-	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
-	if s.captureQwenState {
-		executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
-		if err != nil || !executed {
-			sess.Close()
-			if err == nil {
-				err = errors.New("modelengine: Qwen Metal state identity was not executed")
+	prefillChunkTokens := s.qwenPrefillChunkBudget(prep, sess, len(prompt))
+	state := schedLaneDecode
+	promptCursor := len(prompt)
+	promptLen := len(prompt)
+	var logits []float32
+	if prefillChunkTokens == 0 {
+		prefillStarted := s.now()
+		logits = RunWithOp(s.coupler, OpPrefill, func() []float32 {
+			return sess.Prefill(prompt)
+		})
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
+		if s.captureQwenState {
+			executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
+			if err != nil || !executed {
+				sess.Close()
+				if err == nil {
+					err = errors.New("modelengine: Qwen Metal state identity was not executed")
+				}
+				return nil, err
 			}
-			return nil, err
+			receipt, ok := sess.Qwen35MetalStateIdentityReceipt()
+			if !ok {
+				sess.Close()
+				return nil, errors.New("modelengine: Qwen Metal state identity receipt unavailable")
+			}
+			s.mu.Lock()
+			s.qwenStateReceipts = append(s.qwenStateReceipts, receipt)
+			s.mu.Unlock()
 		}
-		receipt, ok := sess.Qwen35MetalStateIdentityReceipt()
-		if !ok {
-			sess.Close()
-			return nil, errors.New("modelengine: Qwen Metal state identity receipt unavailable")
-		}
-		s.mu.Lock()
-		s.qwenStateReceipts = append(s.qwenStateReceipts, receipt)
-		s.mu.Unlock()
+	} else {
+		state = schedLanePrefilling
+		promptCursor = 0
+		// promptLen is also the scheduler's resident-KV accounting input. Do not
+		// reserve the not-yet-executed tail of an asynchronously-prefilled prompt.
+		promptLen = 0
 	}
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
-		sched:       s,
-		ctx:         cctx,
-		cancel:      cancel,
-		sess:        sess,
-		logits:      logits,
-		tool:        c.Tool,
-		prompt:      append([]int(nil), prompt...),
-		promptLen:   len(prompt),
-		putCtx:      ctx,
-		tok:         prep.tok,
-		q4k:         q4k,
-		kvReuseHits: kvReuseHits,
-		kvPinned:    kvPinned,
-		kvPinUntil:  kvPinUntil,
-		tokens:      make(chan abi.EngineToken, 1),
-		done:        make(chan struct{}),
-		hint:        hint,
+		sched:              s,
+		ctx:                cctx,
+		cancel:             cancel,
+		sess:               sess,
+		logits:             logits,
+		tool:               c.Tool,
+		prompt:             append([]int(nil), prompt...),
+		promptLen:          promptLen,
+		putCtx:             ctx,
+		tok:                prep.tok,
+		q4k:                q4k,
+		state:              state,
+		promptCursor:       promptCursor,
+		prefillChunkTokens: prefillChunkTokens,
+		kvReuseHits:        kvReuseHits,
+		kvPinned:           kvPinned,
+		kvPinUntil:         kvPinUntil,
+		tokens:             make(chan abi.EngineToken, 1),
+		done:               make(chan struct{}),
+		hint:               hint,
 	}
 
 	s.mu.Lock()
@@ -634,15 +661,34 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	if promoted := len(s.lanes); promoted > s.maxObservedRunning {
 		s.maxObservedRunning = promoted
 	}
-	s.enforcePreemptionLocked()
+	// Keep enforcing the live KV-block budget while protecting partially-prefilled
+	// lanes, whose prompt cursor and recurrent state cannot yet use decode's
+	// swap/recompute restore contract.
+	s.enforcePreemptionPreservingPrefillLocked()
 	running := len(s.lanes)
 	var solo *schedLane
+	var prefill *schedLane
 	var active []*schedLane
-	if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {
-		solo = s.lanes[0]
-	} else if running > 0 {
-		active = make([]*schedLane, running)
-		copy(active, s.lanes)
+	for _, ln := range s.lanes {
+		if ln.state == schedLanePrefilling {
+			prefill = ln
+			break
+		}
+	}
+	if prefill == nil {
+		if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {
+			solo = s.lanes[0]
+		} else if running > 0 {
+			active = make([]*schedLane, running)
+			copy(active, s.lanes)
+		}
+	} else {
+		active = make([]*schedLane, 0, running-1)
+		for _, ln := range s.lanes {
+			if ln.state == schedLaneDecode {
+				active = append(active, ln)
+			}
+		}
 	}
 	closed = s.closed
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
@@ -651,14 +697,24 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	if idle {
 		return false, idle, closed
 	}
-	if solo != nil {
+	s.iteration++
+	iteration := s.iteration
+	if prefill != nil {
+		s.advanceQwenPrefill(prefill, iteration)
+		if !prefill.terminal && prefill.state == schedLaneDecode {
+			active = append(active, prefill)
+		}
+		if len(active) > 0 {
+			s.stepOnce(active, iteration)
+		}
+	} else if solo != nil {
 		if donated {
-			s.stepOnce([]*schedLane{solo})
+			s.stepOnce([]*schedLane{solo}, iteration)
 		} else {
-			s.stepSolo(solo)
+			s.stepSolo(solo, iteration)
 		}
 	} else {
-		s.stepOnce(active)
+		s.stepOnce(active, iteration)
 	}
 	if donated {
 		s.mu.Lock()
@@ -675,22 +731,54 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 // running: ok==false means the lane was finished and the caller must not touch it again.
 // The solo and shared-batch step paths differ only in what they do with a still-running
 // lane, so this is the copy-identical per-lane emit both of them share.
-func (ln *schedLane) emitToken() (next int, ok bool) {
-	if ln.ctx.Err() != nil { // cancelled between steps
-		ln.finish(nil, ln.ctx.Err())
+func (ln *schedLane) emitToken(iteration uint64) (next int, ok bool) {
+	s := ln.sched
+	s.mu.Lock()
+	if err := ln.ctx.Err(); err != nil { // cancelled between steps
+		ln.finish(nil, err)
+		s.mu.Unlock()
+		return 0, false
+	}
+	if ln.state != schedLaneDecode || len(ln.logits) == 0 || ln.sess == nil || ln.sess == ln.statsSess {
+		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
+		s.mu.Unlock()
 		return 0, false
 	}
 	next = argmax(ln.logits)
+	eos := ln.sess.M.Cfg.IsEOS(next)
+	s.mu.Unlock()
+
 	select {
 	case ln.tokens <- abi.EngineToken{ID: next}:
 	case <-ln.ctx.Done(): // cancelled while delivering
+		s.mu.Lock()
 		ln.finish(nil, ln.ctx.Err())
+		s.mu.Unlock()
 		return 0, false
 	}
+
+	s.mu.Lock()
 	ln.gen = append(ln.gen, next)
 	ln.emitted++
-	if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
-		ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
+	done := eos || ln.emitted >= genTokens
+	var res *abi.Result
+	if done {
+		res = assembleResult(ln.putCtx, ln.tool, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
+	}
+	state := ln.state
+	s.mu.Unlock()
+
+	s.observeEvent(nativeSchedulerEvent{
+		Iteration: iteration,
+		Kind:      nativeSchedulerEventDecode,
+		Lane:      ln,
+		State:     state,
+		Token:     next,
+	})
+	if done {
+		s.mu.Lock()
+		ln.finish(res, nil)
+		s.mu.Unlock()
 		return 0, false
 	}
 	return next, true
@@ -699,17 +787,25 @@ func (ln *schedLane) emitToken() (next int, ok bool) {
 // stepSolo advances one lane without rebuilding the scheduler batch between every token.
 // It returns to run() whenever another Admit/Close signal arrives, preserving in-flight
 // batch addition while keeping uncontended B=1 latency off the shared-batch bookkeeping path.
-func (s *NativeScheduler) stepSolo(ln *schedLane) {
+func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 	for {
-		next, ok := ln.emitToken()
+		next, ok := ln.emitToken(iteration)
 		if !ok {
 			return
 		}
+		sess := s.takeDecodeSession(ln)
+		if sess == nil {
+			return
+		}
+		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 		decodeStarted := s.now()
-		ln.logits = RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return ln.sess.Step(next)
+		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
+			return sess.Step(next)
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+		if !s.publishDecodeSession(ln, sess, logits) {
+			return
+		}
 		select {
 		case <-s.wake:
 			return
@@ -721,11 +817,11 @@ func (s *NativeScheduler) stepSolo(ln *schedLane) {
 // stepOnce emits one token per active lane, then advances every lane that is still
 // running with ONE shared StepBatch. A lane is retired (cancelled or done) before
 // the batch so it never enters StepBatch's id panel.
-func (s *NativeScheduler) stepOnce(active []*schedLane) {
+func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	cont := make([]*schedLane, 0, len(active))
 	ids := make([]int, 0, len(active))
 	for _, ln := range active {
-		next, ok := ln.emitToken()
+		next, ok := ln.emitToken(iteration)
 		if !ok {
 			continue
 		}
@@ -735,27 +831,39 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	if len(cont) == 0 {
 		return
 	}
-	if len(cont) == 1 {
-		for i, ln := range cont {
-			decodeStarted := s.now()
-			ln.logits = RunWithOp(s.coupler, OpDecode, func() []float32 {
-				return ln.sess.Step(ids[i])
-			})
-			s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+	execLanes := make([]*schedLane, 0, len(cont))
+	execIDs := make([]int, 0, len(cont))
+	seqs := make([]*model.Session, 0, len(cont))
+	for i, ln := range cont {
+		if sess := s.takeDecodeSession(ln); sess != nil {
+			execLanes = append(execLanes, ln)
+			execIDs = append(execIDs, ids[i])
+			seqs = append(seqs, sess)
 		}
+	}
+	if len(execLanes) == 0 {
+		return
+	}
+	if len(execLanes) == 1 {
+		s.beforeModelExecution(nativeSchedulerEventDecode, execLanes[0])
+		decodeStarted := s.now()
+		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
+			return seqs[0].Step(execIDs[0])
+		})
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+		s.publishDecodeSession(execLanes[0], seqs[0], logits)
 		return
 	}
 	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
 	// still-running lane's own Session (each owns its KV). This is the exact
 	// continuous-batching primitive a real native scheduler is built on.
-	seqs := make([]*model.Session, len(cont))
-	for i, ln := range cont {
-		seqs[i] = ln.sess
-	}
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
+	for _, ln := range execLanes {
+		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
+	}
 	decodeStarted := s.now()
 	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
-		return bs.StepBatch(ids)
+		return bs.StepBatch(execIDs)
 	})
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
@@ -765,8 +873,67 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 		s.sharedMACs += uint64(bs.LastStepMACs())
 		s.mu.Unlock()
 	}
-	for i, ln := range cont {
-		ln.logits = copyF32(out[i])
+	for i, ln := range execLanes {
+		s.publishDecodeSession(ln, seqs[i], copyF32(out[i]))
+	}
+}
+
+// takeDecodeSession replaces the live model session with a non-nil immutable
+// stats shell while Step/StepBatch mutates Cache outside s.mu. Preemption runs
+// only on executor boundaries, so it can never select the shell as a victim.
+func (s *NativeScheduler) takeDecodeSession(ln *schedLane) *model.Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.runningDecodeLaneLocked(ln) {
+		return nil
+	}
+	if err := ln.ctx.Err(); err != nil {
+		ln.finish(nil, err)
+		return nil
+	}
+	return ln.takeSessionForModelLocked()
+}
+
+// publishDecodeSession restores the real session and publishes the logits only
+// after the cache mutation has completed. Cancellation restores ownership first,
+// then finish closes the real session exactly once under s.mu.
+func (s *NativeScheduler) publishDecodeSession(ln *schedLane, sess *model.Session, logits []float32) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.runningDecodeLaneLocked(ln) || !ln.restoreSessionFromModelLocked(sess) {
+		if ln != nil && ln.inflightSess == sess {
+			ln.inflightSess = nil
+		}
+		s.closeLaneSession(sess)
+		return false
+	}
+	if err := ln.ctx.Err(); err != nil {
+		ln.finish(nil, err)
+		return false
+	}
+	if len(logits) == 0 {
+		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
+		return false
+	}
+	ln.logits = logits
+	return true
+}
+
+func (s *NativeScheduler) runningDecodeLaneLocked(ln *schedLane) bool {
+	if ln == nil || ln.terminal || ln.state != schedLaneDecode {
+		return false
+	}
+	for _, running := range s.lanes {
+		if running == ln {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *NativeScheduler) beforeModelExecution(kind nativeSchedulerEventKind, ln *schedLane) {
+	if s != nil && s.beforeModelExecute != nil {
+		s.beforeModelExecute(kind, ln)
 	}
 }
 
@@ -859,23 +1026,30 @@ type schedLane struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// loop-private decode state (touched only by the run goroutine).
-	sess        *model.Session
-	logits      []float32
-	gen         []int
-	emitted     int
-	tool        string
-	prompt      []int
-	promptLen   int
-	putCtx      context.Context
-	tok         NLTokenizer
-	q4k         bool
-	kvReuseHits int
-	kvPinned    bool
-	kvPinUntil  time.Time
-	terminal    bool
-	hint        dispatchtick.WaveHint
-	seqNo       int64
+	// Model execution is serialized by executor. Fields consumed by live stats
+	// (sess, promptLen, emitted, terminal) and completed prefill/decode publication
+	// are additionally synchronized by sched.mu.
+	sess               *model.Session
+	statsSess          *model.Session // immutable non-nil shell exposed while inflightSess mutates
+	inflightSess       *model.Session // real session owned by the executor during model execution
+	logits             []float32
+	gen                []int
+	emitted            int
+	tool               string
+	prompt             []int
+	promptLen          int
+	putCtx             context.Context
+	tok                NLTokenizer
+	q4k                bool
+	state              schedLaneState
+	promptCursor       int
+	prefillChunkTokens int
+	kvReuseHits        int
+	kvPinned           bool
+	kvPinUntil         time.Time
+	terminal           bool
+	hint               dispatchtick.WaveHint
+	seqNo              int64
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
@@ -915,15 +1089,60 @@ func (ln *schedLane) Reclaimed() bool {
 	return ln.reclaimed
 }
 
-// finish records the terminal state once, drops the session (KV reclaim), and
-// closes the stream + done edges. Called only from the run goroutine.
+// finish records the terminal state once, closes and drops the session (KV reclaim),
+// and closes the stream + done edges. Called only by the serialized scheduler executor.
 func (ln *schedLane) finish(res *abi.Result, err error) {
+	if ln.terminal {
+		return
+	}
 	ln.res, ln.err, ln.reclaimed = res, err, true
 	ln.terminal = true
-	ln.sess = nil // reclaim the KV-bearing session
-	ln.cancel()   // release the derived context
+	published, inflight, shell := ln.sess, ln.inflightSess, ln.statsSess
+	ln.sess, ln.inflightSess, ln.statsSess = nil, nil, nil
+	ln.closeRealSession(published, shell)
+	if inflight != published {
+		ln.closeRealSession(inflight, shell)
+	}
+	ln.cancel() // release the derived context
 	close(ln.tokens)
 	close(ln.done)
+}
+
+func (ln *schedLane) closeRealSession(sess, shell *model.Session) {
+	if sess == nil || sess == shell {
+		return
+	}
+	if ln.sched != nil {
+		ln.sched.closeLaneSession(sess)
+	} else {
+		sess.Close()
+	}
+}
+
+// takeSessionForModelLocked transfers the real session to executor-local
+// ownership and leaves laneKVBlocksLocked an immutable, Cache-free view. The
+// shell keeps the lane present in Running while promptLen+emitted supplies the
+// synchronized live-token count.
+func (ln *schedLane) takeSessionForModelLocked() *model.Session {
+	if ln == nil || ln.sess == nil || ln.sess == ln.statsSess || ln.inflightSess != nil {
+		return nil
+	}
+	real := ln.sess
+	if ln.statsSess == nil {
+		ln.statsSess = &model.Session{M: real.M, Quant: real.Quant, Q4K: real.Q4K}
+	}
+	ln.inflightSess = real
+	ln.sess = ln.statsSess
+	return real
+}
+
+func (ln *schedLane) restoreSessionFromModelLocked(real *model.Session) bool {
+	if ln == nil || real == nil || ln.inflightSess != real || ln.statsSess == nil || ln.sess != ln.statsSess {
+		return false
+	}
+	ln.inflightSess = nil
+	ln.sess = real
+	return true
 }
 
 func copyF32(v []float32) []float32 { return append([]float32(nil), v...) }
