@@ -1,11 +1,127 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
+
+func TestGuardCodexPromptFuelProvidesThreeIdenticalLaunchReaders(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DISPATCH_WORKSPACE", root)
+	prompt := "issue #8124\r\nexact unicode λ\n" + strings.Repeat("fuel\x00", 1024)
+	command := []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-"}
+
+	fuel, err := preparePromptFuel(command, strings.NewReader(prompt), "guard-8124")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPathRoot := filepath.Join(root, ".dispatch-runs", "prompt-fuel")
+	if filepath.Dir(fuel.path) != wantPathRoot {
+		t.Fatalf("fuel path = %q, want directory %q", fuel.path, wantPathRoot)
+	}
+	persisted, err := os.ReadFile(fuel.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != prompt {
+		t.Fatal("persisted prompt fuel changed bytes")
+	}
+
+	meta := guardChildSpawnMetadata{
+		AgentRunID:   "guard-8124",
+		ToolCallID:   "guard-child:guard-8124",
+		PolicyDigest: "sha256:test-policy",
+		Backend:      "codex",
+		Envelope: toolprocgate.CapabilityEnvelope{
+			Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn},
+		},
+		LaunchPlan: newGuardLaunchPlan(command),
+		PromptFuel: fuel,
+	}
+	for launch := 1; launch <= 3; launch++ {
+		meta.RegistryPath = filepath.Join(root, fmt.Sprintf("child-registry-%d.jsonl", launch))
+		_, child, err := launchGuardChildWithBroker(command, nil, false, meta, toolprocgate.NewSpawnBroker(), func(toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+			return exec.Command("unused"), nil
+		})
+		if err != nil {
+			t.Fatalf("launch %d: %v", launch, err)
+		}
+		got, err := io.ReadAll(child.Stdin)
+		if err != nil {
+			t.Fatalf("launch %d read: %v", launch, err)
+		}
+		if string(got) != prompt {
+			t.Fatalf("launch %d prompt bytes changed", launch)
+		}
+	}
+
+	j := journal.OpenMemory()
+	row := appendGuardChildExitWitness(j, "codex", "guard-8124", nil, nil, time.Now(), fuel)
+	if row.ChildExit == nil || !strings.Contains(row.ChildExit.LastHook, "prompt_fuel_digest="+promptFuelDigest([]byte(prompt))) ||
+		!strings.Contains(row.ChildExit.LastHook, "restart_count=2") {
+		t.Fatalf("prompt fuel witness = %+v", row.ChildExit)
+	}
+}
+
+func TestGuardCodexPromptFuelRefusesMissingOrTamperedBeforeLaunch(t *testing.T) {
+	command := []string{"codex", "exec", "-"}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*testing.T, string)
+		want   string
+	}{
+		{
+			name: "missing",
+			mutate: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: promptFuelMissingReason,
+		},
+		{
+			name: "tampered",
+			mutate: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte("replacement prompt"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: promptFuelTamperedReason,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fuel, err := persistPromptFuel(filepath.Join(t.TempDir(), "prompt.fuel"), []byte("original prompt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(t, fuel.path)
+			launcherCalled := false
+			meta := guardChildSpawnMetadata{PromptFuel: fuel, LaunchPlan: newGuardLaunchPlan(command)}
+			_, child, err := launchGuardChildWithBroker(command, nil, false, meta, nil, func(toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+				launcherCalled = true
+				return exec.Command("unused"), nil
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("launch error = %v, want %s", err, tc.want)
+			}
+			if launcherCalled || child != nil {
+				t.Fatalf("invalid fuel reached child construction: launcher_called=%v child=%v", launcherCalled, child)
+			}
+		})
+	}
+}
 
 func TestGuardPromptStdinTransportMovesLargeWindowsClaudePrompt(t *testing.T) {
 	prompt := "unicode lambda\r\n" + strings.Repeat("p", 40<<10)

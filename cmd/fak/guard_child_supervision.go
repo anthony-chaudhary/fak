@@ -24,14 +24,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-func guardRecordWireRetry(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int) {
-	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started)
+func guardRecordWireRetry(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int, fuel ...*promptFuel) {
+	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started, fuel...)
 	guardEmitRestartHop(j, stderr, agentName, traceID, guardWireRetryHop(traceID, agentName, retries))
 	time.Sleep(guardCrashRestartDelay(retries))
 }
 
-func guardRecordCrashRestart(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int) {
-	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started)
+func guardRecordCrashRestart(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int, fuel ...*promptFuel) {
+	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started, fuel...)
 	guardEmitRestartHop(j, stderr, agentName, traceID, guardCrashRestartHop(traceID, agentName, retries))
 }
 
@@ -151,6 +151,13 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
 	// below stops the updater and replaces the root with the terminal state.
 	guardSessionCardHandle.startUpdater(srv)
+	var err error
+	spawnMeta.PromptFuel, err = preparePromptFuel(command, os.Stdin, spawnMeta.AgentRunID)
+	if err != nil {
+		startupProgress.Abort()
+		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		return
+	}
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	// #4686 in-place crash restart: a generic harness crash (OOM/SIGNAL/NONZERO_EXIT) matches none of
 	// the narrow recovery seams above, so without this it would tear the guard master down. Bounded by
@@ -216,7 +223,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
-			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
+			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason, spawnMeta.PromptFuel)
 			if receiptErr != nil {
 				resourceErr = guardHandleResourceReceiptFailure(os.Stderr, rsiSession, guardTraceID, agentName, receiptErr)
 				fmt.Fprintf(os.Stderr, "fak guard: %v\n", resourceErr)
@@ -265,7 +272,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			// report. runErr is deliberately dropped for the same reason the supervised
 			// sibling drops it — a park is a scheduled resume, not a session failure, so
 			// the process keeps the exit-0 semantics the `break` already had.
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -280,7 +287,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
 			wireRetries++
-			guardRecordWireRetry(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries)
+			guardRecordWireRetry(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries, spawnMeta.PromptFuel)
 			command = next
 			continue
 		}
@@ -304,14 +311,14 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			}
 			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
 			time.Sleep(guardCrashRestartDelay(crashRestarts))
-			guardRecordCrashRestart(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts)
+			guardRecordCrashRestart(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts, spawnMeta.PromptFuel)
 			command = guardRestartRelaunchCommand(command, agentName)
 			continue
 		}
 		if guardChildIsLaunchFailure(runErr) {
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 		}
-		appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
+		appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted, spawnMeta.PromptFuel)
 		finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
@@ -348,6 +355,13 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
+	var err error
+	spawnMeta.PromptFuel, err = preparePromptFuel(command, os.Stdin, spawnMeta.AgentRunID)
+	if err != nil {
+		startupProgress.Abort()
+		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		return
+	}
 	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
@@ -453,7 +467,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
-			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
+			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason, spawnMeta.PromptFuel)
 			if receiptErr != nil {
 				resourceErr = guardHandleResourceReceiptFailure(restarter.stderr, rsiSession, guardTraceID, agentName, receiptErr)
 				if restarter.stderr != nil {
@@ -508,7 +522,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				// sidecar (written inside finishGuardChildAndReport) was not. The child has
 				// already exited on this branch, so there is nothing to stop: append the
 				// witness before the report, which closes the journal.
-				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
@@ -523,7 +537,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
 				wireRetries++
-				guardRecordWireRetry(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries)
+				guardRecordWireRetry(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries, spawnMeta.PromptFuel)
 				command = next
 				continue
 			}
@@ -555,7 +569,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				}
 				guardReportCrashRestart(restarter.stderr, agentName, class, code, crashRestarts, crashLimit, command)
 				time.Sleep(guardCrashRestartDelay(crashRestarts))
-				guardRecordCrashRestart(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts)
+				guardRecordCrashRestart(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts, spawnMeta.PromptFuel)
 				command = guardRestartRelaunchCommand(command, agentName)
 				continue
 			}
@@ -568,7 +582,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				}
 				markGuardChildTerminalIntent(child, "cancelled")
 				stopGuardChild(child, wait, 2*time.Second)
-				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
@@ -660,7 +674,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			markGuardChildTerminalIntent(child, "time_budget")
 			stopGuardChild(child, wait, 2*time.Second)
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -875,15 +889,15 @@ func guardClassifyChildCrash(runErr error, childState *os.ProcessState) (class s
 	}
 }
 
-func appendGuardChildExitWitness(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time) journal.Row {
-	return appendGuardChildExitWitnessWithReason(j, agentName, traceID, runErr, state, started, "")
+func appendGuardChildExitWitness(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, fuel ...*promptFuel) journal.Row {
+	return appendGuardChildExitWitnessWithReason(j, agentName, traceID, runErr, state, started, "", fuel...)
 }
 
 // appendGuardChildExitWitnessWithReason lets a supervisor-owned termination
 // carry its stable typed cause directly. Resource-monitor errors are synthetic
 // supervisor errors rather than *exec.ExitError values, so routing them through
 // the ordinary process-exit classifier would otherwise produce a blank reason.
-func appendGuardChildExitWitnessWithReason(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, reasonClass string) journal.Row {
+func appendGuardChildExitWitnessWithReason(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, reasonClass string, fuel ...*promptFuel) journal.Row {
 	if j == nil {
 		return journal.Row{}
 	}
@@ -910,6 +924,14 @@ func appendGuardChildExitWitnessWithReason(j *journal.Journal, agentName, traceI
 	wall := time.Duration(0)
 	if !started.IsZero() {
 		wall = time.Since(started)
+	}
+	if len(fuel) > 0 {
+		if fuelReceipt := fuel[0].receipt(); fuelReceipt != "" {
+			if lastHook != "" {
+				lastHook += " "
+			}
+			lastHook += fuelReceipt
+		}
 	}
 	return j.AppendChildExit(agentName, traceID, class, exitCode, wall, lastHook)
 }
