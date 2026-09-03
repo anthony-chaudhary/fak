@@ -3565,6 +3565,21 @@
           "category": "incidental",
           "reason": "Shared policy seam both launchers derive their admission budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
           "token": "nativeAdmissionPolicyForBudget"
+        },
+        {
+          "category": "incidental",
+          "reason": "attempt lineage total mismatch refusal reason",
+          "token": "ReasonAggregateMismatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "attempt lineage total mismatch refusal code",
+          "token": "AGGREGATE_MISMATCH"
+        },
+        {
+          "category": "incidental",
+          "reason": "attempt lineage accumulator function",
+          "token": "ComputeAggregate"
         }
       ],
       "exclude": [
@@ -3583,6 +3598,7 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "AGGREGATE_MISMATCH",
         "AffinityFromContext",
         "AffinityGatewayConfig",
         "AffinitySelection",
@@ -3598,6 +3614,7 @@
         "ClaimRuntimeDelegated",
         "ClassGuard",
         "CodeRuntimeDelegated",
+        "ComputeAggregate",
         "ConversionGate",
         "CorrectnessGate",
         "DELEGATE",
@@ -3645,6 +3662,7 @@
         "PonytailGateOptions",
         "PonytailGateReport",
         "PonytailGatesRevision",
+        "ReasonAggregateMismatch",
         "RemoteCredentialGate",
         "RemoteGate",
         "ReportedGates",
