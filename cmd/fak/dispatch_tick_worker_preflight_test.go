@@ -433,3 +433,27 @@ func writeDispatchCodexAuth(t *testing.T, home, credential, accountID string) {
 		t.Fatal(err)
 	}
 }
+
+func TestDispatchWorkerPreflightAuthMissingIdentifiesSeatAndRemediation(t *testing.T) {
+	home := t.TempDir()
+	setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+		return dispatchCodexPreflightObservation{AuthError: "credential missing"}, nil
+	})
+	req := dispatchWorkerPreflightRequest{
+		Backend:       "codex",
+		Account:       dispatchtick.Account{Tag: "worker-seat-1", Dir: home},
+		Model:         "gpt-5.6-sol",
+		Guarded:       true,
+		LaunchCommand: []string{"fak", "guard", "--", "codex"},
+	}
+	res := dispatchWorkerPreflight(context.Background(), req, time.Now())
+	if res.Verdict != dispatchWorkerPreflightAuthMissing {
+		t.Fatalf("verdict = %q, want %q", res.Verdict, dispatchWorkerPreflightAuthMissing)
+	}
+	if !strings.Contains(res.Reason, `seat "worker-seat-1"`) {
+		t.Fatalf("reason missing seat identity: %q", res.Reason)
+	}
+	if !strings.Contains(res.Reason, "fak accounts") || !strings.Contains(res.Reason, "fak m -- codex login") {
+		t.Fatalf("reason missing actionable remediation: %q", res.Reason)
+	}
+}
