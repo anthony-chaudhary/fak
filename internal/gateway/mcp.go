@@ -369,11 +369,13 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	case "fak_adjudicate":
 		req := decodeSyscallArgs(p.Arguments)
 		req.TraceID = s.traceFor(req.TraceID)
+		started := time.Now()
 		wv, repaired, err := s.adjudicate(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
+		receipt := adjudicateReceipt(wv, err, time.Since(started))
 		if err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "fak_adjudicate failed", Data: receipt}
 		}
-		resp := SyscallResponse{Verdict: wv, TraceID: req.TraceID}
+		resp := SyscallResponse{Verdict: wv, TraceID: req.TraceID, Receipt: &receipt}
 		if repaired != "" {
 			resp.RepairedArguments = json.RawMessage(repaired)
 		}
@@ -757,7 +759,7 @@ func toolDescriptors() []map[string]any {
 	tools := []map[string]any{
 		{
 			"name":        "fak_adjudicate",
-			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the verdict (ALLOW/DENY/TRANSFORM/REQUIRE_WITNESS) and, for a denial, a disposition (RETRYABLE/WAIT/ESCALATE/TERMINAL); for a TRANSFORM, the repaired canonical arguments. Call this before running a tool your own client executes.",
+			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the legacy verdict/trace/repaired_arguments fields plus a fak-adjudicate-receipt/1 receipt with closed outcome, duration, execution=not_executed, and kernel_decide provenance. Outcomes are allowed, denied, transformed, witness_required, or failed; failures expose only stable error code/source. Repaired arguments appear only for TRANSFORM. Call this before running a tool your own client executes.",
 			"inputSchema": schema,
 		},
 		{
