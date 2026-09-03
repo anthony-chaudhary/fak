@@ -1,0 +1,60 @@
+{
+  "schema": "fak-codex-reconcile/1",
+  "note": "#10673 conformance. Four rollouts: session-a has the #10673 signature (3 starts, 1 observed terminal, 1 mid-session gap, 1 stale open tail); session-b closes by abort; session-c closes cleanly; session-d has a mid-session gap. FreshWithin is 0 in the conformance test, so every open final start is process_death (deterministic: committed files get checkout-time mtimes).",
+  "expect": {
+    "scanned": 4,
+    "unreadable": 0,
+    "totals": {
+      "rollouts": 4,
+      "task_started": 7,
+      "task_complete": 3,
+      "turn_aborted": 1,
+      "raw_unaccounted": 3,
+      "raw_unaccounted_pct": 42.857142857142854,
+      "complete": 3,
+      "aborted": 1,
+      "superseded": 2,
+      "process_death": 1,
+      "live": 0,
+      "closed_total": 7,
+      "residual_unaccounted": 0,
+      "residual_pct": 0,
+      "unclassified_after": 0,
+      "orphans": 0,
+      "reused": 0,
+      "multiply_terminated": 0
+    },
+    "by_provider": {
+      "fak 0.144.4": {
+        "rollouts": 2,
+        "task_started": 4,
+        "task_complete": 1,
+        "turn_aborted": 1,
+        "raw_unaccounted": 2,
+        "raw_unaccounted_pct": 50,
+        "complete": 1,
+        "aborted": 1,
+        "superseded": 1,
+        "process_death": 1,
+        "live": 0,
+        "closed_total": 4,
+        "residual_unaccounted": 0
+      },
+      "openai 0.142.2": {
+        "rollouts": 2,
+        "task_started": 3,
+        "task_complete": 2,
+        "turn_aborted": 0,
+        "raw_unaccounted": 1,
+        "raw_unaccounted_pct": 33.333333333333336,
+        "complete": 2,
+        "aborted": 0,
+        "superseded": 1,
+        "process_death": 0,
+        "live": 0,
+        "closed_total": 3,
+        "residual_unaccounted": 0
+      }
+    }
+  }
+}

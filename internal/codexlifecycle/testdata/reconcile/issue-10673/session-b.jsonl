@@ -1,0 +1,3 @@
+{"timestamp":"2026-09-01T07:10:00.000Z","type":"session_meta","payload":{"id":"reconcile-0002","model_provider":"fak","cli_version":"0.144.4","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-09-01T07:10:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"D","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:12:00.000Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"D","reason":"interrupted","duration_ms":119000}}
