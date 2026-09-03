@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -170,6 +171,38 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return wv, env, nil
 	}
 	r, v := s.k.Syscall(ctx, tc)
+	if v.Kind == abi.VerdictAllow && isCapabilitiesTool(tc.Tool) {
+		var capReq CapabilitiesRequest
+		argsBytes := resolveBytes(ctx, tc.Args)
+		if len(argsBytes) > 0 {
+			_ = json.Unmarshal(argsBytes, &capReq)
+		}
+		capResp, capErr := s.capabilities(capReq)
+		if capErr == nil {
+			capBytes, _ := json.Marshal(capResp)
+			r = &abi.Result{
+				Status: abi.StatusOK,
+				Payload: abi.Ref{
+					Kind:   abi.RefInline,
+					Inline: capBytes,
+				},
+				Meta: map[string]string{
+					"engine": "fak-mcp",
+				},
+			}
+		} else {
+			r = &abi.Result{
+				Status: abi.StatusError,
+				Payload: abi.Ref{
+					Kind:   abi.RefInline,
+					Inline: []byte(capErr.Error()),
+				},
+				Meta: map[string]string{
+					"engine": "fak-mcp",
+				},
+			}
+		}
+	}
 	s.rememberOriginSeq(tc.TraceID, tc.Tool, string(resolveBytes(ctx, tc.Args)), tc.SeqNo)
 	wv = renderVerdict(v, resultMeta(r))
 	if r != nil {
@@ -190,6 +223,12 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 	// carries the demotion breadcrumb the parent script checks before folding.
 	wv = witnessScriptedFold(tc.Tool, env, wv)
 	return wv, env, nil
+}
+
+func isCapabilitiesTool(tool string) bool {
+	return tool == "fak_capabilities" ||
+		tool == "mcp__fak__fak_capabilities" ||
+		tool == "mcp__fak_guard__fak_capabilities"
 }
 
 // dispatchEnsemble executes a multi-member routing Plan (issue #597): it runs each

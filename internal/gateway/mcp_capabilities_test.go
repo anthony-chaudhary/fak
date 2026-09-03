@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
@@ -144,5 +146,48 @@ func TestMCPCapabilitiesReusesIdenticalSuccessfulDiscovery(t *testing.T) {
 	}
 	if executions, hits := srv.capabilitiesReuse.snapshot(); executions != 3 || hits != 4 {
 		t.Fatalf("changed request executed=%d reused=%d, want executed=3 reused=4", executions, hits)
+	}
+}
+
+type allowCapabilitiesAdj struct{}
+
+func (allowCapabilitiesAdj) Caps() []abi.Capability { return nil }
+func (allowCapabilitiesAdj) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	if isCapabilitiesTool(c.Tool) {
+		return abi.Verdict{Kind: abi.VerdictAllow, By: "test-policy"}
+	}
+	return abi.Verdict{Kind: abi.VerdictDefer, By: "test-policy"}
+}
+
+func TestSyscallPreservesCapabilitiesCards(t *testing.T) {
+	srv := newTestServer(t)
+	abi.RegisterAdjudicator(1, allowCapabilitiesAdj{})
+	root := writeMCPIndexRepo(t)
+
+	// Call fak_capabilities through guarded syscall
+	args, _ := json.Marshal(map[string]any{"root": root, "query": "inspect policy"})
+	wv, env, err := srv.syscall(context.Background(), "fak_capabilities", string(args), false, "", "trace-test-cap")
+	if err != nil {
+		t.Fatalf("syscall error: %v", err)
+	}
+	if wv.Kind != "ALLOW" {
+		t.Fatalf("expected ALLOW verdict, got %q", wv.Kind)
+	}
+	if env == nil || env.Status != "OK" {
+		t.Fatalf("expected env.Status = OK, got %+v", env)
+	}
+	if env.Meta["engine"] != "fak-mcp" {
+		t.Fatalf("expected engine=fak-mcp, got %q", env.Meta["engine"])
+	}
+
+	var resp selfquery.CapabilitiesResponse
+	if err := json.Unmarshal([]byte(env.Content), &resp); err != nil {
+		t.Fatalf("failed to parse capability cards from result content: %v (raw content: %s)", err, env.Content)
+	}
+	if len(resp.Cards) == 0 {
+		t.Fatalf("expected capability cards in result, got 0 cards (response: %+v)", resp)
+	}
+	if strings.Contains(env.Content, "generated_tokens") {
+		t.Fatal("result content should not contain model-generation tokens")
 	}
 }
