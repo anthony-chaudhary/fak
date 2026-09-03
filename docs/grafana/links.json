@@ -73,6 +73,22 @@
       "lifetime": "stack-local",
       "description": "one session end to end — LIVE registry state (heartbeat liveness, cache posture, wall-clock budget) beside its HISTORICAL tokens, cache economics and kernel verdicts; reached by clicking a session on the fleet overview",
       "source": "tools/grafana/dashboards/fak-fleet-session.json"
+    },
+    {
+      "title": "FAK Harness — Session Tool Call Observatory",
+      "uid": "fak-harness-toolcall-session",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "deep per-session tool call telemetry — invocation stream, execution latency vs adjudication overhead, mutability breakdown, JIT fleet secret & OAuth paging events, and policy verdicts",
+      "source": "tools/grafana/dashboards/fak-harness-toolcall-session.json"
+    },
+    {
+      "title": "FAK Harness — Fleet Tool Call Overview",
+      "uid": "fak-harness-toolcall-fleet",
+      "category": "rollup",
+      "lifetime": "stack-local",
+      "description": "fleet-wide tool call observability — invocation rate across all sessions, top active tools & integrations, policy denial taxonomy, JIT auth paging hit rates, and runaway tool loop detection",
+      "source": "tools/grafana/dashboards/fak-harness-toolcall-fleet.json"
     }
   ]
 }

@@ -19,6 +19,7 @@ type Contract struct {
 	RunProtocol   ProtocolContract               `json:"run_protocol"`
 	Instructions  InstructionCompositionContract `json:"instruction_composition"`
 	Hardware      HardwareContract               `json:"hardware"`
+	Tools         ToolContract                   `json:"tools,omitempty"`
 }
 
 // CompatibilityContract publishes the stable machine formats used at upgrade
@@ -71,6 +72,7 @@ func PublicContract() Contract {
 		RunProtocol:   PublicProtocolContract(),
 		Instructions:  PublicInstructionContract(),
 		Hardware:      PublicHardwareContract(),
+		Tools:         PublicToolContract(),
 	}
 }
 

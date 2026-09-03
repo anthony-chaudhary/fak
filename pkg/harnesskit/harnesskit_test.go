@@ -72,6 +72,9 @@ func TestPublicContractIsCompleteAndMachineReadable(t *testing.T) {
 	if got.Instructions.SchemaVersion != InstructionContractVersion || got.Instructions.Ownership == "" || got.Instructions.Security == "" || got.Instructions.Cancellation == "" {
 		t.Fatalf("instruction composition contract missing: %#v", got.Instructions)
 	}
+	if got.Tools.Version != ToolContractVersion || got.Tools.Security == "" || got.Tools.Observability == "" {
+		t.Fatalf("tool contract missing: %#v", got.Tools)
+	}
 }
 
 type testStream struct{ ch chan int }
