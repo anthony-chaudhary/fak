@@ -711,7 +711,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// upstream that stays WARM without advancing — keepalive comments and empty-delta chunks
 	// re-arm the byte deadline but are not progress, so only a real delta below calls
 	// sr.noteProgress (#5486).
-	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow())
+	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow(), streamMaxDuration())
 	defer sr.Close()
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
