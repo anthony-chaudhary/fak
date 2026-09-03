@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 
@@ -486,6 +487,11 @@ func DefaultSkewThreshold() SkewThreshold { return SkewThreshold{AbsLoad: 8, Rel
 // of its traffic: as the holder's load climbs, its score falls toward the idle balance
 // target. Past the documented SkewThreshold it drops locality entirely and routes by
 // load alone. Safe for concurrent use.
+type affinityTarget struct {
+	worker   string
+	deadline time.Time
+}
+
 type CacheAwarePolicy struct {
 	mu          sync.Mutex
 	index       *PrefixResidencyIndex
@@ -493,6 +499,9 @@ type CacheAwarePolicy struct {
 	tierEnabled bool
 	tierWeights TierWeights
 	decode      decodeFootprintRouteState
+	affinityTTL time.Duration
+	affinities  map[string]affinityTarget
+	now         func() time.Time
 }
 
 // NewCacheAwarePolicy builds the policy over a residency index (a fresh one is created
@@ -508,7 +517,94 @@ func NewCacheAwarePolicy(index *PrefixResidencyIndex, skew SkewThreshold) *Cache
 	if skew.RelLoad < 1 {
 		skew.RelLoad = def.RelLoad
 	}
-	return &CacheAwarePolicy{index: index, skew: skew, decode: newDecodeFootprintRouteState(DefaultDecodeFootprintConfig())}
+	return &CacheAwarePolicy{
+		index:       index,
+		skew:        skew,
+		decode:      newDecodeFootprintRouteState(DefaultDecodeFootprintConfig()),
+		affinityTTL: 5 * time.Minute,
+		affinities:  make(map[string]affinityTarget),
+	}
+}
+
+// clock returns the time source, defaulting to time.Now.
+func (p *CacheAwarePolicy) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
+}
+
+// WithClock sets an injectable clock source for testing.
+func (p *CacheAwarePolicy) WithClock(now func() time.Time) *CacheAwarePolicy {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.now = now
+	return p
+}
+
+// WithAffinityTTL sets the affinity TTL window.
+func (p *CacheAwarePolicy) WithAffinityTTL(ttl time.Duration) *CacheAwarePolicy {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.affinityTTL = ttl
+	return p
+}
+
+// SetAffinity associates an affinity key with a target worker.
+func (p *CacheAwarePolicy) SetAffinity(key, worker string) {
+	key = strings.TrimSpace(key)
+	worker = strings.TrimSpace(worker)
+	if key == "" || worker == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.affinities == nil {
+		p.affinities = make(map[string]affinityTarget)
+	}
+	ttl := p.affinityTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	p.affinities[key] = affinityTarget{
+		worker:   worker,
+		deadline: p.clock().Add(ttl),
+	}
+}
+
+// GetAffinity looks up the unexpired worker affinity for key.
+func (p *CacheAwarePolicy) GetAffinity(key string) (string, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.affinities == nil {
+		return "", false
+	}
+	entry, ok := p.affinities[key]
+	if !ok {
+		return "", false
+	}
+	if p.clock().After(entry.deadline) {
+		delete(p.affinities, key)
+		return "", false
+	}
+	return entry.worker, true
+}
+
+// ClearAffinity removes any recorded affinity for key.
+func (p *CacheAwarePolicy) ClearAffinity(key string) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.affinities != nil {
+		delete(p.affinities, key)
+	}
 }
 
 // WithTierWeightedOverlap enables live tier-aware credit. Invalid weights fail closed;
@@ -648,10 +744,18 @@ func (p *CacheAwarePolicy) loadRange(workers []string, ext func(string) int) (ma
 	return max, min
 }
 
-// Pick implements PickPolicy: it adapts the live PlannerReplica candidate set to the
-// name-level core and maps the chosen name back to its replica. ok=false only when the
-// candidate set is empty (the router then falls back to its round-robin path).
-func (p *CacheAwarePolicy) Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool) {
+// AffinityPicker is the additive interface for placement implementations
+// that support session-keyed sticky routing for multi-turn prompt cache affinity.
+type AffinityPicker interface {
+	PickPolicy
+	PickWithAffinity(candidates []PlannerReplica, prefix []string, affinityKey string, load func(name string) int) (PlannerReplica, bool)
+}
+
+// PickWithAffinity implements AffinityPicker: it routes with affinity
+// when affinityKey is non-empty, sticking to an unexpired target worker among candidates
+// unless severely skewed/overloaded. On affinity miss, expiration, or target overload,
+// it falls back to standard cache-aware placement and updates the affinity target.
+func (p *CacheAwarePolicy) PickWithAffinity(candidates []PlannerReplica, prefix []string, affinityKey string, load func(name string) int) (PlannerReplica, bool) {
 	if len(candidates) == 0 {
 		return PlannerReplica{}, false
 	}
@@ -661,11 +765,56 @@ func (p *CacheAwarePolicy) Pick(candidates []PlannerReplica, prefix []string, lo
 		names[i] = c.Name
 		byName[c.Name] = c
 	}
-	chosen, _, ok := p.pickWorker(names, prefix, load)
-	if !ok {
-		return PlannerReplica{}, false
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.affinities == nil {
+		p.affinities = make(map[string]affinityTarget)
 	}
-	return byName[chosen], true
+
+	ttl := p.affinityTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+
+	trimmed := strings.TrimSpace(affinityKey)
+	if trimmed != "" {
+		if entry, ok := p.affinities[trimmed]; ok {
+			if p.clock().After(entry.deadline) {
+				delete(p.affinities, trimmed)
+			} else if repl, valid := byName[entry.worker]; valid {
+				_, minL := p.loadRange(names, load)
+				targetL := p.effectiveLoad(entry.worker, load)
+				overloaded := targetL-minL >= p.skew.AbsLoad && float64(targetL) >= p.skew.RelLoad*float64(mathx.MaxInt(minL, 1))
+				if !overloaded {
+					p.affinities[trimmed] = affinityTarget{
+						worker:   entry.worker,
+						deadline: p.clock().Add(ttl),
+					}
+					p.index.Observe(entry.worker, prefix)
+					return repl, true
+				}
+			}
+		}
+	}
+
+	chosenName := p.chooseWorkerLocked(names, prefix, load)
+	p.index.Observe(chosenName, prefix)
+	if trimmed != "" {
+		p.affinities[trimmed] = affinityTarget{
+			worker:   chosenName,
+			deadline: p.clock().Add(ttl),
+		}
+	}
+	return byName[chosenName], true
+}
+
+// Pick implements PickPolicy: it adapts the live PlannerReplica candidate set to the
+// name-level core and maps the chosen name back to its replica. ok=false only when the
+// candidate set is empty (the router then falls back to its round-robin path).
+func (p *CacheAwarePolicy) Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool) {
+	return p.PickWithAffinity(candidates, prefix, "", load)
 }
 
 // CacheAwareRoutingResult is the measured witness for the cache-aware-beats-round-robin

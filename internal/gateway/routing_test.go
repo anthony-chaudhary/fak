@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 )
 
@@ -334,5 +335,35 @@ func TestComplexity_FloorIndexCapsAtLastTier(t *testing.T) {
 	}
 	if got := ComplexityLow.floorIndex(3); got != 0 {
 		t.Fatalf("low complexity floor should be 0, got %d", got)
+	}
+}
+
+func TestRequestClass_SessionID(t *testing.T) {
+	rc := RequestClass{
+		PromptTokens: 100,
+		Latency:      LatencyInteractive,
+		Complexity:   ComplexityLow,
+		AffinityKey:  "session-42",
+	}
+	if rc.AffinityKey != "session-42" {
+		t.Fatalf("AffinityKey = %q, want session-42", rc.AffinityKey)
+	}
+}
+
+func TestExtractAffinityKey(t *testing.T) {
+	r, _ := http.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	r.Header.Set("X-Session-ID", "header-sess")
+
+	if got := extractAffinityKey(r, ""); got != "header-sess" {
+		t.Fatalf("extractAffinityKey from header = %q, want header-sess", got)
+	}
+	if got := extractAffinityKey(r, "explicit-sess"); got != "explicit-sess" {
+		t.Fatalf("extractAffinityKey with explicit = %q, want explicit-sess", got)
+	}
+	if got := extractAffinityKey(nil, "explicit-only"); got != "explicit-only" {
+		t.Fatalf("extractAffinityKey with nil request = %q, want explicit-only", got)
+	}
+	if got := extractAffinityKey(nil, ""); got != "" {
+		t.Fatalf("extractAffinityKey with empty = %q, want empty", got)
 	}
 }

@@ -530,21 +530,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequestBody(w, r, &req) {
 		return
 	}
-	// An empty/missing messages array is a CLIENT error, not an upstream failure.
-	// Reject it here with a 400 ("messages: field required") rather than forwarding
-	// a degenerate request and surfacing the upstream's own 400 as a confusing 502
-	// gateway error (#82). This is the same well-formedness floor a real provider
-	// applies, applied before we spend an upstream round-trip on it.
-	if len(req.Messages) == 0 {
-		writeErr(w, http.StatusBadRequest, "messages: field required")
-		return
-	}
-	// Validate the sampling params on ingress (#326). A negative max_tokens or an
-	// out-of-range temperature/top_p is a CLIENT error — reject it here with a 400
-	// rather than forwarding bad input that the upstream silently answers anyway (a
-	// wire-contract deviation the proxy used to swallow). Same well-formedness floor
-	// as the empty-messages check above, applied before an upstream round-trip is spent.
-	if rejectInvalidSampling(w, validateSampling(req)) {
+	req.AffinityKey = extractAffinityKey(r, req.AffinityKey)
+	if !validateChatRequestIngress(w, req) {
 		return
 	}
 	// Stamp the causal input on the untouched wire envelope before admission
@@ -565,22 +552,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
 	decodeTraceRequested := req.FakDecodeTrace
 	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
-	if decodeTokenIDsRequested && !decodeTraceRequested {
-		writeErr(w, http.StatusBadRequest, "native decode token IDs require fak_decode_trace")
-		return
-	}
-	if decodeTraceRequested && req.Stream {
-		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
-		return
-	}
-	if receiptRequested && req.Stream {
-		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered request")
-		return
-	}
-	if receiptRequested && ((req.Temperature != nil && *req.Temperature != 0) || (req.TopP != nil && *req.TopP != 0) || len(req.LogitBias) > 0 || (req.FrequencyPenalty != nil && *req.FrequencyPenalty != 0) || (req.PresencePenalty != nil && *req.PresencePenalty != 0)) {
-		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy sampling over unmodified logits")
-		return
-	}
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
 	// client omitted one. This stops the gateway silently serving a DIFFERENT model
@@ -702,42 +673,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	asst := comp.Message
 	asst.Role = agent.RoleAssistant
 
-	// Tool-call conformance: the upstream's finish_reason announced tool calls but
-	// NONE survived parsing + the text-lift fallback. Proceeding would skip
-	// adjudication on a call the model intended to make — the exact silent-no-op a
-	// non-OpenAI-shaped emitter (e.g. a GLM-5.2 variant burying calls in
-	// reasoning_content) causes. Fail closed: never let an unparsed tool call cross
-	// the gateway as a benign empty turn.
-	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", s.model)
-		const conformanceMsg = "upstream tool-call format not recognized; refusing to skip adjudication"
-		if stream != nil {
-			// Fail closed in-band: the preamble already spent the status line, but the
-			// client must still never read a benign empty stop on a skipped adjudication.
-			stream.fail(http.StatusBadGateway, "", conformanceMsg)
-			return
-		}
-		writeErr(w, http.StatusBadGateway, conformanceMsg)
-		return
-	}
-	if receiptRequested && comp.NativeInference == nil {
-		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
-		return
-	}
-	if inputTriggerRoute != nil && comp.NativeInference != nil &&
-		(comp.NativeInference.Engine != TurnIngressEngine ||
-			comp.NativeInference.Model != TurnIngressModel ||
-			comp.NativeInference.FallbackActive) {
-		s.logf("gateway: input-trigger route execution identity mismatch")
-		writeErr(w, http.StatusBadGateway, "fak-native route execution identity mismatch")
-		return
-	}
-	if decodeTraceRequested && comp.DecodeTrace == nil {
-		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
-		return
-	}
-	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
-		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
+	if !s.validateChatCompletionConformance(w, stream, comp, asst, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested, inputTriggerRoute) {
 		return
 	}
 
@@ -750,6 +686,91 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// this fix removes.
 	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
+	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested)
+	if stream != nil {
+		writeChatCompletionStream(stream, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
+	if len(req.Messages) == 0 {
+		writeErr(w, http.StatusBadRequest, "messages: field required")
+		return false
+	}
+	if rejectInvalidSampling(w, validateSampling(req)) {
+		return false
+	}
+	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
+	decodeTraceRequested := req.FakDecodeTrace
+	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
+	if decodeTokenIDsRequested && !decodeTraceRequested {
+		writeErr(w, http.StatusBadRequest, "native decode token IDs require fak_decode_trace")
+		return false
+	}
+	if decodeTraceRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
+		return false
+	}
+	if receiptRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered request")
+		return false
+	}
+	if receiptRequested && ((req.Temperature != nil && *req.Temperature != 0) || (req.TopP != nil && *req.TopP != 0) || len(req.LogitBias) > 0 || (req.FrequencyPenalty != nil && *req.FrequencyPenalty != 0) || (req.PresencePenalty != nil && *req.PresencePenalty != 0)) {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy sampling over unmodified logits")
+		return false
+	}
+	return true
+}
+
+func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {
+	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", s.model)
+		const conformanceMsg = "upstream tool-call format not recognized; refusing to skip adjudication"
+		if stream != nil {
+			stream.fail(http.StatusBadGateway, "", conformanceMsg)
+			return false
+		}
+		writeErr(w, http.StatusBadGateway, conformanceMsg)
+		return false
+	}
+	if receiptRequested && comp.NativeInference == nil {
+		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
+		return false
+	}
+	if inputTriggerRoute != nil && comp.NativeInference != nil &&
+		(comp.NativeInference.Engine != TurnIngressEngine ||
+			comp.NativeInference.Model != TurnIngressModel ||
+			comp.NativeInference.FallbackActive) {
+		s.logf("gateway: input-trigger route execution identity mismatch")
+		writeErr(w, http.StatusBadGateway, "fak-native route execution identity mismatch")
+		return false
+	}
+	if decodeTraceRequested && comp.DecodeTrace == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
+		return false
+	}
+	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
+		return false
+	}
+	return true
+}
+
+func extractAffinityKey(r *http.Request, explicit string) string {
+	if s := strings.TrimSpace(explicit); s != "" {
+		return s
+	}
+	if r != nil {
+		if s := strings.TrimSpace(r.Header.Get("X-Session-ID")); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, finish, respModel string, adjs []ToolAdjudication, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt, decodeTraceRequested, decodeTokenIDsRequested bool) ChatResponse {
 	resp := ChatResponse{
 		ID:      "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano())),
 		Object:  "chat.completion",
@@ -786,11 +807,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
 	}
-	if stream != nil {
-		writeChatCompletionStream(stream, resp)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 func (s *Server) chatDecodeTraceSupported(reqModel string) bool {

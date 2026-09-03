@@ -393,6 +393,8 @@ type ChatRequest struct {
 	// Fak carries explicit fak-only request extensions. nil keeps the OpenAI wire
 	// byte-compatible and does not enable any measurement work.
 	Fak *FakRequestExt `json:"fak,omitempty"`
+	// AffinityKey carries an optional affinity key for multi-turn prompt cache affinity.
+	AffinityKey string `json:"session_id,omitempty"`
 }
 
 // FakRequestExt is the opt-in request half of fak's response extension.

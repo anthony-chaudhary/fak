@@ -133,6 +133,8 @@ type RequestClass struct {
 	// FAIL-CLOSED analogue of OpenRouter's provider `max_price` — a request that cannot
 	// be served within budget is refused, never silently served by a pricier tier.
 	MaxCostPerMTok float64
+	// AffinityKey is an optional key for multi-turn prompt cache affinity.
+	AffinityKey string
 }
 
 // RouterConfig is the configurable routing policy: the strategy and the ordered tiers.
