@@ -1252,6 +1252,11 @@
           "category": "incidental",
           "reason": "telemetry field for modelengine active cache load workers",
           "token": "CacheLoadWorkers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Asymmetric KV cache byte sizing helper (#10731)",
+          "token": "KVCacheBytesAsymmetric"
         }
       ],
       "id": "cache",
@@ -1304,6 +1309,7 @@
         "InputUncached",
         "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
+        "KVCacheBytesAsymmetric",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
         "NewCacheStateAllowlist",

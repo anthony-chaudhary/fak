@@ -1,7 +1,18 @@
 package model
 
-// kvquant.go — the 4-bit KV-cache quantization codec and the layer/byte accounting that
-// makes a 262K-context claim checkable (#4874, gen/next).
+// kvquant.go — the 4-bit and 8-bit asymmetric KV-cache quantization codec and the
+// layer/byte accounting that makes a 262K-context claim checkable (#4874, #10731, gen/next).
+//
+// WHY ASYMMETRIC K/V BIT ALLOCATION (#10731): attention mechanisms exhibit an asymmetric
+// sensitivity to quantization error:
+//   - Keys govern softmax exponent routing (Q * K^T / sqrt(d)), so errors in Key vectors
+//     cause exponential attention distribution drift. They require higher precision (8-bit).
+//   - Values undergo linear convex combination with attention weights (sum A_i V_i), so
+//     quantization errors in Values average out and comfortably tolerate 4-bit compression.
+// Asymmetric allocation (e.g. K=8, V=4) cuts memory dramatically while preserving routing
+// fidelity.
+//
+// Prior-art: TurboQuant (asymmetric K/V bit allocation, Keys Q8_0 + Values turbo4), KIVI, KVQuant.
 //
 // WHY THIS IS A SEPARATE AXIS FROM WEIGHT QUANT: the quant_*.go family quantizes WEIGHTS,
 // which are static, shared across every session, and packed once at load. A KV cache is
@@ -141,6 +152,128 @@ func (q KVQuant4) Bytes() int {
 	return len(q.Codes) + 4*len(q.Scale) + 4*len(q.Min)
 }
 
+// KVQuant8GroupSize is the number of contiguous elements sharing one (scale, min) pair
+// in 8-bit KV quantization. 32 matches KVQuant4GroupSize and weight k-quants.
+const KVQuant8GroupSize = 32
+
+// KVQuant8 is one 8-bit-quantized K (or V) row-set: a group-wise affine quantization
+// holding one byte per element, with a per-group scale and min in f32.
+type KVQuant8 struct {
+	// N is the logical element count.
+	N int
+	// Scale and Min are per-group, indexed by element/KVQuant8GroupSize.
+	Scale []float32
+	Min   []float32
+	// Codes holds one 8-bit code per element.
+	Codes []byte
+}
+
+// QuantizeKV8 packs src into 8-bit codes (0..255). It is exact for a constant group
+// (scale 0 stores the value in Min), and never returns a code outside 0..255.
+func QuantizeKV8(src []float32) KVQuant8 {
+	q := KVQuant8{N: len(src)}
+	if len(src) == 0 {
+		return q
+	}
+	groups := (len(src) + KVQuant8GroupSize - 1) / KVQuant8GroupSize
+	q.Scale = make([]float32, groups)
+	q.Min = make([]float32, groups)
+	q.Codes = make([]byte, len(src))
+	for g := 0; g < groups; g++ {
+		lo := g * KVQuant8GroupSize
+		hi := lo + KVQuant8GroupSize
+		if hi > len(src) {
+			hi = len(src)
+		}
+		mn, mx := src[lo], src[lo]
+		for _, v := range src[lo:hi] {
+			if v < mn {
+				mn = v
+			}
+			if v > mx {
+				mx = v
+			}
+		}
+		// 255 intervals across 256 code points. A constant group leaves scale at 0, which
+		// dequantizes back to Min exactly rather than dividing by zero.
+		scale := (mx - mn) / 255
+		q.Min[g] = mn
+		q.Scale[g] = scale
+		for i := lo; i < hi; i++ {
+			var code byte
+			if scale > 0 {
+				c := int((src[i]-mn)/scale + 0.5)
+				if c < 0 {
+					c = 0
+				}
+				if c > 255 {
+					c = 255
+				}
+				code = byte(c)
+			}
+			q.Codes[i] = code
+		}
+	}
+	return q
+}
+
+// Dequantize reconstructs the f32 row-set from 8-bit codes.
+func (q KVQuant8) Dequantize() []float32 {
+	out := make([]float32, q.N)
+	for i := 0; i < q.N; i++ {
+		g := i / KVQuant8GroupSize
+		out[i] = q.Min[g] + float32(q.Codes[i])*q.Scale[g]
+	}
+	return out
+}
+
+// ErrorBound is the worst-case absolute round-trip error this quantization can produce:
+// half the widest group step.
+func (q KVQuant8) ErrorBound() float32 {
+	var worst float32
+	for _, s := range q.Scale {
+		if s > worst {
+			worst = s
+		}
+	}
+	return worst / 2
+}
+
+// Bytes is the packed footprint: the 1-byte-per-element payload plus the per-group f32 scale
+// and min. At KVQuant8GroupSize=32 it adds 8 bytes per 32 elements (2 bits/element), for an
+// honest rate of 10 bits/element.
+func (q KVQuant8) Bytes() int {
+	return len(q.Codes) + 4*len(q.Scale) + 4*len(q.Min)
+}
+
+// KVQuantAsymmetric is an asymmetric cache pair holding K in KVQuant8 and V in KVQuant4.
+// Keys dictate softmax exponent routing (Q * K^T / sqrt(d)) where error compounds exponentially
+// and requires 8-bit precision, while Values undergo linear convex combination (sum A_i V_i)
+// and comfortably tolerate 4-bit compression.
+type KVQuantAsymmetric struct {
+	K KVQuant8
+	V KVQuant4
+}
+
+// QuantizeKVAsymmetric quantizes Key vector k to 8-bit (KVQuant8) and Value vector v
+// to 4-bit (KVQuant4).
+func QuantizeKVAsymmetric(k, v []float32) KVQuantAsymmetric {
+	return KVQuantAsymmetric{
+		K: QuantizeKV8(k),
+		V: QuantizeKV4(v),
+	}
+}
+
+// DequantizeKVAsymmetric reconstructs the f32 Key and Value row-sets.
+func DequantizeKVAsymmetric(a KVQuantAsymmetric) ([]float32, []float32) {
+	return a.K.Dequantize(), a.V.Dequantize()
+}
+
+// Bytes returns the combined packed byte footprint of the asymmetric K and V pair.
+func (a KVQuantAsymmetric) Bytes() int {
+	return a.K.Bytes() + a.V.Bytes()
+}
+
 // KVQuantLayers returns the layer indices that actually hold a softmax KV cache, and are
 // therefore the layers this codec may be aimed at. Linear-attention (Gated-DeltaNet)
 // layers are excluded: they hold a recurrent state, not per-token K/V rows. For a
@@ -159,11 +292,11 @@ func (c Config) KVQuantLayers() []int {
 	return out
 }
 
-// KVCacheBytesAtBits sizes the K+V cache for `positions` tokens when the KV-holding
-// layers store their rows at `bits` precision. bits=16 is an f16 cache, bits=32 the f32
-// rows KVCache holds today, and bits=4 routes through the KVQuant4 rate INCLUDING its
-// per-group scale/min overhead — so the 4-bit number is directly comparable to the others
-// rather than flattering itself.
+// KVCacheBytesAsymmetric sizes the K+V cache for `positions` tokens when the KV-holding
+// layers store Key rows at `kBits` precision and Value rows at `vBits` precision (#10731).
+// bits=16 is an f16 cache, bits=32 the f32 rows KVCache holds today, while bits=4 and bits=8
+// route through the KVQuant4 and KVQuant8 rates INCLUDING their per-group scale/min overhead —
+// so the quantized numbers are directly comparable rather than flattering themselves.
 //
 // It counts only the layers KVQuantLayers admits, which is what makes it usable on the
 // hybrid backbone: sizing all NumLayers there overstates a Qwen3.6-class cache by ~4x,
@@ -174,8 +307,8 @@ func (c Config) KVQuantLayers() []int {
 // pre-RoPE K rows eviction re-rotates from — so a resident cache is ~1.5x this number
 // until Kraw is either quantized too or dropped for sessions that never evict. If that
 // changes, these numbers move; the per-layer and per-bit branch stands.
-func (c Config) KVCacheBytesAtBits(positions, bits int) int64 {
-	if positions <= 0 || bits <= 0 {
+func (c Config) KVCacheBytesAsymmetric(positions, kBits, vBits int) int64 {
+	if positions <= 0 || kBits <= 0 || vBits <= 0 {
 		return 0
 	}
 	layers := int64(len(c.KVQuantLayers()))
@@ -186,12 +319,19 @@ func (c Config) KVCacheBytesAtBits(positions, bits int) int64 {
 	if vHeadDim == 0 {
 		vHeadDim = c.HeadDim
 	}
-	perPos := kvBitsToBytes(c.NumKVHeads*c.HeadDim, bits) + kvBitsToBytes(c.NumKVHeads*vHeadDim, bits)
+	perPos := kvBitsToBytes(c.NumKVHeads*c.HeadDim, kBits) + kvBitsToBytes(c.NumKVHeads*vHeadDim, vBits)
 	return perPos * layers * int64(positions)
 }
 
+// KVCacheBytesAtBits sizes the symmetric K+V cache for `positions` tokens when the KV-holding
+// layers store their rows at `bits` precision. It delegates to KVCacheBytesAsymmetric.
+func (c Config) KVCacheBytesAtBits(positions, bits int) int64 {
+	return c.KVCacheBytesAsymmetric(positions, bits, bits)
+}
+
 // kvBitsToBytes is the per-row byte cost of `elems` values at `bits` precision, adding the
-// KVQuant4 group metadata on the 4-bit path so the quantized rate is not understated.
+// group metadata (one f32 scale + one f32 min per group of 32) on the 4-bit and 8-bit paths
+// so the quantized rate is not understated.
 func kvBitsToBytes(elems, bits int) int64 {
 	if elems <= 0 || bits <= 0 {
 		return 0
@@ -199,6 +339,9 @@ func kvBitsToBytes(elems, bits int) int64 {
 	n := (int64(elems)*int64(bits) + 7) / 8
 	if bits == 4 {
 		groups := int64((elems + KVQuant4GroupSize - 1) / KVQuant4GroupSize)
+		n += groups * 8 // one f32 scale + one f32 min per group
+	} else if bits == 8 {
+		groups := int64((elems + KVQuant8GroupSize - 1) / KVQuant8GroupSize)
 		n += groups * 8 // one f32 scale + one f32 min per group
 	}
 	return n
