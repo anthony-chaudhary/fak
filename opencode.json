@@ -15,15 +15,22 @@
     },
     "fak": {
       "type": "local",
-      "command": ["fak", "serve", "--stdio", "--policy", "examples/dev-agent-policy.json"],
+      "command": ["fak", "serve", "--stdio", "--policy", "examples/opencode-policy.json"],
       "environment": {},
       "enabled": true
+    }
+  },
+  "lsp": {
+    "fak-go": {
+      "command": ["fak", "lsp"],
+      "extensions": [".go"]
     }
   },
   "permission": {
     "skill": {
       "phased-plan": "deny"
     },
+    "lsp": "allow",
     "fak*": "allow",
     "dos*": "allow",
     "fak_*": "allow",
