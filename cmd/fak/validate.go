@@ -1015,24 +1015,74 @@ func extractCommittedTipWithin(ctx context.Context, repo, tip string) (string, e
 	}
 }
 
+func wslMountPath(winPath string) (string, bool) {
+	winPath = strings.TrimSpace(winPath)
+	if len(winPath) < 3 || winPath[1] != ':' || (winPath[2] != '\\' && winPath[2] != '/') {
+		return "", false
+	}
+	drive := winPath[0]
+	if drive >= 'A' && drive <= 'Z' {
+		drive += 'a' - 'A'
+	}
+	if drive < 'a' || drive > 'z' {
+		return "", false
+	}
+	rest := strings.ReplaceAll(winPath[2:], "\\", "/")
+	if !strings.HasPrefix(rest, "/") {
+		rest = "/" + rest
+	}
+	return "/mnt/" + string(drive) + rest, true
+}
+
+func readWSLWorktreeGitDir(repo string) (string, bool) {
+	dotGit := filepath.Join(repo, ".git")
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(string(data))
+	rest, ok := strings.CutPrefix(text, "gitdir:")
+	if !ok {
+		return "", false
+	}
+	rawDir := strings.TrimSpace(rest)
+	if rawDir == "" {
+		return "", false
+	}
+	if wsl, ok := wslMountPath(rawDir); ok {
+		return wsl, true
+	}
+	if !filepath.IsAbs(rawDir) && !strings.Contains(rawDir, ":") {
+		abs := filepath.Join(repo, rawDir)
+		if wsl, ok := wslMountPath(abs); ok {
+			return wsl, true
+		}
+	}
+	return "", false
+}
+
 func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string, error) {
 	wslDir := fmt.Sprintf("/tmp/fak-validate-%d-%d", os.Getpid(), validateNow().UnixNano())
 	quotedDir := posixQuote(wslDir)
 	cacheDir := "/tmp/fak-validate-cache"
 	archive := cacheDir + "/" + tip + ".tar"
 	temporaryArchive := archive + fmt.Sprintf(".%d.tmp", os.Getpid())
+	gitFlags := ""
+	if gitDir, ok := readWSLWorktreeGitDir(repo); ok {
+		gitFlags = "--git-dir=" + posixQuote(gitDir) + " "
+	}
 	script := "set -euo pipefail; " +
 		"rm -rf -- " + quotedDir + "; mkdir -p -- " + quotedDir + "; " +
 		"mkdir -p -- " + posixQuote(cacheDir) + "; " +
 		"trap 'rm -rf -- " + quotedDir + "; rm -f -- " + posixQuote(temporaryArchive) + "' ERR INT TERM; " +
 		"if [ ! -s " + posixQuote(archive) + " ]; then " +
-		"git archive --format=tar -o " + posixQuote(temporaryArchive) + " " + posixQuote(tip) + "; " +
+		"git " + gitFlags + "archive --format=tar -o " + posixQuote(temporaryArchive) + " " + posixQuote(tip) + "; " +
 		"if [ ! -s " + posixQuote(archive) + " ]; then mv -- " + posixQuote(temporaryArchive) + " " + posixQuote(archive) + "; else rm -f -- " + posixQuote(temporaryArchive) + "; fi; " +
 		"fi; " +
 		"tar -xf " + posixQuote(archive) + " -C " + quotedDir + "; " +
 		"git -C " + quotedDir + " init --quiet; " +
 		"mkdir -p -- " + quotedDir + "/.git/objects/info; " +
-		"git rev-parse --path-format=absolute --git-path objects > " + quotedDir + "/.git/objects/info/alternates; " +
+		"git " + gitFlags + "rev-parse --path-format=absolute --git-path objects > " + quotedDir + "/.git/objects/info/alternates; " +
 		"git -C " + quotedDir + " read-tree " + posixQuote(tip) + "; " +
 		"git -C " + quotedDir + " update-ref --no-deref HEAD " + posixQuote(tip) + "; " +
 		"ls -1t " + posixQuote(cacheDir) + "/*.tar 2>/dev/null | tail -n +4 | xargs -r rm -f --; " +
