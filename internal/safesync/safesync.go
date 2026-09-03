@@ -47,6 +47,8 @@ type Options struct {
 	// WriterLeaseTTL bounds how long the lease is honored before a peer may reclaim it as
 	// crash residue (default DefaultWriterLeaseTTL).
 	WriterLeaseTTL time.Duration `json:"-"`
+	// QuarantineScratch enables shift-left untracked artifact isolation across fast-forward (#10913).
+	QuarantineScratch bool `json:"quarantine_scratch,omitempty"`
 	// barrier is a test-only seam fired while Apply holds the writer lease, so a
 	// concurrency test can prove a second managed writer is refused mid-window.
 	barrier func()
@@ -58,21 +60,22 @@ type Entry struct {
 }
 
 type Assessment struct {
-	OK            bool         `json:"ok"`
-	State         string       `json:"state"`
-	Head          string       `json:"head,omitempty"`
-	Target        string       `json:"target,omitempty"`
-	TargetRef     string       `json:"target_ref,omitempty"`
-	Branch        string       `json:"branch,omitempty"`
-	WriteCount    int          `json:"write_count,omitempty"`
-	Identical     []Entry      `json:"identical,omitempty"`
-	Divergent     []Entry      `json:"divergent,omitempty"`
-	Reason        string       `json:"reason,omitempty"`
-	Applied       bool         `json:"applied,omitempty"`
-	NewHead       string       `json:"new_head,omitempty"`
-	PushAudit     *PushAudit   `json:"push_audit,omitempty"`
-	Worktree      *Worktree    `json:"worktree,omitempty"`
-	ApplyVelocity PushVelocity `json:"apply_velocity"`
+	OK            bool               `json:"ok"`
+	State         string             `json:"state"`
+	Head          string             `json:"head,omitempty"`
+	Target        string             `json:"target,omitempty"`
+	TargetRef     string             `json:"target_ref,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	WriteCount    int                `json:"write_count,omitempty"`
+	Identical     []Entry            `json:"identical,omitempty"`
+	Divergent     []Entry            `json:"divergent,omitempty"`
+	Reason        string             `json:"reason,omitempty"`
+	Applied       bool               `json:"applied,omitempty"`
+	NewHead       string             `json:"new_head,omitempty"`
+	PushAudit     *PushAudit         `json:"push_audit,omitempty"`
+	Worktree      *Worktree          `json:"worktree,omitempty"`
+	Quarantine    *QuarantineReceipt `json:"quarantine,omitempty"`
+	ApplyVelocity PushVelocity       `json:"apply_velocity"`
 	// Indeterminate is set when a fast-forward failed partway (a partial checkout, an
 	// in-progress MERGE_HEAD, or HEAD moved despite a non-zero exit): the worktree may be
 	// partially updated, so Apply neither claims a clean refusal nor swallows a plain
@@ -205,7 +208,7 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 	if err != nil {
 		return Assessment{}, err
 	}
-	identical, divergent := classify(opts.Repo, run, ctx, head, target, entries)
+	identical, divergent := classify(opts.Repo, run, ctx, head, target, entries, opts.QuarantineScratch)
 	base.State = StateBehind
 	base.WriteCount = len(entries)
 	base.Identical = identical
@@ -276,6 +279,36 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		info.Applied = false
 		return info, nil
 	}
+
+	var qTx *QuarantineTransaction
+	if opts.QuarantineScratch && info.Target != "" {
+		entries, ffErr := ffWriteSet(ctx, run, opts.Repo, info.Head, info.Target)
+		if ffErr == nil {
+			var qPaths []string
+			identMap := make(map[string]bool)
+			for _, e := range entries {
+				if e.Status == "A" {
+					if _, exists := worktreeBytes(opts.Repo, e.Path); exists {
+						qPaths = append(qPaths, e.Path)
+						identMap[e.Path] = cleanEquivalentTo(ctx, run, opts.Repo, info.Target, e.Path)
+					}
+				}
+			}
+			if len(qPaths) > 0 {
+				var qErr error
+				qTx, qErr = PrepareQuarantine(opts.Repo, qPaths, identMap)
+				if qErr != nil {
+					return info, qErr
+				}
+				defer func() {
+					if qTx != nil {
+						_ = qTx.Rollback()
+					}
+				}()
+			}
+		}
+	}
+
 	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info, lease)
 	if err != nil {
 		return info, err
@@ -298,6 +331,14 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 			info.Reason += ": " + detail
 		}
 		return info, nil
+	}
+	if qTx != nil {
+		receipt, commitErr := qTx.Commit()
+		if commitErr != nil {
+			return info, commitErr
+		}
+		qTx = nil
+		info.Quarantine = &receipt
 	}
 	newHead, err := rev(ctx, run, opts.Repo, "HEAD")
 	if err != nil {
@@ -432,7 +473,8 @@ func parseNameStatusZ(out []byte) []Entry {
 	return entries
 }
 
-func classify(repo string, run Runner, ctx context.Context, head, target string, entries []Entry) (identical, divergent []Entry) {
+func classify(repo string, run Runner, ctx context.Context, head, target string, entries []Entry, quarantineScratch ...bool) (identical, divergent []Entry) {
+	allowQuarantine := len(quarantineScratch) > 0 && quarantineScratch[0]
 	for _, e := range entries {
 		safe := false
 		switch e.Status {
@@ -447,7 +489,13 @@ func classify(repo string, run Runner, ctx context.Context, head, target string,
 			safe = ok && cleanEquivalentTo(ctx, run, repo, head, e.Path)
 		case "A":
 			_, ok := worktreeBytes(repo, e.Path)
-			safe = !ok
+			if !ok {
+				safe = true
+			} else if allowQuarantine {
+				// With shift-left pre-sync quarantine, colliding untracked files are
+				// safely isolated across fast-forward and verified/restored (#10913).
+				safe = true
+			}
 		case "D":
 			_, ok := worktreeBytes(repo, e.Path)
 			safe = !ok || cleanEquivalentTo(ctx, run, repo, head, e.Path)
