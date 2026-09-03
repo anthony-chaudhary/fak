@@ -143,6 +143,7 @@ if [ "${FAK_FAST:-}" = "1" ]; then
         --exclude="/.dos/runs"
         --exclude="/.dos/streams"
         --exclude="/.fak"
+        --exclude="/_scratch"
         "$SCRIPT_DIR/" "$SCRATCH/"
       )
       rsync_rc=0

@@ -197,8 +197,8 @@ def test_glm_gateway_ready_probe_admits_spawn() -> None:
     # Gateway UP: the local guard gateway answers GET /models with 200 -> OK, which is
     # NOT in the preflight refuse set, so dispatch_glm_docs proceeds past the gateway
     # gate to a real (non-gateway) capacity decision.
-    def ok_conn(base_url, *, timeout):
-        return {"reachable": True, "status": 200,
+    def ok_conn(base_url, *, timeout, **kwargs):
+        return {"reachable": True, "status": 200, "generated_text": "pong",
                 "body": '{"data":[{"id":"mock","object":"model"}]}', "error": ""}
     pf = ap.probe_opencode_account(
         {"account": "opencode", "tag": "zai-coding-plan"},
@@ -211,7 +211,7 @@ def test_glm_gateway_down_probe_refuses_spawn() -> None:
     # Gateway DOWN: the local guard gateway refuses the TCP connect -> GATEWAY_DOWN,
     # which IS in the refuse set, so dispatch_glm_docs skips the spawn (never fires a
     # worker at an unreachable gateway) with a truthful gateway-reachability reason.
-    def down_conn(base_url, *, timeout):
+    def down_conn(base_url, *, timeout, **kwargs):
         return {"reachable": False, "status": None, "body": "",
                 "error": "[WinError 10061] connection refused"}
     pf = ap.probe_opencode_account(
