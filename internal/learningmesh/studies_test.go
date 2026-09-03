@@ -139,7 +139,7 @@ func TestIngestStudiesAllFiveProviders(t *testing.T) {
 		t.Fatalf("IngestStudies is not deterministic")
 	}
 
-	if len(ledger1.Mechanisms) != 5 {
+	if len(ledger1.Mechanisms) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant
 		t.Fatalf("expected 5 mechanisms, got %d", len(ledger1.Mechanisms))
 	}
 
