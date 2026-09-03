@@ -7485,6 +7485,16 @@
           "category": "incidental",
           "reason": "internal revocation timestamp and reason mapping",
           "token": "RevocationEntry"
+        },
+        {
+          "category": "incidental",
+          "reason": "detached worker fail-to-pass symptom refusal code",
+          "token": "SYMPTOM_UNWITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "flag variable bypassing detached worker symptom witness",
+          "token": "unsafeSkipSymptomWitness"
         }
       ],
       "id": "witness-proof",
@@ -7533,6 +7543,7 @@
         "SOURCE_WITNESSED",
         "STATE_TRANSITION_WITNESS_OK",
         "STATE_TRANSITION_WITNESS_WRITTEN",
+        "SYMPTOM_UNWITNESSED",
         "SessionMoveProviderWitness",
         "StageAttest",
         "StageWitnessRequest",
@@ -7664,6 +7675,7 @@
         "terminal_witness",
         "trajctlWitnessedPhases",
         "tree_witness",
+        "unsafeSkipSymptomWitness",
         "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
@@ -8184,6 +8196,16 @@
           "category": "incidental",
           "reason": "dataslot migration engine type",
           "token": "MigrationEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "speculative tool execution pipeline engine in agentopt",
+          "token": "SpeculativeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "constructor for speculative tool execution engine in agentopt",
+          "token": "NewSpeculativeEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8213,6 +8235,7 @@
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
         "NewSessionAffinityGateway",
+        "NewSpeculativeEngine",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
@@ -8220,6 +8243,7 @@
         "RegisterEngines",
         "RemotePlacement",
         "SessionAffinityGateway",
+        "SpeculativeEngine",
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
         "WithAffinity",

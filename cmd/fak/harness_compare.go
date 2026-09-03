@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // HarnessComparisonEntry represents a single external harness compared against the fak native harness.
@@ -44,12 +47,27 @@ type HarnessNBATargets struct {
 	SecurityContainment string  `json:"security_containment"`
 }
 
+// HarnessBenchOutcome captures witnessed empirical metrics from a paired A/B benchmark run.
+type HarnessBenchOutcome struct {
+	Task          string `json:"task"`
+	FakTurns      int    `json:"fak_turns"`
+	BaselineTurns int    `json:"baseline_turns"`
+	TurnsSaved    int    `json:"turns_saved"`
+	TokensSaved   int    `json:"tokens_saved"`
+	VDSOHits      int    `json:"vdso_hits"`
+	Repairs       int    `json:"repairs"`
+	Denies        int    `json:"denies"`
+	Quarantines   int    `json:"quarantines"`
+	TaskCompleted bool   `json:"task_completed"`
+}
+
 // HarnessComparisonReport is the top-level machine and human report for harness comparisons.
 type HarnessComparisonReport struct {
-	Schema      string                   `json:"schema"`
-	Premise     string                   `json:"premise"`
-	Strategy    string                   `json:"strategy"`
-	Comparisons []HarnessComparisonEntry `json:"comparisons"`
+	Schema           string                   `json:"schema"`
+	Premise          string                   `json:"premise"`
+	Strategy         string                   `json:"strategy"`
+	Comparisons      []HarnessComparisonEntry `json:"comparisons"`
+	EmpiricalOutcome *HarnessBenchOutcome     `json:"empirical_outcome,omitempty"`
 }
 
 var canonicalHarnessComparisons = []HarnessComparisonEntry{
@@ -344,6 +362,7 @@ func runHarnessCompare(stdout, stderr io.Writer, argv []string) int {
 	baseline := fs.String("baseline", "all", "target harness to compare: opencode, codex, cursor, claude, or all")
 	view := fs.String("view", "cli", "output format: cli or json")
 	dimensions := fs.String("dimensions", "all", "filter dimensions: architecture, learning, adaptation, metrics, or all")
+	bench := fs.Bool("bench", false, "execute offline deterministic A/B benchmark comparing native kernel vs baseline")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -361,11 +380,33 @@ func runHarnessCompare(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	var outcome *HarnessBenchOutcome
+	if *bench {
+		res, _, err := agent.Run(context.Background(), agent.NewMockPlanner(""), agent.DefaultTask, 10)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness compare --bench: %v\n", err)
+			return 1
+		}
+		outcome = &HarnessBenchOutcome{
+			Task:          res.Task,
+			FakTurns:      res.Fak.Turns,
+			BaselineTurns: res.Baseline.Turns,
+			TurnsSaved:    res.TurnsSaved,
+			TokensSaved:   res.TokensSaved,
+			VDSOHits:      res.Fak.VDSOHits,
+			Repairs:       res.Fak.Repairs,
+			Denies:        res.Fak.Denies,
+			Quarantines:   res.Fak.Quarantines,
+			TaskCompleted: res.Fak.TaskCompleted,
+		}
+	}
+
 	report := HarnessComparisonReport{
-		Schema:      "fak.harness.comparison/v1",
-		Premise:     "low-ego market realism; always learning; tier-1 external support up to proxy seam; mainstream work prioritizes native kernel advantages",
-		Strategy:    "evaluate native fak harness against tuned next-best alternatives (NBAs); pioneer features in native kernel and adapt outward where possible",
-		Comparisons: filtered,
+		Schema:           "fak.harness.comparison/v1",
+		Premise:          "low-ego market realism; always learning; tier-1 external support up to proxy seam; mainstream work prioritizes native kernel advantages",
+		Strategy:         "evaluate native fak harness against tuned next-best alternatives (NBAs); pioneer features in native kernel and adapt outward where possible",
+		Comparisons:      filtered,
+		EmpiricalOutcome: outcome,
 	}
 
 	if *view == "json" {
@@ -440,5 +481,21 @@ func printHarnessCompareCLI(w io.Writer, report HarnessComparisonReport, dimFilt
 			fmt.Fprintf(w, "  * Security Floor Target:    %s\n", entry.NBABenchmarkTargets.SecurityContainment)
 			fmt.Fprintln(w)
 		}
+	}
+
+	if report.EmpiricalOutcome != nil {
+		fmt.Fprintln(w, "================================================================================")
+		fmt.Fprintln(w, "[EMPIRICAL WITNESSED OUTCOME (DETERMINISTIC BENCH)]")
+		fmt.Fprintln(w, "================================================================================")
+		fmt.Fprintf(w, "  * Task:                  %s\n", report.EmpiricalOutcome.Task)
+		fmt.Fprintf(w, "  * Candidate Turns (fak): %d\n", report.EmpiricalOutcome.FakTurns)
+		fmt.Fprintf(w, "  * Baseline Turns:        %d\n", report.EmpiricalOutcome.BaselineTurns)
+		fmt.Fprintf(w, "  * Turns Saved:           %d\n", report.EmpiricalOutcome.TurnsSaved)
+		fmt.Fprintf(w, "  * Tokens Saved:          %d\n", report.EmpiricalOutcome.TokensSaved)
+		fmt.Fprintf(w, "  * In-Kernel vDSO Hits:   %d\n", report.EmpiricalOutcome.VDSOHits)
+		fmt.Fprintf(w, "  * In-Syscall Repairs:    %d\n", report.EmpiricalOutcome.Repairs)
+		fmt.Fprintf(w, "  * Destructive Denied:    %d\n", report.EmpiricalOutcome.Denies)
+		fmt.Fprintf(w, "  * Quarantined Payloads:  %d\n", report.EmpiricalOutcome.Quarantines)
+		fmt.Fprintf(w, "  * Task Completed:        %t\n\n", report.EmpiricalOutcome.TaskCompleted)
 	}
 }

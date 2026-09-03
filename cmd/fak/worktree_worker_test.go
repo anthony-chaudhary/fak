@@ -250,6 +250,8 @@ func newDisambiguationLandFixture(t *testing.T) (repo, worktree, base string) {
 	// .git non-empty after the resolver has already produced its typed receipt.
 	git(repo, "config", "maintenance.auto", "false")
 	git(repo, "config", "gc.auto", "0")
+	git(repo, "config", "commit.gpgsign", "false")
+	git(repo, "config", "core.hooksPath", "")
 	git(repo, "add", ".")
 	git(repo, "commit", "-qm", "base")
 	base = git(repo, "rev-parse", "HEAD")
@@ -1562,4 +1564,105 @@ func TestWorktreeWorkerPublishRequiresExplicitMode(t *testing.T) {
 	if got.OK || !strings.Contains(got.Reason, "exactly one") {
 		t.Fatalf("publish=%+v", got)
 	}
+}
+
+func newSymptomWorkerFixture(t *testing.T, isRedThenGreen bool) (repo, worktree, base string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go unavailable")
+	}
+	root := t.TempDir()
+	repo = filepath.Join(root, "repo")
+	worktree = filepath.Join(root, "worker")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "config", "user.email", "t@t")
+	git(repo, "config", "user.name", "t")
+	git(repo, "config", "maintenance.auto", "false")
+	git(repo, "config", "gc.auto", "0")
+	git(repo, "config", "commit.gpgsign", "false")
+	git(repo, "config", "core.hooksPath", "")
+
+	_ = os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module m\n\ngo 1.21\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(repo, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\treturn 0\n}\n"), 0o644)
+	git(repo, "add", ".")
+	git(repo, "commit", "-qm", "init")
+	base = git(repo, "rev-parse", "HEAD")
+
+	git(repo, "worktree", "add", "--detach", worktree, base)
+
+	if isRedThenGreen {
+		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\tif n < 0 { return -n }\n\treturn 0\n}\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte("package pkg\n\nimport \"testing\"\n\nfunc TestCalcNegative(t *testing.T) {\n\tif Calc(-5) != 5 {\n\t\tt.Fatalf(\"Calc(-5)=%d, want 5\", Calc(-5))\n\t}\n}\n"), 0o644)
+	} else {
+		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int {\n\tif n > 0 { return n }\n\tif n < 0 { return -n }\n\treturn 0\n}\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte("package pkg\n\nimport \"testing\"\n\nfunc TestCalcPositive(t *testing.T) {\n\tif Calc(5) != 5 {\n\t\tt.Fatalf(\"Calc(5)=%d, want 5\", Calc(5))\n\t}\n}\n"), 0o644)
+	}
+
+	git(worktree, "add", ".")
+	git(worktree, "commit", "-qm", "fix(calc): fix negative calculation (fak calc)")
+	return repo, worktree, base
+}
+
+func TestWorkerLandSymptom(t *testing.T) {
+	t.Run("tautological fix is rejected with SYMPTOM_UNWITNESSED", func(t *testing.T) {
+		repo, worktree, base := newSymptomWorkerFixture(t, false)
+		var out, errb bytes.Buffer
+		res, code := runWorktreeWorkerLand(&out, &errb, []string{
+			"--root", repo,
+			"--worktree", worktree,
+			"--base-sha", base,
+		})
+		if res.OK || res.Code != "SYMPTOM_UNWITNESSED" || code == 0 {
+			t.Fatalf("expected rejection with SYMPTOM_UNWITNESSED, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+	})
+
+	t.Run("red-then-green fix is accepted and lands cleanly", func(t *testing.T) {
+		repo, worktree, base := newSymptomWorkerFixture(t, true)
+		var out, errb bytes.Buffer
+		res, code := runWorktreeWorkerLand(&out, &errb, []string{
+			"--root", repo,
+			"--worktree", worktree,
+			"--base-sha", base,
+			"--paths", "pkg/calc.go",
+			"--paths", "pkg/calc_test.go",
+		})
+		if !res.OK || code != 0 {
+			t.Fatalf("expected successful landing, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+	})
+
+	t.Run("unsafe bypass flag skips symptom check for fix", func(t *testing.T) {
+		repo, worktree, base := newSymptomWorkerFixture(t, false)
+		var out, errb bytes.Buffer
+		res, code := runWorktreeWorkerLand(&out, &errb, []string{
+			"--root", repo,
+			"--worktree", worktree,
+			"--base-sha", base,
+			"--paths", "pkg/calc.go",
+			"--paths", "pkg/calc_test.go",
+			"--unsafe-skip-symptom-witness",
+		})
+		if !res.OK || code != 0 {
+			t.Fatalf("expected bypass to succeed, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+	})
 }
