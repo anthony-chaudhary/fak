@@ -158,6 +158,9 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex namespaced shell command benign allowed", "functions.shell_command", `{"command":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
 		{"Codex namespaced shell command rm -rf denied", "functions.shell_command", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
 		{"Codex namespaced shell command Remove-Item -Recurse denied", "functions.shell_command", `{"command":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
+		{"Codex namespaced exec_command benign allowed", "functions.exec_command", `{"cmd":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
+		{"Codex namespaced exec_command rm -rf denied", "functions.exec_command", `{"cmd":"rm -rf /tmp/x"}`, abi.VerdictDeny},
+		{"Codex namespaced exec_command Remove-Item -Recurse denied", "functions.exec_command", `{"cmd":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
 
 		// The broader ultracode orchestration surface is admitted so a full-toolset turn never
 		// leaves these names as silent prune-candidates. The work-spawners re-adjudicate their

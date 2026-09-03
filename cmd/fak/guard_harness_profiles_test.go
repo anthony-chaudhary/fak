@@ -134,6 +134,7 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{Name: "shell_command", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
 				{Name: "functions.shell_command", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
 				{Name: "exec_command", Arg: "cmd", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
+				{Name: "functions.exec_command", Arg: "cmd", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
 			},
 		},
 		{
