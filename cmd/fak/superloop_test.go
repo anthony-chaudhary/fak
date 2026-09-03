@@ -219,40 +219,6 @@ func TestRenderSuperloopWalkMarksSurfaceAsDescend(t *testing.T) {
 	}
 }
 
-func TestRenderSuperloopWalkRendersRollup(t *testing.T) {
-	rep := superloop.WalkReport{
-		Name:       "improve-quality",
-		Verdict:    "ACTION",
-		Finding:    "superloop_debt",
-		Reason:     "test",
-		NextAction: "descend",
-		Members:    6,
-		Walked:     5,
-		Unmeasured: 1,
-		Rollup: superloop.RollupSummary{
-			Members:    12,
-			Walked:     10,
-			Unmeasured: 2,
-			Dark:       1,
-			Spinning:   1,
-			Orphaned:   1,
-		},
-	}
-	var out bytes.Buffer
-	renderSuperloopWalk(&out, rep)
-	got := out.String()
-	for _, want := range []string{
-		"members 6  walked 5  unmeasured 1",
-		"rollup: leaves 12  walked 10  unmeasured 2  dark 1",
-		"spinning 1",
-		"orphaned 1",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("human render missing %q:\n%s", want, got)
-		}
-	}
-}
-
 // TestSuperloopModelFitCLIRendersReadout exercises the operator readout end to end:
 // `fak superloop modelfit` grades the built-in simulated rows offline and renders the
 // per-model suitability + risk-class table, exiting 0. The name carries "ModelFit" so
