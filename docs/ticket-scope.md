@@ -96,6 +96,27 @@ advisory. Decomposition is the [`dos-replan`](../.claude/skills/dos-replan/SKILL
 and [`study-repo`](../.claude/skills/study-repo/SKILL.md) job: an epic becomes an
 epic issue plus N leaf issues, never one "adopt everything" monolith.
 
+#### Capability-aware sizing: smaller models and fail-to-abstain
+
+Model capability directly bounds dispatchable ticket size. While frontier models
+can reason across moderately complex multi-file leaves, **smaller models (such as
+local 7B/14B models, fast/flash models, or bounded worker subagents) require tight
+S0/S1 leaf boundaries and explicit fail-to-abstain discipline**:
+
+- **Subdivide into focused leaves**: Smaller models must receive packets restricted
+  to single-concern changes, touching at most 1–3 files within a single package or
+  lane, with exactly one deterministic witness. Decompose compound work into
+  sequential steps: establish a reproduction test first, commit the minimal fix,
+  and verify the package.
+- **Fail-to-abstain on high-difficulty aspects**: When a task involves subtle
+  concurrency invariants, lock ordering, frozen ABI modifications (`internal/abi`),
+  SIMD/CUDA kernel mechanics, or security policy gates that exceed reliable reasoning,
+  the model must abstain explicitly rather than guessing or generating speculative
+  diffs.
+- **Emit structured evidence**: Record an explicit `ABSTAIN` verdict with a typed
+  refusal token or boundary description. Land or report the solvable portion (such
+  as diagnostic tests or data) and escalate the out-of-depth aspect cleanly.
+
 ### 3. Atomicity — the smallness lint
 
 Size asks "how big is the work"; atomicity asks "is it really *one* thing". The
