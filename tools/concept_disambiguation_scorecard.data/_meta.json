@@ -14657,13 +14657,25 @@
           "category": "incidental",
           "reason": "Per-call replay record type local to tool-call-control ablation output, not a cross-repository layout concept",
           "token": "ReplayOutcome"
+        },
+        {
+          "category": "incidental",
+          "reason": "ROCmFP4 layout name constant",
+          "token": "ROCmFP4LayoutName"
+        },
+        {
+          "category": "incidental",
+          "reason": "ROCmFP4 layout validator function",
+          "token": "ValidateROCmFP4Layout"
         }
       ],
       "id": "layout",
       "ignore": [
         "ExportLayout",
         "ImportLayout",
+        "ROCmFP4LayoutName",
         "ReplayOutcome",
+        "ValidateROCmFP4Layout",
         "archusesmlamoelayout",
         "defaultlayout",
         "gitDailyDayLayout",

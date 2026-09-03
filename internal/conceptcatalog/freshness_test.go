@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -447,4 +448,52 @@ func fixtureGitRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func TestGenerateFailsLoudWhenPythonMissing(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "docs", "concept-disambiguation-scorecard")
+	if err := os.MkdirAll(out, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, art := range generatedArtifacts {
+		if err := os.WriteFile(filepath.Join(out, art.Name), []byte("stale content\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath)
+
+	err := generate(root, out)
+	if err == nil {
+		t.Fatal("generate must fail loudly when Python interpreter is missing, even if artifacts pre-exist on disk")
+	}
+	if !strings.Contains(err.Error(), "Python interpreter not found") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestResolvePythonHermetic(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PATH", tmp)
+
+	if _, err := ResolvePython(); err == nil {
+		t.Fatal("want error when no python on PATH")
+	}
+
+	py3Name := "python3"
+	if runtime.GOOS == "windows" {
+		py3Name = "python3.bat"
+	}
+	py3Path := filepath.Join(tmp, py3Name)
+	if err := os.WriteFile(py3Path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolvePython()
+	if err != nil {
+		t.Fatalf("ResolvePython with python3 on PATH failed: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(got), "python3") {
+		t.Fatalf("ResolvePython=%q, want python3", got)
+	}
 }

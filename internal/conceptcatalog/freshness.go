@@ -303,11 +303,28 @@ func Regenerate(root string) ([]string, error) {
 	return files, nil
 }
 
+// ResolvePython returns the path to an available Python interpreter ("python" or "python3").
+// It tries the platform default first (python on Windows, python3 elsewhere), then the fallback.
+// If neither is found, it returns an error.
+func ResolvePython() (string, error) {
+	primary, fallback := "python3", "python"
+	if runtime.GOOS == "windows" {
+		primary, fallback = "python", "python3"
+	}
+	if p, err := exec.LookPath(primary); err == nil {
+		return p, nil
+	}
+	if p, err := exec.LookPath(fallback); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("Python interpreter not found (tried %q and %q)", primary, fallback)
+}
+
 func generate(root, out string) error {
 	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
-	python := "python3"
-	if runtime.GOOS == "windows" {
-		python = "python"
+	python, err := ResolvePython()
+	if err != nil {
+		return fmt.Errorf("generate scorecard: %w", err)
 	}
 	cmd := exec.Command(python, script, "--workspace", root, "--markdown-dir", out)
 	cmd.Dir = root
@@ -315,11 +332,11 @@ func generate(root, out string) error {
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	// The scorecard intentionally exits 1 when its current verdict is ACTION;
-	// generation itself succeeded if EVERY artifact exists. Checking all of them
-	// keeps a crash that stops after the first one from reading as a clean run.
-	if err != nil {
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
 		for _, art := range generatedArtifacts {
 			if _, statErr := os.Stat(filepath.Join(out, art.Name)); statErr != nil {
 				return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
@@ -340,9 +357,12 @@ var invariantSnapshotCommand = newInvariantSnapshotCommand
 
 func newInvariantSnapshotCommand(root, generated string) *exec.Cmd {
 	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
-	python := "python3"
-	if runtime.GOOS == "windows" {
-		python = "python"
+	python, err := ResolvePython()
+	if err != nil {
+		python = "python3"
+		if runtime.GOOS == "windows" {
+			python = "python"
+		}
 	}
 	return exec.Command(python, script, "--workspace", root, "--markdown-dir", generated, "--json")
 }

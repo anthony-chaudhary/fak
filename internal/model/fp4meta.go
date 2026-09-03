@@ -51,19 +51,22 @@ const FP4MetadataSchema = "fp4meta/v1"
 type FP4Format string
 
 const (
-	FP4FormatE2M1  FP4Format = "e2m1"
-	FP4FormatNVFP4 FP4Format = "nvfp4"
-	FP4FormatMXFP4 FP4Format = "mxfp4"
+	FP4FormatE2M1    FP4Format = "e2m1"
+	FP4FormatNVFP4   FP4Format = "nvfp4"
+	FP4FormatMXFP4   FP4Format = "mxfp4"
+	FP4FormatROCmFP4 FP4Format = "rocmfp4"
 )
 
 // FP4ScaleEncoding is the numeric format of the per-block shared scale. E8M0 is a pure
-// power-of-two exponent (the OCP microscaling scale); E4M3 is an fp8 scale with a mantissa.
+// power-of-two exponent (the OCP microscaling scale); E4M3 is an fp8 scale with a mantissa;
+// FP16 is an IEEE binary16 float scale (used by ROCmFP4_FAST).
 type FP4ScaleEncoding string
 
 const (
 	FP4ScaleNone FP4ScaleEncoding = "none"
 	FP4ScaleE4M3 FP4ScaleEncoding = "e4m3"
 	FP4ScaleE8M0 FP4ScaleEncoding = "e8m0"
+	FP4ScaleFP16 FP4ScaleEncoding = "fp16"
 )
 
 // FP4Accumulator is the type the GEMM accumulates products in — not the storage type of the
@@ -300,6 +303,8 @@ func fp4FormatDefinition(m FP4Metadata) (string, bool) {
 		return fp4RequireBlock(m, FP4ScaleE4M3, 16, 2)
 	case FP4FormatMXFP4:
 		return fp4RequireBlock(m, FP4ScaleE8M0, 32, 1)
+	case FP4FormatROCmFP4:
+		return fp4RequireBlock(m, FP4ScaleFP16, 32, 1)
 	case FP4FormatE2M1:
 		// The bare element format pins no block geometry of its own; any coherent scale is valid.
 		return "", true
@@ -325,7 +330,7 @@ func fp4Verdict(d FP4Disposition, r FP4Reason, m *FP4Metadata, detail string) FP
 
 func (f FP4Format) known() bool {
 	switch f {
-	case FP4FormatE2M1, FP4FormatNVFP4, FP4FormatMXFP4:
+	case FP4FormatE2M1, FP4FormatNVFP4, FP4FormatMXFP4, FP4FormatROCmFP4:
 		return true
 	}
 	return false
@@ -333,10 +338,31 @@ func (f FP4Format) known() bool {
 
 func (e FP4ScaleEncoding) known() bool {
 	switch e {
-	case FP4ScaleNone, FP4ScaleE4M3, FP4ScaleE8M0:
+	case FP4ScaleNone, FP4ScaleE4M3, FP4ScaleE8M0, FP4ScaleFP16:
 		return true
 	}
 	return false
+}
+
+// ROCmFP4MetadataPreset returns the self-describing metadata for an AMD RDNA 3/3.5
+// ROCmFP4_FAST checkpoint: E2M1 elements in 32-element blocks (aligned to RDNA 3/3.5
+// half-wave SIMD strides) with a single FP16 scale per block and FP32 accumulation.
+func ROCmFP4MetadataPreset() FP4Metadata {
+	return FP4Metadata{
+		Schema:      FP4MetadataSchema,
+		Format:      FP4FormatROCmFP4,
+		Encoding:    "e2m1",
+		BlockScale:  FP4BlockScale{Elements: 32, Encoding: FP4ScaleFP16, Levels: 1},
+		Exponent:    FP4Exponent{Bits: 2, Bias: 1},
+		Accumulator: FP4AccumulatorFP32,
+		Hardware: FP4HardwareCapability{
+			Runtime:      "rocm",
+			Accelerator:  "gfx1151",
+			NativeDecode: true,
+			NativeGEMM:   true,
+		},
+		ClaimScope: FP4ClaimArtifact,
+	}
 }
 
 func (a FP4Accumulator) known() bool {
