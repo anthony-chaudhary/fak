@@ -268,6 +268,44 @@ func (t *Table) Transition(trace string, to RunState, reason string) (State, boo
 	return out, true
 }
 
+// ResumeAll finds every currently Paused session in the table, transitions it to Running
+// (clearing its Reason and waking its parked WaitResume channels), and returns the
+// updated States in deterministic (sorted TraceID) order. Sessions in any other state
+// (Running, Throttled, Draining, Stopped, Terminating) are untouched.
+func (t *Table) ResumeAll(reason string) []State {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	var paused []string
+	for trace, cur := range t.state {
+		if cur.Run == Paused {
+			paused = append(paused, trace)
+		}
+	}
+	sort.Strings(paused)
+	out := make([]State, 0, len(paused))
+	for _, trace := range paused {
+		cur := t.getLocked(trace)
+		if cur.Run != Paused {
+			continue
+		}
+		cur.Run = Running
+		cur.Reason = ""
+		st := t.putLocked(cur)
+		t.signalResumeLocked(trace)
+		out = append(out, st)
+	}
+	obs := t.transObs
+	t.mu.Unlock()
+	if obs != nil {
+		for _, st := range out {
+			obs(transitionEvent(st, Paused, Running))
+		}
+	}
+	return out
+}
+
 // SetBudget re-sets a session's remaining allotment live — raise to extend/speed
 // up, cut to slow down or to let an urgent session pass. A terminal session rejects
 // the change. Pass Unbounded on an axis to clear its cap.

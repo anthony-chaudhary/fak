@@ -984,3 +984,74 @@ func TestSessionRecoverRefusesMalformedIdentityBeforeInventoryOrLaunch(t *testin
 		t.Fatalf("receipts created: %v", err)
 	}
 }
+
+func TestSessionRecoverDefaultFullSafeCohortAndBoundedLimit(t *testing.T) {
+	oldInv, oldLaunch := recoveryInventory, recoveryLaunch
+	defer func() { recoveryInventory, recoveryLaunch = oldInv, oldLaunch }()
+
+	report := sessionrecovery.InventoryReport{}
+	for i := 0; i < 12; i++ {
+		sid := fmt.Sprintf("crash-parent-%02d", i)
+		report.Sessions = append(report.Sessions, sessionrecovery.Session{
+			Thread:     &sessionrecovery.Thread{ID: sid, Source: "interactive_tui", CWD: `C:\work\fak`},
+			Provider:   sessionrecovery.ProviderCodex,
+			Category:   sessionrecovery.CategorySubstantive,
+			Action:     sessionrecovery.ActionRecover,
+			LatestTurn: &sessionrecovery.Turn{ID: "turn-1", Status: "inProgress", StartedAt: "2026-08-31T10:00:00Z"},
+		})
+	}
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return report, nil
+	}
+	launcher := &captureLauncher{}
+	recoveryLaunch = launcher
+
+	// 1. Default (no --limit flag): all 12 safe candidates are selected deterministically.
+	previewDir := t.TempDir()
+	var out, er bytes.Buffer
+	code := runSessionRecover(&out, &er, []string{"--json", "--journal=false", "--receipts", previewDir})
+	if code != 0 {
+		t.Fatalf("default preview failed: code=%d err=%s", code, er.String())
+	}
+	var preview sessionrecovery.Summary
+	if err := json.Unmarshal(out.Bytes(), &preview); err != nil {
+		t.Fatalf("decode default preview: %v\n%s", err, out.String())
+	}
+	if preview.Counts.Actionable != 12 || preview.Counts.Selected != 12 || preview.Counts.OmittedByLimit != 0 {
+		t.Fatalf("default preview counts = %+v, want actionable=12 selected=12 omitted=0", preview.Counts)
+	}
+	if preview.RecoverAllCommand != "" {
+		t.Fatalf("unbounded run should not emit recover-all command, got %q", preview.RecoverAllCommand)
+	}
+
+	// 2. Explicit --limit 3: exactly 3 selected, 9 omitted, recover-all command emitted.
+	boundedDir := t.TempDir()
+	var boundedOut, boundedEr bytes.Buffer
+	code = runSessionRecover(&boundedOut, &boundedEr, []string{"--json", "--journal=false", "--limit", "3", "--receipts", boundedDir})
+	if code != 0 {
+		t.Fatalf("bounded preview failed: code=%d err=%s", code, boundedEr.String())
+	}
+	var boundedPreview sessionrecovery.Summary
+	if err := json.Unmarshal(boundedOut.Bytes(), &boundedPreview); err != nil {
+		t.Fatalf("decode bounded preview: %v\n%s", err, boundedOut.String())
+	}
+	if boundedPreview.Counts.Actionable != 12 || boundedPreview.Counts.Selected != 3 || boundedPreview.Counts.OmittedByLimit != 9 {
+		t.Fatalf("bounded counts = %+v, want actionable=12 selected=3 omitted=9", boundedPreview.Counts)
+	}
+	if boundedPreview.RecoverAllCommand != "fak session recover --all" {
+		t.Fatalf("recover-all command = %q, want 'fak session recover --all'", boundedPreview.RecoverAllCommand)
+	}
+
+	// Also verify text rendering outputs actionable, selected, omitted, and recover-all:
+	var textOut, textEr bytes.Buffer
+	code = runSessionRecover(&textOut, &textEr, []string{"--journal=false", "--limit", "3", "--receipts", boundedDir})
+	if code != 0 {
+		t.Fatalf("bounded text failed: code=%d err=%s", code, textEr.String())
+	}
+	text := textOut.String()
+	for _, expected := range []string{"actionable=12", "selected=3", "omitted=9", "recover-all: fak session recover --all"} {
+		if !strings.Contains(text, expected) {
+			t.Errorf("text output missing %q:\n%s", expected, text)
+		}
+	}
+}

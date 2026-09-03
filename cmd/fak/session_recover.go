@@ -212,7 +212,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("session recover", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	since := fs.Duration("since", 24*time.Hour, "candidate evidence window")
-	limit := fs.Int("limit", 1, "maximum launches per wave")
+	limit := fs.Int("limit", 0, "maximum launches per wave (0 = all actionable candidates)")
 	liveMode := fs.Bool("live", false, "write receipts and launch one visible wrapper window per selected session")
 	apply := fs.Bool("apply", false, "deprecated alias for --live")
 	all := fs.Bool("all", false, "with --live, confirm every selected candidate instead of one explicit --thread")
@@ -237,8 +237,8 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			limitExplicit = true
 		}
 	})
-	if fs.NArg() != 0 || *since <= 0 || *limit <= 0 || *settle < 0 || *verifyTimeout < 0 || *pollInterval <= 0 {
-		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit 1] [--cwd DIR] [--prompt TEXT] [--live (--thread ID | --all)] [--verify-timeout 30s] [--poll-interval 500ms]")
+	if fs.NArg() != 0 || *since <= 0 || *limit < 0 || *settle < 0 || *verifyTimeout < 0 || *pollInterval <= 0 {
+		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit N] [--cwd DIR] [--prompt TEXT] [--live (--thread ID | --all)] [--verify-timeout 30s] [--poll-interval 500ms]")
 		return 2
 	}
 	doLive := *liveMode || *apply
@@ -269,8 +269,8 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	selectionLimit := *limit
-	if doLive && *all && !limitExplicit {
-		selectionLimit = int(^uint(0) >> 1)
+	if !limitExplicit {
+		selectionLimit = 0
 	}
 	before, err := recoveryInventory(*since)
 	if err != nil {
@@ -525,7 +525,10 @@ func sessionRecoveryResult(req sessionrecovery.Request) sessionrecovery.Result {
 func renderRecoverySummary(w io.Writer, summary sessionrecovery.Summary) {
 	fmt.Fprintf(w, "SESSION RECOVERY %s\n", strings.ToUpper(summary.Mode))
 	fmt.Fprintf(w, "witness=%s\n", summary.WitnessPath)
-	fmt.Fprintf(w, "discovered=%d selected=%d launched=%d active=%d productive=%d completed=%d failed=%d unproven=%d exact_cardinality=%d\n", summary.Counts.Discovered, summary.Counts.Selected, summary.Counts.Launched, summary.Counts.Active, summary.Counts.Productive, summary.Counts.Completed, summary.Counts.Failed, summary.Counts.LaunchedUnproven, summary.Counts.ExactCardinality)
+	fmt.Fprintf(w, "discovered=%d selected=%d actionable=%d omitted=%d launched=%d active=%d productive=%d completed=%d failed=%d stalled=%d unproven=%d exact_cardinality=%d\n", summary.Counts.Discovered, summary.Counts.Selected, summary.Counts.Actionable, summary.Counts.OmittedByLimit, summary.Counts.Launched, summary.Counts.Active, summary.Counts.Productive, summary.Counts.Completed, summary.Counts.Failed, summary.Counts.Stalled, summary.Counts.LaunchedUnproven, summary.Counts.ExactCardinality)
+	if summary.RecoverAllCommand != "" {
+		fmt.Fprintf(w, "recover-all: %s\n", summary.RecoverAllCommand)
+	}
 	if len(summary.Results) == 0 {
 		fmt.Fprintln(w, "No crashed sessions need recovery.")
 		return

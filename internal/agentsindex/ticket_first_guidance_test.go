@@ -50,7 +50,7 @@ func TestAgentGuidanceTracksWorkInGitHubBeforeImplementation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
-	guidance := string(raw)
+	guidance := strings.ReplaceAll(string(raw), "\r\n", "\n")
 
 	for _, want := range []string{
 		"Use a GitHub issue as the durable tracker for every substantive unit of work whenever\nreasonably possible.",
@@ -94,8 +94,9 @@ func TestAgentGuidanceDefaultsSubstantiveWorkToWorkers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
 		}
+		content := strings.ReplaceAll(string(body), "\r\n", "\n")
 		for _, want := range wants {
-			if !strings.Contains(string(body), want) {
+			if !strings.Contains(content, want) {
 				t.Errorf("%s must retain worker-first context-hygiene guidance %q", rel, want)
 			}
 		}

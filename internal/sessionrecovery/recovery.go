@@ -137,9 +137,6 @@ type Options struct {
 
 func Select(report InventoryReport, opts Options) []Request {
 	opts = optionsFromReport(report, opts)
-	if opts.Limit <= 0 {
-		opts.Limit = 1
-	}
 	if opts.CodexBin == "" {
 		opts.CodexBin = "codex"
 	}
@@ -201,12 +198,10 @@ func Select(report InventoryReport, opts Options) []Request {
 			}
 			continue
 		}
-		if selected >= opts.Limit {
-			if row.Provider != "" || row.HostHandle != "" || len(row.HostHandles) > 0 {
-				req.Status = "deferred"
-				req.Reason = "launch_limit"
-				out = append(out, req)
-			}
+		if opts.Limit > 0 && selected >= opts.Limit {
+			req.Status = "deferred"
+			req.Reason = "launch_limit"
+			out = append(out, req)
 			continue
 		}
 		if cwd == "" {
@@ -502,16 +497,12 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 		merged = append(merged, req)
 		seen[req.ThreadID] = true
 	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 1
-	}
 	launches := 0
 	for i := range merged {
 		if merged[i].Status != "candidate" {
 			continue
 		}
-		if launches >= limit {
+		if opts.Limit > 0 && launches >= opts.Limit {
 			merged[i].Status = "deferred"
 			merged[i].Reason = "launch_limit"
 			merged[i].Argv = nil

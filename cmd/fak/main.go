@@ -219,6 +219,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runRuntimeCapabilities(os.Stdout, os.Stderr, args))
 	case "codex":
 		cmdCodex(args)
+	case "opencode":
+		cmdOpencode(args)
 	case "codex-mcp-health":
 		cmdCodexMCPHealth(args)
 	case "loop":
@@ -307,6 +309,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdLint(args)
 	case "codelint":
 		cmdCodelint(args)
+	case "lsp":
+		cmdLSP(args)
 	case "breath":
 		cmdBreath(args)
 	case "answer-shape":

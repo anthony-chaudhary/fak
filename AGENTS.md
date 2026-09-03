@@ -60,6 +60,14 @@ When operating as or delegating to smaller models, enforce two scoping safeguard
    - Emit a structured `ABSTAIN` verdict with a typed refusal token or clear rationale that names the exact boundary reached.
    - Land or report the solvable, verified sub-component (such as a reproduction test case or diagnostic data) and cleanly escalate the difficult aspect to a higher-capability model or human operator.
 
+3. **Guard against fast/flash model sharp edges (Gemini 3.8 Flash & peers)**:
+   - **Curb token inflation and verbosity**: 3.8 Flash is designed to "work harder" and can output 2×–4× more tokens than other models per task. Enforce extreme conciseness (<3 lines commentary in CLI), eliminate conversational preambles/postambles, and keep explanations minimal.
+   - **Resist over-scaffolding ("happy-go-lucky" sprawl)**: Flash models are prone to generating unsolicited companion abstractions, multi-panel apps, or broad refactors for simple requests. Confine diffs strictly to the requested lines/files; do not introduce unasked scaffolding.
+   - **Beware thinking effort tradeoffs**: At low thinking effort, 3.8 Flash exhibits quality regressions (spatial/geometric flaws, shallow verification); at high effort, it burns large token budgets. Never trust low-effort intuition on complex logic—always verify against deterministic external tools (`go test`, `go vet`, `fak validate`).
+   - **Break interactive tool loops and avoid self-narrating**: In CLI/tool loops, Flash models can confabulate success or loop in repeat-failure cycles ("apologizes, then retries the exact same command"). Ground every claim in an observed tool receipt; if a tool call is denied or fails, stop immediately, read the error, and change tack rather than repeating the call.
+   - **Prefer specialized file tools over shell scripting**: Flash models experience higher failure rates on complex CLI/terminal pipelines (TerminalBench regressions). Prefer structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
+   - **Anticipate safety false-positives**: Standard 3.8 Flash guardrails can trigger false refusals on legitimate security inspection, redaction, or policy code; frame technical security contexts neutrally or emit structured `ABSTAIN` rather than hallucinating workarounds. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+
 ## Native inference performance invariant
 
 For any native-inference or performance task, keep model execution **fak-native all the

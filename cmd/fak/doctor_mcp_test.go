@@ -223,3 +223,34 @@ func TestResolveCodexMCPEntryPrefersLiteralConfig(t *testing.T) {
 		t.Fatalf("unexpected literal registration: command=%q args=%q source=%q", command, args, source)
 	}
 }
+
+func TestDoctorMCPResolvesRelativeExecutableInCwd(t *testing.T) {
+	dir := t.TempDir()
+	probeName := "probe"
+	targetName := probeName
+	if runtime.GOOS == "windows" {
+		targetName += ".exe"
+	}
+	probePath := filepath.Join(dir, targetName)
+	if err := os.WriteFile(probePath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := diagnoseMCP("test", "", probeName, nil, time.Second)
+	if got := stageCause(rep, "executable_resolution"); got == "EXECUTABLE_MISSING" {
+		t.Fatalf("executable in cwd was marked missing: %+v", rep.Stages)
+	}
+	if got := stageStatus(rep, "executable_resolution"); got != "pass" {
+		t.Fatalf("expected executable_resolution pass, got %q", got)
+	}
+}
+

@@ -30,5 +30,16 @@ Must-know rules (enforced below the agent layer):
 - The Go module is the repository root — run `go` commands from the clone root
   (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly).
 
+## Operational sharp edges & model guidance (Gemini 3.8 Flash & peers)
+
+When operating as or delegating to Gemini 3.8 Flash, observe these behavioral fences:
+
+- **Enforce strict token and diff economy**: 3.8 Flash tends toward verbosity and output inflation (~2×–4× output tokens vs peer models). Keep commentary brief (<3 lines in CLI mode), avoid conversational filler, and never introduce unasked scaffolding, multi-panel apps, or unsolicited helper files. Keep diffs strictly minimal.
+- **Circuit-break tool error loops**: If a command or tool call fails or is denied by a kernel guard, never immediately retry the same call. Read the error, change tack, or emit a structured refusal.
+- **Rely on external verification, not self-narration**: Never declare a task complete based on internal reasoning alone. Ground every claim in an observed tool execution receipt or test result (`go test`, `fak validate`).
+- **Prefer discrete file tools**: 3.8 Flash exhibits lower reliability on raw shell pipelines (TerminalBench regressions). Use structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
+- **Fail-to-abstain on high-difficulty subsystems**: Concurrency lock invariants, frozen ABI (`internal/abi`), and low-level SIMD/CUDA mechanics exceed safe Flash reasoning. Emit an `ABSTAIN` verdict with diagnostic context rather than guessing.
+- Full analysis & evaluation data: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+
 To run the Gemini CLI behind the kernel (governed tool calls via MCP / an
 OpenAI-compatible gateway), follow [`docs/integrations/gemini-cli.md`](docs/integrations/gemini-cli.md).

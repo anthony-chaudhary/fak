@@ -99,8 +99,20 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		sessionUsage(stderr)
 		return 2
 	}
+	if verb == "resume" {
+		for _, a := range args {
+			if a == "--all" || a == "-all" || strings.HasPrefix(a, "--all=") || strings.HasPrefix(a, "-all=") {
+				want = 0
+				break
+			}
+		}
+	}
 	if len(args) < want {
-		fmt.Fprintf(stderr, "fak session %s: missing argument(s); want %d\n", verb, want)
+		if verb == "resume" {
+			fmt.Fprintf(stderr, "fak session resume: missing argument(s); want 1 (pass <id> or --all)\n")
+		} else {
+			fmt.Fprintf(stderr, "fak session %s: missing argument(s); want %d\n", verb, want)
+		}
 		sessionUsage(stderr)
 		return 2
 	}
@@ -115,6 +127,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the raw JSON instead of the human table")
 	ifRev := fs.Uint64("if-rev", 0, "optimistic-concurrency guard: apply only if the session's current rev matches (0 = no guard)")
 	reason := fs.String("reason", "", "reason token recorded on throttle/stop")
+	all := fs.Bool("all", false, "resume: resume all paused sessions")
 	turns := fs.Int("turns", sessionFlagUnset, "budget: remaining turns (-1 = unbounded)")
 	tokens := fs.Int("tokens", sessionFlagUnset, "budget: remaining output tokens (-1 = unbounded)")
 	contextTokens := fs.Int("context-tokens", sessionFlagUnset, "budget: remaining prompt/context tokens (0 = off)")
@@ -199,6 +212,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	case "pause":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "paused", *reason, *ifRev)
 	case "resume":
+		if *all {
+			return c.resumeAll(stdout, stderr, *asJSON)
+		}
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "running", *reason, *ifRev)
 	case "throttle":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], "throttled", *reason, *ifRev)
@@ -283,6 +299,54 @@ func (c *sessionClient) runVerb(stdout, stderr io.Writer, asJSON bool, id, state
 	return c.renderState(stdout, stderr, asJSON, func() (gateway.SessionState, error) {
 		return c.control(id, "run", gateway.SessionControlRequest{Run: state, Reason: reason, IfRev: ifRev})
 	})
+}
+
+// resumeAll un-pauses every currently paused session via GET /v1/fak/sessions and
+// POST /v1/fak/session/{id}/run.
+func (c *sessionClient) resumeAll(stdout, stderr io.Writer, asJSON bool) int {
+	list, err := c.list()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session resume --all: %v\n", err)
+		return 1
+	}
+	var paused []gateway.SessionState
+	for _, st := range list.Sessions {
+		if strings.EqualFold(st.Run, "paused") {
+			paused = append(paused, st)
+		}
+	}
+	if len(paused) == 0 {
+		if asJSON {
+			return emitSessionJSON(stdout, stderr, map[string]any{
+				"count":    0,
+				"resumed":  0,
+				"sessions": []gateway.SessionState{},
+			})
+		}
+		fmt.Fprintln(stdout, "no paused sessions")
+		return 0
+	}
+	var resumed []gateway.SessionState
+	for _, st := range paused {
+		next, err := c.control(st.TraceID, "run", gateway.SessionControlRequest{Run: "running"})
+		if err != nil {
+			fmt.Fprintf(stderr, "resume %s: %v\n", st.TraceID, err)
+			continue
+		}
+		resumed = append(resumed, next)
+	}
+	if asJSON {
+		return emitSessionJSON(stdout, stderr, map[string]any{
+			"count":    len(resumed),
+			"resumed":  len(resumed),
+			"sessions": resumed,
+		})
+	}
+	for _, st := range resumed {
+		fmt.Fprintln(stdout, formatSessionState(st))
+	}
+	fmt.Fprintf(stdout, "%d session(s) resumed\n", len(resumed))
+	return 0
 }
 
 // budgetVerb re-sets the work allotment. Budget is one value (all axes), so a
@@ -819,7 +883,7 @@ func sessionUsage(w io.Writer) {
   fak session terminate <id> [--reason R]     forceful stop: cancel in-flight work at the next
                                                safe point (no new tool calls; no drain cleanup)
   fak session pause    <id>                   hold at the next turn boundary
-  fak session resume   <id>                   un-pause (a live state flip)
+  fak session resume   [<id>|--all]           un-pause one session or all paused sessions
   fak session throttle <id> [--reason R]      slow without pausing
   fak session run      <id> <state>           set running|throttled|paused|draining|terminating|stopped
   fak session budget   <id> [--turns N] [--tokens N] [--context-tokens N]  re-set the work allotment live
