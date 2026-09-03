@@ -384,3 +384,62 @@ func TestMetalForwardMatchesRef(t *testing.T) {
 	}
 	t.Logf("Metal forward parity: %d prompt + %d greedy steps, argmax-exact, final cosine=%.8f", len(prompt), nGen, cosine(lref, lmt))
 }
+
+func TestMetalTypedErrorsAndRecovery(t *testing.T) {
+	// 1. Pure Go verification of requireMetalMatMulF32 typed error.
+	t.Run("typed_unsupported_dtype", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on non-F32 MatMul input")
+			}
+			var dtypeErr *MetalInputDtypeError
+			if !errors.As(r.(error), &dtypeErr) {
+				t.Fatalf("expected *MetalInputDtypeError, got %T: %v", r, r)
+			}
+			if dtypeErr.Op != "MatMul" || dtypeErr.Weight != Q8_0 || dtypeErr.Input != F32 {
+				t.Fatalf("unexpected error payload: %+v", dtypeErr)
+			}
+			if !strings.Contains(dtypeErr.Error(), "compute: metal MatMul supports only F32 inputs") {
+				t.Fatalf("error string mismatch: %s", dtypeErr.Error())
+			}
+		}()
+		invalidW := Tensor{Shape: []int{4, 4}, Dtype: Q8_0}
+		validX := Tensor{Shape: []int{4}, Dtype: F32}
+		requireMetalMatMulF32("MatMul", invalidW, validX)
+	})
+
+	// 2. Hardware-gated execution on real Metal device.
+	t.Run("on_device_recovery", func(t *testing.T) {
+		mb := metalOrSkip(t)
+		ref := Default()
+
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("expected panic on non-F32 MatMul input")
+				}
+				var dtypeErr *MetalInputDtypeError
+				if !errors.As(r.(error), &dtypeErr) {
+					t.Fatalf("expected *MetalInputDtypeError, got %T: %v", r, r)
+				}
+			}()
+
+			invalidW := Tensor{Shape: []int{4, 4}, Dtype: Q8_0}
+			validX := mtlMkResident(mb, []int{4}, []float32{1, 2, 3, 4})
+			_ = mb.MatMul(invalidW, validX)
+		}()
+
+		w := []float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+		x := []float32{2, 3, 5, 7}
+		dw := mtlMkResident(mb, []int{4, 4}, w)
+		dx := mtlMkResident(mb, []int{4}, x)
+		got := mb.Read(mb.MatMul(dw, dx))
+		want := ref.Read(ref.MatMul(mtlMkResident(ref, []int{4, 4}, w), mtlMkResident(ref, []int{4}, x)))
+
+		if c := cosine(want, got); c < 0.9999 {
+			t.Fatalf("subsequent MatMul failed: cosine %.6f < 0.9999", c)
+		}
+	})
+}

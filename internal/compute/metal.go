@@ -408,9 +408,38 @@ func recordMetalMatMulTrace(started time.Time, receipt metalCommandReceipt, w, x
 	computetrace.Record(metalMatMulTraceEvent(started, receipt, w, x, y, out, in, p))
 }
 
+// MetalCommandError represents a typed runtime failure encountered during a Metal command execution.
+type MetalCommandError struct {
+	Op   string
+	Site string
+	Err  error
+}
+
+func (e *MetalCommandError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("compute: metal %s failed at %s: %v", e.Op, e.Site, e.Err)
+	}
+	return fmt.Sprintf("compute: metal %s failed at %s", e.Op, e.Site)
+}
+
+func (e *MetalCommandError) Unwrap() error {
+	return e.Err
+}
+
+// MetalInputDtypeError indicates an invalid or unsupported data type for a Metal operation.
+type MetalInputDtypeError struct {
+	Op     string
+	Weight Dtype
+	Input  Dtype
+}
+
+func (e *MetalInputDtypeError) Error() string {
+	return fmt.Sprintf("compute: metal %s supports only F32 inputs today (weight=%s input=%s)", e.Op, e.Weight, e.Input)
+}
+
 func requireMetalMatMulF32(operation string, w, x Tensor) {
 	if w.Dtype != F32 || x.Dtype != F32 {
-		panic(fmt.Sprintf("compute: metal %s supports only F32 inputs today (weight=%s input=%s)", operation, w.Dtype, x.Dtype))
+		panic(&MetalInputDtypeError{Op: operation, Weight: w.Dtype, Input: x.Dtype})
 	}
 }
 
@@ -423,15 +452,15 @@ func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "begin", Err: err})
 	}
 	if err := owner.encodeMatMul(c.mb(w), c.mb(x), c.mb(y), out, in, 1); err != nil {
 		_ = owner.abort()
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "encode", Err: err})
 	}
 	receipt, err := owner.finishExactly(1)
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "finish", Err: err})
 	}
 	recordMetalMatMulTrace(started, receipt, w, x, y, out, in, 1)
 	return y
@@ -448,15 +477,15 @@ func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "begin", Err: err})
 	}
 	if err := owner.encodeMatMul(c.mb(w), c.mb(X), c.mb(y), out, in, P); err != nil {
 		_ = owner.abort()
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "encode", Err: err})
 	}
 	receipt, err := owner.finishExactly(1)
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "finish", Err: err})
 	}
 	recordMetalMatMulTrace(started, receipt, w, X, y, out, in, P)
 	return y
