@@ -61,10 +61,36 @@ func TestReservationFailsClosedBeforeCreatingLedger(t *testing.T) {
 			if err != nil || got.Admit || got.Reason != "pressure_"+string(pressure) {
 				t.Fatalf("decision=%+v err=%v", got, err)
 			}
+			if pressure == PressureCritical && got.RemedyHint == "" {
+				t.Fatalf("remedy hint missing on critical pressure refusal: %+v", got)
+			}
 			if _, err := os.Stat(filepath.Join(dir, "reservations.json")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("ledger created before refusal: %v", err)
 			}
 		})
+	}
+}
+
+func TestReservationDevOverrideOnPressureCritical(t *testing.T) {
+	dir := t.TempDir()
+	store := NewReservationStore(dir)
+	req := reservationRequest(os.Getpid(), 10, 5, 100, PressureCritical)
+	req.Policy = "dev"
+	req.Host.TotalBytes = 1000
+	req.Host.CompressedBytes = 320
+
+	got, err := store.Reserve(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reserve err = %v", err)
+	}
+	if !got.Admit {
+		t.Fatalf("expected admission under dev override, got decision: %+v", got)
+	}
+	if got.Pressure != PressureCritical {
+		t.Fatalf("expected real pressure to be preserved as critical, got %q", got.Pressure)
+	}
+	if got.AdmissionPolicy != "dev-override" {
+		t.Fatalf("expected admission policy dev-override, got %q", got.AdmissionPolicy)
 	}
 }
 
