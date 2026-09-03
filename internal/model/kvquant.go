@@ -134,9 +134,9 @@ func (q KVQuant4) Dequantize() []float32 {
 // from the value. It is a PROVABLE per-element ceiling derived from the stored scales, not
 // a measurement — a caller can compare it against a decode-quality tolerance before
 // committing a span to 4-bit, and a test can assert the realized error respects it.
-func (q KVQuant4) ErrorBound() float32 {
+func maxScaleHalf(scale []float32) float32 {
 	var worst float32
-	for _, s := range q.Scale {
+	for _, s := range scale {
 		if s > worst {
 			worst = s
 		}
@@ -144,12 +144,20 @@ func (q KVQuant4) ErrorBound() float32 {
 	return worst / 2
 }
 
+func packedKVBytes(codesLen, scaleLen, minLen int) int {
+	return codesLen + 4*scaleLen + 4*minLen
+}
+
+func (q KVQuant4) ErrorBound() float32 {
+	return maxScaleHalf(q.Scale)
+}
+
 // Bytes is the packed footprint: the nibble payload plus the per-group f32 scale and min.
 // The group metadata is real overhead and is counted here — at KVQuant4GroupSize=32 it
 // adds 8 bytes per 32 elements (2 bits/element), so the honest rate is 6 bits/element,
 // not 4. Reporting the bare nibble count would overstate the saving by 50%.
 func (q KVQuant4) Bytes() int {
-	return len(q.Codes) + 4*len(q.Scale) + 4*len(q.Min)
+	return packedKVBytes(len(q.Codes), len(q.Scale), len(q.Min))
 }
 
 // KVQuant8GroupSize is the number of contiguous elements sharing one (scale, min) pair
@@ -230,20 +238,14 @@ func (q KVQuant8) Dequantize() []float32 {
 // ErrorBound is the worst-case absolute round-trip error this quantization can produce:
 // half the widest group step.
 func (q KVQuant8) ErrorBound() float32 {
-	var worst float32
-	for _, s := range q.Scale {
-		if s > worst {
-			worst = s
-		}
-	}
-	return worst / 2
+	return maxScaleHalf(q.Scale)
 }
 
 // Bytes is the packed footprint: the 1-byte-per-element payload plus the per-group f32 scale
 // and min. At KVQuant8GroupSize=32 it adds 8 bytes per 32 elements (2 bits/element), for an
 // honest rate of 10 bits/element.
 func (q KVQuant8) Bytes() int {
-	return len(q.Codes) + 4*len(q.Scale) + 4*len(q.Min)
+	return packedKVBytes(len(q.Codes), len(q.Scale), len(q.Min))
 }
 
 // KVQuantAsymmetric is an asymmetric cache pair holding K in KVQuant8 and V in KVQuant4.
