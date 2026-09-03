@@ -201,7 +201,7 @@ func TestDebounceTriggerAndMetricsAreBounded(t *testing.T) {
 		t.Fatalf("trigger=%+v", got.Trigger)
 	}
 	m := NewDebouncer(cfg, &MemoryBurstStore{}, clock).Metrics()
-	if len(m.LatencyBuckets) != 5 {
+	if len(m.LatencyBuckets) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the latency metric histogram declares exactly five default buckets
 		t.Fatalf("metrics=%+v", m)
 	}
 }
