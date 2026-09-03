@@ -685,6 +685,12 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  scorecard grid + rung->regime router into rung . regime . target .
                  next-action . the witness behind the rung. --json round-trips; --family /
                  --backend answer "where is X and what should I do about it?")
+  fak code-debt [--workspace DIR] [--kpi KPI] [--category CAT] [--path PATH]
+                [--search STR] [--limit N] [--count] [--summary] [--json] [--from FILE]
+                (query and inspect code quality debt natively and deterministically across
+                 the workspace: filter by KPI, structural category, package/path, or text search;
+                 outputs formatted worklist, summary aggregations, or machine-readable JSON. Exit
+                 0 when zero matching debt, 1 when debt is present, 2 on usage error.)
   fak learning-debt-dispatch --scorecard FILE [--cap N] [--cache FILE] [--live]
                 [--fetch-existing] [--existing-json FILE] [--repo owner/repo] [--json]
                 (learning-scorecard -> backlog: file at most --cap triage issues for HARD
