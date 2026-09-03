@@ -34,3 +34,32 @@ func TestSelectSOLRoute(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteResolutionPreservesEffortPin(t *testing.T) {
+	// 1. Valid effort pin reaches SOLRoute.ReasoningEffort
+	for _, effort := range []string{"low", "medium", "high", "xhigh"} {
+		task := TaskSpec{
+			ID:        "test-task",
+			WorkClass: WorkDefault,
+			Pins:      FastPins{Effort: effort},
+		}
+		res, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, task, HarnessCapabilities{})
+		if err != nil {
+			t.Fatalf("Resolve with effort %q: %v", effort, err)
+		}
+		RouteResolution(&res, "audit an uncertain security invariant", "gpt-5.6-sol")
+		if res.Resolved.SOLRoute.ReasoningEffort != effort {
+			t.Fatalf("effort pin = %q, got %q", effort, res.Resolved.SOLRoute.ReasoningEffort)
+		}
+	}
+
+	// 2. Invalid effort pin is rejected
+	badTask := TaskSpec{
+		ID:        "bad-task",
+		WorkClass: WorkDefault,
+		Pins:      FastPins{Effort: "unsupported"},
+	}
+	if _, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, badTask, HarnessCapabilities{}); err == nil {
+		t.Fatal("expected error on invalid effort pin, got nil")
+	}
+}

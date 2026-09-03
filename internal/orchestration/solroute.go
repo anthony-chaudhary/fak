@@ -99,6 +99,14 @@ func RouteResolution(res *Resolution, taskText string, model string) {
 	if res.Requested.Name == ProfileAuto {
 		profile = ProfileAuto
 	}
+	pinnedEffort := ""
+	if strings.Contains(res.Resolved.SOLRoute.Decision, "; effort pinned by operator to ") {
+		pinnedEffort = res.Resolved.SOLRoute.ReasoningEffort
+	}
 	res.Resolved.SOLRoute = SelectSOLRoute(taskText, profile, res.Resolved.WorkClass, model)
+	if pinnedEffort != "" {
+		res.Resolved.SOLRoute.ReasoningEffort = pinnedEffort
+		res.Resolved.SOLRoute.Decision += "; effort pinned by operator to " + pinnedEffort
+	}
 	res.Resolved.Explanation = append(res.Resolved.Explanation, "SOL route "+string(res.Resolved.SOLRoute.Mode)+": "+res.Resolved.SOLRoute.Decision)
 }
