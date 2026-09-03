@@ -255,9 +255,25 @@ func ParseRollout(r io.Reader) ([]Event, error) {
 // subagent rollout carries the PARENT's metadata in its inherited context further
 // down, so a last-wins read would relabel every child as its parent.
 func ReadRollout(r io.Reader) (Meta, []Event, error) {
+	return readRollout(r, nil)
+}
+
+// ReadRolloutCensus is ReadRollout plus the #10668 sidecar: every event_msg
+// payload type counted (including the ones this reader does not interpret, so
+// upstream's future typed error/retry/terminal events are observed, not
+// dropped) and the torn-tail shape. The returned events and Meta are
+// identical to ReadRollout's.
+func ReadRolloutCensus(r io.Reader) (Meta, []Event, RolloutCensus, error) {
+	var census RolloutCensus
+	meta, events, err := readRollout(r, &census)
+	return meta, events, census, err
+}
+
+func readRollout(r io.Reader, census *RolloutCensus) (Meta, []Event, error) {
 	var meta Meta
 	var out []Event
 	haveMeta := false
+	lastParsed := true
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 256*1024), 64*1024*1024)
@@ -282,8 +298,10 @@ func ReadRollout(r io.Reader) (Meta, []Event, error) {
 			} `json:"payload"`
 		}
 		if json.Unmarshal([]byte(line), &rec) != nil {
+			lastParsed = false
 			continue
 		}
+		lastParsed = true
 		switch rec.Type {
 		case "session_meta":
 			if haveMeta {
@@ -297,6 +315,14 @@ func ReadRollout(r io.Reader) (Meta, []Event, error) {
 				CWD:        strings.TrimSpace(rec.Payload.CWD),
 			}
 		case "event_msg":
+			// THE #10668 CENSUS: every event_msg payload type is counted by
+			// name, interpreted or not — an unrecognized type is never an
+			// error, and the census is the FULL event-type inventory (the
+			// interpreted kinds included), not just its unknown tail. Free
+			// text (e.g. a terminal task_complete's last_agent_message) is
+			// never retained here; class extraction lives in the analytics
+			// reader (errorclass.go's contract).
+			census.addPayload(rec.Payload.Type)
 			switch rec.Payload.Type {
 			case KindStarted, KindComplete, KindAborted:
 				out = append(out, Event{
@@ -308,6 +334,9 @@ func ReadRollout(r io.Reader) (Meta, []Event, error) {
 				})
 			}
 		}
+	}
+	if census != nil {
+		census.TornTail = !lastParsed
 	}
 	if err := sc.Err(); err != nil {
 		return meta, out, err

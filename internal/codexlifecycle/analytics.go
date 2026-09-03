@@ -241,15 +241,37 @@ type ARecord struct {
 	DurationMS       int64
 	InputTokens      int  // token_count only: payload.info.last_token_usage.input_tokens (#10662)
 	GoalContinuation bool // structured harness envelope; no prompt body retained
+
+	// ErrClasses is the #10668(c) closed status-class vocabulary reduced from a
+	// TERMINAL task_complete's free text at read time (5xx / 429 / 400 only,
+	// code-anchored — see errorclass.go). The text itself is dropped here, so
+	// no consumer ever sees it; non-terminal records carry nil.
+	ErrClasses []string
 }
 
 // ReadAnalyticsRollout streams one rollout and returns its Meta plus body-free
 // analytics records in file order. Torn/non-JSON lines are skipped — the truncated
 // tail is process-death evidence, not a read error.
 func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
+	return readAnalyticsRollout(r, nil)
+}
+
+// ReadAnalyticsRolloutCensus is ReadAnalyticsRollout plus the #10668 sidecar:
+// every event_msg payload type counted by name (including the ones this reader
+// does not interpret, so upstream's future typed error/retry/terminal events
+// are observed, not dropped) and the torn-tail shape. The returned Meta and
+// records are identical to ReadAnalyticsRollout's; counting is never an error.
+func ReadAnalyticsRolloutCensus(r io.Reader) (Meta, []ARecord, RolloutCensus, error) {
+	var census RolloutCensus
+	meta, records, err := readAnalyticsRollout(r, &census)
+	return meta, records, census, err
+}
+
+func readAnalyticsRollout(r io.Reader, census *RolloutCensus) (Meta, []ARecord, error) {
 	var meta Meta
 	var out []ARecord
 	haveMeta := false
+	lastParsed := true
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 256*1024), 64*1024*1024)
@@ -262,20 +284,21 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			Timestamp string `json:"timestamp"`
 			Type      string `json:"type"`
 			Payload   struct {
-				Type          string `json:"type"`
-				TurnID        string `json:"turn_id"`
-				Reason        string `json:"reason"`
-				DurationMS    int64  `json:"duration_ms"`
-				ID            string `json:"id"`
-				AltID         string `json:"session_id"`
-				ModelProvider string `json:"model_provider"`
-				CLIVersion    string `json:"cli_version"`
-				CWD           string `json:"cwd"`
-				Originator    string `json:"originator"`
-				Source        string `json:"source"`
-				ThreadSource  string `json:"thread_source"`
-				Role          string `json:"role"`
-				Content       []struct {
+				Type             string `json:"type"`
+				TurnID           string `json:"turn_id"`
+				Reason           string `json:"reason"`
+				DurationMS       int64  `json:"duration_ms"`
+				ID               string `json:"id"`
+				AltID            string `json:"session_id"`
+				ModelProvider    string `json:"model_provider"`
+				CLIVersion       string `json:"cli_version"`
+				CWD              string `json:"cwd"`
+				Originator       string `json:"originator"`
+				Source           string `json:"source"`
+				ThreadSource     string `json:"thread_source"`
+				Role             string `json:"role"`
+				LastAgentMessage string `json:"last_agent_message"`
+				Content          []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"content"`
@@ -292,8 +315,10 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			} `json:"payload"`
 		}
 		if json.Unmarshal([]byte(line), &rec) != nil {
+			lastParsed = false
 			continue
 		}
+		lastParsed = true
 		ts, _ := time.Parse(time.RFC3339, rec.Timestamp)
 		switch rec.Type {
 		case "session_meta":
@@ -338,12 +363,19 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 				})
 			}
 		case "event_msg":
+			// THE #10668 CENSUS: an unrecognized payload type is counted by
+			// name and never an error — unknown events stay invisible to the
+			// analytics fold, but no longer invisible to the operator. The
+			// interpreted kinds are counted too, so the census is the full
+			// event-type inventory, not just its unknown tail.
+			census.addPayload(rec.Payload.Type)
 			switch rec.Payload.Type {
 			case KindStarted, KindComplete, KindAborted:
 				out = append(out, ARecord{
 					Kind: rec.Payload.Type, PayloadKind: rec.Payload.Type, TS: ts,
 					TurnID: strings.TrimSpace(rec.Payload.TurnID),
 					Reason: rec.Payload.Reason, DurationMS: rec.Payload.DurationMS,
+					ErrClasses: errClassesFor(rec.Payload.Type, rec.Payload.LastAgentMessage),
 				})
 			case kindTokens:
 				out = append(out, ARecord{Kind: kindTokens, PayloadKind: rec.Payload.Type, TS: ts,
@@ -351,10 +383,23 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			}
 		}
 	}
+	if census != nil {
+		census.TornTail = !lastParsed
+	}
 	if err := sc.Err(); err != nil {
 		return meta, out, err
 	}
 	return meta, out, nil
+}
+
+// errClassesFor reduces a terminal task_complete's free text to the closed
+// #10668 status-class tokens, dropping the text at read time. Anything that is
+// not a terminal task_complete carries no classes.
+func errClassesFor(kind, lastAgentMessage string) []string {
+	if kind != KindComplete {
+		return nil
+	}
+	return ClassifyStatusClasses(lastAgentMessage)
 }
 
 // outputText unwraps a function_call_output payload's output field, which is a JSON

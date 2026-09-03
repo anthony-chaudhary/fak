@@ -1,0 +1,40 @@
+{
+  "schema": "fak-codex-errorclass/1",
+  "note": "#10668 conformance. session-a: three unknown event_msg payload types (item_completed, thread_settings_applied, thread_goal_updated), a clean mid-file interrupt (records follow it), and one terminal task_complete whose free text references HTTP 429. session-b: a torn final line (writer died mid-write) with turn_aborted as the last parseable record (process_death_tail), and one terminal whose free text references HTTP 502 and HTTP 400. No message content may appear in any report.",
+  "expect": {
+    "sessions": 2,
+    "unreadable": 0,
+    "torn_tail_rollouts": 1,
+    "payload_types": {
+      "item_completed": 1,
+      "task_complete": 2,
+      "task_started": 4,
+      "thread_goal_updated": 1,
+      "thread_settings_applied": 1,
+      "token_count": 1,
+      "turn_aborted": 2
+    },
+    "unknown_payload_types": {
+      "item_completed": 1,
+      "thread_goal_updated": 1,
+      "thread_settings_applied": 1
+    },
+    "unknown_payload_total": 3,
+    "rollouts_with_unknown": 1,
+    "turn_aborted": 2,
+    "abort_classes": {
+      "interrupted": 1,
+      "other_recorded": 0,
+      "process_death_tail": 1,
+      "unrecorded": 0
+    },
+    "task_complete": 2,
+    "terminals_with_class": 2,
+    "provider_error_classes": {
+      "http_400": 1,
+      "http_429": 1,
+      "http_5xx": 1
+    }
+  },
+  "privacy_probe": "Bad Gateway after 3 attempts"
+}
