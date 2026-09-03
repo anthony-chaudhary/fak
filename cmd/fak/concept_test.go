@@ -150,3 +150,30 @@ func runGitAt(root string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+func TestConceptGenerateFailsLoudWhenPythonMissing(t *testing.T) {
+	c, root := conceptCLIFixture(t)
+	outDir := filepath.Join(root, "docs", "concept-disambiguation-scorecard")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"README.md", "INDEX.md"} {
+		if err := os.WriteFile(filepath.Join(outDir, name), []byte("stale\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath)
+
+	var out, errb bytes.Buffer
+	code := runConceptGenerate(&out, &errb, c, []string{})
+	if code == 0 {
+		t.Fatal("concept generate must fail with non-zero code when python interpreter is missing")
+	}
+	if !strings.Contains(errb.String(), "Python interpreter not found") {
+		t.Fatalf("concept generate must report missing interpreter, got: %s", errb.String())
+	}
+	if strings.Contains(out.String(), "GENERATED concept scorecard") {
+		t.Fatal("concept generate must not report success when generation failed")
+	}
+}
