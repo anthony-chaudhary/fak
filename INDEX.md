@@ -288,6 +288,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md`](docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md) — pinned deep study of TurboQuant-vLLM's MoE sparse dequantization, 3/4-bit KV ladder rungs, shape-gain norm correction, and CUDA-graph invariants; filed #10709 and #10710.
 - [`docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json`](docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json) — refreshed repository-discovery baseline for the curated doc map (`fak-dev index benchmark`, schema `fak-devindex-discovery-benchmark/1`): 15/24 top-5 (62.5%), 120 results, 9,267 rendered bytes over the 24 fixed navigation questions; hit set unchanged from the 2026-08-25 baseline.
 - [`docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md`](docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md) — pinned deep study of Hipfire's RDNA-native admission, cache/session safety, retained replay, evidence contracts, negative results, and provenance; reuses #9587/#8395 and files no duplicate mechanism issue.
 

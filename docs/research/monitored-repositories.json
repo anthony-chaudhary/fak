@@ -3986,6 +3986,19 @@
         ],
         "completeness_critic": "Major tracked source classes were exhaustively inventoried, but the 1,086-document investigation corpus was clustered rather than read line-by-line; older benchmark identity and statistical rigor are uneven; selected active PRs lacked formal review; and the pinned submodule license was not locally verified."
       }
+    },
+    {
+      "repository": "varjoranta/turboquant-vllm",
+      "url": "https://github.com/varjoranta/turboquant-vllm",
+      "status": "studied",
+      "priority": 25,
+      "why": "TurboQuant+ KV cache and 3-bit weight compression plugin for vLLM. Source of sparse top-k MoE dequant into shared scratch pool (8.4x decode speedup at bs=1 on Qwen3-30B-A3B) and served-benchmark validation of shape-gain norm correction + asymmetric K4/V3 bits.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "c8a7e0a73b2b9bb93dc66c9380dceab985a0fbc5",
+      "stars_at_check": 80,
+      "last_push_at_check": "2026-07-14T06:43:07Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md",
+      "refresh_issue": "#10709"
     }
   ]
 }
