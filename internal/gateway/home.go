@@ -35,9 +35,9 @@ var homePageTemplate = template.Must(template.New("gateway-home").Parse(`<!docty
 </section><footer>API clients can continue using <code>/v1/responses</code>, <code>/v1/chat/completions</code>, or <code>/mcp</code>. The homepage contains no credentials or upstream URL.</footer>
 </main><script>
 (()=>{const byId=id=>document.getElementById(id),state=byId("live-state"),note=byId("live-note");
-const metric=(text,name)=>{let total=0,found=false;for(const line of text.split("\\n")){const match=line.match(new RegExp("^"+name+"(?:\\{[^}]*\\})?\\s+([0-9.eE+-]+)$"));if(match){total+=Number(match[1]);found=true}}return found?total:null};
+const metric=(text,name)=>{let total=0,found=false;for(const line of text.split(/\r?\n/)){const match=line.match(new RegExp("^"+name+"(?:\\{[^}]*\\})?\\s+([0-9.eE+-]+)$"));if(match){total+=Number(match[1]);found=true}}return found?total:null};
 const show=(id,value)=>{if(value!==null&&Number.isFinite(value))byId(id).textContent=value.toLocaleString()};
-async function refresh(){try{const [health,metrics]=await Promise.all([fetch("/healthz",{headers:{Accept:"application/json"}}),fetch("/metrics",{headers:{Accept:"text/plain"}})]);if(!health.ok||!metrics.ok)throw new Error("health "+health.status+", metrics "+metrics.status);const healthBody=await health.json(),metricsBody=await metrics.text();byId("live-ready").textContent=healthBody.ready===false?"not ready":"ready";show("live-requests",metric(metricsBody,"fak_gateway_http_requests_total"));show("live-cache-hits",metric(metricsBody,"fak_gateway_inference_cached_prompt_hits_total"));show("live-inflight",metric(metricsBody,"fak_gateway_inflight_requests"));state.textContent="live";state.dataset.state="live";note.textContent="Updated "+new Date().toLocaleTimeString()+" / refreshes every 5 seconds."}catch(error){state.textContent="unavailable";state.dataset.state="unavailable";note.textContent="Live refresh failed; last good values are preserved. Open Health or Metrics below for details."}}
+async function refresh(){try{const [health,metrics]=await Promise.all([fetch("/healthz",{headers:{Accept:"application/json"}}),fetch("/metrics",{headers:{Accept:"text/plain"}})]);if(!health.ok||!metrics.ok)throw new Error("health "+health.status+", metrics "+metrics.status);const healthBody=await health.json(),metricsBody=await metrics.text();byId("live-ready").textContent=(healthBody.ok===false||healthBody.ready===false)?"not ready":"ready";show("live-requests",metric(metricsBody,"fak_gateway_http_requests_total"));show("live-cache-hits",metric(metricsBody,"fak_gateway_inference_cached_prompt_hits_total"));show("live-inflight",metric(metricsBody,"fak_gateway_inflight_requests"));state.textContent="live";state.dataset.state="live";note.textContent="Updated "+new Date().toLocaleTimeString()+" / refreshes every 5 seconds."}catch(error){state.textContent="unavailable";state.dataset.state="unavailable";note.textContent="Live refresh failed; last good values are preserved. Open Health or Metrics below for details."}}
 refresh();setInterval(refresh,5000)})();
 </script></body></html>`))
 
@@ -72,7 +72,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	recordDashboardAdoption("lightweight_open")
 	if r.Method == http.MethodHead {
