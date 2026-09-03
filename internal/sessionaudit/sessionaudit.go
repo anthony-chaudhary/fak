@@ -1295,6 +1295,9 @@ func sessionNamespaces(sessions []Session) []string {
 // workspace path. Claude derives it by replacing every non-alphanumeric rune in
 // the cleaned path with '-': C:\work\fak becomes C--work-fak.
 func ProjectNamespace(workspace string) string {
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil {
+		workspace = resolved
+	}
 	clean := filepath.Clean(workspace)
 	var b strings.Builder
 	b.Grow(len(clean))
