@@ -32,6 +32,7 @@ type stubGateway struct {
 	curRev                         uint64
 	conflictID                     string // an id whose control POST returns 409
 	ctxValue                       gateway.CtxValueSnapshot
+	sessions                       []gateway.SessionState
 }
 
 func (g *stubGateway) handler() http.Handler {
@@ -39,14 +40,18 @@ func (g *stubGateway) handler() http.Handler {
 	mux.HandleFunc("/v1/fak/sessions", func(w http.ResponseWriter, r *http.Request) {
 		g.lastMethod, g.lastPath = r.Method, r.URL.Path
 		g.lastRawQuery = r.URL.RawQuery
-		writeTestJSON(w, 200, gateway.SessionListResponse{
-			Count: 2,
-			Sessions: []gateway.SessionState{
+		respSessions := g.sessions
+		if respSessions == nil {
+			respSessions = []gateway.SessionState{
 				{TraceID: "urgent", Run: "running", Priority: 0, Rev: 1,
 					Budget: gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1}},
 				{TraceID: "bg", Run: "throttled", Priority: 5, Reason: "operator-throttle", Rev: 4,
 					Budget: gateway.SessionBudget{TurnsLeft: 3, TokensLeft: -1}},
-			},
+			}
+		}
+		writeTestJSON(w, 200, gateway.SessionListResponse{
+			Count:    len(respSessions),
+			Sessions: respSessions,
 		})
 	})
 	mux.HandleFunc("/v1/fak/ctxvalue", func(w http.ResponseWriter, r *http.Request) {
@@ -455,3 +460,57 @@ func TestSessionCLIEscapesIDInPath(t *testing.T) {
 		t.Fatalf("escaped id did not round-trip whole; output=%q path=%q", out, g.lastPath)
 	}
 }
+
+func TestSessionCLIResumeAll(t *testing.T) {
+	g := &stubGateway{
+		curRev: 1,
+		sessions: []gateway.SessionState{
+			{TraceID: "p-1", Run: "paused", Reason: "operator-hold", Rev: 2},
+			{TraceID: "p-2", Run: "paused", Reason: "operator-hold", Rev: 3},
+			{TraceID: "live", Run: "running", Rev: 1},
+		},
+	}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	// 1. Resume all paused sessions.
+	out, errb, code := runSessionAt(t, ts.URL, "resume", "--all")
+	if code != 0 {
+		t.Fatalf("resume --all exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, "p-1") || !strings.Contains(out, "p-2") || !strings.Contains(out, "2 session(s) resumed") {
+		t.Fatalf("resume --all output unexpected: %q", out)
+	}
+	if len(g.bodies) != 2 {
+		t.Fatalf("control calls = %d, want 2", len(g.bodies))
+	}
+	for _, b := range g.bodies {
+		if b.Run != "running" {
+			t.Errorf("control body run = %q, want running", b.Run)
+		}
+	}
+
+	// 2. Resume all with --json when no sessions are paused.
+	g.sessions = []gateway.SessionState{
+		{TraceID: "live", Run: "running", Rev: 1},
+	}
+	g.bodies = nil
+	out, errb, code = runSessionAt(t, ts.URL, "resume", "--all", "--json")
+	if code != 0 {
+		t.Fatalf("resume --all --json exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, `"resumed": 0`) {
+		t.Fatalf("resume --all --json output unexpected: %q", out)
+	}
+
+	// 3. resume with missing args (neither id nor --all).
+	var out3, errb3 bytes.Buffer
+	code = runSession(&out3, &errb3, []string{"resume"})
+	if code != 2 {
+		t.Fatalf("resume with no args exit = %d, want 2", code)
+	}
+	if !strings.Contains(errb3.String(), "--all") {
+		t.Fatalf("expected usage message to mention --all, got: %q", errb3.String())
+	}
+}
+
