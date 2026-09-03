@@ -1,9 +1,9 @@
 ---
-title: "Native-performance Grafana panel proof"
-description: "Reproduce the deterministic panel coverage matrix, distinguish fixtures from live fak-native evidence, and preserve honest unavailable states."
+title: "Native-performance Grafana panel proof and local Metal observability"
+description: "Reproduce the deterministic panel coverage matrix, operate the local Qwen3.8 Metal observability pipeline, query Grafana dashboards and Prometheus metrics, and validate the execution receipt contract."
 ---
 
-# Native-performance Grafana panel proof
+# Native-performance Grafana panel proof and local Metal observability
 
 Issue #9817 binds the four native-performance dashboards to their contracts,
 controlled Prometheus fixtures, deterministic visual witnesses, and a separate live
@@ -19,6 +19,178 @@ in the matrix and every static row/text panel appears as a non-query surface. Fi
 success is **not** a live performance claim. Live completion additionally requires one
 fresh Qwen3.8 execution whose scrubbed receipt names `fak-native`, the `inkernel` runtime,
 an explicit native forward path, and zero fallback.
+
+Issue #9898 establishes the local Apple Silicon Qwen3.8 Metal observability proof bundle,
+providing an executable observer harness, Prometheus scraping checks, dashboard query
+validation, and a structured, zero-fallback execution receipt.
+
+## Local Qwen3.8 Metal observability pipeline
+
+The local observability pipeline enables operators on Apple Silicon hardware (such as an
+Apple M3 Pro with 36 GiB unified memory) to execute, scrape, query, and verify fak-native
+Qwen3.8 inference through Grafana without relying on remote or containerized dependencies:
+
+```
++--------------------------+      Prometheus Scrape      +--------------------------+
+|  fak serve               | -------------------------> |  Prometheus 3.2.1        |
+|  --engine inkernel       |        (:18085/metrics     |  (127.0.0.1:9091)        |
+|  --qwen38-runtime native |         or :8080/metrics)  +--------------------------+
+|  --metal                 |                                      |
+|  --model qwen38:27b      |                                      | Datasource Query
++--------------------------+                                      v
+             |                                          +--------------------------+
+             | Chat /v1/chat/completions                |  Grafana 12.4.2          |
+             v                                          |  (127.0.0.1:3000)        |
++--------------------------+                            |  4 Native Dashboards     |
+| scripts/local-qwen38-    |                            +--------------------------+
+| metal-observe.sh         |                                      |
++--------------------------+                                      | Query Validation
+             |                                                    v
+             +--------------------------------------> [ Public Structured Receipt ]
+                                                      local-qwen38-metal-live-proof.json
+```
+
+### Pipeline components
+
+1. **In-Kernel Model Execution (`fak serve`)**:
+   - Invoked with `--engine inkernel --qwen38-runtime native --metal --model qwen38:27b`.
+   - Uses streamed Q4_K quantization (`FAK_METAL_STREAM_Q4K=1 FAK_Q4K_FREE_CPU=1 FAK_Q4K=1`) to fit within the 36 GiB unified memory envelope while releasing retained CPU backing memory.
+   - Enforces fail-closed execution: any silent fallback to `llama.cpp` or CPU emulation immediately fails.
+
+2. **Metrics Exposition and Prometheus Scraping**:
+   - `fak serve` exposes native telemetry via `/metrics`.
+   - Prometheus (either Homebrew-native at `127.0.0.1:9091` or containerized via `tools/grafana/up.sh`) scrapes the target endpoint.
+   - Scrape health is verified via `/api/v1/targets` and direct endpoint polling.
+
+3. **Dashboard Query Evaluation and Validation**:
+   - Queries corresponding to all four native-performance dashboards are evaluated against the scraped metrics or Prometheus API.
+   - Sentinel values and anti-coercion checks ensure missing metrics are never silently coerced to zero.
+
+4. **Public Scrubbed Receipt Generation**:
+   - Produces a machine-readable JSON witness (`tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json`) conforming to `fak-native-qwen38-metal-observation/v1`.
+   - Scrubbed of all private hostnames, paths, credentials, and raw logs.
+
+## Grafana dashboards breakdown
+
+The observability stack provisions four dedicated native-performance dashboards under `tools/grafana/dashboards/`:
+
+### 1. `fak-native-kernel-performance` (UID: `fak-native-kernel-performance`)
+Tracks in-kernel latency breakdown, throughput, and hardware efficiency.
+- **Request Counter**: `count(fak_native_receipt_requests_total{engine="inkernel",backend=~"$backend",forward_path=~"$forward_path"}) or vector(-1)`
+- **Request Rate**: `sum(rate(fak_native_receipt_requests_total{engine="inkernel",backend=~"$backend",forward_path=~"$forward_path"}[$__rate_interval])) or vector(-1)`
+- **Latency by Phase**: Computes average seconds per request spent in `queue`, `prefill`, `decode`, and `kernel` phases using `fak_native_receipt_phase_seconds_total`.
+- **KV & Transfer Byte Rates**: Tracks memory bandwidth consumption via `fak_native_receipt_bytes_total`.
+- **Evidence Freshness**: Monitored via `fak_native_receipt_latest_age_seconds` and `fak_native_receipt_latest_stale`.
+
+### 2. `fak-native-backends` (UID: `fak-native-backends`)
+Displays backend-specific operational parameters and device isolation.
+- **Backend Identity**: `fak_native_runtime_info{engine="inkernel",backend="metal",model="qwen3.8",planner="inkernel",owner="fak"}`.
+- **Backend Request Rate**: `sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine="inkernel",backend=~"$backend"}[5m]))`.
+- **Device Utilization & Pressure**: Tracks memory pressure, backend execution delays, and hardware sync events.
+- **Fallback Exclusion**: Verifies `rate(fak_native_receipt_unsupported_total[5m]) == 0`.
+
+### 3. `fak-native-artifacts` (UID: `fak-native-artifacts`)
+Catalogs durable artifacts produced by native runs.
+- **Artifact Indexing**: Tracks `benchmark_receipt`, `metal_profile_bundle`, `kernel_trace`, and `comparison_report` states via `fak_native_artifact_info`.
+- **Correlation Key Mapping**: Binds artifacts to the immutable run identifier (`npc1_<hex32>`).
+- **Artifact Freshness**: Validates `fak_native_receipt_latest_stale == 0`.
+
+### 4. `fak-native-slo` (UID: `fak-native-slo`)
+Tracks 10 formal SLO objectives across time-to-first-token (TTFT), inter-token latency (TPOT), throughput, queue delay, cache efficiency, transfer share, kernel share, memory pressure, evidence freshness, and receipt coverage.
+- **SLO State**: Evaluates regression or missing evidence via `fak_native_slo_state{engine="fak-native",backend=~"$backend"}`.
+- **Objective Values**: Evaluates normalized ratios via `fak_native_slo_value`.
+- **Violation Monitoring**: Alerts on `fak_native_slo_violation == 1`.
+
+## Prometheus metrics contract
+
+The `/metrics` endpoint exposes the following metric families for native execution:
+
+| Metric Name | Type | Key Labels | Purpose |
+|---|---|---|---|
+| `fak_native_runtime_info` | Gauge | `engine`, `backend`, `forward_path`, `model`, `planner`, `owner` | Proves the exact runtime identity (`engine="inkernel"`, `backend="metal"`, `model="qwen3.8"`). Value is always `1`. |
+| `fak_native_receipt_requests_total` | Counter | `engine`, `backend`, `forward_path` | Total count of completed, verified native execution receipts. |
+| `fak_native_receipt_phase_seconds_total` | Counter | `engine`, `backend`, `forward_path`, `phase` | Cumulative seconds spent in `queue`, `prefill`, `decode`, and `kernel`. |
+| `fak_native_phase_seconds_total` | Counter | `engine`, `backend`, `forward_path`, `phase`, `kind` | Wall, active, and wait durations per phase. |
+| `fak_native_receipt_bytes_total` | Counter | `engine`, `backend`, `forward_path`, `kind` | Cumulative bytes transferred for `kv` cache and device `transfer`. |
+| `fak_native_receipt_signal_supported` | Gauge | `signal` | Indicates authoritative signal support (`queue`, `kernel`, `transfer`). |
+| `fak_native_receipt_latest_age_seconds` | Gauge | None | Seconds elapsed since the most recent native execution observation. |
+| `fak_native_receipt_latest_stale` | Gauge | None | `0` when the latest observation is fresh (within 900s), `1` when stale or absent. |
+| `fak_native_receipt_unsupported_total` | Counter | None | Incremented when an execution fails or uses an unsupported path. |
+
+### Anti-coercion rule
+To preserve evidentiary integrity, PromQL panel targets in the native dashboards must **never** coerce missing metrics to zero using `or vector(0)` or similar constructs. An unexecuted model or broken scrape must render an empty series or trigger explicit unavailable sentinels (`or vector(-1)`), ensuring that absence of evidence is never displayed as green zero-latency or zero-error performance.
+
+## Execution receipt contract
+
+Scrubbed live receipts follow schema `fak-native-qwen38-metal-observation/v1` and are stored at `tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json`. Every receipt must satisfy:
+
+1. **Runtime & Engine Identity**:
+   - `engine`: `"inkernel"` / `"fak-native"`
+   - `model`: `"qwen38:27b"` (family `Qwen3.8`)
+   - `runtime`: `"native"`
+   - `qwen38_runtime`: `"native"`
+   - `backend`: `"metal"`
+   - `device`: Non-empty sanitized string (e.g., `"Apple M3 Pro"`)
+   - `required_execution` and `observed_execution` blocks must both specify `engine: "fak-native"`, `runtime_engine: "inkernel"`, `planner: "inkernel"`, `model_owner: "fak"`.
+
+2. **Zero Fallback Invariant**:
+   - `fallback_count`: `0`
+   - `fallback_active`: `false`
+   - `llama_cpp_used`: `false`
+   - All nested execution blocks must enforce the same zero-fallback constants.
+
+3. **Observed Completion**:
+   - `live_execution_obtained`: `true`
+   - `observed_execution.completed`: `true`
+   - `observed_execution.output_tokens`: `> 0`
+   - `run_id`: Format `npc1_<32-hex-characters>` matched by `observed_execution.correlation_key`.
+   - `native_receipt.forward_path`: Prefix `metal/`
+   - `native_receipt.q4k`: `true`
+   - `native_receipt.sha256`: 64-character lowercase SHA-256 hash of response.
+
+4. **Live Dashboard Query Validation**:
+   - `dashboard_queries.status`: `"valid"`
+   - `dashboard_queries.queries_passed`: `> 0`
+   - `dashboard_queries.failed_queries`: `0`
+   - `dashboard_queries.zero_coerced`: `false`
+
+5. **Privacy & Freshness**:
+   - `raw_logs_committed`: `false`
+   - `private_identifiers_committed`: `false`
+   - `completed_at_utc`: ISO 8601 / RFC 3339 UTC timestamp.
+   - Must be within `MAX_AGE_SECONDS` (900 seconds / 15 minutes) of validation time.
+
+## Verification runbook
+
+### 1. Run regression tests
+Validate that the observer script and receipt reject invalid engines, backends, runtimes, fallbacks, stale timestamps, and failed dashboard queries:
+
+```bash
+bash scripts/local-qwen38-metal-observe_test.sh
+```
+
+### 2. Validate receipt file
+Validate an existing receipt against the contract schema:
+
+```bash
+bash scripts/local-qwen38-metal-observe.sh --validate tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json --now <RFC3339_TIMESTAMP>
+```
+
+### 3. Validate live dashboard queries
+Verify that a Prometheus metrics exposition or receipt satisfies dashboard query requirements:
+
+```bash
+bash scripts/local-qwen38-metal-observe.sh --validate-dashboard-queries tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json
+```
+
+### 4. Execute a local observation run
+On Apple Silicon hardware with the cached `qwen38:27b` artifact, execute a live observation pass:
+
+```bash
+bash scripts/local-qwen38-metal-observe.sh --output tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json
+```
+
+---
 
 ## Reproduce the matrix
 
