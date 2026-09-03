@@ -19,81 +19,81 @@
       "id": "assumption_effect_safety",
       "name": "Assumption effect safety",
       "area": "assumption",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1920 glossary parity fixture",
-      "detail": "No product scorecard fixture yet proves low-confidence or stale assumptions block effectful actions through AssumptionReport.EffectSafe.",
-      "next_action": "add an assumption fixture with use/query/refresh counts and an effect-safe witness before calling this SLO green"
+      "source": "internal/ctxplan/assumption_test.go TestAssessAssumptionsScoresSourceClasses",
+      "detail": "Low-confidence and stale assumptions fail closed through AssumptionReport.EffectSafe with sorted action counts.",
+      "next_action": "preserve assumption effect safety and non-bypassable confidence gates"
     },
     {
       "id": "context_visibility",
       "name": "Context visibility",
       "area": "visibility",
-      "status": "fail",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No managed-context scorecard pane yet shows known, unknown, and assumed context buckets with source refs.",
-      "next_action": "add the report fixture and mark this SLO pass only when the rendered buckets are witnessed"
+      "source": "internal/contextq/context_render_test.go TestRenderKnownUnknownAssumedContext",
+      "detail": "Context evidence splits into known materialized rows with source/view digests, unknown refusals/omissions, and assumed contexts.",
+      "next_action": "preserve operator-visible context split and unpromoted unknown handles"
     },
     {
       "id": "pinned_objective_reconciliation",
       "name": "Pinned-objective reconciliation",
       "area": "objective",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1920 glossary parity fixture",
-      "detail": "No product scorecard fixture yet proves a pinned objective reconciles as preserved/established or surfaces drift.",
-      "next_action": "add an objective-pin fixture with a ReconcileObjective outcome before calling this SLO green"
+      "source": "internal/ctxplan/objective_test.go TestObjectivePinSurvivesReset",
+      "detail": "Pinned objectives survive resets as ObjectivePreserved with identical digests, and detect drift, drops, and corruption.",
+      "next_action": "preserve deterministic objective reconciliation and drift refusal"
     },
     {
       "id": "deterministic_resets",
       "name": "Deterministic resets",
       "area": "reset",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No product scorecard fixture yet proves hidden resets preserve deterministic continuity over a long run.",
-      "next_action": "add a reset fixture with before/after session state and continuation evidence"
+      "source": "internal/sessionreset/transaction_test.go TestResetSeedAndTransactionIdempotentAcrossReplays",
+      "detail": "Reset seed and transaction generation is idempotent and replayable, recording seed digests, contributors, and omitted spans.",
+      "next_action": "preserve reset idempotence and replayable transaction auditing"
     },
     {
       "id": "budget_compliance",
       "name": "Budget compliance",
       "area": "budget",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No product scorecard fixture yet proves context/token/time budgets are enforced across reset boundaries.",
-      "next_action": "add a budget exhaustion fixture that proves the drain/reset decision and remaining-budget accounting"
+      "source": "internal/session/timebudget_test.go TestTimeBudgetElapsedSurvivesRestart",
+      "detail": "Token and wall-clock budgets enforce limits across restarts and resets, with rearm tracking and drain reasons.",
+      "next_action": "preserve orthogonal budget envelope accounting across resets"
     },
     {
       "id": "query_correctness",
       "name": "Query correctness",
       "area": "query",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No product scorecard fixture yet proves missing context becomes a typed query with a recorded answer.",
-      "next_action": "add a context-query fixture with known, unknown, assumed, and answered states"
+      "source": "internal/ctxplan/query_test.go TestPlanQueryMatchesDirectPlanCells",
+      "detail": "Model-authored PlanQuery matches host PlanCells identically, enforcing budget bounds and faithful elision.",
+      "next_action": "preserve zero-divergence plan query lowering and adaptive defaults"
     },
     {
       "id": "cache_preservation",
       "name": "Cache preservation",
       "area": "cache",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No product scorecard fixture yet proves managed context preserves the cacheable prefix across turns and resets.",
-      "next_action": "add a prefix-stability fixture with the first divergent span or a prefix-stable witness"
+      "source": "internal/sessionreset/warm_prefix_replay_test.go TestWarmPrefixDescriptorWitnessesByteIdenticalReplay",
+      "detail": "Warm-prefix descriptors verify byte-identical replayed prefixes across resets and reject diverged or truncated prefixes.",
+      "next_action": "preserve warm-prefix descriptor verification and divergence rejection"
     },
     {
       "id": "memory_promotion_safety",
       "name": "Memory-promotion safety",
       "area": "memory",
-      "status": "unknown",
+      "status": "pass",
       "hard": true,
-      "source": "issue #1624 seed fixture",
-      "detail": "No product scorecard fixture yet proves raw observations cannot silently become durable standing assumptions.",
-      "next_action": "add a promotion-safety fixture that distinguishes witnessed facts from raw observations"
+      "source": "internal/memq/promotion_test.go TestMemoryPromotionAuditRecord",
+      "detail": "Ephemeral observations never mint promotion records, while durable and bounded facts require explicit or inferred consent.",
+      "next_action": "preserve fail-closed memory promotion gating and audit records"
     }
   ]
 }
