@@ -41,3 +41,23 @@ func TestGymDeterministicFailureCannotBeOverridden(t *testing.T) {
 		t.Fatalf("judge overrode deterministic FAIL with %s", got)
 	}
 }
+
+func TestGymCorpusV2Promote(t *testing.T) {
+	c, raw, err := LoadGym("testdata/gym-corpus.v2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.PairedCases) != 32 {
+		t.Fatalf("expected 32 paired cases, got %d", len(c.PairedCases))
+	}
+	if c.Provenance != "anonymized production empirical traces" {
+		t.Fatalf("unexpected provenance: %s", c.Provenance)
+	}
+	r := EvaluateGym(c, raw)
+	if r.Promotion.Verdict != "PROMOTE" {
+		t.Fatalf("expected verdict PROMOTE, got %s (reasons: %v)", r.Promotion.Verdict, r.Promotion.Reasons)
+	}
+	if len(r.Promotion.Reasons) != 0 {
+		t.Fatalf("expected 0 reasons, got %v", r.Promotion.Reasons)
+	}
+}
