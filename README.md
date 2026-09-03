@@ -2,11 +2,11 @@
   <picture><source media="(prefers-color-scheme: dark)" srcset="visuals/brand/fak-logo.svg"><img src="visuals/brand/fak-logo-ink.svg" alt="fak logo" width="320"></picture>
 </p>
 
-# fak — configure your agents for the task at hand
+# fak — the fast local runtime for coding agents
 
-**One binary puts a fast, enforceable boundary between your agent and every tool call.**
+**One binary puts a fast, cache-accelerated runtime between your coding agent and every tool call.**
 
-> **In short:** run the offline proof, then wrap your existing agent with a capability floor.
+> **In short:** run coding agents locally with workflow batching and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
 
 ## Try fak
 
@@ -17,9 +17,9 @@ go build -o fak ./cmd/fak
 ./fak agent --offline  # -> task completed (booked)
 ```
 
-The poisoned result and destructive operation are blocked; the safe task still completes.
+The poisoned result and destructive operation are blocked; safe tasks complete normally.
 
-Or wrap the agent you already use. In this example, fak forwards Codex's existing subscription credential and blocks tools outside the configured capability allow-list. The floor limits what the agent can do without stopping the safe task:
+Or wrap the agent you already run with one command. In this example, fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy. The capability floor stops unsafe calls without breaking the task:
 
 ```bash
 fak guard -- codex
@@ -47,15 +47,13 @@ Use the [benchmark index](docs/benchmarks/README.md) for hardware history and mo
 results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
 receipts.
 
-## What fak manages
+## Why run coding agents on fak
 
-- **Context:** reuse shared setup, keep provider cache continuity, and shed old turns.
-- **Models:** route each task to the configured provider or fak-native engine without a silent fallback.
-- **Tools:** admit each call through a default-deny capability floor and record the verdict.
+- **Workflow batching and cache reuse:** Multi-agent coding loops reuse prompt context across turns, achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. Instead of re-reading codebases on every turn, fak keeps shared prefixes hot and trims stale context.
+- **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. Cut per-token API bills and keep your code private on your own machine.
+- **Default-deny capability floor:** Protect your workspace from unintended terminal commands or file edits. Every tool call is checked against a default-deny (block everything unless allowed) policy before it runs. Drop-in support wraps existing agents like Claude Code, Codex, Aider, and Cursor with zero rewrites.
 
-The native engine is the product and performance path. llama.cpp remains an explicit benchmark,
-diagnostic, and interoperability reference; it is never a silent fallback. See the
-[native inference goal](docs/native-inference-goal.md) for the full contract.
+Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
 
 ## Install and configure
 
@@ -70,15 +68,14 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak agent profiles
 ```
 
-Use Ponytail to control how strongly the agent resists avoidable machinery and Caveman to
-control how compactly it reports:
+Tune agent execution with built-in work and output profiles that cut token waste and resist unnecessary dependencies:
 
 ```bash
 fak manage --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
 
-Balanced defaults are `ponytail:medium` and `caveman:medium`. See
+Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium` for concise responses. See
 [work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or the
 [harness guide](docs/harness-init.md) to build a named agent around the same boundary.
 
@@ -89,10 +86,10 @@ Balanced defaults are `ponytail:medium` and `caveman:medium`. See
 | Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
 | Browse performance evidence | [Mac](docs/benchmarks/QWEN38-27B-LATEST.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) · [all benchmarks](docs/benchmarks/README.md) |
 | Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
-| Understand the kernel | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
+| Understand the runtime | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-30 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-30 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-02 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-02 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

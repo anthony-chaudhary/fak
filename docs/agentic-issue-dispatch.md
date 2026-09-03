@@ -70,6 +70,19 @@ another worker's output. Hold an issue for triage instead of dispatch when the e
 paths are unknown, the lane is private/exclusive, the acceptance witness is unclear, or
 the issue is a sequenced epic rather than a leaf.
 
+### Model capability and scope bounds
+
+Match issue scope to worker model capability. When assigning work to smaller or
+resource-constrained models (such as 7B/14B local models, fast/flash models, or worker agents):
+
+- Restrict tickets strictly to S0/S1 leaves: single concern, 1–3 files in a single
+  package, and exactly one unambiguous witness command.
+- Mandate sequential subdivision: require multi-part tasks to split into reproduction,
+  minimal implementation, and verification phases.
+- Require fail-to-abstain: workers must explicitly emit an `ABSTAIN` verdict when
+  confronting high-difficulty aspects (concurrency invariants, frozen ABI changes,
+  low-level kernels, security policies) rather than guessing or emitting unverified diffs.
+
 ### Required worker body sections
 
 A worker-ready issue body must carry enough structure for a headless worker to act

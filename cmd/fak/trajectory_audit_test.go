@@ -62,6 +62,46 @@ func TestRunTrajectoryAuditPinnedCrossHarness(t *testing.T) {
 	}
 }
 
+func TestRunTrajectoryAuditRendersCodexCacheAttribution(t *testing.T) {
+	temp := t.TempDir()
+	jsonlPath := filepath.Join(temp, "audit.jsonl")
+	markdownPath := filepath.Join(temp, "audit.md")
+	claudeRoot := filepath.Join(temp, "missing-claude")
+	codexRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "codex", "sessions")
+	var stdout, stderr bytes.Buffer
+	rc := runTrajectory(&stdout, &stderr, []string{
+		"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot,
+		"--jsonl", jsonlPath, "--md", markdownPath,
+	})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	jsonl := mustReadTrajectoryAuditFile(t, jsonlPath)
+	markdown := mustReadTrajectoryAuditFile(t, markdownPath)
+	for _, want := range []string{
+		`"model_provider":"openai"`,
+		`"last_token_usage_cached_input_samples":2`,
+		`"last_token_usage_cached_input_min":40`,
+		`"last_token_usage_cached_input_max":40`,
+		`"physical_provider_cache_residency":"not_inferable_from_cached_input_tokens"`,
+		`"fak_owned_cache_coverage":"not_observed_by_codex_token_count"`,
+	} {
+		if !bytes.Contains(jsonl, []byte(want)) {
+			t.Fatalf("JSONL missing %q:\n%s", want, jsonl)
+		}
+	}
+	for _, want := range []string{
+		"## Codex per-request cache observations",
+		"| `codex-session` | `codex` | `openai` | 2 | 40 | 40 |",
+		"does not prove physical provider cache residency or process-local ownership",
+		"fak-owned caches are not observed by Codex `token_count` rows",
+	} {
+		if !bytes.Contains(markdown, []byte(want)) {
+			t.Fatalf("markdown missing %q:\n%s", want, markdown)
+		}
+	}
+}
+
 func TestRunTrajectoryAuditUnsupportedShapeWritesArtifactAndFails(t *testing.T) {
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")

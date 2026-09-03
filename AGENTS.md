@@ -42,6 +42,24 @@ Use FAK's managed launch, lane, lease, detached-worktree, landing, and witness s
 worker self-reports are not evidence, and delegation does not relax ownership of the
 final result.
 
+## Scope discipline for smaller models: subdivide or abstain
+
+Smaller or resource-constrained models (such as local 7B/14B checkpoints, fast/flash models,
+or bounded worker subagents) achieve reliability by keeping work tightly focused and strictly verified.
+When operating as or delegating to smaller models, enforce two scoping safeguards:
+
+1. **Subdivide into atomic units (S0/S1 leaves)**:
+   - Restrict each task or dispatch packet to a single observable deliverable and exactly one witness command.
+   - Limit the active write surface to 1–3 closely related files within a single package or lane.
+   - Decompose multi-step tasks into sequential, verified phases: write the reproduction test first, commit the minimal implementation, and verify the targeted package.
+   - Complete and witness one step before advancing to the next; keep edits focused rather than attempting broad multi-subsystem sweeps in one turn.
+
+2. **Abstain from high-difficulty aspects (fail-to-abstain)**:
+   - Identify task aspects that demand deep architectural context or high-risk reasoning: concurrency invariants and lock ordering, frozen ABI modifications (`internal/abi`), low-level SIMD/CUDA kernel mechanics, cross-subsystem protocol migrations, and security policy gates.
+   - When an aspect exceeds confident reasoning or reliable verification, abstain explicitly rather than guessing or generating speculative diffs.
+   - Emit a structured `ABSTAIN` verdict with a typed refusal token or clear rationale that names the exact boundary reached.
+   - Land or report the solvable, verified sub-component (such as a reproduction test case or diagnostic data) and cleanly escalate the difficult aspect to a higher-capability model or human operator.
+
 ## Native inference performance invariant
 
 For any native-inference or performance task, keep model execution **fak-native all the
@@ -230,6 +248,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 ## Hard rules (enforced below the agent layer)
 
 - **Ship green work by default.** Run the scope-correct gate above, then commit and push without waiting for a prompt. Stay on `main`; never force-push, create a feature branch, use `--autostash`, or escape a dirty/diverged tree into a worktree. Merge `origin/main` in place. If a peer owns `MERGE_HEAD`, unstage your paths and wait; do not finish or abort their merge.
+- **Match scope to capability.** Constrain smaller models and workers to atomic S0/S1 leaf units with single-concern boundaries and one witness. When encountering high-difficulty aspects (concurrency, frozen ABI, complex kernel algorithms), fail-to-abstain with a structured ABSTAIN record rather than guessing or emitting speculative changes.
 - **Commit exactly one issue through explicit paths.** Prefer `fak commit --preview`, then `fak commit --path <p> ... -m "<subject>"`; use `fak sweep` for one coherent lane. The fallback is `git commit -s -m "<subject>" -- <paths>`, never `git add -A`. One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues.
 - **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.
 - **Preserve shared-tree buildability.** A tracked or untracked `.go` sibling enters every package build. Fence incomplete cross-file WIP with `//go:build wip_<feature>` until its symbols exist; validate only your explicit paths with `fak validate --mine`. Build verification never writes an in-tree binary.
