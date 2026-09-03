@@ -60,13 +60,14 @@ func main() {
     fmt.Println(string(out))
 }`
 	dir := writeExternalModule(t, root, program)
-	got := strings.TrimSpace(runGo(t, dir, true, "run", "."))
+	got := strings.ReplaceAll(strings.TrimSpace(runGo(t, dir, true, "run", ".")), "\r\n", "\n")
 	witnessPath := filepath.Join(root, "docs", "_witnesses", "issue-6805-harnesskit-upgrade.json")
 	want, err := os.ReadFile(witnessPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != strings.TrimSpace(string(want)) {
+	wantNorm := strings.ReplaceAll(strings.TrimSpace(string(want)), "\r\n", "\n")
+	if got != wantNorm {
 		t.Fatalf("clean-module upgrade witness drifted\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 	var decoded struct {
