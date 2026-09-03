@@ -1,0 +1,4 @@
+{"timestamp":"2026-09-01T07:30:00.000Z","type":"session_meta","payload":{"id":"reconcile-0004","model_provider":"openai","cli_version":"0.142.2","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-09-01T07:30:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"F","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:31:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"G","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:31:30.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"G","last_agent_message":null,"duration_ms":30000}}

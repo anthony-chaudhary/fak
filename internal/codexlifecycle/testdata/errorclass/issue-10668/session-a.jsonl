@@ -1,0 +1,9 @@
+{"timestamp":"2026-09-01T08:00:00.000Z","type":"session_meta","payload":{"id":"errorclass-1001","model_provider":"fak","cli_version":"0.144.4","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-09-01T08:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"P","model_context_window":258400}}
+{"timestamp":"2026-09-01T08:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":5000}}}}
+{"timestamp":"2026-09-01T08:00:03.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"P"}}
+{"timestamp":"2026-09-01T08:00:04.000Z","type":"event_msg","payload":{"type":"thread_settings_applied"}}
+{"timestamp":"2026-09-01T08:00:05.000Z","type":"event_msg","payload":{"type":"thread_goal_updated"}}
+{"timestamp":"2026-09-01T08:01:00.000Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"P","reason":"interrupted","duration_ms":59000}}
+{"timestamp":"2026-09-01T08:02:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"R","model_context_window":258400}}
+{"timestamp":"2026-09-01T08:02:30.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"R","last_agent_message":"done; first attempt hit HTTP 429 before succeeding","duration_ms":30000}}

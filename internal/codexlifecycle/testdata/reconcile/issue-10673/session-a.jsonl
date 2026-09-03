@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-01T07:00:00.000Z","type":"session_meta","payload":{"id":"reconcile-0001","model_provider":"fak","cli_version":"0.144.4","cwd":"C:\\work\\fak"}}
+{"timestamp":"2026-09-01T07:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"A","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:01:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"B","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:01:30.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"B","last_agent_message":null,"duration_ms":30000}}
+{"timestamp":"2026-09-01T07:02:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"C","model_context_window":258400}}
+{"timestamp":"2026-09-01T07:02:30.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"C"}}
