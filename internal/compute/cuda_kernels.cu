@@ -1501,6 +1501,42 @@ extern "C" void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, i
   k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
 }
 
+// ---- Fused RMSNorm + Residual Add ----------------------------------------------
+__global__ void k_rmsnorm_fused_residual_add(
+    const float *X, const float *ResidualIn, const float *W,
+    float *ResidualOut, float *Y, int rows, int n, float eps) {
+  int r = blockIdx.x;
+  if (r >= rows) return;
+  const float *x = X + (size_t)r * n;
+  const float *rin = ResidualIn + (size_t)r * n;
+  float *rout = ResidualOut ? (ResidualOut + (size_t)r * n) : nullptr;
+  float *y = Y + (size_t)r * n;
+  __shared__ float red[256];
+  float local = 0.f;
+  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    float val = x[i] + rin[i];
+    if (rout) rout[i] = val;
+    local += val * val;
+  }
+  red[threadIdx.x] = local;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    __syncthreads();
+  }
+  float inv = rsqrtf(red[0] / (float)n + eps);
+  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    float val = rout ? rout[i] : (x[i] + rin[i]);
+    y[i] = val * inv * W[i];
+  }
+}
+extern "C" void fcuda_rmsnorm_fused_residual_add_f32(
+    const float *dX, const float *dResidualIn, const float *dW,
+    float *dResidualOut, float *dY, int rows, int n, float eps) {
+  k_rmsnorm_fused_residual_add<<<rows, 256, 0, g_stream>>>(
+      dX, dResidualIn, dW, dResidualOut, dY, rows, n, eps);
+}
+
 // ---- RoPE (HF non-interleaved rotate_half) at one absolute position -------------
 __global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta) {
   int half = headDim / 2;

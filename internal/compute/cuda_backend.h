@@ -196,6 +196,10 @@ void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int o
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
+/* fused RMSNorm + residual add: residual_out = x + residual_in; y = rmsnorm(residual_out, w, eps).
+ * Supports in-place aliasing (residual_out == dResidualIn or dX). */
+void fcuda_rmsnorm_fused_residual_add_f32(const float *dX, const float *dResidualIn, const float *dW,
+                                         float *dResidualOut, float *dY, int rows, int n, float eps);
 
 /* RoPE (HF non-interleaved rotate_half) on x[nHeads*headDim] at absolute position pos. */
 void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta);
