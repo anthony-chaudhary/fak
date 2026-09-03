@@ -49,5 +49,23 @@
       },
       "required_danger_classes": ["posix_shell", "windows_shell"]
     }
+  ],
+  "host_tools": [
+    {
+      "name": "write_stdin",
+      "classification": "host_plumbing"
+    },
+    {
+      "name": "functions.write_stdin",
+      "classification": "host_plumbing"
+    },
+    {
+      "name": "update_plan",
+      "classification": "host_plumbing"
+    },
+    {
+      "name": "functions.update_plan",
+      "classification": "host_plumbing"
+    }
   ]
 }

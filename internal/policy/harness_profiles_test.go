@@ -357,3 +357,51 @@ func TestShellDangerRulesForAliasArgumentOverride(t *testing.T) {
 		})
 	}
 }
+
+func TestHarnessToolSchemaDriftMutationCoverage(t *testing.T) {
+	floorBytes := realFloor(t)
+	var floor struct {
+		Allow []string `json:"allow"`
+	}
+	if err := json.Unmarshal(floorBytes, &floor); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, omittedTool := range []string{"write_stdin", "functions.write_stdin", "update_plan", "exec_command"} {
+		t.Run("omit_"+omittedTool, func(t *testing.T) {
+			var filtered []string
+			for _, a := range floor.Allow {
+				if a != omittedTool {
+					filtered = append(filtered, a)
+				}
+			}
+			mutated, err := json.Marshal(map[string]any{"allow": filtered})
+			if err != nil {
+				t.Fatal(err)
+			}
+			problems := LintHarnessProfiles(mutated)
+			if !problemsContain(problems, omittedTool) {
+				t.Fatalf("omitting tool %q was not caught: %v", omittedTool, problems)
+			}
+		})
+	}
+
+	t.Run("unclassified_tool_requires_review", func(t *testing.T) {
+		var schema capturedToolSchemaDoc
+		if err := json.Unmarshal(codexToolSchemaJSON, &schema); err != nil {
+			t.Fatal(err)
+		}
+		schema.HostTools = append(schema.HostTools, capturedHostTool{
+			Name:           "dangerous_remote_eval",
+			Classification: "unreviewed",
+		})
+		schemaJSON, err := json.Marshal(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		problems := lintHarnessProfilesInputs(floorBytes, harnessProfilesJSON, schemaJSON)
+		if !problemsContain(problems, "review required") || !problemsContain(problems, "dangerous_remote_eval") {
+			t.Fatalf("unclassified tool was not flagged for review: %v", problems)
+		}
+	})
+}
