@@ -11,7 +11,7 @@
       "affordances": [
         {"id": "contributor-contract", "kind": "path_exists", "target": "CONTRIBUTING.md", "need": "a contributor contract", "severity": "hard"},
         {"id": "extending-guide", "kind": "path_exists", "target": "EXTENDING.md", "need": "the build-on-fak guide (the Register* seams + the leaf path)", "severity": "hard"},
-        {"id": "leaf-scaffold", "kind": "path_exists", "target": "tools/new_leaf.py", "need": "a scaffolder that stamps a conforming leaf (add a leaf, don't edit core)", "severity": "hard"},
+        {"id": "leaf-scaffold", "kind": "path_exists", "target": "cmd/fak/newleaf.go", "need": "a scaffolder that stamps a conforming leaf (add a leaf, don't edit core)", "severity": "hard"},
         {"id": "green-gate", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["make ci"], "need": "a one-command green gate documented at the entry point (the feedback loop)", "severity": "hard"},
         {"id": "guardrails-trunk", "kind": "doc_mentions", "doc": "CONTRIBUTING.md", "tokens": ["OFF_TRUNK"], "match": "all", "need": "the enforced trunk-only rule surfaced by name in the contributor entry doc so a refused commit teaches (names the OFF_TRUNK refusal token; #8698 deduplicated the rule to this doc)", "severity": "hard"},
         {"id": "guardrails-write-guard", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["OUT_OF_TREE_WRITE"], "match": "all", "need": "the enforced out-of-tree write guard surfaced by name in the agent entry doc so an external write teaches (names the OUT_OF_TREE_WRITE refusal token)", "severity": "hard"},

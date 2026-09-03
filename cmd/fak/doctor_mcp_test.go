@@ -253,4 +253,3 @@ func TestDoctorMCPResolvesRelativeExecutableInCwd(t *testing.T) {
 		t.Fatalf("expected executable_resolution pass, got %q", got)
 	}
 }
-

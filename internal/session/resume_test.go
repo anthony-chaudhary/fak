@@ -273,4 +273,3 @@ func TestTableResumeAllWakesAllPausedSessions(t *testing.T) {
 		t.Fatalf("second ResumeAll returned %d sessions, want 0", len(second))
 	}
 }
-

@@ -1,0 +1,51 @@
+{
+  "schema": "fak.issue-9587-nativeadmission-receipt/1",
+  "issue": 9587,
+  "parent_issue": 9577,
+  "verdict": "PASS",
+  "engine": "fak-native",
+  "model": {
+    "artifact": "Qwen3.8-27B-Q4_K_M.gguf",
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "quant": "Q4_K_M",
+    "architecture": "qwen35-hybrid"
+  },
+  "host": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "total_physical_bytes": 38654705664,
+    "architecture": "darwin/arm64",
+    "topology": {
+      "kind": "Apple unified memory architecture (UMA)",
+      "description": "Unified physical pool shared between CPU and GPU; Metal buffers are zero-copy device-resident and not host-addressable duplicates",
+      "device_buffers_host_addressable": false
+    }
+  },
+  "admission": {
+    "policy": "dev",
+    "planned_startup_peak_bytes": 22754885632,
+    "planned_steady_bytes": 16536406016,
+    "allocatable_bytes": 10911449088,
+    "reserved_bytes": 22754885632,
+    "pressure": "normal",
+    "peak_rss_bytes": 22754885632,
+    "swap_used_bytes": 2540049531,
+    "swap_delta_bytes": 0,
+    "owner": {
+      "pid": 10193,
+      "cleanup_verified": true,
+      "exact_once_release": true
+    }
+  },
+  "test_witness": {
+    "command": "go test -v ./cmd/fak -run TestLoadLocalLauncherModelWithMetalLease",
+    "tests_passed": [
+      "TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe",
+      "TestLoadLocalLauncherModelWithMetalLeaseLeavesCPUAndEmptyModelUnserialized",
+      "TestLoadLocalLauncherModelWithMetalLeasePressurePolicy",
+      "TestLoadLocalLauncherModelWithMetalLeaseCoexistsForSmallModels",
+      "TestLoadLocalLauncherModelWithMetalLeaseRefusesOvercommitBeforeLoader",
+      "TestLoadLocalLauncherModelWithMetalLeaseLoadFailureReleasesReservation"
+    ]
+  }
+}

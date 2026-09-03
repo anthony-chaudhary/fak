@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/computetrace"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 func TestMetalMatMulTraceEventHostTiming(t *testing.T) {
@@ -78,8 +79,13 @@ func TestMetalMatMulRejectsEitherNonF32OperandBeforeDeviceUse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer func() {
 				got := recover()
-				message, ok := got.(string)
-				if !ok || !strings.Contains(message, tc.want) {
+				var message string
+				if err, ok := got.(error); ok {
+					message = err.Error()
+				} else if str, ok := got.(string); ok {
+					message = str
+				}
+				if !strings.Contains(message, tc.want) {
 					t.Fatalf("panic = %v, want text %q", got, tc.want)
 				}
 			}()
@@ -383,4 +389,207 @@ func TestMetalForwardMatchesRef(t *testing.T) {
 		checkPair("gen" + strconv.Itoa(step))
 	}
 	t.Logf("Metal forward parity: %d prompt + %d greedy steps, argmax-exact, final cosine=%.8f", len(prompt), nGen, cosine(lref, lmt))
+}
+
+func TestMetalTypedErrorsAndRecovery(t *testing.T) {
+	// 1. Pure Go verification of requireMetalMatMulF32 typed error.
+	t.Run("typed_unsupported_dtype", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on non-F32 MatMul input")
+			}
+			var dtypeErr *MetalInputDtypeError
+			if !errors.As(r.(error), &dtypeErr) {
+				t.Fatalf("expected *MetalInputDtypeError, got %T: %v", r, r)
+			}
+			if dtypeErr.Op != "MatMul" || dtypeErr.Weight != Q8_0 || dtypeErr.Input != F32 {
+				t.Fatalf("unexpected error payload: %+v", dtypeErr)
+			}
+			if !strings.Contains(dtypeErr.Error(), "compute: metal MatMul supports only F32 inputs") {
+				t.Fatalf("error string mismatch: %s", dtypeErr.Error())
+			}
+		}()
+		invalidW := Tensor{Shape: []int{4, 4}, Dtype: Q8_0}
+		validX := Tensor{Shape: []int{4}, Dtype: F32}
+		requireMetalMatMulF32("MatMul", invalidW, validX)
+	})
+
+	// 2. Hardware-gated execution on real Metal device.
+	t.Run("on_device_recovery", func(t *testing.T) {
+		mb := metalOrSkip(t)
+		ref := Default()
+
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("expected panic on non-F32 MatMul input")
+				}
+				var dtypeErr *MetalInputDtypeError
+				if !errors.As(r.(error), &dtypeErr) {
+					t.Fatalf("expected *MetalInputDtypeError, got %T: %v", r, r)
+				}
+			}()
+
+			invalidW := Tensor{Shape: []int{4, 4}, Dtype: Q8_0}
+			validX := mtlMkResident(mb, []int{4}, []float32{1, 2, 3, 4})
+			_ = mb.MatMul(invalidW, validX)
+		}()
+
+		w := []float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+		x := []float32{2, 3, 5, 7}
+		dw := mtlMkResident(mb, []int{4, 4}, w)
+		dx := mtlMkResident(mb, []int{4}, x)
+		got := mb.Read(mb.MatMul(dw, dx))
+		want := ref.Read(ref.MatMul(mtlMkResident(ref, []int{4, 4}, w), mtlMkResident(ref, []int{4}, x)))
+
+		if c := cosine(want, got); c < 0.9999 {
+			t.Fatalf("subsequent MatMul failed: cosine %.6f < 0.9999", c)
+		}
+	})
+}
+
+const metalQ2CosineMin = 0.999
+
+func mtlDominantRow(w []float32, out, in int) int {
+	best, bestNorm := 0, float32(-1)
+	for o := 0; o < out; o++ {
+		var n float32
+		for _, v := range w[o*in : o*in+in] {
+			n += v * v
+		}
+		if n > bestNorm {
+			bestNorm, best = n, o
+		}
+	}
+	return best
+}
+
+func mtlAlignActToRow(w []float32, out, in, target int) []float32 {
+	x := make([]float32, in)
+	copy(x, w[target*in:target*in+in])
+	return x
+}
+
+func mtlNonTarget(v []float32, out, target int) []float32 {
+	r := make([]float32, 0, out-1)
+	for o := 0; o < out; o++ {
+		if o != target {
+			r = append(r, v[o])
+		}
+	}
+	return r
+}
+
+func mtlMaxAbsDelta(a, b []float32) float64 {
+	var m float64
+	for i := range a {
+		if d := math.Abs(float64(a[i] - b[i])); d > m {
+			m = d
+		}
+	}
+	return m
+}
+
+// TestMetalQ2_0MatMulApproxMatchesRef verifies that packed-ternary Q2_0 decode GEMV (P=1)
+// runs on Apple Silicon Metal and matches the cpuref reference within the approx gate
+// (cosine >= 0.999 and argmax-exact).
+func TestMetalQ2_0MatMulApproxMatchesRef(t *testing.T) {
+	mb := metalOrSkip(t)
+	ref := Default() // cpu-ref
+	defer metalgemm.ResetQ2_0()
+	const out, in = 320, 256 // in divisible by 32 (q2Block)
+	packed, scale := randTernaryWeight(0x4872, out, in, q2Block)
+	dense := dequantQ2Weight(packed, scale, out, in, q2Block)
+	target := mtlDominantRow(dense, out, in)
+	x := mtlAlignActToRow(dense, out, in, target)
+
+	yRef := ref.Read(ref.MatMul(mtlMkResident(ref, []int{out, in}, dense), mtlMkResident(ref, []int{in}, x)))
+
+	hostQ2 := NewQ2(mb, []int{out, in}, packed, scale, q2Block)
+	wQ2 := mb.Upload(hostQ2, Q2_0)
+	if wQ2.Dtype != Q2_0 {
+		t.Fatalf("Upload(_, Q2_0) produced Dtype %s, want q2_0", wQ2.Dtype)
+	}
+
+	// Verify upload caching: same host buffer returns cached resident tensor.
+	wQ2Cached := mb.Upload(hostQ2, Q2_0)
+	if wQ2.buf != wQ2Cached.buf {
+		t.Fatalf("Q2_0 upload cache miss on identical host tensor")
+	}
+
+	yMt := mb.Read(mb.MatMul(wQ2, mtlMkResident(mb, []int{in}, x)))
+	if len(yRef) != out || len(yMt) != out {
+		t.Fatalf("shape ref=%d metal=%d want %d", len(yRef), len(yMt), out)
+	}
+
+	if a := argmaxF32(yRef); a != target {
+		t.Fatalf("reference argmax %d != constructed dominant channel %d", a, target)
+	}
+	aMt := mb.Argmax(mtlMkResident(mb, []int{out}, yMt))
+	if aMt != argmaxF32(yMt) || argmaxF32(yMt) != argmaxF32(yRef) {
+		t.Fatalf("Q2_0 argmax-exact failed: ref=%d metalHost=%d metalKernel=%d", argmaxF32(yRef), argmaxF32(yMt), aMt)
+	}
+	c := cosine(mtlNonTarget(yRef, out, target), mtlNonTarget(yMt, out, target))
+	if c < metalQ2CosineMin {
+		t.Fatalf("Q2_0 MatMul cosine %.6f < recorded Q2_0 gate %.6f (metalQ2CosineMin)", c, metalQ2CosineMin)
+	}
+	t.Logf("Metal Q2_0 MatMul: cosine=%.8f maxAbs=%.2e gate=%.4f argmax-exact (device=%s tier=%s class=%s)",
+		c, mtlMaxAbsDelta(yRef, yMt), metalQ2CosineMin, mb.Name(), mb.Tier(), mb.Class())
+
+	mb.Free(wQ2)
+}
+
+// TestMetalQ2_0BatchedMatMulApproxMatchesRef verifies that packed-ternary Q2_0 prefill GEMM (P>1)
+// runs on Apple Silicon Metal and matches the cpuref reference with cosine >= 0.999.
+func TestMetalQ2_0BatchedMatMulApproxMatchesRef(t *testing.T) {
+	mb := metalOrSkip(t)
+	ref := Default() // cpu-ref
+	defer metalgemm.ResetQ2_0()
+	const out, in, P = 320, 256, 8
+	packed, scale := randTernaryWeight(0x4872b, out, in, q2Block)
+	dense := dequantQ2Weight(packed, scale, out, in, q2Block)
+	var seed lcg = 0x4872c
+	X := mtlRscale(&seed, P*in, 1.0)
+
+	YRef := ref.Read(ref.BatchedMatMul(mtlMkResident(ref, []int{out, in}, dense), mtlMkResident(ref, []int{P, in}, X), P))
+	wQ2 := mb.Upload(NewQ2(mb, []int{out, in}, packed, scale, q2Block), Q2_0)
+	YMt := mb.Read(mb.BatchedMatMul(wQ2, mtlMkResident(mb, []int{P, in}, X), P))
+	if len(YRef) != P*out || len(YMt) != P*out {
+		t.Fatalf("shape ref=%d metal=%d want %d", len(YRef), len(YMt), P*out)
+	}
+	c := cosine(YRef, YMt)
+	if c < metalQ2CosineMin {
+		t.Fatalf("Q2_0 BatchedMatMul cosine %.6f < recorded Q2_0 gate %.6f", c, metalQ2CosineMin)
+	}
+	t.Logf("Metal Q2_0 BatchedMatMul (P=%d): cosine=%.8f maxAbs=%.2e gate=%.4f", P, c, mtlMaxAbsDelta(YRef, YMt), metalQ2CosineMin)
+
+	mb.Free(wQ2)
+}
+
+// TestMetalQ2_0UploadCacheAndFree verifies upload caching and cache eviction on Free for Q2_0 weights.
+func TestMetalQ2_0UploadCacheAndFree(t *testing.T) {
+	mb := metalOrSkip(t)
+	defer metalgemm.ResetQ2_0()
+	const out, in = 64, 32
+	packed, scale := randTernaryWeight(0x1234, out, in, q2Block)
+	hostQ2 := NewQ2(mb, []int{out, in}, packed, scale, q2Block)
+
+	res1 := mb.Upload(hostQ2, Q2_0)
+	res2 := mb.Upload(hostQ2, Q2_0)
+	if res1.buf != res2.buf {
+		t.Fatalf("Q2_0 upload should return cached resident tensor on identical host buffer")
+	}
+
+	mb.Free(res1)
+	if b, ok := res1.buf.(*metalBuf); ok && b.q2w != nil {
+		t.Fatalf("Free did not clear resident q2w handle")
+	}
+
+	res3 := mb.Upload(hostQ2, Q2_0)
+	if res3.buf == res1.buf {
+		t.Fatalf("re-upload after Free should allocate fresh buffer, not reuse evicted cache")
+	}
+	mb.Free(res3)
 }

@@ -115,7 +115,7 @@ remain compatible (`brief_readiness.enforced=false`) until migrated; once a brie
 6. **Declare ownership and collisions.** Name the lane/tree before a worker starts. Scheduling may choose the worker; it must not invent scope.
 7. **Declare dependencies.** Use explicit `requires`/`unblocks` edges. Parallel-looking work with a hidden prerequisite is serial work described badly.
 8. **Write acceptance before implementation.** Checkboxes describe observable effects. Implementation notes may suggest a path but cannot redefine done.
-9. **Choose the witness.** Visual work needs a captured render; behavior needs a before/after repro; shipped claims need independent commit/effect verification.
+9. **Choose the witness.** Visual work needs a captured render; behavior needs a before/after repro; runtime/CLI/protocol work needs meaningful execution (dogfood or integration test run, not mock-only); shipped claims need independent commit/effect verification.
 10. **Type uncertainty.** File a decision or investigation leaf when an unknown blocks a contract. Do not bury the unknown in a worker prompt.
 11. **Place the work.** Apply class, priority, generation, milestone, and parent at creation or update time.
 12. **Dispatch only ready leaves.** A worker receives the issue contract plus current lease/attempt state, not an improvised prose brief.

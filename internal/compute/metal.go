@@ -77,20 +77,27 @@ func metalDeviceMemoryTotal() int64 {
 // metalBuf is a device-resident Buffer: an opaque id<MTLBuffer> handle + byte length.
 // Synchronous backend, so Ready() is always true (the async seam would flip this).
 type metalBuf struct {
-	ptr  unsafe.Pointer // id<MTLBuffer> handle (shared storage on unified memory)
-	n    int            // bytes
-	host uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	ptr    unsafe.Pointer        // id<MTLBuffer> handle (shared storage on unified memory)
+	n      int                   // bytes
+	host   uintptr               // source host pointer if this came from a cached Upload (0 otherwise)
+	hostDt Dtype                 // source host dtype for cache keying
+	q2w    *metalgemm.Q2_0Weight // resident Q2_0 weight handle if uploaded as Q2_0
 }
 
 // Ready reports the buffer is materialized — always true on this synchronous backend.
 func (b *metalBuf) Ready() bool { return true }
 
+type metalUploadKey struct {
+	hp uintptr
+	dt Dtype
+}
+
 // metalUploadCache shares one device copy per distinct host buffer across all sessions — a
 // model's weights are zero-copy views into one blob (the SAME pointer every call), so
-// without this each session would re-upload the whole model. Keyed by host pointer; Free
-// evicts (so per-token inputs, which have fresh pointers, don't accumulate). Mirrors the
+// without this each session would re-upload the whole model. Keyed by (host pointer, dtype);
+// Free evicts (so per-token inputs, which have fresh pointers, don't accumulate). Mirrors the
 // CUDA backend's uploadCache.
-var metalUploadCache = map[uintptr]Tensor{}
+var metalUploadCache = map[metalUploadKey]Tensor{}
 
 type metalBackend struct {
 	name string
@@ -205,6 +212,12 @@ func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site s
 	if !ok {
 		panic("compute: metal Upload expects host data")
 	}
+	if t.Dtype == Q2_0 {
+		if as != Q2_0 {
+			panic("compute: metal Upload supports Q2_0 resident upload only for as=Q2_0 (got " + as.String() + ")")
+		}
+		return c.uploadQ2Resident(t, hb)
+	}
 	if t.Dtype != F32 {
 		panic("compute: metal Upload supports only F32 today (got " + t.Dtype.String() + ")")
 	}
@@ -222,7 +235,8 @@ func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site s
 	var hp uintptr
 	if len(f) > 0 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
-		if cached, ok := metalUploadCache[hp]; ok {
+		key := metalUploadKey{hp: hp, dt: F32}
+		if cached, ok := metalUploadCache[key]; ok {
 			return cached // same host buffer already resident; share it
 		}
 	}
@@ -230,9 +244,66 @@ func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site s
 	if len(f) > 0 {
 		C.fmetal_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 		buf.host = hp
-		metalUploadCache[hp] = out
+		buf.hostDt = F32
+		metalUploadCache[metalUploadKey{hp: hp, dt: F32}] = out
 	}
 	return out
+}
+
+func (c *metalBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
+	if len(t.Shape) != 2 {
+		panic("compute: metal Upload(Q2_0 host) expects a 2-D [out,in] weight (got rank " + strconv.Itoa(len(t.Shape)) + ")")
+	}
+	if t.Quant == nil || t.Quant.Scale == nil {
+		panic("compute: metal Upload(Q2_0 host) requires QuantSpec.Scale (per-block f32 scales)")
+	}
+	out, in := t.Shape[0], t.Shape[1]
+	blk := t.Quant.Block
+	if blk <= 0 || in%blk != 0 {
+		panic("compute: metal Upload(Q2_0 host) needs in divisible by QuantSpec.Block (block=" + strconv.Itoa(blk) + ")")
+	}
+	if in%4 != 0 {
+		panic("compute: metal Upload(Q2_0 host) needs in divisible by 4 (2-bit codes, 4/byte)")
+	}
+	codes := hb.I8()
+	scales := t.Quant.Scale
+	nblk := in / blk
+	if len(codes) != 0 && len(codes) != out*in/4 {
+		panic("compute: metal Upload(Q2_0 host) code length " + strconv.Itoa(len(codes)) + " != out*in/4")
+	}
+	if len(scales) != out*nblk {
+		panic("compute: metal Upload(Q2_0 host) scale length " + strconv.Itoa(len(scales)) + " != out*(in/block)")
+	}
+	var hp uintptr
+	if len(codes) > 0 {
+		hp = uintptr(unsafe.Pointer(&codes[0]))
+		key := metalUploadKey{hp: hp, dt: Q2_0}
+		if cached, ok := metalUploadCache[key]; ok && cached.Numel() == t.Numel() {
+			return cached
+		}
+	}
+	var codesBytes []byte
+	if len(codes) > 0 {
+		codesBytes = make([]byte, len(codes))
+		for i, b := range codes {
+			codesBytes[i] = byte(b) + 0x55
+		}
+	}
+	q2w := metalgemm.UploadQ2_0(codesBytes, scales, out, in)
+	if q2w == nil {
+		panic(fmt.Sprintf("compute: metal UploadQ2_0 failed for shape [%d,%d]", out, in))
+	}
+	buf := &metalBuf{
+		n:      out * in / 4,
+		host:   hp,
+		hostDt: Q2_0,
+		q2w:    q2w,
+	}
+	res := makeTensor(c, Q2_0, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
+	if hp != 0 {
+		metalUploadCache[metalUploadKey{hp: hp, dt: Q2_0}] = res
+	}
+	return res
 }
 
 // Host returns a host-addressable f32 view only for a host-resident tensor; a
@@ -241,16 +312,23 @@ func (c *metalBackend) Host(t Tensor) ([]float32, bool) {
 	return hostF32(t)
 }
 
+func (c *metalBackend) readFloatsUnlocked(t Tensor) []float32 {
+	if hf, ok := c.Host(t); ok {
+		return hf
+	}
+	return readF32Tensor(t, func(buf Buffer, out []float32) {
+		db, ok := buf.(*metalBuf)
+		if ok && len(out) > 0 && db.ptr != nil {
+			C.fmetal_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		}
+	})
+}
+
 // Read is the host fence: device -> host f32.
 func (c *metalBackend) Read(t Tensor) []float32 {
 	metalMu.Lock()
 	defer metalMu.Unlock()
-	return readF32Tensor(t, func(buf Buffer, out []float32) {
-		db := buf.(*metalBuf)
-		if len(out) > 0 {
-			C.fmetal_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
-		}
-	})
+	return c.readFloatsUnlocked(t)
 }
 
 // Free releases the tensor's device buffer, evicting it from the upload cache so a
@@ -258,12 +336,18 @@ func (c *metalBackend) Read(t Tensor) []float32 {
 func (c *metalBackend) Free(t Tensor) {
 	metalMu.Lock()
 	defer metalMu.Unlock()
-	if db, ok := t.buf.(*metalBuf); ok && db.ptr != nil {
+	if db, ok := t.buf.(*metalBuf); ok {
 		if db.host != 0 {
-			delete(metalUploadCache, db.host) // evict so a re-upload of the same host buffer re-stages
+			delete(metalUploadCache, metalUploadKey{hp: db.host, dt: db.hostDt})
+			db.host = 0
 		}
-		C.fmetal_free(db.ptr)
-		db.ptr = nil
+		if db.ptr != nil {
+			C.fmetal_free(db.ptr)
+			db.ptr = nil
+		}
+		if db.q2w != nil {
+			db.q2w = nil
+		}
 	}
 }
 
@@ -408,30 +492,80 @@ func recordMetalMatMulTrace(started time.Time, receipt metalCommandReceipt, w, x
 	computetrace.Record(metalMatMulTraceEvent(started, receipt, w, x, y, out, in, p))
 }
 
+// MetalCommandError represents a typed runtime failure encountered during a Metal command execution.
+type MetalCommandError struct {
+	Op   string
+	Site string
+	Err  error
+}
+
+func (e *MetalCommandError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("compute: metal %s failed at %s: %v", e.Op, e.Site, e.Err)
+	}
+	return fmt.Sprintf("compute: metal %s failed at %s", e.Op, e.Site)
+}
+
+func (e *MetalCommandError) Unwrap() error {
+	return e.Err
+}
+
+// MetalInputDtypeError indicates an invalid or unsupported data type for a Metal operation.
+type MetalInputDtypeError struct {
+	Op     string
+	Weight Dtype
+	Input  Dtype
+}
+
+func (e *MetalInputDtypeError) Error() string {
+	return fmt.Sprintf("compute: metal %s supports only F32 inputs today (weight=%s input=%s)", e.Op, e.Weight, e.Input)
+}
+
 func requireMetalMatMulF32(operation string, w, x Tensor) {
 	if w.Dtype != F32 || x.Dtype != F32 {
-		panic(fmt.Sprintf("compute: metal %s supports only F32 inputs today (weight=%s input=%s)", operation, w.Dtype, x.Dtype))
+		panic(&MetalInputDtypeError{Op: operation, Weight: w.Dtype, Input: x.Dtype})
 	}
 }
 
 func (c *metalBackend) MatMul(w, x Tensor) Tensor {
-	requireMetalMatMulF32("MatMul", w, x)
+	if w.Dtype != Q2_0 {
+		requireMetalMatMulF32("MatMul", w, x)
+	} else if x.Dtype != F32 {
+		panic(&MetalInputDtypeError{Op: "MatMul", Weight: w.Dtype, Input: x.Dtype})
+	}
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	if w.Dtype == Q2_0 {
+		if x.Numel() != in {
+			panic(fmt.Sprintf("compute: metal MatMul Q2_0 in=%d != input numel=%d", in, x.Numel()))
+		}
+		wb, ok := w.buf.(*metalBuf)
+		if !ok || wb == nil || wb.q2w == nil {
+			panic("compute: metal MatMul Q2_0 weight missing resident handle")
+		}
+		xFloats := c.readFloatsUnlocked(x)
+		y, yb := c.devTr([]int{out}, F32)
+		yFloats := make([]float32, out)
+		wb.q2w.GEMV(xFloats, yFloats)
+		if out > 0 {
+			C.fmetal_h2d(yb.ptr, unsafe.Pointer(&yFloats[0]), C.size_t(out*4))
+		}
+		return y
+	}
 	y, _ := c.devTr([]int{out}, F32)
 	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "begin", Err: err})
 	}
 	if err := owner.encodeMatMul(c.mb(w), c.mb(x), c.mb(y), out, in, 1); err != nil {
 		_ = owner.abort()
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "encode", Err: err})
 	}
 	receipt, err := owner.finishExactly(1)
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "MatMul", Site: "finish", Err: err})
 	}
 	recordMetalMatMulTrace(started, receipt, w, x, y, out, in, 1)
 	return y
@@ -440,23 +574,44 @@ func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 // BatchedMatMul is the prefill GEMM Y = X @ Wᵀ over P rows on the MPS path; it refuses
 // non-F32 inputs (quantized device GEMM is a tracked follow-up).
 func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
-	requireMetalMatMulF32("BatchedMatMul", w, X)
+	if w.Dtype != Q2_0 {
+		requireMetalMatMulF32("BatchedMatMul", w, X)
+	} else if X.Dtype != F32 {
+		panic(&MetalInputDtypeError{Op: "BatchedMatMul", Weight: w.Dtype, Input: X.Dtype})
+	}
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	if w.Dtype == Q2_0 {
+		if X.Numel() != P*in {
+			panic(fmt.Sprintf("compute: metal BatchedMatMul Q2_0 in*P=%d != input numel=%d", P*in, X.Numel()))
+		}
+		wb, ok := w.buf.(*metalBuf)
+		if !ok || wb == nil || wb.q2w == nil {
+			panic("compute: metal BatchedMatMul Q2_0 weight missing resident handle")
+		}
+		XFloats := c.readFloatsUnlocked(X)
+		y, yb := c.devTr([]int{P, out}, F32)
+		YFloats := make([]float32, P*out)
+		wb.q2w.GEMM(XFloats, P, YFloats)
+		if P*out > 0 {
+			C.fmetal_h2d(yb.ptr, unsafe.Pointer(&YFloats[0]), C.size_t(P*out*4))
+		}
+		return y
+	}
 	y, _ := c.devTr([]int{P, out}, F32)
 	started := time.Now()
 	owner, err := beginMetalCommand()
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "begin", Err: err})
 	}
 	if err := owner.encodeMatMul(c.mb(w), c.mb(X), c.mb(y), out, in, P); err != nil {
 		_ = owner.abort()
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "encode", Err: err})
 	}
 	receipt, err := owner.finishExactly(1)
 	if err != nil {
-		panic(err)
+		panic(&MetalCommandError{Op: "BatchedMatMul", Site: "finish", Err: err})
 	}
 	recordMetalMatMulTrace(started, receipt, w, X, y, out, in, P)
 	return y

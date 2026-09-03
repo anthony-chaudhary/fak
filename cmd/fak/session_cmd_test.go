@@ -513,4 +513,3 @@ func TestSessionCLIResumeAll(t *testing.T) {
 		t.Fatalf("expected usage message to mention --all, got: %q", errb3.String())
 	}
 }
-

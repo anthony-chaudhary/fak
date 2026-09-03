@@ -14028,6 +14028,16 @@
           "category": "incidental",
           "reason": "Input type of the internal/gitresource AdmitCleanup seam (one proposed Git resource mutation with resource kind, scope, owner+epoch, terminal evidence); leaf-local contract symbol, not a cross-subsystem concept and no overloaded root.",
           "token": "CleanupCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "traversal helper for gateway retry telemetry (#10323)",
+          "token": "walkHTTPPlanners"
+        },
+        {
+          "category": "incidental",
+          "reason": "traversal method on composite planners for gateway retry telemetry (#10323)",
+          "token": "WalkPlanners"
         }
       ],
       "exclude": [
@@ -14134,6 +14144,7 @@
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
         "ValidateListPlan",
+        "WalkPlanners",
         "WatchdogCandidate",
         "WatchdogCandidateExclusion",
         "WatchdogCandidateReport",
@@ -14244,6 +14255,7 @@
         "setSelfUpdateCandidateCacheDisposition",
         "stablePlanID",
         "validateGroupedPlan",
+        "walkHTTPPlanners",
         "watchdogCandidates",
         "watchdogExclusionReason",
         "wipLandOptions",

@@ -25,6 +25,26 @@
       "output_contains": "slackwire",
       "lane": "slackwire",
       "command": "fak slack send --channel runtime-proof --text slackwire --dry-run"
+    },
+    {
+      "output_contains": "usage: fak guard",
+      "lane": "guard",
+      "command": "fak guard --help"
+    },
+    {
+      "output_contains": "fak macfit",
+      "lane": "macfit",
+      "command": "fak macfit"
+    },
+    {
+      "output_contains": "macbench",
+      "lane": "macbench",
+      "command": "fak macbench recover --log /dev/null"
+    },
+    {
+      "output_contains": "internal/metalgemm",
+      "lane": "metalgemm",
+      "command": "fak sota internal/metalgemm/decode.m"
     }
   ]
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -136,6 +137,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	for _, process := range s.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 	}
+	sort.Ints(d.OwnedPIDs)
 	headroom := procguard.EvaluateSystemCommitHeadroom(s, p.MinSystemHeadroom)
 	d.HeadroomBytes = headroom.ObservedBytes
 	if len(s.Processes) > 0 {
@@ -156,7 +158,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 
 func appendGuardResourceReceipt(path string, r guardResourceReceipt) error {
 	if strings.TrimSpace(path) == "" {
-		return errors.New("child resource receipt path is empty")
+		return errors.New("child resource receipt path is empty; recovery: provide a valid path via --child-resource-journal")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create child resource receipt directory: %w", err)
@@ -186,6 +188,46 @@ func guardResourceReceiptPath() string {
 		return filepath.Join(base, "fak", "guard", "child-resource.jsonl")
 	}
 	return filepath.Join(os.TempDir(), "fak", "guard", "child-resource.jsonl")
+}
+
+// foldChildResourceReceiptsByWeek reads the child-resource containment ledger and
+// surfaces invocation counts grouped by ISO week (e.g. "2026-W35").
+func foldChildResourceReceiptsByWeek(path string) (map[string]int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]int{}, nil
+		}
+		return nil, fmt.Errorf("open child resource ledger: %w", err)
+	}
+	defer f.Close()
+
+	counts := make(map[string]int)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var r guardResourceReceipt
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339Nano, r.At)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, r.At)
+		}
+		if err != nil {
+			continue
+		}
+		year, week := t.ISOWeek()
+		weekKey := fmt.Sprintf("%04d-W%02d", year, week)
+		counts[weekKey]++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan child resource ledger: %w", err)
+	}
+	return counts, nil
 }
 
 func guardResourceReason(d guardResourceDecision) string {

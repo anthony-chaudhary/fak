@@ -491,6 +491,10 @@ func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 		"news - slackenv",
 		"slackmeta",
 		"slackwire",
+		"usage: fak guard",
+		"fak macfit",
+		"macbench",
+		"internal/metalgemm",
 	}, "\n"))
 	oldResolver := resolveRuntimeFak
 	resolveRuntimeFak = func() (string, error) { return artifact, nil }

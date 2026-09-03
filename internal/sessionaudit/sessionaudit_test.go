@@ -366,6 +366,22 @@ func TestProjectNamespaceMatchesClaudeProjectsKey(t *testing.T) {
 	}
 }
 
+func TestProjectNamespaceResolvesSymlinks(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("symlink not supported in this environment")
+	}
+	targetNS := ProjectNamespace(target)
+	linkNS := ProjectNamespace(link)
+	if targetNS != linkNS {
+		t.Fatalf("ProjectNamespace(link) = %q, want %q (target)", linkNS, targetNS)
+	}
+}
+
 func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 	root := t.TempDir()
 	topPath := writeTranscriptIn(t, root, "C--work-fak", "session-a.jsonl", []map[string]any{

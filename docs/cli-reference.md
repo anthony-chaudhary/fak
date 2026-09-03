@@ -527,6 +527,14 @@ fak guard [flags] [--] <agent command...>
 
 Fronts an interactive or autonomous agent with the in-process capability floor, audit journal, and result quarantine. Proposed tool calls are checked before execution.
 
+### Child process-tree memory containment
+
+On macOS (Darwin) and Windows, `fak guard` monitors and bounds wrapped agent child process trees to prevent runaway memory usage from impacting host stability:
+
+- `--child-max-memory-mb <N>`: maximum wrapped-child process-tree memory in MiB (0 uses the host-sized default: on macOS, 1/4 of host physical RAM clamped between 1 GiB and 64 GiB RSS; on Windows, 64 GiB commit limit).
+- `--child-resource-poll <duration>`: poll interval for child process-tree memory monitoring (default: `1s`).
+- `--child-resource-journal <path>`: record child process-tree resource containment receipts to this JSONL file (default: `~/.config/fak/guard/child-resource.jsonl`).
+
 ## `fak ablate`
 
 ```text

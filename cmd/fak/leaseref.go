@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -803,6 +804,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 		*holder = leaseref.MintHolder(leaseref.LocalNodeID(*dir), *session)
 	}
 	store := leaseref.NewInDir(*dir)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefAcquire, store, "", false)
 	rec, v, err := store.AcquireFenced(context.Background(), leaseref.Record{
 		ID:         *id,
 		TreeGlobs:  trees,
@@ -817,6 +819,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefAcquire, store, "", true)
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceAcquire, rec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "acquire")
@@ -861,6 +864,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	store := leaseref.NewInDir(*dir)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRenew, store, "", false)
 	rec, v, err := store.Renew(context.Background(), *id, *holder, *ttl, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak leaseref renew: %v\n", err)
@@ -869,6 +873,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRenew, store, "", true)
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRenew, rec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "renew")

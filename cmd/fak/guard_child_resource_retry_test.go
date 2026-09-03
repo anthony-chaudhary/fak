@@ -326,3 +326,56 @@ func resourceRetryEvent(reason string) guardChildWaitEvent {
 		},
 	}
 }
+
+func TestGuardChildResourceRefusalsAndErrorsNameRecovery(t *testing.T) {
+	t.Run("reattach unavailable status names recovery", func(t *testing.T) {
+		status := guardResourceReattachUnavailableStatus("claude", "trace-test", fmt.Errorf("transport lost"))
+		if !strings.Contains(status, "refusing a cold relaunch") || !strings.Contains(status, "recovery:") {
+			t.Fatalf("status missing refusal or recovery keyword: %s", status)
+		}
+		if !strings.Contains(status, "fak guard -- claude --continue") {
+			t.Fatalf("status missing claude recovery command: %s", status)
+		}
+
+		codexStatus := guardResourceReattachUnavailableStatus("codex", "trace-codex", nil)
+		if !strings.Contains(codexStatus, "recovery: run `fak guard -- codex resume`") {
+			t.Fatalf("codex status missing codex resume recovery: %s", codexStatus)
+		}
+	})
+
+	t.Run("restart give up status names recovery", func(t *testing.T) {
+		verdict := guardResourceRetryVerdict{
+			Action:  guardResourceRetryExhausted,
+			Limit:   3,
+			Attempt: 3,
+			Cause:   guardResourceRestartCauseBudget,
+		}
+		status := guardResourceRestartGiveUpStatus(verdict, "trace-giveup")
+		if !strings.Contains(status, "refusing another relaunch") || !strings.Contains(status, "recovery:") {
+			t.Fatalf("status missing refusal or recovery keyword: %s", status)
+		}
+		if !strings.Contains(status, "--child-max-memory-mb") {
+			t.Fatalf("status missing memory parameter recovery: %s", status)
+		}
+	})
+
+	t.Run("empty receipt path error names recovery", func(t *testing.T) {
+		err := appendGuardResourceReceipt("", guardResourceReceipt{})
+		if err == nil {
+			t.Fatal("expected error for empty receipt path")
+		}
+		if !strings.Contains(err.Error(), "recovery:") || !strings.Contains(err.Error(), "--child-resource-journal") {
+			t.Fatalf("error missing recovery guidance: %v", err)
+		}
+	})
+
+	t.Run("unsupported reattach transport error names recovery", func(t *testing.T) {
+		_, err := guardResourceReattachCommand([]string{"unsupported"}, "unsupported-agent", "", "trace-1")
+		if err == nil {
+			t.Fatal("expected error for unsupported agent reattach")
+		}
+		if !strings.Contains(err.Error(), "recovery:") {
+			t.Fatalf("error missing recovery guidance: %v", err)
+		}
+	})
+}

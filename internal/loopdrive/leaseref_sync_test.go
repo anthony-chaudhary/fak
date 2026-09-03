@@ -43,6 +43,11 @@ func TestLeaseRefSyncPlanForSurfaces(t *testing.T) {
 		LeaseRefSyncSurfaceDispatchPreflight,
 		LeaseRefSyncSurfaceLoopDriveTick,
 		LeaseRefSyncSurfaceGardenStaleLease,
+		LeaseRefSyncSurfaceIntentClaim,
+		LeaseRefSyncSurfaceIntentRelease,
+		LeaseRefSyncSurfaceLeaserefAcquire,
+		LeaseRefSyncSurfaceLeaserefRelease,
+		LeaseRefSyncSurfaceLeaserefRenew,
 	} {
 		t.Run(string(surface), func(t *testing.T) {
 			steps := LeaseRefSyncPlanForSurface(surface, LeaseRefSyncPlanInput{LeaseRefsWritten: true})

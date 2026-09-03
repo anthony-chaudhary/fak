@@ -16,6 +16,7 @@
 package metalgemm
 
 import (
+	"encoding/binary"
 	"math"
 	"math/rand"
 	"testing"
@@ -296,4 +297,165 @@ func TestFusedMLPQ2_0Parity(t *testing.T) {
 		t.Fatal("FusedMLPQ2_0 refused valid shapes")
 	}
 	q2RequireClose(t, got, want)
+}
+
+func q2_0G128DequantBlock(dst []float32, blk []byte) {
+	d := math.Float32frombits(q4kTestF16Bits(binary.LittleEndian.Uint16(blk[0:2])))
+	qs := blk[2:34]
+	for i := 0; i < 32; i++ {
+		b := qs[i]
+		dst[4*i+0] = d * float32(int(b&0x3)-1)
+		dst[4*i+1] = d * float32(int((b>>2)&0x3)-1)
+		dst[4*i+2] = d * float32(int((b>>4)&0x3)-1)
+		dst[4*i+3] = d * float32(int((b>>6)&0x3)-1)
+	}
+}
+
+func q2_0G128RefGEMV(raw []byte, out, in int, x []float32) []float32 {
+	nblk := in / Q2_0G128BlockWeights
+	y := make([]float32, out)
+	blk := make([]float32, Q2_0G128BlockWeights)
+	for o := 0; o < out; o++ {
+		rowBytes := raw[o*nblk*Q2_0G128BlockBytes : (o+1)*nblk*Q2_0G128BlockBytes]
+		var sum float32
+		for b := 0; b < nblk; b++ {
+			q2_0G128DequantBlock(blk, rowBytes[b*Q2_0G128BlockBytes:(b+1)*Q2_0G128BlockBytes])
+			xs := x[b*Q2_0G128BlockWeights : (b+1)*Q2_0G128BlockWeights]
+			for i := 0; i < Q2_0G128BlockWeights; i++ {
+				sum += blk[i] * xs[i]
+			}
+		}
+		y[o] = sum
+	}
+	return y
+}
+
+func q2_0G128TestRaw(out, in int, seed int64) []byte {
+	if in%Q2_0G128BlockWeights != 0 {
+		panic("q2_0G128TestRaw: in must be a multiple of 128")
+	}
+	nblk := in / Q2_0G128BlockWeights
+	raw := make([]byte, out*nblk*Q2_0G128BlockBytes)
+	rng := rand.New(rand.NewSource(seed))
+	for b := 0; b < out*nblk; b++ {
+		base := b * Q2_0G128BlockBytes
+		exp := uint16(13 + rng.Intn(3))
+		frac := uint16(rng.Intn(1024))
+		binary.LittleEndian.PutUint16(raw[base:base+2], (exp<<10)|frac)
+		for i := 0; i < 32; i++ {
+			c0 := byte(rng.Intn(3))
+			c1 := byte(rng.Intn(3))
+			c2 := byte(rng.Intn(3))
+			c3 := byte(rng.Intn(3))
+			raw[base+2+i] = c0 | (c1 << 2) | (c2 << 4) | (c3 << 6)
+		}
+	}
+	return raw
+}
+
+func TestMetalQ2_0G128GemvMatchesCPU(t *testing.T) {
+	if !Available() {
+		t.Skip("no Metal device available")
+	}
+	defer ResetQ2_0G128()
+	rng := rand.New(rand.NewSource(108891))
+
+	shapes := [][2]int{{1, 128}, {4, 256}, {7, 512}, {16, 1024}, {32, 2048}, {64, 4096}}
+	for _, s := range shapes {
+		out, in := s[0], s[1]
+		raw := q2_0G128TestRaw(out, in, int64(out*1000+in))
+		w := UploadQ2_0G128(raw, out, in)
+		if w == nil {
+			t.Fatalf("shape [%d,%d]: UploadQ2_0G128 returned nil on an available device", out, in)
+		}
+		if w.Out != out || w.In != in || w.Nblk != in/Q2_0G128BlockWeights {
+			t.Fatalf("shape [%d,%d]: handle dims = (Out=%d,In=%d,Nblk=%d)", out, in, w.Out, w.In, w.Nblk)
+		}
+
+		x := make([]float32, in)
+		for i := range x {
+			x[i] = float32(rng.NormFloat64())
+		}
+		want := q2_0G128RefGEMV(raw, out, in, x)
+		got := make([]float32, out)
+		w.GEMV(x, got)
+
+		nonZero := false
+		for o := 0; o < out; o++ {
+			if math.IsNaN(float64(got[o])) || math.IsInf(float64(got[o]), 0) {
+				t.Fatalf("shape [%d,%d] row %d: Metal GEMV produced non-finite %v", out, in, o, got[o])
+			}
+			if got[o] != 0 {
+				nonZero = true
+			}
+			if !q2_0CloseEnough(got[o], want[o]) {
+				t.Fatalf("shape [%d,%d] row %d: Metal GEMV = %v, CPU-ref = %v (delta %v)",
+					out, in, o, got[o], want[o], math.Abs(float64(got[o]-want[o])))
+			}
+		}
+		if !nonZero {
+			t.Fatalf("shape [%d,%d]: all-zero output produced", out, in)
+		}
+	}
+}
+
+func TestMetalQ2_0G128GEMMParity(t *testing.T) {
+	if !Available() {
+		t.Skip("no Metal device available")
+	}
+	defer ResetQ2_0G128()
+	rng := rand.New(rand.NewSource(108892))
+
+	const out, in, P = 16, 384, 4
+	raw := q2_0G128TestRaw(out, in, 77)
+	w := UploadQ2_0G128(raw, out, in)
+	if w == nil {
+		t.Fatal("UploadQ2_0G128 returned nil on an available device")
+	}
+
+	X := make([]float32, P*in)
+	for i := range X {
+		X[i] = float32(rng.NormFloat64())
+	}
+
+	got := make([]float32, P*out)
+	w.GEMM(X, P, got)
+
+	for p := 0; p < P; p++ {
+		rowX := X[p*in : (p+1)*in]
+		wantRow := q2_0G128RefGEMV(raw, out, in, rowX)
+		gotRow := got[p*out : (p+1)*out]
+		for o := 0; o < out; o++ {
+			if !q2_0CloseEnough(gotRow[o], wantRow[o]) {
+				t.Fatalf("token %d row %d: Metal GEMM = %v, CPU-ref = %v (delta %v)",
+					p, o, gotRow[o], wantRow[o], math.Abs(float64(gotRow[o]-wantRow[o])))
+			}
+		}
+	}
+}
+
+func TestMetalQ2_0G128UploadRejectsBadShapes(t *testing.T) {
+	if !Available() {
+		t.Skip("no Metal device available")
+	}
+	defer ResetQ2_0G128()
+
+	const out, in = 8, 256
+	raw := q2_0G128TestRaw(out, in, 108893)
+
+	if w := UploadQ2_0G128(raw, 0, in); w != nil {
+		t.Fatal("UploadQ2_0G128 with out=0 must return nil")
+	}
+	if w := UploadQ2_0G128(raw, out, 0); w != nil {
+		t.Fatal("UploadQ2_0G128 with in=0 must return nil")
+	}
+	if w := UploadQ2_0G128(raw, out, 200); w != nil {
+		t.Fatal("UploadQ2_0G128 with in not a multiple of 128 must return nil")
+	}
+	if w := UploadQ2_0G128(raw[:len(raw)-1], out, in); w != nil {
+		t.Fatal("UploadQ2_0G128 with short payload must return nil")
+	}
+	if w := UploadQ2_0G128(raw, out, in); w == nil {
+		t.Fatal("UploadQ2_0G128 with valid payload must return non-nil handle")
+	}
 }

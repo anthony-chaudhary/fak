@@ -227,7 +227,7 @@ func runServeSizingJSON(sf *serveFlags) {
 	if st, statErr := os.Stat(*sf.ggufPath); statErr == nil {
 		diskBytes = st.Size()
 	}
-	art, err := buildServeSizingArtifact(ws, be, *sf.cpuOffloadExperts, *sf.contextBudgetTokens, *sf.ggufPath, diskBytes)
+	art, err := buildServeSizingArtifact(ws, be, *sf.cpuOffloadExperts, sf.effectiveAdmissionTokenBudget(), *sf.ggufPath, diskBytes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: --plan-json:", err)
 		os.Exit(1)

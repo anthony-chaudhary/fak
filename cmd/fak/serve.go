@@ -280,6 +280,19 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	return fs, sf
 }
 
+func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
+	if sf == nil {
+		return 0
+	}
+	if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 {
+		return *sf.contextBudgetTokens
+	}
+	if sf.nativeAdmissionTokenBudget != nil && *sf.nativeAdmissionTokenBudget > 0 {
+		return *sf.nativeAdmissionTokenBudget
+	}
+	return 0
+}
+
 func effectiveServeConfigWithQwen38Runtime(sf *serveFlags, m deploymanifest.Manifest, hasManifest bool, explicit map[string]bool) effectiveServeConfigReport {
 	report := effectiveServeConfig(sf, m, hasManifest, explicit)
 	source := "built-in"

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -43,6 +44,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	store := leaseref.NewInDir(*dir)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", false)
 	// Capture the public-safe projection inputs before deletion. Get failures are ignored
 	// here because release remains authoritative and announcement is only advisory.
 	announceRec := leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}
@@ -57,6 +59,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 			return 1
 		}
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 		return emitLeaserefJSON(stdout, stderr, leaseref.FenceVerdict{
 			OK:     true,
@@ -65,6 +68,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	}
 	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
 	if err == nil && v.OK {
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })

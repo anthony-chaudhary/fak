@@ -450,6 +450,40 @@ func TestValidateMultipleAndInterspersedMinePaths(t *testing.T) {
 	}
 }
 
+func TestValidateOverlayRetainsAllMinePaths(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+
+	paths := []string{"pkg/a.go", "pkg/b.go", "pkg/c.go"}
+	for _, p := range paths {
+		full := filepath.Join(srcRoot, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("// "+p), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var checked []string
+	if err := overlayMinePathsWithin(context.Background(), srcRoot, dstRoot, paths, func(rel string) {
+		checked = append(checked, rel)
+	}); err != nil {
+		t.Fatalf("overlayMinePathsWithin: %v", err)
+	}
+
+	if len(checked) != len(paths) {
+		t.Fatalf("checked %d paths, want %d: %v", len(checked), len(paths), checked)
+	}
+
+	for _, p := range paths {
+		dstFile := filepath.Join(dstRoot, filepath.FromSlash(p))
+		if _, err := os.Stat(dstFile); err != nil {
+			t.Errorf("destination file %q missing after overlay: %v", p, err)
+		}
+	}
+}
+
 func TestValidateCommittedTipPlusOnlyMine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")

@@ -24,6 +24,11 @@ void mg_q2_0_gemv_group(const int* wids, int n, const float* x, float* Ycat, con
 void mg_q2_0_gemm(int wid, const float* X, int p, float* Y);
 int  mg_q2_0_mlp(int gate, int up, int down, const float* x, float* y);
 void mg_q2_0_reset(void);
+
+int  mg_q2_0_g128_upload(const unsigned char* raw, int out, int in);
+void mg_q2_0_g128_gemv(int wid, const float* x, float* y);
+void mg_q2_0_g128_gemm(int wid, const float* X, int p, float* Y);
+void mg_q2_0_g128_reset(void);
 */
 import "C"
 
@@ -142,3 +147,54 @@ func (w *Q2_0Weight) ID() int { return int(w.id) }
 // ResetQ2_0 releases every resident ternary weight buffer and the reused scratch (the Q2_0 twin of
 // ResetQ8). Call only when no Q2_0Weight handle is still in use — every prior handle is invalidated.
 func ResetQ2_0() { C.mg_q2_0_reset() }
+
+// Q2_0G128Weight is a handle to a standard GGUF group-128 Q2_0 weight matrix [Out, In] resident
+// on the GPU (34-byte blocks: 2-byte f16 scale + 32-byte codes). In must be a multiple of
+// Q2_0G128BlockWeights (128); Nblk = In / 128.
+type Q2_0G128Weight struct {
+	id      C.int
+	Out, In int
+	Nblk    int
+}
+
+// UploadQ2_0G128 copies a standard GGUF group-128 Q2_0 payload (34 bytes per 128-weight block)
+// resident onto the GPU and returns a handle, or nil if the backend is unavailable, in is not
+// a multiple of 128, or the raw slice is short / table is full.
+func UploadQ2_0G128(raw []byte, out, in int) *Q2_0G128Weight {
+	if !Available() || in <= 0 || in%Q2_0G128BlockWeights != 0 || out <= 0 {
+		return nil
+	}
+	need := Q2_0G128PayloadBytes(out, in)
+	if len(raw) < need {
+		return nil
+	}
+	id := C.mg_q2_0_g128_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	if id < 0 {
+		return nil
+	}
+	return &Q2_0G128Weight{id: id, Out: out, In: in, Nblk: in / Q2_0G128BlockWeights}
+}
+
+// ID returns the backend handle for this matrix.
+func (w *Q2_0G128Weight) ID() int { return int(w.id) }
+
+// GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length >= Out.
+func (w *Q2_0G128Weight) GEMV(x, y []float32) {
+	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
+		return
+	}
+	C.mg_q2_0_g128_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+}
+
+// GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a resident group-128 Q2_0 matrix over P activation rows.
+func (w *Q2_0G128Weight) GEMM(X []float32, P int, Y []float32) {
+	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
+		return
+	}
+	C.mg_q2_0_g128_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
+
+// ResetQ2_0G128 releases every resident group-128 Q2_0 weight buffer and reused scratch.
+func ResetQ2_0G128() {
+	C.mg_q2_0_g128_reset()
+}

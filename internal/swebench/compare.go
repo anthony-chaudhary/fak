@@ -61,7 +61,6 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 		return nil, err
 	}
 
-	// Build a ComparisonRun skeleton.
 	cr := &ComparisonRun{
 		Schema:      "swebench-compare/1",
 		GeneratedAt: time.Now().Format(time.RFC3339),
@@ -102,17 +101,14 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 		}
 	}
 
-	// Compute headline.
 	cr.Summary.Headline = computeHeadline(cr.Summary)
 
-	// Write the comparison JSON.
 	cmpPath := fmt.Sprintf("%s/comparison.json", cfg.OutputDir)
 	cmpData, _ := json.MarshalIndent(cr, "", "  ")
 	if err := os.WriteFile(cmpPath, cmpData, 0o644); err != nil {
 		return cr, fmt.Errorf("write comparison: %w", err)
 	}
 
-	// Write markdown report.
 	mdPath := fmt.Sprintf("%s/comparison.md", cfg.OutputDir)
 	if err := os.WriteFile(mdPath, []byte(RenderComparisonMarkdown(cr)), 0o644); err != nil {
 		return cr, fmt.Errorf("write markdown: %w", err)
@@ -195,7 +191,6 @@ func computeHeadline(s ComparisonSummary) string {
 	if len(s.ResolveRates) == 0 {
 		return "No resolve rates available (harness gated on this box)"
 	}
-	// Find the winner.
 	bestRunner := ""
 	bestRate := 0.0
 	for rt, rate := range s.ResolveRates {
