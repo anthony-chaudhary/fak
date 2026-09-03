@@ -269,7 +269,11 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		status.Update(fmt.Sprintf("updating launcher %s -> %s at %s", running, target, executable))
 		installedCommit, err := codexFreshnessUpdate(root, executable)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
+			if strings.Contains(err.Error(), "target updated successfully") {
+				fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
+			}
 			return nil, 1, true
 		}
 		if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), installedCommit, installedCommit); err != nil {
@@ -309,6 +313,13 @@ func codexFreshnessInstalledRevision(data []byte, executable string) (string, er
 		return "", fmt.Errorf("self-update returned an unexpected receipt schema")
 	}
 	if receipt.Status != "updated" {
+		if receipt.Status == "divergent" {
+			nextCmd := receipt.NextCommand
+			if nextCmd == "" {
+				nextCmd = "fak self-update --all"
+			}
+			return "", fmt.Errorf("target updated successfully, but launch remains refused due to divergent hot copies (%s); run `%s` to repair", receipt.Detail, nextCmd)
+		}
 		if detail := strings.TrimSpace(receipt.Detail); detail != "" {
 			return "", fmt.Errorf("self-update receipt status is %q: %s", receipt.Status, detail)
 		}
