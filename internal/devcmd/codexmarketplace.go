@@ -959,9 +959,22 @@ func listCodexMarketplaceProcesses() ([]codexMarketplaceProcess, error) {
 }
 
 func codexMarketplaceReferencingPIDs(processes []codexMarketplaceProcess, candidate string) []int {
+	variants := []string{candidate, canonicalPath(candidate)}
+	if strings.HasPrefix(candidate, "/private/var/") {
+		variants = append(variants, strings.TrimPrefix(candidate, "/private"))
+	} else if strings.HasPrefix(candidate, "/var/") {
+		variants = append(variants, "/private"+candidate)
+	}
 	pids := make([]int, 0)
 	for _, process := range processes {
-		if codexMarketplaceFieldReferencesPath(process.CommandLine, candidate) || codexMarketplaceFieldReferencesPath(process.ExecutablePath, candidate) {
+		matched := false
+		for _, v := range variants {
+			if codexMarketplaceFieldReferencesPath(process.CommandLine, v) || codexMarketplaceFieldReferencesPath(process.ExecutablePath, v) {
+				matched = true
+				break
+			}
+		}
+		if matched {
 			pids = append(pids, process.PID)
 		}
 	}
@@ -1135,15 +1148,47 @@ func canonicalCodexMarketplaceStagingRoot(root string) (string, error) {
 }
 
 func exactChildOf(root, candidate string) bool {
-	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	cleanRoot, errR := filepath.EvalSymlinks(root)
+	if errR != nil {
+		cleanRoot = filepath.Clean(root)
+	}
+	cleanCand, errC := filepath.EvalSymlinks(candidate)
+	if errC != nil {
+		cleanCand = filepath.Clean(candidate)
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanCand)
 	return err == nil && rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !strings.Contains(rel, string(filepath.Separator))
 }
 
-func sameCanonicalPath(left, right string) bool {
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
+func canonicalPath(p string) string {
+	clean := filepath.Clean(p)
+	if eval, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(eval)
 	}
-	return left == right
+	dir := filepath.Dir(clean)
+	base := filepath.Base(clean)
+	tails := []string{base}
+	for dir != "" && dir != "." && dir != "/" && filepath.Dir(dir) != dir {
+		if eval, err := filepath.EvalSymlinks(dir); err == nil {
+			result := eval
+			for i := len(tails) - 1; i >= 0; i-- {
+				result = filepath.Join(result, tails[i])
+			}
+			return filepath.Clean(result)
+		}
+		tails = append(tails, filepath.Base(dir))
+		dir = filepath.Dir(dir)
+	}
+	return clean
+}
+
+func sameCanonicalPath(left, right string) bool {
+	cleanL := canonicalPath(left)
+	cleanR := canonicalPath(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(cleanL, cleanR)
+	}
+	return cleanL == cleanR
 }
 
 func validMarketplaceToken(value string) bool {
