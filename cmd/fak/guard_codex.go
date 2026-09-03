@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
@@ -63,8 +64,12 @@ type guardCodexInstall struct {
 	BaseURL    string
 	Model      string
 	Reasoning  string
-	AuthMode   string
-	AuthSource string
+	// ReasoningOptIn records that Reasoning came from the operator's explicit
+	// FAK_GUARD_CODEX_REASONING_EFFORT opt-in rather than the configured default, so an
+	// escalated effort is attributable to a decision, not a silent guard posture (#10669).
+	ReasoningOptIn bool
+	AuthMode       string
+	AuthSource     string
 }
 
 const (
@@ -125,7 +130,7 @@ func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
 	base := guardCodexBaseURL(gwURL)
 	envKey := guardCodexEnvKey(apiKeyEnv)
 	model = guardCodexConfiguredModel(model)
-	effort := guardCodexReasoningEffort(model)
+	effort := guardCodexResolveReasoningEffort(model, os.Getenv).Effort
 	id := guardCodexProviderID
 	q := func(s string) string { return `"` + s + `"` }
 	args := []string{
@@ -150,10 +155,40 @@ func guardCodexConfiguredModel(model string) string {
 	return guardCodexDefaultModelID
 }
 
-// guardCodexReasoningEffort pins xhigh only for the managed GPT-5.6 default. An explicit
-// custom/local model keeps its own supported-effort contract instead of receiving a config
-// value it may reject; a later user-supplied `-c model_reasoning_effort=...` still overrides
-// this earlier default in Codex's argv.
+// guardCodexReasoningEffortEnv is the explicit operator opt-in for a guarded Codex session's
+// reasoning effort (#10669). The guard never escalates silently: unset/empty defers to the
+// configured default, and only a non-empty value here can pin xhigh (which roughly doubles
+// the post-tool wait vs high). The value is passed through verbatim (whitespace-trimmed, not
+// case-munged) — an explicit operator value is Codex's to accept or reject loudly.
+const guardCodexReasoningEffortEnv = "FAK_GUARD_CODEX_REASONING_EFFORT"
+
+// guardCodexEffortResolution is the resolved reasoning-effort decision for one guarded Codex
+// install: the effort the session config pins ("" = no pin) and whether it came from the
+// explicit opt-in rather than the configured default.
+type guardCodexEffortResolution struct {
+	Effort string
+	OptIn  bool
+}
+
+// guardCodexResolveReasoningEffort resolves the guarded Codex session's reasoning effort in
+// strict order (#10669): an explicit $FAK_GUARD_CODEX_REASONING_EFFORT opt-in wins over
+// everything; otherwise the managed GPT-5.6 default gets the configured effort — never the
+// silent xhigh escalation the guard used to force onto every goal-continuation turn; an
+// explicit custom/local model keeps its own supported-effort contract instead of receiving a
+// config value it may reject. A later user-supplied `-c model_reasoning_effort=...` still
+// overrides this earlier default in Codex's argv.
+func guardCodexResolveReasoningEffort(model string, getenv func(string) string) guardCodexEffortResolution {
+	if getenv != nil {
+		if v := strings.TrimSpace(getenv(guardCodexReasoningEffortEnv)); v != "" {
+			return guardCodexEffortResolution{Effort: v, OptIn: true}
+		}
+	}
+	return guardCodexEffortResolution{Effort: guardCodexReasoningEffort(model)}
+}
+
+// guardCodexReasoningEffort is the no-opt-in effort for the model Codex is being pointed at:
+// the configured default for the managed GPT-5.6 models, and no pin at all for a custom or
+// local model whose supported-effort set the guard cannot know.
 func guardCodexReasoningEffort(model string) string {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gpt-5.6", "gpt-5.6-sol":
@@ -223,19 +258,20 @@ func installGuardCodexConfigForProfile(command []string, profile harnessprofile.
 		return command, guardCodexInstall{}
 	}
 	model := guardCodexDefaultModelID
-	effort := guardCodexReasoningEffort(model)
+	resolved := guardCodexResolveReasoningEffort(model, os.Getenv)
 	args := guardCodexConfigArgs(gwURL, apiKeyEnv, model)
 	out := make([]string, 0, len(command)+len(args))
 	out = append(out, command[0])
 	out = append(out, args...)
 	out = append(out, command[1:]...)
 	return out, guardCodexInstall{
-		Applied:    true,
-		ProviderID: guardCodexProviderID,
-		EnvKey:     guardCodexEnvKey(apiKeyEnv),
-		BaseURL:    guardCodexBaseURL(gwURL),
-		Model:      model,
-		Reasoning:  effort,
+		Applied:        true,
+		ProviderID:     guardCodexProviderID,
+		EnvKey:         guardCodexEnvKey(apiKeyEnv),
+		BaseURL:        guardCodexBaseURL(gwURL),
+		Model:          model,
+		Reasoning:      resolved.Effort,
+		ReasoningOptIn: resolved.OptIn,
 	}
 }
 
@@ -278,7 +314,11 @@ func printGuardCodexNote(w io.Writer, in guardCodexInstall) {
 	}
 	fmt.Fprintf(w, "fak guard: Codex wired via -c model_provider=%s (wire_api=responses, base_url=%s) — every tool call crosses the kernel floor\n", in.ProviderID, in.BaseURL)
 	if in.Reasoning != "" {
-		fmt.Fprintf(w, "fak guard: Codex session config — model=%s model_reasoning_effort=%s\n", in.Model, in.Reasoning)
+		if in.ReasoningOptIn {
+			fmt.Fprintf(w, "fak guard: Codex session config — model=%s model_reasoning_effort=%s (explicit opt-in via $%s)\n", in.Model, in.Reasoning, guardCodexReasoningEffortEnv)
+		} else {
+			fmt.Fprintf(w, "fak guard: Codex session config — model=%s model_reasoning_effort=%s\n", in.Model, in.Reasoning)
+		}
 	} else {
 		fmt.Fprintf(w, "fak guard: Codex session config — model=%s (custom model keeps its own reasoning-effort default)\n", in.Model)
 	}

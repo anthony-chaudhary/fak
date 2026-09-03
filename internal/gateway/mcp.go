@@ -777,8 +777,7 @@ func toolDescriptors() []map[string]any {
 	"file_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "independent file paths to read in one call; preferred when reading more than one file"},
     "trace_id": {"type": "string", "description": "optional session trace id; omitted means the gateway mints one and returns it"},
     "witness": {"type": "string", "description": "optional external world-state token (a git commit / blob hash) the read is taken at"}
-  },
-	"anyOf": [{"required": ["file_path"]}, {"required": ["file_paths"]}]
+  }
 }`),
 		},
 		{
@@ -792,8 +791,7 @@ func toolDescriptors() []map[string]any {
 	"items": {"type": "array", "minItems": 1, "description": "independent tool results to admit in one call", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "result": {}, "trace_id": {"type": "string"}, "witness": {"type": "string"}}, "required": ["tool"]}},
     "trace_id": {"type": "string", "description": "the session trace this result belongs to (keys the IFC taint ledger)"},
     "witness": {"type": "string", "description": "optional external world-state token the result was read at"}
-  },
-	"anyOf": [{"required": ["tool"]}, {"required": ["items"]}]
+  }
 }`),
 		},
 		{

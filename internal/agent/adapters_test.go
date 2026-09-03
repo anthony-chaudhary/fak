@@ -2141,3 +2141,82 @@ func TestOpenAIResponsesToolsPreserveCustomWire(t *testing.T) {
 		t.Fatalf("custom tool wire changed: %s", tools[1])
 	}
 }
+
+func TestGeminiSchemaSanitization(t *testing.T) {
+	t.Run("removes_invalid_anyof_with_partial_required", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"file_path": {"type": "string"},
+				"file_paths": {"type": "array", "items": {"type": "string"}}
+			},
+			"anyOf": [{"required": ["file_path"]}, {"required": ["file_paths"]}]
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes, ok := outAny.(json.RawMessage)
+		if !ok {
+			t.Fatalf("expected json.RawMessage, got %T", outAny)
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if _, hasAnyOf := parsed["anyOf"]; hasAnyOf {
+			t.Fatalf("expected anyOf to be removed, got: %s", string(outBytes))
+		}
+		if _, hasAnyOfLower := parsed["any_of"]; hasAnyOfLower {
+			t.Fatalf("expected any_of to be removed, got: %s", string(outBytes))
+		}
+		if parsed["type"] != "OBJECT" {
+			t.Fatalf("expected type OBJECT, got %v", parsed["type"])
+		}
+	})
+
+	t.Run("preserves_valid_nullable_anyof", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"now_ms": {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+			}
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes := outAny.(json.RawMessage)
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		props := parsed["properties"].(map[string]any)
+		nowMs := props["now_ms"].(map[string]any)
+		alts := nowMs["anyOf"].([]any)
+		if len(alts) != 2 {
+			t.Fatalf("expected 2 anyOf alternatives, got %d", len(alts))
+		}
+		alt0 := alts[0].(map[string]any)
+		if alt0["type"] != "INTEGER" {
+			t.Fatalf("expected INTEGER, got %v", alt0["type"])
+		}
+	})
+
+	t.Run("preserves_valid_object_anyof_with_properties_and_required", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"type": "object",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {"action": {"type": "string"}},
+					"required": ["action"]
+				}
+			]
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes := outAny.(json.RawMessage)
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		alts := parsed["anyOf"].([]any)
+		if len(alts) != 1 {
+			t.Fatalf("expected 1 anyOf alternative, got %d", len(alts))
+		}
+	})
+}

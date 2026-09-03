@@ -44,6 +44,7 @@ type guardCrashRSIRequest struct {
 
 var guardCrashRSILaunch = launchGuardCrashRSI
 var guardCrashRSIAdmit = admitGuardCrashRSILaunch
+var guardCrashRSIDir string
 
 // guardRSISession admits at most one launch attempt for the lifetime of one guard
 // session. Admission claims the slot before starting the worker, so even a failed
@@ -112,29 +113,24 @@ func guardMaybeLaunchFailureRSI(stderr io.Writer, session *guardRSISession, guar
 	if !ok || !session.claim() {
 		return false
 	}
-	if err := guardCrashRSILaunch(req); err != nil {
-		if stderr != nil {
-			fmt.Fprintf(stderr, "fak guard: failure RSI launch skipped (%s): %v\n", req.Tag, err)
-		}
-		return false
-	}
-	if stderr != nil {
-		fmt.Fprintf(stderr, "fak guard: spawned failure RSI session %s for %s\n", req.Tag, req.Reason)
-	}
-	return true
+	return guardLaunchCrashRSI(stderr, req)
 }
 
 func guardLaunchCrashRSI(stderr io.Writer, req guardCrashRSIRequest) bool {
+	kind := "crash"
+	if req.Reason != "" {
+		kind = "failure"
+	}
 	finish, decision, err := guardCrashRSIAdmit(req.Tag)
 	if err != nil {
 		if stderr != nil {
-			fmt.Fprintf(stderr, "fak guard: crash RSI launch skipped (%s): launchguard: %v\n", req.Tag, err)
+			fmt.Fprintf(stderr, "fak guard: %s RSI launch skipped (%s): launchguard: %v\n", kind, req.Tag, err)
 		}
 		return false
 	}
 	if finish == nil {
 		if stderr != nil {
-			fmt.Fprintf(stderr, "fak guard: crash RSI launch refused (%s): %s", req.Tag, decision.Outcome)
+			fmt.Fprintf(stderr, "fak guard: %s RSI launch refused (%s): %s", kind, req.Tag, decision.Outcome)
 			if decision.RetryAfter > 0 {
 				fmt.Fprintf(stderr, " retry-after=%s", decision.RetryAfter.Round(time.Millisecond))
 			}
@@ -145,30 +141,42 @@ func guardLaunchCrashRSI(stderr io.Writer, req guardCrashRSIRequest) bool {
 	if err := guardCrashRSILaunch(req); err != nil {
 		_ = finish(false)
 		if stderr != nil {
-			fmt.Fprintf(stderr, "fak guard: crash RSI launch skipped (%s): %v\n", req.Tag, err)
+			fmt.Fprintf(stderr, "fak guard: %s RSI launch skipped (%s): %v\n", kind, req.Tag, err)
 		}
 		return false
 	}
 	if err := finish(true); err != nil {
 		if stderr != nil {
-			fmt.Fprintf(stderr, "fak guard: crash RSI launch state warning (%s): %v\n", req.Tag, err)
+			fmt.Fprintf(stderr, "fak guard: %s RSI launch state warning (%s): %v\n", kind, req.Tag, err)
 		}
 	}
 	if stderr != nil {
-		fmt.Fprintf(stderr, "fak guard: spawned crash RSI session %s for original crash %s exit %d\n", req.Tag, req.Class, req.ExitCode)
+		if req.Reason != "" {
+			fmt.Fprintf(stderr, "fak guard: spawned failure RSI session %s for %s\n", req.Tag, req.Reason)
+		} else {
+			fmt.Fprintf(stderr, "fak guard: spawned crash RSI session %s for original crash %s exit %d\n", req.Tag, req.Class, req.ExitCode)
+		}
 	}
 	return true
 }
 
 func admitGuardCrashRSILaunch(identity string) (func(bool) error, launchguard.Decision, error) {
-	root, err := os.UserCacheDir()
-	if err != nil {
-		return nil, launchguard.Decision{}, err
+	dir := guardCrashRSIDir
+	if dir == "" {
+		root, err := os.UserCacheDir()
+		if err != nil {
+			return nil, launchguard.Decision{}, err
+		}
+		dir = filepath.Join(root, "fak", "launchguard")
 	}
 	g, err := launchguard.New(launchguard.Config{
-		Dir: filepath.Join(root, "fak", "launchguard"), MaxAttempts: 3,
-		Window: 10 * time.Minute, BaseBackoff: 5 * time.Second,
-		MaxBackoff: time.Minute, StaleAfter: 15 * time.Minute,
+		Dir:         dir,
+		MaxAttempts: 1,
+		Window:      10 * time.Minute,
+		Cooldown:    10 * time.Minute,
+		BaseBackoff: 5 * time.Second,
+		MaxBackoff:  time.Minute,
+		StaleAfter:  15 * time.Minute,
 	})
 	if err != nil {
 		return nil, launchguard.Decision{}, err

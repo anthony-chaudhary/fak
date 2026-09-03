@@ -211,7 +211,7 @@ func TestFakReadDiscoverySchemaDocumentsReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := string(schemaBytes)
-	for _, term := range []string{"file_path", "file_paths", "anyOf"} {
+	for _, term := range []string{"file_path", "file_paths"} {
 		if !strings.Contains(schema, term) {
 			t.Fatalf("input schema omits %q: %s", term, schema)
 		}

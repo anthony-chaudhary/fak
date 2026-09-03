@@ -1287,11 +1287,79 @@ func geminiSchemaCompute(raw json.RawMessage) any {
 	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
 		return raw
 	}
+	v = sanitizeGeminiSchema(v)
 	b, err := json.Marshal(uppercaseSchemaTypes(v))
 	if err != nil {
 		return raw
 	}
 	return json.RawMessage(b)
+}
+
+// sanitizeGeminiSchema strips or repairs schema constructs that Gemini's
+// function_declarations validation rejects. Specifically, Gemini requires that:
+// 1. A schema with "required" must have type OBJECT.
+// 2. Every field in "required" must be defined in "properties" of that schema.
+// Constructs like "anyOf": [{"required": ["a"]}, {"required": ["b"]}] (a draft-07
+// idiom for "either a or b is required") violate both rules and produce
+// GenerateContentRequest 400s on the Gemini API wire.
+func sanitizeGeminiSchema(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		if arr, ok := v.([]any); ok {
+			for i, elem := range arr {
+				arr[i] = sanitizeGeminiSchema(elem)
+			}
+		}
+		return v
+	}
+
+	for _, key := range []string{"anyOf", "any_of", "oneOf", "one_of"} {
+		if alts, ok := m[key].([]any); ok {
+			validAlts := make([]any, 0, len(alts))
+			for _, alt := range alts {
+				altMap, ok := alt.(map[string]any)
+				if !ok {
+					validAlts = append(validAlts, sanitizeGeminiSchema(alt))
+					continue
+				}
+				if req, hasReq := altMap["required"].([]any); hasReq && len(req) > 0 {
+					props, _ := altMap["properties"].(map[string]any)
+					t, _ := altMap["type"].(string)
+					allPropsExist := true
+					for _, r := range req {
+						rStr, _ := r.(string)
+						if props == nil || props[rStr] == nil {
+							allPropsExist = false
+							break
+						}
+					}
+					if !allPropsExist || (t != "" && !strings.EqualFold(t, "object")) {
+						// Invalid partial required subschema for Gemini; drop it.
+						continue
+					}
+					if t == "" {
+						altMap["type"] = "object"
+					}
+				}
+				validAlts = append(validAlts, sanitizeGeminiSchema(altMap))
+			}
+			if len(validAlts) == 0 {
+				delete(m, key)
+			} else {
+				m[key] = validAlts
+			}
+		}
+	}
+
+	if props, ok := m["properties"].(map[string]any); ok {
+		for k, child := range props {
+			props[k] = sanitizeGeminiSchema(child)
+		}
+	}
+	if items, ok := m["items"]; ok {
+		m["items"] = sanitizeGeminiSchema(items)
+	}
+	return m
 }
 
 // mapSchemaTypes walks a decoded JSON Schema value and rewrites every "type" field's
