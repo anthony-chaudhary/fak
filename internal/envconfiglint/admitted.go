@@ -275,4 +275,16 @@ var admittedPostFreeze = []string{
 	// Relocates to: the trailer JSON the tool loads via `-config`, so the renderer's executable
 	// is declared beside the render settings it belongs with.
 	"VIDEOGEN_FFMPEG",
+
+	// cmd/fak/launchguard.go — directory where launchguard state is stored.
+	// Relocates to: a config setting or flag on launchguard initialization.
+	"FAK_LAUNCHGUARD_DIR",
+
+	// internal/selfupdate/cmd/selfupdate.go — update installer type: native or msix.
+	// Relocates to: a config setting or flag on selfupdate.
+	"FAK_SELF_UPDATE_INSTALLER",
+
+	// cmd/fak/guard_prompt_transport.go — workspace directory for guarded codex prompt fuel.
+	// Relocates to: launch plan workspace or flag.
+	"DISPATCH_WORKSPACE",
 }
