@@ -225,7 +225,7 @@ func TestInstalledLaunchQualificationReceipt(t *testing.T) {
 	if provider.Harness != "fak-launch/codex" || provider.Status != "READY" || provider.Failure != "" {
 		t.Fatalf("success provider = %#v", provider)
 	}
-	if want := []string{"<local>/codex.cmd", "fak guard", "<local>/codex.cmd"}; !reflect.DeepEqual(provider.Chain, want) {
+	if want := []string{"<local>/" + shimName("codex"), "fak guard", "<local>/codex.cmd"}; !reflect.DeepEqual(provider.Chain, want) {
 		t.Fatalf("resolved chain = %#v, want %#v", provider.Chain, want)
 	}
 	encoded, err := json.Marshal(receipt)

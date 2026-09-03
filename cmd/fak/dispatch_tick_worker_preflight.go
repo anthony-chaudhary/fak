@@ -230,7 +230,12 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 	case dispatchWorkerPreflightAuthInvalid:
 		result.Reason = "Codex credential refresh failed for the selected seat"
 	case dispatchWorkerPreflightAuthMissing:
-		result.Reason = "Codex credential is missing for the selected seat"
+		seat := result.accountTag
+		if seat == "" {
+			seat = "default"
+		}
+		cleanHome := redactLocalPath(result.accountDir)
+		result.Reason = fmt.Sprintf("Codex credential is missing for selected seat %q (source: %s); run `fak accounts enroll-current --harness codex` or `CODEX_HOME=%s fak m -- codex login`", seat, cleanHome, cleanHome)
 	case dispatchWorkerPreflightAuthExpired:
 		result.Reason = "Codex credential is expired for the selected seat"
 	case dispatchWorkerPreflightAuthMismatched:

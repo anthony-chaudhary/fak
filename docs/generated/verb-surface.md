@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1112<br>
-rows: 1083<br>
-unverified rows: 0 / 1083<br>
-source-only rows absent from help: 858
+parsed files: 1114<br>
+rows: 1084<br>
+unverified rows: 0 / 1084<br>
+source-only rows absent from help: 859
 
 ## Surface table
 
@@ -764,7 +764,7 @@ source-only rows absent from help: 858
 | `fak scratch-janitor` | plan or remove abandoned session scratch directories with age and resume guards | runScratchJanitor / internal/scratchjanitor | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak search` | search the repository text corpus with bounded results and JSON output | cmdSearch / internal/fleetsearch, internal/sessionjournal, internal/sessionregistry | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak self-update` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
-| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/deploymanifest, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/pathutil, internal/policy, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `POLICY_BLOCK` | yes |
+| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/deploymanifest, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/localadmission, internal/memgate, internal/pathutil, internal/policy, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `POLICY_BLOCK` | yes |
 | `fak serve help` |  |  | `if` arm of the dispatch in serveHelpTopic() | N/A | — | **SOURCE ONLY** |
 | `fak serve-wiring` | audit fak serve flag -> gateway.Config -> runtime-read wiring | cmdServeWiring | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak service` | run or install fak as a long-lived OS service (Windows service dispatcher + install/status) | cmdService / internal/guardsessions, internal/servicewatchdog, internal/systemservice | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -803,6 +803,7 @@ source-only rows absent from help: 858
 | `fak session-audit feed` | makes a session-audit run DURABLE: it folds the discovery window into the SAME CompactReport the summary/actions surfaces build, then appends one scrubbed FeedRow to the durable docs/nightrun ledger… | runSessionAuditFeed / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit help` |  | sessionAuditUsage | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit posttool` |  | runSessionAuditPosttool / internal/codexlifecycle | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
+| `fak session-audit reconcile` |  | runSessionAuditReconcile / internal/codexlifecycle | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit summary` |  | runSessionAuditSummary / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak sessionjournal` | crash-survivable session journal: boot-epoch fold to LIVE/CRASHED/STALE/CLOSED (open/beat/close/report) | cmdSessionJournal / internal/guardsessions, internal/sessionjournal, internal/strmatch, internal/toolprocgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | STRUCTURAL | `APPLICATION_ERROR_` | **SOURCE ONLY** |
 | `fak sessions` | ingest + score this host's agent transcripts (the session->outcome learn loop) | cmdSessions | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
@@ -984,7 +985,7 @@ source-only rows absent from help: 858
 | `fak unwired-scorecard` | score which code-complete internal packages are not wired into a runnable CLI surface | cmdUnwiredScorecard / internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak up` | start the local fak application surface and report readiness | cmdUp | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak usage` | read side of the CLI-invocation journal: how fak itself has been invoked (totals/errors/timing, per-verb) | cmdUsage / internal/usagelog | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak validate` | check committed tip plus only explicit --mine paths with full build/vet and affected tests | cmdValidate / internal/affectedtests, internal/committedtree, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `WSL_CAPABILITY_MISSING`, `WSL_CAPABILITY_PREFLIGHT_FAILED` | **SOURCE ONLY** |
+| `fak validate` | check committed tip plus only explicit --mine paths with full build/vet and affected tests | cmdValidate / internal/affectedtests, internal/committedtree, internal/interspersedflags, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `WSL_CAPABILITY_MISSING`, `WSL_CAPABILITY_PREFLIGHT_FAILED` | **SOURCE ONLY** |
 | `fak value-chain` | audit a value-chain manifest against observed artifacts and evidence | cmdValueChain / internal/valuechain | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak value-chain usage` |  | runValueChainUsage | `if` arm of the dispatch in runValueChain() | NONE | — | **SOURCE ONLY** |
 | `fak vcache` | the virtual provider-cache status/proof surface (status/prove/prove-telemetry) | cmdVCache | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
