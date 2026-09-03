@@ -1,3 +1,8 @@
+---
+title: "Memory-Concept Ranking Dossier"
+description: "Grounded memory concept rankings across fak, vLLM, SGLang, Dynamo, and other open serving runtimes."
+---
+
 # Memory-Concept Ranking Dossier: fak ⊇ vLLM · SGLang · NVIDIA Dynamo · TRT-LLM · LMDeploy · llama.cpp · LMCache · Mooncake · llm-d
 
 > **Status:** Grounded research dossier for epic #2236 (superset rankings, memory-first) and issue #2237 / issue #3143.

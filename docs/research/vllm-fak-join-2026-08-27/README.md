@@ -1,3 +1,8 @@
+---
+title: "vLLM to FAK evidence join — 2026-08-27"
+description: "Deterministic join over 193 clusters from the compact vLLM index."
+---
+
 # vLLM → FAK evidence join
 
 Deterministic join over **193 clusters** (**183 actionable**) from the compact vLLM index. The FAK side was searched from the complete captured study-forge corpus (9531 records at `2026-08-27T04:36:00Z`) and repository paths were checked at `8f0fa4147eaef6cc7f87ee3f767581995fac3968`.

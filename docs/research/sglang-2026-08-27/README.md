@@ -1,3 +1,8 @@
+---
+title: "SGLang upstream study — 2026-08-27"
+description: "Study of SGLang upstream source tree and forge capture receipt."
+---
+
 # SGLang upstream study — 2026-08-27
 
 **Verdict:** the pinned tree is complete, every declared source class and all 12 candidates are accounted for, and no unduplicated implementation ticket was created. The forge corpus is **partial, not complete**: both capture attempts paginated the six endpoint classes, but `fak study-forge` rejected cross-endpoint PR identity consistency.

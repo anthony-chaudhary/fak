@@ -34,7 +34,7 @@ you will know why the headline number is an artifact of one workload shape, the 
 scaling laws that bend it to zero, and why this is the case for an addressable, coherence-
 checked cache rather than a frozen prefix. Every number here comes from
 [`tools/cache_curve.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py) (deterministic, stdlib-only) and the
-real transcripts on this machine via [`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py).*
+real transcripts on this machine via [`cmd/fak/sessionaudit.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/sessionaudit.go).*
 
 This is the demand-side companion to two existing notes. The mechanics of prefix reuse are
 in [`kv-cache-agentic-context.md`](kv-cache-agentic-context.md); the supply-side answer —

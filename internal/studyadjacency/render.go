@@ -27,6 +27,11 @@ func WriteMarkdown(w io.Writer, manifest Manifest) error {
 	}
 
 	var output strings.Builder
+	fmt.Fprintln(&output, "---")
+	fmt.Fprintf(&output, "title: %q\n", manifest.Title)
+	fmt.Fprintf(&output, "description: %q\n", manifest.Scope.BoundedMeaning)
+	fmt.Fprintln(&output, "---")
+	fmt.Fprintln(&output)
 	fmt.Fprintln(&output, generatedHeader)
 	fmt.Fprintf(&output, "# %s\n\n", markdownText(manifest.Title))
 	fmt.Fprintf(&output, "- **Schema:** `%s`\n", markdownCode(manifest.Schema))

@@ -19,7 +19,7 @@ Sources:
 
 - [`docs/integrations/adopter-playbook.md`](integrations/adopter-playbook.md): the
   external-adopter playbook, with shapes A/B/C and the production checklist.
-- [`docs/integrations/CLAUDE.md`](integrations/CLAUDE.md): the `fak manage` front door,
+- [`docs/integrations/claude.md`](integrations/claude.md): the `fak manage` front door,
   the per-turn debug line, and the gateway-transit proof.
 - [`docs/concepts-and-story.md`](concepts-and-story.md): the two-gate trust model and
   the "when does the win kick in" tables.

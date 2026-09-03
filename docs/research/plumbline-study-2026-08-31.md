@@ -1,3 +1,8 @@
+---
+title: "ActaClad/plumbline study — 2026-08-31"
+description: "Analysis of Plumbline Python static analyzer for LLM/agent applications and bounded mechanisms for FAK."
+---
+
 # ActaClad/plumbline study — 2026-08-31
 
 **Verdict:** borrow four bounded mechanisms; do not adopt Plumbline as a second analyzer framework.

@@ -73,7 +73,7 @@ python tools/context_tape.py render      tape.json             --html out.html
 ## Application 1 — live for any trajectory
 
 Point the `trajectory` adapter at a real Claude Code session transcript — the same `.jsonl`
-[`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) reads — and it renders **that
+[`cmd/fak/sessionaudit.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/sessionaudit.go) reads — and it renders **that
 session's** context tape. Each row is one billed turn; the bands are **exact provider token
 counts** from `message.usage`: the big faded band is the prefix the model **reused** from
 cache that turn (`cache_read`), the small coloured tip is the fresh input that turn
@@ -96,7 +96,7 @@ turn 8 │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒�
 The reused band dwarfing the fresh tip is the frozen-trajectory **OBSERVED provider-cache
 cost/latency rebate** — but now on *your* session, not a synthetic one. It is the
 per-turn, drawn-to-scale companion to the
-aggregate numbers in [`session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) and the survival
+aggregate numbers in [`cmd/fak/sessionaudit.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/sessionaudit.go) and the survival
 curves in [`cache_curve.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py): the
 [frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md) made visible turn by turn.
 
@@ -216,5 +216,5 @@ python -m pytest tools/context_tape_test.py -q                 # parity + exact-
 **Related:** [`frozen-trajectory-cache-cliff.md`](frozen-trajectory-cache-cliff.md) (why the
 reused band is so big, and the scaling laws that shrink it) ·
 [`kv-cache-agentic-context.md`](kv-cache-agentic-context.md) (the prefix mechanics) ·
-[`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) (the exact token accounting the
+[`cmd/fak/sessionaudit.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/sessionaudit.go) (the exact token accounting the
 trajectory tape reads) · [`cmd/ctxdemo`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/ctxdemo) (the live, interactive sibling).

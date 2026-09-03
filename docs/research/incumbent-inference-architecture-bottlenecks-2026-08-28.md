@@ -1,3 +1,8 @@
+---
+title: "Incumbent inference architecture bottlenecks — 2026-08-28"
+description: "Analysis of structural bottlenecks in vLLM, SGLang, Dynamo, and Modular MAX."
+---
+
 # Incumbent inference architecture bottlenecks — 2026-08-28
 
 Issue: [#9894](https://github.com/anthony-chaudhary/fak/issues/9894)
