@@ -119,3 +119,31 @@ func TestBashScratchProcessWitness(t *testing.T) {
 		t.Fatalf("witness=%q err=%v", b, err)
 	}
 }
+
+func TestBashNonExistentCwdFallsBackToRootWithWarning(t *testing.T) {
+	ts, _ := newTestToolset(t)
+	out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: bashEcho("recovered"), Cwd: "vanished_worktree"}))
+	if bad {
+		t.Fatalf("bash with missing cwd should gracefully fallback: %s", out)
+	}
+	got := decodeResult(t, out)
+	if !strings.Contains(got["stdout"].(string), "recovered") {
+		t.Fatalf("stdout=%v, want recovered", got["stdout"])
+	}
+	if !strings.Contains(got["stderr"].(string), "does not exist; executed in") {
+		t.Fatalf("stderr=%v, want fallback warning", got["stderr"])
+	}
+}
+
+func TestBashMissingRootRefusesWithDirectoryNotFound(t *testing.T) {
+	temp := t.TempDir()
+	deletedRoot := filepath.Join(temp, "deleted_root")
+	ts, _ := New(Config{Root: deletedRoot})
+	out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: bashEcho("test")}))
+	if !bad {
+		t.Fatalf("expected refusal when root does not exist, got %s", out)
+	}
+	if !strings.Contains(string(out), CodeNotFound) || !strings.Contains(string(out), "DIRECTORY_NOT_FOUND") {
+		t.Fatalf("expected DIRECTORY_NOT_FOUND refusal, got %s", out)
+	}
+}

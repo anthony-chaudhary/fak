@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -68,12 +71,23 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
 	}
 	cwd := t.root
+	var cwdWarning string
 	if a.Cwd != "" {
 		resolved, r := t.resolve(a.Cwd)
 		if r != nil {
 			return r.JSON(), true
 		}
-		cwd = resolved.Abs
+		cwd = filepath.Clean(resolved.Abs)
+		if fi, err := os.Stat(cwd); err != nil || !fi.IsDir() {
+			if rootFi, rootErr := os.Stat(t.root); rootErr == nil && rootFi.IsDir() {
+				cwdWarning = fmt.Sprintf("working directory %s does not exist; executed in %s\n", cwd, t.root)
+				cwd = t.root
+			} else {
+				return refuse(CodeNotFound, fmt.Sprintf("DIRECTORY_NOT_FOUND: working directory %q does not exist", cwd)).JSON(), true
+			}
+		}
+	} else if fi, err := os.Stat(cwd); err != nil || !fi.IsDir() {
+		return refuse(CodeNotFound, fmt.Sprintf("DIRECTORY_NOT_FOUND: working directory %q does not exist", cwd)).JSON(), true
 	}
 	timeout := t.limits.MaxCommandTime
 	if a.TimeoutMS > 0 && time.Duration(a.TimeoutMS)*time.Millisecond < timeout {
@@ -87,6 +101,9 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	var stdout, stderr boundedBuffer
 	stdout.max = t.limits.MaxOutputBytes
 	stderr.max = t.limits.MaxOutputBytes
+	if cwdWarning != "" {
+		_, _ = stderr.Write([]byte(cwdWarning))
+	}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	configureProcessTree(cmd)
