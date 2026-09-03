@@ -2,11 +2,31 @@
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["CONTRIBUTING.md"],
   "skills": {
-    "paths": [".claude/skills"]
+    "paths": [".agents/skills"]
+  },
+  "mcp": {
+    "dos": {
+      "type": "local",
+      "command": ["dos-mcp"],
+      "environment": {
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "enabled": true
+    },
+    "fak": {
+      "type": "local",
+      "command": ["fak", "serve", "--stdio", "--policy", "examples/dev-agent-policy.json"],
+      "environment": {},
+      "enabled": true
+    }
   },
   "permission": {
     "skill": {
       "phased-plan": "deny"
-    }
+    },
+    "fak*": "allow",
+    "dos*": "allow",
+    "fak_*": "allow",
+    "dos_*": "allow"
   }
 }
