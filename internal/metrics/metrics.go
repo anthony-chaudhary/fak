@@ -159,16 +159,19 @@ type KPIs struct {
 
 // Report is the full A/B artifact (report.json).
 type Report struct {
-	Provenance    Provenance `json:"provenance"`
-	On            Arm        `json:"vdso_on"`
-	Off           Arm        `json:"vdso_off"`
-	Baseline      Baseline   `json:"spawned_hook_baseline"`
-	KPIs          KPIs       `json:"kpis"`
-	GatePrimary   string     `json:"gate_primary"` // "pass"/"fail" for the syscall subsystem check (unit 82)
-	PrimaryDetail string     `json:"primary_detail"`
-	TokenDeltaPct float64    `json:"token_delta_pct"` // secondary, soft (unit 83)
-	DollarPerTask float64    `json:"dollar_per_task"` // tokencost (unit 84)
-	LiveSeam      string     `json:"live_seam"`       // transcript hash xor "live_seam_unverified"
+	Provenance           Provenance `json:"provenance"`
+	On                   Arm        `json:"vdso_on"`
+	Off                  Arm        `json:"vdso_off"`
+	Baseline             Baseline   `json:"spawned_hook_baseline"`
+	KPIs                 KPIs       `json:"kpis"`
+	GatePrimary          string     `json:"gate_primary"` // "pass"/"fail" for the syscall subsystem check (unit 82)
+	PrimaryDetail        string     `json:"primary_detail"`
+	TokenDeltaPct        float64    `json:"token_delta_pct"`                  // secondary, soft (unit 83)
+	TokenDeltaProvenance string     `json:"token_delta_provenance,omitempty"` // "SIMULATED" vs "WITNESSED"
+	DollarPerTask        float64    `json:"dollar_per_task"`                  // tokencost (unit 84)
+	DollarValuationBasis string     `json:"dollar_valuation_basis,omitempty"` // "MODELED" vs "BILLED"
+	DollarRateTable      string     `json:"dollar_rate_table,omitempty"`      // "$3/M in, $15/M out (illustrative)"
+	LiveSeam             string     `json:"live_seam"`                        // transcript hash xor "live_seam_unverified"
 }
 
 // ComputeGate fills the legacy gate_primary field for the syscall subsystem
@@ -191,6 +194,9 @@ func (r *Report) ComputeGate() {
 func (r *Report) Validate(onHash, offHash string) error {
 	if onHash != offHash {
 		return errors.New("metrics: refusing to compare arms with different workload hashes (" + onHash + " != " + offHash + ")")
+	}
+	if r.LiveSeam == "live_seam_unverified" && (r.TokenDeltaProvenance == "WITNESSED" || r.DollarValuationBasis == "BILLED") {
+		return errors.New("metrics: live_seam_unverified cannot coexist with real or billed provenance claim")
 	}
 	return nil
 }

@@ -385,7 +385,14 @@ func printReport(rep *metrics.Report, path string) {
 		fmt.Printf("fusion speedup (p50)        : %.0fx\n", float64(rep.Baseline.P50Ns)/float64(rep.On.P50Ns))
 	}
 	fmt.Printf("PRIMARY GATE                : %s  (%s)\n", rep.GatePrimary, rep.PrimaryDetail)
-	fmt.Printf("secondary token delta       : %.2f%% (soft, never gates)\n", rep.TokenDeltaPct)
+	prov := rep.TokenDeltaProvenance
+	if prov == "" {
+		prov = "SIMULATED"
+	}
+	fmt.Printf("secondary token delta       : %.2f%% (soft, never gates) [%s]\n", rep.TokenDeltaPct, prov)
+	if rep.DollarValuationBasis != "" {
+		fmt.Printf("cost per task               : $%.6f [%s, %s]\n", rep.DollarPerTask, rep.DollarValuationBasis, rep.DollarRateTable)
+	}
 	fmt.Printf("vdso hit-rate               : %.3f   pollution-rate: %.3f\n",
 		rep.KPIs.VDSOHitRate, rep.KPIs.ContextPollutionRate)
 	fmt.Printf("workload hash               : %s   live seam: %s\n",

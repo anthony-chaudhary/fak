@@ -244,8 +244,13 @@ func Run(ctx context.Context, t *Trace, opt Options) (*metrics.Report, error) {
 
 	if opt.LiveTranscript != "" {
 		rep.LiveSeam = opt.LiveTranscript
+		rep.TokenDeltaProvenance = "WITNESSED"
+		rep.DollarValuationBasis = "BILLED"
 	} else {
 		rep.LiveSeam = "live_seam_unverified" // honest RED flag (unit 46)
+		rep.TokenDeltaProvenance = "SIMULATED"
+		rep.DollarValuationBasis = "MODELED"
+		rep.DollarRateTable = "$3/M in, $15/M out (illustrative)"
 	}
 	return rep, nil
 }

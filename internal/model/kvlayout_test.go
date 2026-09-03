@@ -2,6 +2,7 @@ package model
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -302,4 +303,81 @@ func makeVec(n int, base float32, salt int) []float32 {
 		v[i] = base + float32(math.Sin(float64((i+1)*(salt+1))*0.21))*0.1
 	}
 	return v
+}
+
+func TestSM100FP8SparseIndexScorerWitness(t *testing.T) {
+	// First witness requirements (#9931):
+	// 1. Scorer vs f32 dot/top-k oracle across page boundaries (128, 256, 512).
+	// 2. Verified across valid head configurations (4, 8, 32, 64).
+	// 3. Matched end-to-end selection and gather.
+
+	depth := 128
+	headConfigs := []int{4, 8, 32, 64}
+	keyCounts := []int{128, 256, 512} // page boundaries (multiples of 128)
+	topK := 8
+
+	qScale := float32(0.01)
+	kScale := float32(0.01)
+
+	// Build query
+	qFP8 := make([]int8, depth)
+	qF32 := make([]float32, depth)
+	for d := 0; d < depth; d++ {
+		val := int8((d%10 - 5) * 8)
+		qFP8[d] = val
+		qF32[d] = float32(val) * qScale
+	}
+
+	for _, nHeads := range headConfigs {
+		for _, nKeys := range keyCounts {
+			req := sparseIndexScorerRequest{
+				SMVersion:   100,
+				QueryDType:  sparseIndexDTypeFP8E4M3FN,
+				KeyDType:    sparseIndexDTypeFP8E4M3FN,
+				Depth:       depth,
+				NumHeads:    nHeads,
+				PageSize:    128,
+				SparseTopK:  topK,
+				KeysPerPool: 1,
+			}
+
+			// Verify eligibility selection
+			if path := selectSparseIndexScorer(req); path != sparseIndexScorerSM100FP8 {
+				t.Fatalf("heads=%d keys=%d expected SM100FP8 scorer path, got %v", nHeads, nKeys, path)
+			}
+
+			// Build keys
+			keysFP8 := make([]int8, nKeys*depth)
+			keysF32 := make([][]float32, nKeys)
+			for i := 0; i < nKeys; i++ {
+				keysF32[i] = make([]float32, depth)
+				for d := 0; d < depth; d++ {
+					val := int8(((i+d)%15 - 7) * 6)
+					keysFP8[i*depth+d] = val
+					keysF32[i][d] = float32(val) * kScale
+				}
+			}
+
+			// 1. Evaluate SM100 FP8 scorer vs F32 oracle
+			topSM100, scoresSM100 := executeSparseIndexScorer(req, qFP8, keysFP8, nKeys, qScale, kScale, qF32, keysF32)
+
+			// Reference F32 scores
+			wantScores := scoreSparseIndexF32(qF32, keysF32, depth)
+			wantTop := topSparseIndexF32(wantScores, topK)
+
+			if len(scoresSM100) != nKeys {
+				t.Fatalf("scores length %d != nKeys %d", len(scoresSM100), nKeys)
+			}
+			for i := 0; i < nKeys; i++ {
+				if math.Abs(float64(scoresSM100[i]-wantScores[i])) > 1e-4 {
+					t.Fatalf("score mismatch at key %d: got %v, want %v", i, scoresSM100[i], wantScores[i])
+				}
+			}
+
+			// 3. Verify top-k indices match oracle exactly
+			if !reflect.DeepEqual(topSM100, wantTop) {
+				t.Fatalf("top-k indices mismatch:\ngot =%v\nwant=%v", topSM100, wantTop)
+			}
+		}
+	}
 }

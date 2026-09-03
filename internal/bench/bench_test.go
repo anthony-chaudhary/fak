@@ -156,4 +156,44 @@ func TestRun_BothArmsPopulated_NoSpawn(t *testing.T) {
 	if rep.LiveSeam != "live_seam_unverified" {
 		t.Errorf("LiveSeam = %q, want %q", rep.LiveSeam, "live_seam_unverified")
 	}
+	if rep.TokenDeltaProvenance != "SIMULATED" {
+		t.Errorf("TokenDeltaProvenance = %q, want SIMULATED", rep.TokenDeltaProvenance)
+	}
+	if rep.DollarValuationBasis != "MODELED" {
+		t.Errorf("DollarValuationBasis = %q, want MODELED", rep.DollarValuationBasis)
+	}
+}
+
+func TestOfflineBenchmarkProvenanceAndValuationBasis(t *testing.T) {
+	ctx := context.Background()
+	tr, err := LoadTrace(smokeTrace)
+	if err != nil {
+		t.Fatalf("LoadTrace: %v", err)
+	}
+
+	rep, err := Run(ctx, tr, Options{EngineID: "mock", EngineModel: "mock-offline"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.TokenDeltaProvenance != "SIMULATED" {
+		t.Errorf("token_delta_provenance = %q, want SIMULATED", rep.TokenDeltaProvenance)
+	}
+	if rep.DollarValuationBasis != "MODELED" {
+		t.Errorf("dollar_valuation_basis = %q, want MODELED", rep.DollarValuationBasis)
+	}
+	if rep.DollarRateTable == "" {
+		t.Error("dollar_rate_table is empty")
+	}
+
+	badRep := *rep
+	badRep.TokenDeltaProvenance = "WITNESSED"
+	if err := badRep.Validate(tr.WorkloadHash(), tr.WorkloadHash()); err == nil {
+		t.Error("Validate should refuse live_seam_unverified with WITNESSED provenance")
+	}
+
+	badRep2 := *rep
+	badRep2.DollarValuationBasis = "BILLED"
+	if err := badRep2.Validate(tr.WorkloadHash(), tr.WorkloadHash()); err == nil {
+		t.Error("Validate should refuse live_seam_unverified with BILLED valuation")
+	}
 }
