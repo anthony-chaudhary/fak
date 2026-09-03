@@ -103,11 +103,16 @@ func isExactGLM5NextConfig(raw []byte) bool {
 	}
 	vision := envelope.VisionConfig
 	quant := envelope.QuantizationConfig
-	return vision.ModelType == "glm5_next_vision" && vision.Depth == 24 && vision.HiddenSize == 1024 &&
+	isVisionValid := vision.ModelType == "glm5_next_vision" && vision.Depth == 24 && vision.HiddenSize == 1024 &&
 		vision.IntermediateSize == 4096 && vision.NumHeads == 16 && vision.ImageSize == 448 &&
 		vision.PatchSize == 14 && vision.SpatialMergeSize == 2 && vision.TemporalPatchSize == 2 &&
-		vision.OutHiddenSize == 4096 && vision.ProjectionIntermediateSize == 10240 &&
-		quant.Method == "fp8" && quant.Format == "e4m3" && quant.ActivationScheme == "dynamic"
+		vision.OutHiddenSize == 4096 && vision.ProjectionIntermediateSize == 10240
+	if !isVisionValid {
+		return false
+	}
+	isFP8 := quant.Method == "fp8" && quant.Format == "e4m3" && quant.ActivationScheme == "dynamic"
+	isBF16 := quant.Method == "" && quant.Format == "" && quant.ActivationScheme == ""
+	return isFP8 || isBF16
 }
 
 func glm5NextCadence(layerTypes []string, kda, full []int) bool {

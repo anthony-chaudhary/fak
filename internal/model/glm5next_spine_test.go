@@ -46,8 +46,11 @@ func TestGLM5NextIdentityRejectsNearMissesAndAliases(t *testing.T) {
 		"wrong cadence": func(v map[string]any) {
 			v["text_config"].(map[string]any)["layer_types"].([]any)[3] = "linear_attention"
 		},
-		"wrong context":        func(v map[string]any) { v["text_config"].(map[string]any)["max_position_embeddings"] = float64(131072) },
-		"missing fp8 metadata": func(v map[string]any) { delete(v, "quantization_config") },
+		"wrong context":     func(v map[string]any) { v["text_config"].(map[string]any)["max_position_embeddings"] = float64(131072) },
+		"unsupported quant": func(v map[string]any) { v["quantization_config"] = map[string]any{"quant_method": "awq"} },
+		"unsupported format": func(v map[string]any) {
+			v["quantization_config"] = map[string]any{"quant_method": "fp8", "fmt": "e5m2", "activation_scheme": "dynamic"}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -66,6 +69,39 @@ func TestGLM5NextIdentityRejectsNearMissesAndAliases(t *testing.T) {
 		})
 	}
 	_ = base
+}
+
+func TestGLM5NextAcceptsUnquantizedBF16Envelope(t *testing.T) {
+	raw := readGLM5NextFixture(t, "config.json")
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	// Delete quantization_config for the official reference BF16 checkpoint
+	delete(v, "quantization_config")
+	bf16Bytes, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isExactGLM5NextConfig(bf16Bytes) {
+		t.Fatal("unquantized BF16 GLM5Next config was not recognized as exact GLM5Next")
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(bf16Bytes, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.GLM5Next {
+		t.Fatal("unquantized BF16 GLM5Next config did not set cfg.GLM5Next")
+	}
+	path, err := ClassifyForwardPath(cfg, nil)
+	if path != "" {
+		t.Fatalf("path = %q, want empty", path)
+	}
+	var unsupported *GLM5NextUnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("expected *GLM5NextUnsupportedError, got %T: %v", err, err)
+	}
 }
 
 func TestGLM5NextTensorInventoryPinned(t *testing.T) {
