@@ -798,6 +798,21 @@ This page was checked against the current OpenAI Codex manual on 2026-06-25:
 
 fak-side references:
 
+## Skill portability: sharing skills with OpenCode and Claude Code (#10689)
+
+Codex skills stored under `.agents/skills/<name>/SKILL.md` conform to the [Agent Skills](https://agentskills.io) specification. These skills can be shared and imported into OpenCode:
+
+1. **Discovery Architecture**:
+   - **Codex**: Discovers skills in `.agents/skills/` (and `$CODEX_HOME/skills/`).
+   - **OpenCode**: Discovers skills configured in `opencode.json` via `"skills": { "paths": [".agents/skills"] }`.
+   - **Claude Code**: Uses `.claude/skills/<name>/SKILL.md` as canonical definitions.
+
+2. **Synchronization**:
+   Run `go run ./cmd/fak-project-assets sync --json` to synchronize canonical skill definitions across `.claude/skills` and `.agents/skills`. Run `go run ./cmd/fak-project-assets parity --json` to verify that all skills across harnesses are in parity (`zero_unexplained_gaps: true`).
+
+3. **Portability Layer**:
+   See the comprehensive guide in [`docs/integrations/opencode.md`](opencode.md#skill-portability-importing-skills-into-opencode-10689-10690-10691) and [`docs/integrations/project-assets.md`](project-assets.md).
+
 - [Integration index](README.md)
 - [Harness integration acceptance checklist](harness-acceptance-checklist.md)
 - [MCP example](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md)
