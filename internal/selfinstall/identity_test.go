@@ -97,11 +97,11 @@ func TestAdvanceInstallIdentityDigestEqualRefreshPreservesAppVersion(t *testing.
 	if state.MetadataGeneration != 2 || state.SelectedSourceCommit != cacheTestCommitB {
 		t.Fatalf("metadata refresh = %+v", state)
 	}
-	if state.AppVersion != "1.2.3" {
+	if state.AppVersion != "1.2.3" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("digest-equal app version = %q, want preserved 1.2.3", state.AppVersion)
 	}
 	active, ok := VerifiedArtifact(state, artifactDigest)
-	if !ok || active.ArtifactSourceCommit != cacheTestCommitA || active.AppVersion != "1.2.3" {
+	if !ok || active.ArtifactSourceCommit != cacheTestCommitA || active.AppVersion != "1.2.3" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("active verified slot = %+v ok=%v", active, ok)
 	}
 
@@ -110,7 +110,7 @@ func TestAdvanceInstallIdentityDigestEqualRefreshPreservesAppVersion(t *testing.
 		t.Fatal(err)
 	}
 	if persisted.MetadataGeneration != 2 || persisted.SelectedSourceCommit != cacheTestCommitB ||
-		persisted.ArtifactDigest != artifactDigest || persisted.AppVersion != "1.2.3" {
+		persisted.ArtifactDigest != artifactDigest || persisted.AppVersion != "1.2.3" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("persisted identity = %+v", persisted)
 	}
 }
@@ -151,11 +151,11 @@ func TestAdvanceInstallIdentityActivationKeepsRollbackAsVerifiedSlot(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.AppVersion != "2.0.0" || state.CurrentDigest != newDigest {
+	if state.AppVersion != "2.0.0" || state.CurrentDigest != newDigest { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("activated identity = %+v", state)
 	}
 	rollback, ok := VerifiedArtifact(state, oldDigest)
-	if !ok || rollback.Path != rollbackPath || rollback.AppVersion != "1.0.0" {
+	if !ok || rollback.Path != rollbackPath || rollback.AppVersion != "1.0.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("rollback slot = %+v ok=%v", rollback, ok)
 	}
 	if _, ok := VerifiedArtifact(state, "1.0.0"); ok {
