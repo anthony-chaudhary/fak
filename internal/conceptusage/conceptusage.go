@@ -75,10 +75,15 @@ const (
 // (AGENTS.md): a ship commit ends with a `(fak <leaf>)` trailer, uses a Conventional
 // type, and leads after `type(scope):` with a verb that BINDS a witnessable effect.
 var (
-	stampRe = regexp.MustCompile(`\(fak [a-z0-9][a-z0-9-]*\)\s*$`)
-	convRe  = regexp.MustCompile(`(?i)^(feat|fix|docs|test|refactor|perf|chore|build|ci|style|add)(\([^)]*\))?!?:\s`)
-	bindRe  = regexp.MustCompile(`(?i)^\w+(\([^)]*\))?!?:\s*(add|fix|implement|wire|port|extract|split|map|gate|fail|kill|pin|hoist|declare|resolve|exclude|treat|close|fold|route|enforce|attest|witness|cancel)\b`)
+	stampRe  = regexp.MustCompile(`\(fak [a-z0-9][a-z0-9-]*\)\s*$`)
+	convRe   = regexp.MustCompile(`(?i)^(feat|fix|docs|test|refactor|perf|chore|build|ci|style|add)(\([^)]*\))?!?:\s`)
+	bindRe   = regexp.MustCompile(`(?i)^\w+(\([^)]*\))?!?:\s*(add|fix|implement|wire|port|extract|split|map|gate|fail|kill|pin|hoist|declare|resolve|exclude|treat|close|fold|route|enforce|attest|witness|cancel)\b`)
+	exemptRe = regexp.MustCompile(`(?i)^(Merge\b|Revert\b|fixup!\b|squash!\b|amend!\b|v[0-9]+\.[0-9]+\.[0-9]+)`)
 )
+
+func isExemptCommit(subject string) bool {
+	return exemptRe.MatchString(strings.TrimSpace(subject))
+}
 
 // KPIResult aliases the shared binary criterion shape while preserving this package's API.
 type KPIResult = scorecard.BinaryResult
@@ -191,6 +196,9 @@ func gatherEvidence(opts Options) Evidence {
 		logFn = gitCommits
 	}
 	for _, c := range logFn(root, opts.CommitWindow) {
+		if isExemptCommit(c.subject) {
+			continue
+		}
 		ev.Commits++
 		if stampRe.MatchString(c.subject) {
 			ev.Stamped++
