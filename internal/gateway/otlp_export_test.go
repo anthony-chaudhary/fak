@@ -84,3 +84,44 @@ func TestOTLPExporterConfigFailClosed(t *testing.T) {
 		t.Fatalf("disabled=%v err=%v", e, err)
 	}
 }
+
+func TestOTLPExporterConcurrentEnqueueAndCloseRaceSafe(t *testing.T) {
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer collector.Close()
+
+	for iter := 0; iter < 50; iter++ {
+		e, err := newOTLPExporter(collector.URL, 16, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		// Launch concurrent enqueuers
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					e.enqueue(otlpSpan{TraceID: "test-trace", SpanID: "test-span", Name: "GET /"})
+				}
+			}()
+		}
+
+		// Launch concurrent closers (asserting idempotency and race safety)
+		for i := 0; i < 3; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_ = e.close(ctx)
+			}()
+		}
+
+		wg.Wait()
+		// Late enqueue after close should drop cleanly, never panic on closed channel
+		e.enqueue(otlpSpan{TraceID: "late-trace"})
+	}
+}
