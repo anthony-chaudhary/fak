@@ -225,3 +225,28 @@ func TestFileAdmissionAllowsReusableClaudeGoalPrompt(t *testing.T) {
 		t.Fatalf("reusable prompt must remain admissible: %#v", got)
 	}
 }
+
+func TestFileAdmission_ScriptAdmission(t *testing.T) {
+	cases := []struct {
+		rel     string
+		wantBad bool
+	}{
+		{"scripts/dogfood-opencode.ps1", true},
+		{"tools/random.ps1", true},
+		{"scripts/random.sh", true},
+		{"foo.bat", true},
+		{"tools/random.cmd", true},
+		{"test.ps1", false},
+		{"test.sh", false},
+		{"scripts/build.sh", false},
+		{"tools/build_cuda_windows.ps1", false},
+		{"internal/hooks/gate_fileadmission.go", false},
+	}
+	for _, c := range cases {
+		fr := mapReader{c.rel: "content"}
+		why := classifyFileWith(fr, c.rel)
+		if gotBad := why != ""; gotBad != c.wantBad {
+			t.Errorf("classifyFileWith(%q) bad=%v want=%v (why=%q)", c.rel, gotBad, c.wantBad, why)
+		}
+	}
+}
