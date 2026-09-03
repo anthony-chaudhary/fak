@@ -128,7 +128,7 @@ def _git(args, cwd=None):
     that takes the sweep of every other repository down with it."""
     try:
         p = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True
+            ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
     except OSError as e:
         return 127, "", str(e)

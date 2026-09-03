@@ -71,6 +71,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Codex `UserPromptSubmit` permissive, guarded-child, and hardened modes; capability floor; `fak sessions codex-hook-install`; and `fak sessions codex-loop-hook --hardened`: [`docs/integrations/openai-codex.md#userpromptsubmit-modes`](docs/integrations/openai-codex.md#userpromptsubmit-modes)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
+- Terminal-Bench 4 reproduction manual and parity envelope specification: [`docs/benchmarks/TERMINAL-BENCH-4-REPRODUCTION.md`](docs/benchmarks/TERMINAL-BENCH-4-REPRODUCTION.md)
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
 - Enterprise-gateway governance parity — what `fak serve` covers today against the redaction, per-key rate-limit, and provider-failover checklist, and the two gaps still open: [`docs/gateway-governance-parity-audit.md`](docs/gateway-governance-parity-audit.md)
 - Out-of-band operator control of a RUNNING session — the closed control vocabulary (`steer`/`redirect`/`pause`/`resume`/`cancel`/`terminate`/`throttle`/`budget`/`priority`), each op's capability + boundary + witness-of-applied + closed refusal, the `fak session` / `fak signal` / `fak ps` front door, and why `fak steering` / `fak steer` are an unrelated name collision: [docs/operator-control-plane.md](docs/operator-control-plane.md)

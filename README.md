@@ -27,7 +27,7 @@ fak guard -- codex
 
 The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
-## Latest hardware results — 2026-08-28
+## Latest hardware results — 2026-09-03
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be

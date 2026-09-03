@@ -43,7 +43,10 @@ var securityCriticalPrefixes = []string{
 // not a green mock. Case-insensitive; matched anywhere in an added line so staging the `/verify` output
 // (which carries this header) or adding an "E2E-verified:" or "Shift-left-verified:" trailer in a
 // touched test/doc both silence the gate.
-const e2eWitnessTrailer = "e2e-verified:"
+const (
+	e2eWitnessTrailer       = "e2e-verified:"
+	reasonShiftLeftUnproven = "SHIFT_LEFT_UNPROVEN"
+)
 
 // matchSecurityPrefix reports whether p (a repo-relative staged path) lives under one of the
 // security-critical package trees, and returns the matched prefix. Backslashes are normalized to

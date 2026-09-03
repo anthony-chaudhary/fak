@@ -1,0 +1,127 @@
+{
+  "schema": "fak.qwen38.m3pro-metal-witness/1",
+  "observed_at": "2026-09-03T18:00:00Z",
+  "commit": "d5392548d79a09d05662e52f503c3c9745ac087d",
+  "hardware": {
+    "soc": "Apple M3 Pro",
+    "cpu_cores": 12,
+    "gpu_cores": 18,
+    "memory_bytes": 38654705664,
+    "memory_gib": 36,
+    "os": "macOS",
+    "arch": "darwin/arm64"
+  },
+  "runtime": {
+    "engine": "fak-native",
+    "backend": "metal",
+    "go_version": "go1.26.6",
+    "threads": "GOMAXPROCS=12"
+  },
+  "benchmarks": {
+    "multivector_gemv_crossover": {
+      "target": "BenchmarkQ4KGEMVBatchCrossover",
+      "shapes": {
+        "hidden_5120x5120": {
+          "p1": { "repeated_gemv_ns": 340610, "routed_batch_ns": 340277, "gemm_ns": 2941689, "speedup": 1.00, "vectors_per_sec": 2939 },
+          "p4": { "repeated_gemv_ns": 921351, "routed_batch_ns": 542950, "gemm_ns": 3008908, "speedup": 1.70, "vectors_per_sec": 7367 },
+          "p8": { "repeated_gemv_ns": 1647053, "routed_batch_ns": 956723, "gemm_ns": 2928708, "speedup": 1.72, "vectors_per_sec": 8362 },
+          "p16": { "repeated_gemv_ns": 3565604, "routed_batch_ns": 3087903, "gemm_ns": 3021578, "speedup": 1.15, "gemm_vs_repeated": 1.18, "vectors_per_sec": 5295 }
+        },
+        "ffn_up_17408x5120": {
+          "p1": { "repeated_gemv_ns": 807182, "routed_batch_ns": 775897, "gemm_ns": 8315068, "speedup": 1.04, "vectors_per_sec": 1289 },
+          "p4": { "repeated_gemv_ns": 2580408, "routed_batch_ns": 1507501, "gemm_ns": 8500602, "speedup": 1.71, "vectors_per_sec": 2653 },
+          "p8": { "repeated_gemv_ns": 4943379, "routed_batch_ns": 2755218, "gemm_ns": 8358315, "speedup": 1.79, "vectors_per_sec": 2904 },
+          "p16": { "repeated_gemv_ns": 9555615, "routed_batch_ns": 9464243, "gemm_ns": 8530519, "speedup": 1.01, "gemm_vs_repeated": 1.12, "vectors_per_sec": 1876 }
+        }
+      }
+    },
+    "fused_mlp": {
+      "target": "BenchmarkMetalQ4KFusedMLP",
+      "shapes": { "h": 5120, "i": 17408 },
+      "fused": { "ns_per_op": 1962469, "ms_per_mlp": 1.962, "bandwidth_gbps": 76.64, "allocs_per_op": 1 },
+      "separate": { "ns_per_op": 3175337, "ms_per_mlp": 3.175, "bandwidth_gbps": 47.37, "allocs_per_op": 3 },
+      "speedup": 1.62,
+      "latency_saved_ms": 1.213
+    },
+    "dispatch_overhead": {
+      "tiny_256x256_ns": 134837,
+      "single_5120x5120_ns": 353753,
+      "batched_64_per_gemv_ns": 185626,
+      "batch_speedup": 1.91,
+      "launch_overhead_fraction": 0.381
+    },
+    "prefill_psweep": {
+      "target": "BenchmarkMetalQ4KGemmPSweep",
+      "shape": [17408, 5120],
+      "points": [
+        { "p": 22, "ms_per_op": 9.533, "gflops": 411.4 },
+        { "p": 64, "ms_per_op": 9.160, "gflops": 1245.0 },
+        { "p": 128, "ms_per_op": 17.965, "gflops": 1270.0 },
+        { "p": 256, "ms_per_op": 35.785, "gflops": 1275.0 },
+        { "p": 512, "ms_per_op": 71.321, "gflops": 1280.0 },
+        { "p": 1024, "ms_per_op": 142.083, "gflops": 1285.0 },
+        { "p": 2048, "ms_per_op": 283.799, "gflops": 1286.0 }
+      ]
+    },
+    "paged_swap_codec": {
+      "target": "BenchmarkQwenHybridPagedSwapCodec",
+      "hybrid_layers": 64,
+      "payload_bytes": 158488532,
+      "fork_share": { "target": "BenchmarkPagedKVForkShare", "ns_per_op": 264.7, "allocs": 1, "bytes": 1024 },
+      "encode": { "ms_per_op": 59.64, "ns_per_byte": 0.3763, "throughput_mbps": 2657.43 },
+      "decode": { "ms_per_op": 60.02, "ns_per_byte": 0.3787, "throughput_mbps": 2640.60 }
+    },
+    "m2_sequence_prefill_vs_control": {
+      "target": "BenchmarkMetalQwen35P32SequenceVsControl",
+      "tokens": 32,
+      "control_per_op": {
+        "ns_per_op": 153907418,
+        "ms_per_prefill": 153.91,
+        "bytes_per_op": 2343074,
+        "allocs_per_op": 1283
+      },
+      "candidate_sequence": {
+        "ns_per_op": 19725282,
+        "ms_per_prefill": 19.73,
+        "bytes_per_op": 616115,
+        "allocs_per_op": 412
+      },
+      "speedup": 7.80,
+      "latency_saved_ms": 134.18,
+      "latency_reduction_pct": 87.18,
+      "allocations_reduction_pct": 67.89,
+      "heap_bytes_reduction_pct": 73.71
+    },
+    "resident_inference": {
+      "qwen35_08b_metal": {
+        "load_ms": 1658.70,
+        "prefill_tok_per_sec": { "p16": 10.51, "p64": 63.12, "p256": 120.63 },
+        "decode_tok_per_sec": 11.42,
+        "decode_ms_per_tok": 87.57,
+        "max_rss_mb": 4864.70
+      },
+      "qwen35_08b_cpu": {
+        "load_ms": 1761.49,
+        "prefill_tok_per_sec": { "p16": 43.96, "p64": 88.05, "p256": 92.58 },
+        "decode_tok_per_sec": 10.86,
+        "decode_ms_per_tok": 92.06,
+        "max_rss_mb": 4546.83
+      },
+      "qwen35_4b_metal": {
+        "load_ms": 4956.06,
+        "prefill_tok_per_sec": { "p16": 8.20, "p64": 29.89, "p256": 35.24 },
+        "decode_tok_per_sec": 3.90,
+        "decode_ms_per_tok": 256.31,
+        "max_rss_mb": 14337.86
+      }
+    }
+  },
+  "memory_safety": {
+    "swap_used_before_bytes": 37695954944,
+    "swap_used_after_bytes": 37695954944,
+    "swap_delta_bytes": 0,
+    "swapouts_delta": 0,
+    "physical_free_after_gib": 19.61,
+    "verdict": "SAFE_ZERO_SWAP_GROWTH"
+  }
+}

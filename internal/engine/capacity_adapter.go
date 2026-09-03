@@ -100,10 +100,30 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 	}
 	d := mv.Decision
 	switch d.Action {
-	case cachemeta.ActionKeep, cachemeta.ActionPromote:
-		// Not this adapter's control path: keep is a no-op; promote is a page-IN
-		// (RestoreSpan), the reverse direction. Surface that it was not applied.
+	case cachemeta.ActionKeep:
+		// Keep is a no-op; surface that no placement action was executed.
 		return PlacementResult{Applied: false}, nil
+	case cachemeta.ActionPromote:
+		// Promote is a page-IN (RestoreSpan), the reverse direction of demote-not-evict (#1469).
+		restorer := &RestoreAdapter{KV: a.KV, Recorder: a.Recorder}
+		res, err := restorer.Restore(ctx, RestoreMove{
+			SpanDigest:   mv.SpanDigest,
+			ModelID:      mv.ModelID,
+			TokenizerID:  mv.TokenizerID,
+			PositionMode: mv.PositionMode,
+			FromTier:     d.FromTier,
+			ToTier:       d.ToTier,
+			Owner:        mv.Owner,
+			Lease:        mv.Lease,
+		})
+		if err != nil {
+			return PlacementResult{Applied: false}, err
+		}
+		return PlacementResult{
+			Recorded: res.Recorded,
+			Evicted:  0,
+			Applied:  res.Restored,
+		}, nil
 	case cachemeta.ActionDemote, cachemeta.ActionSpill, cachemeta.ActionCompressDemote, cachemeta.ActionEvict:
 		// The drop-from-hot-tier family — executed below. A compress-demote stages a
 		// lossy COMPRESSED span to the colder tier (its smaller EstMoveBytes) before the

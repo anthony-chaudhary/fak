@@ -90,7 +90,7 @@ type Response struct {
 	Clarifications *ClarificationPlan `json:"clarifications,omitempty"`
 }
 
-const DefaultResultLimit = 50
+const DefaultResultLimit = 5
 
 type Request struct {
 	Root           string

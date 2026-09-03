@@ -1017,6 +1017,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchSystemBaseline(os.Stdout, os.Stderr, argv[1:]))
 		case "local":
 			os.Exit(runBenchLocal(os.Stdout, os.Stderr, argv[1:]))
+		case "tb4":
+			os.Exit(runBenchTB4(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)

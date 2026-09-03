@@ -117,6 +117,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunIdeaScout(stdout, stderr, argv[1:])
 	case "borrow-provenance":
 		return devcmd.RunBorrowProvenance(stdout, stderr, argv[1:])
+	case "perfscout":
+		return devcmd.RunPerfScout(stdout, stderr, argv[1:])
 	case "customization-index":
 		return devcmd.RunCustomizationIndex(stdout, stderr, argv[1:])
 	default:
@@ -172,6 +174,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  study-tickets <build|validate> [flags] construct audited study ticket closure")
 	fmt.Fprintln(w, "  study-adjacency <validate|render> [flags] audit related-runtime adjacency")
 	fmt.Fprintln(w, "  idea-scout [flags]                     plan deduplicated research issues")
+	fmt.Fprintln(w, "  perfscout [flags]                      search and inventory Qwen 3.8 & GLM 5.3 Flash repos")
 	fmt.Fprintln(w, "  borrow-provenance <pin|verify> [flags] bind borrowed code to upstream evidence")
 	fmt.Fprintln(w, "  customization-index [flags]            inspect agent customization research")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")

@@ -16,13 +16,18 @@ import (
 // with NO live model or GPU — the same offline discipline the rest of the engine tests
 // use. RestoreSpan answers a typed MISS, like the in-process default.
 type fakeCapacityKV struct {
-	len        int
-	modelID    string
-	stageOut   abi.KVResidencyOutcome
-	stageErr   error
-	stageBytes int64
-	stageCalls int
-	evicts     []struct{ from, n int }
+	len              int
+	modelID          string
+	stageOut         abi.KVResidencyOutcome
+	stageErr         error
+	stageBytes       int64
+	stageCalls       int
+	restoreOut       abi.KVResidencyOutcome
+	restoreErr       error
+	restoreBytes     int64
+	restorePositions int
+	restoreCalls     int
+	evicts           []struct{ from, n int }
 }
 
 func (f *fakeCapacityKV) Len() int                    { return f.len }
@@ -40,7 +45,19 @@ func (f *fakeCapacityKV) StageSpan(_ context.Context, digest string, _, n int) (
 	return abi.KVResidency{Outcome: f.stageOut, Digest: digest, Positions: n, BytesMoved: f.stageBytes}, nil
 }
 func (f *fakeCapacityKV) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
-	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest}, nil
+	f.restoreCalls++
+	if f.restoreErr != nil {
+		return abi.KVResidency{}, f.restoreErr
+	}
+	out := f.restoreOut
+	if out == abi.KVResidencyUnknown {
+		out = abi.KVResidencyMiss
+	}
+	pos := f.restorePositions
+	if pos == 0 && out == abi.KVResidencyOK {
+		pos = 4
+	}
+	return abi.KVResidency{Outcome: out, Digest: digest, Positions: pos, BytesMoved: f.restoreBytes}, nil
 }
 
 type placementAwareKV struct {
@@ -283,26 +300,86 @@ func TestCapacityAdapterEvictSkipsStaging(t *testing.T) {
 	}
 }
 
-// A promote (KVRestore) is the reverse direction and a keep is a no-op: neither is this
-// adapter's control path, so neither touches the live cache.
-func TestCapacityAdapterPromoteAndKeepNotApplied(t *testing.T) {
-	for _, action := range []cachemeta.PlacementAction{cachemeta.ActionPromote, cachemeta.ActionKeep} {
-		kv := &fakeCapacityKV{len: 4096, stageOut: abi.KVResidencyOK}
-		adp := &engine.CapacityAdapter{KV: kv}
+// A keep is a no-op: it is not executed and does not touch the live cache.
+func TestCapacityAdapterKeepNotApplied(t *testing.T) {
+	kv := &fakeCapacityKV{len: 4096, stageOut: abi.KVResidencyOK}
+	adp := &engine.CapacityAdapter{KV: kv}
+	res, err := adp.Execute(context.Background(), engine.PlacementMove{
+		Decision:   cachemeta.PlacementDecision{Action: cachemeta.ActionKeep, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierHBM},
+		SpanDigest: "span-E", From: 0, N: 4,
+	})
+	if err != nil {
+		t.Fatalf("Keep: unexpected err %v", err)
+	}
+	if res.Applied {
+		t.Fatalf("Keep must not be applied by this adapter")
+	}
+	if kv.stageCalls != 0 || len(kv.evicts) != 0 || kv.restoreCalls != 0 {
+		t.Fatalf("Keep must not touch the live cache: stage=%d evicts=%v restore=%d", kv.stageCalls, kv.evicts, kv.restoreCalls)
+	}
+}
+
+// A promote (KVRestore) executes RestoreSpan via RestoreAdapter, recording a typed KVRestore event (#1469).
+func TestCapacityAdapterPromoteExecutesRestore(t *testing.T) {
+	t.Run("promote_success", func(t *testing.T) {
+		kv := &fakeCapacityKV{len: 4096, restoreOut: abi.KVResidencyOK, restoreBytes: 1024, restorePositions: 4}
+		rec := engine.NewCacheEventRecorder()
+		adp := &engine.CapacityAdapter{KV: kv, Recorder: rec}
 		res, err := adp.Execute(context.Background(), engine.PlacementMove{
-			Decision:   cachemeta.PlacementDecision{Action: action, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierHBM},
-			SpanDigest: "span-E", From: 0, N: 4,
+			Decision:   cachemeta.PlacementDecision{Action: cachemeta.ActionPromote, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierHBM},
+			SpanDigest: "span-promote", From: 0, N: 4, ModelID: "m",
 		})
 		if err != nil {
-			t.Fatalf("%s: unexpected err %v", action, err)
+			t.Fatalf("Promote: unexpected err %v", err)
+		}
+		if !res.Applied {
+			t.Fatalf("Promote with OK outcome must be applied")
+		}
+		if kv.restoreCalls != 1 {
+			t.Fatalf("expected 1 restore call, got %d", kv.restoreCalls)
+		}
+		if res.Recorded.Verdict.Kind != cachemeta.LookupHit {
+			t.Fatalf("expected LookupHit verdict, got %s", res.Recorded.Verdict.Kind)
+		}
+	})
+
+	t.Run("promote_miss", func(t *testing.T) {
+		kv := &fakeCapacityKV{len: 4096, restoreOut: abi.KVResidencyMiss}
+		rec := engine.NewCacheEventRecorder()
+		adp := &engine.CapacityAdapter{KV: kv, Recorder: rec}
+		res, err := adp.Execute(context.Background(), engine.PlacementMove{
+			Decision:   cachemeta.PlacementDecision{Action: cachemeta.ActionPromote, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierHBM},
+			SpanDigest: "span-miss", From: 0, N: 4, ModelID: "m",
+		})
+		if err != nil {
+			t.Fatalf("Promote: unexpected err %v", err)
 		}
 		if res.Applied {
-			t.Fatalf("%s must not be applied by this adapter", action)
+			t.Fatalf("Promote with Miss outcome must not be applied")
 		}
-		if kv.stageCalls != 0 || len(kv.evicts) != 0 {
-			t.Fatalf("%s must not touch the live cache: stage=%d evicts=%v", action, kv.stageCalls, kv.evicts)
+		if res.Recorded.Verdict.Reason != cachemeta.ReasonRestoreMiss {
+			t.Fatalf("expected ReasonRestoreMiss, got %s", res.Recorded.Verdict.Reason)
 		}
-	}
+	})
+
+	t.Run("promote_fault", func(t *testing.T) {
+		kv := &fakeCapacityKV{len: 4096, restoreErr: errors.New("io error")}
+		rec := engine.NewCacheEventRecorder()
+		adp := &engine.CapacityAdapter{KV: kv, Recorder: rec}
+		res, err := adp.Execute(context.Background(), engine.PlacementMove{
+			Decision:   cachemeta.PlacementDecision{Action: cachemeta.ActionPromote, FromTier: cachemeta.TierDRAM, ToTier: cachemeta.TierHBM},
+			SpanDigest: "span-fault", From: 0, N: 4, ModelID: "m",
+		})
+		if err != nil {
+			t.Fatalf("Promote: unexpected err %v", err)
+		}
+		if res.Applied {
+			t.Fatalf("Promote with Fault outcome must not be applied")
+		}
+		if res.Recorded.Verdict.Reason != cachemeta.ReasonResidencyFault {
+			t.Fatalf("expected ReasonResidencyFault, got %s", res.Recorded.Verdict.Reason)
+		}
+	})
 }
 
 // A nil KV backend is a typed error, not a nil-deref — the adapter cannot execute

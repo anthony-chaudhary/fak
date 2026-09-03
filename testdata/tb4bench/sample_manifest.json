@@ -1,0 +1,28 @@
+{
+  "benchmark": "terminal-bench-4",
+  "version": "1.0",
+  "tasks": [
+    {
+      "task_id": "tb4-synth-01-syntax-fix",
+      "category": "refactor",
+      "prompt": "Fix the syntax error in main.py so it prints 'hello world'.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo 'print(\"hello world\"' > main.py",
+      "verification_oracle": "#!/bin/bash\nexit 0\n",
+      "verification_oracle_hash": "sha256:c87c7a722d59a266b300850637a1cb77b46cc67c5add8a66aa9e79e198955808",
+      "timeout_seconds": 60,
+      "budget_turns": 10
+    },
+    {
+      "task_id": "tb4-synth-02-git-rebase",
+      "category": "git",
+      "prompt": "Rebase feature branch onto main and resolve conflicts.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "git init",
+      "verification_oracle": "#!/bin/bash\nexit 0\n",
+      "verification_oracle_hash": "sha256:c87c7a722d59a266b300850637a1cb77b46cc67c5add8a66aa9e79e198955808",
+      "timeout_seconds": 120,
+      "budget_turns": 15
+    }
+  ]
+}

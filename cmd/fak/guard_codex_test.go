@@ -317,6 +317,7 @@ func TestGuardCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
 // deprecated for future removal. This test pins the exact emitted sequence.
 func TestGuardCodexConfigArgs(t *testing.T) {
 	t.Setenv(guardCodexReasoningEffortEnv, "")
+	t.Setenv("CODEX_HOME", t.TempDir())
 	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "")
 	want := []string{
 		"-c", "model_provider=fak",
@@ -356,6 +357,100 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 	// wire_api is responses on every code path for the first-class guard route.
 	if !containsArg(got, `model_providers.fak.wire_api="responses"`) {
 		t.Errorf("guardCodexConfigArgs must pin wire_api=\"responses\": %v", got)
+	}
+}
+
+func TestGuardCodexConfigArgsDisablesFakMCPServerWhenPresent(t *testing.T) {
+	t.Setenv(guardCodexReasoningEffortEnv, "")
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	content := `[model_providers.fak]
+name = "fak"
+
+[mcp_servers.fak]
+command = "fak"
+args = ["serve", "--stdio"]
+`
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("via codexHome arg", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "", dir)
+		if !containsArg(got, "mcp_servers.fak.enabled=false") {
+			t.Errorf("expected mcp_servers.fak.enabled=false when [mcp_servers.fak] is present: %v", got)
+		}
+		// Confirm mcp_servers.fak_guard.url is still emitted
+		if !containsArg(got, `mcp_servers.fak_guard.url="http://127.0.0.1:8137/mcp"`) {
+			t.Errorf("expected mcp_servers.fak_guard.url to be emitted: %v", got)
+		}
+	})
+
+	t.Run("via CODEX_HOME env", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", dir)
+		got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "")
+		if !containsArg(got, "mcp_servers.fak.enabled=false") {
+			t.Errorf("expected mcp_servers.fak.enabled=false when [mcp_servers.fak] is present: %v", got)
+		}
+	})
+
+	t.Run("omitted when mcp_servers.fak is absent", func(t *testing.T) {
+		emptyDir := t.TempDir()
+		emptyCfg := filepath.Join(emptyDir, "config.toml")
+		if err := os.WriteFile(emptyCfg, []byte(`[mcp_servers.node_repl]
+command = "node"
+`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "", emptyDir)
+		if containsArg(got, "mcp_servers.fak.enabled=false") {
+			t.Errorf("unexpected mcp_servers.fak.enabled=false when [mcp_servers.fak] is absent: %v", got)
+		}
+	})
+}
+
+func TestGuardCodexMCPConfigSuppressesDuplicateFak(t *testing.T) {
+	t.Setenv(guardCodexReasoningEffortEnv, "")
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	cfg := filepath.Join(dir, "config.toml")
+	content := `[mcp_servers.fak]
+command = "fak"
+args = ["serve", "--stdio"]
+`
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "", dir)
+	found := false
+	for i := 0; i < len(got)-1; i++ {
+		if got[i] == "-c" && got[i+1] == "mcp_servers.fak.enabled=false" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected guardCodexConfigArgs to include -c mcp_servers.fak.enabled=false when [mcp_servers.fak] is present: %v", got)
+	}
+}
+
+func TestGuardCodexMCPConfigOmitsFakDisabledWhenNotPresent(t *testing.T) {
+	t.Setenv(guardCodexReasoningEffortEnv, "")
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	cfg := filepath.Join(dir, "config.toml")
+	content := `[mcp_servers.other]
+command = "node"
+`
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "", dir)
+	if containsArg(got, "mcp_servers.fak.enabled=false") {
+		t.Fatalf("unexpected mcp_servers.fak.enabled=false when [mcp_servers.fak] is absent: %v", got)
 	}
 }
 

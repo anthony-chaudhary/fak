@@ -175,8 +175,12 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP tool search allowed", "mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
 		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"query":"README ownership"}`, abi.VerdictAllow},
 		{"fak MCP capabilities task query allowed", "mcp__fak__fak_capabilities", `{"query":"inspect guard loop"}`, abi.VerdictAllow},
+		{"fak_guard MCP capabilities allowed", "mcp__fak_guard__fak_capabilities", `{"query":"README ownership"}`, abi.VerdictAllow},
+		{"fak_guard MCP capabilities task query allowed", "mcp__fak_guard__fak_capabilities", `{"query":"inspect guard loop"}`, abi.VerdictAllow},
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
+		{"fak_guard MCP context value allowed", "mcp__fak_guard__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
+		{"fak_guard MCP effectful memory run remains denied by default", "mcp__fak_guard__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 		// ...but the READ-ONLY form is the one the kernel's own capability catalog hands
 		// the agent (`fak-dev capabilities` emits every memory-driver card as a ready
 		// fak_memory_run with apply=false) and the one guard-sessionstart's first-turn
@@ -185,6 +189,8 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		// same binary had just told it to call. The deny is arg-gated on apply now.
 		{"fak MCP read-only memory run allowed (apply=false is a proposal)", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":false}`, abi.VerdictAllow},
 		{"fak MCP memory run allowed with apply omitted (defaults to false)", "mcp__fak__fak_memory_run", `{"driver":"recall"}`, abi.VerdictAllow},
+		{"fak_guard MCP read-only memory run allowed (apply=false is a proposal)", "mcp__fak_guard__fak_memory_run", `{"driver":"recall","apply":false}`, abi.VerdictAllow},
+		{"fak_guard MCP memory run allowed with apply omitted (defaults to false)", "mcp__fak_guard__fak_memory_run", `{"driver":"recall"}`, abi.VerdictAllow},
 
 		// The self-service verbs witnessed as DEFAULT_DENY friction in real guarded
 		// sessions (the guard's own appeal channel among them) are admitted: pure
@@ -193,6 +199,10 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP dry-run fak_adjudicate allowed", "mcp__fak__fak_adjudicate", `{"tool":"Bash","arguments":{}}`, abi.VerdictAllow},
 		{"fak MCP kernel-mediated fak_syscall allowed (inner call re-adjudicates)", "mcp__fak__fak_syscall", `{"tool":"Read","arguments":{}}`, abi.VerdictAllow},
 		{"fak MCP memory drivers listing allowed (pure read)", "mcp__fak__fak_memory_drivers", `{}`, abi.VerdictAllow},
+		{"fak_guard MCP appeal channel fak_admit allowed", "mcp__fak_guard__fak_admit", `{"tool":"Read","intent":"appeal"}`, abi.VerdictAllow},
+		{"fak_guard MCP dry-run fak_adjudicate allowed", "mcp__fak_guard__fak_adjudicate", `{"tool":"Bash","arguments":{}}`, abi.VerdictAllow},
+		{"fak_guard MCP kernel-mediated fak_syscall allowed (inner call re-adjudicates)", "mcp__fak_guard__fak_syscall", `{"tool":"Read","arguments":{}}`, abi.VerdictAllow},
+		{"fak_guard MCP memory drivers listing allowed (pure read)", "mcp__fak_guard__fak_memory_drivers", `{}`, abi.VerdictAllow},
 		{"harness ReportFindings allowed (review output, no effect)", "ReportFindings", `{"findings":[]}`, abi.VerdictAllow},
 		{"harness DeferredToolPlaceholder allowed (schema plumbing)", "DeferredToolPlaceholder", `{}`, abi.VerdictAllow},
 

@@ -1,0 +1,163 @@
+{
+  "benchmark": "terminal-bench-4",
+  "generated_at": "2026-09-03T12:28:48Z",
+  "contract_digest": "c88ea907cd59a59dedb53755eedffc61a61f7614bd620fff6913e903f2496140",
+  "model_checkpoint": "qwen3.8-coder-7b-q4_k_m.gguf",
+  "model_sha256": "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "arm_a_metrics": {
+    "arm_id": "fak_inkernel",
+    "official": {
+      "total_tasks": 5,
+      "solved_tasks": 5,
+      "solve_rate": 1,
+      "task_pass_map": {
+        "tb4-synth-01-syntax-fix": true,
+        "tb4-synth-02-git-rebase": true,
+        "tb4-synth-03-bash-pipeline": true,
+        "tb4-synth-04-env-debug": true,
+        "tb4-synth-05-file-refactor": true
+      },
+      "mean_task_duration_seconds": 0.0056
+    },
+    "telemetry": {
+      "total_prompt_tokens": 3000,
+      "total_completion_tokens": 800,
+      "token_efficiency": 760,
+      "vdso_hits": 24
+    }
+  },
+  "arm_b_metrics": {
+    "arm_id": "opencode_llamacpp",
+    "official": {
+      "total_tasks": 5,
+      "solved_tasks": 3,
+      "solve_rate": 0.6,
+      "task_pass_map": {
+        "tb4-synth-01-syntax-fix": true,
+        "tb4-synth-02-git-rebase": true,
+        "tb4-synth-03-bash-pipeline": true,
+        "tb4-synth-04-env-debug": false,
+        "tb4-synth-05-file-refactor": false
+      },
+      "mean_task_duration_seconds": 1.5
+    },
+    "telemetry": {
+      "total_prompt_tokens": 4200,
+      "total_completion_tokens": 1100,
+      "token_efficiency": 1766.6666666666667
+    }
+  },
+  "solve_rate_delta": 0.4,
+  "token_efficiency_delta": -1006.6666666666667,
+  "win_tie_loss": {
+    "arm_a_wins": 2,
+    "both_solved": 3,
+    "both_failed": 0,
+    "arm_b_wins": 0
+  },
+  "category_breakdown": [
+    {
+      "category": "build",
+      "total_tasks": 1,
+      "arm_a_solved": 1,
+      "arm_b_solved": 0,
+      "arm_a_solve_rate": 1,
+      "arm_b_solve_rate": 0,
+      "solve_rate_delta": 1
+    },
+    {
+      "category": "git",
+      "total_tasks": 1,
+      "arm_a_solved": 1,
+      "arm_b_solved": 1,
+      "arm_a_solve_rate": 1,
+      "arm_b_solve_rate": 1,
+      "solve_rate_delta": 0
+    },
+    {
+      "category": "refactor",
+      "total_tasks": 2,
+      "arm_a_solved": 2,
+      "arm_b_solved": 1,
+      "arm_a_solve_rate": 1,
+      "arm_b_solve_rate": 0.5,
+      "solve_rate_delta": 0.5
+    },
+    {
+      "category": "sysadmin",
+      "total_tasks": 1,
+      "arm_a_solved": 1,
+      "arm_b_solved": 1,
+      "arm_a_solve_rate": 1,
+      "arm_b_solve_rate": 1,
+      "solve_rate_delta": 0
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "tb4-synth-01-syntax-fix",
+      "category": "refactor",
+      "arm_a_verdict": "SOLVED",
+      "arm_a_failure_reason": "SOLVED",
+      "arm_a_duration_ms": 7,
+      "arm_a_tokens": 0,
+      "arm_b_verdict": "SOLVED",
+      "arm_b_failure_reason": "SOLVED",
+      "arm_b_duration_ms": 1500,
+      "arm_b_tokens": 0,
+      "winner": "TIE_SOLVED"
+    },
+    {
+      "task_id": "tb4-synth-02-git-rebase",
+      "category": "git",
+      "arm_a_verdict": "SOLVED",
+      "arm_a_failure_reason": "SOLVED",
+      "arm_a_duration_ms": 10,
+      "arm_a_tokens": 0,
+      "arm_b_verdict": "SOLVED",
+      "arm_b_failure_reason": "SOLVED",
+      "arm_b_duration_ms": 1500,
+      "arm_b_tokens": 0,
+      "winner": "TIE_SOLVED"
+    },
+    {
+      "task_id": "tb4-synth-03-bash-pipeline",
+      "category": "sysadmin",
+      "arm_a_verdict": "SOLVED",
+      "arm_a_failure_reason": "SOLVED",
+      "arm_a_duration_ms": 3,
+      "arm_a_tokens": 0,
+      "arm_b_verdict": "SOLVED",
+      "arm_b_failure_reason": "SOLVED",
+      "arm_b_duration_ms": 1500,
+      "arm_b_tokens": 0,
+      "winner": "TIE_SOLVED"
+    },
+    {
+      "task_id": "tb4-synth-04-env-debug",
+      "category": "build",
+      "arm_a_verdict": "SOLVED",
+      "arm_a_failure_reason": "SOLVED",
+      "arm_a_duration_ms": 5,
+      "arm_a_tokens": 0,
+      "arm_b_verdict": "FAILED",
+      "arm_b_failure_reason": "TEST_FAILED",
+      "arm_b_duration_ms": 1500,
+      "arm_b_tokens": 0,
+      "winner": "ARM_A"
+    },
+    {
+      "task_id": "tb4-synth-05-file-refactor",
+      "category": "refactor",
+      "arm_a_verdict": "SOLVED",
+      "arm_a_failure_reason": "SOLVED",
+      "arm_a_duration_ms": 3,
+      "arm_a_tokens": 0,
+      "arm_b_verdict": "FAILED",
+      "arm_b_failure_reason": "TEST_FAILED",
+      "arm_b_duration_ms": 1500,
+      "arm_b_tokens": 0,
+      "winner": "ARM_A"
+    }
+  ]
+}

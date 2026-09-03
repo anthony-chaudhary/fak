@@ -1,0 +1,61 @@
+{
+  "schema": "fak.tb4-run-contract.v1",
+  "generated_at": "2026-09-03T12:00:00Z",
+  "benchmark": "terminal-bench-4",
+  "status": "LOCKED_EVALUATION",
+  "model": {
+    "checkpoint": "Qwen3.8-Coder-7B-Instruct-Q4_K_M.gguf",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "quantization": "Q4_K_M",
+    "format": "gguf"
+  },
+  "determinism": {
+    "temperature": 0.0,
+    "seed": 42,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_context_tokens": 32768,
+    "max_output_tokens": 4096,
+    "max_turns": 30,
+    "network_isolated": true,
+    "time_budget_seconds": 600
+  },
+  "arm_a": {
+    "id": "fak_inkernel",
+    "harness": "fak-native",
+    "serving_engine": "in-kernel",
+    "ipc": "in-process",
+    "model": {
+      "checkpoint": "Qwen3.8-Coder-7B-Instruct-Q4_K_M.gguf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quantization": "Q4_K_M",
+      "format": "gguf"
+    }
+  },
+  "arm_b": {
+    "id": "opencode_llamacpp",
+    "harness": "opencode",
+    "serving_engine": "llama-server",
+    "ipc": "http/loopback",
+    "model": {
+      "checkpoint": "Qwen3.8-Coder-7B-Instruct-Q4_K_M.gguf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quantization": "Q4_K_M",
+      "format": "gguf"
+    }
+  },
+  "task_selection": {
+    "dataset": "terminal-bench-4",
+    "version": "1.0",
+    "tasks": [
+      "tb4-synth-01-syntax-fix",
+      "tb4-synth-02-git-rebase"
+    ],
+    "parity": {
+      "same_task_ids_required": true,
+      "same_image_required": true,
+      "same_budget_required": true,
+      "same_weights_required": true
+    }
+  }
+}

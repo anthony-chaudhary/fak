@@ -50,6 +50,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -185,6 +186,7 @@ type Tree struct {
 	remoteBackend       compute.Backend
 	remoteConfig        model.Config
 	remoteSnapshotBytes int64
+	remoteBreaker       *RemoteL3Breaker
 	l3Hits              int
 	l3Misses            int
 	l3Faults            int
@@ -1098,49 +1100,58 @@ func truncatePrefix(c *model.KVCache, L int) *model.KVCache {
 
 // Stats is a snapshot of the cache's structural state for reporting.
 type Stats struct {
-	Tokens                  int   // total cached tokens (Σ edge lengths) — the LRU-budget metric
-	PrefixTokens            int   // Σ node.plen over nodes holding a kv — TRUE resident KV positions
-	Nodes                   int   // non-root nodes
-	SnapshotBytes           int64 `json:"snapshot_bytes"`
-	MaxSnapshotBytes        int64 `json:"max_snapshot_bytes"`
-	HostSnapshotBytes       int64 `json:"host_snapshot_bytes"`
-	MaxHostSnapshotBytes    int64 `json:"max_host_snapshot_bytes"`
-	DeviceSnapshotBytes     int64 `json:"device_snapshot_bytes"`
-	DeviceSnapshotHostBytes int64 `json:"device_snapshot_host_bytes"`
-	DeviceSnapshotTokens    int   `json:"device_snapshot_tokens"`
-	L1Hits                  int   `json:"l1_hits"`
-	L1Misses                int   `json:"l1_misses"`
-	L1Faults                int   `json:"l1_faults"`
-	L1HitTokens             int   `json:"l1_hit_tokens"`
-	L2Hits                  int   `json:"l2_hits"`
-	L2Misses                int   `json:"l2_misses"`
-	L2Faults                int   `json:"l2_faults"`
-	L2HitTokens             int   `json:"l2_hit_tokens"`
-	L2StageBytes            int64 `json:"l2_stage_bytes"`
-	L2RestoreBytes          int64 `json:"l2_restore_bytes"`
-	L2Evictions             int   `json:"l2_evictions"`
-	L3Enabled               bool  `json:"l3_enabled"`
-	L3ReferencedBytes       int64 `json:"l3_referenced_bytes"`
-	L3Hits                  int   `json:"l3_hits"`
-	L3Misses                int   `json:"l3_misses"`
-	L3Faults                int   `json:"l3_faults"`
-	L3HitTokens             int   `json:"l3_hit_tokens"`
-	L3StageBytes            int64 `json:"l3_stage_bytes"`
-	L3RestoreBytes          int64 `json:"l3_restore_bytes"`
-	L3StageNanos            int64 `json:"l3_stage_nanos"`
-	L3RestoreNanos          int64 `json:"l3_restore_nanos"`
-	L3StageFaults           int   `json:"l3_stage_faults"`
-	L3RestoreFaults         int   `json:"l3_restore_faults"`
-	Leaves                  int   // leaf nodes
-	MaxDepthTokens          int   // longest cached prefix
-	Evictions               int   // LRU leaf evictions performed
-	CostEvictions           int   // cost-aware leaf evictions performed
-	PageEvictions           int   `json:"page_evictions,omitempty"` // page-aware leaf evictions performed
-	PolicyEvictions         int   // EvictNode calls
-	Splits                  int   // edge splits performed
-	MaxTokens               int   // configured LRU budget (0 = unbounded)
-	EvictionPolicy          string
-	ReuseHits               int
+	Tokens                     int          // total cached tokens (Σ edge lengths) — the LRU-budget metric
+	PrefixTokens               int          // Σ node.plen over nodes holding a kv — TRUE resident KV positions
+	Nodes                      int          // non-root nodes
+	SnapshotBytes              int64        `json:"snapshot_bytes"`
+	MaxSnapshotBytes           int64        `json:"max_snapshot_bytes"`
+	HostSnapshotBytes          int64        `json:"host_snapshot_bytes"`
+	MaxHostSnapshotBytes       int64        `json:"max_host_snapshot_bytes"`
+	DeviceSnapshotBytes        int64        `json:"device_snapshot_bytes"`
+	DeviceSnapshotHostBytes    int64        `json:"device_snapshot_host_bytes"`
+	DeviceSnapshotTokens       int          `json:"device_snapshot_tokens"`
+	L1Hits                     int          `json:"l1_hits"`
+	L1Misses                   int          `json:"l1_misses"`
+	L1Faults                   int          `json:"l1_faults"`
+	L1HitTokens                int          `json:"l1_hit_tokens"`
+	L2Hits                     int          `json:"l2_hits"`
+	L2Misses                   int          `json:"l2_misses"`
+	L2Faults                   int          `json:"l2_faults"`
+	L2HitTokens                int          `json:"l2_hit_tokens"`
+	L2StageBytes               int64        `json:"l2_stage_bytes"`
+	L2RestoreBytes             int64        `json:"l2_restore_bytes"`
+	L2Evictions                int          `json:"l2_evictions"`
+	L3Enabled                  bool         `json:"l3_enabled"`
+	L3ReferencedBytes          int64        `json:"l3_referenced_bytes"`
+	L3Hits                     int          `json:"l3_hits"`
+	L3Misses                   int          `json:"l3_misses"`
+	L3Faults                   int          `json:"l3_faults"`
+	L3HitTokens                int          `json:"l3_hit_tokens"`
+	L3StageBytes               int64        `json:"l3_stage_bytes"`
+	L3RestoreBytes             int64        `json:"l3_restore_bytes"`
+	L3StageNanos               int64        `json:"l3_stage_nanos"`
+	L3RestoreNanos             int64        `json:"l3_restore_nanos"`
+	L3StageFaults              int          `json:"l3_stage_faults"`
+	L3RestoreFaults            int          `json:"l3_restore_faults"`
+	L3Breaker                  BreakerStats `json:"l3_breaker"`
+	L3BreakerState             BreakerState `json:"l3_breaker_state,omitempty"`
+	L3BreakerConsecutiveFaults int          `json:"l3_breaker_consecutive_faults,omitempty"`
+	L3BreakerTotalFaults       int          `json:"l3_breaker_total_faults,omitempty"`
+	L3BreakerOpenSkips         int          `json:"l3_breaker_open_skips,omitempty"`
+	L3BreakerProbesAttempted   int          `json:"l3_breaker_probes_attempted,omitempty"`
+	L3BreakerProbeRecoveries   int          `json:"l3_breaker_probe_recoveries,omitempty"`
+	L3BreakerProbeFailures     int          `json:"l3_breaker_probe_failures,omitempty"`
+	L3BreakerOpenedAt          time.Time    `json:"l3_breaker_opened_at,omitempty"`
+	Leaves                     int          // leaf nodes
+	MaxDepthTokens             int          // longest cached prefix
+	Evictions                  int          // LRU leaf evictions performed
+	CostEvictions              int          // cost-aware leaf evictions performed
+	PageEvictions              int          `json:"page_evictions,omitempty"` // page-aware leaf evictions performed
+	PolicyEvictions            int          // EvictNode calls
+	Splits                     int          // edge splits performed
+	MaxTokens                  int          // configured LRU budget (0 = unbounded)
+	EvictionPolicy             string
+	ReuseHits                  int
 
 	LastEvictPolicy       string
 	LastEvictCandidates   int
@@ -1216,64 +1227,83 @@ type Stats struct {
 // tree (a single N-token chain holds N·(N+1)/2 positions while Tokens reports only N).
 // PrefixTokens makes that gap measurable instead of silent (see TestBudgetVsTrueKVFootprint).
 func (t *Tree) Stats() Stats {
+	var bStats BreakerStats
+	if t.remoteBreaker != nil {
+		bStats = t.remoteBreaker.Stats()
+	} else {
+		bStats = BreakerStats{
+			State:          BreakerClosed,
+			FaultThreshold: DefaultBreakerFaultThreshold,
+			Cooldown:       DefaultBreakerCooldown,
+		}
+	}
 	s := Stats{
-		Evictions:             t.evictions,
-		CostEvictions:         t.costEvictions,
-		PageEvictions:         t.pageEvictions,
-		PolicyEvictions:       t.policyEvictions,
-		Splits:                t.splits,
-		MaxTokens:             t.effectiveMaxTokens(),
-		SnapshotBytes:         t.snapshotBytes,
-		MaxSnapshotBytes:      t.maxSnapshotBytes,
-		HostSnapshotBytes:     t.hostSnapshotBytes,
-		MaxHostSnapshotBytes:  t.maxHostSnapshotBytes,
-		L1Hits:                t.l1Hits,
-		L1Misses:              t.l1Misses,
-		L1Faults:              t.l1Faults,
-		L1HitTokens:           t.l1HitTokens,
-		L2Hits:                t.l2Hits,
-		L2Misses:              t.l2Misses,
-		L2Faults:              t.l2Faults,
-		L2HitTokens:           t.l2HitTokens,
-		L2StageBytes:          t.l2StageBytes,
-		L2RestoreBytes:        t.l2RestoreBytes,
-		L2Evictions:           t.l2Evictions,
-		L3Enabled:             t.RemoteSnapshotEnabled(),
-		L3ReferencedBytes:     t.remoteSnapshotBytes,
-		L3Hits:                t.l3Hits,
-		L3Misses:              t.l3Misses,
-		L3Faults:              t.l3Faults,
-		L3HitTokens:           t.l3HitTokens,
-		L3StageBytes:          t.l3StageBytes,
-		L3RestoreBytes:        t.l3RestoreBytes,
-		L3StageNanos:          t.l3StageNanos,
-		L3RestoreNanos:        t.l3RestoreNanos,
-		L3StageFaults:         t.l3StageFaults,
-		L3RestoreFaults:       t.l3RestoreFaults,
-		EvictionPolicy:        t.evictionStrategy().Name(),
-		LastEvictPolicy:       t.lastEvictPolicyName(),
-		LastEvictCandidates:   t.lastEvictCandidates,
-		LastEvictLocked:       t.lastEvictLocked,
-		LastEvictVictimCost:   t.lastEvictVictimCost,
-		LastEvictVictimHits:   t.lastEvictVictimHits,
-		LastEvictVictimTokens: t.lastEvictVictimTokens,
-		LastEvictVictimPrefix: t.lastEvictVictimPrefix,
-		ThrashReuses:          t.thrashReuses,
-		ThrashTokens:          t.thrashTokens,
-		ThrashGapTotal:        t.thrashGapTotal,
-		ThrashGapLast:         t.thrashGapLast,
-		ThrashGapMax:          t.thrashGapMax,
-		ThrashTracked:         len(t.thrashIndex),
-		BoundedEvictions:      t.boundedEvictions,
-		LedgerConfirmed:       t.ledgerConfirmed,
-		LedgerConfirmedTokens: t.ledgerConfirmedTokens,
-		LedgerPending:         len(t.evictLedger),
-		Lookups:               t.lookups,
-		LookupHits:            t.lookupHits,
-		LookupMissCold:        t.lookupMissCold,
-		LookupMissDivergent:   t.lookupMissDivergent,
-		Fills:                 t.fills,
-		AdmissionEnabled:      t.admissionEnabled,
+		Evictions:                  t.evictions,
+		CostEvictions:              t.costEvictions,
+		PageEvictions:              t.pageEvictions,
+		PolicyEvictions:            t.policyEvictions,
+		Splits:                     t.splits,
+		MaxTokens:                  t.effectiveMaxTokens(),
+		SnapshotBytes:              t.snapshotBytes,
+		MaxSnapshotBytes:           t.maxSnapshotBytes,
+		HostSnapshotBytes:          t.hostSnapshotBytes,
+		MaxHostSnapshotBytes:       t.maxHostSnapshotBytes,
+		L1Hits:                     t.l1Hits,
+		L1Misses:                   t.l1Misses,
+		L1Faults:                   t.l1Faults,
+		L1HitTokens:                t.l1HitTokens,
+		L2Hits:                     t.l2Hits,
+		L2Misses:                   t.l2Misses,
+		L2Faults:                   t.l2Faults,
+		L2HitTokens:                t.l2HitTokens,
+		L2StageBytes:               t.l2StageBytes,
+		L2RestoreBytes:             t.l2RestoreBytes,
+		L2Evictions:                t.l2Evictions,
+		L3Enabled:                  t.RemoteSnapshotEnabled(),
+		L3ReferencedBytes:          t.remoteSnapshotBytes,
+		L3Hits:                     t.l3Hits,
+		L3Misses:                   t.l3Misses,
+		L3Faults:                   t.l3Faults,
+		L3HitTokens:                t.l3HitTokens,
+		L3StageBytes:               t.l3StageBytes,
+		L3RestoreBytes:             t.l3RestoreBytes,
+		L3StageNanos:               t.l3StageNanos,
+		L3RestoreNanos:             t.l3RestoreNanos,
+		L3StageFaults:              t.l3StageFaults,
+		L3RestoreFaults:            t.l3RestoreFaults,
+		L3Breaker:                  bStats,
+		L3BreakerState:             bStats.State,
+		L3BreakerConsecutiveFaults: bStats.ConsecutiveFaults,
+		L3BreakerTotalFaults:       bStats.TotalFaults,
+		L3BreakerOpenSkips:         bStats.OpenSkips,
+		L3BreakerProbesAttempted:   bStats.ProbesAttempted,
+		L3BreakerProbeRecoveries:   bStats.ProbeRecoveries,
+		L3BreakerProbeFailures:     bStats.ProbeFailures,
+		L3BreakerOpenedAt:          bStats.OpenedAt,
+		EvictionPolicy:             t.evictionStrategy().Name(),
+		LastEvictPolicy:            t.lastEvictPolicyName(),
+		LastEvictCandidates:        t.lastEvictCandidates,
+		LastEvictLocked:            t.lastEvictLocked,
+		LastEvictVictimCost:        t.lastEvictVictimCost,
+		LastEvictVictimHits:        t.lastEvictVictimHits,
+		LastEvictVictimTokens:      t.lastEvictVictimTokens,
+		LastEvictVictimPrefix:      t.lastEvictVictimPrefix,
+		ThrashReuses:               t.thrashReuses,
+		ThrashTokens:               t.thrashTokens,
+		ThrashGapTotal:             t.thrashGapTotal,
+		ThrashGapLast:              t.thrashGapLast,
+		ThrashGapMax:               t.thrashGapMax,
+		ThrashTracked:              len(t.thrashIndex),
+		BoundedEvictions:           t.boundedEvictions,
+		LedgerConfirmed:            t.ledgerConfirmed,
+		LedgerConfirmedTokens:      t.ledgerConfirmedTokens,
+		LedgerPending:              len(t.evictLedger),
+		Lookups:                    t.lookups,
+		LookupHits:                 t.lookupHits,
+		LookupMissCold:             t.lookupMissCold,
+		LookupMissDivergent:        t.lookupMissDivergent,
+		Fills:                      t.fills,
+		AdmissionEnabled:           t.admissionEnabled,
 		AdmissionSketchCells: func() int {
 			if t.admissionSketch == nil {
 				return 0

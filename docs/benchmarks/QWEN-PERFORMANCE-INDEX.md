@@ -11,9 +11,8 @@ description: "Canonical cross-hardware index and publishing route for accepted Q
 ## Generated front-door readout
 
 This block is derived by `fak native-performance --frontdoor-md`; classifications cannot be spliced across envelopes.
-- **DIAGNOSTIC:** the separate A100 cache-restore arm measured **~0.2 tok/s with 0/5 exact**. Failed quality keeps it out of accepted and approximate comparison headlines. [Attribution](../_witnesses/issue-8819-qwen38-cache-attribution/README.md).
 
-_2 reviewed row(s) are reaped from active presentation; immutable witnesses remain._
+_3 reviewed row(s) are reaped from active presentation; immutable witnesses remain._
 <!-- qwen38-frontdoor:end -->
 
 ## Read this first: rows are envelopes, not a timeline

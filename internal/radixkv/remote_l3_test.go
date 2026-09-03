@@ -299,3 +299,173 @@ func remoteL3TestConfig() model.Config {
 		EOSTokenID:       63,
 	}
 }
+
+func TestRemoteL3BreakerIntegration(t *testing.T) {
+	cfg := remoteL3TestConfig()
+	m := model.NewSynthetic(cfg)
+	be := &deviceCapsBackend{Backend: compute.Default()}
+	store := &memorySnapshotStore{}
+	tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 0, EvictionLRU)
+	if err := tree.ConfigureRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	currentTime := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	breaker := tree.RemoteL3Breaker()
+	breaker.SetClock(func() time.Time { return currentTime })
+
+	ids := []int{10, 20, 30}
+	digest := insertRemoteL3Snapshot(t, tree, m, be, ids)
+	if got := tree.StageSnapshotToRemote(context.Background(), digest); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage remote: %+v", got)
+	}
+	if tree.EvictHotSnapshot(digest) != len(ids) {
+		t.Fatal("hot owner was not removed")
+	}
+
+	backendErr := errors.New("backend 500: storage temporarily unavailable")
+	store.getErr = backendErr
+
+	// 5 consecutive faults will trip the default FaultThreshold (5)
+	for i := 0; i < 5; i++ {
+		n, snap, matched, tier, err := tree.LookupSnapshotTieredContext(context.Background(), ids)
+		tree.Done(n)
+		if snap != nil {
+			snap.Close()
+		}
+		if err == nil {
+			t.Fatalf("lookup %d: expected error, got nil", i+1)
+		}
+		if tier != SnapshotTierRemoteL3 {
+			t.Fatalf("lookup %d: tier=%q, want %q", i+1, tier, SnapshotTierRemoteL3)
+		}
+		if matched != len(ids) {
+			t.Fatalf("lookup %d: matched=%d, want %d", i+1, matched, len(ids))
+		}
+	}
+
+	stats := tree.Stats()
+	if stats.L3Faults != 5 || stats.L3RestoreFaults != 5 {
+		t.Fatalf("stats before breaker trip: faults=%d restoreFaults=%d", stats.L3Faults, stats.L3RestoreFaults)
+	}
+	if stats.L3BreakerState != BreakerOpen || stats.L3Breaker.State != BreakerOpen {
+		t.Fatalf("breaker state=%v, want %v", stats.L3BreakerState, BreakerOpen)
+	}
+	if stats.L3BreakerConsecutiveFaults != 5 || stats.L3BreakerTotalFaults != 5 {
+		t.Fatalf("breaker faults: cons=%d total=%d", stats.L3BreakerConsecutiveFaults, stats.L3BreakerTotalFaults)
+	}
+
+	// 6th lookup: Breaker is open and within cooldown!
+	// Must return a clean typed miss / fallback without wiping n.remoteSnapshot
+	n6, snap6, matched6, tier6, err6 := tree.LookupSnapshotTieredContext(context.Background(), ids)
+	tree.Done(n6)
+	if snap6 != nil {
+		snap6.Close()
+		t.Fatal("expected nil snapshot on breaker skip")
+	}
+	if err6 != nil {
+		t.Fatalf("expected nil error on breaker skip (clean miss), got: %v", err6)
+	}
+	if tier6 != SnapshotTierMiss {
+		t.Fatalf("tier on breaker skip = %q, want %q", tier6, SnapshotTierMiss)
+	}
+	if matched6 != 0 {
+		t.Fatalf("matched on breaker skip = %d, want 0", matched6)
+	}
+
+	stats6 := tree.Stats()
+	if stats6.L3BreakerOpenSkips != 1 {
+		t.Fatalf("open skips = %d, want 1", stats6.L3BreakerOpenSkips)
+	}
+	// L3Faults should still be 5 (breaker prevented an additional fault!)
+	if stats6.L3Faults != 5 {
+		t.Fatalf("L3Faults after skip = %d, want 5", stats6.L3Faults)
+	}
+
+	// Confirm that n.remoteSnapshot was NOT wiped:
+	ns, nFound := tree.findSnapshotByDigestNS(digest)
+	if nFound == nil || nFound.remoteSnapshot == nil {
+		t.Fatalf("n.remoteSnapshot was wiped by breaker skip! ns=%q node=%v", ns, nFound)
+	}
+
+	// Now advance clock past cooldown (30s) and heal the store
+	currentTime = currentTime.Add(DefaultBreakerCooldown + time.Second)
+	store.getErr = nil
+
+	// 7th lookup: Breaker is HalfOpen, admits probe read, store succeeds, breaker recovers to Closed
+	n7, snap7, matched7, tier7, err7 := tree.LookupSnapshotTieredContext(context.Background(), ids)
+	if err7 != nil {
+		t.Fatalf("probe lookup error: %v", err7)
+	}
+	defer tree.Done(n7)
+	if snap7 == nil {
+		t.Fatal("expected recovered snapshot on probe lookup, got nil")
+	}
+	defer snap7.Close()
+	if tier7 != SnapshotTierRemoteL3 {
+		t.Fatalf("probe tier = %q, want %q", tier7, SnapshotTierRemoteL3)
+	}
+	if matched7 != len(ids) {
+		t.Fatalf("probe matched = %d, want %d", matched7, len(ids))
+	}
+
+	stats7 := tree.Stats()
+	if stats7.L3BreakerState != BreakerClosed || stats7.L3Breaker.State != BreakerClosed {
+		t.Fatalf("breaker state after probe = %v, want %v", stats7.L3BreakerState, BreakerClosed)
+	}
+	if stats7.L3BreakerConsecutiveFaults != 0 {
+		t.Fatalf("consecutive faults after recovery = %d, want 0", stats7.L3BreakerConsecutiveFaults)
+	}
+	if stats7.L3BreakerProbesAttempted != 1 {
+		t.Fatalf("probes attempted = %d, want 1", stats7.L3BreakerProbesAttempted)
+	}
+	if stats7.L3BreakerProbeRecoveries != 1 {
+		t.Fatalf("probe recoveries = %d, want 1", stats7.L3BreakerProbeRecoveries)
+	}
+	if stats7.L3Hits != 1 {
+		t.Fatalf("L3Hits after recovery = %d, want 1", stats7.L3Hits)
+	}
+}
+
+func TestRemoteL3BreakerCallerCancelDoesNotTripBreaker(t *testing.T) {
+	cfg := remoteL3TestConfig()
+	m := model.NewSynthetic(cfg)
+	be := &deviceCapsBackend{Backend: compute.Default()}
+	store := &memorySnapshotStore{}
+	tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 0, EvictionLRU)
+	if err := tree.ConfigureRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := []int{10, 20, 30}
+	digest := insertRemoteL3Snapshot(t, tree, m, be, ids)
+	if got := tree.StageSnapshotToRemote(context.Background(), digest); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage remote: %+v", got)
+	}
+	if tree.EvictHotSnapshot(digest) != len(ids) {
+		t.Fatal("hot owner was not removed")
+	}
+
+	// Repeated cancelled contexts:
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	store.getErr = ctx.Err()
+
+	for i := 0; i < 10; i++ {
+		n, snap, _, _, _ := tree.LookupSnapshotTieredContext(ctx, ids)
+		tree.Done(n)
+		if snap != nil {
+			snap.Close()
+		}
+	}
+
+	stats := tree.Stats()
+	if stats.L3BreakerState != BreakerClosed {
+		t.Fatalf("breaker state after canceled calls = %v, want %v", stats.L3BreakerState, BreakerClosed)
+	}
+	if stats.L3BreakerConsecutiveFaults != 0 || stats.L3BreakerTotalFaults != 0 {
+		t.Fatalf("breaker recorded faults on canceled ctx: cons=%d total=%d",
+			stats.L3BreakerConsecutiveFaults, stats.L3BreakerTotalFaults)
+	}
+}

@@ -1,0 +1,53 @@
+{
+  "schema": "fak-target-verification/1",
+  "issue": 9983,
+  "parent_issue": 9819,
+  "verdict": "PASS",
+  "module": "internal/model@r624+g1b3f14b96",
+  "engine": "fak-native",
+  "path": "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1",
+  "model": {
+    "architecture": "qwen35-hybrid",
+    "name": "Qwen3.8-hybrid-MTP"
+  },
+  "verification_operations_per_block": 1,
+  "target_decode_steps": 0,
+  "one_operation": true,
+  "benchmark": {
+    "command": "go test -bench=BenchmarkQwen38MTPBatchedTargetVerification -benchmem -run=^$ ./internal/model",
+    "ns_per_op": 396180,
+    "bytes_per_op": 318045,
+    "allocs_per_op": 1970,
+    "operations_per_block": 1.0,
+    "target_decode_steps_per_block": 0.0
+  },
+  "accounting": {
+    "setup": {
+      "measured": true
+    },
+    "drafting": {
+      "measured": true
+    },
+    "target_verification": {
+      "measured": true
+    },
+    "rejection": {
+      "measured": true
+    },
+    "rollback": {
+      "measured": true
+    },
+    "synchronization": {
+      "measured": true
+    },
+    "recovery": {
+      "measured": true
+    },
+    "known_memory_bytes": 318045
+  },
+  "downgrade_policy": {
+    "unsupported_engine": "fak-native ordinary target decode",
+    "silent_external_fallback": false,
+    "llama_cpp_used": false
+  }
+}

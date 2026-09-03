@@ -34,17 +34,151 @@ func Read(path string) ([]blastradius.Lease, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []blastradius.Lease
-	for i, line := range strings.Split(string(data), "\n") {
+	lines := strings.Split(string(data), "\n")
+	out := make([]blastradius.Lease, 0, len(lines))
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var lease blastradius.Lease
-		if err := json.Unmarshal([]byte(line), &lease); err != nil {
-			return nil, fmt.Errorf("%s line %d: %w", path, i+1, err)
+		lease, ok := parseLeaseLine(line)
+		if !ok {
+			if err := json.Unmarshal([]byte(line), &lease); err != nil {
+				return nil, fmt.Errorf("%s line %d: %w", path, i+1, err)
+			}
 		}
 		out = append(out, lease)
 	}
 	return out, nil
+}
+
+func parseLeaseLine(s string) (blastradius.Lease, bool) {
+	if len(s) < 2 || s[0] != '{' || s[len(s)-1] != '}' {
+		return blastradius.Lease{}, false
+	}
+	i := 1
+	skipWS := func() {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n') {
+			i++
+		}
+	}
+
+	parseStr := func() (string, bool) {
+		if i >= len(s) || s[i] != '"' {
+			return "", false
+		}
+		i++
+		start := i
+		for i < len(s) {
+			c := s[i]
+			if c == '\\' {
+				return "", false
+			}
+			if c == '"' {
+				val := s[start:i]
+				i++
+				return val, true
+			}
+			if c < 0x20 {
+				return "", false
+			}
+			i++
+		}
+		return "", false
+	}
+
+	var lease blastradius.Lease
+	skipWS()
+	if i < len(s) && s[i] == '}' {
+		i++
+		skipWS()
+		return lease, i == len(s)
+	}
+
+	for i < len(s) {
+		skipWS()
+		key, ok := parseStr()
+		if !ok {
+			return blastradius.Lease{}, false
+		}
+		skipWS()
+		if i >= len(s) || s[i] != ':' {
+			return blastradius.Lease{}, false
+		}
+		i++
+		skipWS()
+
+		switch key {
+		case "lane":
+			val, ok := parseStr()
+			if !ok {
+				return blastradius.Lease{}, false
+			}
+			lease.Lane = val
+		case "tree_globs":
+			if i >= len(s) || s[i] != '[' {
+				return blastradius.Lease{}, false
+			}
+			i++
+			skipWS()
+			if i < len(s) && s[i] == ']' {
+				i++
+				lease.TreeGlobs = []string{}
+			} else {
+				commaCount := 0
+				bracketDepth := 1
+				for j := i; j < len(s); j++ {
+					if s[j] == '[' {
+						bracketDepth++
+					} else if s[j] == ']' {
+						bracketDepth--
+						if bracketDepth == 0 {
+							break
+						}
+					} else if s[j] == ',' && bracketDepth == 1 {
+						commaCount++
+					}
+				}
+				globs := make([]string, 0, commaCount+1)
+				for {
+					skipWS()
+					g, ok := parseStr()
+					if !ok {
+						return blastradius.Lease{}, false
+					}
+					globs = append(globs, g)
+					skipWS()
+					if i < len(s) && s[i] == ',' {
+						i++
+						continue
+					}
+					if i < len(s) && s[i] == ']' {
+						i++
+						break
+					}
+					return blastradius.Lease{}, false
+				}
+				lease.TreeGlobs = globs
+			}
+		default:
+			return blastradius.Lease{}, false
+		}
+
+		skipWS()
+		if i < len(s) && s[i] == ',' {
+			i++
+			continue
+		}
+		if i < len(s) && s[i] == '}' {
+			i++
+			break
+		}
+		return blastradius.Lease{}, false
+	}
+
+	skipWS()
+	if i != len(s) {
+		return blastradius.Lease{}, false
+	}
+	return lease, true
 }

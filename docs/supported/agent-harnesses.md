@@ -137,5 +137,6 @@ in the integration index is the one-paste pattern, and the
 
 - [Compatibility matrix](../integrations/compatibility-matrix.md) — 47 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Terminal-Bench 4 Reproduction](../benchmarks/TERMINAL-BENCH-4-REPRODUCTION.md) — end-to-end benchmark manual comparing fak native harness against OpenCode baseline
 - [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
 - [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)

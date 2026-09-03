@@ -474,6 +474,13 @@ concurrent = [
   "overtonscore",
   "walkfiles",
   "reportledger",
+  "resulttier",
+  "servingsupervision",
+  "tb4bench",
+  "orgdebt",
+  "perfscout",
+  "promptcomp",
+  "servingsim",
   "control",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
@@ -650,6 +657,13 @@ autopick = [
   "overtonscore",
   "walkfiles",
   "reportledger",
+  "resulttier",
+  "servingsupervision",
+  "tb4bench",
+  "orgdebt",
+  "perfscout",
+  "promptcomp",
+  "servingsim",
   "control",
   # new-leaf:lane
 ]
@@ -1529,6 +1543,13 @@ toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
 walkfiles = ["internal/walkfiles/**"]
 reportledger = ["internal/reportledger/**"]
+resulttier = ["internal/resulttier/**"]
+servingsupervision = ["internal/servingsupervision/**"]
+tb4bench = ["internal/tb4bench/**"]
+orgdebt = ["internal/orgdebt/**"]
+perfscout = ["internal/perfscout/**"]
+promptcomp = ["internal/promptcomp/**"]
+servingsim = ["internal/servingsim/**"]
 control = ["internal/control/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]

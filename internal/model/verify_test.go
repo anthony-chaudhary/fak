@@ -378,3 +378,126 @@ func TestVerifyForwardTreeMaskIsolatesBranches(t *testing.T) {
 		t.Fatalf("distractor == g0; fix the test")
 	}
 }
+
+func TestQwen38MTPBatchedTargetVerificationBlockAccounting(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	before := target.Prefill(prompt)
+
+	draft := []int{2, 3, 4}
+	tx, err := beginQwen35MTPTargetTransaction(target, before)
+	if err != nil {
+		t.Fatalf("begin target transaction: %v", err)
+	}
+
+	rows, err := tx.Verify(draft)
+	if err != nil {
+		t.Fatalf("target transaction verify: %v", err)
+	}
+	if len(rows) != len(draft) {
+		t.Fatalf("verify rows = %d, want %d", len(rows), len(draft))
+	}
+
+	receipt := tx.VerificationReceipt()
+	if receipt.Engine != targetVerificationEngine {
+		t.Fatalf("receipt engine = %q, want %q", receipt.Engine, targetVerificationEngine)
+	}
+	if !receipt.OneOperation || receipt.TargetVerificationOperations != 1 {
+		t.Fatalf("receipt operations = %d (oneOp=%v), want exactly 1 operation per block", receipt.TargetVerificationOperations, receipt.OneOperation)
+	}
+	if receipt.TargetDecodeSteps != 0 {
+		t.Fatalf("target decode steps = %d, want 0 on batched verify", receipt.TargetDecodeSteps)
+	}
+	if !receipt.Accounting.Setup.Measured || !receipt.Accounting.TargetVerification.Measured {
+		t.Fatalf("accounting setup/target_verification unmeasured: %+v", receipt.Accounting)
+	}
+
+	accepted := 2
+	committedLogits, err := tx.Commit(accepted)
+	if err != nil {
+		t.Fatalf("commit accepted prefix: %v", err)
+	}
+	if len(committedLogits) == 0 {
+		t.Fatal("committed logits empty")
+	}
+
+	finalReceipt := tx.VerificationReceipt()
+	if finalReceipt.AcceptedTokens != accepted || finalReceipt.RejectedTokens != len(draft)-accepted {
+		t.Fatalf("final receipt tokens accepted=%d rejected=%d, want accepted=%d rejected=%d",
+			finalReceipt.AcceptedTokens, finalReceipt.RejectedTokens, accepted, len(draft)-accepted)
+	}
+	if !finalReceipt.Accounting.Rollback.Measured || !finalReceipt.Accounting.Synchronization.Measured {
+		t.Fatalf("accounting rollback/sync unmeasured: %+v", finalReceipt.Accounting)
+	}
+}
+
+func BenchmarkQwen38MTPBatchedTargetVerification(b *testing.B) {
+	m := qwen38HybridMTPEnabledSyntheticModelBench(b)
+	prompt := []int{0, 1}
+	draft := []int{2, 3, 4}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		target := m.NewSession()
+		target.captureTargetHidden = true
+		before := target.Prefill(prompt)
+
+		tx, err := beginQwen35MTPTargetTransaction(target, before)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		rows, err := tx.Verify(draft)
+		if err != nil || len(rows) != len(draft) {
+			b.Fatalf("Verify failed: err=%v rows=%d", err, len(rows))
+		}
+
+		receipt := tx.VerificationReceipt()
+		if receipt.TargetVerificationOperations != 1 || !receipt.OneOperation {
+			b.Fatalf("expected 1 verification operation per block, got %d", receipt.TargetVerificationOperations)
+		}
+
+		_, err = tx.Commit(2)
+		if err != nil {
+			b.Fatal(err)
+		}
+		target.Close()
+	}
+}
+
+func qwen38HybridMTPEnabledSyntheticModelBench(b *testing.B) *Model {
+	b.Helper()
+	cfg := qwen35HybridTestCfg()
+	cfg.Name = "Qwen3.8 hybrid MTP synthetic bench"
+	cfg.ModelType = "qwen3_5_text"
+	cfg.MTPNumHiddenLayers = 1
+	m := NewSynthetic(cfg)
+	shapes, err := qwen35MTPExpectedShapes(cfg)
+	if err != nil {
+		b.Fatalf("Qwen3.8 hybrid MTP shapes: %v", err)
+	}
+	for tensorIndex, name := range qwen35MTPRequiredTensors {
+		shape := shapes[name]
+		elements := 1
+		for _, dim := range shape {
+			elements *= dim
+		}
+		start := len(m.raw)
+		for i := 0; i < elements; i++ {
+			value := float32(tensorIndex+1)/100 + float32(i)/100000
+			var bits [4]byte
+			binary.LittleEndian.PutUint32(bits[:], math.Float32bits(value))
+			m.raw = append(m.raw, bits[:]...)
+		}
+		m.manifest[name] = tensorMeta{
+			Dtype:  "F32",
+			Shape:  append([]int(nil), shape...),
+			Offset: start,
+			Nbytes: elements * 4,
+		}
+	}
+	return m
+}

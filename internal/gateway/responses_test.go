@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -678,6 +679,31 @@ func TestResponsesToolsPreserveFunctionAndCustomWire(t *testing.T) {
 	}
 	if defs[1].Type != "custom" || string(defs[1].ResponsesWire) != custom {
 		t.Fatalf("custom tool wire changed: type=%q wire=%s", defs[1].Type, defs[1].ResponsesWire)
+	}
+}
+
+func TestResponsesToolsCollapseFakNamespaceToGuard(t *testing.T) {
+	inbound := []responsesTool{
+		{Type: "function", Name: "mcp__fak__fak_read", Description: "fak read"},
+		{Type: "function", Name: "mcp__fak_guard__fak_read", Description: "fak guard read"},
+		{Type: "function", Name: "mcp__fak__fak_adjudicate", Description: "fak adjudicate"},
+		{Type: "function", Name: "mcp__fak_guard__fak_adjudicate", Description: "fak guard adjudicate"},
+		{Type: "function", Name: "mcp__fak__standalone_tool", Description: "standalone"},
+		{Type: "function", Name: "Bash", Description: "bash"},
+	}
+	defs := responsesToolsToToolDefs(inbound)
+	var names []string
+	for _, d := range defs {
+		names = append(names, d.Function.Name)
+	}
+	want := []string{
+		"mcp__fak_guard__fak_read",
+		"mcp__fak_guard__fak_adjudicate",
+		"mcp__fak__standalone_tool",
+		"Bash",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("collapsed tool names = %v, want %v", names, want)
 	}
 }
 func TestResponsesFunctionCallOutputAcceptsHarnessWireVersions(t *testing.T) {

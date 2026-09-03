@@ -331,8 +331,9 @@ const (
 type ThresholdOperator string
 
 const (
-	AtOrAbove ThresholdOperator = "at_or_above"
-	AtOrBelow ThresholdOperator = "at_or_below"
+	AtOrAbove            ThresholdOperator = "at_or_above"
+	AtOrBelow            ThresholdOperator = "at_or_below"
+	ThresholdDirectAbove ThresholdOperator = AtOrAbove
 )
 
 type Constraint struct {
