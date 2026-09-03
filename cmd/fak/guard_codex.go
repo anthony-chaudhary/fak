@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
@@ -126,13 +127,21 @@ func guardCodexLoopGateConfigForProfile(profile harnessprofile.HarnessProfile, c
 // `/responses` to, so the request lands on the gateway's `/v1/responses` route. The same
 // session receives the gateway MCP endpoint additively, allowing Codex's native tool router to
 // execute the FAK substrate tools that guard exposes to the model.
-func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
+//
+// When the effective Codex config.toml declares [mcp_servers.fak], guard also injects
+// `-c mcp_servers.fak.enabled=false` along with `-c mcp_servers.fak_guard.url=...` so that
+// Codex does not start a second conflicting stdio instance of fak alongside fak_guard (#10295).
+func guardCodexConfigArgs(gwURL, apiKeyEnv, model string, codexHome ...string) []string {
 	base := guardCodexBaseURL(gwURL)
 	envKey := guardCodexEnvKey(apiKeyEnv)
 	model = guardCodexConfiguredModel(model)
 	effort := guardCodexResolveReasoningEffort(model, os.Getenv).Effort
 	id := guardCodexProviderID
 	q := func(s string) string { return `"` + s + `"` }
+	home := ""
+	if len(codexHome) > 0 {
+		home = codexHome[0]
+	}
 	args := []string{
 		"-c", "model_provider=" + id,
 		"-c", "model=" + q(model),
@@ -142,10 +151,73 @@ func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
 		"-c", "model_providers." + id + ".env_key=" + q(envKey),
 		"-c", "mcp_servers.fak_guard.url=" + q(guardCodexMCPURL(gwURL)),
 	}
+	if codexConfigHasMCPServerFak(effectiveCodexConfigFile(home)) {
+		args = append(args, "-c", "mcp_servers.fak.enabled=false")
+	}
 	if effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+q(effort))
 	}
 	return args
+}
+
+// effectiveCodexConfigFile locates the Codex config.toml to inspect:
+// explicit codexHome > CODEX_HOME environment variable > ~/.codex/config.toml.
+func effectiveCodexConfigFile(codexHome string) string {
+	home := strings.TrimSpace(codexHome)
+	if home == "" {
+		home = strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	}
+	if home != "" {
+		home = expandHome(home)
+		if strings.HasSuffix(strings.ToLower(home), ".toml") {
+			if _, err := os.Stat(home); err == nil {
+				return home
+			}
+		}
+		p := filepath.Join(home, "config.toml")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		pSub := filepath.Join(home, ".codex", "config.toml")
+		if _, err := os.Stat(pSub); err == nil {
+			return pSub
+		}
+		return p
+	}
+	if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
+		return filepath.Join(uHome, ".codex", "config.toml")
+	}
+	return ""
+}
+
+// codexConfigHasMCPServerFak checks whether the Codex config.toml declares [mcp_servers.fak].
+func codexConfigHasMCPServerFak(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(string(b), "\n")
+	if start, _ := findTOMLSection(lines, "mcp_servers.fak"); start >= 0 {
+		return true
+	}
+	for _, raw := range lines {
+		line := strings.TrimSpace(strings.SplitN(raw, "#", 2)[0])
+		if !strings.HasPrefix(line, "[") {
+			continue
+		}
+		inner := strings.Trim(line, "[]")
+		inner = strings.TrimSpace(inner)
+		inner = strings.ReplaceAll(inner, `"`, "")
+		inner = strings.ReplaceAll(inner, `'`, "")
+		inner = strings.ReplaceAll(inner, ` `, "")
+		if inner == "mcp_servers.fak" {
+			return true
+		}
+	}
+	return false
 }
 
 func guardCodexConfiguredModel(model string) string {
@@ -235,12 +307,12 @@ func guardCodexEnvKey(apiKeyEnv string) string {
 // any subcommand (`exec`) or user args, since Codex's global `-c` flag precedes the
 // subcommand. A non-Codex agent, or enabled=false, is returned unchanged (no install), so
 // the path is inert for every other wrapped agent. An empty command is a no-op.
-func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv string) ([]string, guardCodexInstall) {
+func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv string, codexHome ...string) ([]string, guardCodexInstall) {
 	var profile harnessprofile.HarnessProfile
 	if len(command) > 0 {
 		profile, _ = harnessprofile.Lookup(command[0])
 	}
-	return installGuardCodexConfigForProfile(command, profile, enabled, gwURL, apiKeyEnv)
+	return installGuardCodexConfigForProfile(command, profile, enabled, gwURL, apiKeyEnv, codexHome...)
 }
 
 func guardCodexAuthManagementCommand(command []string) bool {
@@ -253,13 +325,13 @@ func guardCodexAuthManagementCommand(command []string) bool {
 		command[1] == "login" &&
 		command[2] == "status"
 }
-func installGuardCodexConfigForProfile(command []string, profile harnessprofile.HarnessProfile, enabled bool, gwURL, apiKeyEnv string) ([]string, guardCodexInstall) {
+func installGuardCodexConfigForProfile(command []string, profile harnessprofile.HarnessProfile, enabled bool, gwURL, apiKeyEnv string, codexHome ...string) ([]string, guardCodexInstall) {
 	if !enabled || len(command) == 0 || guardCodexAuthManagementCommand(command) || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return command, guardCodexInstall{}
 	}
 	model := guardCodexDefaultModelID
 	resolved := guardCodexResolveReasoningEffort(model, os.Getenv)
-	args := guardCodexConfigArgs(gwURL, apiKeyEnv, model)
+	args := guardCodexConfigArgs(gwURL, apiKeyEnv, model, codexHome...)
 	out := make([]string, 0, len(command)+len(args))
 	out = append(out, command[0])
 	out = append(out, args...)

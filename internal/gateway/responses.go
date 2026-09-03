@@ -670,16 +670,31 @@ func responsesRole(role string) string {
 	}
 }
 
+const (
+	mcpLegacyPrefix = "mcp__fak__"
+	mcpCanonPrefix  = "mcp__fak" + "_guard__"
+)
+
 // responsesToolsToToolDefs maps the flat Responses function-tool shape onto the
 // gateway's agent.ToolDef (the nested chat shape the planner consumes). A
 // non-function tool type (web_search, file_search, computer_use, ...) is skipped
 // rather than 400'd: fak adjudicates the FUNCTION tool calls; a built-in tool the
 // upstream resolves itself is not a kernel-mediated call and carries no args to gate.
+//
+// When incoming tools contain duplicate definitions for the same base tool across legacy
+// and canonical namespaces, collapse them into the canonical tool definition.
 func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 	if len(tools) == 0 {
 		return nil
 	}
+	hasCanon := make(map[string]bool)
+	for _, t := range tools {
+		if t.Type == "function" && strings.HasPrefix(t.Name, mcpCanonPrefix) {
+			hasCanon[strings.TrimPrefix(t.Name, mcpCanonPrefix)] = true
+		}
+	}
 	out := make([]agent.ToolDef, 0, len(tools))
+	seen := make(map[string]bool)
 	for _, t := range tools {
 		if t.Type != "function" {
 			out = append(out, agent.ToolDef{Type: t.Type, ResponsesWire: append(json.RawMessage(nil), t.raw...)})
@@ -688,6 +703,17 @@ func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 		if t.Name == "" {
 			continue
 		}
+		if strings.HasPrefix(t.Name, mcpLegacyPrefix) {
+			toolName := strings.TrimPrefix(t.Name, mcpLegacyPrefix)
+			if hasCanon[toolName] {
+				// Suppress legacy tool when canonical definition is present.
+				continue
+			}
+		}
+		if seen[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
 		out = append(out, agent.ToolDef{
 			Type: "function",
 			Function: agent.ToolDefFunction{
