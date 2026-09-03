@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 )
 
 // cmdSignal is the `fak signal` entry point; it maps the testable core's exit code to the
@@ -55,9 +56,14 @@ func runSignal(stdout, stderr io.Writer, argv []string) int {
 	// (or stdin). The id comes before any flags so `fak signal sess-1 pause --json` parses.
 	known := map[string]bool{"pause": true, "resume": true, "stop": true, "steer": true}
 	if !known[verb] {
-		fmt.Fprintf(stderr, "fak signal: unknown verb %q (want pause|resume|stop|steer)\n", verb)
-		signalUsage(stderr)
-		return 2
+		if len(argv) >= 2 && known[argv[1]] {
+			verb = argv[1]
+			args = append([]string{argv[0]}, argv[2:]...)
+		} else {
+			fmt.Fprintf(stderr, "fak signal: unknown verb %q (want pause|resume|stop|steer)\n", verb)
+			signalUsage(stderr)
+			return 2
+		}
 	}
 	if len(args) < 1 {
 		fmt.Fprintf(stderr, "fak signal %s: missing session id\n", verb)
@@ -76,6 +82,7 @@ func runSignal(stdout, stderr io.Writer, argv []string) int {
 	reason := fs.String("reason", "", "reason token recorded on stop")
 	text := fs.String("text", "", "steer: the input to deliver to the running session (or read from stdin if empty)")
 	stdin := fs.Bool("stdin", false, "steer: read the input text from stdin")
+	regDir := fs.String("reg-dir", "", "registry dir holding guard_sessions.jsonl (default: $FLEET_REG_DIR, else the host Fleet registry, else <repo>/tools/_registry)")
 	if err := fs.Parse(flagArgs); err != nil {
 		return 2
 	}
@@ -84,21 +91,34 @@ func runSignal(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	c := &sessionClient{base: strings.TrimRight(*addr, "/"), key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
+	targetID := id
+	targetAddr := strings.TrimRight(*addr, "/")
+	if !sessionAddrExplicit(fs) {
+		resolvedID, resolvedAddr, code, handled := resolveSignalTarget(stderr, verb, id, resolveSweepRegDir(*regDir))
+		if handled {
+			if code != 0 {
+				return code
+			}
+			targetID = resolvedID
+			targetAddr = resolvedAddr
+		}
+	}
+
+	c := &sessionClient{base: targetAddr, key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
 
 	switch verb {
 	case "pause":
-		return c.runVerb(stdout, stderr, *asJSON, id, "paused", *reason, *ifRev)
+		return c.runVerb(stdout, stderr, *asJSON, targetID, "paused", *reason, *ifRev)
 	case "resume":
-		return c.runVerb(stdout, stderr, *asJSON, id, "running", *reason, *ifRev)
+		return c.runVerb(stdout, stderr, *asJSON, targetID, "running", *reason, *ifRev)
 	case "stop":
-		return c.runVerb(stdout, stderr, *asJSON, id, "stopped", *reason, *ifRev)
+		return c.runVerb(stdout, stderr, *asJSON, targetID, "stopped", *reason, *ifRev)
 	case "steer":
 		body, code := resolveSteerText(stdin, text, stderr)
 		if code != 0 {
 			return code
 		}
-		return c.renderSteer(stdout, stderr, *asJSON, id, body)
+		return c.renderSteer(stdout, stderr, *asJSON, targetID, body)
 	}
 	return 2 // unreachable: the known-verb gate already rejected unknown verbs
 }
@@ -162,6 +182,31 @@ func (c *sessionClient) renderSteer(stdout, stderr io.Writer, asJSON bool, id, t
 	}
 	fmt.Fprintf(stdout, "steered %s (%d bytes) - delivered at the session's next turn boundary\n", ack.TraceID, len(text))
 	return 0
+}
+
+func resolveSignalTarget(stderr io.Writer, verb, query, regDir string) (string, string, int, bool) {
+	rows := guardsessions.Load(regDir)
+	res := guardsessions.Resolve(rows, query)
+	switch {
+	case res.Matched == 1:
+		gw := strings.TrimRight(strings.TrimSpace(res.Row.GatewayURL), "/")
+		if gw == "" {
+			fmt.Fprintf(stderr, "fak signal %s: guard session %s published no gateway_url — cannot control cross-process without --addr\n", verb, res.Row.Handle)
+			return "", "", 1, true
+		}
+		actualID := strings.TrimSpace(res.Row.TraceID)
+		if actualID == "" {
+			actualID = res.Row.Handle
+		}
+		return actualID, gw, 0, true
+	case res.Matched > 1:
+		fmt.Fprintf(stderr, "fak signal %s: %q matches %d guard sessions — narrow the prefix:\n", verb, query, res.Matched)
+		for _, c := range res.Candidates {
+			fmt.Fprintf(stderr, "  %s  %s\n", c.Handle, orDash(c.TraceID))
+		}
+		return "", "", 3, true
+	}
+	return query, "", 0, false
 }
 
 func signalUsage(w io.Writer) {
