@@ -23,3 +23,13 @@ func TestReleaseGateConfigReadsStayOnExplicitSeams(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmittedPostFreezeContainsNoDuplicates(t *testing.T) {
+	seen := make(map[string]bool, len(admittedPostFreeze))
+	for _, name := range admittedPostFreeze {
+		if seen[name] {
+			t.Errorf("duplicate entry in admittedPostFreeze: %s", name)
+		}
+		seen[name] = true
+	}
+}
