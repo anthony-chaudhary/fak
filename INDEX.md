@@ -288,7 +288,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
-- [CONCEPT-STUDY: OpenRouter architecture, provider routing, server-side tools, and guardrail mechanisms (2026-09-02)](docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md) -- auto-indexed dated note.
+- [`docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md`](docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md) — pinned exhaustive study of OpenRouter's Go/Python/TypeScript SDKs, Responses API, agent loop graceful termination (`stop_server_tools_when`), ReDoS-safe guardrail linting, hierarchical policy composition algebra, and response healing; receipt `study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780`; filed #10742, #10744-#10747.
 - [`docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md`](docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md) — pinned deep study of lightseekorg/tokenspeed LLM inference engine for agentic workloads: C++ FSM request lifecycle, overlap scheduling with in-flight tracking, declarative kernel/backend registry with FormatSignature, and first-class selection objectives; receipt `study_cd231d853e89cb3218b25711bf6c92fa19a247d650f6f53981ccee1e1636269d`; parent epic #10741; filed child leaves #10743, #10748, #10749, #10750.
 - [OpenCode Provider Architecture Study — 2026-09-02](docs/notes/CONCEPT-STUDY-OPENCODE-PROVIDER-ARCHITECTURE-2026-09-02.md) -- auto-indexed dated note.
 - [Concept Study: Portkey AI Gateway](docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md) -- auto-indexed dated note.
