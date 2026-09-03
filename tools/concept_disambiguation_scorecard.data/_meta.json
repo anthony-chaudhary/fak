@@ -9139,6 +9139,46 @@
         },
         {
           "category": "incidental",
+          "reason": "Go package constant holding the preflight receipt schema string; internal identifier, not a domain concept",
+          "token": "incumbentPreflightSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "classifyIncumbentPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentPreflightExpectedOwner"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentPreflightIncumbent"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentPreflightReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "observeIncumbentPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "renderIncumbentPreflightText"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "runModelIncumbentPreflight"
+        },
+        {
+          "category": "incidental",
           "reason": "Shared admission-policy seam both launchers derive their operator budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
           "token": "nativeAdmissionPolicyForBudget"
         }
@@ -9242,6 +9282,7 @@
         "capability_lines",
         "capabilitynotverdict",
         "ciPreflightArchiveTimeout",
+        "classifyIncumbentPreflight",
         "config_posture_budget",
         "containsAllTools",
         "contractByCapability",
@@ -9268,6 +9309,10 @@
         "hookCapability",
         "hookPosture",
         "hookPostureFor",
+        "incumbentPreflightExpectedOwner",
+        "incumbentPreflightIncumbent",
+        "incumbentPreflightReceipt",
+        "incumbentPreflightSchema",
         "launchPostureMechanism",
         "launchPostureOptions",
         "launchPostureReport",
@@ -9284,6 +9329,7 @@
         "normalizeDecodePolicyLabel",
         "normalizeFallbackPolicy",
         "numareplicapolicyunsupported",
+        "observeIncumbentPreflight",
         "orgPostureGloss",
         "phasePolicy",
         "policies",
@@ -9319,6 +9365,7 @@
         "qwenEmptyUsageGuardReceipt",
         "qwenEmptyUsagePolicyReceipt",
         "referencePolicyForCorpusCell",
+        "renderIncumbentPreflightText",
         "renderLaunchPosture",
         "resolveUltracodePosture",
         "routingPolicyStat",
@@ -9326,6 +9373,7 @@
         "runDoctorDefaultsSelfcheck",
         "runDoctorLaunchPosture",
         "runLiveSemanticMatrix",
+        "runModelIncumbentPreflight",
         "runRoutingPolicy",
         "runSemanticAdjudicator",
         "runTailPolicyMatrix",
@@ -9865,6 +9913,11 @@
           "category": "false-positive",
           "reason": "Benchmark receipt field records an input byte limit; it does not introduce a context-management concept.",
           "token": "ContextBudgetBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "readyCtx"
         }
       ],
       "exclude": [
@@ -9965,6 +10018,7 @@
         "providerSpanContext",
         "queryCodexHooksContext",
         "readGuardCompactionWitnesses",
+        "readyCtx",
         "recalled",
         "recalling",
         "recalls",
@@ -12666,6 +12720,51 @@
           "category": "incidental",
           "reason": "Private deterministic issue-comment formatter; it materializes one established worker-worktree projection rather than defining a distinct render concept.",
           "token": "renderSteerLifecycleStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private render helper extracted from renderIssueContract during the #10405 function-split pass; single-package incidental symbol with no cross-concept identity to protect",
+          "token": "renderIssueContractReviews"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go package constant holding the render receipt schema string; internal identifier, not a domain concept",
+          "token": "incumbentRenderSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentRenderInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentRenderSpec"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "incumbentRenderSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "modelIncumbentRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "renderIncumbentPlist"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "renderIncumbentPreflightText"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
+          "token": "runModelIncumbentRender"
         }
       ],
       "id": "render-materialize",
@@ -12700,12 +12799,17 @@
         "RenderUnrun",
         "RenderUserSplice",
         "formatTUIRenderStatus",
+        "incumbentRenderInput",
+        "incumbentRenderSchema",
+        "incumbentRenderSpec",
+        "incumbentRenderSummary",
         "indexrenderhits",
         "materializeSessionMoveCheckpoint",
         "materialized",
         "materializers",
         "materializes",
         "metricsrender",
+        "modelIncumbentRender",
         "printWorkflowConcepts",
         "priorwtrendercrash",
         "renderAgentGroups",
@@ -12729,6 +12833,9 @@
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
+        "renderIncumbentPlist",
+        "renderIncumbentPreflightText",
+        "renderIssueContractReviews",
         "renderLaunchPosture",
         "renderNextNativePerformance",
         "renderProviders",
@@ -12758,6 +12865,7 @@
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
         "rerender",
+        "runModelIncumbentRender",
         "runTUIRender",
         "runTUIRenderControl",
         "runTUIRenderSeat",
