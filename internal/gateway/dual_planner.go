@@ -89,6 +89,19 @@ func (d *DualPlanner) Proxy() agent.Planner { return d.proxy }
 // Local exposes the in-kernel side (tests, banners).
 func (d *DualPlanner) Local() agent.Planner { return d.local }
 
+// WalkPlanners traverses each direct child planner in the dual planner.
+func (d *DualPlanner) WalkPlanners(fn func(agent.Planner)) {
+	if d == nil {
+		return
+	}
+	if d.proxy != nil {
+		fn(d.proxy)
+	}
+	if d.local != nil {
+		fn(d.local)
+	}
+}
+
 // RoutesLocal reports whether a request naming reqModel is served by the in-kernel
 // side. An empty model routes to the proxy (the default side), so an omitted model
 // field never lands on the local model by accident.
