@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +26,9 @@ type otlpExporter struct {
 	client                                      *http.Client
 	queue                                       chan otlpSpan
 	done                                        chan struct{}
+	closeOnce                                   sync.Once
+	closedMu                                    sync.RWMutex
+	closed                                      bool
 	accepted, exported, dropped, failed, denied uint64
 }
 type otlpStats struct {
@@ -59,6 +63,12 @@ func newOTLPExporter(endpoint string, capacity int, timeout time.Duration) (*otl
 }
 func (e *otlpExporter) enqueue(span otlpSpan) {
 	if e == nil {
+		return
+	}
+	e.closedMu.RLock()
+	defer e.closedMu.RUnlock()
+	if e.closed {
+		atomic.AddUint64(&e.dropped, 1)
 		return
 	}
 	payload, _ := json.Marshal(span)
@@ -118,7 +128,12 @@ func (e *otlpExporter) close(ctx context.Context) error {
 	if e == nil {
 		return nil
 	}
-	close(e.queue)
+	e.closeOnce.Do(func() {
+		e.closedMu.Lock()
+		e.closed = true
+		close(e.queue)
+		e.closedMu.Unlock()
+	})
 	select {
 	case <-e.done:
 		return nil
