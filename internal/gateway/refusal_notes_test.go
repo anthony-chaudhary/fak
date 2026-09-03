@@ -275,3 +275,179 @@ func TestRefusalNoteSeamPreservesOrderAndConfirmRecipe(t *testing.T) {
 		t.Fatalf("seam reordered notes (sanctioned alternative must precede recipe):\n%s", notes)
 	}
 }
+
+func TestCompactRefusal(t *testing.T) {
+	t.Run("FormatExplicitArgs", func(t *testing.T) {
+		got := FormatCompactRefusalNote("POLICY_BLOCK", "rm -rf / is blocked by policy", "Use git clean instead")
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 lines, got %d: %q", len(lines), got)
+		}
+		if lines[0] != "[FAK GATE: POLICY_BLOCK] rm -rf / is blocked by policy" {
+			t.Fatalf("line 1 mismatch: %q", lines[0])
+		}
+		if lines[1] != "Next Action: Use git clean instead" {
+			t.Fatalf("line 2 mismatch: %q", lines[1])
+		}
+	})
+
+	t.Run("FormatEmbeddedNextActionInMessage", func(t *testing.T) {
+		msg := "rm -rf / is blocked by policy. Next Action: Use git clean to remove untracked files."
+		got := FormatCompactRefusalNote("POLICY_BLOCK", msg, "")
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 lines, got %d: %q", len(lines), got)
+		}
+		if lines[0] != "[FAK GATE: POLICY_BLOCK] rm -rf / is blocked by policy." {
+			t.Fatalf("line 1 mismatch: %q", lines[0])
+		}
+		if lines[1] != "Next Action: Use git clean to remove untracked files." {
+			t.Fatalf("line 2 mismatch: %q", lines[1])
+		}
+		if strings.Contains(lines[0], "Next Action") {
+			t.Fatalf("line 1 should not contain embedded next action: %q", lines[0])
+		}
+	})
+
+	t.Run("FormatPrefixDeduplication", func(t *testing.T) {
+		got := FormatCompactRefusalNote("[FAK GATE: POLICY_BLOCK]", "[FAK GATE: POLICY_BLOCK] rm is blocked", "Next Action: use git clean")
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 lines, got %d: %q", len(lines), got)
+		}
+		if lines[0] != "[FAK GATE: POLICY_BLOCK] rm is blocked" {
+			t.Fatalf("line 1 duplicate prefix: %q", lines[0])
+		}
+		if lines[1] != "Next Action: use git clean" {
+			t.Fatalf("line 2 duplicate prefix: %q", lines[1])
+		}
+	})
+
+	t.Run("FormatEmptyNextActionDerivesAffordance", func(t *testing.T) {
+		got := FormatCompactRefusalNote("OFF_TRUNK", "cannot commit on side branch", "")
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 lines, got %d: %q", len(lines), got)
+		}
+		if !strings.HasPrefix(lines[0], "[FAK GATE: OFF_TRUNK]") {
+			t.Fatalf("line 1 missing reason tag: %q", lines[0])
+		}
+		if !strings.Contains(lines[1], "commit on main with fak commit") {
+			t.Fatalf("line 2 missing known affordance: %q", lines[1])
+		}
+	})
+
+	t.Run("CompressMultilineVerboseNote", func(t *testing.T) {
+		verbose := `Detailed policy refusal explanations can span 10-20 lines of text.
+Tool 'rm -rf /' was refused by the active policy gate.
+Reason: POLICY_BLOCK
+Violation: Recursive root path deletion is forbidden by containment.
+Constraint: rm: DENY (POLICY_BLOCK/TERMINAL)
+Next Action: Choose an allowed alternative tool or request operator clearance.
+Session ID: 991283
+Timestamp: 2026-09-03T12:00:00Z
+Turn: 3
+Policy File: /etc/fak/policy.json
+Audit Record: audit-10294-x
+Stack Trace: none
+Caller: agent-worker-4`
+
+		got := CompressRefusalNote(verbose)
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected at most 2 lines, got %d:\n%s", len(lines), got)
+		}
+		if !strings.HasPrefix(lines[0], "[FAK GATE: POLICY_BLOCK]") {
+			t.Fatalf("line 1 missing extracted reason: %q", lines[0])
+		}
+		if !strings.Contains(lines[0], "Recursive root path deletion is forbidden by containment.") {
+			t.Fatalf("line 1 missing primary informative reason: %q", lines[0])
+		}
+		if lines[1] != "Next Action: Choose an allowed alternative tool or request operator clearance." {
+			t.Fatalf("line 2 missing extracted action: %q", lines[1])
+		}
+	})
+
+	t.Run("CompressExistingRefusalOutputs", func(t *testing.T) {
+		adj := ToolAdjudication{
+			Tool:     "git push",
+			Admitted: false,
+			Verdict: WireVerdict{
+				Kind:        "DENY",
+				Reason:      "REVERSIBILITY_CONFIRM",
+				Disposition: "RETRYABLE",
+				Detail: map[string]string{
+					"remedy": "use fak sync push",
+				},
+			},
+		}
+		raw := denySummary([]ToolAdjudication{adj})
+		compressed := CompressRefusalNote(raw)
+		lines := strings.Split(compressed, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 lines, got %d:\n%s", len(lines), compressed)
+		}
+		if !strings.HasPrefix(lines[0], "[FAK GATE: REVERSIBILITY_CONFIRM]") {
+			t.Fatalf("line 1 missing reason tag: %q", lines[0])
+		}
+		if lines[1] != "Next Action: use fak sync push" {
+			t.Fatalf("line 2 missing remedy action: %q", lines[1])
+		}
+	})
+
+	t.Run("CompressIdempotency", func(t *testing.T) {
+		initial := "[FAK GATE: POLICY_BLOCK] tool rm is blocked\nNext Action: use git clean"
+		once := CompressRefusalNote(initial)
+		twice := CompressRefusalNote(once)
+		if once != initial {
+			t.Fatalf("once != initial:\ngot:\n%s\nwant:\n%s", once, initial)
+		}
+		if twice != once {
+			t.Fatalf("twice != once:\ntwice:\n%s\nonce:\n%s", twice, once)
+		}
+	})
+
+	t.Run("AtMostTwoLinesGuarantee", func(t *testing.T) {
+		testCases := []struct {
+			reason     string
+			message    string
+			nextAction string
+		}{
+			{"", "", ""},
+			{"   ", "   ", "   "},
+			{"POLICY_BLOCK", "Line 1\r\nLine 2\r\nLine 3\r\nLine 4\r\nLine 5", "Action 1\r\nAction 2"},
+			{"CUSTOM_GATE", strings.Repeat("Very long explanation text without newline. ", 10), "Action"},
+			{"DEFAULT_DENY", "Tool not found\n\n\n\n", "Update policy\n"},
+		}
+
+		for i, tc := range testCases {
+			got := FormatCompactRefusalNote(tc.reason, tc.message, tc.nextAction)
+			lines := strings.Split(got, "\n")
+			if len(lines) > 2 || len(lines) == 0 {
+				t.Fatalf("case %d: expected 1 or 2 lines, got %d: %q", i, len(lines), got)
+			}
+			if strings.TrimSpace(got) == "" {
+				t.Fatalf("case %d: got empty string", i)
+			}
+			for lineIdx, line := range lines {
+				if strings.Contains(line, "\n") || strings.Contains(line, "\r") {
+					t.Fatalf("case %d line %d contains newline characters: %q", i, lineIdx, line)
+				}
+			}
+			if !strings.HasPrefix(lines[0], "[FAK GATE: ") {
+				t.Fatalf("case %d line 1 must start with [FAK GATE: , got: %q", i, lines[0])
+			}
+			if len(lines) == 2 && !strings.HasPrefix(lines[1], "Next Action: ") {
+				t.Fatalf("case %d line 2 must start with Next Action: , got: %q", i, lines[1])
+			}
+		}
+	})
+
+	t.Run("AffordanceFirstReframing", func(t *testing.T) {
+		got := FormatCompactRefusalNote("POLICY_BLOCK", "Do not forget to stamp the commit.", "use git commit")
+		lines := strings.Split(got, "\n")
+		if !strings.Contains(lines[0], "remember to stamp the commit.") {
+			t.Fatalf("failed to reframe negative idiom affordance-first: %q", lines[0])
+		}
+	})
+}

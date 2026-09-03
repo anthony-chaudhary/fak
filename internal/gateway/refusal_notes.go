@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -299,4 +300,338 @@ func complaintHint(denied []ToolAdjudication) string {
 		" --from-journal%s` files one deduplicating issue with the witnessed verdict"+
 		" attached. Adapt first; appeal only when you are confident the guard, not"+
 		" your call, is wrong.", reason, tool, selector)
+}
+
+var (
+	reFakHeaderTag        = regexp.MustCompile(`\[FAK GATE:\s*([^\]]+)\]`)
+	reParenVerdict        = regexp.MustCompile(`\(([A-Z0-9_]+)/[A-Z0-9_]+\)`)
+	reExplicitReasonKw    = regexp.MustCompile(`(?i)(?:^|[\r\n\s,;])reason:\s*([A-Za-z0-9_]+)`)
+	reNextActionPrefix    = regexp.MustCompile(`(?i)^(?:next\s*action|next\s*step|actionable\s*affordance|action):\s*`)
+	reBoilerplateTrailers = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)This is per-tool feedback, not a session stop\..*`),
+		regexp.MustCompile(`(?i)Judge a refusal wrong.*`),
+		regexp.MustCompile(`(?i)A session stop only comes from a declared stop policy\..*`),
+		regexp.MustCompile(`(?i)Do not re-propose.*`),
+		regexp.MustCompile(`(?i)Contact [^\s]+ for policy adjustments\..*`),
+		regexp.MustCompile(`(?i)For support, visit:.*`),
+	}
+	reBoilerplateHeaders = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^refusal\s+details:\s*`),
+		regexp.MustCompile(`(?i)^detailed\s+policy\s+refusal[^:]*:\s*`),
+		regexp.MustCompile(`(?i)^error:\s*`),
+		regexp.MustCompile(`(?i)^allowed\s+next\s+step[^\:]*:\s*`),
+	}
+	reMultiSpace        = regexp.MustCompile(`[ \t]+`)
+	reNextActionMarkers = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(?:next\s+action|next\s+step|actionable\s+affordance):\s*([^\r\n]+)`),
+		regexp.MustCompile(`(?i)\baction:\s*([^\r\n]+)`),
+		regexp.MustCompile(`(?i)\bsanctioned\s+alternative:\s*([^\r\n;]+)`),
+		regexp.MustCompile(`(?i)\boperator\s+choice(?:\s*\([^)]*\))?:\s*([^\r\n;]+)`),
+		regexp.MustCompile(`(?i)\bremedy:\s*([^\r\n;]+)`),
+		regexp.MustCompile(`(?i)\ballowed\s+next\s+step(?:\s+for[^\:]*)?:\s*([^\r\n;]+)`),
+	}
+)
+
+func cleanReasonToken(r string) string {
+	r = strings.TrimSpace(r)
+	if strings.HasPrefix(strings.ToUpper(r), "[FAK GATE:") {
+		r = strings.TrimPrefix(r, "[FAK GATE:")
+		r = strings.TrimPrefix(r, "[fak gate:")
+		r = strings.TrimSuffix(r, "]")
+	}
+	r = strings.TrimSpace(r)
+	if idx := strings.Index(r, "/"); idx > 0 {
+		r = r[:idx]
+	}
+	var buf strings.Builder
+	for _, ch := range r {
+		if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			buf.WriteRune(ch)
+		} else {
+			break
+		}
+	}
+	return strings.ToUpper(buf.String())
+}
+
+func extractReasonFromText(text string) string {
+	if m := reFakHeaderTag.FindStringSubmatch(text); len(m) > 1 {
+		if c := cleanReasonToken(m[1]); c != "" {
+			return c
+		}
+	}
+	if m := reParenVerdict.FindStringSubmatch(text); len(m) > 1 {
+		if c := cleanReasonToken(m[1]); c != "" {
+			return c
+		}
+	}
+	if m := reExplicitReasonKw.FindStringSubmatch(text); len(m) > 1 {
+		if c := cleanReasonToken(m[1]); c != "" {
+			return c
+		}
+	}
+	knownReasons := []string{
+		"POLICY_BLOCK",
+		"DEFAULT_DENY",
+		"REVERSIBILITY_CONFIRM",
+		"FILE_ADMISSION",
+		"OFF_TRUNK",
+		"OUT_OF_TREE_WRITE",
+		"SELF_MODIFY",
+		"OVERHEAD_BUDGET_EXCEEDED",
+		"INVALID_TOOL_ARGUMENTS",
+		"LIVELOCK_DETECTED",
+		"NEEDS_WITNESS",
+		"PERMISSION_DENIED",
+		"RECOVERY_REQUIRED",
+		"CORE_LOCK",
+	}
+	for _, kr := range knownReasons {
+		if strings.Contains(text, kr) {
+			return kr
+		}
+	}
+	return ""
+}
+
+func extractNextActionAndCleanMessage(msg string) (string, string) {
+	msgClean := msg
+	var action string
+
+	for _, pat := range reNextActionMarkers {
+		loc := pat.FindStringSubmatchIndex(msgClean)
+		if len(loc) >= 4 {
+			captured := strings.TrimSpace(msgClean[loc[2]:loc[3]])
+			before := msgClean[:loc[0]]
+			after := msgClean[loc[1]:]
+			msgClean = before + " " + after
+
+			delimiters := []string{
+				"Constraint:",
+				"constraint:",
+				"This is per-tool feedback",
+				"Judge a refusal",
+				"Session ID:",
+				"Audit ID:",
+				"Timestamp:",
+			}
+			for _, d := range delimiters {
+				if idx := strings.Index(captured, d); idx > 0 {
+					trailer := captured[idx:]
+					captured = strings.TrimSpace(captured[:idx])
+					msgClean += " " + trailer
+				}
+			}
+			action = captured
+			break
+		}
+	}
+
+	return action, msgClean
+}
+
+func defaultAffordanceForReason(reason string) string {
+	if aff := errorAffordance(reason); aff != "" && aff != reason {
+		return aff
+	}
+	switch reason {
+	case "REVERSIBILITY_CONFIRM":
+		return "re-propose with _fak_confirm key or choose sanctioned alternative"
+	case "DEFAULT_DENY":
+		return "run fak guard allow or update policy profile"
+	case "LIVELOCK_DETECTED":
+		return "change approach; identical repeated calls are refused"
+	case "NEEDS_WITNESS":
+		return "attach required witness artifact and retry"
+	case "FILE_ADMISSION":
+		return "stage only admitted workspace files"
+	case "OFF_TRUNK":
+		return "commit on main with fak commit --path <owned-path> -m <message>"
+	case "OUT_OF_TREE_WRITE":
+		return "write inside the workspace or place scratch data in the OS temp directory"
+	case "SELF_MODIFY":
+		return "route an authorized core-lock edit through maintenance witness or compiled verb"
+	case "OVERHEAD_BUDGET_EXCEEDED":
+		return "reduce overhead or update declared envelope"
+	case "INVALID_TOOL_ARGUMENTS":
+		return "correct tool arguments to match schema and retry"
+	default:
+		return "choose an admitted tool or request operator override"
+	}
+}
+
+func defaultBriefReasonForReason(reason string) string {
+	switch reason {
+	case "POLICY_BLOCK":
+		return "tool execution blocked by policy"
+	case "DEFAULT_DENY":
+		return "unregistered tool blocked by default-deny floor"
+	case "REVERSIBILITY_CONFIRM":
+		return "state-modifying operation requires confirmation"
+	case "OFF_TRUNK":
+		return "commits must be made on main trunk"
+	case "OUT_OF_TREE_WRITE":
+		return "write outside workspace blocked"
+	case "SELF_MODIFY":
+		return "core-lock modification blocked"
+	case "INVALID_TOOL_ARGUMENTS":
+		return "tool arguments invalid"
+	case "LIVELOCK_DETECTED":
+		return "repeated identical call blocked"
+	case "NEEDS_WITNESS":
+		return "operation requires witness artifact"
+	case "FILE_ADMISSION":
+		return "file path admission refused"
+	default:
+		if reason != "" {
+			return fmt.Sprintf("operation blocked by %s gate", reason)
+		}
+		return "operation blocked by gate"
+	}
+}
+
+func selectInformativeLine(text string) string {
+	text = strings.ReplaceAll(text, "\r", "")
+	lines := strings.Split(text, "\n")
+	var informative []string
+	var violationLine string
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "refusal details") ||
+			strings.HasPrefix(lower, "detailed policy refusal") ||
+			strings.HasPrefix(lower, "error:") ||
+			strings.HasPrefix(lower, "reason:") ||
+			strings.HasPrefix(lower, "status:") ||
+			strings.HasPrefix(lower, "audit id:") ||
+			strings.HasPrefix(lower, "session id:") ||
+			strings.HasPrefix(lower, "diagnostic id:") ||
+			strings.HasPrefix(lower, "timestamp:") ||
+			strings.HasPrefix(lower, "turn:") ||
+			strings.HasPrefix(lower, "rule id:") ||
+			strings.HasPrefix(lower, "policy file:") {
+			continue
+		}
+		if strings.HasPrefix(lower, "violation:") {
+			violationLine = strings.TrimSpace(line[len("violation:"):])
+			continue
+		}
+		informative = append(informative, line)
+	}
+	if violationLine != "" {
+		return violationLine
+	}
+	if len(informative) == 0 {
+		return text
+	}
+	for _, l := range informative {
+		low := strings.ToLower(l)
+		if strings.Contains(low, "violation") ||
+			strings.Contains(low, "blocked") ||
+			strings.Contains(low, "refused") ||
+			strings.Contains(low, "denied") ||
+			strings.Contains(low, "prohibited") ||
+			strings.Contains(low, "forbidden") {
+			return l
+		}
+	}
+	return informative[0]
+}
+
+func cleanBriefReason(reason, msg string) string {
+	msg = selectInformativeLine(msg)
+
+	msg = reFakHeaderTag.ReplaceAllString(msg, "")
+	msg = strings.TrimPrefix(msg, "[fak]")
+	msg = strings.TrimSpace(msg)
+
+	for _, re := range reBoilerplateTrailers {
+		msg = re.ReplaceAllString(msg, "")
+	}
+
+	for _, re := range reBoilerplateHeaders {
+		msg = re.ReplaceAllString(msg, "")
+	}
+
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = reMultiSpace.ReplaceAllString(msg, " ")
+	msg = strings.TrimSpace(msg)
+
+	if strings.HasPrefix(strings.ToLower(msg), "constraint:") {
+		msg = strings.TrimSpace(msg[len("constraint:"):])
+	}
+	if idx := strings.Index(msg, "Constraint:"); idx > 15 {
+		msg = strings.TrimSpace(msg[:idx])
+	}
+
+	if len(msg) > 160 {
+		if idx := strings.Index(msg[20:], ". "); idx >= 0 && (20+idx+1) <= 160 {
+			msg = strings.TrimSpace(msg[:20+idx+1])
+		} else if idx := strings.Index(msg[20:], "; "); idx >= 0 && (20+idx) <= 160 {
+			msg = strings.TrimSpace(msg[:20+idx])
+		} else if lastSpace := strings.LastIndex(msg[:140], " "); lastSpace > 30 {
+			msg = strings.TrimSpace(msg[:lastSpace]) + "..."
+		}
+	}
+
+	msg = negframe.Reframe(msg)
+
+	if msg == "" {
+		msg = defaultBriefReasonForReason(reason)
+	}
+
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = reMultiSpace.ReplaceAllString(msg, " ")
+	return strings.TrimSpace(msg)
+}
+
+// FormatCompactRefusalNote formats a refusal into a compact 2-line envelope:
+// Line 1: [FAK GATE: <REASON>] <Brief affordance-first reason>
+// Line 2: Next Action: <Actionable affordance>
+func FormatCompactRefusalNote(reason string, message string, nextAction string) string {
+	cleanedReason := cleanReasonToken(reason)
+	if cleanedReason == "" {
+		cleanedReason = extractReasonFromText(message)
+	}
+	if cleanedReason == "" {
+		cleanedReason = "POLICY_BLOCK"
+	}
+
+	extractedAction, cleanedMsg := extractNextActionAndCleanMessage(message)
+	action := strings.TrimSpace(nextAction)
+	if action != "" {
+		action = reNextActionPrefix.ReplaceAllString(action, "")
+		action = strings.TrimSpace(action)
+	} else if extractedAction != "" {
+		action = extractedAction
+	} else {
+		action = defaultAffordanceForReason(cleanedReason)
+	}
+
+	action = strings.ReplaceAll(action, "\r", " ")
+	action = strings.ReplaceAll(action, "\n", " ")
+	action = reMultiSpace.ReplaceAllString(action, " ")
+	action = strings.TrimSpace(action)
+
+	briefReason := cleanBriefReason(cleanedReason, cleanedMsg)
+
+	line1 := fmt.Sprintf("[FAK GATE: %s] %s", cleanedReason, briefReason)
+	line2 := fmt.Sprintf("Next Action: %s", action)
+
+	line1 = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(line1, "\r", " "), "\n", " "))
+	line2 = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(line2, "\r", " "), "\n", " "))
+
+	return line1 + "\n" + line2
+}
+
+// CompressRefusalNote compresses an existing multi-line or verbose refusal note
+// into the compact 2-line envelope by extracting reason, message, and next action.
+func CompressRefusalNote(rawNote string) string {
+	reason := extractReasonFromText(rawNote)
+	return FormatCompactRefusalNote(reason, rawNote, "")
 }
