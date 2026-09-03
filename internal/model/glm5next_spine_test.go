@@ -46,8 +46,11 @@ func TestGLM5NextIdentityRejectsNearMissesAndAliases(t *testing.T) {
 		"wrong cadence": func(v map[string]any) {
 			v["text_config"].(map[string]any)["layer_types"].([]any)[3] = "linear_attention"
 		},
-		"wrong context":        func(v map[string]any) { v["text_config"].(map[string]any)["max_position_embeddings"] = float64(131072) },
-		"missing fp8 metadata": func(v map[string]any) { delete(v, "quantization_config") },
+		"wrong context":     func(v map[string]any) { v["text_config"].(map[string]any)["max_position_embeddings"] = float64(131072) },
+		"unsupported quant": func(v map[string]any) { v["quantization_config"] = map[string]any{"quant_method": "awq"} },
+		"unsupported format": func(v map[string]any) {
+			v["quantization_config"] = map[string]any{"quant_method": "fp8", "fmt": "e5m2", "activation_scheme": "dynamic"}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -66,6 +69,39 @@ func TestGLM5NextIdentityRejectsNearMissesAndAliases(t *testing.T) {
 		})
 	}
 	_ = base
+}
+
+func TestGLM5NextAcceptsUnquantizedBF16Envelope(t *testing.T) {
+	raw := readGLM5NextFixture(t, "config.json")
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	// Delete quantization_config for the official reference BF16 checkpoint
+	delete(v, "quantization_config")
+	bf16Bytes, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isExactGLM5NextConfig(bf16Bytes) {
+		t.Fatal("unquantized BF16 GLM5Next config was not recognized as exact GLM5Next")
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(bf16Bytes, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.GLM5Next {
+		t.Fatal("unquantized BF16 GLM5Next config did not set cfg.GLM5Next")
+	}
+	path, err := ClassifyForwardPath(cfg, nil)
+	if path != "" {
+		t.Fatalf("path = %q, want empty", path)
+	}
+	var unsupported *GLM5NextUnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("expected *GLM5NextUnsupportedError, got %T: %v", err, err)
+	}
 }
 
 func TestGLM5NextTensorInventoryPinned(t *testing.T) {
@@ -123,6 +159,64 @@ func TestGLM5NextGatePreservesExistingQwenAndGLMPaths(t *testing.T) {
 	glm := Config{ModelType: "glm_moe_dsa", NumExperts: 8, QLoraRank: 8, KVLoraRank: 8}
 	if path, err := ClassifyForwardPath(glm, nil); err != nil || path != ForwardGLMDsaMLA {
 		t.Fatalf("GLM-5.2 path = %q, %v", path, err)
+	}
+}
+
+func TestGLM5NextConfigCadenceHelpers(t *testing.T) {
+	cfg := DefaultGLM5NextConfig()
+	if cfg.NumHiddenLayers != 45 {
+		t.Fatalf("NumHiddenLayers = %d, want 45", cfg.NumHiddenLayers)
+	}
+	if cfg.NRoutedExperts != 288 || cfg.NSharedExperts != 1 || cfg.ExpertsPerToken != 8 {
+		t.Fatalf("MoE parameters mismatch: %+v", cfg)
+	}
+	if cfg.IndexKPool != 4 || cfg.ConvWindowSize != 4 || cfg.HCMult != 4 {
+		t.Fatalf("parameters mismatch: %+v", cfg)
+	}
+
+	modelCfg := Config{GLM5Next: true}
+
+	var kdaCount, dsaCount int
+	for l := 0; l < 45; l++ {
+		isKDA := cfg.IsKDALayer(l)
+		isDSA := cfg.IsDSALayer(l)
+		if isKDA == isDSA {
+			t.Fatalf("layer %d must be either KDA or DSA, got KDA=%v DSA=%v", l, isKDA, isDSA)
+		}
+		if modelCfg.IsGLM5NextKDALayer(l) != isKDA {
+			t.Fatalf("Config.IsGLM5NextKDALayer(%d) = %v, want %v", l, modelCfg.IsGLM5NextKDALayer(l), isKDA)
+		}
+		if modelCfg.IsGLM5NextDSALayer(l) != isDSA {
+			t.Fatalf("Config.IsGLM5NextDSALayer(%d) = %v, want %v", l, modelCfg.IsGLM5NextDSALayer(l), isDSA)
+		}
+		if isKDA {
+			kdaCount++
+		} else {
+			dsaCount++
+		}
+
+		isDense := cfg.IsDenseMLPLayer(l)
+		isMoE := cfg.IsSparseMoELayer(l)
+		if isDense == isMoE {
+			t.Fatalf("layer %d must be either dense MLP or sparse MoE, got dense=%v moe=%v", l, isDense, isMoE)
+		}
+		if modelCfg.IsGLM5NextDenseMLP(l) != isDense {
+			t.Fatalf("Config.IsGLM5NextDenseMLP(%d) = %v, want %v", l, modelCfg.IsGLM5NextDenseMLP(l), isDense)
+		}
+		if modelCfg.IsGLM5NextSparseMoE(l) != isMoE {
+			t.Fatalf("Config.IsGLM5NextSparseMoE(%d) = %v, want %v", l, modelCfg.IsGLM5NextSparseMoE(l), isMoE)
+		}
+	}
+	if kdaCount != 34 || dsaCount != 11 {
+		t.Fatalf("cadence counts mismatch: kda=%d (want 34), dsa=%d (want 11)", kdaCount, dsaCount)
+	}
+
+	// Non-GLM config should return false
+	nonGLM := Config{GLM5Next: false}
+	for l := 0; l < 45; l++ {
+		if nonGLM.IsGLM5NextKDALayer(l) || nonGLM.IsGLM5NextDSALayer(l) || nonGLM.IsGLM5NextDenseMLP(l) || nonGLM.IsGLM5NextSparseMoE(l) {
+			t.Fatalf("non-GLM config returned true for layer %d", l)
+		}
 	}
 }
 

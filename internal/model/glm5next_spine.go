@@ -103,11 +103,16 @@ func isExactGLM5NextConfig(raw []byte) bool {
 	}
 	vision := envelope.VisionConfig
 	quant := envelope.QuantizationConfig
-	return vision.ModelType == "glm5_next_vision" && vision.Depth == 24 && vision.HiddenSize == 1024 &&
+	isVisionValid := vision.ModelType == "glm5_next_vision" && vision.Depth == 24 && vision.HiddenSize == 1024 &&
 		vision.IntermediateSize == 4096 && vision.NumHeads == 16 && vision.ImageSize == 448 &&
 		vision.PatchSize == 14 && vision.SpatialMergeSize == 2 && vision.TemporalPatchSize == 2 &&
-		vision.OutHiddenSize == 4096 && vision.ProjectionIntermediateSize == 10240 &&
-		quant.Method == "fp8" && quant.Format == "e4m3" && quant.ActivationScheme == "dynamic"
+		vision.OutHiddenSize == 4096 && vision.ProjectionIntermediateSize == 10240
+	if !isVisionValid {
+		return false
+	}
+	isFP8 := quant.Method == "fp8" && quant.Format == "e4m3" && quant.ActivationScheme == "dynamic"
+	isBF16 := quant.Method == "" && quant.Format == "" && quant.ActivationScheme == ""
+	return isFP8 || isBF16
 }
 
 func glm5NextCadence(layerTypes []string, kda, full []int) bool {
@@ -155,4 +160,137 @@ func containsGLM5NextString(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// GLM5NextConfig holds the verified architecture parameters for GLM-5.3-Flash.
+type GLM5NextConfig struct {
+	NumHiddenLayers   int
+	HiddenSize        int
+	IntermediateSize  int
+	NumAttentionHeads int
+	NumKVHeads        int
+	NRoutedExperts    int
+	NSharedExperts    int
+	ExpertsPerToken   int
+	MoEIntermediate   int
+	FirstDenseLayers  int
+	QLoraRank         int
+	KVLoraRank        int
+	QKNopeHeadDim     int
+	VHeadDim          int
+	IndexHeadDim      int
+	IndexHeads        int
+	IndexTopK         int
+	IndexKPool        int
+	MHC               bool
+	HCMult            int
+	KDANumHeads       int
+	KDAHeadDim        int
+	ConvWindowSize    int
+	KDALayers         []int
+	FullAttnLayers    []int
+}
+
+// DefaultGLM5NextConfig returns the canonical pinned architecture geometry for GLM-5.3-Flash.
+func DefaultGLM5NextConfig() GLM5NextConfig {
+	kda := make([]int, 0, 34)
+	full := make([]int, 0, 11)
+	for l := 0; l < 45; l++ {
+		if l%4 == 3 {
+			full = append(full, l)
+		} else {
+			kda = append(kda, l)
+		}
+	}
+	return GLM5NextConfig{
+		NumHiddenLayers:   45,
+		HiddenSize:        4096,
+		IntermediateSize:  12288,
+		NumAttentionHeads: 64,
+		NumKVHeads:        64,
+		NRoutedExperts:    288,
+		NSharedExperts:    1,
+		ExpertsPerToken:   8,
+		MoEIntermediate:   2048,
+		FirstDenseLayers:  3,
+		QLoraRank:         1536,
+		KVLoraRank:        512,
+		QKNopeHeadDim:     256,
+		VHeadDim:          256,
+		IndexHeadDim:      128,
+		IndexHeads:        32,
+		IndexTopK:         2048,
+		IndexKPool:        4,
+		MHC:               true,
+		HCMult:            4,
+		KDANumHeads:       64,
+		KDAHeadDim:        128,
+		ConvWindowSize:    4,
+		KDALayers:         kda,
+		FullAttnLayers:    full,
+	}
+}
+
+// IsKDALayer reports whether layer is a KDA linear-attention layer.
+func (c GLM5NextConfig) IsKDALayer(layer int) bool {
+	if layer < 0 || layer >= c.NumHiddenLayers {
+		return false
+	}
+	return layer%4 != 3
+}
+
+// IsDSALayer reports whether layer is a Decoupled Sparse Attention layer.
+func (c GLM5NextConfig) IsDSALayer(layer int) bool {
+	if layer < 0 || layer >= c.NumHiddenLayers {
+		return false
+	}
+	return layer%4 == 3
+}
+
+// IsDenseMLPLayer reports whether layer uses dense MLP rather than MoE (layers 0..2).
+func (c GLM5NextConfig) IsDenseMLPLayer(layer int) bool {
+	if layer < 0 || layer >= c.NumHiddenLayers {
+		return false
+	}
+	return layer < c.FirstDenseLayers
+}
+
+// IsSparseMoELayer reports whether layer uses 288-expert routed MoE (layers 3..44).
+func (c GLM5NextConfig) IsSparseMoELayer(layer int) bool {
+	if layer < 0 || layer >= c.NumHiddenLayers {
+		return false
+	}
+	return layer >= c.FirstDenseLayers
+}
+
+// IsGLM5NextKDALayer reports whether layer is a GLM5Next linear attention layer on Config.
+func (c Config) IsGLM5NextKDALayer(layer int) bool {
+	if !c.GLM5Next {
+		return false
+	}
+	return layer >= 0 && layer < 45 && layer%4 != 3
+}
+
+// IsGLM5NextDSALayer reports whether layer is a GLM5Next sparse attention layer on Config.
+func (c Config) IsGLM5NextDSALayer(layer int) bool {
+	if !c.GLM5Next {
+		return false
+	}
+	return layer >= 0 && layer < 45 && layer%4 == 3
+}
+
+// IsGLM5NextDenseMLP reports whether layer is one of the initial dense MLP layers on Config.
+func (c Config) IsGLM5NextDenseMLP(layer int) bool {
+	if !c.GLM5Next {
+		return false
+	}
+	return layer >= 0 && layer < 3
+}
+
+// IsGLM5NextSparseMoE reports whether layer is a routed MoE layer on Config.
+func (c Config) IsGLM5NextSparseMoE(layer int) bool {
+	if !c.GLM5Next {
+		return false
+	}
+	return layer >= 3 && layer < 45
 }
