@@ -166,3 +166,120 @@ func TestLoadLocalLauncherModelWithMetalLeasePressurePolicy(t *testing.T) {
 		t.Fatal("expected load to run under exclusive admission")
 	}
 }
+
+func TestLoadLocalLauncherModelWithMetalLeaseCoexistsForSmallModels(t *testing.T) {
+	resDir := filepath.Join(t.TempDir(), "reservations")
+	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_RESERVATION_DIR", resDir)
+	t.Setenv("FAK_GPU_LEASE", leasePath)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+	t.Setenv("FAK_NATIVE_ADMISSION", "aggregate")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "536870912") // 512 MiB
+	t.Setenv("FAK_TEST_STEADY_BYTES", "268435456")       // 256 MiB
+
+	loads1 := 0
+	release1, err := loadLocalLauncherModelWithMetalLease(true, "small-model-1.gguf", gpulease.Options{}, func() {
+		loads1++
+	})
+	if err != nil {
+		t.Fatalf("first small model load failed: %v", err)
+	}
+	defer release1()
+	if loads1 != 1 {
+		t.Fatalf("first small model expected 1 load, got %d", loads1)
+	}
+
+	loads2 := 0
+	release2, err := loadLocalLauncherModelWithMetalLease(true, "small-model-2.gguf", gpulease.Options{}, func() {
+		loads2++
+	})
+	if err != nil {
+		t.Fatalf("second small model should coexist when aggregate fits: %v", err)
+	}
+	defer release2()
+	if loads2 != 1 {
+		t.Fatalf("second small model expected 1 load, got %d", loads2)
+	}
+
+	// Verify ledger recorded both coexisting reservations in steady state.
+	ledgerPath := filepath.Join(resDir, "reservations.json")
+	data, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "steady") {
+		t.Fatalf("ledger should record steady phase: %s", content)
+	}
+
+	// Release first model, verify second remains active.
+	release1()
+	dataAfter1, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger after release1: %v", err)
+	}
+	if !strings.Contains(string(dataAfter1), "steady") {
+		t.Fatalf("ledger should still contain second model after release1: %s", string(dataAfter1))
+	}
+
+	// Release second model, verify cleanup.
+	release2()
+	dataAfter2, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger after release2: %v", err)
+	}
+	if strings.Contains(string(dataAfter2), "\"held_bytes\":268435456") {
+		t.Fatalf("ledger should have cleaned up second reservation: %s", string(dataAfter2))
+	}
+}
+
+func TestLoadLocalLauncherModelWithMetalLeaseRefusesOvercommitBeforeLoader(t *testing.T) {
+	resDir := filepath.Join(t.TempDir(), "reservations")
+	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_RESERVATION_DIR", resDir)
+	t.Setenv("FAK_GPU_LEASE", leasePath)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+
+	// Set impossible peak bytes (e.g. 500 GiB on Apple Silicon)
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.FormatInt(500<<30, 10))
+	t.Setenv("FAK_TEST_STEADY_BYTES", strconv.FormatInt(400<<30, 10))
+
+	loads := 0
+	release, err := loadLocalLauncherModelWithMetalLease(true, "huge-model.gguf", gpulease.Options{}, func() {
+		loads++
+	})
+	if err == nil {
+		release()
+		t.Fatal("expected overcommit to refuse before load, got success")
+	}
+	if loads != 0 {
+		t.Fatalf("loader must not be called on refusal, got %d loads", loads)
+	}
+	if !strings.Contains(err.Error(), "aggregate_capacity") && !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadLocalLauncherModelWithMetalLeaseLoadFailureReleasesReservation(t *testing.T) {
+	resDir := filepath.Join(t.TempDir(), "reservations")
+	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_RESERVATION_DIR", resDir)
+	t.Setenv("FAK_GPU_LEASE", leasePath)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "536870912")
+	t.Setenv("FAK_TEST_STEADY_BYTES", "268435456")
+
+	defer func() {
+		_ = recover()
+		// After panic in loader, check that ledger was reaped / released
+		ledgerPath := filepath.Join(resDir, "reservations.json")
+		data, err := os.ReadFile(ledgerPath)
+		if err == nil && strings.Contains(string(data), "\"phase\":\"startup\"") {
+			t.Fatalf("aborted load must not leak startup reservation in ledger: %s", string(data))
+		}
+	}()
+
+	_, _ = loadLocalLauncherModelWithMetalLease(true, "panicking-model.gguf", gpulease.Options{}, func() {
+		panic("simulated loader panic")
+	})
+}
