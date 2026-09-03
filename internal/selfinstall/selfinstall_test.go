@@ -918,7 +918,7 @@ func TestInstallCandidateCacheIdentityBindsRuntimeInputsAndReusesAcrossCommits(t
 	if got.BuildInputDigest == "" || got.ArtifactDigest == "" || got.ArtifactSize == 0 || got.BuildEnvelope["GOVERSION"] == "" {
 		t.Fatalf("cross-commit reuse omitted identities: %+v", got)
 	}
-	if got.AppVersion != "1.2.3" {
+	if got.AppVersion != "1.2.3" { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture asserts round-trip preservation of the declared test version
 		t.Fatalf("cross-commit reuse app version = %q, want candidate provenance 1.2.3", got.AppVersion)
 	}
 

@@ -349,6 +349,11 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 		if role == nativeperf.RoleCandidate {
 			r.ChangedAxes = []string{"lever:" + r.ChangedLeverID}
 		}
+		var err error
+		r.Comparison, err = nativeperf.ComparisonIdentityFor(*r)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	candidate := baseline
 	candidate.UnchangedControls = append([]string(nil), baseline.UnchangedControls...)
@@ -584,6 +589,11 @@ func gateRequestFixture(t *testing.T) nativeperf.GateRequest {
 		}
 		if role == nativeperf.RoleCandidate {
 			r.ChangedAxes = []string{"lever:" + r.ChangedLeverID}
+		}
+		var err error
+		r.Comparison, err = nativeperf.ComparisonIdentityFor(*r)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	candidate := baseline

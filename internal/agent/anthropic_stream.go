@@ -200,7 +200,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			if statusErr != nil {
 				return statusErr
 			}
-			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
+			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && (!transientRetryTried || !transientTargetTried))) {
 				attempt--
 			}
 			if retry {
@@ -221,7 +221,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		if statusErr != nil {
 			return statusErr
 		}
-		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
+		if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && (!transientRetryTried || !transientTargetTried))) {
 			attempt--
 		}
 		if retry {

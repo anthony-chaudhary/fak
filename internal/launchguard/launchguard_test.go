@@ -43,7 +43,7 @@ func TestStableIdentityStoresOnlyHash(t *testing.T) {
 	if d.Outcome != Admitted || lease == nil {
 		t.Fatalf("decision = %+v, lease=%v", d, lease)
 	}
-	if d.Identity == identity || len(d.Identity) != 64 {
+	if d.Identity == identity || len(d.Identity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width is a fixed 64-character invariant
 		t.Fatalf("identity = %q", d.Identity)
 	}
 	entries, err := os.ReadDir(g.cfg.Dir)

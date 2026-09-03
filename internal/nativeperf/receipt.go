@@ -226,6 +226,11 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 			f = append(f, "artifact hash does not match envelope")
 		}
 	}
+	if r.Comparison != (ComparisonIdentity{}) {
+		if err := validateComparisonIdentity(r); err != nil {
+			f = append(f, err.Error())
+		}
+	}
 	return receiptValidationError(f)
 }
 
@@ -260,11 +265,6 @@ func receiptValidationProblems(r ExperimentReceipt) []string {
 	}
 	if r.Execution.FallbackCount != 0 {
 		f = append(f, "fallback count must be zero")
-	}
-	if r.Schema != ReceiptSchemaV1 || r.Comparison != (ComparisonIdentity{}) {
-		if err := validateComparisonIdentity(r); err != nil {
-			f = append(f, err.Error())
-		}
 	}
 	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
 		f = append(f, "quality metric must be captured and finite")

@@ -49,10 +49,10 @@ func TestLedgerFromReceiptsMapsHardwareAndDeduplicates(t *testing.T) {
 				modelArtifact = artifact
 			}
 		}
-		if !receiptArtifact.Exact || len(receiptArtifact.Revision) != 40 || len(receiptArtifact.RecordDigest) != 64 {
+		if !receiptArtifact.Exact || len(receiptArtifact.Revision) != 40 || len(receiptArtifact.RecordDigest) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST git sha1 is 40 and sha256 is 64
 			t.Fatalf("weak receipt provenance: %+v", receiptArtifact)
 		}
-		if !strings.HasPrefix(modelArtifact.ID, "sha256:") || len(modelArtifact.RecordDigest) != 64 || modelArtifact.RecordDigest == receiptArtifact.RecordDigest {
+		if !strings.HasPrefix(modelArtifact.ID, "sha256:") || len(modelArtifact.RecordDigest) != 64 || modelArtifact.RecordDigest == receiptArtifact.RecordDigest { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex digest is a fixed 64-character invariant
 			t.Fatalf("model and receipt identities not separated: receipt=%+v model=%+v", receiptArtifact, modelArtifact)
 		}
 	}
