@@ -62,6 +62,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -122,10 +123,12 @@ type AdmissionTrust struct {
 // session snapshot). Tokens is the footprint charged against the token budget (prompt +
 // planned decode; the KV-block estimate folds onto this axis once paged KV is exact).
 type SeqRequest struct {
-	TraceID  string
-	Priority int
-	Tokens   int
-	Trust    AdmissionTrust
+	TraceID   string
+	Priority  int
+	Tokens    int
+	Trust     AdmissionTrust
+	CreatedAt time.Time
+	DecodeTTL time.Duration
 }
 
 // AdmissionVerdict is the outcome of offering a request to the gate.
@@ -143,6 +146,9 @@ const (
 	VerdictShed
 	// VerdictDenied: a per-tenant trust verdict rejected admission (the governance gate).
 	VerdictDenied
+	// VerdictExpired: the individual request's DecodeTTL expired while waiting or decoding,
+	// shedding only this request without killing the scheduler or other requests.
+	VerdictExpired
 )
 
 // String renders a verdict as its lowercase token; an out-of-range value renders
@@ -157,6 +163,8 @@ func (v AdmissionVerdict) String() string {
 		return "shed"
 	case VerdictDenied:
 		return "denied"
+	case VerdictExpired:
+		return "expired"
 	}
 	return "unknown"
 }
@@ -170,6 +178,8 @@ func (v AdmissionVerdict) HTTPStatus() int {
 		return http.StatusTooManyRequests
 	case VerdictDenied:
 		return http.StatusForbidden
+	case VerdictExpired:
+		return http.StatusGatewayTimeout
 	default:
 		return 0
 	}
@@ -188,6 +198,7 @@ type AdmissionStats struct {
 	Queued        int64 // cumulative requests placed on the waiting queue (counter)
 	Shed          int64 // cumulative requests shed under overload — 429 (counter)
 	Denied        int64 // cumulative requests rejected by a trust verdict (counter)
+	Expired       int64 // cumulative requests expired by DecodeTTL (counter)
 }
 
 // AdmissionController is the admission/priority/fairness gate over the native loop. The
@@ -292,6 +303,13 @@ func (e *AdmissionError) Error() string {
 func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if req.CreatedAt.IsZero() {
+		req.CreatedAt = time.Now()
+	}
+	if req.DecodeTTL > 0 && time.Since(req.CreatedAt) >= req.DecodeTTL {
+		c.stats.Expired++
+		return VerdictExpired
+	}
 	if req.Trust.Deny {
 		c.stats.Denied++
 		return VerdictDenied
@@ -444,6 +462,50 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	// are not retained by the backing array across later Offer appends.
 	c.waiting = append([]waitEntry(nil), c.waiting[len(admitted):]...)
 	return admitted
+}
+
+// ExpireRequests inspects waiting and running requests against now, pruning any request
+// whose per-request DecodeTTL has elapsed without disrupting the healthy scheduler.
+func (c *AdmissionController) ExpireRequests(now time.Time) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var expired []string
+
+	// 1. Prune expired waiters
+	var remaining []waitEntry
+	for _, w := range c.waiting {
+		if w.req.DecodeTTL > 0 && !w.req.CreatedAt.IsZero() && now.Sub(w.req.CreatedAt) >= w.req.DecodeTTL {
+			expired = append(expired, w.req.TraceID)
+			c.queuedTokens -= w.req.Tokens
+			c.stats.Expired++
+			if w.ready != nil {
+				close(w.ready)
+			}
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	c.waiting = remaining
+	if c.queuedTokens < 0 {
+		c.queuedTokens = 0
+	}
+
+	// 2. Prune expired running requests
+	for traceID, req := range c.running {
+		if req.DecodeTTL > 0 && !req.CreatedAt.IsZero() && now.Sub(req.CreatedAt) >= req.DecodeTTL {
+			expired = append(expired, traceID)
+			delete(c.running, traceID)
+			c.tokens -= req.Tokens
+			c.stats.Expired++
+		}
+	}
+
+	if len(expired) > 0 {
+		c.scheduleLocked()
+	}
+
+	return expired
 }
 
 // Complete releases a running request's budget when its sequence finishes (the loop's
