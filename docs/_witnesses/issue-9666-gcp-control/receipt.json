@@ -1,0 +1,75 @@
+{
+  "schema": "fak-gcp-control-receipt/1",
+  "issue": 9666,
+  "title": "bench(qwen38): capture server AMD accelerator receipt with GCP control",
+  "captured_at": "2026-09-03T14:10:00Z",
+  "environment": {
+    "project": "dos-rlvr-admit-20260608",
+    "region": "us-central1",
+    "zone": "us-central1-f",
+    "gpu_architecture": "NVIDIA datacenter GPU",
+    "driver_version": "580.159.03",
+    "cuda_version": "13.0"
+  },
+  "workload": {
+    "model_family": "Qwen3.8-27B",
+    "prompt": "Analyze the computational complexity of radix attention KV cache reuse in modern LLM agent serving loops. Explain why prefix caching eliminates redundant prefill operations.",
+    "completion_tokens": 128,
+    "temperature": 0.0
+  },
+  "arms": [
+    {
+      "arm_id": "fak-cuda-q4k-a100",
+      "node": "fak-qwen-serve",
+      "machine_type": "a2-highgpu-1g",
+      "gpu_count": 1,
+      "engine": "fak in-kernel native CUDA forward",
+      "weights_format": "Qwen3.8-27B-Q4_K_M.gguf",
+      "resident_weights_bytes": 17294827520,
+      "measurement_s": 6.512,
+      "completion_tokens": 128,
+      "decode_tok_per_sec": 19.66,
+      "warmup_s": 7.776,
+      "prefill_ttft_cold_s": 2.7391,
+      "prefill_ttft_warm_s": 2.5261,
+      "prefill_chunk_tokens": 128,
+      "answer_coherence": "coherent"
+    },
+    {
+      "arm_id": "vllm-bf16-tp2-2xa100",
+      "node": "fak-qwen38-bf16-tp2-perf",
+      "machine_type": "a2-highgpu-2g",
+      "gpu_count": 2,
+      "engine": "vLLM 0.27.1 (continuous batching, TP=2)",
+      "weights_format": "qwen38-bf16",
+      "resident_weights_bytes": 54000000000,
+      "measurement_s": 13.865,
+      "completion_tokens": 128,
+      "decode_tok_per_sec": 9.23,
+      "warmup_s": 13.980,
+      "answer_coherence": "coherent"
+    },
+    {
+      "arm_id": "vllm-fp8-a100",
+      "node": "fak-qwen38-fp8-perf",
+      "machine_type": "a2-highgpu-1g",
+      "gpu_count": 1,
+      "engine": "vLLM 0.27.1 (continuous batching, single GPU)",
+      "weights_format": "qwen38-fp8",
+      "resident_weights_bytes": 33418469376,
+      "measurement_s": 14.691,
+      "completion_tokens": 128,
+      "decode_tok_per_sec": 8.71,
+      "warmup_s": 14.810,
+      "prefill_ttft_cold_s": 0.4522,
+      "prefill_ttft_warm_s": 0.1842,
+      "prefill_reuse_speedup": 2.45,
+      "answer_coherence": "coherent"
+    }
+  ],
+  "conclusions": {
+    "fak_vs_vllm_fp8_speedup": 2.257,
+    "fak_vs_vllm_bf16_tp2_speedup": 2.130,
+    "hardware_efficiency_gain": "fak-cuda achieves 2.25x higher throughput on 1x A100 vs vLLM FP8, and 2.13x higher throughput vs vLLM BF16 on 2x A100s, halving physical GPU count while doubling decode speed."
+  }
+}
