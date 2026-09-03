@@ -69,6 +69,11 @@ type NativePreemptionPolicy struct {
 	VictimRule  NativePreemptionVictimRule
 	MaxBlocks   int // <=0 disables preemption; positive means a paged-KV block budget exists
 	BlockTokens int // tokens per paged-KV block; <=0 defaults to 16
+	// DemoteBeforeDrop enables consulting PlanKVDemotion so a span spills to host rather than drops
+	// when the tier's restore cost undercuts full re-prefill (#3414, epic #2236).
+	DemoteBeforeDrop       bool
+	TierRestoreCostPerByte float64
+	RecomputeCostPerToken  float64
 	// UsageLedgerPath is the declared, reversible JSONL target for Qwen hybrid
 	// swap codec invocations. Empty disables the writer without a default path.
 	UsageLedgerPath string
@@ -499,7 +504,20 @@ func blocksFromStats(stats compute.KVSpanStats, blockTokens int) int {
 }
 
 func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
-	ln.preemptMode = s.preemption.Mode
+	mode := s.preemption.Mode
+	if s.preemption.DemoteBeforeDrop && s.preemption.TierRestoreCostPerByte > 0 && s.preemption.RecomputeCostPerToken > 0 {
+		tokens := ln.promptLen + ln.emitted
+		if ln.sess != nil && ln.sess.Cache != nil && ln.sess.Cache.Len() > tokens {
+			tokens = ln.sess.Cache.Len()
+		}
+		bytes := int64(tokens * 4)
+		recomputeCost := float64(tokens) * s.preemption.RecomputeCostPerToken
+		restoreCost := float64(bytes) * s.preemption.TierRestoreCostPerByte
+		if restoreCost < recomputeCost {
+			mode = NativePreemptSwap
+		}
+	}
+	ln.preemptMode = mode
 	ln.preemptRound = s.preemptRound
 	ln.savedLogits = copyF32(ln.logits)
 	s.preemptStats.Preemptions++
@@ -507,7 +525,7 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	if s.preemption.VictimRule == NativePreemptVictimCostAware {
 		s.preemptStats.CostAwareVictims++
 	}
-	switch s.preemption.Mode {
+	switch mode {
 	case NativePreemptRecompute:
 		s.preemptStats.RecomputeCount++
 	case NativePreemptSwap:

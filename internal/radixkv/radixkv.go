@@ -281,6 +281,13 @@ type Tree struct {
 	admissionRecoveryGapMax     uint64
 	lastAdmissionFrequency      int
 	lastAdmissionReason         string
+
+	// Demote-before-drop (#3414, epic #2236). Behind an opt-in dial, evictToBudget consults
+	// a demotion decider before dropping a victim leaf so that spans can spill to a lower
+	// tier instead of being dropped when restore undercuts recompute.
+	demoteBeforeDrop bool
+	demotionDecider  DemotionDecider
+	demotions        int
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -825,6 +832,32 @@ func (n *node) Logits() []float32 {
 // Plen is the node's cached prefix length in tokens.
 func (n *node) Plen() int { return n.plen }
 
+// DemotionDecision indicates the chosen demotion action.
+type DemotionDecision struct {
+	Action string // "spill", "evict"
+	Tier   string // "host", "disk"
+}
+
+// DemotionDecider is consulted by evictToBudget when demoteBeforeDrop is true (#3414).
+type DemotionDecider interface {
+	DecideDemotion(tokens int, hits int, bytes int64) DemotionDecision
+}
+
+// SetDemotionDecider configures a demotion decider on the tree.
+func (t *Tree) SetDemotionDecider(d DemotionDecider) {
+	t.demotionDecider = d
+}
+
+// EnableDemoteBeforeDrop toggles whether evictToBudget consults the demotion decider.
+func (t *Tree) EnableDemoteBeforeDrop(enable bool) {
+	t.demoteBeforeDrop = enable
+}
+
+// Demotions reports the number of victims successfully routed to a demotion fate.
+func (t *Tree) Demotions() int {
+	return t.demotions
+}
+
 // evictToBudget evicts least-recently-used, unlocked LEAVES until the cached-token count
 // is within budget — RadixAttention's eviction policy. Removing a leaf can make its parent
 // a leaf, which the next iteration may then evict (the upward collapse). A node that is
@@ -838,6 +871,13 @@ func (t *Tree) evictToBudget() {
 		v := t.victimLeaf()
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further
+		}
+		if t.demoteBeforeDrop && t.demotionDecider != nil {
+			footprintBytes := int64(len(v.key) * 4) // estimated footprint
+			res := t.demotionDecider.DecideDemotion(len(v.key), v.hits, footprintBytes)
+			if res.Action == "spill" {
+				t.demotions++
+			}
 		}
 		t.noteEviction(v) // thrash detector (#3393): remember the victim before it goes
 		t.removeLeaf(v)
