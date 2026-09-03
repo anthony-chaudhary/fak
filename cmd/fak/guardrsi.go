@@ -248,24 +248,59 @@ func routeFileIssue(stderr io.Writer, d guardroute.RouteDecision, journals []str
 	if dryRun {
 		return map[string]any{"mode": "dry-run", "planned": len(plan), "summary": fmt.Sprintf("dry-run: would create/update 1 issue (key=%s)", item.Key)}
 	}
-	existing, err := dogfoodissues.FetchExistingIssues(repo, 300)
+	existing, err := dogfoodIssuesFetchExisting(repo, 300)
 	if err != nil {
 		fmt.Fprintf(stderr, "guard-verdict-rsi route: gh issue list failed (fail-open, queue row stands): %v\n", err)
 		return map[string]any{"mode": "live", "ok": false, "summary": "gh unavailable -- queue row written, issue skipped"}
 	}
 	plan = dogfoodissues.BuildPlan([]dogfoodissues.ActionItem{item}, existing)
-	synced := dogfoodissues.Sync(plan, repo, []string{"guard-rsi", "dogfood"}, nil)
+	synced := dogfoodIssuesSync(plan, repo, []string{"guard-rsi", "dogfood"}, nil)
 	ok := true
 	for _, row := range synced {
 		if !row.OK {
 			ok = false
 		}
 	}
-	action := "created"
+	action := "create"
+	pastAction := "created"
 	if len(plan) > 0 && plan[0].Number != nil {
-		action = "updated"
+		action = "update"
+		pastAction = "updated"
 	}
-	return map[string]any{"mode": "live", "ok": ok, "summary": fmt.Sprintf("%s issue (key=%s)", action, item.Key)}
+	if !ok {
+		errDetail := "failed to sync issue"
+		if len(synced) > 0 && synced[0].Stderr != "" {
+			errDetail = synced[0].Stderr
+		}
+		return map[string]any{
+			"mode":    "live",
+			"ok":      false,
+			"summary": fmt.Sprintf("failed to %s issue (key=%s): %s", action, item.Key, errDetail),
+			"reason":  "issue_sync_failed",
+		}
+	}
+	res := map[string]any{
+		"mode": "live",
+		"ok":   true,
+	}
+	var num int
+	var issueURL string
+	if len(synced) > 0 {
+		if synced[0].Number != nil {
+			num = *synced[0].Number
+			res["number"] = num
+		}
+		if synced[0].URL != "" {
+			issueURL = synced[0].URL
+			res["url"] = issueURL
+		}
+	}
+	if num > 0 {
+		res["summary"] = fmt.Sprintf("%s issue #%d %s (key=%s)", pastAction, num, issueURL, item.Key)
+	} else {
+		res["summary"] = fmt.Sprintf("%s issue (key=%s)", pastAction, item.Key)
+	}
+	return res
 }
 
 // runPythonTool shells a repo python tool, trying FAK_PYTHON, then python3/python,
