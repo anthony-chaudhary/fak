@@ -417,17 +417,20 @@ func TestKVQuant4BytesCountsGroupMetadata(t *testing.T) {
 		}
 	}
 
-	// Only the 4-bit path carries metadata; the wider widths are the plain rate.
+	// 16-bit and 32-bit widths are the plain rate; 4-bit and 8-bit carry group metadata.
 	for _, tc := range []struct {
 		bits int
 		want int64
-	}{{8, 64}, {16, 128}, {32, 256}} {
+	}{{16, 128}, {32, 256}} {
 		if got := kvBitsToBytes(64, tc.bits); got != tc.want {
-			t.Fatalf("kvBitsToBytes(64,%d) = %d, want %d (no group metadata off the 4-bit path)", tc.bits, got, tc.want)
+			t.Fatalf("kvBitsToBytes(64,%d) = %d, want %d (no group metadata off the quantized path)", tc.bits, got, tc.want)
 		}
 	}
 	if got, want := kvBitsToBytes(64, 4), int64(32+2*8); got != want {
 		t.Fatalf("kvBitsToBytes(64,4) = %d, want %d", got, want)
+	}
+	if got, want := kvBitsToBytes(64, 8), int64(64+2*8); got != want {
+		t.Fatalf("kvBitsToBytes(64,8) = %d, want %d (8-bit carries group metadata)", got, want)
 	}
 	if kvBitsToBytes(0, 4) != 0 || kvBitsToBytes(64, 0) != 0 || kvBitsToBytes(-1, 4) != 0 {
 		t.Fatalf("kvBitsToBytes guards: got %d/%d/%d, want 0/0/0",
@@ -566,5 +569,421 @@ func TestKVCacheBytesAtBitsAccountsPrecisionAndKVLayers(t *testing.T) {
 	codec := int64(QuantizeKV4(row).Bytes() * 2) // K row + V row
 	if got := oneLayer.KVCacheBytesAtBits(1, 4); got != codec {
 		t.Fatalf("KVCacheBytesAtBits(1,4) = %d, want the codec's own K+V footprint %d", got, codec)
+	}
+}
+
+// TestQuantizeKV8PacksCodesAndReconstructs tests the 8-bit affine group-wise quantization
+// codec across ragged and regular lengths, checking code bounds, monotonicity, endpoints,
+// and round-trip error ceilings.
+func TestQuantizeKV8PacksCodesAndReconstructs(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260902))
+	for _, n := range []int{1, 2, 3, 7, 31, 32, 33, 64, 65, 127, 256} {
+		src := make([]float32, n)
+		for i := range src {
+			src[i] = float32(rng.NormFloat64() * 3)
+		}
+		q := QuantizeKV8(src)
+
+		wantGroups := (n + KVQuant8GroupSize - 1) / KVQuant8GroupSize
+		if len(q.Scale) != wantGroups || len(q.Min) != wantGroups {
+			t.Fatalf("n=%d: groups = %d/%d, want %d", n, len(q.Scale), len(q.Min), wantGroups)
+		}
+		if len(q.Codes) != n {
+			t.Fatalf("n=%d: len(Codes) = %d, want %d (one byte per element)", n, len(q.Codes), n)
+		}
+
+		var widest float32
+		for _, s := range q.Scale {
+			if s > widest {
+				widest = s
+			}
+		}
+		if got := q.ErrorBound(); got != widest/2 {
+			t.Fatalf("n=%d: ErrorBound = %v, want %v (half widest group step)", n, got, widest/2)
+		}
+
+		out := q.Dequantize()
+		if len(out) != n {
+			t.Fatalf("n=%d: len(Dequantize()) = %d", n, len(out))
+		}
+		for g := 0; g < wantGroups; g++ {
+			lo := g * KVQuant8GroupSize
+			hi := lo + KVQuant8GroupSize
+			if hi > n {
+				hi = n
+			}
+			groupBound := q.Scale[g] / 2
+			for i := lo; i < hi; i++ {
+				d := kvquantAbs(out[i] - src[i])
+				if d > groupBound*1.001+1e-6 {
+					t.Fatalf("n=%d element %d: err %v exceeds group step/2 %v", n, i, d, groupBound)
+				}
+				if d > q.ErrorBound()*1.001+1e-6 {
+					t.Fatalf("n=%d element %d: err %v exceeds ErrorBound %v", n, i, d, q.ErrorBound())
+				}
+			}
+		}
+	}
+
+	// Boundary mapping: minimum maps to 0 and reconstructs exactly, maximum maps to 255.
+	const n = KVQuant8GroupSize
+	src := make([]float32, n)
+	for i := range src {
+		src[i] = 10 + float32(i)*0.4
+	}
+	src[3] = 10           // minimum
+	src[20] = 10 + 31*0.4 // maximum
+	q := QuantizeKV8(src)
+	mn, mx := src[0], src[0]
+	for _, v := range src {
+		if v < mn {
+			mn = v
+		}
+		if v > mx {
+			mx = v
+		}
+	}
+	if q.Min[0] != mn {
+		t.Fatalf("Min = %v, want %v", q.Min[0], mn)
+	}
+	if want := (mx - mn) / 255; q.Scale[0] != want {
+		t.Fatalf("Scale = %v, want (mx-mn)/255 = %v", q.Scale[0], want)
+	}
+	out := q.Dequantize()
+	for i := range src {
+		code := q.Codes[i]
+		if src[i] == mn {
+			if code != 0 {
+				t.Fatalf("minimum element %d got code %d, want 0", i, code)
+			}
+			if out[i] != mn {
+				t.Fatalf("minimum element %d reconstructed as %v, want exact %v", i, out[i], mn)
+			}
+		}
+		if src[i] == mx && code != 255 {
+			t.Fatalf("maximum element %d got code %d, want 255", i, code)
+		}
+	}
+
+	// Monotonicity within group.
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if src[i] < src[j] && q.Codes[i] > q.Codes[j] {
+				t.Fatalf("non-monotone codes: src[%d]=%v code %d vs src[%d]=%v code %d",
+					i, src[i], q.Codes[i], j, src[j], q.Codes[j])
+			}
+		}
+	}
+
+	// Constant group round-trips bit-exactly with zero error bound.
+	for _, v := range []float32{0, -3.1415, 42.5} {
+		cSrc := make([]float32, 2*KVQuant8GroupSize)
+		for i := range cSrc {
+			cSrc[i] = v
+		}
+		cq := QuantizeKV8(cSrc)
+		if cq.ErrorBound() != 0 {
+			t.Fatalf("constant group ErrorBound = %v, want 0", cq.ErrorBound())
+		}
+		cOut := cq.Dequantize()
+		for i, val := range cOut {
+			if val != v {
+				t.Fatalf("constant group element %d = %v, want exact %v", i, val, v)
+			}
+		}
+	}
+
+	// Degenerate empty input.
+	empty := QuantizeKV8(nil)
+	if empty.N != 0 || len(empty.Codes) != 0 || len(empty.Scale) != 0 || len(empty.Min) != 0 {
+		t.Fatalf("QuantizeKV8(nil) = %+v, want zero", empty)
+	}
+	if empty.ErrorBound() != 0 || empty.Bytes() != 0 || len(empty.Dequantize()) != 0 {
+		t.Fatalf("empty bound/bytes/dequant = %v/%d/%d, want 0/0/0",
+			empty.ErrorBound(), empty.Bytes(), len(empty.Dequantize()))
+	}
+}
+
+// TestKVQuant8BytesCountsGroupMetadata verifies the honest byte rate for 8-bit quantization:
+// 1 byte per element payload + 8 bytes per 32-element group metadata = 10 bits/element.
+func TestKVQuant8BytesCountsGroupMetadata(t *testing.T) {
+	for _, n := range []int{32, 64, 128, 4096} {
+		q := QuantizeKV8(make([]float32, n))
+		// 10 bits/element: 8 bits payload + 2 bits metadata (8B/32 elems)
+		if got, want := q.Bytes()*8, 10*n; got != want {
+			t.Fatalf("n=%d: %d bits total, want %d (10 bits/element incl. group metadata)", n, got, want)
+		}
+		if naive := n; q.Bytes() <= naive {
+			t.Fatalf("n=%d: Bytes %d does not exceed bare payload %d", n, q.Bytes(), naive)
+		}
+	}
+
+	for _, n := range []int{1, 2, 3, 5, 7, 31, 32, 33, 63, 64, 65, 129} {
+		q := QuantizeKV8(make([]float32, n))
+		groups := (n + KVQuant8GroupSize - 1) / KVQuant8GroupSize
+		if want := n + 8*groups; q.Bytes() != want {
+			t.Fatalf("n=%d: Bytes = %d, want %d", n, q.Bytes(), want)
+		}
+		if want := int64(q.Bytes()); kvBitsToBytes(n, 8) != want {
+			t.Fatalf("n=%d: kvBitsToBytes(_,8) = %d, want %d", n, kvBitsToBytes(n, 8), want)
+		}
+	}
+}
+
+// TestQuantizeKVAsymmetricRoundTripAndCosineFloors tests asymmetric K (8-bit) and V (4-bit)
+// quantization pairs across diverse dimensions, verifying packed byte accounting, individual
+// error bounds, and cosine similarity floors (>= 0.999 for K, >= 0.995 for V).
+func TestQuantizeKVAsymmetricRoundTripAndCosineFloors(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260902))
+
+	testCases := []struct {
+		name string
+		kDim int
+		vDim int
+	}{
+		{"SingleGroup", 32, 32},
+		{"StandardHead64", 64, 64},
+		{"StandardHead128", 128, 128},
+		{"AsymmetricMLAHead", 128, 64},
+		{"MultiHeadRow1024", 1024, 1024},
+		{"RaggedAsymmetric", 133, 97},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kSrc := make([]float32, tc.kDim)
+			vSrc := make([]float32, tc.vDim)
+			for i := range kSrc {
+				kSrc[i] = float32(rng.NormFloat64() * 2.5)
+			}
+			for i := range vSrc {
+				vSrc[i] = float32(rng.NormFloat64() * 1.8)
+			}
+
+			asym := QuantizeKVAsymmetric(kSrc, vSrc)
+
+			// Bytes must equal the sum of K and V components.
+			if want := asym.K.Bytes() + asym.V.Bytes(); asym.Bytes() != want {
+				t.Fatalf("asym.Bytes() = %d, want %d", asym.Bytes(), want)
+			}
+
+			kOut, vOut := DequantizeKVAsymmetric(asym)
+			if len(kOut) != tc.kDim || len(vOut) != tc.vDim {
+				t.Fatalf("dequantized lens = %d, %d; want %d, %d", len(kOut), len(vOut), tc.kDim, tc.vDim)
+			}
+
+			// Per-element error bounds.
+			kBound := asym.K.ErrorBound()
+			for i, v := range kSrc {
+				if d := kvquantAbs(kOut[i] - v); d > kBound*1.001+1e-6 {
+					t.Fatalf("K element %d error %v > bound %v", i, d, kBound)
+				}
+			}
+			vBound := asym.V.ErrorBound()
+			for i, v := range vSrc {
+				if d := kvquantAbs(vOut[i] - v); d > vBound*1.001+1e-6 {
+					t.Fatalf("V element %d error %v > bound %v", i, d, vBound)
+				}
+			}
+
+			// Cosine similarity floors: Keys require higher precision for exponential
+			// routing (>= 0.999), Values tolerate lower precision for linear combination (>= 0.995).
+			cosK := cosine(kSrc, kOut)
+			cosV := cosine(vSrc, vOut)
+
+			if cosK < 0.999 {
+				t.Fatalf("Key cosine similarity %f < floor 0.999", cosK)
+			}
+			if cosV < 0.995 {
+				t.Fatalf("Value cosine similarity %f < floor 0.995", cosV)
+			}
+
+			t.Logf("[%s] K(8-bit) cosine: %.6f (bound %g), V(4-bit) cosine: %.6f (bound %g)",
+				tc.name, cosK, kBound, cosV, vBound)
+		})
+	}
+
+	// Constant group handling in asymmetric pairs.
+	t.Run("ConstantPair", func(t *testing.T) {
+		kSrc := make([]float32, 64)
+		vSrc := make([]float32, 64)
+		for i := range kSrc {
+			kSrc[i] = -2.75
+			vSrc[i] = 1.5
+		}
+		asym := QuantizeKVAsymmetric(kSrc, vSrc)
+		if asym.K.ErrorBound() != 0 || asym.V.ErrorBound() != 0 {
+			t.Fatalf("constant pair bounds = %v, %v; want 0, 0", asym.K.ErrorBound(), asym.V.ErrorBound())
+		}
+		kOut, vOut := DequantizeKVAsymmetric(asym)
+		for i := range kSrc {
+			if kOut[i] != -2.75 {
+				t.Fatalf("K[%d] = %v, want -2.75", i, kOut[i])
+			}
+			if vOut[i] != 1.5 {
+				t.Fatalf("V[%d] = %v, want 1.5", i, vOut[i])
+			}
+		}
+	})
+}
+
+// TestKVCacheBytesAsymmetricAccounting verifies the Config.KVCacheBytesAsymmetric sizer:
+// parameter validation guards, parity with KVCacheBytesAtBits on symmetric precision,
+// exact byte agreement with codec Bytes(), and support for asymmetric head dimensions.
+func TestKVCacheBytesAsymmetricAccounting(t *testing.T) {
+	dense := Config{NumLayers: 4, NumKVHeads: 8, HeadDim: 128}
+
+	// Input guards: non-positive inputs must return 0.
+	if got := dense.KVCacheBytesAsymmetric(0, 8, 4); got != 0 {
+		t.Fatalf("positions=0 -> %d, want 0", got)
+	}
+	if got := dense.KVCacheBytesAsymmetric(-5, 8, 4); got != 0 {
+		t.Fatalf("positions<0 -> %d, want 0", got)
+	}
+	if got := dense.KVCacheBytesAsymmetric(1024, 0, 4); got != 0 {
+		t.Fatalf("kBits=0 -> %d, want 0", got)
+	}
+	if got := dense.KVCacheBytesAsymmetric(1024, 8, 0); got != 0 {
+		t.Fatalf("vBits=0 -> %d, want 0", got)
+	}
+	if got := dense.KVCacheBytesAsymmetric(1024, -1, 4); got != 0 {
+		t.Fatalf("kBits<0 -> %d, want 0", got)
+	}
+
+	// All-linear attention architecture holds no KV cache.
+	allLinear := Config{NumLayers: 4, NumKVHeads: 8, HeadDim: 128,
+		LayerTypes: []string{"linear_attention", "linear_attention", "linear_attention", "linear_attention"}}
+	if got := allLinear.KVCacheBytesAsymmetric(1024, 8, 4); got != 0 {
+		t.Fatalf("all-linear backbone -> %d, want 0", got)
+	}
+
+	// Parity with symmetric KVCacheBytesAtBits when kBits == vBits.
+	for _, bits := range []int{4, 8, 16, 32} {
+		asym := dense.KVCacheBytesAsymmetric(1024, bits, bits)
+		sym := dense.KVCacheBytesAtBits(1024, bits)
+		if asym != sym {
+			t.Fatalf("bits=%d: asymmetric(%d,%d) = %d != symmetric(%d) = %d", bits, bits, bits, asym, bits, sym)
+		}
+	}
+
+	// Linearity in positions.
+	p1024 := dense.KVCacheBytesAsymmetric(1024, 8, 4)
+	p2048 := dense.KVCacheBytesAsymmetric(2048, 8, 4)
+	if p2048 != 2*p1024 {
+		t.Fatalf("doubling positions = %d, want 2 * %d = %d", p2048, p1024, 2*p1024)
+	}
+
+	// Byte-exact calculation for K=8, V=4:
+	// NumKVHeads*HeadDim = 8*128 = 1024 elements per row.
+	// Groups = 1024/32 = 32 groups.
+	// K(8-bit) per pos = 1024 + 32*8 = 1280 bytes.
+	// V(4-bit) per pos = 512 + 32*8 = 768 bytes.
+	// Total per pos = 1280 + 768 = 2048 bytes per layer.
+	// Total for 4 layers, 1024 positions = 2048 * 4 * 1024 = 8,388,608 bytes.
+	if want := int64(2048 * 4 * 1024); p1024 != want {
+		t.Fatalf("K=8,V=4 bytes = %d, want %d", p1024, want)
+	}
+
+	// Agreement with codec instance for asymmetric head dimensions (MLA style).
+	mlaCfg := Config{NumLayers: 1, NumKVHeads: 4, HeadDim: 128, VHeadDim: 64}
+	kRow := make([]float32, 4*128)
+	vRow := make([]float32, 4*64)
+	codecFootprint := int64(QuantizeKVAsymmetric(kRow, vRow).Bytes())
+	sizerFootprint := mlaCfg.KVCacheBytesAsymmetric(1, 8, 4)
+	if sizerFootprint != codecFootprint {
+		t.Fatalf("sizer footprint %d != codec footprint %d", sizerFootprint, codecFootprint)
+	}
+}
+
+// TestKVCacheBytesAsymmetric262KReduction verifies byte accounting of asymmetric allocation
+// at a quarter-million tokens context (262,144 positions), demonstrating how K=8, V=4
+// reduces memory footprint from ~61.4 GB down to ~20.08 GB.
+func TestKVCacheBytesAsymmetric262KReduction(t *testing.T) {
+	const pos = 262144
+
+	// 26 layers, 23 KV heads, HeadDim 64 -> 2944 B/pos -> 20,065,550,336 B (~20.08 GB).
+	cfg20GB := Config{NumLayers: 26, NumKVHeads: 23, HeadDim: 64}
+	asym20GB := cfg20GB.KVCacheBytesAsymmetric(pos, 8, 4)
+	want20GB := int64(26) * 2944 * pos
+	if asym20GB != want20GB {
+		t.Fatalf("asym20GB = %d, want %d", asym20GB, want20GB)
+	}
+	asymGigaBytes := float64(asym20GB) / 1e9
+	if math.Abs(asymGigaBytes-20.07) > 0.1 {
+		t.Fatalf("asym20GB in GB = %.2f, want ~20.08 GB", asymGigaBytes)
+	}
+
+	// 29 layers, 8 KV heads, HeadDim 128 -> 62.28 GB (f32) -> 15.57 GB (K=8, V=4, 4x reduction).
+	cfg61GB := Config{NumLayers: 29, NumKVHeads: 8, HeadDim: 128}
+	f32_61GB := cfg61GB.KVCacheBytesAtBits(pos, 32)
+	asym_61GB := cfg61GB.KVCacheBytesAsymmetric(pos, 8, 4)
+	if f32_61GB != 4*asym_61GB {
+		t.Fatalf("f32 (%d) != 4 * asym (%d)", f32_61GB, asym_61GB)
+	}
+
+	t.Logf("262K context footprint reduction:")
+	t.Logf("  Config 1 (20.08 GB target): %d bytes (%.2f GB / %.2f GiB)",
+		asym20GB, float64(asym20GB)/1e9, float64(asym20GB)/(1<<30))
+	t.Logf("  Config 2 (~61.4 GB f32 baseline): f32 = %.2f GB -> K=8,V=4 = %.2f GB (4x reduction)",
+		float64(f32_61GB)/1e9, float64(asym_61GB)/1e9)
+}
+
+// Benchmarks
+
+func BenchmarkQuantizeKV8(b *testing.B) {
+	const n = 1024
+	src := make([]float32, n)
+	for i := range src {
+		src[i] = float32(i % 100)
+	}
+	b.ResetTimer()
+	b.SetBytes(n * 4)
+	for i := 0; i < b.N; i++ {
+		_ = QuantizeKV8(src)
+	}
+}
+
+func BenchmarkDequantizeKV8(b *testing.B) {
+	const n = 1024
+	src := make([]float32, n)
+	for i := range src {
+		src[i] = float32(i % 100)
+	}
+	q := QuantizeKV8(src)
+	b.ResetTimer()
+	b.SetBytes(n * 4)
+	for i := 0; i < b.N; i++ {
+		_ = q.Dequantize()
+	}
+}
+
+func BenchmarkQuantizeKVAsymmetric(b *testing.B) {
+	const n = 1024
+	k := make([]float32, n)
+	v := make([]float32, n)
+	for i := range k {
+		k[i] = float32(i % 100)
+		v[i] = float32(i % 50)
+	}
+	b.ResetTimer()
+	b.SetBytes(2 * n * 4)
+	for i := 0; i < b.N; i++ {
+		_ = QuantizeKVAsymmetric(k, v)
+	}
+}
+
+func BenchmarkDequantizeKVAsymmetric(b *testing.B) {
+	const n = 1024
+	k := make([]float32, n)
+	v := make([]float32, n)
+	for i := range k {
+		k[i] = float32(i % 100)
+		v[i] = float32(i % 50)
+	}
+	asym := QuantizeKVAsymmetric(k, v)
+	b.ResetTimer()
+	b.SetBytes(2 * n * 4)
+	for i := 0; i < b.N; i++ {
+		_, _ = DequantizeKVAsymmetric(asym)
 	}
 }
