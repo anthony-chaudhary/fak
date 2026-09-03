@@ -63,6 +63,9 @@ type IntentNode struct {
 	// Shared is FanIn > 1: a module REUSED by multiple parents — the modularity payoff a
 	// flat registry hides.
 	Shared bool `json:"shared"`
+	// LeafDenominator is the count of distinct non-superloop leaf members reachable
+	// by descending from this intent in the registry DAG — the structural leaf denominator.
+	LeafDenominator int `json:"leaf_denominator"`
 }
 
 // ScorecardClash is one once-only violation: a scorecard key walked by two or more
@@ -105,6 +108,9 @@ type GraphReport struct {
 
 	// Shared lists the super loops with fan-in > 1 (reused modules), sorted.
 	Shared []string `json:"shared,omitempty"`
+
+	// TotalLeafDenominator is the total count of distinct leaf surfaces reachable from the root.
+	TotalLeafDenominator int `json:"total_leaf_denominator"`
 
 	Verdict string `json:"verdict"`
 	Finding string `json:"finding"`
@@ -186,10 +192,12 @@ func graphOf(reg []Super, root string) GraphReport {
 		if node.Shared {
 			rep.Shared = append(rep.Shared, s.Name)
 		}
+		node.LeafDenominator = reachableLeafCount(s.Name, byName, rep.Acyclic)
 		rep.Nodes = append(rep.Nodes, node)
 	}
 	sort.Strings(rep.Orphans)
 	sort.Strings(rep.Shared)
+	rep.TotalLeafDenominator = reachableLeafCount(root, byName, rep.Acyclic)
 
 	rep.Verdict, rep.Finding, rep.Reason = graphVerdict(rep)
 	return rep
@@ -350,4 +358,31 @@ func sortedCopy(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
+}
+
+// reachableLeafCount returns the count of distinct non-superloop leaf surfaces
+// reachable from start by descending the registry DAG.
+func reachableLeafCount(start string, byName map[string]Super, acyclic bool) int {
+	visited := map[string]bool{}
+	leaves := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		if visited[name] {
+			return
+		}
+		visited[name] = true
+		s, ok := byName[name]
+		if !ok {
+			return
+		}
+		for _, m := range s.Members {
+			if m.Kind == KindSuperloop {
+				visit(m.Ref)
+			} else {
+				leaves[memberKey(m)] = true
+			}
+		}
+	}
+	visit(start)
+	return len(leaves)
 }

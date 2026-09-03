@@ -132,6 +132,11 @@ func TestSuperloopFleetStatusFoldsTheSameWalkNumbers(t *testing.T) {
 	if got.Satisfied != walk.Satisfied || got.Verdict != walk.Verdict {
 		t.Errorf("status verdict/satisfied = %q/%t, walk says %q/%t", got.Verdict, got.Satisfied, walk.Verdict, walk.Satisfied)
 	}
+	if got.Rollup == nil {
+		t.Error("fleet status report missing Rollup summary")
+	} else if got.Rollup.LeafMembers != walk.Rollup.LeafMembers {
+		t.Errorf("status rollup leaf members %d != walk rollup %d", got.Rollup.LeafMembers, walk.Rollup.LeafMembers)
+	}
 	// The exit code carries the same verdict the payload does, so a scripted caller
 	// that never parses the JSON still reads the truth.
 	if wantCode := map[bool]int{true: 0, false: 1}[got.Satisfied]; code != wantCode {

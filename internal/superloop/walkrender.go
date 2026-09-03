@@ -194,6 +194,44 @@ func walkVerdict(s Super, rep WalkReport) (verdict, finding, reason, next string
 				s.Name, rep.IssueShortfall, rep.IssueTarget, rep.IssueProgressed),
 			"progress the remaining issues: " + worklistHead(rep)
 	}
+	if rep.Rollup.Intents > 1 {
+		if rep.Rollup.Unmeasured > 0 {
+			return "ACTION", "superloop_unmeasured",
+				fmt.Sprintf("walking %q: %d/%d rolled-up leaf member(s) across %d intent(s) could not be read, so the intent is not proven tended (rollup debt %d)",
+					s.Name, rep.Rollup.Unmeasured, rep.Rollup.LeafMembers, rep.Rollup.Intents, rep.Rollup.TotalDebt),
+				"repair/read the unmeasured rolled-up member(s) first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Dark > 0 {
+			return "ACTION", "superloop_dark",
+				fmt.Sprintf("walking %q: %d rolled-up member loop(s) across %d intent(s) have gone DARK; revive them before chasing debt (rollup debt %d)",
+					s.Name, rep.Rollup.Dark, rep.Rollup.Intents, rep.Rollup.TotalDebt),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Spinning > 0 {
+			return "ACTION", "superloop_spinning",
+				fmt.Sprintf("walking %q: %d rolled-up member loop(s) across %d intent(s) are SPINNING (%s); revive or redirect them",
+					s.Name, rep.Rollup.Spinning, rep.Rollup.Intents, relay.ReasonNoProgress),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.Orphaned > 0 {
+			return "ACTION", "superloop_orphaned",
+				fmt.Sprintf("walking %q: %d rolled-up member loop(s) across %d intent(s) are ORPHANED (%s); chase or redirect their output",
+					s.Name, rep.Rollup.Orphaned, rep.Rollup.Intents, relay.ReasonOrphanedFollowon),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.TotalDebt > s.Floor {
+			return "ACTION", "superloop_debt",
+				fmt.Sprintf("walking %q: rollup aggregate debt %d > floor %d across %d leaf member(s) in %d intent(s); enter the worst first",
+					s.Name, rep.Rollup.TotalDebt, s.Floor, rep.Rollup.LeafMembers, rep.Rollup.Intents),
+				"worst-first: " + worklistHead(rep)
+		}
+		if rep.Rollup.IssueShortfall > 0 {
+			return "ACTION", "superloop_issue_shortfall",
+				fmt.Sprintf("walking %q: debt at-or-below floor, but %d headline issue(s) still owed in rollup — the target is a gate, not a decoration",
+					s.Name, rep.Rollup.IssueShortfall),
+				"progress the remaining issues: " + worklistHead(rep)
+		}
+	}
 	target := ""
 	if rep.IssueProgressMeasured && rep.IssueTarget > 0 {
 		target = fmt.Sprintf("; headline %d/%d issue(s) progressed", rep.IssueProgressed, rep.IssueTarget)

@@ -279,3 +279,49 @@ func TestSuperloopModelFitCLIJSON(t *testing.T) {
 		t.Errorf("expected the eval to both clear and refuse a model; cleared=%v refused=%v", anyCleared, anyRefused)
 	}
 }
+
+// TestSuperloopWalkRollupDenominatorJSONAndHuman pins that walking a hierarchical intent
+// like "tend" computes an honest Rollup with a leaf denominator (LeafMembers) and that
+// both JSON and human outputs expose the rolled-up leaf counts and denominator.
+func TestSuperloopWalkRollupDenominatorJSONAndHuman(t *testing.T) {
+	root := t.TempDir()
+	var out, errb bytes.Buffer
+
+	// 1. JSON output validation
+	code := runSuperloop(&out, &errb, []string{"walk", "tend", "--workspace", root, "--json"})
+	if code != 1 {
+		t.Fatalf("tend walk in empty root should exit 1, got %d: %s", code, errb.String())
+	}
+	var rep superloop.WalkReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("unmarshal walk json: %v\n%s", err, out.String())
+	}
+	if rep.Rollup.Intents <= 1 {
+		t.Errorf("Rollup.Intents for tend must be > 1 (descends sub-intents), got %d", rep.Rollup.Intents)
+	}
+	if rep.Rollup.LeafMembers <= 0 {
+		t.Fatalf("Rollup.LeafMembers must be > 0, got %d", rep.Rollup.LeafMembers)
+	}
+	if rep.Rollup.Walked+rep.Rollup.Unmeasured != rep.Rollup.LeafMembers {
+		t.Errorf("conservation violated: Walked (%d) + Unmeasured (%d) != LeafMembers (%d)",
+			rep.Rollup.Walked, rep.Rollup.Unmeasured, rep.Rollup.LeafMembers)
+	}
+	if len(rep.LeafStatuses) != rep.Rollup.LeafMembers {
+		t.Errorf("LeafStatuses count %d != Rollup.LeafMembers %d", len(rep.LeafStatuses), rep.Rollup.LeafMembers)
+	}
+
+	// 2. Human output validation
+	out.Reset()
+	errb.Reset()
+	code = runSuperloop(&out, &errb, []string{"walk", "tend", "--workspace", root})
+	if code != 1 {
+		t.Fatalf("human tend walk exit=%d, want 1", code)
+	}
+	human := out.String()
+	if !strings.Contains(human, "rollup (") {
+		t.Errorf("human output missing rollup section:\n%s", human)
+	}
+	if !strings.Contains(human, "leaf member(s)") {
+		t.Errorf("human output missing leaf member denominator clause:\n%s", human)
+	}
+}

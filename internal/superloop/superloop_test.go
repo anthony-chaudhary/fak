@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/relay"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 )
 
@@ -1342,5 +1343,268 @@ func TestRegistryBudgetsDeclared(t *testing.T) {
 		if needsExpiry[b.Stream] && strings.TrimSpace(b.Expiry) == "" {
 			t.Errorf("super loop %q is stream %q and must carry an expiry (no open-ended later-horizon budget)", s.Name, b.Stream)
 		}
+	}
+}
+
+// TestWalkExpandedMemberDirectDenominator pins that when template members expand
+// (e.g. KindLoopFleet:all or KindTrajectory:open into multiple statuses), rep.Members
+// reflects the evaluated candidate denominator (Walked + Unmeasured + Containers) rather
+// than remaining locked to the unexpanded template count len(s.Members).
+func TestWalkExpandedMemberDirectDenominator(t *testing.T) {
+	src := Member{Kind: KindLoopFleet, Ref: "all", Why: "fleet"}
+	s := Super{
+		Name:    "fleet-test",
+		Title:   "fleet test",
+		Floor:   0,
+		Members: []Member{src}, // declared count = 1
+	}
+	statuses := []MemberStatus{
+		{Member: Member{Kind: KindLoopFleet, Ref: "loop1"}, Measured: true, Debt: 0},
+		{Member: Member{Kind: KindLoopFleet, Ref: "loop2"}, Measured: true, Debt: 0},
+		{Member: Member{Kind: KindLoopFleet, Ref: "loop3"}, Measured: true, Debt: 0},
+		{Member: Member{Kind: KindLoopFleet, Ref: "loop4"}, Measured: false, Detail: "no ledger"},
+	}
+
+	rep := Walk(s, statuses)
+	if rep.DeclaredMembers != 1 {
+		t.Errorf("DeclaredMembers: want 1 (unexpanded template count), got %d", rep.DeclaredMembers)
+	}
+	if rep.Members != 4 {
+		t.Errorf("Members: want 4 (evaluated candidate denominator), got %d", rep.Members)
+	}
+	if rep.Walked != 3 {
+		t.Errorf("Walked: want 3, got %d", rep.Walked)
+	}
+	if rep.Unmeasured != 1 {
+		t.Errorf("Unmeasured: want 1, got %d", rep.Unmeasured)
+	}
+	if rep.Walked+rep.Unmeasured != rep.Members {
+		t.Errorf("conservation broken: Walked (%d) + Unmeasured (%d) != Members (%d)",
+			rep.Walked, rep.Unmeasured, rep.Members)
+	}
+	if rep.Rollup.LeafMembers != 4 {
+		t.Errorf("Rollup.LeafMembers: want 4, got %d", rep.Rollup.LeafMembers)
+	}
+	if rep.Rollup.Walked != 3 || rep.Rollup.Unmeasured != 1 {
+		t.Errorf("Rollup Walked/Unmeasured: want 3/1, got %d/%d", rep.Rollup.Walked, rep.Rollup.Unmeasured)
+	}
+}
+
+// TestWalkRollupDenominatorAcrossHierarchy pins the hierarchical roll-up: when a parent
+// intent walks sub-super-loops, SubwalkStatus preserves the sub-walk summary and Walk
+// computes a true leaf-level denominator (Rollup.LeafMembers), rolled-up walked/unmeasured
+// counts, and propagates unmeasured or dark failures from the subtree.
+func TestWalkRollupDenominatorAcrossHierarchy(t *testing.T) {
+	sub1Def := Super{
+		Name:    "sub-one",
+		Title:   "sub one",
+		Floor:   0,
+		Members: []Member{{Kind: KindScorecard, Ref: "c1"}, {Kind: KindScorecard, Ref: "c2"}, {Kind: KindScorecard, Ref: "c3"}},
+	}
+	sub1Rep := Walk(sub1Def, []MemberStatus{
+		{Member: sub1Def.Members[0], Measured: true, Debt: 0},
+		{Member: sub1Def.Members[1], Measured: true, Debt: 0},
+		{Member: sub1Def.Members[2], Measured: false, Detail: "no baseline"},
+	})
+	if sub1Rep.Rollup.LeafMembers != 3 || sub1Rep.Rollup.Unmeasured != 1 {
+		t.Fatalf("sub1 rollup want 3 leaves, 1 unmeasured, got %+v", sub1Rep.Rollup)
+	}
+
+	sub2Def := Super{
+		Name:    "sub-two",
+		Title:   "sub two",
+		Floor:   0,
+		Members: []Member{{Kind: KindLoop, Ref: "l1"}, {Kind: KindLoop, Ref: "l2"}},
+	}
+	sub2Rep := Walk(sub2Def, []MemberStatus{
+		{Member: sub2Def.Members[0], Measured: true, Debt: 0},
+		{Member: sub2Def.Members[1], Measured: true, Dark: true, Debt: 0},
+	})
+	if sub2Rep.Rollup.LeafMembers != 2 || sub2Rep.Rollup.Dark != 1 {
+		t.Fatalf("sub2 rollup want 2 leaves, 1 dark, got %+v", sub2Rep.Rollup)
+	}
+
+	rootDef := Super{
+		Name:  "root-intent",
+		Title: "root intent",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindSuperloop, Ref: "sub-one"},
+			{Kind: KindSuperloop, Ref: "sub-two"},
+			{Kind: KindScorecard, Ref: "direct-leaf"},
+		},
+	}
+
+	rootStatuses := []MemberStatus{
+		SubwalkStatus(rootDef.Members[0], sub1Rep),
+		SubwalkStatus(rootDef.Members[1], sub2Rep),
+		{Member: rootDef.Members[2], Measured: true, Debt: 0},
+	}
+
+	rootRep := Walk(rootDef, rootStatuses)
+
+	// Direct member assertions:
+	if rootRep.Members != 3 {
+		t.Errorf("direct Members: want 3, got %d", rootRep.Members)
+	}
+	if rootRep.Walked != 3 || rootRep.Unmeasured != 0 {
+		t.Errorf("direct Walked/Unmeasured: want 3/0, got %d/%d", rootRep.Walked, rootRep.Unmeasured)
+	}
+
+	// Rollup assertions:
+	if rootRep.Rollup.Intents != 3 {
+		t.Errorf("Rollup.Intents: want 3 (root + sub-one + sub-two), got %d", rootRep.Rollup.Intents)
+	}
+	// LeafMembers: 3 from sub1 + 2 from sub2 + 1 direct = 6 leaves
+	if rootRep.Rollup.LeafMembers != 6 {
+		t.Errorf("Rollup.LeafMembers: want 6, got %d", rootRep.Rollup.LeafMembers)
+	}
+	if rootRep.Rollup.Walked != 5 {
+		t.Errorf("Rollup.Walked: want 5, got %d", rootRep.Rollup.Walked)
+	}
+	if rootRep.Rollup.Unmeasured != 1 {
+		t.Errorf("Rollup.Unmeasured: want 1 (from sub1), got %d", rootRep.Rollup.Unmeasured)
+	}
+	if rootRep.Rollup.Dark != 1 {
+		t.Errorf("Rollup.Dark: want 1 (from sub2), got %d", rootRep.Rollup.Dark)
+	}
+	if rootRep.Satisfied {
+		t.Error("rootRep must NOT be satisfied when rollup has unmeasured/dark leaves")
+	}
+	if rootRep.Rollup.Satisfied {
+		t.Error("rootRep.Rollup must NOT be satisfied")
+	}
+}
+
+// TestWalkRollupDeduplicatesSharedSubSuperloopLeaves pins the once-only / non-double-counting
+// invariant in the roll-up denominator: when two parent intents descend the same shared
+// sub-super-loop, the root roll-up counts each distinct leaf surface exactly once.
+func TestWalkRollupDeduplicatesSharedSubSuperloopLeaves(t *testing.T) {
+	sharedDef := Super{
+		Name:    "shared-sub",
+		Title:   "shared sub",
+		Floor:   0,
+		Members: []Member{{Kind: KindLoop, Ref: "shared-loop1"}, {Kind: KindLoop, Ref: "shared-loop2"}},
+	}
+	sharedRep := Walk(sharedDef, []MemberStatus{
+		{Member: sharedDef.Members[0], Measured: true, Debt: 0},
+		{Member: sharedDef.Members[1], Measured: true, Debt: 0},
+	})
+
+	parent1Def := Super{
+		Name:    "parent-one",
+		Title:   "parent one",
+		Floor:   0,
+		Members: []Member{{Kind: KindSuperloop, Ref: "shared-sub"}, {Kind: KindScorecard, Ref: "card-one"}},
+	}
+	parent1Rep := Walk(parent1Def, []MemberStatus{
+		SubwalkStatus(parent1Def.Members[0], sharedRep),
+		{Member: parent1Def.Members[1], Measured: true, Debt: 0},
+	})
+
+	parent2Def := Super{
+		Name:    "parent-two",
+		Title:   "parent two",
+		Floor:   0,
+		Members: []Member{{Kind: KindSuperloop, Ref: "shared-sub"}, {Kind: KindScorecard, Ref: "card-two"}},
+	}
+	parent2Rep := Walk(parent2Def, []MemberStatus{
+		SubwalkStatus(parent2Def.Members[0], sharedRep),
+		{Member: parent2Def.Members[1], Measured: true, Debt: 0},
+	})
+
+	rootDef := Super{
+		Name:    "grandparent",
+		Title:   "grandparent",
+		Floor:   0,
+		Members: []Member{{Kind: KindSuperloop, Ref: "parent-one"}, {Kind: KindSuperloop, Ref: "parent-two"}},
+	}
+	rootRep := Walk(rootDef, []MemberStatus{
+		SubwalkStatus(rootDef.Members[0], parent1Rep),
+		SubwalkStatus(rootDef.Members[1], parent2Rep),
+	})
+
+	// Total distinct leaves are: shared-loop1, shared-loop2, card-one, card-two = 4.
+	// Without deduplication it would be 2 (from p1) + 1 + 2 (from p2) + 1 = 6.
+	if rootRep.Rollup.LeafMembers != 4 {
+		t.Errorf("Rollup.LeafMembers: want 4 distinct leaves, got %d", rootRep.Rollup.LeafMembers)
+	}
+	if rootRep.Rollup.Walked != 4 {
+		t.Errorf("Rollup.Walked: want 4, got %d", rootRep.Rollup.Walked)
+	}
+	if rootRep.Rollup.Intents != 4 {
+		t.Errorf("Rollup.Intents: want 4 (grandparent, parent-one, parent-two, shared-sub), got %d", rootRep.Rollup.Intents)
+	}
+	if !rootRep.Satisfied || !rootRep.Rollup.Satisfied {
+		t.Error("clean tree across all leaves must be satisfied")
+	}
+}
+
+// TestWalkRollupSpinningAndOrphanedPropagation pins that spinning and orphaned loop verdicts
+// in a sub-super-loop propagate through SubwalkStatus into the parent's Rollup.
+func TestWalkRollupSpinningAndOrphanedPropagation(t *testing.T) {
+	subDef := Super{
+		Name:  "sub-faults",
+		Title: "sub faults",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindLoop, Ref: "loop-spin"},
+			{Kind: KindLoop, Ref: "loop-orph"},
+		},
+	}
+	subRep := Walk(subDef, []MemberStatus{
+		{Member: subDef.Members[0], Measured: true, Progress: ProgressSpinning, ProgressReason: relay.ReasonNoProgress, Debt: 1},
+		{Member: subDef.Members[1], Measured: true, FollowOn: FollowonOrphaned, FollowOnReason: relay.ReasonOrphanedFollowon, Debt: 1},
+	})
+	if subRep.Spinning != 1 || subRep.Orphaned != 1 {
+		t.Fatalf("subRep want 1 spinning, 1 orphaned, got spinning=%d orphaned=%d", subRep.Spinning, subRep.Orphaned)
+	}
+
+	parentDef := Super{
+		Name:    "parent",
+		Title:   "parent",
+		Floor:   0,
+		Members: []Member{{Kind: KindSuperloop, Ref: "sub-faults"}},
+	}
+	parentRep := Walk(parentDef, []MemberStatus{
+		SubwalkStatus(parentDef.Members[0], subRep),
+	})
+
+	if parentRep.Rollup.Spinning != 1 {
+		t.Errorf("Rollup.Spinning: want 1, got %d", parentRep.Rollup.Spinning)
+	}
+	if parentRep.Rollup.Orphaned != 1 {
+		t.Errorf("Rollup.Orphaned: want 1, got %d", parentRep.Rollup.Orphaned)
+	}
+	if parentRep.Satisfied {
+		t.Error("parentRep must NOT be satisfied with spinning/orphaned leaves in rollup")
+	}
+}
+
+// TestGraphLeafDenominatorObservable pins that Graph() computes the structural leaf
+// denominator for each intent node and the root.
+func TestGraphLeafDenominatorObservable(t *testing.T) {
+	rep := Graph()
+	if rep.TotalLeafDenominator <= 0 {
+		t.Fatalf("TotalLeafDenominator must be > 0, got %d", rep.TotalLeafDenominator)
+	}
+	byName := map[string]IntentNode{}
+	for _, n := range rep.Nodes {
+		byName[n.Name] = n
+	}
+	sweep, ok := byName["sweep-surfaces"]
+	if !ok {
+		t.Fatal("sweep-surfaces not in graph nodes")
+	}
+	if sweep.LeafDenominator != 7 {
+		t.Errorf("sweep-surfaces LeafDenominator: want 7, got %d", sweep.LeafDenominator)
+	}
+	iq, ok := byName["improve-quality"]
+	if !ok {
+		t.Fatal("improve-quality not in graph nodes")
+	}
+	// sweep-surfaces has 7 scorecards; improve-quality adds 4 direct scorecards + 1 garden = 12
+	if iq.LeafDenominator != 12 {
+		t.Errorf("improve-quality LeafDenominator: want 12, got %d", iq.LeafDenominator)
 	}
 }
