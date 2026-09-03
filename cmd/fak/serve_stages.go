@@ -333,7 +333,8 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 			os.Exit(2)
 		}
 	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, *sf.contextBudgetTokens, expertShard, expertRanks)
+	effectiveTokens := sf.effectiveAdmissionTokenBudget()
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, effectiveTokens, expertShard, expertRanks)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}
@@ -389,7 +390,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// listener and letting rank r OOM uploading its band. Fail-open on cpu-ref / a non-probing backend
 	// (the load above already gated host/aggregate fit); this adds only the per-rank VRAM check the
 	// rank-count + Caps().Collective gate above does not make (#971).
-	if err := refuseEPPlanIfUnfit(inKernelModel, rt.chatBackend, *sf.expertParallel, *sf.contextBudgetTokens); err != nil {
+	if err := refuseEPPlanIfUnfit(inKernelModel, rt.chatBackend, *sf.expertParallel, effectiveTokens); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel %d does not fit resident across the GPUs: %v\n", *sf.expertParallel, err)
 		os.Exit(2)
 	}

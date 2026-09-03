@@ -80,3 +80,26 @@ func TestServeAdmissionTokenBudgetRejectsNonPositiveAtStartup(t *testing.T) {
 		})
 	}
 }
+
+func TestServeEffectiveAdmissionTokenBudget(t *testing.T) {
+	_, sf := newServeFlagSet()
+	if got := sf.effectiveAdmissionTokenBudget(); got != 8192 {
+		t.Fatalf("effective admission token budget default = %d, want shipping admission default 8192", got)
+	}
+
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--native-admission-token-budget", "4096"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sf.effectiveAdmissionTokenBudget(); got != 4096 {
+		t.Fatalf("effective admission token budget = %d, want 4096", got)
+	}
+
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--native-admission-token-budget", "4096", "--context-budget-tokens", "2048"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sf2.effectiveAdmissionTokenBudget(); got != 2048 {
+		t.Fatalf("effective admission token budget = %d, want 2048", got)
+	}
+}
