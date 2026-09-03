@@ -148,7 +148,7 @@ func (a *sccpAnalysis) evaluateNode(node GraphNode) sccpLattice {
 		return sccpLattice{kind: sccpConstant, value: node.Value}
 	case GraphOpIdentity:
 		return a.evaluate(node.Inputs[0])
-	case GraphOpAdd, GraphOpMultiply:
+	case GraphOpAdd, GraphOpMultiply, GraphOpDivide:
 		left := a.evaluate(node.Inputs[0])
 		if a.budgetHit {
 			return sccpLattice{kind: sccpUnknown}
@@ -160,14 +160,42 @@ func (a *sccpAnalysis) evaluateNode(node GraphNode) sccpLattice {
 		if left.kind != sccpConstant || right.kind != sccpConstant {
 			return sccpLattice{kind: sccpUnknown}
 		}
-		result := left.value + right.value
-		if node.Op == GraphOpMultiply {
+		var result float64
+		switch node.Op {
+		case GraphOpAdd:
+			result = left.value + right.value
+		case GraphOpMultiply:
 			result = left.value * right.value
+		case GraphOpDivide:
+			if right.value == 0 {
+				return sccpLattice{kind: sccpOverdefined}
+			}
+			result = left.value / right.value
 		}
 		if math.IsNaN(result) || math.IsInf(result, 0) {
 			return sccpLattice{kind: sccpOverdefined}
 		}
 		return sccpLattice{kind: sccpConstant, value: result}
+	case GraphOpSelect:
+		condition := a.evaluate(node.Inputs[0])
+		if a.budgetHit {
+			return sccpLattice{kind: sccpUnknown}
+		}
+		if condition.kind == sccpConstant {
+			if condition.value != 0 {
+				return a.evaluate(node.Inputs[1])
+			}
+			return a.evaluate(node.Inputs[2])
+		}
+		trueVal := a.evaluate(node.Inputs[1])
+		if a.budgetHit {
+			return sccpLattice{kind: sccpUnknown}
+		}
+		falseVal := a.evaluate(node.Inputs[2])
+		if trueVal.kind == sccpConstant && falseVal.kind == sccpConstant && trueVal.value == falseVal.value {
+			return trueVal
+		}
+		return sccpLattice{kind: sccpOverdefined}
 	case GraphOpIf:
 		condition := a.evaluate(node.Inputs[0])
 		if condition.kind != sccpConstant {
