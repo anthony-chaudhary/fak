@@ -1080,7 +1080,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if statusErr != nil {
 				return nil, statusErr
 			}
-			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && !transientRetryTried && triedTransientRetry && triedTransientTarget == transientTargetTried)) {
+			if rewind && (!attemptsPinned || (p.TransientTargetFunc != nil && (!transientRetryTried || !transientTargetTried))) {
 				attempt--
 			}
 			if retry {
