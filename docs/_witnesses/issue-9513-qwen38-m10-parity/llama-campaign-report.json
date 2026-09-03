@@ -1,0 +1,165 @@
+{
+  "Schema": "fak.qwen38-quant-report/1",
+  "CorpusID": "qwen38-27b-agentic-v1",
+  "CorpusSHA256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "Arm": "q4_k_m",
+  "execution_engine": "llama.cpp",
+  "identity": {
+    "Model": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "CheckpointSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "ArtifactSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "QuantizerRevision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "RuntimeRevision": "llama.cpp@b9828",
+    "FakModuleRev": "internal/qwen38quantrun@r10+gm10parity"
+  },
+  "environment": {
+    "command": [
+      "llama-cli",
+      "-m",
+      "Qwen3.8-27B-Q4_K_M.gguf",
+      "-ngl",
+      "99"
+    ],
+    "hardware": "Apple M3 Pro (18 GPU cores, 36 GiB)",
+    "software": "Darwin 25.3.0 arm64; Metal 3",
+    "context_tokens": 32768,
+    "cache_mode": "hybrid-session",
+    "require_device": "metal",
+    "deny_fallback": true
+  },
+  "trials": [
+    {
+      "workload": "text",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "text",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "text",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 16.5,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 17,
+      "completion_tokens": 1
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 17.5,
+      "completion_tokens": 1
+    }
+  ],
+  "Verdict": "HOLD",
+  "EvidenceClass": "CAMPAIGN",
+  "raw_archive_sha256": "40f318e53599e7e109aef2ff574724f3ba90c9c47329e1a9837a47928bab0d47",
+  "stale_after": "2026-11-21",
+  "rollback_threshold": "any exact-effect, token, or logit failure"
+}

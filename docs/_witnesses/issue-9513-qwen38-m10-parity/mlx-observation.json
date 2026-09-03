@@ -1,0 +1,10 @@
+{
+  "schema": "fak.qwen38-mlx-observation/1",
+  "runtime": "mlx-lm",
+  "revision": "mlx@0.22.0",
+  "comparability": "equivalent-model-only",
+  "excluded_reason": "MLX uses separate non-identical quantized artifact weights; excluded from same-artifact parity ratio",
+  "artifact": "mlx-community/Qwen3.8-27B-4bit",
+  "artifact_sha256": "b0c1e8927a4d5389f5d131498c819a860ef73b64dcfa6791e84a2846d0a7e112",
+  "decode_tokens_per_second": 6.81
+}

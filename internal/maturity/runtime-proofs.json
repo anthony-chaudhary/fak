@@ -42,9 +42,9 @@
       "command": "fak macbench recover --log /dev/null"
     },
     {
-      "output_contains": "internal/metalgemm",
       "lane": "metalgemm",
-      "command": "fak sota internal/metalgemm/decode.m"
+      "command": "fak sota internal/metalgemm/decode.m",
+      "output_contains": "internal/metalgemm"
     }
   ]
 }

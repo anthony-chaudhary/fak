@@ -1,0 +1,20 @@
+{
+  "identity": {
+    "Model": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "CheckpointSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "ArtifactSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "QuantizerRevision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "RuntimeRevision": "fak@post-m9",
+    "FakModuleRev": "internal/qwen38quantrun@r10+gm10parity"
+  },
+  "hardware": "Apple M3 Pro (18 GPU cores, 36 GiB)",
+  "software": "Darwin 25.3.0 arm64; Metal 3",
+  "device": "metal",
+  "context_tokens": 32768,
+  "cache_mode": "hybrid-session",
+  "resident": true,
+  "fallback_active": false,
+  "memory_bytes": 38654705664
+}
