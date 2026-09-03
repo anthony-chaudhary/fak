@@ -72,7 +72,7 @@ confirmed from primary docs, the note says `unverified` instead of guessing.
    identical, verified at `max|Δ| = 0` by a green test rather than asserted. Honest fence:
    this is the in-kernel local-model (`--gguf`) path; on a proxy or subscription seat the
    model lives upstream, so there is no local KV to evict and the evictor is a no-op by
-   design (documented in the [Claude integration guide](../../integrations/CLAUDE.md),
+    design (documented in the [Claude integration guide](../../integrations/claude.md),
    "Current limits on the subscription seat").
 4. Commit-level verify and structured refusal are the DOS trust substrate: a claimed "done"
    is refused from git evidence, and refusals carry a reason from a closed vocabulary rather

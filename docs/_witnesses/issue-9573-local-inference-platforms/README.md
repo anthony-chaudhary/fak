@@ -1,3 +1,8 @@
+---
+title: "Issue 9573: dated local-inference platform inventory"
+description: "Representative 64/128 GB local-inference platforms witness for LongContextEstimatorInput."
+---
+
 # Issue 9573: dated local-inference platform inventory
 
 This witness is the smallest machine-readable and rendered inventory of representative

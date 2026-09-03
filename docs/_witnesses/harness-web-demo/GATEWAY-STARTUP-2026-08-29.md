@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Harness Gateway startup render witness — 2026-08-29"
 description: "Before/after desktop and narrow captures for the typed /debug/vars.startup projection."
 ---
