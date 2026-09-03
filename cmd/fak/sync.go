@@ -70,6 +70,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		budgetHelp = "apply: responsiveness budget used for the effect-qualified velocity score"
 	}
 	budget := fs.Duration("budget", budgetDefault, budgetHelp)
+	quarantineScratch := fs.Bool("quarantine-scratch", true, "shift-left untracked artifact isolation: safely isolate and restore untracked files colliding with incoming fast-forward additions (#10913)")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	var recheckPaths pathList
@@ -163,6 +164,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		Branch:              *branch,
 		Fetch:               *fetch,
 		ApplyVelocityBudget: *budget,
+		QuarantineScratch:   *quarantineScratch,
 	}
 	var (
 		info safesync.Assessment
@@ -201,7 +203,11 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
+	return outputSyncResult(stdout, stderr, command, *asJSON, info, publicLeak, recheckPaths)
+}
+
+func outputSyncResult(stdout, stderr io.Writer, command string, asJSON bool, info safesync.Assessment, publicLeak *syncPublicLeakPreflight, recheckPaths []string) int {
+	if asJSON {
 		var report any = info
 		if publicLeak != nil {
 			report = syncCheckReport{Assessment: info, PublicLeak: publicLeak}
@@ -348,6 +354,10 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 		}
 		if info.Applied {
 			fmt.Fprintf(w, "  HEAD -> %s (novel local work on other paths preserved)\n", short(info.NewHead))
+		}
+		if info.Quarantine != nil && info.Quarantine.QuarantinedCount > 0 {
+			fmt.Fprintf(w, "  quarantine: %d untracked file(s) isolated (%d identical verified, %d restored, %d relocated)\n",
+				info.Quarantine.QuarantinedCount, info.Quarantine.IdenticalCount, info.Quarantine.RestoredCount, info.Quarantine.RelocatedCount)
 		}
 		renderSyncWorktree(w, info)
 	default:
