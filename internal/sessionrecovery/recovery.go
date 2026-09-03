@@ -278,6 +278,9 @@ func claudeResumeArgv(managerBin, sessionID string) []string {
 }
 
 func recoveryEligibility(row Session, explicit bool) (string, string) {
+	if row.Action == "unknown" || row.Reason == "process_inspection_failed" {
+		return "unknown", firstNonBlank(row.Reason, "process_inspection_failed")
+	}
 	switch row.Action {
 	case ActionExcludeProbe:
 		return "probe", firstNonBlank(row.Reason, "semantic_probe")
@@ -291,7 +294,10 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 		if len(row.ProcessTrees) != 0 {
 			return "live", "live_process_tree"
 		}
-		return "candidate", row.Reason
+		if row.LatestTurn != nil && !strings.EqualFold(row.LatestTurn.Status, "inProgress") {
+			return "refused", "latest_turn_" + strings.ToLower(strings.TrimSpace(row.LatestTurn.Status))
+		}
+		return "candidate", firstNonBlank(row.Reason, "terminal_loss")
 	}
 	if row.Category == CategoryIdentityBlocked {
 		return "identity_blocked", firstNonBlank(row.Reason, "exact_identity_unresolved")
@@ -317,13 +323,13 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 		// inventory supplied an exact Codex harness identity and UUID; the legacy
 		// source fallback must not turn an otherwise unknown cli row into Codex.
 		if provider == ProviderCodex && harnessSource != "legacy_source" && isUUID(row.Thread.ID) {
-			return "candidate", ""
+			return "candidate", firstNonBlank(row.Reason, "terminal_loss")
 		}
 		return "refused", "source_not_resumable:" + row.Thread.Source
 	}
 	switch row.Thread.Source {
 	case "interactive_tui", "resume_wrapper":
-		return "candidate", ""
+		return "candidate", firstNonBlank(row.Reason, "terminal_loss")
 	case "exec":
 		if explicit {
 			return "candidate", "explicit_dead_exec"
