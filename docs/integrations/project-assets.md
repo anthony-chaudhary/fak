@@ -6,8 +6,9 @@ description: ".claude/project-assets.json is the canonical registry for portable
 
 `.claude/project-assets.json` is the canonical registry for portable project skills,
 project memories, and reusable goal prompts. Claude continues to read the canonical
-`.claude` paths. Codex discovers generated, regular-file adapters under
-`.agents/skills`; each adapter points to one canonical `SKILL.md` and does not copy its
+`.claude` paths. Codex and OpenCode discover generated, regular-file adapters under
+`.agents/skills` (configured in `opencode.json` via `skills.paths: [".agents/skills"]`);
+each adapter points to one canonical `SKILL.md` and does not copy its
 maintained body, so the seam also works in Windows checkouts without symlinks.
 
 Generate adapters after adding or renaming a portable skill:

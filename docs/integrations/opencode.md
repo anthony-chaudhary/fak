@@ -112,6 +112,52 @@ directly. Use [`fak fleet-accounts launch|exec`](../fleet-accounts-launch.md), s
 task tier, and use `--allow-tier3-narrow` only for explicitly narrow tier-3 work. Hard
 engineering work cannot be overridden onto a restricted tier-3 OpenCode seat.
 
+## Skill portability: importing skills into OpenCode (#10689, #10690, #10691)
+
+OpenCode natively supports the portable [Agent Skills](https://agentskills.io) standard, enabling seamless skill reuse across Claude Code, OpenAI Codex, and OpenCode:
+
+### 1. Skill locations and formats
+
+| Harness | Discovery location | Format |
+|---|---|---|
+| **Claude Code** | `.claude/skills/<name>/SKILL.md` | Canonical semantic body + Claude frontmatter |
+| **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Agent Skills standard (generated adapter / native) |
+| **OpenCode** | `opencode.json` -> `skills.paths` (`.agents/skills`) | Agent Skills standard / portable bundle |
+
+### 2. Bundling and synchronization with `fak-project-assets`
+
+`cmd/fak-project-assets` serves as the portable skill bundler:
+- `go run ./cmd/fak-project-assets sync --json`: syncs canonical skills into portable regular-file adapters under `.agents/skills/` (compatible with Windows, Linux, macOS).
+- `go run ./cmd/fak-project-assets parity --json`: verifies that 100% of skills are canonical or mapped with `zero_unexplained_gaps: true`.
+
+In `opencode.json`, point `skills.paths` at the synced portable bundle:
+```json
+{
+  "skills": {
+    "paths": [".agents/skills"]
+  }
+}
+```
+
+### 3. Access control and frontmatter mediation
+
+Claude Code frontmatter fields (`disable-model-invocation`, `user-invocable`, `allowed-tools`) are dropped by OpenCode's parser. In fak, this gap is bridged cleanly:
+1. **Metadata Acknowledgment:** Skills with load-bearing Claude frontmatter specify `metadata.opencode: agent-permission` or `metadata.opencode: claude-only`. Verified via `python tools/skill_frontmatter_lint.py --check`.
+2. **Re-expression in `opencode.json`:** Per-skill invocation gates are re-expressed in `opencode.json` under `permission.skill`:
+```json
+{
+  "permission": {
+    "skill": {
+      "phased-plan": "deny"
+    }
+  }
+}
+```
+
+### 4. Round-trip demonstration
+
+A skill authored for Codex or Claude is synchronized via `fak-project-assets sync`, loaded into OpenCode via `skills.paths`, and governed by fak's MCP capability floor (`fak_adjudicate`).
+
 ## Cross-references
 
 - **Integration index**: [README.md](README.md)
