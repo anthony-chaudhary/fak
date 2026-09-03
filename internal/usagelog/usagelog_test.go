@@ -471,7 +471,7 @@ func TestDiagnosticSinkLazinessRedactionAndTypedJSON(t *testing.T) {
 	if decoded.Schema != DiagnosticSchemaV1 || decoded.Level != "info" || decoded.Event != "kernel.step" {
 		t.Fatalf("decoded envelope = %+v", decoded)
 	}
-	if len(decoded.Fields) != 5 {
+	if len(decoded.Fields) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the diagnostic fixture logs exactly five explicit fields
 		t.Fatalf("decoded fields = %#v", decoded.Fields)
 	}
 	if n, ok := decoded.Fields["attempt"].(json.Number); !ok || n.String() != "3" {
