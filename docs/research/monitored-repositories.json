@@ -4252,7 +4252,7 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md#candidate-borrows",
-              "study_f51c1d2130e4c1b521ac9c689718677da6f0faba1bfb185cfd8cb53b4b7d1d13"
+              "study_8e02e83cb64d8494cf8fe3d320cf13be15d6d1b9f9a296f4f52eaba07f124f0d"
             ],
             "note": "14 candidates with on-axis status, disposition, evidence, and durable study receipt"
           },
@@ -4262,9 +4262,27 @@
               "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md#what-was-read-fan-out-coverage"
             ],
             "note": "All 14 load-bearing subsystems deeply read; no material kernel-relevant subsystem unopened"
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10736",
+              "https://github.com/anthony-chaudhary/fak/issues/10737",
+              "https://github.com/anthony-chaudhary/fak/issues/10738",
+              "https://github.com/anthony-chaudhary/fak/issues/10739",
+              "https://github.com/anthony-chaudhary/fak/issues/10740"
+            ],
+            "note": "Parent study tracker and 4 independently dispatchable child issues filed and verified"
           }
         ],
-        "issue_refs": [],
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#10736",
+          "#10737",
+          "#10738",
+          "#10739",
+          "#10740"
+        ],
         "completeness_critic": "All 14 load-bearing subsystems (eBPF SSL uprobes, process tracepoints, HTTP/2+SSE+WS parsers, token normalization, materialized view, session parsing, process correlation, container resolution, OTel export, bounded retention, session-centric top, paper framing) deeply read via fan-out agents. Tests, CI, docker, frontend, experimental browsertrace justified as non-kernel-relevant. No material kernel-relevant subsystem unopened."
       }
     },
@@ -4307,6 +4325,50 @@
           "#10721",
           "#10722",
           "#10723"
+        ]
+      }
+    },
+    {
+      "repository": "julianmb/q38rocm",
+      "url": "https://github.com/julianmb/q38rocm",
+      "status": "studied",
+      "priority": 1,
+      "why": "Dedicated single-model deployment package for Qwen 3.8 27B ROCmFP4 on AMD Strix Halo (Ryzen AI Max+ 395). Hardware-aligned block quantization (block 32), MTP speculative decoding, asymmetric TurboQuant KV cache, prompt-cache coexistence, and tuning/benchmark tooling.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
+      "stars_at_check": 185,
+      "last_push_at_check": "2026-09-02T18:30:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
+      "refresh_issue": "#10730",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
+        "indexed_revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 8,
+        "candidate_count": 12,
+        "filed_issue_count": 6,
+        "completeness_critic": "Exhaustive exploration across quantization pipeline, MTP speculative decoding, KV cache and prompt caching, benchmarks and quality eval, NPU hybrid pipeline, engine build and provenance, server launcher, Docker integration, and upstream tracking; 6 independent issues filed (#10730, #10731, #10732, #10733, #10734, #10735) under epics #6221, #2236, #10193; durable receipt study_6777fd46608e1a1293a3f111c4a4f17a9aab28c16431e689f0e011cffc965cb6 recorded.",
+        "issue_refs": [
+          "#10730",
+          "#10731",
+          "#10732",
+          "#10733",
+          "#10734",
+          "#10735"
         ]
       }
     }

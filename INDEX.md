@@ -288,8 +288,12 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Concept Study: Portkey AI Gateway](docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md) -- auto-indexed dated note.
+- [`docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md`](docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md) — pinned deep study of kvcached's virtual-to-physical KV reservation, page-aligned eviction, zero-copy prefix sharing, page-granular CPU offloading, and compound-page layout lessons; filed #10720-#10723.
+- [`docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md`](docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md) — pinned deep study of vLLM's worker execution loop, compilation stack, device communicators, output pipeline, and benchmark methodology; filed #10719, #10725-#10729.
 - [OpenCode Study — 2026-09-02](docs/notes/CONCEPT-STUDY-OPENCODE-2026-09-02.md) -- auto-indexed dated note.
 - [`docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md`](docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md) — pinned deep study of TurboQuant-vLLM's MoE sparse dequantization, 3/4-bit KV ladder rungs, shape-gain norm correction, and CUDA-graph invariants; filed #10709 and #10710.
+- [`docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md`](docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md) — pinned deep study of julianmb/q38rocm Qwen 3.8 27B ROCmFP4 on AMD Strix Halo: hardware-aligned block quantization, MTP speculative decoding, asymmetric TurboQuant KV cache, prompt-cache coexistence with empty-spec tolerance, automated tuning sweeps, and quality evaluation; receipt `study_6777fd46608e1a1293a3f111c4a4f17a9aab28c16431e689f0e011cffc965cb6`; filed #10730-#10735.
 - [`docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json`](docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json) — refreshed repository-discovery baseline for the curated doc map (`fak-dev index benchmark`, schema `fak-devindex-discovery-benchmark/1`): 15/24 top-5 (62.5%), 120 results, 9,267 rendered bytes over the 24 fixed navigation questions; hit set unchanged from the 2026-08-25 baseline.
 - [`docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md`](docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md) — pinned deep study of Hipfire's RDNA-native admission, cache/session safety, retained replay, evidence contracts, negative results, and provenance; reuses #9587/#8395 and files no duplicate mechanism issue.
 
