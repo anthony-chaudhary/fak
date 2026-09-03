@@ -2,6 +2,8 @@
 name: run-it-all-night
 description: Plan and run one bounded overnight issue worker through fak's guarded dispatch path, with typed capacity admission, lane leases, explicit dry-run/live gates, and independent git/DOS/test reconciliation. Use when the operator asks to let a narrow repo task run unattended overnight.
 allowed-tools: Bash, Read, Grep, Glob
+metadata:
+  opencode: claude-only   # capacity admission and lease discipline are load-bearing and not portable per-skill
 ---
 
 Run one narrow, issue-bound task overnight without bypassing the kernel's account, lease,

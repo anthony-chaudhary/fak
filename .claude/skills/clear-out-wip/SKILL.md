@@ -2,6 +2,8 @@
 name: clear-out-wip
 description: Clear backed-up local repository work without sweeping up peers - inventory the dirty tree, remove proven generated junk, prioritize coherent slices, ship green partial/enabling work honestly, park or issue the rest, and use stale-work/fleet workflows only after ownership and path contracts are explicit. Use when the operator says "clear out local WIP", "clean up the dirty tree", "get this backlog of changes shipped", "sort out uncommitted work", or asks what can be committed even though the larger feature is not.
 allowed-tools: Read, Bash
+metadata:
+  opencode: claude-only   # the commit-clean / no-bulk-stage boundary is load-bearing and Claude-only — opencode drops it
 ---
 
 # /clear-out-wip
