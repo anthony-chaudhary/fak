@@ -64,6 +64,9 @@ type ReconcileCounts struct {
 	ProcessDeath int `json:"process_death"` // synthesized
 	Live         int `json:"live"`          // synthesized, open
 
+	CompletedWithTrailingAbort int `json:"completed_with_trailing_abort,omitempty"`
+	SubstantiveCompleted       int `json:"substantive_completed,omitempty"`
+
 	// ClosedTotal = Complete+Aborted+Superseded+ProcessDeath.
 	ClosedTotal int `json:"closed_total"`
 	// ResidualUnaccounted = TaskStarted − ClosedTotal: what synthesis could
@@ -115,6 +118,12 @@ func (c *ReconcileCounts) fold(raw map[string]int, rep Report) {
 	c.Superseded += oc[Superseded]
 	c.ProcessDeath += oc[ProcessDeath]
 	c.Live += oc[Live]
+	if rep.CompletedWithTrailingAbort {
+		c.CompletedWithTrailingAbort++
+	}
+	if rep.SubstantiveCompleted {
+		c.SubstantiveCompleted++
+	}
 }
 
 // finalize derives the two deltas. Kept separate from fold so the totals row

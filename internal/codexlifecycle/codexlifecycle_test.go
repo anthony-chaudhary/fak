@@ -229,3 +229,28 @@ func TestParseRollout_SurvivesTornFinalLine(t *testing.T) {
 		t.Error("a torn tail with an open start is process death")
 	}
 }
+
+func TestFold_CompletedWithTrailingEmptyAbort(t *testing.T) {
+	ev := []Event{
+		{Kind: KindStarted, TurnID: "turn-1", Timestamp: "2026-09-03T01:00:00Z"},
+		{Kind: KindComplete, TurnID: "turn-1", Timestamp: "2026-09-03T01:01:00Z", DurationMS: 60000},
+		{Kind: KindStarted, TurnID: "turn-2", Timestamp: "2026-09-03T01:01:01Z"},
+		{Kind: KindAborted, TurnID: "turn-2", Timestamp: "2026-09-03T01:01:02Z", DurationMS: 50, Reason: "interrupted"},
+	}
+	r := Fold(ev, false)
+	if len(r.Tasks) != 2 {
+		t.Fatalf("tasks count = %d, want 2", len(r.Tasks))
+	}
+	if r.Tasks[0].Outcome != Complete {
+		t.Errorf("turn-1 outcome = %q, want complete", r.Tasks[0].Outcome)
+	}
+	if r.Tasks[1].Outcome != Aborted || !r.Tasks[1].TrailingEmptyAbort {
+		t.Errorf("turn-2 = %+v, want aborted with trailing empty abort", r.Tasks[1])
+	}
+	if !r.SubstantiveCompleted {
+		t.Error("substantive_completed must be true")
+	}
+	if !r.CompletedWithTrailingAbort {
+		t.Error("completed_with_trailing_abort must be true")
+	}
+}

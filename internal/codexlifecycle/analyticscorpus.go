@@ -293,6 +293,9 @@ func foldResumeCohort(c *ResumeCohort, ra RolloutAnalytics) {
 		case Live:
 			// Started already captures the still-running cohort member; it is not terminal.
 		case Aborted, ProcessDeath:
+			if task.TrailingEmptyAbort {
+				continue
+			}
 			c.Crashed++
 			stage := "before_useful_work"
 			if useful {

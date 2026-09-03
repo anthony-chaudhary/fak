@@ -89,13 +89,14 @@ type Event struct {
 
 // Task is one reconciled lifecycle: a start bound to exactly one typed terminal.
 type Task struct {
-	TurnID     string     `json:"turn_id"`
-	StartedAt  string     `json:"started_at,omitempty"`
-	EndedAt    string     `json:"ended_at,omitempty"` // empty for Live — a running turn has no end
-	Outcome    Outcome    `json:"outcome"`
-	Provenance Provenance `json:"provenance"`
-	Reason     string     `json:"reason,omitempty"`
-	DurationMS int64      `json:"duration_ms,omitempty"`
+	TurnID             string     `json:"turn_id"`
+	StartedAt          string     `json:"started_at,omitempty"`
+	EndedAt            string     `json:"ended_at,omitempty"` // empty for Live — a running turn has no end
+	Outcome            Outcome    `json:"outcome"`
+	Provenance         Provenance `json:"provenance"`
+	Reason             string     `json:"reason,omitempty"`
+	DurationMS         int64      `json:"duration_ms,omitempty"`
+	TrailingEmptyAbort bool       `json:"trailing_empty_abort,omitempty"`
 }
 
 // Report is the reconciled lifecycle of ONE rollout. The three integrity classes are
@@ -103,6 +104,12 @@ type Task struct {
 // causes and different fixes.
 type Report struct {
 	Tasks []Task `json:"tasks"`
+
+	// SubstantiveCompleted indicates at least one substantive task turn completed.
+	SubstantiveCompleted bool `json:"substantive_completed,omitempty"`
+
+	// CompletedWithTrailingAbort indicates substantive completion followed by an empty abort.
+	CompletedWithTrailingAbort bool `json:"completed_with_trailing_abort,omitempty"`
 
 	// Orphans are terminals whose turn_id was never started in this rollout — a
 	// truncated head, or a terminal for a turn that began in an earlier file.
@@ -236,6 +243,22 @@ func Fold(events []Event, fresh bool) Report {
 			t.Outcome = ProcessDeath
 			t.Reason = "rollout_stale_no_terminal_observed"
 		}
+	}
+
+	hasComplete := false
+	for i := range rep.Tasks {
+		if rep.Tasks[i].Outcome == Complete {
+			hasComplete = true
+		}
+		if i > 0 && rep.Tasks[i-1].Outcome == Complete && rep.Tasks[i].Outcome == Aborted {
+			if rep.Tasks[i].DurationMS <= 2000 {
+				rep.Tasks[i].TrailingEmptyAbort = true
+			}
+		}
+	}
+	rep.SubstantiveCompleted = hasComplete
+	if len(rep.Tasks) > 1 && rep.Tasks[len(rep.Tasks)-1].TrailingEmptyAbort {
+		rep.CompletedWithTrailingAbort = true
 	}
 	return rep
 }

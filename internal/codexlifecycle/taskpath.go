@@ -70,6 +70,8 @@ type TaskAnalytics struct {
 
 	Classes  map[ToolClass]int `json:"classes,omitempty"`
 	Critical []Contributor     `json:"critical,omitempty"`
+
+	TrailingEmptyAbort bool `json:"trailing_empty_abort,omitempty"`
 }
 
 // CodexBehavior is the #2365 behavioral lens ported to Codex event shape. All rows
@@ -103,11 +105,13 @@ type ChurnRow struct {
 
 // RolloutAnalytics is the full per-rollout report.
 type RolloutAnalytics struct {
-	Meta     Meta            `json:"meta"`
-	Tasks    []TaskAnalytics `json:"tasks"`
-	Calls    int             `json:"calls"`
-	Outcomes []CallOutcome   `json:"outcomes,omitempty"`
-	Behavior CodexBehavior   `json:"behavior"`
+	Meta                       Meta            `json:"meta"`
+	Tasks                      []TaskAnalytics `json:"tasks"`
+	Calls                      int             `json:"calls"`
+	Outcomes                   []CallOutcome   `json:"outcomes,omitempty"`
+	Behavior                   CodexBehavior   `json:"behavior"`
+	SubstantiveCompleted       bool            `json:"substantive_completed,omitempty"`
+	CompletedWithTrailingAbort bool            `json:"completed_with_trailing_abort,omitempty"`
 }
 
 // AnalyzeRollout joins calls/results/tasks by their ids, types every outcome, and
@@ -266,6 +270,24 @@ func AnalyzeRollout(meta Meta, records []ARecord, fresh bool) RolloutAnalytics {
 		}
 	}
 	sort.Slice(behavior.EditChurn, func(a, b int) bool { return behavior.EditChurn[a].Count > behavior.EditChurn[b].Count })
+
+	for i := range tasks {
+		if tasks[i].Outcome == Complete {
+			out.SubstantiveCompleted = true
+		}
+		if i > 0 && tasks[i-1].Outcome == Complete && tasks[i].Outcome == Aborted {
+			dur := tasks[i].RecordedMS
+			if dur <= 0 {
+				dur = tasks[i].WallMS
+			}
+			if tasks[i].ToolCalls == 0 && dur <= 2000 {
+				tasks[i].TrailingEmptyAbort = true
+			}
+		}
+	}
+	if len(tasks) > 1 && tasks[len(tasks)-1].TrailingEmptyAbort {
+		out.CompletedWithTrailingAbort = true
+	}
 
 	out.Tasks = tasks
 	return out

@@ -75,6 +75,9 @@ type Counts struct {
 	Complete     int `json:"complete"`
 	Aborted      int `json:"aborted"`
 
+	CompletedWithTrailingAbort int `json:"completed_with_trailing_abort,omitempty"`
+	SubstantiveCompleted       int `json:"substantive_completed,omitempty"`
+
 	// UnclassifiedAfter MUST be zero — the acceptance criterion.
 	UnclassifiedAfter int `json:"unclassified_after"`
 
@@ -135,6 +138,12 @@ func (c *Counts) fold(rep Report) {
 	}
 	if gap {
 		c.RolloutsWithGap++
+	}
+	if rep.CompletedWithTrailingAbort {
+		c.CompletedWithTrailingAbort++
+	}
+	if rep.SubstantiveCompleted {
+		c.SubstantiveCompleted++
 	}
 }
 
