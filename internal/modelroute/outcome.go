@@ -94,6 +94,8 @@ type OutcomeRecord struct {
 	Key     AspectRuleKey `json:"key"`
 	Digest  string        `json:"digest,omitempty"` // #615 content-address of the graded decision
 	Outcome Outcome       `json:"outcome"`
+	Model   string        `json:"model,omitempty"`   // served model for per-model feedback evaluation (#600)
+	Subject Subject       `json:"subject,omitempty"` // graded subject for routing replay (#600)
 }
 
 // RecordOutcome builds the corpus record for a decision served under a manifest
@@ -106,6 +108,8 @@ func RecordOutcome(version string, d Decision, o Outcome) OutcomeRecord {
 		Key:     keyOf(d),
 		Digest:  d.Digest(version),
 		Outcome: o,
+		Model:   d.Plan.Primary(),
+		Subject: d.Subject,
 	}
 }
 
