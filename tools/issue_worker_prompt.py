@@ -415,7 +415,7 @@ sanctioned ways to stop short.
 
 read first: run `gh issue view {n}` for the live issue, then orient with \
 `AGENTS.md` (build/test/run + the hard rules) and `llms.txt` (the doc map). \
-Then run `python tools/memory_read.py` for the committed fleet memory (lane \
+Then run `fak memory-read` for the committed fleet memory (lane \
 quirks, known blockers, host gotchas) — a Claude worker gets this auto-injected, \
 an opencode worker does NOT, so this read is how both backends start warm (it is \
 a harmless no-op if the mirror is absent). \
