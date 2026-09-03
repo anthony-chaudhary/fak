@@ -63,3 +63,10 @@ commit: 2320237bda0f19c1183ed723493e83b40d3f4a18
 type: chore
 witness: experiments/agent-live/guard-opencode-live-witness-2026-09-01.json
 reason: The landed subject says test(guard), but the diff adds only an immutable live-run JSON witness and changes no test source. The artifact records the already executed #10594 guarded-opencode dogfood turn (child exit 0, two gateway 200s from opencode/1.18.25, placeholder 401 no-bypass check, one hash-chained DECIDE ALLOW row with fak audit verify OK — hashes cited inside the artifact) and therefore supports a documentation/evidence claim, not a test-code claim.
+
+commit: 3ea6f7d6cb842783c468e1e66c0cecfd515a6eaa
+type: chore
+witness: testdata/tb4bench/golden_compare.json
+witness: testdata/tb4bench/sample_contract.json
+witness: testdata/tb4bench/sample_manifest.json
+reason: The landed subject says test(tb4bench), but the diff adds only the three golden and sample fixture documents under testdata/tb4bench and changes no test source. The evidence supports a fixture/chore claim, not a new test-code claim.
