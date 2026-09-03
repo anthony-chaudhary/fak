@@ -11,11 +11,11 @@ func TestGLM5NextKDALayerStateLifecycle(t *testing.T) {
 	}
 
 	// 64 * 128 * 128 = 1,048,576 floats
-	if len(st.S) != 1048576 {
+	if len(st.S) != 1048576 { //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant
 		t.Fatalf("len(S) = %d, want 1048576", len(st.S))
 	}
 	// (4 - 1) * (64 * 128) = 3 * 8192 = 24576 floats
-	if len(st.ConvQ) != 24576 || len(st.ConvK) != 24576 || len(st.ConvV) != 24576 {
+	if len(st.ConvQ) != 24576 || len(st.ConvK) != 24576 || len(st.ConvV) != 24576 { //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant
 		t.Fatalf("unexpected conv lengths: Q=%d K=%d V=%d", len(st.ConvQ), len(st.ConvK), len(st.ConvV))
 	}
 
@@ -55,7 +55,7 @@ func TestGLM5NextKDAStateCollective(t *testing.T) {
 	cfg := DefaultGLM5NextConfig()
 	collective := NewGLM5NextKDAState(cfg)
 
-	if len(collective.Layers) != 34 {
+	if len(collective.Layers) != 34 { //boundarylint:ignore CHANGE_DETECTOR_TEST a deliberate fixed-width invariant
 		t.Fatalf("expected 34 KDA layers, got %d", len(collective.Layers))
 	}
 
