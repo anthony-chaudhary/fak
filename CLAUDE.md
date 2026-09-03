@@ -33,13 +33,14 @@ The five that will bite you if you skip them:
 - **Default is to ship** — once the tree is green (`make ci`), commit AND push
   unprompted. Stay on the trunk, never force-push, defer to the guard (`OFF_TRUNK` / a peer
   merge in flight). Full default + verify command in [`AGENTS.md`](AGENTS.md).
-- **Delegate substantive work and enforce capability-aware scoping** — use guarded
+- **Delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping** — use guarded
   headless agents or equivalent isolated workers for investigation, implementation, tests,
   and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,
   single package, exactly one witness). When encountering high-difficulty aspects
   (concurrency, frozen ABI, kernel memory layout, security gates), fail-to-abstain with a
   structured ABSTAIN record rather than guessing. Keep only decisions and compact witnessed
-  evidence here; independently verify worker effects before landing or reporting them. Reserve
+  evidence here; independently verify
+  worker effects before landing or reporting them. Reserve
   direct work for lightweight coordination and truly trivial tasks. Full contract in [`AGENTS.md`](AGENTS.md).
 - **The Go module is the repository root** — run `go` commands from the clone root;
   `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly.
