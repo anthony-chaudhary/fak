@@ -25,6 +25,7 @@ func TestStudyOperationsDispatcherMatchesHandlers(t *testing.T) {
 		"study-tickets":       devcmd.RunStudyTickets,
 		"study-adjacency":     devcmd.RunStudyAdjacency,
 		"idea-scout":          devcmd.RunIdeaScout,
+		"perfscout":           devcmd.RunPerfScout,
 		"borrow-provenance":   devcmd.RunBorrowProvenance,
 		"customization-index": devcmd.RunCustomizationIndex,
 	}
@@ -51,7 +52,7 @@ func TestRuntimeSourceExcludesStudyOperations(t *testing.T) {
 	for _, name := range []string{
 		"study-monitor", "study-inventory", "study-forge", "study-classify",
 		"study-link", "study-priority", "study-tickets", "study-adjacency",
-		"idea-scout", "borrow-provenance", "customization-index",
+		"idea-scout", "perfscout", "borrow-provenance", "customization-index",
 	} {
 		if strings.Contains(string(mainBody), `case "`+name+`"`) {
 			t.Errorf("runtime dispatch still contains %s", name)
@@ -60,7 +61,7 @@ func TestRuntimeSourceExcludesStudyOperations(t *testing.T) {
 	for _, base := range []string{
 		"study_monitor.go", "study_inventory.go", "study_forge.go", "study_classify.go",
 		"study_link.go", "study_priority.go", "study_tickets.go", "study_adjacency.go",
-		"study_import.go", "ideascout.go", "borrow_provenance.go", "customization_index.go",
+		"study_import.go", "ideascout.go", "perfscout.go", "borrow_provenance.go", "customization_index.go",
 	} {
 		if _, err := os.Stat(filepath.Join(root, "cmd", "fak", base)); !os.IsNotExist(err) {
 			t.Errorf("runtime source %s still exists (err=%v)", base, err)
