@@ -1,0 +1,89 @@
+{
+  "schema": "fak-study/1",
+  "title": "microsoft/vidur high-fidelity LLM inference simulator architecture and scheduling study",
+  "observed": "2026-09-03",
+  "sources": [
+    {
+      "url": "https://github.com/microsoft/vidur",
+      "revision": "abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+      "license": "MIT"
+    },
+    {
+      "url": "https://github.com/microsoft/vidur/tree/canary",
+      "revision": "25e0082dbbfb206fb0477c3ebbededa7ead78949",
+      "license": "MIT"
+    }
+  ],
+  "observations": [
+    "Vidur is an MLSys'24 discrete-event LLM inference system simulator modeling execution time, continuous batching, and multi-node cluster topologies.",
+    "ExecutionTime explicitly decomposes pipeline-stage latency into projection kernels, attention (prefill chunk, decode, RoPE, KV save), MLP, collective communication (AllReduce vs Send/Recv), and host CPU scheduling/sampling/IPC overheads.",
+    "SklearnExecutionTimePredictor fits random forest and linear regressors over empirical operator execution profiling tables (Kineto/CUDA timers), caching models with cross-process locking.",
+    "Canary branch introduces prefix caching with hierarchical KV cache management (VRAM ReplicaKVCacheManager and host DiskKVCacheManager) and multi-replica global routing.",
+    "TolerantStickyLOPUncachedGlobalScheduler enforces conversational session affinity while preventing hot-spot stragglers via a tolerance-factor load imbalance slack window.",
+    "LOPUncachedGlobalScheduler routes requests based on remaining uncached prefill token volume rather than coarse request counts or binary cache hits.",
+    "CapacitySearch executes an adaptive binary search across QPS to determine maximum sustainable throughput within tail latency SLO bounds.",
+    "EDFRequestQueue schedules requests ordered by absolute deadline expiration rather than static integer priority."
+  ],
+  "candidates": [
+    {
+      "effect": "Slack-tolerant sticky session routing for cross-replica prefix cache locality without hot-spot stragglers.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "vidur/scheduler/global_scheduler/tolerant_sticky_lop_uncached_global_scheduler.py:46@25e0082dbbfb206fb0477c3ebbededa7ead78949",
+        "internal/gateway/kv_fleet_routing.go:135",
+        "internal/gateway/replica_router.go:55"
+      ],
+      "issue": "#10852",
+      "outcome": "Filed #10852 to add tolerance-factor slack window to FleetCacheRouter for multi-turn session load balancing."
+    },
+    {
+      "effect": "Route multi-replica requests by uncached prefill token volume rather than binary cache hits or request counts.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "vidur/scheduler/global_scheduler/lop_uncached_global_scheduler.py:21@25e0082dbbfb206fb0477c3ebbededa7ead78949",
+        "internal/gateway/replica_router.go:25",
+        "internal/gateway/kv_fleet_routing.go:135"
+      ],
+      "issue": "#10853",
+      "outcome": "Filed #10853 to calculate uncached prefill tokens per replica and route to minimize peak pending token volume."
+    },
+    {
+      "effect": "Adaptive binary search for maximum sustainable throughput under strict latency SLOs.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "vidur/config_optimizer/config_explorer/capacity_search.py:125@abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+        "internal/localbench/localbench.go:40",
+        "cmd/fak/bench_local_test.go:50"
+      ],
+      "issue": "#10854",
+      "outcome": "Filed #10854 to add adaptive binary search over QPS discovering certified max throughput under latency SLOs."
+    },
+    {
+      "effect": "Earliest Deadline First (EDF) request queue for mixed interactive and batch latency SLO enforcement.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "vidur/scheduler/request_queue/edf_request_queue.py:1@25e0082dbbfb206fb0477c3ebbededa7ead78949",
+        "internal/gateway/admission.go:33"
+      ],
+      "issue": "#10856",
+      "outcome": "Filed #10856 to add deadline-ordered queuing to admission policy for mixed interactive/batch workloads."
+    },
+    {
+      "effect": "Decompose step latency into kernel projections and host CPU scheduling overheads in native performance profiling.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "vidur/entities/execution_time.py:4@abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+        "vidur/execution_time_predictor/base_execution_time_predictor.py:32@abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+        "internal/nativeperf/profile.go:27",
+        "internal/roofline/roofline.go:71"
+      ],
+      "issue": "#10861",
+      "outcome": "Filed #10861 to isolate GPU projection kernels from host CPU scheduling/sampling overheads in ProfileBundle."
+    }
+  ]
+}

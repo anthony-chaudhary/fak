@@ -1594,12 +1594,30 @@
           "category": "incidental",
           "reason": "JSON key for estimated operator-attention cost in seconds",
           "token": "estimated_attention_s"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask struct",
+          "token": "TreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask builder",
+          "token": "BuildTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask validator",
+          "token": "ValidateTreeAttentionMask"
         }
       ],
       "id": "attention",
       "ignore": [
+        "BuildTreeAttentionMask",
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
+        "TreeAttentionMask",
+        "ValidateTreeAttentionMask",
         "attentions",
         "attentive",
         "estimated_attention_s",
@@ -6008,6 +6026,21 @@
           "category": "incidental",
           "reason": "local (path, mtime) candidate record shared by the codex-loop discovery helpers; not a new concept surface (#10405 dedup)",
           "token": "codexLoopSessionFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "dataslot package",
+          "token": "dataslot"
+        },
+        {
+          "category": "incidental",
+          "reason": "dataslot descriptor struct",
+          "token": "DataSlotDescriptor"
+        },
+        {
+          "category": "incidental",
+          "reason": "dataslot status type",
+          "token": "SlotStatus"
         }
       ],
       "exclude": [
@@ -6026,6 +6059,7 @@
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
+        "DataSlotDescriptor",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
@@ -6139,6 +6173,7 @@
         "SessionSupport",
         "SessionTerminalView",
         "SetSessionAffinity",
+        "SlotStatus",
         "StoreVerifiedSlot",
         "UNSUPPORTED_SESSION_KIND",
         "VerifySessionMoveDestinationReceipt",
@@ -6174,6 +6209,7 @@
         "confusedsessions",
         "continueSessionMoveProvider",
         "control-window",
+        "dataslot",
         "deadline_released_slot",
         "decodeSessionClientJSON",
         "defaultServeSessionStatePath",
@@ -7396,6 +7432,11 @@
           "category": "incidental",
           "reason": "private implementation struct carrying native probe results; not an operator-facing proof concept",
           "token": "ownershipWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal revocation timestamp and reason mapping",
+          "token": "RevocationEntry"
         }
       ],
       "id": "witness-proof",
@@ -7439,6 +7480,7 @@
         "ReceiptsDigest",
         "RefutesWitness",
         "ResolutionUnwitnessed",
+        "RevocationEntry",
         "RuntimeTerminalWitness",
         "SOURCE_WITNESSED",
         "STATE_TRANSITION_WITNESS_OK",
@@ -8089,6 +8131,11 @@
           "category": "incidental",
           "reason": "Exported sweepcert constant pins the accepted fak-native engine string for Qwen3.8 receipt validation; it is an implementation symbol, not a distinct engine concept.",
           "token": "Qwen38NativeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "dataslot migration engine type",
+          "token": "MigrationEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8114,6 +8161,7 @@
         "KernelID",
         "KernelRevision",
         "KernelTurns",
+        "MigrationEngine",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
         "NewSessionAffinityGateway",
@@ -12861,6 +12909,11 @@
           "category": "incidental",
           "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
           "token": "runModelIncumbentRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "dataslot unmaterialized status const",
+          "token": "StatusUnmaterialized"
         }
       ],
       "id": "render-materialize",
@@ -12894,6 +12947,7 @@
         "RenderSystemDirective",
         "RenderUnrun",
         "RenderUserSplice",
+        "StatusUnmaterialized",
         "formatTUIRenderStatus",
         "incumbentRenderInput",
         "incumbentRenderSchema",

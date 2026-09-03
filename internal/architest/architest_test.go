@@ -788,6 +788,7 @@ var tier = map[string]int{
 	"schemaadapter":              1,
 	"toolbound":                  1,
 	"overtonscore":               1,
+	"dataslot":                   1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
