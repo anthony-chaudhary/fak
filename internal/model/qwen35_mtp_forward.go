@@ -130,8 +130,8 @@ func (f *Qwen35MTPForward) Close() {
 
 // Forward executes one native Qwen3.8 MTP draft position:
 //
-//  1. normalize prior target hidden and current token embedding separately;
-//  2. concatenate [hidden, embedding] and apply mtp.fc;
+//  1. normalize current token embedding and prior target hidden separately;
+//  2. concatenate [embedding, hidden] and apply mtp.fc;
 //  3. execute the exact retained mtp.layers.0 decoder tensors;
 //  4. apply mtp.norm and the shared target LM head.
 func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []float32) ([]float32, error) {
@@ -160,8 +160,8 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 }
 
 // Qwen35MTPFuse implements the checkpoint-defined pre-layer path exactly:
-// normalize the prior target hidden state and current token embedding
-// independently, concatenate them in that order, then apply mtp.fc.
+// normalize the current token embedding and prior target hidden state
+// independently, concatenate [embedding, hidden] in that order, then apply mtp.fc.
 func (m *Model) Qwen35MTPFuse(priorHidden, currentEmbedding []float32) ([]float32, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
@@ -202,8 +202,10 @@ func (m *Model) Qwen35MTPFuse(priorHidden, currentEmbedding []float32) ([]float3
 
 	eps := float32(m.Cfg.RMSNormEps)
 	fusedInput := make([]float32, 0, 2*h)
-	fusedInput = append(fusedInput, rmsnorm(priorHidden, hiddenNorm, eps)...)
-	fusedInput = append(fusedInput, rmsnorm(currentEmbedding, embeddingNorm, eps)...)
+	normedEmbedding := rmsnorm(currentEmbedding, embeddingNorm, eps)
+	normedHidden := rmsnorm(priorHidden, hiddenNorm, eps)
+	fusedInput = append(fusedInput, normedEmbedding...)
+	fusedInput = append(fusedInput, normedHidden...)
 	return parMatRows(fc, fusedInput, h, 2*h), nil
 }
 

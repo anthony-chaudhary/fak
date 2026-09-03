@@ -259,8 +259,10 @@ func (f *Qwen35MTPForward) qwen38MTPFuse(priorHidden, currentEmbedding []float32
 	}
 	eps := float32(f.target.Cfg.RMSNormEps)
 	fusedInput := make([]float32, 0, 2*h)
-	fusedInput = append(fusedInput, rmsnorm(priorHidden, hiddenNorm, eps)...)
-	fusedInput = append(fusedInput, rmsnorm(currentEmbedding, embeddingNorm, eps)...)
+	normedEmbedding := rmsnorm(currentEmbedding, embeddingNorm, eps)
+	normedHidden := rmsnorm(priorHidden, hiddenNorm, eps)
+	fusedInput = append(fusedInput, normedEmbedding...)
+	fusedInput = append(fusedInput, normedHidden...)
 	qt := f.draft.M.q4kw["mtp.fc.weight"]
 	if qt == nil {
 		return nil, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: "mtp.fc.weight", Want: "resident Q4_K", Got: "missing"}
