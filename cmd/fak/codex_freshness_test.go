@@ -419,6 +419,35 @@ func TestCodexFreshnessInstalledRevisionPreservesFailedReceiptDetail(t *testing.
 	}
 }
 
+func TestCodexFreshnessInstalledRevisionDivergentReceiptIsActionable(t *testing.T) {
+	const diagnostic = "target installed; convergeable hot copies still need repair"
+	receipt := selfUpdateReceipt{
+		Schema:        selfUpdateReceiptSchema,
+		SchemaVersion: 1,
+		Status:        "divergent",
+		Detail:        diagnostic,
+		NextCommand:   "fak self-update --all",
+	}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = codexFreshnessInstalledRevision(data, `C:\bin\fak.exe`)
+	if err == nil {
+		t.Fatal("divergent receipt should return an error refusing launch")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "self-update failed") {
+		t.Fatalf("error should not call installation failed: %q", msg)
+	}
+	if !strings.Contains(msg, "target updated successfully") {
+		t.Fatalf("error missing target updated successfully: %q", msg)
+	}
+	if !strings.Contains(msg, "fak self-update --all") {
+		t.Fatalf("error missing repair next command: %q", msg)
+	}
+}
+
 func TestCodexFreshnessReexecHelperRoundTrip(t *testing.T) {
 	const (
 		selected = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
