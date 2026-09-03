@@ -785,6 +785,7 @@ var tier = map[string]int{
 	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
 	"gitresource":                1, // stdlib-only typed Git resource-ownership and cleanup-admission contract; folded by lifecycle integrations (#10613).
 	"workspin":                   1, // stdlib-only deterministic busywork-trend classifier over bounded commit/issue observations; folded by the CLI (#10609).
+	"schemaadapter":              1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -803,11 +804,39 @@ var hotPath = []string{"adjudicator", "kernel", "vdso", "grammar", "preflight", 
 // internal/architest, so internal is its parent.
 func internalDir(t *testing.T) string {
 	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed â€” cannot locate the internal/ tree")
+	if _, self, _, ok := runtime.Caller(0); ok {
+		cand := filepath.Dir(filepath.Dir(self))
+		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+			return cand
+		}
 	}
-	return filepath.Dir(filepath.Dir(self))
+	if fi, err := os.Stat(".."); err == nil && fi.IsDir() {
+		if _, err := os.Stat(filepath.Join("..", "adjudicator")); err == nil {
+			abs, _ := filepath.Abs("..")
+			return abs
+		}
+	}
+	if fi, err := os.Stat("internal"); err == nil && fi.IsDir() {
+		abs, _ := filepath.Abs("internal")
+		return abs
+	}
+	wd, _ := os.Getwd()
+	cur := wd
+	for i := 0; i < 6; i++ {
+		if _, err := os.Stat(filepath.Join(cur, "go.mod")); err == nil {
+			cand := filepath.Join(cur, "internal")
+			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+				return cand
+			}
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	t.Fatal("cannot locate the internal/ tree")
+	return ""
 }
 
 // goPackageDirs returns the short names of every directory under internal/ that contains
