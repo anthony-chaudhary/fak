@@ -1,0 +1,19 @@
+﻿{
+    "schema":  "fak-opencode-dogfood-witness/1",
+    "captured_at":  "2026-09-03T14:10:09.2315228Z",
+    "status":  "PASS",
+    "launcher":  "scripts/dogfood-opencode.ps1",
+    "command":  {
+                    "prompt":  "echo fak-opencode-probe-ok",
+                    "opencode_bin":  "C:\\Users\\antho\\AppData\\Roaming\\npm\\opencode.cmd",
+                    "gateway":  "http://127.0.0.1:8137/v1",
+                    "backend":  "mock"
+                },
+    "result":  {
+                   "exit_code":  0,
+                   "duration_ms":  3351.8655000000003,
+                   "audit_verified":  true,
+                   "audit_path":  "C:\\Users\\antho\\OneDrive\\Desktop\\work\\fak\\.dispatch-runs\\guard-audit\\dogfood-opencode-1788444605.jsonl",
+                   "audit_rows":  4
+               }
+}
