@@ -502,3 +502,39 @@ func TestGuardChildResourceDarwinContainmentDeterminism(t *testing.T) {
 		}
 	}
 }
+
+func TestFoldGuardResourceReceiptsByWeek(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "child-resource.jsonl")
+
+	empty, err := foldChildResourceReceiptsByWeek(filepath.Join(dir, "nonexistent.jsonl"))
+	if err != nil {
+		t.Fatalf("missing ledger error: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty ledger count = %v, want 0", empty)
+	}
+
+	receipts := []guardResourceReceipt{
+		{Schema: "fak.guard.child-resource.v1", At: "2026-08-10T12:00:00Z", TraceID: "t1", Action: "reap_tree"},
+		{Schema: "fak.guard.child-resource.v1", At: "2026-08-11T14:00:00Z", TraceID: "t2", Action: "reap_tree"},
+		{Schema: "fak.guard.child-resource.v1", At: "2026-08-25T09:00:00Z", TraceID: "t3", Action: "reap_tree"},
+	}
+	for _, r := range receipts {
+		if err := appendGuardResourceReceipt(path, r); err != nil {
+			t.Fatalf("append receipt: %v", err)
+		}
+	}
+
+	counts, err := foldChildResourceReceiptsByWeek(path)
+	if err != nil {
+		t.Fatalf("fold receipts by week: %v", err)
+	}
+
+	if counts["2026-W33"] != 2 {
+		t.Errorf("counts[2026-W33] = %d, want 2", counts["2026-W33"])
+	}
+	if counts["2026-W35"] != 1 {
+		t.Errorf("counts[2026-W35] = %d, want 1", counts["2026-W35"])
+	}
+}
