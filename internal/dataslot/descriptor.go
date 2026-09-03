@@ -15,6 +15,7 @@ const (
 	FamilyPostgres DatabaseFamily = "postgres"
 	FamilyMySQL    DatabaseFamily = "mysql"
 	FamilyRedis    DatabaseFamily = "redis"
+	FamilyDBT      DatabaseFamily = "dbt"
 )
 
 // ValidFamilies enumerates recognized database families.
@@ -24,6 +25,7 @@ var ValidFamilies = map[DatabaseFamily]bool{
 	FamilyPostgres: true,
 	FamilyMySQL:    true,
 	FamilyRedis:    true,
+	FamilyDBT:      true,
 }
 
 // MigrationEngine identifies the migration framework in use.

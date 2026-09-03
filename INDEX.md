@@ -289,6 +289,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-GOVERNED-DBT-SEMANTICS-BEFORE-RAW-SQL-2026-09-03.md`](docs/notes/CONCEPT-GOVERNED-DBT-SEMANTICS-BEFORE-RAW-SQL-2026-09-03.md) — architectural concept and research specification establishing the governed dbt semantics adapter before raw SQL: static artifact ingestion, column reflection, and bidirectional lineage with dormant raw SQL (#10653).
 - [`docs/notes/CONCEPT-STUDY-MICROSOFT-VIDUR-2026-09-03.md`](docs/notes/CONCEPT-STUDY-MICROSOFT-VIDUR-2026-09-03.md) — pinned deep study of Microsoft Research's Vidur LLM inference simulator (MLSys'24): execution time regression modeling, prefix caching, multi-tier Disk/VRAM KV cache management, tolerance-slack sticky routing, uncached prefill volume balancing, and adaptive capacity search; receipt `study_722a05f7439411a3291e4a376f5e48b3da011f06448fbc4480d2e1cb635d9553`; filed #10852-#10854, #10856, #10861.
 - [Gemini 3.8 Flash: Initial Feedback, Limitations, and Operational Model Guidance](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md) -- auto-indexed dated note.
 - [`docs/notes/COMMENT-VERBOSITY-DEFAULT-RESTRAINT-2026-09-03.md`](docs/notes/COMMENT-VERBOSITY-DEFAULT-RESTRAINT-2026-09-03.md) — Goal: less comment verbosity by default; establishes a Ponytail-inspired comment restraint ladder (Rung 0 self-documenting code, Rung 1 minimal contracts, Rung 2 invariants and platform quirks) with explicit correctness/safety carve-outs.
