@@ -210,7 +210,7 @@ func TestRunDispatchesBoundaryUsage(t *testing.T) {
 }
 
 func TestRunDispatchesDevelopmentDiagnosticsUsage(t *testing.T) {
-	for _, verb := range []string{"amd-gpu-facts", "commit-subject-coverage"} {
+	for _, verb := range []string{"amd-gpu-facts", "amd-setup", "commit-subject-coverage"} {
 		t.Run(verb, func(t *testing.T) {
 			var out, errOut bytes.Buffer
 			code := run(&out, &errOut, []string{verb, "--help"})
@@ -280,7 +280,7 @@ func TestRuntimeSourceDoesNotDispatchDevelopmentDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, verb := range []string{"amd-gpu-facts", "commit-subject-coverage"} {
+	for _, verb := range []string{"amd-gpu-facts", "amd-setup", "commit-subject-coverage"} {
 		if bytes.Contains(src, []byte(`case "`+verb+`":`)) {
 			t.Fatalf("runtime fak still dispatches dev-owned %s", verb)
 		}
