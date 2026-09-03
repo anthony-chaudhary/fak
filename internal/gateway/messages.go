@@ -141,6 +141,11 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if dl := s.ScalarConfig().CompletionDeadlineMs; dl > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(dl)*time.Millisecond)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
 	// own route (#5528). Everything below — the passthrough turn, the planner turn, and
 	// both streaming arms — blocks for the whole multi-rank decode, and rank-local expert
@@ -735,7 +740,9 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false, ""
 	}
-	if s.compactHistoryBudget <= 0 {
+	scalarCfg := s.ScalarConfig()
+	compactBudget := scalarCfg.CompactHistoryBudget
+	if compactBudget <= 0 {
 		s.metrics.observeCompaction(agent.CompactOutcome{}, true) // configured OFF
 		return false, ""
 	}
@@ -758,11 +765,11 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		s.recordPlacement(trace)
 	}
 	opts := agent.CompactOptions{
-		Budget:          s.compactHistoryBudget,
+		Budget:          compactBudget,
 		Anchor:          agent.CompactAnchorFirstBP,
 		PositiveResidue: s.positiveResidualSubstitution,
 	}
-	if s.compactAnchorHead {
+	if scalarCfg.CompactAnchorHead != 0 {
 		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can
 		// shed. headSessionPrior supplies the {TotalTurns, CurrentTurn} pair the burst gate
 		// consults: a genuine bounded horizon (turnsLeft>0) wins as before; otherwise, when the
@@ -785,7 +792,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		// as-is. The cold-only path (TotalTurns<=0) also keeps the full budget — both are unchanged.
 		if turnsLeft <= 0 && opts.TotalTurns > 0 {
 			step := int(s.metrics.servedTurnCount(trace)) + 1
-			opts.Budget = earlyFiringBudget(s.compactHistoryBudget, step)
+			opts.Budget = earlyFiringBudget(compactBudget, step)
 		}
 		// Observed-cold witness: the per-trace idle gap (the harness-coherence wall clock) has
 		// passed the message-breakpoint cache TTL, so the suffix a head fire would invalidate is

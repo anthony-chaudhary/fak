@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -26,6 +27,11 @@ import (
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
+	}
+	if dl := s.ScalarConfig().CompletionDeadlineMs; dl > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(dl)*time.Millisecond)
+		defer cancel()
+		r = r.WithContext(ctx)
 	}
 	// Release the EP follower ranks BEFORE this rank enters the decode, exactly as the
 	// chat wire does, and onto THIS wire's own route (#5523). completeServed below

@@ -319,6 +319,29 @@ func New(cfg Config) (*Server, error) {
 	// is up.
 	s.loops = newBgloopSupervisor(s)
 
+	var anchor int
+	if cfg.CompactAnchorHead {
+		anchor = 1
+	}
+	var streamTimeoutMs uint32
+	if cfg.StreamProgressTimeout > 0 {
+		streamTimeoutMs = uint32(cfg.StreamProgressTimeout / time.Millisecond)
+	} else if cfg.StreamProgressTimeout == 0 {
+		streamTimeoutMs = uint32(agent.DefaultStreamProgressTimeout / time.Millisecond)
+	}
+	sc := ScalarConfig{
+		CompletionDeadlineMs:    0,
+		StreamProgressTimeoutMs: streamTimeoutMs,
+		MaxWaitingSeqs:          1024,
+		CompactHistoryBudget:    cfg.CompactHistoryBudget,
+		CompactAnchorHead:       anchor,
+		LogLevel:                "info",
+	}
+	s.versionedConfig.Store(&VersionedScalarConfig{
+		Epoch:  1,
+		Config: sc,
+	})
+
 	return s, nil
 }
 

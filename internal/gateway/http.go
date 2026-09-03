@@ -97,6 +97,9 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/ctxvalue", s.handleFakCtxValue},
 		{"/v1/fak/revoke", s.handleFakRevoke},
 		{"/v1/fak/context/change", s.handleFakContextChange},
+		// Tier 0 hot-swap control plane: dynamic scalar configuration table (#10867).
+		{"/v1/control/config", s.handleControlConfig},
+		{"/v1/fak/control/config", s.handleControlConfig},
 		// /v1/fak/policy (exact, GET) is the read-only floor attestation (#3960); the
 		// longer exact /v1/fak/policy/reload (POST) is matched independently by the mux,
 		// so the observe route never shadows the reload route.
@@ -520,6 +523,11 @@ func gatewayCredential(r *http.Request) (string, bool) {
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
+	}
+	if dl := s.ScalarConfig().CompletionDeadlineMs; dl > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(dl)*time.Millisecond)
+		defer cancel()
+		r = r.WithContext(ctx)
 	}
 	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteChatCompletions)
 	if !ok {
