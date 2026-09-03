@@ -56,6 +56,8 @@ var exemptions = map[string]string{
 	"switch|internal/metalgemm|q4kGEMMRequestedExecution":                            "Scalar mode is non-GEMM execution handled by scalar fallbacks outside this switcher.",
 	"literal|internal/model|iq12ResidentCases":                                       "Unit test matrix specifically targets IQ1 and IQ2 resident k-quant variants.",
 	"literal|internal/wipinventory|issueHistory.Transitions":                         "Test fixture models a partial session transition history covering only tested events.",
+	"switch|internal/compute|sccpAnalysis.evaluateNode":                              "Constant propagation evaluates arithmetic and comparison ops; structural control and aggregate nodes are folded by separate passes.",
+	"literal|internal/compute|DefaultVulkanErrorInventory.Rules":                     "VulkanClassUnknown is the fallback classification applied when no pattern rule matches.",
 }
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is
