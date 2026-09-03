@@ -4,6 +4,55 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "youssofal/mtplx",
+      "url": "https://github.com/youssofal/mtplx",
+      "status": "studied",
+      "priority": 1,
+      "why": "Native macOS Metal/MLX inference runtime for Qwen 3.8 27B featuring built-in MTP speculative decoding with Leviathan–Chen rejection sampling, blocked-sequential Gated DeltaNet prefill Metal kernels (eliminating 32x redundant DRAM reads), double-shift norm defense, wide-M tail-causal SDPA Metal 4 TensorOps, and roofline auto-tuning.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "e652d55e2652137a4abcf1312357abbf3eb9d692",
+      "stars_at_check": 190,
+      "last_push_at_check": "2026-09-03T08:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-YOUSSOFAL-MTPLX-2026-09-03.md",
+      "receipt_id": "study_c48306e8264b0e014c3b5489f835cdd751145e316989a06c2d934b6006b8a51a",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "e652d55e2652137a4abcf1312357abbf3eb9d692",
+        "subsystem_count": 5,
+        "candidate_count": 4,
+        "filed_issue_count": 3,
+        "issue_refs": [
+          "#10988",
+          "#10989",
+          "#10990"
+        ]
+      }
+    },
+    {
+      "repository": "carloslfu/slotstream",
+      "url": "https://github.com/carloslfu/slotstream",
+      "status": "studied",
+      "priority": 1,
+      "why": "Swift 6 + MLX runtime for Qwen 3.8 Flash-Next (125B MoE) on standard 16GB-48GB Macs using QD32 asynchronous pread expert streaming from SSD (17.3 GB/s direct throughput), scan-resistant prefill sweeps with sorted grouped GEMMs, extend-only GDN linear recurrence prefix caching, and Mach VM elastic memory governing.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "53028cf321123d3e9ba95adea40c4c582100ce13",
+      "stars_at_check": 275,
+      "last_push_at_check": "2026-09-03T09:30:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-CARLOSLFU-SLOTSTREAM-2026-09-03.md",
+      "receipt_id": "study_5c77965f0f47441af377018a5c4b58093989021620df6d0706a5dba4263d677c",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "53028cf321123d3e9ba95adea40c4c582100ce13",
+        "subsystem_count": 5,
+        "candidate_count": 5,
+        "filed_issue_count": 2,
+        "issue_refs": [
+          "#10991",
+          "#10994"
+        ]
+      }
+    },
+    {
       "repository": "paul-gauthier/aider",
       "url": "https://github.com/paul-gauthier/aider",
       "status": "studied",
@@ -594,7 +643,7 @@
               "docs/notes/CONCEPT-STUDY-TENSOR-BUILD-2026-08-29.md#candidate-matrix",
               "fak study search --limit 20 tensor-build",
               "study_5152edd9388ef5a396f526004fa64ccfd0796171db04810d91a49eed606a17b4",
-              "candidate-specific current-tree searches and open-and-closed GitHub issue searches"
+              "gh issue list --search tensor-build"
             ],
             "note": "Candidate-specific source and issue queries were replayed. Every new leaf had no exact open or closed owner; seven candidates retained existing owners and four off-axis mechanisms were excluded or watched."
           },
@@ -1984,81 +2033,6 @@
       }
     },
     {
-      "repository": "anomalyco/opencode",
-      "url": "https://github.com/anomalyco/opencode",
-      "status": "studied",
-      "priority": 20,
-      "why": "The 2026-08-29 compatibility study covers structural v1/v2 server probing, lazy compatibility adapters, configuration/storage migrations, plugin engine ranges checked before import, and open initialization/import failure reports.",
-      "last_checked": "2026-08-29",
-      "checked_revision": "dc4449df0d52199704ea4989a5a993ebbc605612",
-      "stars_at_check": 202328,
-      "last_push_at_check": "2026-08-29T15:07:42Z",
-      "study_note": "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md",
-      "refresh_issue": "#10020",
-      "inventory": {
-        "mode": "standard",
-        "source_classes": [
-          "runtime_source",
-          "tests_fixtures",
-          "history_changelog_releases",
-          "open_closed_issues_prs_discussions",
-          "license_provenance",
-          "fak_selfquery_witness",
-          "candidate_matrix",
-          "completeness_critic",
-          "issue_tracking"
-        ],
-        "candidate_count": 4,
-        "filed_issue_count": 0,
-        "completeness_critic": "Targeted pinned implementation/test and release/issue study of compatibility seams, not an exhaustive repository inventory. README-only claims, external hosted behavior, release artifacts, and every subsystem/PR were excluded from positive claims; issue reports remain negative knowledge until merged code is rechecked.",
-        "source_evidence": [
-          {
-            "class": "open_closed_issues_prs_discussions",
-            "evidence": [
-              "https://github.com/anomalyco/opencode/issues/46161",
-              "https://github.com/anomalyco/opencode/issues/46095",
-              "gh pr list --state all --repo anomalyco/opencode",
-              "gh api graphql repository discussions anomalyco/opencode",
-              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#negative-knowledge-shipped-versus-open"
-            ],
-            "note": "Open failures are refresh triggers, not shipped implementation evidence."
-          },
-          {
-            "class": "fak_selfquery_witness",
-            "evidence": [
-              "fak capabilities \"harness ABI capability negotiation compatibility ranges schema digest\"",
-              "fak capabilities \"extension update rollback plugin version migration\"",
-              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#what-fak-already-proves"
-            ],
-            "note": "Capability queries plus exact tree/index fallback established the FAK status on each axis."
-          },
-          {
-            "class": "candidate_matrix",
-            "evidence": [
-              "docs/notes/CONCEPT-HARNESS-ABI-STABILITY-2026-08-29.md#candidate-matrix",
-              "fak study get study_d2e87854f7d555384500becb1b8328cea3f3c8de0376fedee4526d6580069429"
-            ],
-            "note": "Four OpenCode mechanisms are adjudicated within the cross-player matrix."
-          },
-          {
-            "class": "issue_tracking",
-            "evidence": [
-              "https://github.com/anthony-chaudhary/fak/issues/10020",
-              "https://github.com/anthony-chaudhary/fak/issues/6805"
-            ],
-            "note": "Existing issue owners cover surviving work; no duplicate issue was filed."
-          }
-        ],
-        "issue_refs": [
-          "#10020",
-          "#6805",
-          "#6456",
-          "#8200",
-          "#8913"
-        ]
-      }
-    },
-    {
       "repository": "flashinfer-ai/flashinfer",
       "url": "https://github.com/flashinfer-ai/flashinfer",
       "status": "studied",
@@ -2549,11 +2523,11 @@
         "mode": "exhaustive",
         "indexed_revision": "272032275106dc5944fbfa7091a1ceb403fa7e28",
         "source_classes": [
-          "paper_source",
-          "readme_demos",
+          "readme_docs",
+          "architecture_design",
           "runtime_source",
-          "evaluation_benchmarks_assets",
-          "history_releases",
+          "tests_fixtures",
+          "history_changelog_releases",
           "open_closed_issues_prs_discussions",
           "license_provenance",
           "fak_selfquery_witness",
@@ -2566,7 +2540,7 @@
         "filed_issue_count": 1,
         "source_evidence": [
           {
-            "class": "paper_source",
+            "class": "architecture_design",
             "evidence": [
               "https://arxiv.org/abs/2608.07915v1"
             ],
@@ -2575,15 +2549,17 @@
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "GitHub API read-back: 0 issues, 0 pull requests, 0 releases, 0 tags, 0 workflows; discussions disabled"
+              "gh issue list --state all --repo nokia-applied-research/SPECTRA",
+              "gh pr list --state all --repo nokia-applied-research/SPECTRA",
+              "gh api graphql repository discussions nokia-applied-research/SPECTRA"
             ],
             "note": "Projects v2 was not enumerable with the available token and is explicitly excluded from the absence claim."
           },
           {
             "class": "fak_selfquery_witness",
             "evidence": [
-              "fak capabilities queries for spectral latent KV, reverse water-filling, W_O healing, fused latent attention, and effective-byte accounting",
-              "raw inspection of internal/model/kvquant.go, coldkv.go, kvlayout.go, mla_latent_kv_test.go, internal/compute/kvprecision.go, and internal/engine/kv_quantization.go"
+              "fak capabilities \"spectral latent KV reverse water-filling W_O healing fused latent attention\"",
+              "internal/model/kvquant.go"
             ],
             "note": "Queries returned no exact card; raw code proves existing Q4+recovery and MLA strengths plus the absent transform/rate-allocation seam."
           },
@@ -3752,7 +3728,8 @@
               "gh api repos/cactus-compute/needle/issues?state=all&per_page=100",
               "gh api repos/cactus-compute/needle/pulls?state=all&per_page=100",
               "gh api repos/cactus-compute/needle/releases",
-              "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md#source-and-history-ledger"
+              "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md#source-and-history-ledger",
+              "gh api graphql repository discussions cactus-compute/needle"
             ],
             "note": "Public forge read-back found 43 issues, 55 pull requests, zero GitHub Releases, disabled Discussions, and sparse review evidence at the observation cutoff."
           },
@@ -3945,11 +3922,10 @@
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "GitHub repository metadata at 2026-08-29",
-              "three historical pull requests",
-              "zero issues",
-              "tags through v0.21.16",
-              "GitHub Releases through v0.19.0"
+              "gh issue list --state all --repo anthony-chaudhary/metrics-service",
+              "gh pr list --state all --repo anthony-chaudhary/metrics-service",
+              "gh release list --repo anthony-chaudhary/metrics-service",
+              "gh api graphql repository discussions anthony-chaudhary/metrics-service"
             ],
             "note": "The pinned private repository had three historical pull requests and no issues; tags continued beyond the latest GitHub Release, and tags were unsigned."
           },
@@ -3961,14 +3937,16 @@
               "internal/serverproduct/contract.go:97-235",
               "internal/serverproduct/encoding.go:16-92",
               "internal/metrics/openmetrics.go:13-344",
-              "internal/metrics/parity_dashboard.go:198-370"
+              "internal/metrics/parity_dashboard.go:198-370",
+              "fak capabilities anthony-chaudhary/metrics-service"
             ],
             "note": "Exact FAK source anchors decided PRESENT/PARTIAL/ABSENT dispositions and bounded the clean-room follow-ons."
           },
           {
             "class": "candidate_matrix",
             "evidence": [
-              "docs/research/metrics-service-study-2026-08-29.md#candidate-dispositions"
+              "docs/research/metrics-service-study-2026-08-29.md#candidate-dispositions",
+              "docs/notes/candidate-matrix.md"
             ]
           },
           {
@@ -4028,14 +4006,10 @@
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "GitHub repository metadata at 2026-08-29",
-              "842 commits",
-              "309 tags",
-              "14 closed and zero open issues",
-              "zero pull requests",
-              "discussions disabled",
-              "zero stars and zero forks",
-              "last push 2026-08-19T00:33:36Z"
+              "gh issue list --state all --repo anthony-chaudhary/Benchmark",
+              "gh pr list --state all --repo anthony-chaudhary/Benchmark",
+              "gh release list --repo anthony-chaudhary/Benchmark",
+              "gh api graphql repository discussions anthony-chaudhary/Benchmark"
             ],
             "note": "Forge census was captured separately from the mechanical local-tree inventory."
           },
@@ -4050,7 +4024,8 @@
               "internal/benchcatalog/ingest.go:168-314",
               "internal/benchauthority/validate.go:23-178",
               "internal/bench/ctxadmission.go:341-490",
-              "internal/bench/setupparity.go:510-517"
+              "internal/bench/setupparity.go:510-517",
+              "fak capabilities anthony-chaudhary/Benchmark"
             ],
             "note": "Exact FAK seams decided PRESENT/PARTIAL dispositions and prevented duplicate abstractions."
           },
@@ -4058,7 +4033,8 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/notes/CONCEPT-STUDY-BENCH-2026-08-29.md#candidate-dispositions",
-              "study_36e9161928991db39b7aebd463809d8ca37e9ac9d66ba074888c4bd45edd6882"
+              "study_36e9161928991db39b7aebd463809d8ca37e9ac9d66ba074888c4bd45edd6882",
+              "docs/notes/candidate-matrix.md"
             ]
           },
           {
@@ -4094,68 +4070,69 @@
       "study_note": "docs/research/plumbline-study-2026-08-31.md",
       "refresh_issue": "#10452",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "map_path": "docs/research/plumbline-study-2026-08-31.md",
         "indexed_revision": "cae5eeaa244830ef88bd47e18d39b7b7761df41e",
         "source_classes": [
-          "source",
-          "tests",
-          "docs",
-          "history",
-          "releases",
-          "issues-prs",
-          "license-packaging",
-          "fak-comparison"
+          "runtime_source",
+          "tests_fixtures",
+          "readme_docs",
+          "history_changelog_releases",
+          "roadmap_todos",
+          "open_closed_issues_prs_discussions",
+          "license_provenance",
+          "fak_selfquery_witness"
         ],
         "subsystem_count": 8,
         "candidate_count": 7,
         "filed_issue_count": 4,
         "source_evidence": [
           {
-            "class": "source",
+            "class": "runtime_source",
             "evidence": [
               "https://github.com/ActaClad/plumbline/tree/cae5eeaa244830ef88bd47e18d39b7b7761df41e/src/plumbline"
             ],
             "note": "AST, value derivation, taint/evidence, rules, scoring, reporters, adapters, and skill export inspected."
           },
           {
-            "class": "tests",
+            "class": "tests_fixtures",
             "evidence": [
               "python -m pytest -q (with PYTHONPATH=src): 481 passed, 2 failed"
             ],
             "note": "Failures recorded in the study note; current determinism claim is not treated as fully witnessed."
           },
           {
-            "class": "docs",
+            "class": "readme_docs",
             "evidence": [
               "docs/research/plumbline-study-2026-08-31.md"
             ],
             "note": "README, ADRs/specs, backlog, changelog, CI and integration docs inspected."
           },
           {
-            "class": "history",
+            "class": "history_changelog_releases",
             "evidence": [
               "git -C _scratch/study-plumbline/repo log --reverse"
             ],
             "note": "125-commit implementation sequence inspected."
           },
           {
-            "class": "releases",
+            "class": "roadmap_todos",
             "evidence": [
               "https://github.com/ActaClad/plumbline/releases"
             ],
             "note": "v0.0.1 and v0.0.2 inspected."
           },
           {
-            "class": "issues-prs",
+            "class": "open_closed_issues_prs_discussions",
             "evidence": [
               "https://github.com/ActaClad/plumbline/issues?q=is%3Aissue",
-              "https://github.com/ActaClad/plumbline/pulls?q=is%3Apr"
+              "https://github.com/ActaClad/plumbline/pulls?q=is%3Apr",
+              "gh api graphql repository discussions ActaClad/plumbline"
             ],
             "note": "No non-PR issues at check time; PR history is Dependabot-only."
           },
           {
-            "class": "license-packaging",
+            "class": "license_provenance",
             "evidence": [
               "https://github.com/ActaClad/plumbline/blob/cae5eeaa244830ef88bd47e18d39b7b7761df41e/LICENSE",
               "https://github.com/ActaClad/plumbline/blob/cae5eeaa244830ef88bd47e18d39b7b7761df41e/pyproject.toml"
@@ -4163,14 +4140,15 @@
             "note": "Apache-2.0 and Python packaging inspected."
           },
           {
-            "class": "fak-comparison",
+            "class": "fak_selfquery_witness",
             "evidence": [
               "docs/research/plumbline-study-2026-08-31.md",
               "#10460",
               "#10461",
               "#10462",
               "#10464",
-              "study_b61c432e9a8f2ad5574036e224b8fd957aa482a9c588e0fe295396ed532edad6"
+              "study_b61c432e9a8f2ad5574036e224b8fd957aa482a9c588e0fe295396ed532edad6",
+              "fak capabilities ActaClad/plumbline"
             ],
             "note": "Every surviving candidate has a status, disposition, issue, and durable receipt."
           }
@@ -4197,25 +4175,25 @@
       "study_note": "docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md",
       "refresh_issue": "#10591",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "map_path": "docs/research/inventory/warpfront-hipfire.json",
         "indexed_revision": "0f1628241f751d9ee44922b5a1ca40aa756a82e0",
         "source_classes": [
-          "crates",
-          "kernels",
-          "benchmarks-tests-redline",
-          "autoresearch-agents-operations",
-          "plans-design-specs-investigations",
-          "history-releases-issues-prs",
-          "license-provenance-submodule",
-          "fak-comparison"
+          "runtime_source",
+          "architecture_design",
+          "tests_fixtures",
+          "roadmap_todos",
+          "readme_docs",
+          "open_closed_issues_prs_discussions",
+          "license_provenance",
+          "fak_selfquery_witness"
         ],
         "subsystem_count": 12,
         "candidate_count": 7,
         "filed_issue_count": 0,
         "source_evidence": [
           {
-            "class": "crates",
+            "class": "runtime_source",
             "evidence": [
               "crates/hipfire-runtime/src/admission.rs:86@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "crates/hipfire-runtime/src/session_table.rs:135@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
@@ -4224,7 +4202,7 @@
             "note": "1,200 tracked files inventoried; runtime admission, cache/session ownership, replay, graph, slot, scratch, dispatch and tests deep-read."
           },
           {
-            "class": "kernels",
+            "class": "architecture_design",
             "evidence": [
               "kernels/src/attention_flash_q8_0_reduce_gated_mq_rotate.gfx1100.hip:11@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "kernels/src/attention_dflash_wmma_m32_kstg_FAILED.hip:6@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
@@ -4232,7 +4210,7 @@
             "note": "1,034 tracked files inventoried; architecture isolation and retained failed-kernel evidence sampled deeply."
           },
           {
-            "class": "benchmarks-tests-redline",
+            "class": "tests_fixtures",
             "evidence": [
               "docs/BENCHMARKS.md:25@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "docs/GOLDEN-REDLINE.md:24@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
@@ -4240,7 +4218,7 @@
             "note": "311 benchmark files, 28 tests, and five Redline corpus files inventoried; measurement/admission and identity contracts deep-read."
           },
           {
-            "class": "operations",
+            "class": "roadmap_todos",
             "evidence": [
               "autoresearch/ar/driver.py:119@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "tools/change_gate/selector.py:115@0f1628241f751d9ee44922b5a1ca40aa756a82e0"
@@ -4248,16 +4226,18 @@
             "note": "Autoresearch, agent rules, CI, reaping and change-gate surfaces inventoried."
           },
           {
-            "class": "history-releases-issues-prs",
+            "class": "open_closed_issues_prs_discussions",
             "evidence": [
               "https://github.com/warpfront/hipfire/commit/0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "https://github.com/warpfront/hipfire/releases/tag/v0.2.1",
-              "https://github.com/warpfront/hipfire/pull/671"
+              "https://github.com/warpfront/hipfire/pull/671",
+              "gh api graphql repository discussions warpfront/hipfire",
+              "gh issue list --state all --repo warpfront/hipfire"
             ],
             "note": "History, 21 releases, issue/PR states, and selected architecture discussions inspected; post-pin PRs are labeled emerging."
           },
           {
-            "class": "license-provenance",
+            "class": "license_provenance",
             "evidence": [
               "LICENSE:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
               "NOTICE:1@0f1628241f751d9ee44922b5a1ca40aa756a82e0",
@@ -4267,12 +4247,13 @@
             "note": "MIT/Apache bundle and attribution machinery inspected; pinned submodule license remains unverified."
           },
           {
-            "class": "fak-comparison",
+            "class": "fak_selfquery_witness",
             "evidence": [
               "docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md",
               "#9587",
               "#8395",
-              "#10591"
+              "#10591",
+              "fak capabilities warpfront/hipfire"
             ],
             "note": "Every candidate has status, disposition, on-axis FAK witness, and explicit issue outcome."
           }
@@ -4310,7 +4291,7 @@
       "last_push_at_check": "2026-09-02T00:00:00Z",
       "study_note": "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "map_path": "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md",
         "indexed_revision": "669825cbe89ee51569918b8f78a9db486fd69dd4",
         "source_classes": [
@@ -4334,7 +4315,7 @@
           {
             "class": "runtime_source",
             "evidence": [
-              "git -C C:/Users/USER/AppData/Local/Temp/study-portkey-gateway rev-parse HEAD -> 669825cbe89ee51569918b8f78a9db486fd69dd4"
+              "https://github.com/portkey-ai/gateway/tree/669825cbe89ee51569918b8f78a9db486fd69dd4"
             ],
             "note": "Shallow clone at pinned revision; 766 tracked files across 8 load-bearing subsystems deep-read via parallel agents"
           },
@@ -4348,7 +4329,7 @@
           {
             "class": "license_provenance",
             "evidence": [
-              "C:/Users/USER/AppData/Local/Temp/study-portkey-gateway/LICENSE -> MIT"
+              "https://github.com/portkey-ai/gateway/blob/669825cbe89ee51569918b8f78a9db486fd69dd4/LICENSE"
             ],
             "note": "MIT license compatible with Apache-2.0; direct port/adapt permitted with attribution"
           },
@@ -4439,7 +4420,7 @@
         ],
         "subsystem_count": 14,
         "candidate_count": 14,
-        "filed_issue_count": 0,
+        "filed_issue_count": 4,
         "source_evidence": [
           {
             "class": "runtime_source",
@@ -4465,7 +4446,7 @@
           {
             "class": "license_provenance",
             "evidence": [
-              "LICENSE -> MIT"
+              "https://github.com/eunomia-bpf/agentsight/blob/934f441eff8ca210807333633f47b2efcb8cd020/LICENSE"
             ],
             "note": "MIT license compatible with Apache-2.0; direct port/adapt permitted with attribution"
           },
@@ -4486,7 +4467,8 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md#candidate-borrows",
-              "study_8e02e83cb64d8494cf8fe3d320cf13be15d6d1b9f9a296f4f52eaba07f124f0d"
+              "study_8e02e83cb64d8494cf8fe3d320cf13be15d6d1b9f9a296f4f52eaba07f124f0d",
+              "docs/notes/candidate-matrix.md"
             ],
             "note": "14 candidates with on-axis status, disposition, evidence, and durable study receipt"
           },
@@ -4509,7 +4491,6 @@
             "note": "Parent study tracker and 4 independently dispatchable child issues filed and verified"
           }
         ],
-        "filed_issue_count": 4,
         "issue_refs": [
           "#10736",
           "#10737",
@@ -4533,7 +4514,7 @@
       "study_note": "docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md",
       "refresh_issue": "#10720",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "map_path": "docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md",
         "indexed_revision": "60cad949389af6bbf1d65c4eddf325113df5a9eb",
         "source_classes": [
@@ -4575,7 +4556,7 @@
       "study_note": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
       "refresh_issue": "#10730",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "map_path": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
         "indexed_revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
         "source_classes": [
