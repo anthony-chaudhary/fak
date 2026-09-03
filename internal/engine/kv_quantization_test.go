@@ -135,3 +135,71 @@ func TestApplyKVQuantizationColdCompressionIsExplicitAndColdOnly(t *testing.T) {
 		t.Fatalf("disabled codec ran: %+v", got)
 	}
 }
+
+// TestAuxiliaryIndexKPrecisionIndependenceWitness (#9922):
+// First witness: adds a modeled auxiliary cache row and proves its dtype changes memory
+// footprint independently of the primary KV dtype.
+func TestAuxiliaryIndexKPrecisionIndependenceWitness(t *testing.T) {
+	span := KVQuantizationSpan{
+		ID:              "span-sparse-mla",
+		FP16Bytes:       4096, // Primary GQA KV
+		IndexKFP16Bytes: 1024, // Auxiliary sparse IndexK
+		State: KVQuantizationState{
+			Precision:       KVPrecisionFP16,
+			IndexKPrecision: KVPrecisionFP16,
+			Eligible:        true,
+		},
+	}
+
+	// 1. Both at FP16
+	main, idxK, total, err := CalculateDualKVBytes(span)
+	if err != nil {
+		t.Fatalf("CalculateDualKVBytes failed: %v", err)
+	}
+	if main != 4096 || idxK != 1024 || total != 5120 {
+		t.Fatalf("FP16/FP16: main=%d, idxK=%d, total=%d; want 4096/1024/5120", main, idxK, total)
+	}
+
+	// 2. Change ONLY IndexK precision to FP8: main KV MUST remain 4096, IndexK drops to 512
+	span.State.IndexKPrecision = KVPrecisionFP8
+	main2, idxK2, total2, err := CalculateDualKVBytes(span)
+	if err != nil {
+		t.Fatalf("CalculateDualKVBytes failed: %v", err)
+	}
+	if main2 != 4096 {
+		t.Fatalf("changing IndexK precision mutated main KV bytes: got %d, want 4096", main2)
+	}
+	if idxK2 != 512 || total2 != 4608 {
+		t.Fatalf("FP16/FP8: idxK=%d, total=%d; want 512/4608", idxK2, total2)
+	}
+
+	// 3. Change ONLY IndexK precision to INT4: main KV MUST remain 4096, IndexK drops to 256
+	span.State.IndexKPrecision = KVPrecisionINT4
+	main3, idxK3, total3, err := CalculateDualKVBytes(span)
+	if err != nil {
+		t.Fatalf("CalculateDualKVBytes failed: %v", err)
+	}
+	if main3 != 4096 {
+		t.Fatalf("changing IndexK precision mutated main KV bytes: got %d, want 4096", main3)
+	}
+	if idxK3 != 256 || total3 != 4352 {
+		t.Fatalf("FP16/INT4: idxK=%d, total=%d; want 256/4352", idxK3, total3)
+	}
+
+	// 4. Change main KV precision to INT8 while keeping IndexK at INT4:
+	// main KV drops to 2048, IndexK MUST remain 256
+	span.State.Precision = KVPrecisionINT8
+	main4, idxK4, total4, err := CalculateDualKVBytes(span)
+	if err != nil {
+		t.Fatalf("CalculateDualKVBytes failed: %v", err)
+	}
+	if main4 != 2048 {
+		t.Fatalf("INT8 main KV bytes = %d, want 2048", main4)
+	}
+	if idxK4 != 256 {
+		t.Fatalf("changing main KV precision mutated IndexK bytes: got %d, want 256", idxK4)
+	}
+	if total4 != 2304 {
+		t.Fatalf("INT8/INT4 total = %d, want 2304", total4)
+	}
+}

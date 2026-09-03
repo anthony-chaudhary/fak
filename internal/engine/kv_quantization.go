@@ -12,16 +12,18 @@ const (
 	KVPrecisionFP16 KVPrecision = "fp16"
 	KVPrecisionINT8 KVPrecision = "int8"
 	KVPrecisionFP8  KVPrecision = "fp8"
+	KVPrecisionINT4 KVPrecision = "int4"
 )
 
 // KVQuantizationState is the controller-visible state for one resident span.
 // EstimatedError is a normalized, backend-measured quality-loss estimate. A span
 // is quantizable only when the backend explicitly marks it Eligible.
 type KVQuantizationState struct {
-	Precision      KVPrecision
-	Eligible       bool
-	EstimatedError float64
-	LastTransition time.Time
+	Precision       KVPrecision
+	IndexKPrecision KVPrecision // independent auxiliary sparse IndexK precision
+	Eligible        bool
+	EstimatedError  float64
+	LastTransition  time.Time
 }
 
 // KVQuantizationThresholds controls the pressure ladder. PromotePressure must be
@@ -122,9 +124,31 @@ func KVQuantizedBytes(fp16Bytes int64, precision KVPrecision) (int64, error) {
 		return fp16Bytes, nil
 	case KVPrecisionINT8, KVPrecisionFP8:
 		return (fp16Bytes + 1) / 2, nil
+	case KVPrecisionINT4:
+		return (fp16Bytes + 3) / 4, nil
 	default:
 		return 0, fmt.Errorf("unknown KV precision %q", precision)
 	}
+}
+
+// CalculateDualKVBytes computes main KV bytes and auxiliary IndexK bytes independently,
+// verifying that changing auxiliary IndexK precision does not silently mutate main KV bytes.
+func CalculateDualKVBytes(span KVQuantizationSpan) (mainBytes, indexKBytes, totalBytes int64, err error) {
+	mainBytes, err = KVQuantizedBytes(span.FP16Bytes, span.State.Precision)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("main KV: %w", err)
+	}
+
+	indexPrec := span.State.IndexKPrecision
+	if indexPrec == "" {
+		indexPrec = span.State.Precision
+	}
+	indexKBytes, err = KVQuantizedBytes(span.IndexKFP16Bytes, indexPrec)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("auxiliary IndexK: %w", err)
+	}
+
+	return mainBytes, indexKBytes, mainBytes + indexKBytes, nil
 }
 
 // KVColdCodec is the optional cold-tier representation selected after the
@@ -138,11 +162,12 @@ const (
 )
 
 type KVQuantizationSpan struct {
-	ID         string
-	FP16Bytes  int64
-	LastAccess time.Time
-	State      KVQuantizationState
-	ColdCodec  KVColdCodec
+	ID              string
+	FP16Bytes       int64
+	IndexKFP16Bytes int64 // modeled auxiliary sparse index footprint
+	LastAccess      time.Time
+	State           KVQuantizationState
+	ColdCodec       KVColdCodec
 }
 
 type KVQuantizationOptions struct {

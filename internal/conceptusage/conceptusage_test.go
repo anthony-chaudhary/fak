@@ -248,3 +248,34 @@ func TestWindowedWitnessShare_ExcludesPassiveNoise(t *testing.T) {
 		t.Fatalf("witness-share over REAL decisions should be ~60%%, got %d%% (noise must not dilute it)", share)
 	}
 }
+
+func TestGatherEvidence_ExcludesBookkeepingCommits(t *testing.T) {
+	root := t.TempDir()
+	commits := []commit{
+		{subject: "feat(model): add resident expert quant path (fak model)", body: "Signed-off-by: Dev <dev@example.com>"},
+		{subject: "fix(gateway): resolve retry bound (fak gateway)", body: "Signed-off-by: Dev <dev@example.com>"},
+		{subject: "Merge branch 'main' of https://github.com/anthony-chaudhary/fak", body: ""},
+		{subject: "Merge remote-tracking branch 'origin/main'", body: ""},
+		{subject: "Revert \"feat(gateway): add the reclaim path\"", body: ""},
+		{subject: "v0.45.0: cut the release", body: ""},
+	}
+	logFn := func(string, int) []commit { return commits }
+	ev := gatherEvidence(Options{Root: root, gitLog: logFn})
+	if ev.Commits != 2 {
+		t.Fatalf("expected 2 governed commits, got %d (Merge/Revert/release must be excluded)", ev.Commits)
+	}
+	if ev.Stamped != 2 || ev.Signed != 2 || ev.Conventional != 2 || ev.BindingVerb != 2 {
+		t.Fatalf("expected 2 stamped/signed/conventional/binding commits, got %+v", ev)
+	}
+
+	// But an ordinary unstamped commit MUST count as a failure:
+	badCommits := append(commits, commit{subject: "sloppy commit without trailer", body: ""})
+	badLog := func(string, int) []commit { return badCommits }
+	badEv := gatherEvidence(Options{Root: root, gitLog: badLog})
+	if badEv.Commits != 3 {
+		t.Fatalf("expected 3 governed commits, got %d", badEv.Commits)
+	}
+	if badEv.Stamped != 2 {
+		t.Fatalf("expected 2 stamped commits out of 3, got %d", badEv.Stamped)
+	}
+}
