@@ -97,6 +97,9 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateToolDescriptors(); err != nil {
+		return nil, err
+	}
 	model := cfg.Model
 	if model == "" {
 		model = engineID
