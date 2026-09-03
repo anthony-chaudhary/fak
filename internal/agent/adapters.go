@@ -1297,8 +1297,9 @@ func geminiSchemaCompute(raw json.RawMessage) any {
 
 // sanitizeGeminiSchema strips or repairs schema constructs that Gemini's
 // function_declarations validation rejects. Specifically, Gemini requires that:
-// 1. A schema with "required" must have type OBJECT.
-// 2. Every field in "required" must be defined in "properties" of that schema.
+//  1. A schema with "required" must have type OBJECT.
+//  2. Every field in "required" must be defined in "properties" of that schema.
+//
 // Constructs like "anyOf": [{"required": ["a"]}, {"required": ["b"]}] (a draft-07
 // idiom for "either a or b is required") violate both rules and produce
 // GenerateContentRequest 400s on the Gemini API wire.
@@ -1317,37 +1318,46 @@ func sanitizeGeminiSchema(v any) any {
 		if alts, ok := m[key].([]any); ok {
 			validAlts := make([]any, 0, len(alts))
 			for _, alt := range alts {
-				altMap, ok := alt.(map[string]any)
+				sanitized := sanitizeGeminiSchema(alt)
+				altMap, ok := sanitized.(map[string]any)
 				if !ok {
-					validAlts = append(validAlts, sanitizeGeminiSchema(alt))
+					validAlts = append(validAlts, sanitized)
 					continue
 				}
-				if req, hasReq := altMap["required"].([]any); hasReq && len(req) > 0 {
-					props, _ := altMap["properties"].(map[string]any)
-					t, _ := altMap["type"].(string)
-					allPropsExist := true
-					for _, r := range req {
-						rStr, _ := r.(string)
-						if props == nil || props[rStr] == nil {
-							allPropsExist = false
-							break
-						}
-					}
-					if !allPropsExist || (t != "" && !strings.EqualFold(t, "object")) {
-						// Invalid partial required subschema for Gemini; drop it.
-						continue
-					}
-					if t == "" {
-						altMap["type"] = "object"
-					}
+				if len(altMap) == 0 {
+					continue
 				}
-				validAlts = append(validAlts, sanitizeGeminiSchema(altMap))
+				t, _ := altMap["type"].(string)
+				isObject := strings.EqualFold(t, "object")
+				props, _ := altMap["properties"].(map[string]any)
+				if isObject && len(props) == 0 && altMap["anyOf"] == nil && altMap["any_of"] == nil && altMap["oneOf"] == nil && altMap["one_of"] == nil && altMap["allOf"] == nil && altMap["$ref"] == nil {
+					// An object branch with no properties or composition (e.g. leftover
+					// from a stripped draft-07 required constraint) is invalid for Gemini.
+					continue
+				}
+				validAlts = append(validAlts, altMap)
 			}
 			if len(validAlts) == 0 {
 				delete(m, key)
 			} else {
 				m[key] = validAlts
 			}
+		}
+	}
+
+	if allOf, ok := m["allOf"].([]any); ok {
+		var validAllOf []any
+		for _, item := range allOf {
+			sanitized := sanitizeGeminiSchema(item)
+			if sMap, ok := sanitized.(map[string]any); ok && len(sMap) == 0 {
+				continue
+			}
+			validAllOf = append(validAllOf, sanitized)
+		}
+		if len(validAllOf) == 0 {
+			delete(m, "allOf")
+		} else {
+			m["allOf"] = validAllOf
 		}
 	}
 
@@ -1359,7 +1369,61 @@ func sanitizeGeminiSchema(v any) any {
 	if items, ok := m["items"]; ok {
 		m["items"] = sanitizeGeminiSchema(items)
 	}
+	if addl, ok := m["additionalProperties"].(map[string]any); ok {
+		m["additionalProperties"] = sanitizeGeminiSchema(addl)
+	}
+
+	sanitizeSchemaRequired(m)
 	return m
+}
+
+func sanitizeSchemaRequired(m map[string]any) {
+	reqVal, hasReq := m["required"]
+	if !hasReq {
+		return
+	}
+
+	var reqList []string
+	switch r := reqVal.(type) {
+	case []any:
+		for _, item := range r {
+			if s, ok := item.(string); ok {
+				reqList = append(reqList, s)
+			}
+		}
+	case []string:
+		reqList = r
+	default:
+		delete(m, "required")
+		return
+	}
+
+	t, _ := m["type"].(string)
+	isObject := strings.EqualFold(t, "object")
+	props, _ := m["properties"].(map[string]any)
+
+	// If type is omitted but properties are defined, infer object type
+	if !isObject && props != nil && t == "" {
+		m["type"] = "object"
+		isObject = true
+	}
+
+	if !isObject || props == nil {
+		delete(m, "required")
+		return
+	}
+
+	var validReq []any
+	for _, rStr := range reqList {
+		if props[rStr] != nil {
+			validReq = append(validReq, rStr)
+		}
+	}
+	if len(validReq) == 0 {
+		delete(m, "required")
+	} else {
+		m["required"] = validReq
+	}
 }
 
 // mapSchemaTypes walks a decoded JSON Schema value and rewrites every "type" field's
