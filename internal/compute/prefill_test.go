@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -334,5 +335,39 @@ func TestCapturePrefillGraphDeclined(t *testing.T) {
 	}
 	if be.began != 1 || be.ended != 0 || ran != 1 {
 		t.Fatalf("declined path: began=%d ended=%d ran=%d, want 1/0/1", be.began, be.ended, ran)
+	}
+}
+
+// TestGraphCaptureSelfContainedUploadInvariant simulates the TurboQuant (#10716)
+// lesson: skipping uploads when parameters match causes graph replay to read stale constants.
+// Constant/parameter uploads must occur unconditionally on every captured launch.
+func TestGraphCaptureSelfContainedUploadInvariant(t *testing.T) {
+	var capturedUploads []string
+	uploadParam := func(layer int, param string, unconditional bool, lastUploaded *string) {
+		if !unconditional && *lastUploaded == param {
+			// Buggy pattern: host-side "skip if same" emits no graph node
+			return
+		}
+		*lastUploaded = param
+		capturedUploads = append(capturedUploads, fmt.Sprintf("L%d:%s", layer, param))
+	}
+
+	// Case 1: Buggy conditional skip across alternating layers (L0:P0, L1:P1, L0:P0)
+	var lastParam string
+	uploadParam(0, "cfgA", false, &lastParam)
+	uploadParam(1, "cfgB", false, &lastParam)
+	uploadParam(0, "cfgB", false, &lastParam) // erroneously skipped because lastUploaded == "cfgB"
+	if len(capturedUploads) != 2 {
+		t.Fatalf("setup: expected 2 uploads under buggy conditional caching, got %d", len(capturedUploads))
+	}
+
+	// Case 2: Enforced invariant - unconditional upload on capturing stream
+	capturedUploads = nil
+	lastParam = ""
+	uploadParam(0, "cfgA", true, &lastParam)
+	uploadParam(1, "cfgB", true, &lastParam)
+	uploadParam(0, "cfgB", true, &lastParam) // unconditionally uploaded
+	if len(capturedUploads) != 3 {
+		t.Fatalf("invariant violation: all parameter uploads under capture must be unconditional, got %d", len(capturedUploads))
 	}
 }

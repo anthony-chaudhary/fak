@@ -227,7 +227,7 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	if err := c.faultLatch.Admit("qwen35-gdn-decode"); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	in, hidden, keyDim, valueDim, convDim, operands, err := qwen35GDNEntry(normalizedInput, normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
+	_, hidden, keyDim, valueDim, convDim, operands, err := qwen35GDNEntry(normalizedInput, normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}

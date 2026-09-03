@@ -202,3 +202,53 @@ func BenchmarkCUDADecodeCapture(b *testing.B) {
 	b.StopTimer()
 	_ = next
 }
+
+// TestCUDAGraphSelfContainedConstantUploadInvariant pins the TurboQuant #10716 invariant:
+// all device-constant memory or layer-specific configuration parameters must be emitted
+// unconditionally per launch on the capturing stream. Simulates alternating per-layer
+// configuration parameters (e.g., varying dequant scaling or layer-specific multipliers)
+// under graph capture, proving that replayed executions are fully self-contained and
+// do not suffer from stale cross-layer state bleeding or host-side cached omissions.
+func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
+	cb := cudaOrSkip(t)
+	defer withGraphEnabled(true)()
+	if !cb.Caps().GraphCompile {
+		t.Fatal("cuda backend must advertise Caps.GraphCompile=true when graphs are enabled")
+	}
+	cb.GraphReset()
+
+	cfg, host := asyncWitnessCfg()
+	m0 := newSynth(cb, cfg, host)
+	m1 := newSynth(cb, cfg, host)
+
+	const warm = 2
+	for i := 0; i < warm; i++ {
+		cb.Read(m0.stepDev(10 + i))
+		cb.Recycle()
+		cb.Read(m1.stepDev(20 + i))
+		cb.Recycle()
+	}
+
+	out0, cap0 := m0.stepDevGraph(100)
+	l0 := cb.Read(out0)
+	cb.Recycle()
+
+	out1, cap1 := m1.stepDevGraph(200)
+	_ = cb.Read(out1)
+	cb.Recycle()
+
+	if !cap0 || !cap1 {
+		t.Fatal("graph capture must engage for both alternating configurations")
+	}
+
+	out0Replay, _ := m0.stepDevGraph(100)
+	l0Replay := cb.Read(out0Replay)
+	cb.Recycle()
+
+	if argmaxF32(l0) != argmaxF32(l0Replay) {
+		t.Fatalf("graph replay corrupted: argmax %d != %d after alternating layer capture", argmaxF32(l0Replay), argmaxF32(l0))
+	}
+	if c := cosine(l0, l0Replay); c < 0.999 {
+		t.Fatalf("graph replay cosine %.6f < 0.999 after alternating layer capture", c)
+	}
+}
