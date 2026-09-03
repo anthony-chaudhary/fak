@@ -14,7 +14,21 @@
       "stars_at_check": 142,
       "last_push_at_check": "2026-09-01T20:00:00Z",
       "study_note": "docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md",
-      "receipt_id": "study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780"
+      "receipt_id": "study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780",
+      "inventory": {
+        "mode": "deep",
+        "indexed_revision": "23ee7e759807efe760c2870002390a957b2875a7",
+        "subsystem_count": 8,
+        "candidate_count": 7,
+        "filed_issue_count": 5,
+        "issue_refs": [
+          "#10742",
+          "#10744",
+          "#10745",
+          "#10746",
+          "#10747"
+        ]
+      }
     },
     {
       "repository": "anomalyco/opencode",
@@ -2435,13 +2449,45 @@
     {
       "repository": "lightseekorg/tokenspeed",
       "url": "https://github.com/lightseekorg/tokenspeed",
-      "status": "candidate",
+      "status": "studied",
       "priority": 31,
-      "why": "MIT speed-of-light inference engine with fresh performance workflow work. Candidate as a sanity check for lower-bound measurement, benchmark harness shape, and no-excuses profiling before #8923 selects a borrowed hot path.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "1468fe0cbe92d389015ce73842fbaf349ce052d1",
+      "why": "MIT speed-of-light inference engine for agentic workloads deeply studied across scheduler (C++ FSM control plane, overlap scheduling with in-flight tracking), modular kernel registry with capability gating and format signatures, and MLA kernels on Blackwell. Clean-room FAK borrows decompose into #10743 (FSM), #10748 (overlap scheduling), #10749 (declarative registry), and #10750 (selection objectives) under parent #10741.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
       "stars_at_check": 1967,
-      "last_push_at_check": "2026-08-25T20:23:02Z"
+      "last_push_at_check": "2026-08-30T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md",
+      "refresh_issue": "#10741",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/lightseekorg-tokenspeed.json",
+        "indexed_revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 12,
+        "filed_issue_count": 4,
+        "completeness_critic": "Exhaustive fan-out across scheduler (C++ FSM + Python), kernel registry/selection, MLA, entrypoint, event loop, models/layers. Skipped third-party vendored code (CUTLASS, FlashInfer, DeepEP). All load-bearing subsystems opened.",
+        "issue_refs": [
+          "#10741",
+          "#10743",
+          "#10748",
+          "#10749",
+          "#10750"
+        ]
+      }
     },
     {
       "repository": "Luce-Org/lucebox",

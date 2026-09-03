@@ -1,0 +1,96 @@
+{
+  "schema": "fak-study/1",
+  "title": "eunomia-bpf/agentsight eBPF boundary tracing and session observability study",
+  "observed": "2026-09-02",
+  "sources": [
+    {
+      "url": "https://github.com/eunomia-bpf/agentsight",
+      "revision": "934f441eff8ca210807333633f47b2efcb8cd020",
+      "license": "MIT"
+    }
+  ],
+  "observations": [
+    "AgentSight uses eBPF uprobes on SSL_read/SSL_write and tracepoints on sched_process_exec/openat to trace agent intent and action at stable OS boundaries with <3% overhead.",
+    "The core userspace architecture is a unified MaterializedView that ingests normalized events and updates typed read-model rows (llm_calls, token_usage, audit_events, process_nodes, tool_calls, sessions, network_targets, resource_samples) with bounded in-memory retention.",
+    "Session-centric top reorients the monitoring primitive from raw OS process PIDs to agent sessions, aggregating tokens, tools, subprocess execs, failures, and file/net activity.",
+    "Agent-native session parsers (Claude, Codex, Gemini, Cursor) provide a zero-eBPF fallback and offline audit capability, normalizing disparate JSON/JSONL transcripts into a shared session model.",
+    "Token usage accounting implements priority-based merging (network response usage > stdout stats > native session logs) to avoid double-counting across overlapping telemetry sources.",
+    "This study is clean-room inspiration and selective adaptation under MIT license: eBPF kernel probes are outside FAK's pure-Go binary scope, but the session view model, token priority rules, Gemini session ingestion, and session-centric activity counters directly inform FAK's session and gateway observability."
+  ],
+  "candidates": [
+    {
+      "effect": "Multi-source token usage priority merge to prevent double-counting across network, stdout, and session-file telemetry.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "ext/analysis/src/view/mod.rs:493-543@934f441eff8ca210807333633f47b2efcb8cd020",
+        "ext/analysis/src/view/llm.rs:1-230@934f441eff8ca210807333633f47b2efcb8cd020",
+        "internal/session/usage.go",
+        "internal/gateway/server.go"
+      ],
+      "issue": "#10737",
+      "outcome": "Filed #10737 to implement token source priority hierarchy and deduplicating merge logic."
+    },
+    {
+      "effect": "Bounded in-memory materialized view row model for session observability with LRU detailed event eviction and monotonic counters.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "ext/analysis/src/view/mod.rs:27-51@934f441eff8ca210807333633f47b2efcb8cd020",
+        "ext/analysis/src/view/mod.rs:201-218@934f441eff8ca210807333633f47b2efcb8cd020",
+        "docs/design/materialized-view-architecture.md@934f441eff8ca210807333633f47b2efcb8cd020",
+        "internal/session/projection.go"
+      ],
+      "issue": "#10739",
+      "outcome": "Filed #10739 to implement bounded MaterializedView row model in internal/sessionview."
+    },
+    {
+      "effect": "Session-centric live monitor displaying aggregated tokens, tool calls, subprocess executions, failures, and file/net counts per agent session.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "docs/design/session-centric-top.md@934f441eff8ca210807333633f47b2efcb8cd020",
+        "collector/src/cmd_perf_tui.rs:1-200@934f441eff8ca210807333633f47b2efcb8cd020",
+        "cmd/fak/ps_cmd.go",
+        "cmd/fak/tui_overview_sessions.go"
+      ],
+      "issue": "#10740",
+      "outcome": "Filed #10740 to enrich fak ps/top with session tool, execution, failure, and effect activity counters."
+    },
+    {
+      "effect": "Agent-native Gemini CLI session parser and discovery for offline session audits.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "ext/session/src/parser.rs:37@934f441eff8ca210807333633f47b2efcb8cd020",
+        "ext/session/src/parser.rs:238-245@934f441eff8ca210807333633f47b2efcb8cd020",
+        "cmd/fak/sessionaudit.go",
+        "cmd/fak/sessionaudit_codex.go"
+      ],
+      "issue": "#10738",
+      "outcome": "Filed #10738 to add Gemini CLI chat JSON transcript parser and discovery to fak session-audit."
+    },
+    {
+      "effect": "Kernel-level zero-SDK SSL/TLS traffic interception via eBPF uprobes on SSL_read/SSL_write.",
+      "status": "ABSENT",
+      "disposition": "EXCLUDE",
+      "evidence": [
+        "bpf/sslsniff.bpf.c:288-378@934f441eff8ca210807333633f47b2efcb8cd020",
+        "cmd/fak/serve.go"
+      ],
+      "outcome": "FAK operates as an in-process gateway and agent wrapper in Go; kernel-level eBPF uprobes require Linux root privileges and C/eBPF toolchain outside FAK's zero-dependency single-binary architecture."
+    },
+    {
+      "effect": "OpenTelemetry GenAI span export for LLM calls from session view rows.",
+      "status": "PARTIAL",
+      "disposition": "WATCH",
+      "evidence": [
+        "ext/analysis/src/sinks/otel.rs@934f441eff8ca210807333633f47b2efcb8cd020",
+        "collector/src/cmd_trace.rs:251-256@934f441eff8ca210807333633f47b2efcb8cd020",
+        "cmd/fak/serve.go"
+      ],
+      "issue": "#9559",
+      "outcome": "Already tracked under existing FAK issue #9559 (feat(trajectory): export normalized attribution events as JSONL and OpenTelemetry); no duplicate ticket required."
+    }
+  ]
+}
