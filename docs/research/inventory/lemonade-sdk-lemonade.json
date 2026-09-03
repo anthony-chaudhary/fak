@@ -1,0 +1,125 @@
+{
+  "schema": "fak-study/1",
+  "title": "lemonade-sdk/lemonade local LLM serving runtime, multi-model router, and speculative execution study",
+  "observed": "2026-09-03",
+  "sources": [
+    {
+      "url": "https://github.com/lemonade-sdk/lemonade",
+      "revision": "bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+      "license": "Apache-2.0"
+    }
+  ],
+  "observations": [
+    "Lemonade is a C++20 local AI model server (lemond) providing multi-backend acceleration (llama.cpp, FastFlowLM, RyzenAI, vLLM, whisper.cpp, stable-diffusion.cpp, Kokoro) with desktop Tauri app and CLI frontend.",
+    "Model management employs an auto-tuning system that derives context window sizes from hardware VRAM/RAM availability and precise GGUF architecture metadata including SWA attention patterns.",
+    "Speculative draft companion handling in hf_variants.cpp resolves MTP and DFlash companion GGUF sidecars, ranking variants by directory depth, quant tag matching, and nearest bit-distance while preserving mechanism ambiguity.",
+    "WrappedServer streaming proxy captures backend process exits and GPU compute hangs, transparently reloading and replaying requests if zero bytes were streamed, while surfacing structured watchdog reset errors if streaming has begun.",
+    "EvictionEngine couples a GlobalVramMonitor with weighted scoring (idle_ms / (load_duration_ms * weight_factor)) to evict fast-loading models before expensive-loading models under memory pressure.",
+    "RoutingPolicyEngine implements pure model selection over AST match expressions (All, Any, Not, Leaf) with classifier services and attaches route decisions both to HTTP headers and the first SSE chunk of streaming responses.",
+    "SuspendInhibitor acquires OS-level sleep/idle locks via systemd-logind DBus Inhibit during active inference and releases them upon idle transition.",
+    "AliasManager provides thread-safe, persistent model name aliasing with multi-hop resolution (up to depth 10), cycle detection, and hot active-standby failover."
+  ],
+  "candidates": [
+    {
+      "effect": "Automate speculative draft companion discovery and nearest-bit quant matching for multi-file GGUF distributions.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/hf_variants.cpp:137-186@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/ggufload",
+        "internal/model"
+      ],
+      "issue": "#11086",
+      "outcome": "Filed #11086 to add companion GGUF discovery and bit-distance quant alignment for speculative decoding."
+    },
+    {
+      "effect": "Add zero-byte-streamed transparent retry for local accelerator compute errors and GPU watchdog resets.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/wrapped_server.cpp:845-877@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/gateway",
+        "internal/compute"
+      ],
+      "issue": "#11087",
+      "outcome": "Filed #11087 to add zero-byte-streamed accelerator reset and replay logic."
+    },
+    {
+      "effect": "Weight multi-model memory eviction scoring by load duration and reload latency penalty under memory pressure.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/eviction_engine.cpp:110-118@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/polymodel",
+        "internal/residency"
+      ],
+      "issue": "#11088",
+      "outcome": "Filed #11088 to incorporate load duration penalty weighting into polymodel eviction victim selection."
+    },
+    {
+      "effect": "Inject in-band routing and policy decision events into the initial SSE chunk of streaming completions.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/route_decision_response.cpp:138-193@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/gateway"
+      ],
+      "issue": "#11089",
+      "outcome": "Filed #11089 to frame routing decision metadata on the first SSE event of streaming responses."
+    },
+    {
+      "effect": "Inhibit operating system sleep and idle suspension during active model inference and autonomous agent runs.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/platform/suspend_linux.cpp:25-98@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/gateway",
+        "cmd/fak"
+      ],
+      "issue": "#11090",
+      "outcome": "Filed #11090 to add cross-platform OS suspend and idle inhibitor for active inference and agent sessions."
+    },
+    {
+      "effect": "Provide dynamic model target aliasing with cycle-checked multi-hop resolution and hot active-standby failover.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/server/alias_manager.cpp:23-48@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/gateway"
+      ],
+      "issue": "#11091",
+      "outcome": "Filed #11091 to add dynamic model alias registry with cycle-checked resolution and hot failover."
+    },
+    {
+      "effect": "Sliding Window Attention (SWA) layer-cadence-aware KV cache context window sizing.",
+      "status": "PRESENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "src/cpp/include/lemon/auto_tune.h:214-239@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "internal/compute/capacity.go:160-174"
+      ],
+      "outcome": "Witnessed PRESENT on-axis: internal/compute/capacity.go already calculates WindowPerLayer KV bounds."
+    },
+    {
+      "effect": "REST-exposed forward-only DAG job execution engine with pause/interrupt/resume lifecycle.",
+      "status": "ABSENT",
+      "disposition": "EXCLUDE",
+      "evidence": [
+        "src/cpp/server/jobs/job_manager.cpp:45-120@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "cmd/fak/bench.go",
+        "cmd/fak/dos.go"
+      ],
+      "outcome": "DIVERGENT: Lemonade built server-side DAG execution to survive browser reloads in Tauri/web app; fak uses native Go CLI commands and durable JSONL ledgers."
+    },
+    {
+      "effect": "Glibc malloc mmap threshold floor pinning (mallopt) to suppress heap retention of large HTTP buffers.",
+      "status": "ABSENT",
+      "disposition": "EXCLUDE",
+      "evidence": [
+        "src/cpp/server/main.cpp:35-73@bc8d99ccfee301742f1dd86a3f6ec406bb8a863d"
+      ],
+      "outcome": "DIVERGENT: C++ malloc fragmentation workaround for cpp-httplib; Go runtime manages heap arenas directly via OS mmap and spans."
+    }
+  ],
+  "supersedes": "study_2e5b46c51a0f5d71aa6755bd0a0203db752657b0eecd4c2c913a979772a3346d"
+}
