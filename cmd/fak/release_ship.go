@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +92,7 @@ type releaseShipResult struct {
 	ReleaseLock            map[string]any       `json:"release_lock,omitempty"`
 	ReleaseLockRenewals    []map[string]any     `json:"release_lock_renewals,omitempty"`
 	ReleaseLockRelease     map[string]any       `json:"release_lock_release,omitempty"`
+	ReleaseLockReceipt     string               `json:"release_lock_receipt,omitempty"`
 	PushRetries            []map[string]any     `json:"push_retries,omitempty"`
 	RemoteBranch           map[string]string    `json:"remote_branch,omitempty"`
 	RemoteBranchPush       map[string]any       `json:"remote_branch_push,omitempty"`
@@ -1156,6 +1158,7 @@ func runReleaseShipLockAcquire(result *releaseShipResult, root string, env []str
 	args := []string{
 		releaseShipScript(root, "release_lock.py"),
 		"acquire",
+		"--owner", result.ReleaseOwner,
 		"--ttl", strconv.Itoa(releaseShipLockTTLForBudget(opts, releaseShipInitialLockBudget(opts))),
 		"--note", "fak release ship",
 	}
@@ -1175,6 +1178,7 @@ func runReleaseShipLockRenew(result *releaseShipResult, root string, env []strin
 	args := []string{
 		releaseShipScript(root, "release_lock.py"),
 		"renew",
+		"--owner", result.ReleaseOwner,
 		"--ttl", strconv.Itoa(ttl),
 	}
 	payload := releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock_renew_"+label)
@@ -1209,8 +1213,21 @@ func releaseShipLockTTLForBudget(opts releaseShipOptions, phaseBudget time.Durat
 }
 
 func runReleaseShipLockRelease(result *releaseShipResult, root string, env []string) map[string]any {
-	args := []string{releaseShipScript(root, "release_lock.py"), "release"}
-	return releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock_release")
+	args := []string{releaseShipScript(root, "release_lock.py"), "release", "--owner", result.ReleaseOwner}
+	receiptPath := ""
+	if result.CommitSHA != "" {
+		dir := filepath.Join(root, ".fak", "release-receipts")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return map[string]any{"ok": false, "error": err.Error()}
+		}
+		receiptPath = filepath.Join(dir, result.CommitSHA+".json")
+		args = append(args, "--receipt-commit", result.CommitSHA, "--receipt-path", receiptPath)
+	}
+	payload := releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock_release")
+	if receiptPath != "" && releaseShipPayloadOK(payload) {
+		result.ReleaseLockReceipt = receiptPath
+	}
+	return payload
 }
 
 func releaseShipJSONCommand(result *releaseShipResult, cwd, name string, args []string, env []string, timeout time.Duration, label string) map[string]any {

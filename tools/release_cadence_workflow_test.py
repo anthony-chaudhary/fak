@@ -122,5 +122,19 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertIn('"tools/release_publish_test.py"', dry_run_text)
 
 
+    def test_release_persists_commit_bound_lease_receipt(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('--receipt-commit "$release_commit"', text)
+        self.assertIn('--receipt-path release-lease-receipt.json', text)
+        self.assertIn('actions/upload-artifact@v4', text)
+        self.assertIn('name: release-lease-receipt-${{ github.run_id }}-${{ github.run_attempt }}', text)
+
+
+    def test_release_owner_is_declared_once_for_the_whole_job(self) -> None:
+        self.assertEqual(WORKFLOW.read_text(encoding="utf-8").count("FAK_RELEASE_OWNER:"), 1)
+        self.assertIn("FAK_RELEASE_OWNER: release-cadence-${{ github.run_id }}-${{ github.run_attempt }}", WORKFLOW.read_text(encoding="utf-8"))
+        self.assertNotIn("steps.release_lock.outputs.owner", WORKFLOW.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

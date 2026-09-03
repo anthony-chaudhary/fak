@@ -10,8 +10,10 @@ reads or writes the repo's real `.release.lock`.
 from __future__ import annotations
 
 import sys
+import json
 import tempfile
 import unittest
+from unittest import mock
 import os
 from pathlib import Path
 
@@ -103,10 +105,10 @@ class LockTest(unittest.TestCase):
 
     def test_force_steals_a_live_lock(self) -> None:
         rl.acquire(self.root, ttl=600, owner="A", snapshot=[], note=None, steal_stale=True, force=False)
-        out, code = rl.acquire(self.root, ttl=60, owner="B", snapshot=[], note=None, steal_stale=True, force=True)
+        out, code = rl.acquire(self.root, ttl=60, owner="B", snapshot=[], note=None, steal_stale=True, force=True, takeover_reason="operator approved")
         self.assertEqual(code, rl.EXIT_OK)
         self.assertEqual(out["lock"]["owner"], "B")
-        self.assertEqual(out["stole"]["_stolen_because"], "force")
+        self.assertEqual(out["stole"]["_stolen_because"], "force: operator approved")
 
     def test_corrupt_lock_is_stealable(self) -> None:
         rl.lock_path(self.root).write_text("{ not json", encoding="utf-8")
@@ -186,6 +188,75 @@ class LockTest(unittest.TestCase):
     def test_classify_staged_backslashes_normalized(self) -> None:
         res = rl.classify_staged(["docs\\releases\\v1.0.0.md"], allowed=[], notes_dir="docs/releases")
         self.assertTrue(res["ok"])
+
+
+    def test_live_takeover_requires_reason_and_records_audit(self) -> None:
+        root = self.root
+        first, code = rl.acquire(root, ttl=60, owner="first", snapshot=[], note=None, steal_stale=True, force=False)
+        self.assertEqual(code, rl.EXIT_OK)
+        denied, code = rl.acquire(root, ttl=60, owner="second", snapshot=[], note=None, steal_stale=True, force=True)
+        self.assertEqual(code, rl.EXIT_USAGE)
+        self.assertEqual(denied["reason"], "takeover reason required")
+        taken, code = rl.acquire(root, ttl=60, owner="second", snapshot=[], note=None, steal_stale=True, force=True, takeover_reason="first cutter abandoned")
+        self.assertEqual(code, rl.EXIT_OK)
+        self.assertEqual(taken["lock"]["lease_id"], "second")
+        self.assertEqual(taken["lock"]["takeover"]["previous_owner"], "first")
+        self.assertEqual(taken["lock"]["takeover"]["reason"], "force: first cutter abandoned")
+
+    def test_renewal_retains_lease_identity(self) -> None:
+        with mock.patch.object(rl, "now", side_effect=[100.0, 110.0]):
+            acquired, code = rl.acquire(self.root, ttl=20, owner="stable", snapshot=["VERSION"], note="ship", steal_stale=True, force=False)
+            self.assertEqual(code, rl.EXIT_OK)
+            renewed, code = rl.renew(self.root, owner="stable", ttl=30, force=False)
+        self.assertEqual(code, rl.EXIT_OK)
+        self.assertEqual(renewed["lock"]["lease_id"], acquired["lock"]["lease_id"])
+        self.assertEqual([e["event"] for e in renewed["lock"]["lifecycle"]], ["acquired", "renewed"])
+        self.assertEqual(renewed["lock"]["acquired_at"], 100.0)
+
+    def test_release_receipt_survives_lock_and_binds_commit_time(self) -> None:
+        with mock.patch.object(rl, "now", side_effect=[100.0, 110.0, 120.0]):
+            acquired, code = rl.acquire(self.root, ttl=30, owner="stable", snapshot=[], note="ship", steal_stale=True, force=False)
+            self.assertEqual(code, rl.EXIT_OK)
+            renewed, code = rl.renew(self.root, owner="stable", ttl=30, force=False)
+            self.assertEqual(code, rl.EXIT_OK)
+            receipt_path = self.root / "receipts" / "abc123.json"
+            released, code = rl.release(self.root, owner="stable", force=False, receipt_commit="abc123", receipt_path=str(receipt_path))
+        self.assertEqual(code, rl.EXIT_OK)
+        self.assertIsNone(rl.read_lock(self.root))
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["owner"], "stable")
+        self.assertEqual(receipt["lease_id"], acquired["lock"]["lease_id"])
+        self.assertEqual(receipt["commit_sha"], "abc123")
+        self.assertEqual(receipt["released_at"], 120.0)
+        self.assertEqual([e["event"] for e in receipt["lifecycle"]], ["acquired", "renewed", "released"])
+        self.assertEqual(released["receipt"]["commit_sha"], "abc123")
+
+
+    def test_two_cutters_exactly_one_acquires(self) -> None:
+        import concurrent.futures
+        mutations: list[str] = []
+
+        def cutter(owner: str) -> int:
+            _, code = rl.acquire(self.root, ttl=60, owner=owner, snapshot=[], note=None, steal_stale=False, force=False)
+            if code == rl.EXIT_OK:
+                mutations.append(owner)
+            return code
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            codes = list(pool.map(cutter, ["one", "two"]))
+        self.assertEqual(sorted(codes), [rl.EXIT_OK, rl.EXIT_DENIED])
+        self.assertEqual(len(mutations), 1, "exactly one cutter may perform the release mutation")
+        self.assertEqual(rl.read_lock(self.root)["owner"], mutations[0])
+
+    def test_crash_ttl_recovery_is_identity_safe(self) -> None:
+        with mock.patch.object(rl, "now", side_effect=[100.0, 121.0]):
+            first, code = rl.acquire(self.root, ttl=20, owner="crashed", snapshot=[], note=None, steal_stale=True, force=False)
+            self.assertEqual(code, rl.EXIT_OK)
+            recovered, code = rl.acquire(self.root, ttl=20, owner="recovery", snapshot=[], note=None, steal_stale=True, force=False)
+        self.assertEqual(code, rl.EXIT_OK)
+        self.assertEqual(recovered["lock"]["lease_id"], "recovery")
+        self.assertTrue(recovered["lock"]["takeover"]["stale"])
+        self.assertEqual(recovered["lock"]["takeover"]["previous_lease_id"], first["lock"]["lease_id"])
 
 
 if __name__ == "__main__":
