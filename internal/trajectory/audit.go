@@ -111,34 +111,38 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema               string                        `json:"schema"`
-	Kind                 string                        `json:"kind"`
-	Source               string                        `json:"source"`
-	TranscriptID         string                        `json:"session_id"`
-	SourcePath           string                        `json:"source_path"`
-	Models               []string                      `json:"models"`
-	BuildIdentities      []AuditBuildIdentity          `json:"build_identities"`
-	Tokens               AuditTokens                   `json:"tokens"`
-	CodexCache           *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
-	ToolCalls            int                           `json:"tool_calls"`
-	ToolErrors           int                           `json:"tool_errors"`
-	Distribution         []AuditDistributionRow        `json:"distribution,omitempty"`
-	ToolDistribution     []AuditDistributionRow        `json:"tool_distribution,omitempty"`
-	ToolResults          []AuditToolResultRow          `json:"tool_results,omitempty"`
-	StorageDistribution  []AuditStorageRow             `json:"storage_distribution,omitempty"`
-	UnknownExemplars     AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
-	RepeatedFailures     int                           `json:"repeated_failures"`
-	ExpectedWaitTimeouts int                           `json:"expected_wait_timeouts"`
-	MutationChurn        int                           `json:"mutation_churn"`
-	MutationChurnEvents  []QwenMutationChurn           `json:"mutation_churn_events,omitempty"`
-	HookP95MS            *int64                        `json:"hook_p95_ms"`
-	UsageRecords         int                           `json:"usage_records"`
-	SourcePaths          []string                      `json:"source_paths,omitempty"`
-	usageByID            map[string]AuditTokens
-	failureCounts        map[string]int
-	schemaShapes         map[string]auditShapeSet
-	fragmentDigest       string
-	fragmentDigests      map[string]struct{}
+	Schema                       string                        `json:"schema"`
+	Kind                         string                        `json:"kind"`
+	Source                       string                        `json:"source"`
+	TranscriptID                 string                        `json:"session_id"`
+	SourcePath                   string                        `json:"source_path"`
+	Models                       []string                      `json:"models"`
+	BuildIdentities              []AuditBuildIdentity          `json:"build_identities"`
+	Tokens                       AuditTokens                   `json:"tokens"`
+	CodexCache                   *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
+	ToolCalls                    int                           `json:"tool_calls"`
+	ToolErrors                   int                           `json:"tool_errors"`
+	Distribution                 []AuditDistributionRow        `json:"distribution,omitempty"`
+	ToolDistribution             []AuditDistributionRow        `json:"tool_distribution,omitempty"`
+	ToolResults                  []AuditToolResultRow          `json:"tool_results,omitempty"`
+	StorageDistribution          []AuditStorageRow             `json:"storage_distribution,omitempty"`
+	UnknownExemplars             AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
+	RepeatedFailures             int                           `json:"repeated_failures"`
+	ExpectedWaitTimeouts         int                           `json:"expected_wait_timeouts"`
+	MutationChurn                int                           `json:"mutation_churn"`
+	MutationChurnEvents          []QwenMutationChurn           `json:"mutation_churn_events,omitempty"`
+	HookP95MS                    *int64                        `json:"hook_p95_ms"`
+	UsageRecords                 int                           `json:"usage_records"`
+	SourcePaths                  []string                      `json:"source_paths,omitempty"`
+	TerminalFailures             int                           `json:"terminal_failures,omitempty"`
+	TerminalFailureClasses       map[string]int                `json:"terminal_failure_classes,omitempty"`
+	TerminalStallSeconds         int64                         `json:"terminal_stall_seconds,omitempty"`
+	TerminalStallDurationBuckets map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
+	usageByID                    map[string]AuditTokens
+	failureCounts                map[string]int
+	schemaShapes                 map[string]auditShapeSet
+	fragmentDigest               string
+	fragmentDigests              map[string]struct{}
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
@@ -202,6 +206,9 @@ type AuditSummaryRow struct {
 	QwenTopContributorTokenFraction     *float64                      `json:"qwen_top_contributor_token_fraction"`
 	QwenTokenConcentrationThreshold     float64                       `json:"qwen_token_concentration_threshold"`
 	QwenTopContributorTokenConcentrated *bool                         `json:"qwen_top_contributor_token_concentrated"`
+	TerminalFailures                    int                           `json:"terminal_failures,omitempty"`
+	TerminalFailureClasses              map[string]int                `json:"terminal_failure_classes,omitempty"`
+	TerminalStallDurationBuckets        map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -603,6 +610,19 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
+		summary.TerminalFailures += transcript.TerminalFailures
+		for k, v := range transcript.TerminalFailureClasses {
+			if summary.TerminalFailureClasses == nil {
+				summary.TerminalFailureClasses = map[string]int{}
+			}
+			summary.TerminalFailureClasses[k] += v
+		}
+		for k, v := range transcript.TerminalStallDurationBuckets {
+			if summary.TerminalStallDurationBuckets == nil {
+				summary.TerminalStallDurationBuckets = map[string]int{}
+			}
+			summary.TerminalStallDurationBuckets[k] += v
+		}
 		exemplars.merge(transcript.UnknownExemplars)
 		for _, r := range transcript.Distribution {
 			categoryTotals[r.Name] += r.Bytes

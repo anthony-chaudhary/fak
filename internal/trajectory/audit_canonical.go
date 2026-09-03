@@ -73,6 +73,22 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 		}
 		rollup.ExpectedWaitTimeouts += row.ExpectedWaitTimeouts
 		rollup.MutationChurn += row.MutationChurn
+		rollup.TerminalFailures += row.TerminalFailures
+		if row.TerminalStallSeconds > rollup.TerminalStallSeconds {
+			rollup.TerminalStallSeconds = row.TerminalStallSeconds
+		}
+		for k, v := range row.TerminalFailureClasses {
+			if rollup.TerminalFailureClasses == nil {
+				rollup.TerminalFailureClasses = map[string]int{}
+			}
+			rollup.TerminalFailureClasses[k] += v
+		}
+		for k, v := range row.TerminalStallDurationBuckets {
+			if rollup.TerminalStallDurationBuckets == nil {
+				rollup.TerminalStallDurationBuckets = map[string]int{}
+			}
+			rollup.TerminalStallDurationBuckets[k] += v
+		}
 	}
 	out := make([]AuditTranscriptRow, 0, len(byID))
 	for _, row := range byID {

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var auditNonzeroExit = regexp.MustCompile(`(?i)(?:process exited with code|exit (?:code|status)[:= ]+)\s*[1-9][0-9]*`)
@@ -28,35 +29,40 @@ type auditToolCall struct {
 }
 
 type auditParseState struct {
-	row                   AuditTranscriptRow
-	models                map[string]struct{}
-	calls                 map[string]auditToolCall
-	seenCalls             map[string]struct{}
-	failureCounts         map[string]int
-	mutationCounts        map[string]int
-	mutationEvents        []QwenMutationEvent
-	mutationHypothesis    string
-	mutationAccountedFor  int64
-	hookDurations         []int64
-	claudeUsageByID       map[string]AuditTokens
-	codexPrimaryMetaSeen  bool
-	codexRawTotal         *auditCodexRawTokens
-	codexCompleted        AuditTokens
-	codexVersion          string
-	codexModelProvider    string
-	codexResetArmed       bool
-	codexCacheSamples     int
-	codexCacheMin         int64
-	codexCacheMax         int64
-	usageSeen             int
-	usageExact            int
-	usageDuplicates       int
-	toolErrorEvents       []QwenToolErrorEvent
-	toolErrorAttributions []qwenToolErrorAttribution
-	distribution          auditDistribution
-	buildIdentity         AuditBuildIdentity
-	buildIdentities       map[AuditBuildIdentity]struct{}
-	schemaShapes          map[string]auditShapeSet
+	row                          AuditTranscriptRow
+	models                       map[string]struct{}
+	calls                        map[string]auditToolCall
+	seenCalls                    map[string]struct{}
+	failureCounts                map[string]int
+	mutationCounts               map[string]int
+	mutationEvents               []QwenMutationEvent
+	mutationHypothesis           string
+	mutationAccountedFor         int64
+	hookDurations                []int64
+	claudeUsageByID              map[string]AuditTokens
+	codexPrimaryMetaSeen         bool
+	codexRawTotal                *auditCodexRawTokens
+	codexCompleted               AuditTokens
+	codexVersion                 string
+	codexModelProvider           string
+	codexResetArmed              bool
+	codexCacheSamples            int
+	codexCacheMin                int64
+	codexCacheMax                int64
+	usageSeen                    int
+	usageExact                   int
+	usageDuplicates              int
+	toolErrorEvents              []QwenToolErrorEvent
+	toolErrorAttributions        []qwenToolErrorAttribution
+	distribution                 auditDistribution
+	buildIdentity                AuditBuildIdentity
+	buildIdentities              map[AuditBuildIdentity]struct{}
+	schemaShapes                 map[string]auditShapeSet
+	lastProgressTS               time.Time
+	terminalFailures             int
+	terminalFailureClasses       map[string]int
+	terminalStallSeconds         int64
+	terminalStallDurationBuckets map[string]int
 }
 
 type auditCodexRawTokens struct {
@@ -193,6 +199,10 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
 	}
+	state.row.TerminalFailures = state.terminalFailures
+	state.row.TerminalFailureClasses = state.terminalFailureClasses
+	state.row.TerminalStallSeconds = state.terminalStallSeconds
+	state.row.TerminalStallDurationBuckets = state.terminalStallDurationBuckets
 	return state.row, refusals, append([]int64(nil), state.hookDurations...), append([]QwenToolErrorEvent(nil), state.toolErrorEvents...), nil
 }
 
@@ -341,6 +351,17 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 		return
 	}
 	payload, _ := record["payload"].(map[string]any)
+	if rawTS, ok := record["timestamp"].(string); ok && rawTS != "" {
+		if ts, err := time.Parse(time.RFC3339Nano, rawTS); err == nil {
+			if recordType != "event_msg" || payload["type"] != "task_complete" {
+				state.lastProgressTS = ts
+			}
+		} else if ts, err := time.Parse(time.RFC3339, rawTS); err == nil {
+			if recordType != "event_msg" || payload["type"] != "task_complete" {
+				state.lastProgressTS = ts
+			}
+		}
+	}
 	switch recordType {
 	case "session_meta":
 		// Subagent rollouts embed their parent transcript history after the
@@ -374,9 +395,98 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 			state.codexResetArmed = state.codexRawTotal != nil && state.codexVersion != "" && strings.TrimSpace(turnID) != ""
 		case "token_count":
 			parseCodexAuditUsage(payload, line, rel, state, refusals)
+		case "task_complete":
+			parseCodexTaskComplete(payload, record, line, rel, state)
 		}
 	case "response_item":
 		parseCodexResponseItem(payload, line, rel, state, refusals)
+	}
+}
+
+func parseCodexTaskComplete(payload map[string]any, record map[string]any, line int, rel string, state *auditParseState) {
+	errVal, ok := payload["error"]
+	if !ok || errVal == nil {
+		return
+	}
+	var errStr string
+	switch v := errVal.(type) {
+	case string:
+		errStr = v
+	case map[string]any:
+		if msg, ok := v["message"].(string); ok {
+			errStr = msg
+		} else {
+			b, _ := json.Marshal(v)
+			errStr = string(b)
+		}
+	default:
+		errStr = fmt.Sprintf("%v", v)
+	}
+	if strings.TrimSpace(errStr) == "" {
+		return
+	}
+
+	failureClass := normalizeTerminalFailureClass(errStr)
+	state.terminalFailures++
+	if state.terminalFailureClasses == nil {
+		state.terminalFailureClasses = map[string]int{}
+	}
+	state.terminalFailureClasses[failureClass]++
+
+	var stallSec int64
+	if rawTS, ok := record["timestamp"].(string); ok && rawTS != "" {
+		completeTS, err := time.Parse(time.RFC3339Nano, rawTS)
+		if err != nil {
+			completeTS, _ = time.Parse(time.RFC3339, rawTS)
+		}
+		if !completeTS.IsZero() && !state.lastProgressTS.IsZero() && completeTS.After(state.lastProgressTS) {
+			stallSec = int64(completeTS.Sub(state.lastProgressTS).Seconds())
+		}
+	}
+	if stallSec > state.terminalStallSeconds {
+		state.terminalStallSeconds = stallSec
+	}
+	bucket := classifyTerminalStallBucket(stallSec)
+	if state.terminalStallDurationBuckets == nil {
+		state.terminalStallDurationBuckets = map[string]int{}
+	}
+	state.terminalStallDurationBuckets[bucket]++
+}
+
+func normalizeTerminalFailureClass(raw string) string {
+	low := strings.ToLower(raw)
+	switch {
+	case strings.Contains(low, "502") || strings.Contains(low, "bad gateway"):
+		return "http_502_upstream"
+	case strings.Contains(low, "504") || strings.Contains(low, "gateway timeout"):
+		return "http_504_upstream"
+	case strings.Contains(low, "503") || strings.Contains(low, "service unavailable"):
+		return "http_503_upstream"
+	case strings.Contains(low, "500") || strings.Contains(low, "internal server error"):
+		return "http_500_upstream"
+	case strings.Contains(low, "5xx") || strings.Contains(low, "upstream model error"):
+		return "http_5xx_upstream"
+	case strings.Contains(low, "429") || strings.Contains(low, "rate limit"):
+		return "http_429_rate_limit"
+	case strings.Contains(low, "400") || strings.Contains(low, "bad request"):
+		return "http_400_bad_request"
+	default:
+		return "upstream_error"
+	}
+}
+
+func classifyTerminalStallBucket(s int64) string {
+	switch {
+	case s < 300:
+		return "lt_300s"
+	case s < 900:
+		return "300s_to_900s"
+	case s < 1800:
+		return "900s_to_1800s"
+	case s < 3600:
+		return "1800s_to_3600s"
+	default:
+		return "gt_3600s"
 	}
 }
 

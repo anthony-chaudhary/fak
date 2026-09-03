@@ -1137,3 +1137,97 @@ func TestQwenTopContributorConcentrationJSONAndRendering(t *testing.T) {
 		t.Fatalf("missing render:\n%s", rendered.String())
 	}
 }
+
+func TestAuditCodexTerminal502Stall(t *testing.T) {
+	temp := t.TempDir()
+	sessionDir := filepath.Join(temp, "codex", "sessions", "2026", "09", "01")
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(sessionDir, "terminal-502-session.jsonl")
+	secretURL := "https://private.upstream.domain:8443/v1/chat/completions"
+	secretToken := "sk-super-secret-credential-leak-probe"
+	secretPrompt := "confidential client acquisition memo"
+	lines := []string{
+		`{"timestamp":"2026-09-01T10:00:00Z","type":"session_meta","payload":{"id":"session-502-secret","model_provider":"openai"}}`,
+		`{"timestamp":"2026-09-01T10:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`,
+		`{"timestamp":"2026-09-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + secretPrompt + `"}]}}`,
+		`{"timestamp":"2026-09-01T10:00:10Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"cache_write_input_tokens":0,"output_tokens":10,"total_tokens":110}}}}`,
+		`{"timestamp":"2026-09-01T10:06:50Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","error":"502 Bad Gateway: upstream model error at ` + secretURL + ` auth ` + secretToken + `"}}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceCodex, Root: filepath.Join(temp, "codex", "sessions"), RootLabel: "codex/sessions"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAudit: %v", err)
+	}
+
+	// 1. Terminal failure counted exactly once
+	if result.Summary.TerminalFailures != 1 {
+		t.Fatalf("TerminalFailures = %d, want 1", result.Summary.TerminalFailures)
+	}
+	// 2. Normalized into bounded class http_502_upstream
+	if got := result.Summary.TerminalFailureClasses["http_502_upstream"]; got != 1 {
+		t.Fatalf("TerminalFailureClasses[http_502_upstream] = %d, want 1", got)
+	}
+	// 3. Post-last-progress stall interval: 10:06:50 - 10:00:10 = 400 seconds -> 300s_to_900s bucket
+	if got := result.Summary.TerminalStallDurationBuckets["300s_to_900s"]; got != 1 {
+		t.Fatalf("TerminalStallDurationBuckets[300s_to_900s] = %d, want 1", got)
+	}
+
+	if len(result.Transcripts) != 1 {
+		t.Fatalf("transcripts count = %d, want 1", len(result.Transcripts))
+	}
+	tr := result.Transcripts[0]
+	if tr.TerminalFailures != 1 {
+		t.Errorf("transcript TerminalFailures = %d, want 1", tr.TerminalFailures)
+	}
+	if tr.TerminalStallSeconds != 400 {
+		t.Errorf("transcript TerminalStallSeconds = %d, want 400", tr.TerminalStallSeconds)
+	}
+
+	// 4. Verify privacy: raw URL, secret tokens, private prompts must never leak into JSONL or Markdown
+	var jsonlBuf bytes.Buffer
+	if err := WriteAuditJSONL(&jsonlBuf, result); err != nil {
+		t.Fatal(err)
+	}
+	jsonlStr := jsonlBuf.String()
+	for _, forbidden := range []string{secretURL, secretToken, secretPrompt} {
+		if strings.Contains(jsonlStr, forbidden) {
+			t.Errorf("JSONL output leaked sensitive data %q", forbidden)
+		}
+	}
+	if !strings.Contains(jsonlStr, `"terminal_failures":1`) {
+		t.Errorf("JSONL output missing terminal_failures:1")
+	}
+	if !strings.Contains(jsonlStr, `"http_502_upstream":1`) {
+		t.Errorf("JSONL output missing http_502_upstream:1")
+	}
+
+	var mdBuf bytes.Buffer
+	if err := WriteAuditMarkdown(&mdBuf, result); err != nil {
+		t.Fatal(err)
+	}
+	mdStr := mdBuf.String()
+	for _, forbidden := range []string{secretURL, secretToken, secretPrompt} {
+		if strings.Contains(mdStr, forbidden) {
+			t.Errorf("Markdown output leaked sensitive data %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"## Terminal failures and stalls",
+		"Total terminal failures: 1",
+		"http_502_upstream",
+		"300s_to_900s",
+	} {
+		if !strings.Contains(mdStr, want) {
+			t.Errorf("Markdown output missing %q:\n%s", want, mdStr)
+		}
+	}
+}

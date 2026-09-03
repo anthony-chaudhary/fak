@@ -3,6 +3,7 @@ package trajectory
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -150,6 +151,8 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		}
 	}
 
+	writeAuditTerminalFailures(&out, result.Summary)
+
 	out.WriteString("\n## Refused transcript shapes\n\n")
 	if len(result.Refusals) == 0 {
 		out.WriteString("None. Every usage candidate in the selected window matched a versioned exact shape.\n")
@@ -194,6 +197,38 @@ func writeAuditCodexCacheObservations(out *strings.Builder, transcripts []AuditT
 	}
 	out.WriteString("\n`cached_input_tokens` is emitted by the transcript producer for the configured provider path; it does not prove physical provider cache residency or process-local ownership. ")
 	out.WriteString("fak-owned caches are not observed by Codex `token_count` rows and require fak telemetry for attribution.\n")
+}
+
+func writeAuditTerminalFailures(out *strings.Builder, summary AuditSummaryRow) {
+	if summary.TerminalFailures == 0 {
+		return
+	}
+	out.WriteString("\n## Terminal failures and stalls\n\n")
+	fmt.Fprintf(out, "- Total terminal failures: %d\n\n", summary.TerminalFailures)
+	if len(summary.TerminalFailureClasses) > 0 {
+		out.WriteString("| Failure class | Occurrences |\n")
+		out.WriteString("|---|---:|\n")
+		keys := make([]string, 0, len(summary.TerminalFailureClasses))
+		for k := range summary.TerminalFailureClasses {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(out, "| `%s` | %d |\n", escapeAuditMarkdown(k), summary.TerminalFailureClasses[k])
+		}
+	}
+	if len(summary.TerminalStallDurationBuckets) > 0 {
+		out.WriteString("\n| Stall duration bucket | Failures |\n")
+		out.WriteString("|---|---:|\n")
+		keys := make([]string, 0, len(summary.TerminalStallDurationBuckets))
+		for k := range summary.TerminalStallDurationBuckets {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(out, "| `%s` | %d |\n", escapeAuditMarkdown(k), summary.TerminalStallDurationBuckets[k])
+		}
+	}
 }
 
 func auditBuildsMarkdown(builds []AuditBuildIdentity) string {
