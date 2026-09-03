@@ -28,3 +28,19 @@ func TestNativeBenchmarksCheckFailsOpenCoverageDebt(t *testing.T) {
 		t.Fatalf("code=%d, want 1; out=%s err=%s", code, out.String(), errb.String())
 	}
 }
+
+func TestNativeBenchmarksJSONHasNoUnreadableWitnessFindings(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runNativeBenchmarks(&out, &errb, []string{"--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var report nativebench.Report
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range report.Findings {
+		if bytes.Contains([]byte(f.Reason), []byte("is not readable")) {
+			t.Errorf("falsely unreadable finding for %s: %s", f.Capability, f.Reason)
+		}
+	}
+}
