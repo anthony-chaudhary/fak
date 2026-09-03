@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -376,7 +378,7 @@ func resetValidateWSLCapabilityCacheForTest() {
 
 func TestValidateTestArgsDisableCacheAndKeepRunBeforeTargets(t *testing.T) {
 	got := validateTestArgs("^TestOwned$", []string{"./internal/owned"})
-	want := []string{"test", "-trimpath", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
+	want := []string{"test", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("validate test args = %v, want %v", got, want)
 	}
@@ -420,6 +422,31 @@ func TestValidateRequiresExplicitMine(t *testing.T) {
 	_, code, stderr := runValidateJSON(t, []string{"--json"})
 	if code != 2 || !bytes.Contains([]byte(stderr), []byte("at least one --mine")) {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestValidateMultipleAndInterspersedMinePaths(t *testing.T) {
+	var fs flag.FlagSet
+	var mine pathList
+	fs.Var(&mine, "mine", "")
+	asJSON := fs.Bool("json", false, "")
+
+	argv := []string{"--mine", "p1.go", "p2.go", "--json", "--mine", "p3.go", "p4.go"}
+	positional, err := interspersedflags.Parse(&fs, argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range positional {
+		if p = strings.TrimSpace(p); p != "" {
+			mine = append(mine, p)
+		}
+	}
+	if !*asJSON {
+		t.Fatal("expected --json to be parsed after positional arguments")
+	}
+	want := []string{"p1.go", "p3.go", "p2.go", "p4.go"}
+	if len(mine) != len(want) {
+		t.Fatalf("mine count = %d, want %d: %v", len(mine), len(want), mine)
 	}
 }
 

@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -192,8 +193,14 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
-	if !parseFlags(fs, argv) {
+	positional, parseErr := interspersedflags.Parse(fs, argv)
+	if parseErr != nil {
 		return 2
+	}
+	for _, p := range positional {
+		if p = strings.TrimSpace(p); p != "" {
+			mine = append(mine, p)
+		}
 	}
 	if len(mine) == 0 {
 		fmt.Fprintln(stderr, "fak validate: at least one --mine path is required; ownership is never inferred from a peer-dirty tree")
@@ -856,7 +863,9 @@ func validateTestRunner(goos string, wsl bool) string {
 }
 
 func validateTestArgs(testRun string, targets []string) []string {
-	args := []string{"test", "-trimpath", "-count=1"}
+	// Tests require filesystem-valid source paths from runtime.Caller(0) (e.g. for
+	// package introspection and dos.toml validation); do not pass -trimpath here (#9788).
+	args := []string{"test", "-count=1"}
 	if testRun != "" {
 		args = append(args, "-run", testRun)
 	}
