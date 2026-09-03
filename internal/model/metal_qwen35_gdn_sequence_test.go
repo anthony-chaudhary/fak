@@ -458,3 +458,44 @@ func TestMetalQwen35GDNProductionPreflightDeclinesBeforeMutation(t *testing.T) {
 		t.Fatalf("unavailable path returned execution evidence: %+v", receipt)
 	}
 }
+
+func BenchmarkMetalQwen35P32SequenceVsControl(b *testing.B) {
+	setQ4KSDOTForTest(false)
+	b.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(&testing.T{}, m, cfg)
+	prompt := make([]int, 32)
+	for i := range prompt {
+		prompt[i] = (i*19 + 7) % cfg.VocabSize
+	}
+
+	b.Run("control_per_op", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s := m.NewSession()
+			s.Q4K, s.MetalQ4K = true, true
+			s.Prefill(prompt)
+			s.Close()
+		}
+	})
+
+	b.Run("candidate_sequence", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s := m.NewSession()
+			s.Q4K, s.MetalQ4K = true, true
+			if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+				b.Fatal(err)
+			}
+			s.Prefill(prompt)
+			if _, err := s.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil {
+				b.Fatal(err)
+			}
+			s.Close()
+		}
+	})
+}

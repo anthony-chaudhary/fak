@@ -10,8 +10,7 @@ For the current cross-hardware view, use the canonical [Qwen performance index](
 <!-- qwen38-frontdoor:begin -->
 ## Generated current readout
 
-- **Separate diagnostic:** A100 cache restore was **~0.2 tok/s with 0/5 exact**; failed quality excludes it from parity presentation.
-- **Reaped:** 2 row(s) passed review without renewal and are omitted here; their witnesses remain.
+- **Reaped:** 3 row(s) passed review without renewal and are omitted here; their witnesses remain.
 <!-- qwen38-frontdoor:end -->
 
 **Latest retained Metal receipt:** native fak Metal ran Qwen3.8-27B Q4_K_M at
