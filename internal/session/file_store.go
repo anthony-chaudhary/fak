@@ -329,3 +329,10 @@ func (s *FileStore) saveLocked(byID map[string]Descriptor) error {
 	committed = true
 	return nil
 }
+
+// DriverName returns the driver identifier "file".
+func (s *FileStore) DriverName() string { return "file" }
+
+func init() {
+	RegisterStoreDriver("file", &FileStore{})
+}

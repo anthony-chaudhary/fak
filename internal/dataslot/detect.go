@@ -172,6 +172,22 @@ func DetectWorkspace(ctx context.Context, root string) ([]DataSlotDescriptor, er
 			return nil
 		}
 
+		// 3b. dbt project
+		if lowerName == "dbt_project.yml" || lowerName == "dbt_project.yaml" {
+			id := "dbt:" + filepath.ToSlash(rel)
+			if !seenIDs[id] {
+				seenIDs[id] = true
+				results = append(results, DataSlotDescriptor{
+					ID:             id,
+					Family:         FamilyDBT,
+					Status:         StatusReady,
+					SourceArtifact: filepath.ToSlash(rel),
+					ReadOnly:       true,
+				})
+			}
+			return nil
+		}
+
 		// 4. Docker Compose
 		if isComposeFile(lowerName) {
 			composeDescs := parseComposeFile(cleanRoot, path, rel)

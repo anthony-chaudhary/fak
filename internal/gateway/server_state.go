@@ -904,7 +904,8 @@ type Server struct {
 	// tools/list returns only the bootstrap view (#3231). Read only by
 	// toolsListDescriptors; every other surface (fak_tools_search, tools/call) sees
 	// the full registry regardless.
-	deferMCPTools bool
+	deferMCPTools   bool
+	disableMCPDefer bool
 
 	// capabilitiesReuse is the bounded, success-only reuse entry for the MCP
 	// fak_capabilities discovery operation. Its zero value is ready for use.
@@ -1048,4 +1049,17 @@ type Server struct {
 	// nativeReceiptMetrics projects authoritative per-request fak-native receipts
 	// into the shared /metrics surface. It never admits fallback-active receipts.
 	nativeReceiptMetrics *nativeperf.ReceiptMetrics
+
+	// versionedConfig bundles the monotonic configuration epoch with the immutable
+	// ScalarConfig snapshot, enabling atomic single-pointer loads without torn reads.
+	// Read-side access is lock-free with <1ns latency via s.versionedConfig.Load().
+	versionedConfig atomic.Pointer[VersionedScalarConfig]
+
+	// controlConfigMu serializes write-side PATCH/POST mutations to versionedConfig and
+	// guarantees atomic monotonic transitions.
+	controlConfigMu sync.Mutex
+
+	// controlSocketMu guards the optional local Unix domain socket listener for control IPC.
+	controlSocketMu sync.Mutex
+	controlSocket   *ControlSocketServer
 }

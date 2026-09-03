@@ -10,15 +10,22 @@ import (
 	"path/filepath"
 )
 
-const indexSchema = "fak-sessionmine-index/1"
+const (
+	SchemaV1    = "fak-sessionmine-index/1"
+	SchemaV2    = "fak-sessionmine-index/2"
+	indexSchema = SchemaV2
+)
 
 // IndexState is the privacy-safe checkpoint for recurring history scans. Keys are
 // one-way source fingerprints; raw paths and transcript content are never stored.
 type IndexState struct {
-	Schema    string                 `json:"schema"`
-	Files     map[string]IndexedFile `json:"files"`
-	Seen      map[string]bool        `json:"seen_candidates,omitempty"`
-	UpdatedAt string                 `json:"updated_at"`
+	Schema        string                 `json:"schema"`
+	Files         map[string]IndexedFile `json:"files"`
+	Seen          map[string]bool        `json:"seen_candidates,omitempty"`
+	UpdatedAt     string                 `json:"updated_at"`
+	Lineage       map[string]string      `json:"lineage,omitempty"`
+	RetentionDays int                    `json:"retention_days,omitempty"`
+	OutcomeStats  map[string]int         `json:"outcome_stats,omitempty"`
 }
 
 type IndexedFile struct {
@@ -134,7 +141,19 @@ func LoadIndex(path string) (IndexState, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return IndexState{}, fmt.Errorf("decode index: %w", err)
 	}
-	if state.Schema != indexSchema {
+	switch state.Schema {
+	case SchemaV1:
+		// Backward-compatible V1 load: upgrade in memory to V2 structure
+		state.Schema = SchemaV2
+		if state.Lineage == nil {
+			state.Lineage = make(map[string]string)
+		}
+		if state.OutcomeStats == nil {
+			state.OutcomeStats = make(map[string]int)
+		}
+	case SchemaV2:
+		// Current schema
+	default:
 		return IndexState{}, fmt.Errorf("unsupported index schema %q", state.Schema)
 	}
 	if state.Files == nil {

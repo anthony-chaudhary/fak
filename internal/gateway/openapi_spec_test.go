@@ -53,6 +53,8 @@ var specPathFor = map[string]string{
 	"/v1/fak/context/change":        "/v1/fak/context/change",
 	"/v1/fak/policy":                "/v1/fak/policy",
 	"/v1/fak/policy/reload":         "/v1/fak/policy/reload",
+	"/v1/control/config":            "/v1/control/config",
+	"/v1/fak/control/config":        "/v1/fak/control/config",
 	"/v1/fak/route/reload":          "/v1/fak/route/reload",
 	"/v1/fak/trace/reset":           "/v1/fak/trace/reset",
 	"/v1/fak/trace/":                "/v1/fak/trace/{trace_id}",
