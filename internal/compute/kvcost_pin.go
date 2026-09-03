@@ -85,7 +85,7 @@ func KVEvictionCostPinned(s KVSpanStats) float64 {
 	if s.Bytes <= 0 {
 		return math.Inf(1) // fail-open on unknown footprint, same as KVEvictionCost.
 	}
-	reuseProbability := float64(s.Hits+1) * hintReuseMultiplier(s.Hint)
+	reuseProbability := KVReuseTerm(s) * hintReuseMultiplier(s.Hint) // Unified reuse term seam (#3411)
 	recomputeCost := float64(s.Tokens)
 	return recomputeCost*reuseProbability/float64(s.Bytes) + s.PinBoost
 }

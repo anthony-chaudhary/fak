@@ -11894,6 +11894,16 @@
           "category": "incidental",
           "reason": "Validation reason for an unproved backend eviction, not an eviction operation.",
           "token": "eviction_postcondition_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "age-conditioned hazard rate eviction cost",
+          "token": "KVEvictionCostHazard"
+        },
+        {
+          "category": "incidental",
+          "reason": "age-conditioned hazard rate eviction victim selector",
+          "token": "PickEvictionVictimHazard"
         }
       ],
       "id": "evict",
@@ -11908,8 +11918,10 @@
         "EvictedByteCount",
         "EvictionsPerHit",
         "KVDigestEvictor",
+        "KVEvictionCostHazard",
         "L2Evictions",
         "NewWithTierBudgetsAndEvictionPolicy",
+        "PickEvictionVictimHazard",
         "ReasonPinEvictRefused",
         "TransitionPressureEvict",
         "cache_evictions",
