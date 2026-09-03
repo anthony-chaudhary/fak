@@ -555,6 +555,15 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		engine = "executionroute:auto"
 	}
 	solRoute := SelectSOLRoute("", resolvedProfile, task.WorkClass, "gpt-5.6-sol")
+	if task.Pins.Effort != "" {
+		effort := strings.ToLower(strings.TrimSpace(task.Pins.Effort))
+		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+			return Resolution{}, fmt.Errorf("fast intent: invalid effort pin %q", task.Pins.Effort)
+		}
+		solRoute.ReasoningEffort = effort
+		solRoute.Decision += "; effort pinned by operator to " + effort
+		prov = append(prov, Provenance{"fast.effort", "task.pin", effort})
+	}
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {
 		explain = append(explain, "degraded: "+d.Reason)
@@ -644,6 +653,9 @@ func resolveFast(task TaskSpec, caps HarnessCapabilities, workers int, tokens in
 	}
 	if resolved.Speed != "auto" && resolved.Speed != "fast" && resolved.Speed != "standard" {
 		return FastExecutionPlan{}, nil, fmt.Errorf("fast intent: invalid speed pin %q", resolved.Speed)
+	}
+	if resolved.Effort != "low" && resolved.Effort != "medium" && resolved.Effort != "high" && resolved.Effort != "xhigh" {
+		return FastExecutionPlan{}, nil, fmt.Errorf("fast intent: invalid effort pin %q", resolved.Effort)
 	}
 	level := caps.ClaudeSpeed
 	if level == "" {
