@@ -584,3 +584,25 @@ mirror `fak session-audit codex`, and reports export ids, tool names, closed
 tokens, and numbers only. Attribution tokens are correlation aids over journal
 timestamps, not causal latency measurements; see
 [docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md](notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md).
+
+## `fak webbench serving`
+
+```bash
+fak webbench serving \
+  --dataset testdata/webbench/sample-tasks.jsonl \
+  --endpoints ours=http://127.0.0.1:8000/v1 \
+  --concurrencies 1,2,4,8,16 \
+  --batch-capacities ours=32 \
+  --capacity-sources ours=declared-manifest \
+  --engines ours=fak-native \
+  --engine-receipts ours=rcpt_c3b5dc1b4e0f \
+  --ttft-p99-budget-ms 2000 \
+  --out _scratch/webbench-sweep.json
+```
+
+Evaluates endpoint serving capacity and latency curves across multiple concurrency points.
+When `--concurrencies` is provided, it outputs an opt-in multi-concurrency serving sweep
+(`fak.serving-sweep.v1`) binding each point to one workload digest, model, engine receipt,
+and declared batch-capacity source. Single-point evaluation continues to emit `fak.serving-parity.v1`.
+Flags include `--concurrencies`, `--batch-capacities`, `--capacity-sources`, `--engines`,
+`--engine-receipts`, `--ttft-p99-budget-ms`, and `--itl-p99-budget-ms`. See [Model observability](benchmarks/model-observability.md).

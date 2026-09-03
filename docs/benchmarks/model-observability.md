@@ -182,4 +182,26 @@ or an unrecognized correlation source fails closed instead of manufacturing a
 request-level cause. A generic Prometheus adapter may omit request labels and
 still retain honest cohort evidence; distributed tracing is optional.
 
+## Capacity-valid serving sweeps (fak.serving-sweep.v1)
+
+Multi-concurrency serving sweeps evaluate throughput saturation curves and p99 SLA boundaries across concurrency points.
+The receipt schema `fak.serving-sweep.v1` governs multi-point sweeps, while single-concurrency point evaluations continue to use `fak.serving-parity.v1`.
+
+### Key definitions
+
+- **Workload digest**: Deterministic cryptographic hash of the task dataset, prompt prefix, and generation parameters across every concurrency point.
+- **Engine receipt digest**: Digest proving the exact backend engine identity, ensuring no silent engine substitution or mid-sweep drift occurs.
+- **Capacity source**: Provenance label (e.g., `declared-manifest`, `probe-bench`) asserting the maximum concurrent batch capacity.
+- **Valid point**: A measured concurrency point whose concurrency does not exceed declared batch capacity, whose engine receipt matches the sweep identity, and whose output quality passes verification.
+- **Peak**: The maximum aggregate output tokens per second observed strictly among valid points.
+- **p99-SLA knee**: The highest concurrency point that simultaneously satisfies optional p99 TTFT (`--ttft-p99-budget-ms`) and p99 ITL (`--itl-p99-budget-ms`) service-level budgets.
+
+### Claim boundaries and invalidation rules
+
+To prevent misleading saturation or capacity claims, the following rules are strictly enforced:
+- **Unknown capacity**: A sweep with undeclared or unmeasured capacity (`capacity <= 0` or missing) cannot support a peak or SLA knee claim.
+- **Above-capacity load**: Concurrency points exceeding declared batch capacity are flagged as invalid and cannot be selected as peak.
+- **Identity drift**: Any change in model, engine, or workload digest between points invalidates the entire sweep.
+- **Point sufficiency**: Fewer than two valid points cannot establish a saturation curve or support a peak/knee claim.
+
 Source studied 2026-08-21: [vLLM metrics design](https://github.com/vllm-project/vllm/blob/main/docs/design/metrics.md).
