@@ -272,6 +272,45 @@ func sm100SparseIndexHeadCount(n int) bool {
 	return n == 4 || n == 8 || n == 32 || n == 64
 }
 
+// scoreSparseIndexSM100FP8 computes depth-128 FP8 dot-product scores matching the SM100 128-row load contract.
+func scoreSparseIndexSM100FP8(qFP8 []int8, keysFP8 []int8, numKeys int, depth int, qScale, kScale float32) []float32 {
+	if depth != 128 || len(qFP8) != depth || len(keysFP8) != numKeys*depth {
+		return nil
+	}
+	combinedScale := float64(qScale) * float64(kScale)
+	scores := make([]float32, numKeys)
+	for i := 0; i < numKeys; i++ {
+		kOffset := i * depth
+		var dot int32
+		for d := 0; d < depth; d++ {
+			dot += int32(qFP8[d]) * int32(keysFP8[kOffset+d])
+		}
+		scores[i] = float32(float64(dot) * combinedScale)
+	}
+	return scores
+}
+
+// executeSparseIndexScorer executes scoring according to the selected scorer path.
+func executeSparseIndexScorer(
+	req sparseIndexScorerRequest,
+	qFP8 []int8,
+	keysFP8 []int8,
+	numKeys int,
+	qScale, kScale float32,
+	qF32 []float32,
+	keysF32 [][]float32,
+) ([]int, []float32) {
+	path := selectSparseIndexScorer(req)
+	var scores []float32
+	if path == sparseIndexScorerSM100FP8 {
+		scores = scoreSparseIndexSM100FP8(qFP8, keysFP8, numKeys, req.Depth, qScale, kScale)
+	} else {
+		scores = scoreSparseIndexF32(qF32, keysF32, req.Depth)
+	}
+	topIndices := topSparseIndexF32(scores, req.SparseTopK)
+	return topIndices, scores
+}
+
 // scoreSparseIndexF32 is the explicit scalar oracle/fallback for sparse-index
 // scoring. It deliberately stays separate from the SM100 eligibility contract.
 func scoreSparseIndexF32(q []float32, keys [][]float32, depth int) []float32 {
