@@ -225,6 +225,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	pollInterval := fs.Duration("poll-interval", 500*time.Millisecond, "interval between verification observations")
 	jsonOutput := fs.Bool("json", false, "emit the versioned cohort summary as JSON")
 	receipts := fs.String("receipts", "", "receipt directory")
+	interactive := fs.Bool("interactive", false, "preserve native Codex TUI on relaunch (uses codex resume instead of codex exec resume)")
 	threads := threadFlags{}
 	fs.Var(threads, "thread", "thread ID to recover (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -282,14 +283,14 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak session recover: resolve current executable:", exeErr)
 		return 2
 	}
-	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts, Interactive: *interactive})
 	if *journal {
 		classified, journalErr := recoveryJournalCrashes(*journalPath, recoveryNow())
 		if journalErr != nil {
 			fmt.Fprintln(stderr, "fak session recover: session journal:", journalErr)
 			return 2
 		}
-		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts, Interactive: *interactive})
 	}
 	mode := "preview"
 	if doLive {
@@ -435,11 +436,12 @@ func runSessionRecoverProviderLaunch(stdout, stderr io.Writer, args []string) in
 	cwd := fs.String("cwd", "", "provider working directory")
 	promptFile := fs.String("prompt-file", "", "private continuation prompt file")
 	codexBin := fs.String("codex", "codex", "Codex executable")
+	interactive := fs.Bool("interactive", false, "preserve native Codex TUI on relaunch")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*thread) == "" || strings.TrimSpace(*cwd) == "" || strings.TrimSpace(*promptFile) == "" {
-		fmt.Fprintln(stderr, "usage: fak session recover --provider-launch claude|codex --thread ID --cwd DIR --prompt-file FILE [--codex BIN]")
+		fmt.Fprintln(stderr, "usage: fak session recover --provider-launch claude|codex --thread ID --cwd DIR --prompt-file FILE [--codex BIN] [--interactive]")
 		return 2
 	}
 	prompt, err := os.ReadFile(*promptFile)
@@ -460,7 +462,11 @@ func runSessionRecoverProviderLaunch(stdout, stderr io.Writer, args []string) in
 		// independent of prompt bytes; fak guard preserves stdin at the boundary.
 		argv = append(argv, "claude", "--print", "--resume", *thread)
 	case sessionrecovery.ProviderCodex:
-		argv = append(argv, *codexBin, "exec", "--cd", *cwd, "resume", *thread, "-")
+		if *interactive {
+			argv = append(argv, *codexBin, "resume", *thread)
+		} else {
+			argv = append(argv, *codexBin, "exec", "--cd", *cwd, "resume", *thread, "-")
+		}
 	default:
 		fmt.Fprintf(stderr, "fak session recover provider launch: unsupported provider %q\n", *provider)
 		return 2
