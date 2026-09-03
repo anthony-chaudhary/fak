@@ -76,6 +76,7 @@ var renderFiles = []string{
 	"cmd/fak/tui_issues_garden.go",
 	"cmd/fak/tui_overview_sessions.go",
 	"cmd/fak/info.go",
+	"cmd/fak/info_format.go",
 	"cmd/fak/guard_split.go",
 }
 
@@ -506,6 +507,11 @@ func changedSide(headerStillMatches bool) string {
 func kpiLegendCoverage(src []source) KPI {
 	k := newKPI("legend_coverage")
 	info := bodyOf(src, "cmd/fak/info.go")
+	if !strings.Contains(info, "func guardInfoLegend()") {
+		if fmtSrc := bodyOf(src, "cmd/fak/info_format.go"); fmtSrc != "" {
+			info = fmtSrc
+		}
+	}
 	if info == "" {
 		k.Soft = append(k.Soft, "info.go not present; legend not gradable")
 		k.Score = 100
