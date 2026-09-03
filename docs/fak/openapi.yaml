@@ -1166,6 +1166,70 @@ paths:
               example: { error: { message: "policy reload is not configured", type: "invalid_request_error", code: null, param: null } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/control/config:
+    get:
+      tags: [serving-control]
+      summary: Read active Tier 0 scalar configuration
+      description: Returns the active Tier 0 operational parameters and monotonic ConfigEpoch.
+      responses:
+        '200':
+          description: The active scalar configuration snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlConfigResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    patch:
+      tags: [serving-control]
+      summary: Hot-swap Tier 0 scalar configuration
+      description: Atomically updates operational parameters, increments ConfigEpoch, and swaps active config with <1ns read overhead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScalarConfigPatch' }
+      responses:
+        '200':
+          description: The updated scalar configuration and incremented epoch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlConfigResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/control/config:
+    get:
+      tags: [serving-control]
+      summary: Read active Tier 0 scalar configuration (fak alias)
+      description: Returns the active Tier 0 operational parameters and monotonic ConfigEpoch.
+      responses:
+        '200':
+          description: The active scalar configuration snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlConfigResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    patch:
+      tags: [serving-control]
+      summary: Hot-swap Tier 0 scalar configuration (fak alias)
+      description: Atomically updates operational parameters, increments ConfigEpoch, and swaps active config with <1ns read overhead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScalarConfigPatch' }
+      responses:
+        '200':
+          description: The updated scalar configuration and incremented epoch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlConfigResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/route/reload:
     post:
       tags: [fak-native]
@@ -2254,6 +2318,33 @@ components:
         trust_epoch: { type: integer }
         applied: { type: boolean }
         tombstoned: { type: boolean }
+
+    ScalarConfig:
+      type: object
+      properties:
+        completion_deadline_ms: { type: integer }
+        stream_progress_timeout_ms: { type: integer }
+        max_waiting_seqs: { type: integer }
+        compact_history_budget: { type: integer }
+        compact_anchor_head: { type: integer }
+        log_level: { type: string }
+
+    ScalarConfigPatch:
+      type: object
+      properties:
+        completion_deadline_ms: { type: integer }
+        stream_progress_timeout_ms: { type: integer }
+        max_waiting_seqs: { type: integer }
+        compact_history_budget: { type: integer }
+        compact_anchor_head: { type: integer }
+        log_level: { type: string }
+
+    ControlConfigResponse:
+      type: object
+      properties:
+        status: { type: string }
+        config_epoch: { type: integer }
+        config: { $ref: '#/components/schemas/ScalarConfig' }
 
     PolicyReloadResponse:
       type: object

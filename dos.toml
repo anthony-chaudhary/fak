@@ -472,6 +472,8 @@ concurrent = [
   "schemaadapter",
   "toolbound",
   "overtonscore",
+  "walkfiles",
+  "reportledger",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -645,6 +647,8 @@ autopick = [
   "schemaadapter",
   "toolbound",
   "overtonscore",
+  "walkfiles",
+  "reportledger",
   # new-leaf:lane
 ]
 
@@ -1521,6 +1525,8 @@ timeaware = ["internal/timeaware/**"]
 schemaadapter = ["internal/schemaadapter/**"]
 toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
+walkfiles = ["internal/walkfiles/**"]
+reportledger = ["internal/reportledger/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1745,6 +1751,27 @@ refusal  = true
 summary  = "A commit outside fak's vetted path (a raw `git commit` / `git add -A && git commit`) reached the pre-commit hook with NO FAK_SAFECOMMIT_VETTED handshake, so it would fold the entire staged index -- including hunks the committer never declared -- into one commit: the shared-trunk sweep hazard safecommit's pathspec discipline exists to prevent. Advisory by default; blocks only under FLEET_BARE_COMMIT_GUARD=block."
 fix      = "Commit by explicit pathspec so only your files land: `fak commit --path <yours> -m ...` (sets the vetted marker), or `git commit -- <yours>`. One-shot escape: ALLOW_BARE_COMMIT=1; soften fleet-wide: FLEET_BARE_COMMIT_GUARD=warn|off; disable the whole prestaged family: FAK_PRESTAGED_PATH_GUARD=off."
 see_also = ["internal/hooks/gate_barecommitsweep.go", "internal/safecommit/prestaged.go", "fak commit", "fak hooks pre-commit"]
+
+# E2E_OVER_MOCKS (#2901, #10820): the pre-commit gate for changes touching security,
+# execution, or protocol boundaries without a witnessed end-to-end run. Hermes' rule:
+# "mocks hide integration bugs". Drive the REAL path against a temporary home, stage its
+# output, or add an "E2E-verified:" or "Shift-left-verified:" trailer before landing.
+[reasons.E2E_OVER_MOCKS]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A commit modified a security-critical, protocol, or runtime boundary without a witnessed end-to-end run. Mocks hide integration bugs; the real path must be exercised before landing."
+fix      = "Drive the real path (via the /verify skill, integration test, or dogfood probe) and stage the output receipt or an `E2E-verified:` / `Shift-left-verified:` trailer in the commit. Floor: `internal/hooks/gate_e2eovermocks.go` (advisory by default; FLEET_E2E_GUARD=block enforces, ALLOW_NO_E2E=1 skips once)."
+see_also = ["internal/hooks/gate_e2eovermocks.go", "internal/hooks/gate_cartbeforehorse.go", "docs/shift-left-task-organization.md", "docs/spine-first-defaults.md"]
+
+# SHIFT_LEFT_UNPROVEN (#10819, #10820): refusal when code is claimed done without meaningful
+# shift-left execution in dogfood, integration, or sub-testing. Prohibits shallow mock-only
+# escapes when executable paths are changed.
+[reasons.SHIFT_LEFT_UNPROVEN]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The task or commit claims completion without meaningful shift-left execution proof. Synthetic or shallow unit mocks alone do not prove runtime viability."
+fix      = "Execute the real path via dogfood (scripts/dogfood-claude.sh, tools/recent_feature_dogfood.py), run multi-process integration tests (make test-integration), or attach a runtime execution receipt. Floor: `internal/hooks/gate_e2eovermocks.go`, AGENTS.md."
+see_also = ["AGENTS.md", "CLAUDE.md", "docs/shift-left-task-organization.md", "internal/maturity/runtime-proofs.json"]
 
 # The untiered-leaf pre-commit gate (#3614): the STAGED, commit-boundary twin of the whole-tree
 # TIER_DECLARED hygiene gate. TIER_DECLARED runs only in `fak hygiene` / `make ci`, so it catches

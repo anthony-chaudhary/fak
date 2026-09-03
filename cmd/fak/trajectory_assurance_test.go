@@ -94,3 +94,163 @@ func TestRunTrajectoryAssuranceBuildsFromDeclaredReceipts(t *testing.T) {
 		t.Fatalf("receipt=%s", stdout.String())
 	}
 }
+
+func gymCorpusV2Path(t *testing.T) string {
+	t.Helper()
+	candidates := []string{
+		filepath.Join("..", "..", "internal", "trajectoryassurance", "testdata", "gym-corpus.v2.json"),
+		filepath.Join("internal", "trajectoryassurance", "testdata", "gym-corpus.v2.json"),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	t.Fatalf("gym-corpus.v2.json not found in %v", candidates)
+	return ""
+}
+
+func TestTrajectoryAssuranceGym(t *testing.T) {
+	corpusPath := gymCorpusV2Path(t)
+	var stdout, stderr bytes.Buffer
+	code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", corpusPath})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Gym Report: PROMOTE") {
+		t.Fatalf("expected stdout to contain 'Gym Report: PROMOTE', got:\n%s", out)
+	}
+	if !strings.Contains(out, "Verdict:            PROMOTE") {
+		t.Fatalf("expected stdout to contain 'Verdict:            PROMOTE', got:\n%s", out)
+	}
+}
+
+func TestTrajectoryAssuranceGym_JSON(t *testing.T) {
+	corpusPath := gymCorpusV2Path(t)
+	var stdout, stderr bytes.Buffer
+	code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", corpusPath, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	var report trajectoryassurance.GymReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON report: %v\noutput:\n%s", err, stdout.String())
+	}
+	if report.Schema != trajectoryassurance.GymReportSchema {
+		t.Fatalf("expected schema %q, got %q", trajectoryassurance.GymReportSchema, report.Schema)
+	}
+	if report.Promotion.Verdict != "PROMOTE" {
+		t.Fatalf("expected PROMOTE verdict, got %q (reasons: %v)", report.Promotion.Verdict, report.Promotion.Reasons)
+	}
+	if report.Overall.Cases != 192 {
+		t.Fatalf("expected 192 cases, got %d", report.Overall.Cases)
+	}
+}
+
+func TestTrajectoryAssuranceGym_Thresholds(t *testing.T) {
+	corpusPath := gymCorpusV2Path(t)
+	threshPath := filepath.Join(t.TempDir(), "thresholds.json")
+	// Set an impossibly high min_utility_ci95_low threshold (0.99) to force NO_PROMOTION
+	customThresh := `{"proposed": true, "min_utility_ci95_low": 0.99, "min_security_ci95_low": 0.85, "max_false_hold": 0.05, "max_intervention_regret": 0.12}`
+	if err := os.WriteFile(threshPath, []byte(customThresh), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", corpusPath, "--thresholds", threshPath, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	var report trajectoryassurance.GymReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON report: %v", err)
+	}
+	if report.Promotion.Verdict != "NO_PROMOTION" {
+		t.Fatalf("expected NO_PROMOTION with strict threshold, got %q", report.Promotion.Verdict)
+	}
+	if report.Promotion.Threshold.MinUtilityCI95Low != 0.99 {
+		t.Fatalf("expected Threshold.MinUtilityCI95Low = 0.99, got %f", report.Promotion.Threshold.MinUtilityCI95Low)
+	}
+}
+
+func TestTrajectoryAssuranceGym_ReportFile(t *testing.T) {
+	corpusPath := gymCorpusV2Path(t)
+	reportOut := filepath.Join(t.TempDir(), "report.json")
+	var stdout, stderr bytes.Buffer
+	code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", corpusPath, "--report", reportOut})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	// Verify human summary on stdout
+	if !strings.Contains(stdout.String(), "Gym Report: PROMOTE") {
+		t.Fatalf("expected summary on stdout, got: %s", stdout.String())
+	}
+	// Verify report file was written with JSON
+	data, err := os.ReadFile(reportOut)
+	if err != nil {
+		t.Fatalf("failed to read report file: %v", err)
+	}
+	var fileReport trajectoryassurance.GymReport
+	if err := json.Unmarshal(data, &fileReport); err != nil {
+		t.Fatalf("failed to unmarshal report file JSON: %v", err)
+	}
+	if fileReport.Promotion.Verdict != "PROMOTE" {
+		t.Fatalf("expected file report to have PROMOTE verdict, got %q", fileReport.Promotion.Verdict)
+	}
+}
+
+func TestTrajectoryAssuranceGym_UsageAndErrors(t *testing.T) {
+	corpusPath := gymCorpusV2Path(t)
+
+	// Missing --corpus flag
+	{
+		var stdout, stderr bytes.Buffer
+		code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym"})
+		if code != 2 {
+			t.Fatalf("expected exit 2 on missing corpus, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "usage: fak trajectory assurance gym") {
+			t.Fatalf("expected usage message in stderr, got: %s", stderr.String())
+		}
+	}
+
+	// Non-existent corpus file
+	{
+		var stdout, stderr bytes.Buffer
+		code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", "nonexistent-corpus.json"})
+		if code != 1 {
+			t.Fatalf("expected exit 1 on non-existent corpus, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "load corpus") {
+			t.Fatalf("expected 'load corpus' in stderr, got: %s", stderr.String())
+		}
+	}
+
+	// Non-existent thresholds file
+	{
+		var stdout, stderr bytes.Buffer
+		code := runTrajectoryAssurance(nil, &stdout, &stderr, []string{"gym", "--corpus", corpusPath, "--thresholds", "nonexistent-thresholds.json"})
+		if code != 1 {
+			t.Fatalf("expected exit 1 on non-existent thresholds, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "read thresholds") {
+			t.Fatalf("expected 'read thresholds' in stderr, got: %s", stderr.String())
+		}
+	}
+
+	// Dispatch through runTrajectory entrypoint
+	{
+		var stdout, stderr bytes.Buffer
+		code := runTrajectory(&stdout, &stderr, []string{"assurance", "gym", "--corpus", corpusPath, "--json"})
+		if code != 0 {
+			t.Fatalf("runTrajectory assurance gym failed: exit = %d, stderr = %s", code, stderr.String())
+		}
+		var report trajectoryassurance.GymReport
+		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+			t.Fatalf("failed to unmarshal JSON report from runTrajectory: %v", err)
+		}
+		if report.Promotion.Verdict != "PROMOTE" {
+			t.Fatalf("expected PROMOTE, got %s", report.Promotion.Verdict)
+		}
+	}
+}

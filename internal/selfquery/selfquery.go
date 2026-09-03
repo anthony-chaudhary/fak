@@ -15,7 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/memq"
-
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -325,6 +325,7 @@ func (c *Catalog) Cards(plane Plane) []FeatureCard {
 		out = append(out, c.contextPlanCards()...)
 		out = append(out, c.askPolicyCards()...)
 		out = append(out, c.memoryCards()...)
+		out = append(out, c.storeCards()...)
 		out = append(out, c.toolCards()...)
 		out = append(out, c.capabilityCards()...)
 	}
@@ -476,6 +477,23 @@ func (c *Catalog) memoryCards() []FeatureCard {
 				},
 				Note:     "explain first; fak_memory_run defaults to apply=false so mutations are proposed unless explicitly authorized",
 				Executed: false,
+			}))
+	}
+	return out
+}
+
+func (c *Catalog) storeCards() []FeatureCard {
+	drivers := session.StoreDrivers()
+	out := make([]FeatureCard, 0, len(drivers))
+	for _, name := range drivers {
+		out = append(out, card("session-store-driver", "session-store:"+name,
+			fmt.Sprintf("durable session persistence driver %q", name),
+			[]string{"session", "store", "driver", name},
+			"internal/session", EffectRead, "session-store", "session",
+			digestOf(name),
+			RequestShape{
+				Route: "session-store",
+				Note:  "registered session store driver",
 			}))
 	}
 	return out

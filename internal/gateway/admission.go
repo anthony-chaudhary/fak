@@ -215,6 +215,7 @@ type AdmissionController struct {
 	round        int64                 // monotone admission-round counter (drives aging)
 	stats        AdmissionStats        // cumulative counters (gauges are derived in Stats)
 	seq          uint64                // internal per-request suffix for duplicate caller traces
+	clock        func() time.Time      // injectable clock, defaults to time.Now
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -228,6 +229,26 @@ type waitEntry struct {
 // NewAdmissionController builds a gate under the given policy.
 func NewAdmissionController(p AdmissionPolicy) *AdmissionController {
 	return newAdmissionControllerWithBudgets(p, admissionBatchBudgets(p)...)
+}
+
+// SetMaxWaiting dynamically updates the waiting queue admission limit.
+func (c *AdmissionController) SetMaxWaiting(n int) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.policy.MaxWaiting = n
+}
+
+// MaxWaiting returns the current waiting queue admission limit.
+func (c *AdmissionController) MaxWaiting() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.policy.MaxWaiting
 }
 
 func newAdmissionControllerWithBudgets(p AdmissionPolicy, budgets ...batchBudget) *AdmissionController {
@@ -293,6 +314,20 @@ func (e *AdmissionError) Error() string {
 	return "scheduler admission " + e.Verdict.String()
 }
 
+// SetClock overrides the time source used for CreatedAt defaults and TTL expiry.
+func (c *AdmissionController) SetClock(clk func() time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clock = clk
+}
+
+func (c *AdmissionController) nowLocked() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
+}
+
 // Offer presents a new request to the gate and classifies it. It admits straight to the
 // running set only on the fast path — an underloaded node with no one already waiting and
 // free headroom — so an idle node serves immediately; otherwise the request joins the
@@ -303,10 +338,11 @@ func (e *AdmissionError) Error() string {
 func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	now := c.nowLocked()
 	if req.CreatedAt.IsZero() {
-		req.CreatedAt = time.Now()
+		req.CreatedAt = now
 	}
-	if req.DecodeTTL > 0 && time.Since(req.CreatedAt) >= req.DecodeTTL {
+	if req.DecodeTTL > 0 && now.Sub(req.CreatedAt) >= req.DecodeTTL {
 		c.stats.Expired++
 		return VerdictExpired
 	}
@@ -469,6 +505,9 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 func (c *AdmissionController) ExpireRequests(now time.Time) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if now.IsZero() {
+		now = c.nowLocked()
+	}
 
 	var expired []string
 

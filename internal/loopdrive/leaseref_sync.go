@@ -17,6 +17,11 @@ const (
 	LeaseRefSyncSurfaceDispatchPreflight LeaseRefSyncSurface = "dispatch_preflight"
 	LeaseRefSyncSurfaceLoopDriveTick     LeaseRefSyncSurface = "loop_drive_tick"
 	LeaseRefSyncSurfaceGardenStaleLease  LeaseRefSyncSurface = "garden_stale_lease"
+	LeaseRefSyncSurfaceIntentClaim       LeaseRefSyncSurface = "intent_claim"
+	LeaseRefSyncSurfaceIntentRelease     LeaseRefSyncSurface = "intent_release"
+	LeaseRefSyncSurfaceLeaserefAcquire   LeaseRefSyncSurface = "leaseref_acquire"
+	LeaseRefSyncSurfaceLeaserefRelease   LeaseRefSyncSurface = "leaseref_release"
+	LeaseRefSyncSurfaceLeaserefRenew     LeaseRefSyncSurface = "leaseref_renew"
 )
 
 // LeaseRefSyncBoundary names the loop-drive lease-ref sync boundary. The shell

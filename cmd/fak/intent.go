@@ -14,7 +14,8 @@ package main
 //   fak intent release --target "issue #2155"     when shipped or abandoned
 //   fak intent list                               every claimed target, live/expired
 //
-// Cross-machine visibility rides the same fetch/push as the lock leases:
+// Cross-machine visibility rides ambient lease-ref sync by default (fetch before
+// decide, push after write) and manual fetch/push remains supported:
 //   git fetch origin '+refs/fak/locks/*:refs/fak/locks/*'   before claiming
 //   git push  origin 'refs/fak/locks/intent-*:refs/fak/locks/intent-*'   after
 //
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -108,6 +110,7 @@ func runIntentClaim(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	store := leaseref.NewInDir(*dir)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceIntentClaim, store, "", false)
 	rec, v, err := store.ClaimIntent(context.Background(), leaseref.IntentRecord{
 		Target:     *target,
 		Holder:     *holder,
@@ -121,6 +124,7 @@ func runIntentClaim(stdout, stderr io.Writer, argv []string) int {
 	out := intentResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceIntentClaim, store, "", true)
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "intent claim")
 }
@@ -139,10 +143,12 @@ func runIntentRelease(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	store := leaseref.NewInDir(*dir)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceIntentRelease, store, "", false)
 	if err := store.ReleaseIntent(context.Background(), *target); err != nil {
 		fmt.Fprintf(stderr, "fak intent release: %v\n", err)
 		return 1
 	}
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceIntentRelease, store, "", true)
 	fmt.Fprintf(stdout, "released intent %s\n", leaseref.IntentKey(*target))
 	return 0
 }

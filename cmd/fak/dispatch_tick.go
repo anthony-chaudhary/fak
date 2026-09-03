@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leasequeue"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
@@ -1022,6 +1023,7 @@ func inspectDispatchLaneLease(root, lane string, tree []string, goal string) map
 func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, goal string) map[string]any {
 	holder := dispatchLeaseHolderForGoal(goal)
 	store := leaseref.NewInDir(root)
+	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceDispatchPreflight, store, "", false)
 	now := time.Now()
 	live, _, liveErr := store.Live(context.Background(), now)
 	if liveErr != nil {
@@ -1131,6 +1133,7 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	if verdict.OK {
+		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceDispatchPreflight, store, "", true)
 		// The waiter got in, so it gives up the place it was holding (#5505) — otherwise a tick
 		// that finally acquired would keep a reservation that ranks ahead of the peers still
 		// waiting behind it for the whole ticket TTL. Best-effort and silent, exactly like the

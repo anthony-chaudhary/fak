@@ -29,6 +29,9 @@ var familyRemedyCommands = map[string][]string{
 	"git-destroy":       {"git status", "git clean -nd"},
 	"infra-destroy":     {"terraform plan -destroy", "kubectl diff -f x.yaml", "kubectl delete --dry-run=server -f x.yaml"},
 	"sql-drop":          {}, // "a transaction that rolls back" — no single command
+	"sql-truncate":      {}, // "a transaction with rollback" — no single command
+	"sql-alter":         {}, // "verify schema compatibility or capture a snapshot" — no single command
+	"db-migration-down": {}, // "capture a database snapshot" — no single command
 	"dd-device-write":   {}, // "write to an image file first" — no single command
 	"destructive-tool":  {}, // "the tool's preview or dry-run mode" — tool-specific
 }

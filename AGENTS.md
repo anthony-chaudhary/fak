@@ -193,6 +193,15 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
   test that never renders the surface is not proof for a visual bug.
 - **Logic / behavior**: a test that **fails before the fix and passes after** — the repro is the
   proof. Land it in the same commit as the fix.
+- **Runtime / CLI / Dogfood / Integration** (an executable verb, CLI command, gateway protocol
+  adapter, daemon hook, or multi-component flow): the proof is **meaningful execution of the real
+  path**, not an in-memory mock. Hermes' rule: "mocks hide integration bugs." For executable verbs
+  or protocol layers, run the real binary or harness in dogfood (`make dogfood-test`,
+  `scripts/dogfood-claude.sh --probe`, `recent_feature_dogfood.py`) or a loopback integration test
+  (`make test-integration`, `*integration*test.go`) against a temporary workspace before claiming
+  completion. A green unit test that only asserts mocks or verifies syntax without executing the
+  real path is unproven and must not be declared done. Shift left: prove execution early during
+  development, never deferring validation to post-merge or scheduled nightly runs.
 - **"Shipped / done" claims**: a witnessed commit (`dos verify`, the `(fak <leaf>)` trailer) — see
   the witness rules below. A subject line is forgeable; the diff and the registry are not.
 
@@ -255,7 +264,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 
 ## Hard rules (enforced below the agent layer)
 
-- **Ship green work by default.** Run the scope-correct gate above, then commit and push without waiting for a prompt. Stay on `main`; never force-push, create a feature branch, use `--autostash`, or escape a dirty/diverged tree into a worktree. Merge `origin/main` in place. If a peer owns `MERGE_HEAD`, unstage your paths and wait; do not finish or abort their merge.
+- **Ship green work by default.** Run the scope-correct gate above, then commit and push without waiting for a prompt. "Green" mandates shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic, execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests. Stay on `main`; never force-push, create a feature branch, use `--autostash`, or escape a dirty/diverged tree into a worktree. Merge `origin/main` in place. If a peer owns `MERGE_HEAD`, unstage your paths and wait; do not finish or abort their merge.
 - **Match scope to capability.** Constrain smaller models and workers to atomic S0/S1 leaf units with single-concern boundaries and one witness. When encountering high-difficulty aspects (concurrency, frozen ABI, complex kernel algorithms), fail-to-abstain with a structured ABSTAIN record rather than guessing or emitting speculative changes.
 - **Commit exactly one issue through explicit paths.** Prefer `fak commit --preview`, then `fak commit --path <p> ... -m "<subject>"`; use `fak sweep` for one coherent lane. The fallback is `git commit -s -m "<subject>" -- <paths>`, never `git add -A`. One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues.
 - **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.

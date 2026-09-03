@@ -329,3 +329,61 @@ func TestCommittedWitnessesAreNotReportedAsUnreadable(t *testing.T) {
 		}
 	}
 }
+
+func TestAlternativeAndContractTreatmentDistinction(t *testing.T) {
+	// 1. First-class integrations default to additive treatments
+	intArm := Alternative{
+		Name:        "fak + llm-d",
+		Class:       FirstClassIntegration,
+		Integration: "llm-d",
+		Source:      "src",
+	}
+	if intArm.TreatmentKind() != TreatmentAdditive {
+		t.Errorf("integration arm treatment = %q, want %q", intArm.TreatmentKind(), TreatmentAdditive)
+	}
+
+	// 2. Baselines and alternative engines default to replacement treatments
+	baseArm := Alternative{
+		Name:   "llama.cpp baseline",
+		Class:  TunedBaseline,
+		Source: "src",
+	}
+	if baseArm.TreatmentKind() != TreatmentReplacement {
+		t.Errorf("baseline arm treatment = %q, want %q", baseArm.TreatmentKind(), TreatmentReplacement)
+	}
+
+	// 3. Explicit treatment overrides
+	explicitArm := Alternative{
+		Name:      "custom-layer",
+		Class:     NextBest,
+		Treatment: TreatmentAdditive,
+	}
+	if explicitArm.TreatmentKind() != TreatmentAdditive {
+		t.Errorf("explicit arm treatment = %q, want %q", explicitArm.TreatmentKind(), TreatmentAdditive)
+	}
+
+	// 4. Contract treatment defaults to additive
+	contract := Contract{
+		Capability: "prefix_kv_reuse",
+	}
+	if contract.TreatmentKind() != TreatmentAdditive {
+		t.Errorf("contract treatment = %q, want %q", contract.TreatmentKind(), TreatmentAdditive)
+	}
+}
+
+func TestResolveWitnessFromModuleRoot(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	modRoot, err := moduleRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolving an existing witness relative to module root should return valid path
+	target := ResolveWitness(modRoot, "docs/native-inference-goal.md")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected ResolveWitness to resolve docs/native-inference-goal.md: %v", err)
+	}
+}

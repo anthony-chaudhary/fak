@@ -310,5 +310,3 @@ func TestTablePauseAllHoldsActiveSessions(t *testing.T) {
 		t.Fatalf("second PauseAll returned %d sessions, want 0", len(second))
 	}
 }
-
-

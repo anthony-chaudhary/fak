@@ -18,10 +18,12 @@ func TestMatchSecurityPrefix(t *testing.T) {
 		{"internal/egressfloor/egressfloor.go", "internal/egressfloor/", true},
 		{"internal/policy/policy.go", "internal/policy/", true},
 		{"internal/normgate/normgate.go", "internal/normgate/", true},
+		{"internal/gateway/gateway.go", "internal/gateway/", true},
+		{"internal/repoguard/repoguard.go", "internal/repoguard/", true},
 		{`internal\adjudicator\secretposture.go`, "internal/adjudicator/", true}, // backslashes normalized
-		{"internal/gateway/gateway.go", "", false},                               // not in the guarded set
-		{"README.md", "", false},                  // non-security
-		{"internal/adjudicatorx/x.go", "", false}, // prefix must end at a dir boundary
+		{"internal/cache/cache.go", "", false},                                   // not in the guarded set
+		{"README.md", "", false},                                                 // non-security
+		{"internal/adjudicatorx/x.go", "", false},                                // prefix must end at a dir boundary
 	}
 	for _, c := range cases {
 		prefix, ok := matchSecurityPrefix(c.path)
@@ -60,8 +62,8 @@ func TestE2EOverMocks_securityFileEmitsAdvisory(t *testing.T) {
 // (b) touching a non-security file yields zero findings.
 func TestE2EOverMocks_nonSecurityFileQuiet(t *testing.T) {
 	d := diffOf("/r", map[string][]string{
-		"internal/gateway/gateway.go": {"package gateway"},
-		"README.md":                   {"some prose"},
+		"internal/cache/cache.go": {"package cache"},
+		"README.md":               {"some prose"},
 	})
 	f, err := gateE2EOverMocks(d)
 	if err != nil {
@@ -72,21 +74,26 @@ func TestE2EOverMocks_nonSecurityFileQuiet(t *testing.T) {
 	}
 }
 
-// (c) a staged "E2E-verified:" line (the /verify witness) suppresses the gate entirely, even
+// (c) a staged "E2E-verified:" or "Shift-left-verified:" line suppresses the gate entirely, even
 // when a security-critical file is touched.
 func TestE2EOverMocks_witnessTrailerSuppresses(t *testing.T) {
-	d := diffOf("/r", map[string][]string{
-		"internal/egressfloor/egressfloor.go": {
-			"package egressfloor",
-			"// E2E-verified: drove `fak preflight` against a temp home; metadata egress DENY witnessed.",
-		},
-	})
-	f, err := gateE2EOverMocks(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f) != 0 {
-		t.Fatalf("a staged 'E2E-verified:' line must silence the gate, got %+v", f)
+	for _, token := range []string{
+		"// E2E-verified: drove `fak preflight` against a temp home; metadata egress DENY witnessed.",
+		"// Shift-left-verified: executed dogfood probe against loopback server.",
+	} {
+		d := diffOf("/r", map[string][]string{
+			"internal/egressfloor/egressfloor.go": {
+				"package egressfloor",
+				token,
+			},
+		})
+		f, err := gateE2EOverMocks(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f) != 0 {
+			t.Fatalf("a staged %q line must silence the gate, got %+v", token, f)
+		}
 	}
 }
 

@@ -300,25 +300,47 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.cacheTTL1H.Store(cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"))
 
-	// Wire retry observability onto the proxy planner (#793 follow-on): Complete's 429/5xx
-	// backoff is otherwise invisible — up to ~8s of silent waiting. The hook bumps a retry
-	// counter and prints a glanceable `fak-turn … retry` line to the default --debug-stats
-	// sink, so an operator sees the backoff happening instead of a frozen terminal. Only the
-	// direct HTTPPlanner carries the loop — unwrapped from a dual planner's proxy side, which
-	// fronts the same upstream; the mock/in-kernel/replica planners don't, so this is a
-	// no-op for them.
-	if hp := unwrapHTTPPlanner(planner); hp != nil {
+	// Wire retry observability onto reachable proxy planners (#793 follow-on, #10323):
+	// Complete's 429/5xx backoff is otherwise invisible — up to ~8s of silent waiting. The hook
+	// bumps a retry counter and prints a glanceable `fak-turn … retry` line to the default --debug-stats
+	// sink, so an operator sees the backoff happening instead of a frozen terminal. Every reachable
+	// HTTPPlanner carries the loop — direct, unwrapped from a dual planner's proxy side, or across every
+	// upstream in a replica fleet; mock and in-kernel planners don't, so this is a no-op for them.
+	walkHTTPPlanners(planner, func(hp *agent.HTTPPlanner) {
 		hp.RetryNotify = s.onUpstreamRetry
 		hp.AuthRefreshNotify = s.onAuthRefresh
 		hp.ForbiddenRetryNotify = s.onForbiddenRetry
 		hp.AccountFailoverNotify = s.onAccountFailover
-	}
+	})
 
 	// Build the in-kernel background-loop supervisor and register the built-in loops
 	// (a liveness heartbeat). It is not running yet — Serve starts it on the lifecycle
 	// context and joins it on shutdown, so the loops progress exactly while the kernel
 	// is up.
 	s.loops = newBgloopSupervisor(s)
+
+	var anchor int
+	if cfg.CompactAnchorHead {
+		anchor = 1
+	}
+	var streamTimeoutMs uint32
+	if cfg.StreamProgressTimeout > 0 {
+		streamTimeoutMs = uint32(cfg.StreamProgressTimeout / time.Millisecond)
+	} else if cfg.StreamProgressTimeout == 0 {
+		streamTimeoutMs = uint32(agent.DefaultStreamProgressTimeout / time.Millisecond)
+	}
+	sc := ScalarConfig{
+		CompletionDeadlineMs:    0,
+		StreamProgressTimeoutMs: streamTimeoutMs,
+		MaxWaitingSeqs:          1024,
+		CompactHistoryBudget:    cfg.CompactHistoryBudget,
+		CompactAnchorHead:       anchor,
+		LogLevel:                "info",
+	}
+	s.versionedConfig.Store(&VersionedScalarConfig{
+		Epoch:  1,
+		Config: sc,
+	})
 
 	return s, nil
 }
@@ -435,6 +457,28 @@ func envEnabled(name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// walkHTTPPlanners calls fn for every *agent.HTTPPlanner reachable from p,
+// traversing composite planners (DualPlanner, ReplicaRouter, or any type
+// implementing WalkPlanners).
+func walkHTTPPlanners(p agent.Planner, fn func(*agent.HTTPPlanner)) {
+	if p == nil {
+		return
+	}
+	if hp, ok := p.(*agent.HTTPPlanner); ok {
+		fn(hp)
+		return
+	}
+	if w, ok := p.(interface{ WalkPlanners(func(agent.Planner)) }); ok {
+		w.WalkPlanners(func(child agent.Planner) {
+			walkHTTPPlanners(child, fn)
+		})
+		return
+	}
+	if d, ok := p.(*DualPlanner); ok {
+		walkHTTPPlanners(d.Proxy(), fn)
 	}
 }
 

@@ -134,19 +134,16 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		return nil, err
 	}
 
-	// Load, filter, and cap the instance set.
 	d, err := loadFilterLimit(cfg.Difficulty, cfg.DatasetPath, cfg.Filter, cfg.Limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// Select runner strategy.
 	strat, err := newRunnerStrategy(cfg.Runner, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("runner strategy: %w", err)
 	}
 
-	// Run each instance.
 	preds := make([]Prediction, 0, d.Len())
 	meta := make([]InstanceMeta, 0, d.Len())
 	done, skipped, failed := 0, 0, 0
@@ -155,7 +152,6 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		instStart := time.Now()
 		instMeta := InstanceMeta{InstanceID: in.InstanceID}
 
-		// Check context cancellation.
 		if ctx.Err() != nil {
 			instMeta.Status = "skipped"
 			instMeta.Error = "run canceled"
@@ -200,13 +196,11 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		meta = append(meta, instMeta)
 	}
 
-	// Write predictions.
 	predsPath := filepath.Join(cfg.OutputDir, "predictions.json")
 	if err := WritePredictions(predsPath, preds); err != nil {
 		return nil, fmt.Errorf("write predictions: %w", err)
 	}
 
-	// Write metadata.
 	elapsed := time.Since(start)
 	runMeta := RunMeta{
 		Runner:         cfg.Runner,
@@ -272,7 +266,6 @@ func applyFilter(d *Dataset, filter string) *Dataset {
 	case "full":
 		return d
 	default:
-		// Treat unknown filters as full.
 		return d
 	}
 }
@@ -302,7 +295,6 @@ type mockRunner struct{}
 // RunInstance returns a fixed dummy patch for the instance, for exercising the harness
 // without invoking a real agent.
 func (m *mockRunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
-	// Generate a plausible-looking dummy patch.
 	patch := fmt.Sprintf(`# Mock patch for %s (fleet test harness)
 --- a/file.py
 +++ b/file.py

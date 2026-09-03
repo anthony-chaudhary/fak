@@ -217,6 +217,18 @@ func (r *ReplicaRouter) Replicas() []ReplicaInfo {
 	return out
 }
 
+// WalkPlanners traverses each direct child planner in the replica set.
+func (r *ReplicaRouter) WalkPlanners(fn func(agent.Planner)) {
+	if r == nil {
+		return
+	}
+	for _, repl := range r.replicas {
+		if repl.Planner != nil {
+			fn(repl.Planner)
+		}
+	}
+}
+
 func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, bool) {
 	admit, err := r.admitSet()
 	if err != nil {

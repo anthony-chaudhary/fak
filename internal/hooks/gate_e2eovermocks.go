@@ -21,10 +21,11 @@ import (
 // the change, or an "E2E-verified:" trailer in a touched file), the same seam PRIOR_ART uses
 // for its "Prior-art:" suppression.
 
-// securityCriticalPrefixes is the initial set of security-boundary package trees the E2E rule
-// guards — the adjudicator (capability decisions), the egress floor (blocks the cloud-metadata
-// SSRF class), the deployable capability floor (policy manifest), and the write-time result
-// quarantine/normalize gate. These are the "adjudicator/floor/quarantine" surfaces the issue
+// securityCriticalPrefixes is the initial set of security-boundary and runtime-critical package
+// trees the E2E rule guards — the adjudicator (capability decisions), the egress floor (blocks the
+// cloud-metadata SSRF class), the deployable capability floor (policy manifest), the write-time
+// result quarantine/normalize gate, the gateway (wire protocol and streaming flow), and repoguard
+// (tool interception hooks). These are the "adjudicator/floor/quarantine/runtime" surfaces the issue
 // names: a change here that ships only against mocks is exactly the failure Hermes warns about.
 // The set is intentionally explicit and minimal for the first slice; widen it as more security
 // surfaces earn the rule.
@@ -33,12 +34,15 @@ var securityCriticalPrefixes = []string{
 	"internal/egressfloor/", // the network-egress floor (cloud-metadata SSRF block)
 	"internal/policy/",      // the deployable capability floor (policy manifest)
 	"internal/normgate/",    // the write-time result quarantine / normalize gate
+	"internal/gateway/",     // the wire gateway proxy, SSE streaming, and route adapters
+	"internal/repoguard/",   // tool-use interception and security hooks
 }
 
 // e2eWitnessTrailer is the attestation token an author stages to satisfy the rule: it certifies
-// that a real end-to-end run (the `/verify` skill) drove the change, not a green mock. Case-
-// insensitive; matched anywhere in an added line so staging the `/verify` output (which carries
-// this header) or adding an "E2E-verified:" trailer in a touched test/doc both silence the gate.
+// that a real end-to-end run (the `/verify` skill, integration test, or dogfood probe) drove the change,
+// not a green mock. Case-insensitive; matched anywhere in an added line so staging the `/verify` output
+// (which carries this header) or adding an "E2E-verified:" or "Shift-left-verified:" trailer in a
+// touched test/doc both silence the gate.
 const e2eWitnessTrailer = "e2e-verified:"
 
 // matchSecurityPrefix reports whether p (a repo-relative staged path) lives under one of the
@@ -79,10 +83,11 @@ func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
 	// than none, and this gate's whole job is to make that surface visible.
 	d.NoteCandidates("E2E_OVER_MOCKS", len(matched), "touched security-surface prefix(es)")
 
-	// Witness: any added line carrying the "E2E-verified:" token quiets the whole gate — the
+	// Witness: any added line carrying a recognized witness trailer quiets the whole gate — the
 	// author has staged/attested the real end-to-end run the rule asks for.
 	for _, al := range d.AddedLines() {
-		if strings.Contains(strings.ToLower(al.Text), e2eWitnessTrailer) {
+		lower := strings.ToLower(al.Text)
+		if strings.Contains(lower, e2eWitnessTrailer) || strings.Contains(lower, "shift-left-verified:") {
 			return nil, nil
 		}
 	}
@@ -107,10 +112,10 @@ func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
 
 // e2eDetail renders the one-line advisory for a touched security surface: which floor/quarantine
 // tree changed, the Hermes rule, and how to satisfy it (drive the real path, stage the `/verify`
-// output, or add an "E2E-verified:" trailer).
+// output, or add an "E2E-verified:" or "Shift-left-verified:" trailer).
 func e2eDetail(prefix string) string {
 	return `security-critical surface "` + prefix + `" changed without a witnessed end-to-end run — ` +
-		`Hermes' rule: "mocks hide integration bugs". Drive the REAL path (the /verify skill) against a ` +
-		`temp home and stage its output, or add an "E2E-verified:" trailer citing the run, before landing. ` +
+		`Hermes' rule: "mocks hide integration bugs". Drive the REAL path (the /verify skill, integration test, or dogfood probe) against a ` +
+		`temp home and stage its output, or add an "E2E-verified:" or "Shift-left-verified:" trailer citing the run, before landing. ` +
 		`(advisory; FLEET_E2E_GUARD=block enforces, ALLOW_NO_E2E=1 skips once)`
 }
