@@ -969,7 +969,7 @@ func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail stri
 	}
 	targets := append([]selfUpdateReceiptTarget(nil), selfUpdateReceiptTargets...)
 	if len(targets) == 0 && strings.TrimSpace(target) != "" && target != "<self>" {
-		targets = append(targets, selfUpdateReceiptTarget{Role: "primary", Path: filepath.Clean(target)})
+		targets = append(targets, selfUpdateReceiptTarget{Role: "primary", Path: filepath.ToSlash(filepath.Clean(target))})
 	}
 	if targets == nil {
 		targets = []selfUpdateReceiptTarget{}
