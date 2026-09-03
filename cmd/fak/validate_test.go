@@ -956,3 +956,53 @@ func validateContains(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestReadWSLWorktreeGitDirTranslatesWindowsPaths(t *testing.T) {
+	cases := []struct {
+		name    string
+		gitdir  string
+		wantWSL string
+		wantOK  bool
+	}{
+		{
+			name:    "windows absolute forward slash",
+			gitdir:  "gitdir: C:/work/fak/.git/worktrees/worker-1\n",
+			wantWSL: "/mnt/c/work/fak/.git/worktrees/worker-1",
+			wantOK:  true,
+		},
+		{
+			name:    "windows absolute backslash",
+			gitdir:  "gitdir: C:\\work\\fak\\.git\\worktrees\\worker-2\n",
+			wantWSL: "/mnt/c/work/fak/.git/worktrees/worker-2",
+			wantOK:  true,
+		},
+		{
+			name:    "d drive path",
+			gitdir:  "gitdir: D:/data/repo/.git/worktrees/sub1",
+			wantWSL: "/mnt/d/data/repo/.git/worktrees/sub1",
+			wantOK:  true,
+		},
+		{
+			name:    "not a gitdir file",
+			gitdir:  "ref: refs/heads/main\n",
+			wantWSL: "",
+			wantOK:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, ".git"), []byte(tc.gitdir), 0644); err != nil {
+				t.Fatal(err)
+			}
+			gotWSL, ok := readWSLWorktreeGitDir(dir)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v want %v", ok, tc.wantOK)
+			}
+			if gotWSL != tc.wantWSL {
+				t.Fatalf("got=%q want %q", gotWSL, tc.wantWSL)
+			}
+		})
+	}
+}
