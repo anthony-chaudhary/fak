@@ -342,7 +342,8 @@ func TestClaudeBash_ReadOnlyCommandsCacheAndMutatingCommandsInvalidate(t *testin
 	file := filepath.Join(dir, "test.txt")
 	_ = os.WriteFile(file, []byte("first line\nsecond line\n"), 0644)
 
-	catCall := claudeCall("Bash", fmt.Sprintf(`{"command":"cat %s"}`, file))
+	cleanFile := filepath.ToSlash(file)
+	catCall := claudeCall("Bash", fmt.Sprintf(`{"command":"cat %s"}`, cleanFile))
 	expected := "first line\nsecond line\n"
 
 	ctx := context.Background()
@@ -354,12 +355,12 @@ func TestClaudeBash_ReadOnlyCommandsCacheAndMutatingCommandsInvalidate(t *testin
 
 	// Cache hit
 	res, ok := v.Lookup(ctx, catCall)
-	if !ok || string(res.Payload.Inline) != expected {
-		t.Fatalf("cat lookup failed: ok=%v, payload=%q", ok, string(res.Payload.Inline))
+	if !ok || res == nil || string(res.Payload.Inline) != expected {
+		t.Fatalf("cat lookup failed: ok=%v, payload=%v", ok, res)
 	}
 
 	// External write via mutating bash command (e.g. echo append)
-	mutCall := claudeCall("Bash", fmt.Sprintf(`{"command":"echo third >> %s"}`, file))
+	mutCall := claudeCall("Bash", fmt.Sprintf(`{"command":"echo third >> %s"}`, cleanFile))
 	v.Emit(claudeCompleteEvent(mutCall, `{"ok":true}`))
 
 	// catCall must be invalidated
