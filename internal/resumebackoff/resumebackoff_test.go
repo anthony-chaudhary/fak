@@ -29,3 +29,24 @@ func TestDifferentSignatureResetsBackoff(t *testing.T) {
 		t.Fatalf("d=%+v", d)
 	}
 }
+
+func TestCrashLoopQuarantinedWhenBudgetExceeded(t *testing.T) {
+	now := time.Unix(1000, 0)
+	h := []Event{
+		{"s", "crash-sig", now.Add(-10 * time.Minute)},
+		{"s", "crash-sig", now.Add(-5 * time.Minute)},
+		{"s", "crash-sig", now.Add(-time.Minute)},
+	}
+	// With budget 3 and 3 previous launches for the same signature, must quarantine.
+	d := Decide(Input{Session: "s", Signature: "crash-sig", Now: now, History: h, CrashLoopBudget: 3})
+	if d.Eligible || !d.Parked || !d.Quarantined || d.Reason != ReasonCrashLoopQuarantined || d.Repeat != 3 {
+		t.Fatalf("expected crash loop quarantined: d=%+v", d)
+	}
+
+	// Witness: changing the witnessed signature resets consecutive repeats and permits one bounded attempt.
+	dNew := Decide(Input{Session: "s", Signature: "repaired-sig", Now: now, History: h, CrashLoopBudget: 3})
+	if !dNew.Eligible || dNew.Parked || dNew.Quarantined || dNew.Reason != "" {
+		t.Fatalf("expected eligible on changed signature: d=%+v", dNew)
+	}
+}
+

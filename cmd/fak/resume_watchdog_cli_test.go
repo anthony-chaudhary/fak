@@ -90,6 +90,42 @@ func TestResumeWatchdogStormSignatureBacksOffRepeatedLogicalSession(t *testing.T
 	}
 }
 
+func TestResumeWatchdogCrashLoopQuarantinedAtBudget(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	row := resume.WatchdogPlanRow{Session: "codex-crash-loop", CWD: `C:\work\fak`, Disp: "STOPPED_CRASH"}
+	signature := rwResumeStormSignature(row)
+	history := []resumebackoff.Event{
+		{Session: row.Session, Signature: signature, At: now.Add(-20 * time.Minute)},
+		{Session: row.Session, Signature: signature, At: now.Add(-10 * time.Minute)},
+		{Session: row.Session, Signature: signature, At: now.Add(-2 * time.Minute)},
+	}
+	// At budget 3 with 3 repeated launches, Decision must quarantine with CRASH_LOOP_QUARANTINED.
+	decision := resumebackoff.Decide(resumebackoff.Input{
+		Session:         row.Session,
+		Signature:       signature,
+		Now:             now,
+		History:         history,
+		CrashLoopBudget: 3,
+	})
+	if decision.Eligible || !decision.Parked || !decision.Quarantined || decision.Reason != resumebackoff.ReasonCrashLoopQuarantined || decision.Repeat != 3 {
+		t.Fatalf("unchanged crash loop escaped quarantine: %+v", decision)
+	}
+
+	// Witness: when the failure signature changes (e.g. repaired disposition or changed prompt/state), reset and permit one bounded attempt.
+	changedRow := resume.WatchdogPlanRow{Session: "codex-crash-loop", CWD: `C:\work\fak`, Disp: "STOPPED_INTERRUPTED"}
+	changedSig := rwResumeStormSignature(changedRow)
+	resetDecision := resumebackoff.Decide(resumebackoff.Input{
+		Session:         changedRow.Session,
+		Signature:       changedSig,
+		Now:             now,
+		History:         history,
+		CrashLoopBudget: 3,
+	})
+	if !resetDecision.Eligible || resetDecision.Parked || resetDecision.Quarantined {
+		t.Fatalf("changed signature was not permitted a bounded attempt: %+v", resetDecision)
+	}
+}
+
 func TestRwLoadPlanAndHistoryTolerateBrokenFiles(t *testing.T) {
 	dir := t.TempDir()
 	if got := rwLoadPlan(filepath.Join(dir, "missing.json")); len(got) != 0 {

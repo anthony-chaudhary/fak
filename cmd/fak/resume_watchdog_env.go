@@ -82,6 +82,10 @@ func rwEnvInt(name string, def int) int {
 	return def
 }
 
+func rwCrashLoopBudget() int {
+	return rwEnvInt("FAK_RESUME_CRASH_LOOP_BUDGET", 3)
+}
+
 func rwBackoffHistory(path string) []resumebackoff.Event {
 	b, err := os.ReadFile(path)
 	if err != nil {
