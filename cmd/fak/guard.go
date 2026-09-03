@@ -1332,7 +1332,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
-	command, codexInstall := installGuardCodexConfigForProfile(command, launchPlan.harnessProfile(), *codexConfig, gwURL, *apiKeyEnv)
+	command, codexInstall := installGuardCodexConfigForProfile(command, launchPlan.harnessProfile(), *codexConfig, gwURL, *apiKeyEnv, *codexHome)
 	launchPlan = launchPlan.withExecutableCommand(command)
 	if codexInstall.Applied && pinUpstream && up == "openai-responses" && strings.TrimSpace(oauthSource) != "" {
 		codexInstall.AuthMode = "chatgpt"
