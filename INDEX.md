@@ -289,6 +289,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md`](docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md) — pinned comparative study of landmark OSS agentic software development systems (Aider, SWE-agent, Cline, Continue, Agentless): PageRank RepoMap, windowed ACI file viewing, AST skeletonization, delta-linting, in-memory syntax gating, Myers diff streaming, Architect/Editor split, shadow git checkpoints, and .worktreeinclude; receipt `study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784`; filed #10966-#10986.
+
 - [`docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md`](docs/notes/NATIVE-HARNESS-PRIORITY-AND-NBA-BENCHMARK-2026-09-03.md) — strategic priority and architectural doctrine shifting mainstream development to the native fak harness: low-ego market realism, field-borrowing posture, 4-arm next-best alternative (NBA) benchmarking against OpenCode, Codex, Cursor, and Claude Code, and upstream feature adaptation matrix.
 - [`docs/notes/MULTI-DIMENSIONAL-MATURITY-CURVE-2026-09-03.md`](docs/notes/MULTI-DIMENSIONAL-MATURITY-CURVE-2026-09-03.md) — operational doctrine advancing the 6-dimensional capability maturity curve from minimal tested spines to full runtime verification.
 - [`docs/notes/SHIFT-LEFT-COMPOSABLE-LIFECYCLE-NO-STATIC-DAEMONS-2026-09-03.md`](docs/notes/SHIFT-LEFT-COMPOSABLE-LIFECYCLE-NO-STATIC-DAEMONS-2026-09-03.md) — shift-left invariant and operational doctrine prohibiting unmanaged static background daemons in developer environments.

@@ -4,6 +4,137 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "paul-gauthier/aider",
+      "url": "https://github.com/paul-gauthier/aider",
+      "status": "studied",
+      "priority": 1,
+      "why": "High-velocity CLI coding agent with Tree-sitter PageRank symbol graph repomap, Architect/Editor dual-model orchestration, whitespace-tolerant search/replace with relative indentation, and pre-commit auto-lint reflection.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "stars_at_check": 28400,
+      "last_push_at_check": "2026-09-02T18:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md",
+      "receipt_id": "study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+        "subsystem_count": 5,
+        "candidate_count": 4,
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#10966",
+          "#10972",
+          "#10976",
+          "#10982"
+        ]
+      }
+    },
+    {
+      "repository": "princeton-nlp/SWE-agent",
+      "url": "https://github.com/princeton-nlp/SWE-agent",
+      "status": "studied",
+      "priority": 1,
+      "why": "Foundational Agent-Computer Interface (ACI) benchmark runner featuring windowed file navigation, delta-lint error isolation, LastNObservations history processor, closed-window deduplication, and reproduction script invariants.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "3ea751c087f32b16e039a2233dd6eefecef325d5",
+      "stars_at_check": 15600,
+      "last_push_at_check": "2026-09-01T20:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md",
+      "receipt_id": "study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "3ea751c087f32b16e039a2233dd6eefecef325d5",
+        "subsystem_count": 6,
+        "candidate_count": 6,
+        "filed_issue_count": 6,
+        "issue_refs": [
+          "#10967",
+          "#10969",
+          "#10970",
+          "#10973",
+          "#10974",
+          "#10983"
+        ]
+      }
+    },
+    {
+      "repository": "cline/cline",
+      "url": "https://github.com/cline/cline",
+      "status": "studied",
+      "priority": 1,
+      "why": "Autonomous coding agent with Git-based shadow worktree checkpoints preserving untracked files via 3rd-parent tracking, granular auto-approve regex rulesets, and .worktreeinclude sparse-checkout sub-workspace isolation.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "d7cb79aea570dd2fb86bc3d28c7382fef2a7e345",
+      "stars_at_check": 24500,
+      "last_push_at_check": "2026-09-03T10:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md",
+      "receipt_id": "study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "d7cb79aea570dd2fb86bc3d28c7382fef2a7e345",
+        "subsystem_count": 4,
+        "candidate_count": 3,
+        "filed_issue_count": 3,
+        "issue_refs": [
+          "#10980",
+          "#10981",
+          "#10986"
+        ]
+      }
+    },
+    {
+      "repository": "continuedev/continue",
+      "url": "https://github.com/continuedev/continue",
+      "status": "studied",
+      "priority": 1,
+      "why": "Leading open-source AI code assistant featuring deterministic Myers diff line streaming, AST declaration replacement fallback, modular ContextProvider architecture, and cache-friendly prompt section ordering.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "5522c6f44ca0ac3528b37244818fbfa39b5af470",
+      "stars_at_check": 22100,
+      "last_push_at_check": "2026-09-03T11:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md",
+      "receipt_id": "study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "5522c6f44ca0ac3528b37244818fbfa39b5af470",
+        "subsystem_count": 5,
+        "candidate_count": 4,
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#10971",
+          "#10975",
+          "#10984",
+          "#10985"
+        ]
+      }
+    },
+    {
+      "repository": "OpenAutoCoder/Agentless",
+      "url": "https://github.com/OpenAutoCoder/Agentless",
+      "status": "studied",
+      "priority": 1,
+      "why": "Minimalist, highly effective SWE-bench framework demystifying agent loops with two-phase hierarchical localization, AST skeletonization with body elision, negative directory pruning, and multi-candidate patch majority voting.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+      "stars_at_check": 2100,
+      "last_push_at_check": "2026-08-20T12:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OSS-AGENTIC-DEV-BEST-PRACTICES-2026-09-03.md",
+      "receipt_id": "study_87a344905593c035d8add68ec1e0c09a30cac4259b0cd7c396d0a437098f0784",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+        "subsystem_count": 4,
+        "candidate_count": 4,
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#10968",
+          "#10977",
+          "#10978",
+          "#10979"
+        ]
+      }
+    },
+    {
       "repository": "microsoft/vidur",
       "url": "https://github.com/microsoft/vidur",
       "status": "studied",
@@ -73,7 +204,7 @@
       "study_note": "docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md",
       "receipt_id": "study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780",
       "inventory": {
-        "mode": "deep",
+        "mode": "exhaustive",
         "indexed_revision": "23ee7e759807efe760c2870002390a957b2875a7",
         "subsystem_count": 8,
         "candidate_count": 7,
@@ -2264,13 +2395,13 @@
       "repository": "vllm-project/vllm",
       "url": "https://github.com/vllm-project/vllm",
       "status": "studied",
-      "priority": 23,
-      "why": "Primary high-throughput serving reference for scheduler, prefix-cache, memory-allocation, speculative-decode, and determinism tradeoffs. Existing fak notes cite vLLM heavily, but the exact current source identity was not in the durable registry; refresh against #2236, #8395, and #8923 before filing any new performance gap.",
-      "last_checked": "2026-09-02",
+      "priority": 1,
+      "why": "Primary high-throughput serving reference for scheduler, prefix-cache, memory-allocation, speculative-decode, and determinism tradeoffs. Deeply studied for engineering process failures (step overhead accretion, flaky hardware matrix CI, cache refcount leaks).",
+      "last_checked": "2026-09-03",
       "checked_revision": "a56654d6de060495ff2db3b1d9ff0b187084d1a9",
       "stars_at_check": 90799,
       "last_push_at_check": "2026-09-02T19:43:08Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md"
     },
     {
       "repository": "sgl-project/sglang",

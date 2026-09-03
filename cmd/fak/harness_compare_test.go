@@ -115,3 +115,24 @@ func TestHarnessSubcommandDispatch(t *testing.T) {
 		t.Errorf("expected OpenAI Codex in output, got: %s", stdout.String())
 	}
 }
+
+func TestHarnessCompareBench(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	rc := runHarnessCompare(&stdout, &stderr, []string{"--baseline", "opencode", "--bench", "--view", "json"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 from runHarnessCompare --bench, got %d; stderr: %s", rc, stderr.String())
+	}
+	var report HarnessComparisonReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+	if report.EmpiricalOutcome == nil {
+		t.Fatal("expected EmpiricalOutcome to be populated with --bench")
+	}
+	if report.EmpiricalOutcome.FakTurns <= 0 {
+		t.Errorf("expected FakTurns > 0, got %d", report.EmpiricalOutcome.FakTurns)
+	}
+	if !report.EmpiricalOutcome.TaskCompleted {
+		t.Errorf("expected TaskCompleted=true on deterministic mock bench")
+	}
+}
