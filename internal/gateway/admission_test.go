@@ -431,3 +431,44 @@ func postAdmissionChat(t *testing.T, base, trace string) int {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
 }
+
+// TestMaxQueuedTokensShed verifies the vLLM-borrowed MaxQueuedTokens TTFT-QoS queue admission cap (#10727).
+// Even if waiting queue length is well below MaxWaiting, a burst of large-prompt requests
+// exceeding MaxQueuedTokens is shed at the front door to protect TTFT.
+func TestMaxQueuedTokensShed(t *testing.T) {
+	c := NewAdmissionController(AdmissionPolicy{
+		MaxNumSeqs:      1,
+		MaxWaiting:      100,
+		MaxQueuedTokens: 10000,
+		AgingRounds:     1,
+	})
+
+	// Fill the running set so subsequent requests must queue.
+	if v := c.Offer(SeqRequest{TraceID: "running", Tokens: 500}); v != VerdictAdmitted {
+		t.Fatalf("running request: verdict = %s, want admitted", v)
+	}
+
+	// First waiting request: 6,000 tokens. Fits within MaxQueuedTokens = 10,000.
+	if v := c.Offer(SeqRequest{TraceID: "req1", Tokens: 6000}); v != VerdictQueued {
+		t.Fatalf("req1: verdict = %s, want queued", v)
+	}
+	if st := c.Stats(); st.Waiting != 1 || st.QueuedTokens != 6000 {
+		t.Fatalf("stats after req1: waiting=%d queuedTokens=%d, want 1/6000", st.Waiting, st.QueuedTokens)
+	}
+
+	// Second waiting request: 6,000 tokens. 6,000 + 6,000 = 12,000 > 10,000 => must shed.
+	// Note: waiting count is only 1 < MaxWaiting=100.
+	if v := c.Offer(SeqRequest{TraceID: "req2", Tokens: 6000}); v != VerdictShed {
+		t.Fatalf("req2 exceeding token cap: verdict = %s, want shed", v)
+	}
+	if st := c.Stats(); st.Waiting != 1 || st.QueuedTokens != 6000 || st.Shed != 1 {
+		t.Fatalf("stats after req2 shed: waiting=%d queuedTokens=%d shed=%d, want 1/6000/1", st.Waiting, st.QueuedTokens, st.Shed)
+	}
+
+	// Release running request and schedule: req1 promotes from waiting to running.
+	c.Complete("running")
+	c.Schedule()
+	if st := c.Stats(); st.Running != 1 || st.Waiting != 0 || st.QueuedTokens != 0 {
+		t.Fatalf("stats after schedule: running=%d waiting=%d queuedTokens=%d, want 1/0/0", st.Running, st.Waiting, st.QueuedTokens)
+	}
+}
