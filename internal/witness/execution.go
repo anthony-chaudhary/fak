@@ -152,6 +152,132 @@ func (v *ExecutionVerifier) Verify(ctx context.Context, spec ExecutionSpec) Exec
 	return res
 }
 
+// VerifyFailToPassRefs executes command in detached scratch worktrees at parentRef
+// (asserting non-zero exit) and fixRef (asserting zero exit). If parentRef is empty,
+// it defaults to fixRef^.
+func (v *ExecutionVerifier) VerifyFailToPassRefs(ctx context.Context, parentRef, fixRef string, command []string) ExecutionResult {
+	fixRef = strings.TrimSpace(fixRef)
+	if fixRef == "" {
+		return ExecutionResult{Verdict: ExecUnwitnessed, Reason: "missing_commit"}
+	}
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return ExecutionResult{Verdict: ExecUnwitnessed, Reason: "missing_fail_to_pass_selector", Commit: fixRef}
+	}
+
+	commit, ok := v.revParse(ctx, fixRef+"^{commit}")
+	if !ok {
+		return ExecutionResult{Verdict: ExecUnwitnessed, Reason: "commit_not_found", Commit: fixRef}
+	}
+
+	parentRef = strings.TrimSpace(parentRef)
+	var parent string
+	if parentRef == "" {
+		p, ok := v.revParse(ctx, commit+"^")
+		if !ok {
+			return ExecutionResult{Verdict: ExecUnwitnessed, Reason: "parent_not_found", Commit: commit}
+		}
+		parent = p
+	} else {
+		p, ok := v.revParse(ctx, parentRef+"^{commit}")
+		if !ok {
+			return ExecutionResult{Verdict: ExecUnwitnessed, Reason: "parent_not_found", Commit: commit, Parent: parentRef}
+		}
+		parent = p
+	}
+
+	res := ExecutionResult{Verdict: ExecUnwitnessed, Commit: commit, Parent: parent}
+	parentDir, cleanupParent, err := v.scratchWorktree(ctx, parent)
+	if err != nil {
+		res.Reason = "scratch_parent:" + err.Error()
+		return res
+	}
+	defer cleanupParent()
+
+	selectors := []ExecutionSelector{{Command: command}}
+	if ok := v.expectSelectors(ctx, parentDir, parent, "fail_to_pass", selectors, false, &res); !ok {
+		return res
+	}
+
+	commitDir, cleanupCommit, err := v.scratchWorktree(ctx, commit)
+	if err != nil {
+		res.Reason = "scratch_commit:" + err.Error()
+		return res
+	}
+	defer cleanupCommit()
+
+	if ok := v.expectSelectors(ctx, commitDir, commit, "fail_to_pass", selectors, true, &res); !ok {
+		return res
+	}
+
+	res.Verdict = ExecPass
+	res.Reason = ""
+	return res
+}
+
+// VerifyFailToPass executes testSelector at parentRef (asserting non-zero exit)
+// and fixRef (asserting zero exit) in detached scratch worktrees of repoDir.
+// It returns ExecPass on valid red->green transition, or ExecUnwitnessed if it
+// passed at parent (tautological test) or failed at fix (broken fix).
+func VerifyFailToPass(ctx context.Context, repoDir, parentRef, fixRef, testSelector string) (ExecutionResult, error) {
+	cmd := splitTestSelector(testSelector)
+	if len(cmd) == 0 {
+		return ExecutionResult{
+			Verdict: ExecUnwitnessed,
+			Reason:  "missing_fail_to_pass_selector",
+		}, fmt.Errorf("missing fail-to-pass test selector")
+	}
+	v := NewExecutionVerifier(repoDir)
+	res := v.VerifyFailToPassRefs(ctx, parentRef, fixRef, cmd)
+	if res.Verdict == ExecUnwitnessed {
+		if strings.HasPrefix(res.Reason, "scratch_") ||
+			strings.HasPrefix(res.Reason, "commit_not_found") ||
+			strings.HasPrefix(res.Reason, "parent_not_found") ||
+			strings.HasPrefix(res.Reason, "missing_") ||
+			strings.HasPrefix(res.Reason, "fail_to_pass_error:") {
+			return res, fmt.Errorf("verification failed: %s", res.Reason)
+		}
+	}
+	return res, nil
+}
+
+func splitTestSelector(s string) []string {
+	var toks []string
+	var cur strings.Builder
+	inS, inD := false, false
+	flush := func() {
+		if cur.Len() > 0 {
+			toks = append(toks, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range strings.TrimSpace(s) {
+		switch {
+		case r == '\'' && !inD:
+			inS = !inS
+		case r == '"' && !inS:
+			inD = !inD
+		case (r == ' ' || r == '\t' || r == '\n' || r == '\r') && !inS && !inD:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	if len(toks) == 0 {
+		return nil
+	}
+	if toks[0] == "go" {
+		return toks
+	}
+	if strings.HasSuffix(toks[0], ".sh") || strings.HasSuffix(toks[0], ".py") || strings.HasSuffix(toks[0], ".bat") || strings.HasSuffix(toks[0], ".cmd") {
+		return toks
+	}
+	if strings.HasPrefix(toks[0], "-") || strings.HasPrefix(toks[0], ".") || strings.Contains(toks[0], "...") {
+		return append([]string{"go", "test"}, toks...)
+	}
+	return toks
+}
+
 func (r *Resolver) resolveExecution(ctx context.Context, raw string) abi.WitnessOutcome {
 	var spec ExecutionSpec
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
