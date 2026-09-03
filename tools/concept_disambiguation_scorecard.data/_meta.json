@@ -6083,6 +6083,11 @@
           "category": "incidental",
           "reason": "dataslot status type",
           "token": "SlotStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "speculative draft token slot ceiling",
+          "token": "max_preallocated_draft_slots"
         }
       ],
       "exclude": [
@@ -6319,6 +6324,7 @@
         "loopStateForSession",
         "matchedSessions",
         "materializeSessionMoveCheckpoint",
+        "max_preallocated_draft_slots",
         "member_sessions",
         "microagentSessionID",
         "mixedQKVSession",
