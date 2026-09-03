@@ -10,8 +10,10 @@
 
 In developer environments, testing harnesses, and local evaluation benches, **there must never be unmanaged, static background processes or auto-restarting daemon definitions** (such as macOS `launchd` LaunchAgents with `KeepAlive=true`, Linux `systemd --user` units with `Restart=always`, or Windows Task Scheduler jobs) running model servers (`llama-server`, `fak serve`, etc.) out-of-band.
 
+Specifically, static background daemons with `KeepAlive=true` (e.g. `com.fak.*` in `~/Library/LaunchAgents/` or `/Library/LaunchDaemons/`) are strictly prohibited on developer benches.
+
 All local execution must be **composable, ephemeral, and bounded**:
-- **Lifecycle-bound:** Services must be spawned explicitly by the active command, session, or test runner that requires them.
+- **Lifecycle-bound:** Servers are spawned on-demand by the calling harness/session that requires them.
 - **Deterministic teardown:** When the driving command or test finishes (whether successful, failed, or interrupted), all child processes, sockets, and memory reservations must be completely released via disciplined signal traps (`trap cleanup EXIT INT TERM`).
 - **Zero background idle residency:** A developer machine or shared test box must remain at zero resident model weight footprint when no test or benchmark is actively executing.
 
@@ -33,37 +35,55 @@ All local execution must be **composable, ephemeral, and bounded**:
 
 ---
 
-## 3. Immediate Remediation Actions Taken (2026-09-03)
+## 3. Immediate Remediation & Cleanup Commands
 
-1. **Booted Out and Disabled LaunchAgents:**
+When static background daemons are detected or ports are wedged, run the following sequence to clean up:
+
+1. **Boot Out and Disable LaunchAgents / LaunchDaemons:**
    ```bash
-   launchctl bootout "gui/$(id -u)/com.fak.qwen36-kernel"
-   launchctl bootout "gui/$(id -u)/com.fak.serve-gateway"
-   launchctl disable "gui/$(id -u)/com.fak.qwen36-kernel"
-   launchctl disable "gui/$(id -u)/com.fak.serve-gateway"
+   launchctl bootout "gui/$(id -u)/com.fak.qwen36-kernel" 2>/dev/null || true
+   launchctl bootout "gui/$(id -u)/com.fak.serve-gateway" 2>/dev/null || true
+   launchctl disable "gui/$(id -u)/com.fak.qwen36-kernel" 2>/dev/null || true
+   launchctl disable "gui/$(id -u)/com.fak.serve-gateway" 2>/dev/null || true
    ```
-2. **Reaped Plist Files:**
-   Permanently removed from `~/Library/LaunchAgents/`:
-   - `com.fak.qwen36-kernel.plist` and its backups.
-   - `com.fak.qwen36-model.plist*` backups and duplicates.
-   - `com.fak.serve-gateway.plist`.
-3. **Confirmed Process & Port Clearance:**
-   Verified that PID 709 was reaped, port `8090` is completely unallocated, and no `llama-server` processes exist on the system.
+2. **Terminate Lingering Listeners via Port:**
+   ```bash
+   lsof -ti:8090 | xargs kill
+   ```
+3. **Reap and Remove Plist Files:**
+   Permanently remove from `~/Library/LaunchAgents/` and `/Library/LaunchDaemons/`:
+   ```bash
+   rm -f ~/Library/LaunchAgents/com.fak.qwen36-kernel.plist*
+   rm -f ~/Library/LaunchAgents/com.fak.qwen36-model.plist*
+   rm -f ~/Library/LaunchAgents/com.fak.serve-gateway.plist*
+   sudo rm -f /Library/LaunchDaemons/com.fak.* 2>/dev/null || true
+   ```
+4. **Confirm Process & Port Clearance:**
+   Verify that PID 709 was reaped, port `8090` is completely unallocated, and no `llama-server` or rogue `fak serve` processes exist on the system:
+   ```bash
+   lsof -i :8090
+   pgrep -fl "(llama-server|fak serve)"
+   ```
 
 ---
 
-## 4. Cross-Platform Audit: Checking Linux / WSL & Windows
+## 4. Cross-Platform Equivalents: macOS, Linux / WSL & Windows
 
-| Platform | Mechanism to Prevent | Verification & Remediation Command |
-|---|---|---|
-| **macOS** | `~/Library/LaunchAgents/*.plist` with `KeepAlive=true` | `launchctl list \| grep fak`; remove offending plists from `~/Library/LaunchAgents/` |
-| **Linux / WSL** | `~/.config/systemd/user/*.service` or `/etc/systemd/system/*.service` | `systemctl --user list-units --type=service \| grep -E "(fak\|llama\|qwen)"`; disable with `systemctl --user disable --now <unit>` |
-| **Windows** | Scheduled Tasks in `Task Scheduler` (`schtasks`) | `Get-ScheduledTask \| Where-Object TaskName -like "*fak*"` or `schtasks /query`; remove task entries |
+Persistent background daemons manifest differently across operating systems. All developer benches must enforce the same composable lifecycle rules regardless of platform:
+
+| Platform | Persistent Mechanism to Prohibit | Equivalence to macOS Launchd `KeepAlive` | Verification & Remediation Command |
+|---|---|---|---|
+| **macOS** | `~/Library/LaunchAgents/*.plist` or `/Library/LaunchDaemons/*.plist` | `<key>KeepAlive</key><true/>` in launchd plist | `launchctl list \| grep fak`; bootout with `launchctl bootout "gui/$(id -u)/<label>"`; clean port with `lsof -ti:<port> \| xargs kill`; remove plists with `rm -f ~/Library/LaunchAgents/com.fak.*` |
+| **Linux / WSL** | `~/.config/systemd/user/*.service` or `/etc/systemd/system/*.service` | `Restart=always` or `Restart=on-failure` in systemd unit | `systemctl --user list-units --type=service \| grep -E "(fak\|llama\|qwen)"`; disable with `systemctl --user disable --now <unit>`; clean port with `lsof -ti:<port> \| xargs kill` or `fuser -k <port>/tcp`; remove unit files |
+| **Windows** | Scheduled Tasks in `Task Scheduler` (`schtasks`) | Continuous execution triggers or auto-restart on failure | Query with `Get-ScheduledTask \| Where-Object TaskName -like "*fak*"` or `schtasks /query`; remove task with `Unregister-ScheduledTask -TaskName <name> -Confirm:$false` or `schtasks /delete /tn <name> /f`; terminate port with `Stop-Process -Id (Get-NetTCPConnection -LocalPort <port>).OwningProcess -Force` |
 
 ### Linux Audit Findings
 - In Linux/WSL environments, `systemd-run --unit=... --collect` was historically used in scripts under `tools/` and `scripts/gcp-*.sh`.
 - **Rule for Linux testbeds:** Ephemeral benchmarking scripts must never leave persistent systemd units running without an attached reaper timer (`scripts/gcp-idle-reaper.sh`).
 - On developer workstations, no user-level systemd service should automatically launch heavy LLM weights on boot or login.
+
+### Windows Audit Findings
+- Windows dev benches must not register auto-starting Scheduled Tasks or Windows Services with `binPath` pointing to model runners without an explicit `--uninstall` or lifecycle reaper script.
 
 ---
 
