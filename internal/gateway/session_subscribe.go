@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -132,6 +135,87 @@ func (s *Server) handleFakSessionSubscribe(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+
+	isSSE := strings.Contains(r.Header.Get("Accept"), "text/event-stream") ||
+		r.URL.Query().Get("format") == "sse" ||
+		r.URL.Query().Get("stream") == "sse" ||
+		r.URL.Query().Get("stream") == "true"
+
+	isNDJSON := strings.Contains(r.Header.Get("Accept"), "application/x-ndjson") ||
+		r.URL.Query().Get("format") == "ndjson" ||
+		r.URL.Query().Get("stream") == "ndjson"
+
+	if isSSE || isNDJSON {
+		if isSSE {
+			w.Header().Set("Content-Type", "text/event-stream")
+		} else {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
+
+		emit := func(ev SessionChangeEvent) error {
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			if isSSE {
+				if _, err := fmt.Fprintf(w, "event: transition\ndata: %s\n\n", b); err != nil {
+					return err
+				}
+			} else {
+				if _, err := fmt.Fprintf(w, "%s\n", b); err != nil {
+					return err
+				}
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return nil
+		}
+
+		cursor := since
+		events, nextCursor, _ := s.sessionFeed.drainTrace(traceID, cursor)
+		cursor = nextCursor
+		for _, ev := range events {
+			if err := emit(ev); err != nil {
+				return
+			}
+		}
+
+		for {
+			events, nextCursor, _, wake := s.sessionFeed.armTrace(traceID, cursor)
+			cursor = nextCursor
+			for _, ev := range events {
+				if err := emit(ev); err != nil {
+					return
+				}
+			}
+			if wake == nil {
+				continue
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-wake:
+				events, nextCursor, _ := s.sessionFeed.drainTrace(traceID, cursor)
+				cursor = nextCursor
+				for _, ev := range events {
+					if err := emit(ev); err != nil {
+						return
+					}
+				}
+			}
+		}
+	}
+
 	wait, ok := subscribeWait(w, r)
 	if !ok {
 		return

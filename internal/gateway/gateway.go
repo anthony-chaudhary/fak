@@ -46,6 +46,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -237,6 +238,9 @@ func New(cfg Config) (*Server, error) {
 		decideSession:                cfg.DecideSession,
 		stopGate:                     cfg.StopGate,
 		debitSession:                 cfg.DebitSession,
+		table:                        cfg.Table,
+		scheduler:                    cfg.Scheduler,
+		pool:                         cfg.Pool,
 		resetOnBudget:                cfg.ResetOnBudget,
 		budgetDrained:                cfg.OnBudgetExhausted,
 		defaultTraceID:               strings.TrimSpace(cfg.DefaultTraceID),
@@ -342,6 +346,38 @@ func New(cfg Config) (*Server, error) {
 		Epoch:  1,
 		Config: sc,
 	})
+
+	if s.admissionCtl != nil {
+		if s.table != nil {
+			s.admissionCtl.SetTable(s.table)
+		}
+		if s.scheduler != nil {
+			s.admissionCtl.SetSequencer(s.scheduler)
+		}
+		if s.pool != nil {
+			s.admissionCtl.SetFleet(s.pool)
+		}
+	}
+	if s.observeSession == nil && s.table != nil {
+		s.observeSession = func(_ context.Context, traceID string) SessionState {
+			return toGatewaySessionState(s.table.Get(traceID))
+		}
+	}
+	if s.listSessions == nil && s.table != nil {
+		s.listSessions = func(_ context.Context) []SessionState {
+			snap := s.table.Snapshot()
+			out := make([]SessionState, 0, len(snap))
+			for _, st := range snap {
+				out = append(out, toGatewaySessionState(st))
+			}
+			return out
+		}
+	}
+	if s.table != nil && s.sessionFeed != nil {
+		s.table.WatchRevisions(func(st session.State) {
+			s.PublishSessionRevision(toGatewaySessionState(st))
+		})
+	}
 
 	return s, nil
 }

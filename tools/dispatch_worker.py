@@ -756,19 +756,19 @@ def opencode_guard_config_content(command: Sequence[str], gateway_base_url: str,
 
 
 def _opencode_config_candidates(env: dict[str, str]) -> list[Path]:
-    home = Path.home()
-    root = Path(env.get("XDG_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
-                or home / ".config")
     candidates: list[Path] = []
-    explicit = (env.get("OPENCODE_CONFIG") or os.environ.get("OPENCODE_CONFIG") or "").strip()
+    explicit = (env.get("OPENCODE_CONFIG") or "").strip()
     if explicit:
         candidates.append(Path(explicit))
-    candidates.extend([
-        root / "opencode" / "opencode.json",
-        root / "opencode" / "opencode.jsonc",
-        root / "opencode.json",
-        root / "opencode.jsonc",
-    ])
+    xdg = (env.get("XDG_CONFIG_HOME") or "").strip()
+    if xdg:
+        root = Path(xdg)
+        candidates.extend([
+            root / "opencode" / "opencode.json",
+            root / "opencode" / "opencode.jsonc",
+            root / "opencode.json",
+            root / "opencode.jsonc",
+        ])
     seen: set[str] = set()
     out: list[Path] = []
     for path in candidates:
@@ -784,7 +784,7 @@ def _env_substituted_value(value: Any, env: dict[str, str]) -> str:
         return ""
     stripped = value.strip()
     if stripped.startswith("{env:") and stripped.endswith("}"):
-        return env.get(stripped[5:-1], os.environ.get(stripped[5:-1], "")).strip()
+        return env.get(stripped[5:-1], "").strip()
     return stripped
 
 

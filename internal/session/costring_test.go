@@ -147,3 +147,30 @@ func TestDebitUsageZeroCostNoRecord(t *testing.T) {
 		t.Fatalf("Cost.Count = %d after a zero debit, want 0", c)
 	}
 }
+
+// TestCostRingTotalTokens proves TotalTokens sums output + context tokens across all live entries
+// in the ring, returning 0 for an empty ring and retaining only the bounded window when full.
+func TestCostRingTotalTokens(t *testing.T) {
+	var r CostRing
+	if got := r.TotalTokens(); got != 0 {
+		t.Fatalf("empty ring TotalTokens = %d, want 0", got)
+	}
+	r = r.push(TurnCost{OutputTokens: 100, ContextTokens: 50})
+	if got := r.TotalTokens(); got != 150 {
+		t.Fatalf("single turn TotalTokens = %d, want 150", got)
+	}
+	r = r.push(TurnCost{OutputTokens: 200, ContextTokens: 50})
+	if got := r.TotalTokens(); got != 400 {
+		t.Fatalf("two turns TotalTokens = %d, want 400", got)
+	}
+
+	// Fill and overflow the ring (CostRingSize turns total)
+	r = CostRing{}
+	for i := 1; i <= 2*CostRingSize; i++ {
+		r = r.push(TurnCost{OutputTokens: 10, ContextTokens: 5}) // 15 per turn
+	}
+	want := CostRingSize * 15
+	if got := r.TotalTokens(); got != want {
+		t.Fatalf("overflowed ring TotalTokens = %d, want %d", got, want)
+	}
+}

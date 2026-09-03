@@ -42,6 +42,15 @@ func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.listSessions == nil {
+		if s.table != nil {
+			snap := s.table.Snapshot()
+			sessions := make([]SessionState, 0, len(snap))
+			for _, st := range snap {
+				sessions = append(sessions, toGatewaySessionState(st))
+			}
+			writeJSON(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
+			return
+		}
 		writeErr(w, http.StatusNotFound, "session list is not configured")
 		return
 	}

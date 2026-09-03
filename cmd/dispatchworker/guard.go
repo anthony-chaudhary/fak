@@ -23,6 +23,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -550,8 +551,102 @@ func withCodexCompactLimit(command []string) []string {
 	return append(out, command[1:]...)
 }
 
+const (
+	opencodeCompactShedLineTokens = 96000
+	opencodeDefaultProviderID     = "zai-coding-plan"
+)
+
+type opencodeWindowLimit struct {
+	Context int
+	Output  int
+}
+
+var opencodeModelLimits = map[string]map[string]opencodeWindowLimit{
+	"zai-coding-plan": {
+		"glm-5.2":      {Context: 1000000, Output: 131072},
+		"glm-5.1":      {Context: 200000, Output: 131072},
+		"glm-5-turbo":  {Context: 200000, Output: 131072},
+		"glm-5v-turbo": {Context: 200000, Output: 131072},
+		"glm-4.7":      {Context: 204800, Output: 131072},
+		"glm-4.5-air":  {Context: 131072, Output: 98304},
+	},
+}
+
+func opencodeModelProvider(command []string) string {
+	for i, token := range command {
+		if (token == "-m" || token == "--model") && i+1 < len(command) {
+			model := strings.TrimSpace(command[i+1])
+			if idx := strings.Index(model, "/"); idx != -1 {
+				provider := strings.TrimSpace(model[:idx])
+				if provider != "" {
+					return provider
+				}
+			}
+		}
+	}
+	return opencodeDefaultProviderID
+}
+
 // opencodeCompactionOverlay builds the OpenCode-native 96K shed-line config overlay,
 // or nil when the provider's real limits are unknown (fail OPEN). Mirrors
+// tools/dispatch_worker.py:opencode_compaction_overlay.
+func opencodeCompactionOverlay(command []string) map[string]any {
+	provider := opencodeModelProvider(command)
+	catalog, ok := opencodeModelLimits[provider]
+	if !ok || len(catalog) == 0 {
+		return nil
+	}
+	models := map[string]any{}
+	for model, lim := range catalog {
+		if lim.Context <= opencodeCompactShedLineTokens {
+			continue
+		}
+		models[model] = map[string]any{
+			"limit": map[string]any{
+				"context": lim.Context,
+				"input":   opencodeCompactShedLineTokens,
+				"output":  lim.Output,
+			},
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"compaction": map[string]any{
+			"auto":     true,
+			"reserved": 0,
+		},
+		"provider": map[string]any{
+			provider: map[string]any{
+				"models": models,
+			},
+		},
+	}
+}
+
+func opencodeGuardConfigContent(command []string, gatewayBaseURL, existing string) string {
+	provider := opencodeModelProvider(command)
+	overlay := map[string]any{
+		"provider": map[string]any{
+			provider: map[string]any{
+				"options": map[string]any{
+					"baseURL": gatewayBaseURL,
+				},
+			},
+		},
+	}
+	base := map[string]any{}
+	if trimmed := strings.TrimSpace(existing); trimmed != "" {
+		_ = json.Unmarshal([]byte(trimmed), &base)
+	}
+	merged := deepMergeConfig(base, overlay)
+	if compOverlay := opencodeCompactionOverlay(command); compOverlay != nil {
+		merged = deepMergeConfig(merged, compOverlay)
+	}
+	data, _ := json.Marshal(merged)
+	return string(data)
+}
 
 // deepMergeConfig overlays overlay onto base, recursing into nested objects. Mirrors
 // dispatch_worker._deep_merge_config.
@@ -593,6 +688,19 @@ func guardWrap(command []string, fakBin, lane, backend, workspace, workerModel s
 			return command // don't misroute a local-upstream worker
 		}
 		extra = []string{"--base-url", base}
+		if backend == "opencode" {
+			addr := strings.TrimSpace(env["FLEET_DOGFOOD_GUARD_ADDR"])
+			if addr != "" {
+				extra = append([]string{"--addr", addr}, extra...)
+			}
+			if env != nil {
+				targetAddr := addr
+				if targetAddr == "" {
+					targetAddr = "127.0.0.1:8137"
+				}
+				env["OPENCODE_CONFIG_CONTENT"] = opencodeGuardConfigContent(command, "http://"+targetAddr+"/v1", env["OPENCODE_CONFIG_CONTENT"])
+			}
+		}
 	}
 	out := []string{fakBin, "guard", "--provider", provider}
 	out = append(out, extra...)

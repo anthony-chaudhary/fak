@@ -33,6 +33,10 @@ import (
 // Schema is the ledger row schema tag.
 const Schema = "fak-module-versions/1"
 
+// ReasonModuleRevStale is the closed refusal token emitted when a recalled
+// module analysis is pinned to an older module revision than trunk (dos.toml [reasons.MODULE_REV_STALE]).
+const ReasonModuleRevStale = "MODULE_REV_STALE"
+
 // Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
 // a .github/workflows/<file> CI workflow, a tools/<family> script, an
 // examples/<file>.json policy manifest, a .claude/skills/<name> agent skill, or a

@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
@@ -515,6 +516,13 @@ type Config struct {
 	// applied before the model turn is served. Nil keeps the historical observe-only
 	// admission path.
 	DecideSession SessionDecideFunc
+
+	// Table is the optional shared drive-state table for served sessions.
+	Table *session.Table
+	// Scheduler is the optional session scheduler.
+	Scheduler *session.Scheduler
+	// Pool is the optional fleet-wide token budget pool.
+	Pool *session.Pool
 
 	// StopGate checks declared completion evidence at a model-final boundary. Nil disables it.
 	StopGate StopGateFunc

@@ -62,7 +62,7 @@ to reproduce it locally.
 
 | Your change | Run before pushing |
 |---|---|
-| Go code | `go build ./...`, `go vet ./...`, and the tests for the package you touched |
+| Go code | `go build ./...`, `go vet ./...`, and the tests for the package you touched (`fak test ./internal/<pkg>/` or `.\test.ps1 ./internal/<pkg>/` on Windows) |
 | Documentation | Confirm every link you added or moved resolves |
 | Anything | `git commit -s` (DCO sign-off — enforced) |
 
@@ -363,8 +363,10 @@ go run ./cmd/fak-dev windows-setup --apply      # one UAC prompt; default-deny i
 ```
 
 The command idempotently adds Microsoft Defender exclusions for the repository, Go build
-cache/temp roots, fak/Fleet state, and the Go/fak/agent tool processes. It also installs
-inbound and outbound Windows Firewall rules for fak's Fleet-spine multicast endpoint.
+cache/temp roots, fak/Fleet state, OpenCode/cache roots, and the Go/fak/agent/compiler tool processes.
+It configures the active Windows power plan for High/Ultimate Performance on AC power (disabling Modern
+Standby display lock suspension and enabling Away Mode for background tasks) and enables Win32 long paths.
+It also installs inbound and outbound Windows Firewall rules for fak's Fleet-spine multicast endpoint.
 The endpoint defaults to `239.255.70.65:4765` and follows `FLEET_SPINE_GROUP` /
 `FLEET_SPINE_PORT` when those environment variables configure the guard. It reports `READY`
 only after reading every setting back. Use
