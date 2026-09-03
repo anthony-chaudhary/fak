@@ -251,6 +251,41 @@ def test_tracked_tree_has_no_secret_file() -> None:
     assert not hits, "secret/key files tracked in the public tree:\n" + "\n".join(hits)
 
 
+# --- SCRIPT admission: random scripts refused, grandfathered allowed ---------
+
+def test_random_powershell_script_refused() -> None:
+    assert cc._classify("scripts/dogfood-opencode.ps1", ROOT, MAX) is not None
+    assert cc._classify("tools/random.ps1", ROOT, MAX) is not None
+    assert cc._classify("random.ps1", ROOT, MAX) is not None
+    r = cc._classify("scripts/test.ps1", ROOT, MAX)
+    assert r is not None and "prefer making Go" in r
+
+
+def test_random_shell_script_refused() -> None:
+    assert cc._classify("scripts/dogfood-opencode.sh", ROOT, MAX) is not None
+    assert cc._classify("tools/random.sh", ROOT, MAX) is not None
+    assert cc._classify("random.bat", ROOT, MAX) is not None
+    assert cc._classify("random.cmd", ROOT, MAX) is not None
+    r = cc._classify("foo/bar.sh", ROOT, MAX)
+    assert r is not None and "prefer making Go" in r
+
+
+def test_grandfathered_script_allowed() -> None:
+    assert cc._classify("test.ps1", ROOT, MAX) is None
+    assert cc._classify("test.sh", ROOT, MAX) is None
+    assert cc._classify("scripts/build.sh", ROOT, MAX) is None
+    assert cc._classify("tools/build_cuda_windows.ps1", ROOT, MAX) is None
+
+
+def test_tracked_tree_has_no_ungrandfathered_script() -> None:
+    """The tracked tree must carry zero scripts outside the grandfathered baseline."""
+    r = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True)
+    assert r.returncode == 0, "git ls-files failed"
+    hits = [p for p in r.stdout.split()
+            if cc._is_script_file(p) and p not in cc.GRANDFATHERED_SCRIPTS]
+    assert not hits, "ungrandfathered scripts tracked in tree:\n" + "\n".join(hits)
+
+
 def _run() -> int:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

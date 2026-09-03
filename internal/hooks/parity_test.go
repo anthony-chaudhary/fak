@@ -198,6 +198,9 @@ func TestParity_FileAdmission(t *testing.T) {
 		// enforcers (root-hoisted + fak/-nested + the dgx* class), proving lockstep.
 		{"bymachine-drop", map[string]string{"experiments/benchmark/runs/by-machine/dgx-a100/20260718-x/score.json": "{}\n"}, true},
 		{"bymachine-fak-nested", map[string]string{"fak/experiments/benchmark/runs/by-machine/node-a/20260718-x/witness.json": "{}\n"}, true},
+		{"random-ps1", map[string]string{"scripts/my_script.ps1": "Write-Host 'hello'\n"}, true},
+		{"random-sh", map[string]string{"tools/my_tool.sh": "#!/bin/sh\necho hi\n"}, true},
+		{"grandfathered-script", map[string]string{"test.ps1": "#!/usr/bin/env pwsh\n"}, false},
 	})
 }
 

@@ -6,9 +6,10 @@ import (
 )
 
 // gate_fileadmission.go — the FILE_ADMISSION gate, a port of tools/check_committed_files.py.
-// It refuses files that should never be committed: credentials, private-lab subsystems, build
-// junk, regenerable logs/temp, and oversized blobs. The CLASSIFICATION ORDER is load-bearing
-// (check_committed_files.py _classify L127-150) and is reproduced exactly.
+// It refuses files that should never be committed: credentials, private-lab subsystems, random
+// shell/PowerShell scripts (prefer Go sub-modules/applications), build junk, regenerable logs/temp,
+// and oversized blobs. The CLASSIFICATION ORDER is load-bearing (check_committed_files.py _classify
+// L127-150) and is reproduced exactly.
 
 // fileAdmissionMaxBytes is the oversized-blob ceiling: a committed file bigger than this is
 // refused as build junk / an accidental blob. Raised from the original 10 MiB to 25 MiB (a
@@ -34,6 +35,31 @@ var secretFiles = []patternReason{
 var privateOnly = []patternReason{
 	{regexp.MustCompile(`^(cmd|internal)/[^/]*dgx[^/]*/`), "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"},
 	{regexp.MustCompile(`^cmd/slackgc/`), "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"},
+}
+
+// disallowedScriptExtensions lists script extensions prohibited for new repository tooling.
+var disallowedScriptExtensions = []string{".ps1", ".sh", ".bat", ".cmd", ".bash", ".zsh"}
+
+const scriptRefusalReason = "random shell/powershell script (.ps1/.sh/.bat/.cmd) refused: prefer making Go sub-modules (nested modules under tools/<name>/), Go applications (cmd/), or Go leaves (internal/) rather than shell or PowerShell scripts (AGENTS.md: prefer Go tooling/submodules). Port automation to Go."
+
+func isScriptPath(p string) bool {
+	low := strings.ToLower(p)
+	for _, ext := range disallowedScriptExtensions {
+		if strings.HasSuffix(low, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func scriptAdmissionReason(p string) string {
+	if !isScriptPath(p) {
+		return ""
+	}
+	if grandfatheredScripts[p] {
+		return ""
+	}
+	return scriptRefusalReason
 }
 
 // privateByMachine matches a raw per-machine benchmark run drop under
