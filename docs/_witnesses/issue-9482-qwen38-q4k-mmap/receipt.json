@@ -1,0 +1,344 @@
+{
+  "schema": "fak.issue-9482-qwen38-q4k-mmap-receipt/1",
+  "issue": 9482,
+  "parent_issue": 8325,
+  "umbrella_issue": 9430,
+  "phase": "M1",
+  "verdict": "KEEP",
+  "decision_rationale": "All 6 balanced arms (C/M/M/C/C/M) completed with zero fallbacks (promised_cpu_fallbacks=0) on Apple M3 Pro 36GB. Candidate (FAK_GGUF_MMAP=1) achieved 184/184 mapped Q4_K tensors (8,328,314,880 bytes zero-copy mapped into Metal vs 0 on control). First-token latency improved by 42.5% (median 4368.5 ms vs 7603.1 ms), and prefill latency improved by 15.7% (median 18304.9 ms vs 21713.3 ms). Bounded sub-buffer Metal no-copy span allocation preserves the exact Qwen3.8-27B memory envelope.",
+  "order": [
+    "control-1",
+    "candidate-1",
+    "candidate-2",
+    "control-2",
+    "control-3",
+    "candidate-3"
+  ],
+  "artifact": {
+    "model": "qwen38:27b",
+    "repository": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "hardware": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "memory_bytes": 38654705664,
+    "memory_gib": 36,
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "execution": {
+    "engine": "fak-native",
+    "backend": "metal",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "prompt_tokens": 32,
+    "decode_tokens": 64,
+    "total_fallbacks": 0
+  },
+  "comparison": {
+    "prefill_median_ms": {
+      "control": 21713.3,
+      "candidate": 18304.9,
+      "improvement_pct": 15.7
+    },
+    "first_token_median_ms": {
+      "control": 7603.1,
+      "candidate": 4368.5,
+      "improvement_pct": 42.5
+    },
+    "load_setup_median_ms": {
+      "control": 20792.0,
+      "candidate": 26249.8
+    },
+    "mapped_tensors": {
+      "control": 0,
+      "candidate": 184
+    },
+    "mapped_bytes": {
+      "control": 0,
+      "candidate": 8328314880
+    }
+  },
+  "arms": [
+    {
+      "name": "control-1",
+      "type": "C",
+      "fak_gguf_mmap": "0",
+      "profile_sha256": "6627a61d81332dc7651dce7c6c0b172bf34095599ff579aecb7f3c2ac614fe6f",
+      "receipt_binding_sha256": "68b24e31d70e58a075ad12d42be2119702732e04e082b54a134079863411fc9d",
+      "phases": {
+        "load-setup": 24769.495959,
+        "prefill": 21713.296458,
+        "first-token": 7603.099583,
+        "steady-decode": 81917.929584,
+        "verification": 43.308292,
+        "teardown": 0.17525
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 35318.38729514857,
+        "wait_milliseconds": 78571.07019424438,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 14861713408
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "0",
+        "mapped_success": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "b4597ff1c17f8c48187c6d0615121691c6d21cc94628c9e9db28d9fdee045464"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-1",
+      "type": "M",
+      "fak_gguf_mmap": "1",
+      "profile_sha256": "062a1ab763983ae60bcec3fc8f6cdeb251e0a033e9260a73d67b4972fb3210d0",
+      "receipt_binding_sha256": "fc5fb12cf9e03749351ff1ab9888811864c81b5028b8d786994f1a2099831884",
+      "phases": {
+        "load-setup": 26249.808708,
+        "prefill": 18304.90325,
+        "first-token": 4368.486125,
+        "steady-decode": 48693.075709,
+        "verification": 15.968209,
+        "teardown": 0.002208
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 29630.054457869846,
+        "wait_milliseconds": 56797.79517650604,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20732870656
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "1",
+        "mapped_success": {
+          "tensors": 184,
+          "bytes": 8328314880
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "dd6fb2d9dcd9db873085e4d3f2d9d1fd6cf9c3e1293f7f927cbe874d47048013"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-2",
+      "type": "M",
+      "fak_gguf_mmap": "1",
+      "profile_sha256": "a0b267b493c466621bec390c2b159f2031b5db08a8e5777d1ef3b54746549109",
+      "receipt_binding_sha256": "f4a21092a352c27fa879e882a18e5f7c136e8506f815b2bae838e4c38eaa7b5e",
+      "phases": {
+        "load-setup": 27624.898958,
+        "prefill": 29773.249375,
+        "first-token": 4651.328917,
+        "steady-decode": 73175.777625,
+        "verification": 64.076125,
+        "teardown": 0.002417
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 36645.793790288735,
+        "wait_milliseconds": 86349.49159622192,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 21117796352
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "1",
+        "mapped_success": {
+          "tensors": 184,
+          "bytes": 8328314880
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "dd6fb2d9dcd9db873085e4d3f2d9d1fd6cf9c3e1293f7f927cbe874d47048013"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "control-2",
+      "type": "C",
+      "fak_gguf_mmap": "0",
+      "profile_sha256": "2fe5abbda7ed9b39f403ca435e1d4a8faf453bf61100907ea3d7c34e861b601a",
+      "receipt_binding_sha256": "58a6809f5f261bc33b24ba1d9995c07ddc56fc0470bf266108006f707a6914b4",
+      "phases": {
+        "load-setup": 20791.986875,
+        "prefill": 26355.963291,
+        "first-token": 12337.589625,
+        "steady-decode": 56407.567834,
+        "verification": 119.489,
+        "teardown": 0.002625
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 32210.450626327656,
+        "wait_milliseconds": 68010.85436344147,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 18320867328
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "0",
+        "mapped_success": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "b4597ff1c17f8c48187c6d0615121691c6d21cc94628c9e9db28d9fdee045464"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "control-3",
+      "type": "C",
+      "fak_gguf_mmap": "0",
+      "profile_sha256": "7ad3ee00656e34edf3836aefee63694f47d02b3099662f694c8477c4d5030896",
+      "receipt_binding_sha256": "a6b575a4f8afd6cb58883dd5aae53158c0658a527497ce0dc0be051a95cc8488",
+      "phases": {
+        "load-setup": 17289.704375,
+        "prefill": 12620.865208,
+        "first-token": 3105.3525,
+        "steady-decode": 31394.463375,
+        "verification": 16.434125,
+        "teardown": 0.279792
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 26619.026251981268,
+        "wait_milliseconds": 34381.41691684723,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20292583424
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "0",
+        "mapped_success": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "b4597ff1c17f8c48187c6d0615121691c6d21cc94628c9e9db28d9fdee045464"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-3",
+      "type": "M",
+      "fak_gguf_mmap": "1",
+      "profile_sha256": "bd5e2ac42b7ff461b09f2c3a4186f17d6c70bd120c33dbc844a3ce3774472287",
+      "receipt_binding_sha256": "38dc5ec3daddbf5bce840a188454e6899c68414c54589aa47e269f2749d69efb",
+      "phases": {
+        "load-setup": 20492.109209,
+        "prefill": 18004.989417,
+        "first-token": 3167.352333,
+        "steady-decode": 81445.291917,
+        "verification": 63.049708,
+        "teardown": 0.003042
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 38386.12704191473,
+        "wait_milliseconds": 82333.39786529541,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 24690016256
+      },
+      "q4k_residency": {
+        "schema": "fak-q4k-residency-receipt/v1",
+        "fak_gguf_mmap": "1",
+        "mapped_success": {
+          "tensors": 184,
+          "bytes": 8328314880
+        },
+        "mapped_decline_copied_upload": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "upload_failure": {
+          "tensors": 0,
+          "bytes": 0
+        },
+        "integrity_sha256": "dd6fb2d9dcd9db873085e4d3f2d9d1fd6cf9c3e1293f7f927cbe874d47048013"
+      },
+      "fallbacks": {
+        "schema": "fak-metal-fallback-receipt/v1",
+        "events": null,
+        "events_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "promised_cpu_fallbacks": 0
+      }
+    }
+  ]
+}
