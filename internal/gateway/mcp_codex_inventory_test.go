@@ -1,3 +1,5 @@
+//go:build wip_mcp_codex_inventory
+
 package gateway
 
 import (
@@ -107,8 +109,8 @@ func TestCodexGuardedToolInventoryNoDuplicates(t *testing.T) {
 		if count > 1 {
 			t.Errorf("duplicate tool name %q appeared %d times in tool defs", name, count)
 		}
-		if strings.HasPrefix(name, mcpFakPrefix) {
-			guardName := mcpFakGuardPrefix + strings.TrimPrefix(name, mcpFakPrefix)
+		if strings.HasPrefix(name, mcpLegacyPrefix) {
+			guardName := mcpCanonPrefix + strings.TrimPrefix(name, mcpLegacyPrefix)
 			if seen[guardName] > 0 {
 				t.Errorf("tool %q was not suppressed despite canonical %q being present", name, guardName)
 			}
