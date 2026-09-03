@@ -440,7 +440,11 @@ func (w *promWriter) gauge(name, help string, val float64, labelPairs ...string)
 	w.b.WriteString(name)
 	w.writeLabels(labelPairs)
 	w.b.WriteByte(' ')
-	w.b.WriteString(strconv.FormatFloat(val, 'g', -1, 64))
+	if val == math.Trunc(val) && math.Abs(val) < 1e15 {
+		w.b.WriteString(strconv.FormatInt(int64(val), 10))
+	} else {
+		w.b.WriteString(strconv.FormatFloat(val, 'g', -1, 64))
+	}
 	w.b.WriteByte('\n')
 }
 

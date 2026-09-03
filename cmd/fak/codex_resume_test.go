@@ -293,7 +293,7 @@ func TestCodexResumeAccountLaunchEnvAndBindingCommitGate(t *testing.T) {
 		"CODEX_SESSION_ID=stale",
 		"FAK_ATTEMPT_ID=stale",
 	}, "/selected")
-	if len(cmd) != 7 || cmd[0] != "codex-custom" || cmd[5] != threadID || cmd[6] != "continue" {
+	if len(cmd) != 7 || cmd[0] != "codex-custom" || cmd[5] != threadID || cmd[6] != "continue" { //boundarylint:ignore CHANGE_DETECTOR_TEST the resume launch argv contract specifies exactly seven elements
 		t.Fatalf("launch command did not use exact thread UUID: %v", cmd)
 	}
 	var codexHomes int

@@ -332,7 +332,7 @@ func TestMacBenchValidateComparisonPublishesOnlyExactMatchedPacket(t *testing.T)
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("decode validation: %v\n%s", err, stdout.String())
 	}
-	if result.Schema != "fak.macbench.comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 64 {
+	if result.Schema != "fak.macbench.comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width is a fixed 64-character invariant
 		t.Fatalf("validation = %+v", result)
 	}
 

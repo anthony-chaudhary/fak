@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -84,6 +85,8 @@ func runVCacheFixturePut(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
+	*payloadFile = pathutil.ExpandTilde(*payloadFile)
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak vcache put: unexpected positional arguments")
 		return 2
@@ -170,6 +173,7 @@ func runVCacheInspect(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak vcache inspect: unexpected positional arguments")
 		return 2
