@@ -84,11 +84,12 @@ const (
 // context ("gguf-q4k-load", "decode logits", "kv prefill window"); it is never
 // parsed by policy code.
 type MemoryDemand struct {
-	Class  MemoryClass
-	Bytes  int64
-	Detail string
-	Scope  MemoryScope
-	DType  string // optional bounded dtype/storage label ("f32", "q8_0", "mixed"); empty = unknown/not applicable
+	Class       MemoryClass
+	Bytes       int64
+	Detail      string
+	Scope       MemoryScope
+	DType       string // optional bounded dtype/storage label ("f32", "q8_0", "mixed"); empty = unknown/not applicable
+	EpochDigest string
 }
 
 // MemoryPlan is the classed form of "will this fit?" A plan can hold several
@@ -96,6 +97,30 @@ type MemoryDemand struct {
 // scratch. It is intentionally pure data so loaders can build it from headers
 // before allocating.
 type MemoryPlan []MemoryDemand
+
+// EpochDigest reports the hardware epoch digest associated with this plan, if any.
+func (p MemoryPlan) EpochDigest() string {
+	for _, d := range p {
+		if d.EpochDigest != "" {
+			return d.EpochDigest
+		}
+	}
+	return ""
+}
+
+// WithEpochDigest returns a copy of the plan with the given epoch digest assigned
+// to all demands.
+func (p MemoryPlan) WithEpochDigest(digest string) MemoryPlan {
+	if p == nil {
+		return nil
+	}
+	out := make(MemoryPlan, len(p))
+	for i, d := range p {
+		d.EpochDigest = digest
+		out[i] = d
+	}
+	return out
+}
 
 // EstimateKVStoreBytes reports the resident bytes required by the compute.KVStore
 // layout for tokens cached at once. The HAL KV contract stores three rows per cached
@@ -457,6 +482,11 @@ const (
 	FitTooBig
 )
 
+// EpochDigest reports the hardware epoch digest associated with this verdict.
+func (f FitVerdict) EpochDigest() string {
+	return ""
+}
+
 // String renders the verdict for logs and refusal messages.
 func (f FitVerdict) String() string {
 	switch f {
@@ -612,11 +642,12 @@ func fitsMemoryPlanByScope(b Backend, plan MemoryPlan, headroom float64) (scope 
 // this refusal (the fail-open contract from DeviceCapacity, docs/explainers/hardware-limits-
 // and-capacity.md Plank 5).
 type FitError struct {
-	Verdict FitVerdict // always FitTooBig
-	Want    int64      // bytes the caller asked to place in Scope
-	Avail   int64      // headroom-adjusted budget the verdict was computed against
-	Demands MemoryPlan // optional classed breakdown of Want
-	Scope   MemoryScope
+	Verdict     FitVerdict // always FitTooBig
+	Want        int64      // bytes the caller asked to place in Scope
+	Avail       int64      // headroom-adjusted budget the verdict was computed against
+	Demands     MemoryPlan // optional classed breakdown of Want
+	Scope       MemoryScope
+	EpochDigest string
 }
 
 func (e *FitError) Error() string {
@@ -716,7 +747,11 @@ func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
 	if verdict != FitTooBig {
 		return nil
 	}
-	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail, Scope: MemoryScopeDevice}
+	var epochDigest string
+	if ep, ok := BackendCurrentEpoch(b); ok {
+		epochDigest = ep.Digest
+	}
+	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail, Scope: MemoryScopeDevice, EpochDigest: epochDigest}
 }
 
 // RefuseMemoryPlanIfTooBig is the class-preserving form of RefuseIfTooBig. It
@@ -728,7 +763,13 @@ func RefuseMemoryPlanIfTooBig(b Backend, plan MemoryPlan, headroom float64) erro
 	if verdict != FitTooBig {
 		return nil
 	}
-	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: scope}
+	epochDigest := plan.EpochDigest()
+	if epochDigest == "" {
+		if ep, ok := BackendCurrentEpoch(b); ok {
+			epochDigest = ep.Digest
+		}
+	}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: scope, EpochDigest: epochDigest}
 }
 
 // RefuseMemoryPlanIfTooBigForHost is the NO-BACKEND, host-RAM counterpart of
@@ -766,7 +807,7 @@ func refuseMemoryPlanForHostMem(plan MemoryPlan, total, free int64, known bool, 
 	if verdict != FitTooBig {
 		return nil
 	}
-	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: MemoryScopeHost}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: MemoryScopeHost, EpochDigest: plan.EpochDigest()}
 }
 
 // RefuseHostScopedPlanIfTooBigForHost is the --cpu-offload-experts counterpart of
@@ -807,7 +848,7 @@ func refuseHostScopedPlanForHostMem(plan MemoryPlan, total, free int64, known bo
 			hostPlan = append(hostPlan, d)
 		}
 	}
-	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: hostPlan, Scope: MemoryScopeHost}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: hostPlan, Scope: MemoryScopeHost, EpochDigest: plan.EpochDigest()}
 }
 
 // DeviceAllocError is the typed form of a RUNTIME in-kernel device allocation failure — the
