@@ -24,12 +24,13 @@ import (
 // per-model Jinja engine.
 //
 // Confusion risk (per the issue): fak's template is HARDCODED ChatML (Qwen/SmolLM2
-// grammar), not a general Jinja engine. Where it deliberately diverges from the
-// stock upstream Qwen3 Jinja tool template — it omits the upstream preamble line
-// "You may call one or more functions to assist with the user query." — the diff is
-// CAPTURED below (TestBonsaiChatMLToolPreambleDivergenceCaptured), not assumed away.
-// Everything here is OFFLINE: no weights, no GPU, no network — the render/parse
-// functions are pure over the transcript.
+// grammar), not a general Jinja engine. The one divergence this file used to document —
+// omitting the upstream preamble line "You may call one or more functions to assist
+// with the user query." — CLOSED with issue #10600: toolSpecBlock now ports the tools
+// branch shared by the upstream Qwen3 / Qwen2.5-Coder templates byte-for-byte, and
+// TestBonsaiChatMLToolPreambleDivergenceCaptured pins the closure. Everything here is
+// OFFLINE: no weights, no GPU, no network — the render/parse functions are pure over
+// the transcript.
 
 // bonsaiConfig returns a model.Config that IsQwen35Hybrid() recognizes as a Bonsai /
 // Qwen3.6 hybrid checkpoint: at least one linear_attention (Gated-DeltaNet) layer, the
@@ -67,33 +68,26 @@ func bonsaiRequestTools() []ToolDef {
 // leading system block folds the tool schema into a <tools>…</tools> advertisement plus
 // the <tool_call> emission instruction; the assistant turn is pre-seeded with the empty
 // <think>\n\n</think> block that mirrors apply_chat_template(enable_thinking=false).
+// The system block is a byte-faithful port of the tools branch shared by the upstream
+// Qwen3 and Qwen2.5-Coder chat templates (verified against Qwen/Qwen3-32B and
+// Qwen/Qwen2.5-Coder-7B-Instruct tokenizer_config.json renders via jinja2) — issue
+// #10600 closed the previously documented preamble/grammar divergence.
 const bonsaiChatMLReferenceThinkingOff = `<|im_start|>system
 You are Bonsai, a helpful assistant.
 
 # Tools
 
+You may call one or more functions to assist with the user query.
+
 You are provided with function signatures within <tools></tools> XML tags:
 <tools>
-{"type":"function","function":{"name":"get_weather","description":"Get the current temperature for a city, in Celsius.","parameters":{"type":"object","properties":{"city":{"type":"string","description":"City name, e.g. Paris"}},"required":["city"]}}}
+{"type": "function", "function": {"name": "get_weather", "description": "Get the current temperature for a city, in Celsius.", "parameters": {"type": "object", "properties": {"city": {"type": "string", "description": "City name, e.g. Paris"}}, "required": ["city"]}}}
 </tools>
 
-If you choose to call a function ONLY reply in the following format with NO suffix:
-
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
 <tool_call>
-<function=example_function_name>
-<parameter=example_parameter_1>
-value_1
-</parameter>
-</function>
-</tool_call>
-
-<IMPORTANT>
-Reminder:
-- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
-- Required parameters MUST be specified
-- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
-- If there is no function call available, answer normally
-</IMPORTANT><|im_end|>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call><|im_end|>
 <|im_start|>user
 What is the weather in Paris?<|im_end|>
 <|im_start|>assistant
@@ -167,29 +161,41 @@ func TestBonsaiChatMLThinkingDefaultMatchesEnableThinkingFalse(t *testing.T) {
 	}
 }
 
-// TestBonsaiChatMLToolPreambleDivergenceCaptured CAPTURES the one deliberate divergence
-// between fak's hardcoded ChatML tool block and the stock upstream Qwen3 Jinja tool
-// template: fak omits the upstream preamble line "You may call one or more functions to
-// assist with the user query." The issue's confusion-risk directive is to capture such a
-// diff rather than assume identity — so this test documents it as a known, asserted delta.
-// If a future edit adds the preamble (or the upstream drifts), this test tells us the diff
-// closed and the render moved.
+// TestBonsaiChatMLToolPreambleDivergenceCaptured used to CAPTURE a deliberate divergence
+// (fak omitted the upstream "You may call one or more functions…" preamble and taught the
+// antl emission format). Issue #10600 closed it: toolSpecBlock now ports the tools branch
+// shared by the upstream Qwen3 / Qwen2.5-Coder templates byte-for-byte, so this test
+// flipped into a closure witness — the preamble must be present, the antl instruction and
+// the compact json.Marshal signature spacing must be gone, and the system turn must end
+// flush with </tool_call><|im_end|> the way both upstream templates end it.
 func TestBonsaiChatMLToolPreambleDivergenceCaptured(t *testing.T) {
 	const upstreamPreamble = "You may call one or more functions to assist with the user query."
 	got := renderInKernelChatMLTools(bonsaiRequestMessages(), bonsaiRequestTools(), bonsaiConfig())
-	if strings.Contains(got, upstreamPreamble) {
-		t.Fatalf("render now CONTAINS the upstream Qwen3 preamble %q — the documented divergence closed; update the reference transcript and this witness", upstreamPreamble)
+	if !strings.Contains(got, upstreamPreamble) {
+		t.Fatalf("render no longer carries the upstream preamble %q — the template diverged again:\n%q", upstreamPreamble, got)
 	}
-	// The structural tool advertisement fak DOES render is still present and complete.
+	// The structural tool advertisement fak renders is still present and complete.
 	for _, want := range []string{
 		"# Tools",
 		"<tools>",
-		`"name":"get_weather"`,
+		`"name": "get_weather"`, // tojson spacing, not compact json.Marshal
 		"</tools>",
-		"<tool_call></tool_call> XML tags",
+		"For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("tool advertisement missing %q in render:\n%q", want, got)
+		}
+	}
+	// The old antl emission format and the <IMPORTANT> reminder are the Ornith contract,
+	// never the Qwen3/Qwen2.5 one; and the turn ends flush against <|im_end|>.
+	for _, banned := range []string{
+		"If you choose to call a function ONLY reply in the following format",
+		"<IMPORTANT>",
+		`"name":"get_weather"`,
+		"</tool_call>\n<|im_end|>", // the template ends the turn flush, no newline between
+	} {
+		if strings.Contains(got, banned) {
+			t.Errorf("render carries divergent %q:\n%q", banned, got)
 		}
 	}
 }
@@ -259,7 +265,7 @@ func TestBonsaiToolCallLiftConformance(t *testing.T) {
 		{Role: RoleTool, ToolCallID: "call_0", Name: "get_weather", Content: "15"},
 	}, bonsaiRequestTools())
 
-	if !strings.Contains(transcript, "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\":\"Paris\"}}\n</tool_call>") {
+	if !strings.Contains(transcript, "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>") {
 		t.Errorf("assistant tool call did not render as canonical <tool_call> block:\n%q", transcript)
 	}
 	if !strings.Contains(transcript, "<tool_response>\nget_weather: 15\n</tool_response>") {

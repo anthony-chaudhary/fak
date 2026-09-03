@@ -134,7 +134,7 @@ func newQwen35MTPDrafter(draftLength int, targetHidden Qwen35MTPTargetHidden, to
 // The returned closure shares this adapter's lifecycle and error latch.
 func (d *Qwen35MTPDrafter) Drafter() polymodel.Drafter {
 	if d == nil {
-		return func([]int) []int { return nil }
+		return nilQwen35MTPDraft
 	}
 	return d.Propose
 }

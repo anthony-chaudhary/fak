@@ -155,7 +155,28 @@ class CommandShapeTest(unittest.TestCase):
     def test_unknown_backend_rejected(self) -> None:
         mod = load()
         with self.assertRaises(ValueError):
-            mod.build_command("sonnet", as_of="2026-06-20", backend="opencode")
+            mod.build_command("sonnet", as_of="2026-06-20", backend="cursor")
+
+    def test_opencode_command_mirrors_issue_resolve_conventions(self) -> None:
+        # Same headless opencode argv shape as issue_resolve_dispatch's opencode
+        # worker arm: pure + print-logs + skip-permissions, then -m, then prompt.
+        mod = load()
+        cmd = mod.build_command("openai/glm-4.7", as_of="2026-06-20", backend="opencode")
+        self.assertEqual(
+            cmd[:5],
+            ["opencode", "run", "--pure", "--print-logs", "--dangerously-skip-permissions"],
+        )
+        self.assertEqual(cmd[5:7], ["-m", "openai/glm-4.7"])
+        self.assertIn("Garden the open GitHub issue backlog", cmd[7])
+        self.assertEqual(len(cmd), 8)
+
+    def test_opencode_without_model_omits_m_flag(self) -> None:
+        # No pin => the seat's configured opencode model; never a Claude alias.
+        mod = load()
+        cmd = mod.build_command("", as_of="2026-06-20", backend="opencode")
+        self.assertEqual(cmd[0], "opencode")
+        self.assertNotIn("-m", cmd)
+        self.assertIn("Garden the open GitHub issue backlog", cmd[-1])
 
 
 class PayloadAndLaunchTest(unittest.TestCase):
@@ -180,6 +201,35 @@ class PayloadAndLaunchTest(unittest.TestCase):
         self.assertTrue(payload["propose_only"])
         self.assertEqual(payload["model"], "sonnet")
         self.assertEqual(payload["tier"], "2")
+
+    def test_dry_run_opencode_unpinned_forwards_no_claude_alias(self) -> None:
+        mod = load()
+        import contextlib
+        import io
+        import json as _json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = mod.main(["--json", "--backend", "opencode"])
+        self.assertEqual(rc, 0)
+        payload = _json.loads(buf.getvalue())
+        self.assertEqual(payload["model"], "")
+        self.assertNotIn("-m", payload["command"])
+
+    def test_dry_run_opencode_explicit_pin_is_forwarded(self) -> None:
+        mod = load()
+        import contextlib
+        import io
+        import json as _json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = mod.main(["--json", "--backend", "opencode", "--model", "openai/glm-4.7"])
+        self.assertEqual(rc, 0)
+        payload = _json.loads(buf.getvalue())
+        self.assertEqual(payload["model"], "openai/glm-4.7")
+        self.assertIn("-m", payload["command"])
+        self.assertIn("openai/glm-4.7", payload["command"])
 
     def test_live_launch_calls_runner_with_stamped_env(self) -> None:
         mod = load()

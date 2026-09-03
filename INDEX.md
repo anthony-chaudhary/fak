@@ -1,5 +1,6 @@
 # INDEX — the full map of the fak repo
 
+- [docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md](docs/notes/POSTTOOL-LATENCY-SPAN-2026-09-02.md) — the #10662 post-tool latency span: `tool_result_recorded → next_model_item` definition, disjointness rule, closed band/ordinal/attribution vocabularies, and the `fak session-audit posttool` readout.
 - [docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md](docs/notes/qwen38-paged-swap-dogfood-2026-08-29.md) — production-sized, repository-derived Qwen3.8 paged-swap codec round-trip witness for issue #9617.
 
 
@@ -287,6 +288,17 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-DS4-STRIX-HALO-TP-ODINLINK-2026-09-02.md`](docs/notes/CONCEPT-STUDY-DS4-STRIX-HALO-TP-ODINLINK-2026-09-02.md) — pinned deep study of wkljohn/ds4-strix-halo-tp-odinlink: dual AMD Strix Halo APU Tensor Parallelism over USB4 OdinLink and RoCE v2, selection range expert sharding, greedy top-2 logit reduction, direct slab RDMA, AVX-512 WC streaming copy, GLM-5.3 Wave32 KDA linear recurrence, and direct I/O streaming; receipt `study_dc99f78a887e2ab60a9ccf5807650b6da85ac992d7f69d96b335360c55892811`; parent epic #2869; filed #10755, #10756, #10758-#10763.
+- [`docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md`](docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md) — pinned exhaustive study of OpenRouter's Go/Python/TypeScript SDKs, Responses API, agent loop graceful termination (`stop_server_tools_when`), ReDoS-safe guardrail linting, hierarchical policy composition algebra, and response healing; receipt `study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780`; filed #10742, #10744-#10747.
+- [`docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md`](docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md) — pinned deep study of lightseekorg/tokenspeed LLM inference engine for agentic workloads: C++ FSM request lifecycle, overlap scheduling with in-flight tracking, declarative kernel/backend registry with FormatSignature, and first-class selection objectives; receipt `study_cd231d853e89cb3218b25711bf6c92fa19a247d650f6f53981ccee1e1636269d`; parent epic #10741; filed child leaves #10743, #10748, #10749, #10750.
+- [OpenCode Provider Architecture Study — 2026-09-02](docs/notes/CONCEPT-STUDY-OPENCODE-PROVIDER-ARCHITECTURE-2026-09-02.md) -- auto-indexed dated note.
+- [Concept Study: Portkey AI Gateway](docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md) -- auto-indexed dated note.
+- [`docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md`](docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md) — pinned deep study of kvcached's virtual-to-physical KV reservation, page-aligned eviction, zero-copy prefix sharing, page-granular CPU offloading, and compound-page layout lessons; filed #10720-#10723.
+- [`docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md`](docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md) — pinned deep study of vLLM's worker execution loop, compilation stack, device communicators, output pipeline, and benchmark methodology; filed #10719, #10725-#10729.
+- [OpenCode Study — 2026-09-02](docs/notes/CONCEPT-STUDY-OPENCODE-2026-09-02.md) -- auto-indexed dated note.
+- [`docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md`](docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md) — pinned deep study of TurboQuant-vLLM's MoE sparse dequantization, 3/4-bit KV ladder rungs, shape-gain norm correction, and CUDA-graph invariants; filed #10709 and #10710.
+- [`docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md`](docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md) — pinned deep study of julianmb/q38rocm Qwen 3.8 27B ROCmFP4 on AMD Strix Halo: hardware-aligned block quantization, MTP speculative decoding, asymmetric TurboQuant KV cache, prompt-cache coexistence with empty-spec tolerance, automated tuning sweeps, and quality evaluation; receipt `study_6777fd46608e1a1293a3f111c4a4f17a9aab28c16431e689f0e011cffc965cb6`; filed #10730-#10735.
+- [`docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md`](docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md) — pinned deep study of eunomia-bpf/agentsight eBPF boundary tracing, multi-source token priority merge, Gemini CLI session parsing, bounded materialized view models, and session-centric top monitoring; receipts `study_f51c1d2130e4c1b521ac9c689718677da6f0faba1bfb185cfd8cb53b4b7d1d13` and `study_8e02e83cb64d8494cf8fe3d320cf13be15d6d1b9f9a296f4f52eaba07f124f0d`; parent tracker #10736; filed child leaves #10737, #10738, #10739, #10740.
 - [`docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json`](docs/notes/DEVINDEX-DISCOVERY-BASELINE-2026-09-01.json) — refreshed repository-discovery baseline for the curated doc map (`fak-dev index benchmark`, schema `fak-devindex-discovery-benchmark/1`): 15/24 top-5 (62.5%), 120 results, 9,267 rendered bytes over the 24 fixed navigation questions; hit set unchanged from the 2026-08-25 baseline.
 - [`docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md`](docs/notes/CONCEPT-STUDY-HIPFIRE-2026-09-01.md) — pinned deep study of Hipfire's RDNA-native admission, cache/session safety, retained replay, evidence contracts, negative results, and provenance; reuses #9587/#8395 and files no duplicate mechanism issue.
 
@@ -418,6 +430,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Harness creator ten-minute spine witness — 2026-08-15](docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md) -- auto-indexed dated note.
 - [Custom tool registration, model visibility, and deterministic skill programs](docs/notes/CUSTOM-TOOL-REGISTRATION-SKILL-PROGRAMS-2026-08-14.md) -- separates installed, allowed, exposed, and selected tools; defines explicit versioned skill-to-program compilation.
 - [Worktree ledger ownership](docs/notes/WORKTREE-LEDGER-OWNERSHIP-2026-08-13.md) -- auto-indexed dated note.
+- [Git resource ownership and crash-safe cleanup audit](docs/notes/GIT-RESOURCE-OWNERSHIP-AUDIT-2026-09-01.md) -- distinguishes shared repository resources from per-worktree state and types fail-closed cleanup admission after worker or host loss.
+- [Reversible model-visible shorthand indexes for repeated paths](docs/notes/PATH-SHORTHAND-INDEX-RESEARCH-2026-09-01.md) -- surveys OSS and research, defines typed epoch-scoped aliases, and maps the transform onto fak memory/cache layers.
 - [Caveman study: shape-specific context transforms with measured fallback](docs/notes/CONCEPT-STUDY-CAVEMAN-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6668-#6670.
 - [Ponytail study: portable behavioral instructions and their witnesses](docs/notes/CONCEPT-STUDY-PONYTAIL-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6671-#6673.
 

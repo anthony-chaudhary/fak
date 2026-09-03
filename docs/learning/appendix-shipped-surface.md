@@ -1,6 +1,6 @@
 ---
 title: "fak learning path — You've finished the path"
-description: "A staged part of the fak learning path, split out of LEARNING-PATH.md so each stage stays a bounded read."
+description: "A completion appendix that inventories the shipped fak surface and gives final verification commands after the staged learning path."
 ---
 
 # You've finished the path — the shipped-surface appendix

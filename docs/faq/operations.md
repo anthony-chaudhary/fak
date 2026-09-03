@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Operations, configuration, and deployment"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How to run fak reliably in production, covering configuration, startup, upgrades, recovery, capacity, health checks, and incident response."
 ---
 
 # Operations, configuration, and deployment

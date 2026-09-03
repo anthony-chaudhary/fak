@@ -345,9 +345,10 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 				return 1
 			}
 			launchedAt := recoveryNow()
-			if err := recoveryLaunch.Launch(requests[i]); err != nil {
+			handle, launchErr := recoveryLaunch.Launch(requests[i])
+			if launchErr != nil {
 				requests[i].Status = "launch_failed"
-				requests[i].Reason = err.Error()
+				requests[i].Reason = launchErr.Error()
 				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
 				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
 					return 1
@@ -356,6 +357,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			}
 			requests[i].Status = "launched_unproven"
 			result := sessionRecoveryResult(requests[i])
+			result.LaunchIdentity = handle.Identity()
 			result.LaunchedAt = launchedAt.UTC().Format(time.RFC3339Nano)
 			result.BaselineCursor = summary.Results[resultIndex].BaselineCursor
 			result.BaselineAt = summary.Results[resultIndex].BaselineAt

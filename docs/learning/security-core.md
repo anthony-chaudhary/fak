@@ -1,6 +1,6 @@
 ---
 title: "fak learning path — L300"
-description: "A staged part of the fak learning path, split out of LEARNING-PATH.md so each stage stays a bounded read."
+description: "The L300 security stage teaches fak's in-process default-deny capability floor, write-time controls, and their verification labs."
 ---
 
 # L300 — The Security Core: the in-process default-deny floor and the write-time wall

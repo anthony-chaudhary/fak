@@ -8594,12 +8594,6 @@
         },
         {
           "kind": "repo_path",
-          "id": "docs/benchmark/mac-cpu-parity-runbook.md",
-          "revision": "8f0fa4147eaef6cc7f87ee3f767581995fac3968",
-          "path": "docs/benchmark/mac-cpu-parity-runbook.md"
-        },
-        {
-          "kind": "repo_path",
           "id": "docs/notes/CPU-INFERENCE-SCALING-BOX873AF63B-2026-07-11.md",
           "revision": "8f0fa4147eaef6cc7f87ee3f767581995fac3968",
           "path": "docs/notes/CPU-INFERENCE-SCALING-BOX873AF63B-2026-07-11.md"
@@ -8636,7 +8630,7 @@
           "issue:#1061 state=closed basis=body_phrase score=47 record=sha256:b57a7279f9a72a844858e09b4a182291849eb8a0d434d3826e50f23ce146755e"
         ],
         "full_matches_digest": "sha256:f2b32bb9c2e8b421ae74e72e9751a3854c1ffca44e5e33a7e19ea685e7bfbd51",
-        "digest": "sha256:cb1e6255375d2c66f6d0d0457fae53561c6aaddbedc9ef1a8c5482daa1c117a4"
+        "digest": "sha256:14e4eaca9a76ae4acc22e959345ac64bfa93ac4bb230909c721760eef7346462"
       },
       "manual_review": true,
       "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",

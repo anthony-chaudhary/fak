@@ -85,6 +85,9 @@ var toolCallDialects = []dialectExtractor{
 	{name: "function_call_tag", extract: extractDelimited(functionCallTagRe)},
 	{name: "llama_python_tag", extract: extractDelimited(llamaPythonTagRe)},
 	{name: "mistral_tool_calls", extract: extractArrayDelimited(mistralToolCallsRe)},
+	// Bare antl sits ahead of fenced/bare JSON because its inner <parameter> values
+	// may themselves contain JSON that the more ambiguous dialects would misread.
+	{name: "qwen_function_parameter", extract: extractQwenFunctionBlocks},
 	{name: "fenced_json", extract: extractFenced},
 	{name: "bare_json", extract: extractBareJSON},
 }
@@ -137,6 +140,43 @@ func LiftTextToolCalls(m Message) Message {
 	m.Content = strings.TrimSpace(stripped.String())
 	m.ToolCalls = calls
 	return m
+}
+
+// qwenFunctionParamRe locates Qwen's antl-style <function=name>…</function> block when
+// it is emitted WITHOUT the <tool_call> wrapper. Qwen2.5-Coder-3B improvises exactly
+// this shape as bare content under a tools-bearing prompt (issue #10600 captured
+// `<function=bash>\n<parameter=command>…`); the wrapper-presence gate in
+// normalizeQwenFunctionToolCalls never sees it there, so the call stayed text and never
+// reached adjudication. parseQwenFunctionToolCall stays the authority on whether a
+// located block is well-formed; a malformed one is left in the content untouched.
+var qwenFunctionParamRe = regexp.MustCompile(`(?s)<function=[^>]*>.*?</function>`)
+
+// extractQwenFunctionBlocks lifts bare <function=name><parameter=key>value blocks into
+// structured calls. The wrapped form never reaches here: normalizeQwenFunctionToolCalls
+// has already rewritten it into the hermes JSON form, and both paths share one parser,
+// so a block malformed for one is malformed for the other (no double-lift, no husk).
+func extractQwenFunctionBlocks(content string) []liftedBlock {
+	matches := qwenFunctionParamRe.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var blocks []liftedBlock
+	for _, loc := range matches {
+		name, args, ok := parseQwenFunctionToolCall(content[loc[0]:loc[1]])
+		if !ok {
+			continue
+		}
+		encoded, err := json.Marshal(args)
+		if err != nil {
+			continue
+		}
+		blocks = append(blocks, liftedBlock{
+			start: loc[0],
+			end:   loc[1],
+			call:  ToolCall{Type: "function", Function: Func{Name: name, Arguments: string(encoded)}},
+		})
+	}
+	return blocks
 }
 
 // liftPayload parses one inner JSON object as a {"name","arguments"} or

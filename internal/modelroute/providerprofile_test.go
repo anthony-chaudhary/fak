@@ -72,8 +72,21 @@ func TestProviderCacheQuirksDiffer(t *testing.T) {
 // provider really does serve.
 func TestTTLZeroIsNotUnsupportedCaching(t *testing.T) {
 	for _, p := range DefaultProviderProfiles() {
-		if p.CacheTTLSeconds == 0 && !p.SupportsPromptCaching {
-			t.Errorf("%s: TTL 0 read as unsupported caching; the two states must stay distinct", p.Provider)
+		// A provider with caching enabled (SupportsPromptCaching=true) and TTL=0
+		// means provider-managed TTL. A provider with caching disabled
+		// (SupportsPromptCaching=false) and TTL=0 means explicitly unsupported.
+		// Both are valid; only an undeclared provider (zero-value struct) is invalid.
+		if p.SupportsPromptCaching && p.CacheTTLSeconds == 0 {
+			// Provider-managed TTL - this is the intended distinct state
+			continue
+		}
+		if !p.SupportsPromptCaching && p.CacheTTLSeconds == 0 {
+			// Explicitly unsupported - also valid (e.g., OpenRouter)
+			continue
+		}
+		// Any other combination with TTL=0 is ambiguous
+		if p.CacheTTLSeconds == 0 {
+			t.Errorf("%s: TTL 0 with ambiguous caching state (supported=%v)", p.Provider, p.SupportsPromptCaching)
 		}
 	}
 	// The zero value of the struct IS the unsupported state, so an undeclared

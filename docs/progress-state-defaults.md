@@ -1,3 +1,8 @@
+---
+title: "Progress-state defaults for plans and reports"
+description: "Report delivery, evidence maturity, and next movement as independent axes without weakening acceptance gates or erasing shipped implementation."
+---
+
 # Progress-state defaults
 
 Use these defaults for plans, issue rollups, and operator reports. They separate what shipped, how mature the evidence is, and what can move next. A failed or missing performance receipt changes the evidence axis; it does not erase delivered implementation or force the whole item into a static `HOLD`.

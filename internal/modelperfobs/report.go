@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 )
 
 type Summary struct {
@@ -65,10 +64,10 @@ func Summarize(rows []Observation) Summary {
 			rate = append(rate, r.OutputTokensPerSec)
 		}
 	}
-	s.DurationP50MS, s.DurationP95MS = quantile(durations, .5), quantile(durations, .95)
-	s.TTFTP50MS, s.TTFTP95MS = quantile(ttft, .5), quantile(ttft, .95)
-	s.TPOTP50MS, s.TPOTP95MS = quantile(tpot, .5), quantile(tpot, .95)
-	s.OutputTokensPerSecP50, s.OutputTokensPerSecP95 = quantile(rate, .5), quantile(rate, .95)
+	s.DurationP50MS, s.DurationP95MS = percentile(durations, .5), percentile(durations, .95)
+	s.TTFTP50MS, s.TTFTP95MS = percentile(ttft, .5), percentile(ttft, .95)
+	s.TPOTP50MS, s.TPOTP95MS = percentile(tpot, .5), percentile(tpot, .95)
+	s.OutputTokensPerSecP50, s.OutputTokensPerSecP95 = percentile(rate, .5), percentile(rate, .95)
 	s.LikelyBottleneck, s.NextCheck = diagnose(s, len(ttft), len(tpot))
 	return s
 }
@@ -90,16 +89,6 @@ func diagnose(s Summary, ttftN, tpotN int) (string, string) {
 		return "decode", "profile device residency, memory bandwidth, batching, and quantized kernels"
 	}
 	return "workload-orchestration", "join request IDs to agent outcomes and compare useful tokens and wall time per completed task"
-}
-
-func quantile(values []float64, q float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	v := append([]float64(nil), values...)
-	sort.Float64s(v)
-	i := int(float64(len(v)-1)*q + .5)
-	return v[i]
 }
 
 func WriteMarkdown(w io.Writer, s Summary) error {

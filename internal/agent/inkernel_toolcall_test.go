@@ -187,17 +187,38 @@ func TestReasoningWithTruncatedToolCallFailsClosed(t *testing.T) {
 	}
 }
 
-func TestToolSpecBlockMatchesQwen35Contract(t *testing.T) {
+// TestToolSpecBlockMatchesQwen25TemplateContract pins toolSpecBlock to the tools branch
+// of Qwen/Qwen2.5-Coder-7B-Instruct's chat_template (issue #10600): the usage preamble,
+// the tojson-spaced signature, the JSON-object <tool_call> instruction, and the flush
+// </tool_call> ending the system turn. Qwen3's template repeats this branch verbatim.
+// The antl (<function=…>) instruction this block used to teach is the Ornith contract —
+// it belongs to ornithToolSpecPrefix/Suffix only, and teaching it here drove Qwen2.5-Coder
+// away from its trained dialect so native tool_calls never engaged.
+func TestToolSpecBlockMatchesQwen25TemplateContract(t *testing.T) {
 	got := toolSpecBlock([]ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Description: "record", Parameters: json.RawMessage(`{"type":"object","properties":{"probe":{"type":"string"}},"required":["probe"]}`)}}})
 	for _, want := range []string{
+		"# Tools\n\nYou may call one or more functions to assist with the user query.",
 		"You are provided with function signatures within <tools></tools> XML tags:",
-		"<tools>",
-		`{"type":"function","function":{"name":"record_probe"`,
-		"If you choose to call a function ONLY reply in the following format with NO suffix:",
+		`<tools>
+{"type": "function", "function": {"name": "record_probe", "description": "record", "parameters": {"type": "object", "properties": {"probe": {"type": "string"}}, "required": ["probe"]}}}`,
+		"For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:",
+		"<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tool preamble missing %q:\n%s", want, got)
 		}
+	}
+	for _, banned := range []string{
+		"If you choose to call a function ONLY reply in the following format",
+		"<IMPORTANT>",
+		`{"type":"function"`, // the compact json.Marshal form, not the template's tojson spacing
+	} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("tool preamble carries divergent %q:\n%s", banned, got)
+		}
+	}
+	if strings.HasSuffix(got, "\n") {
+		t.Fatalf("spec must end flush against <|im_end|> (template: </tool_call><|im_end|>):\n%s", got)
 	}
 }
 

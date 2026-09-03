@@ -229,6 +229,7 @@ const headBytes = 256
 // ARecord is one retained, body-free analytics record from a rollout.
 type ARecord struct {
 	Kind             string // task_started | task_complete | turn_aborted | function_call | function_call_output | token_count | compacted
+	PayloadKind      string // the record's raw payload type ("function_call" vs "custom_tool_call", …) when one exists
 	TS               time.Time
 	TurnID           string
 	CallID           string
@@ -238,6 +239,7 @@ type ARecord struct {
 	Env              Envelope
 	Reason           string
 	DurationMS       int64
+	InputTokens      int  // token_count only: payload.info.last_token_usage.input_tokens (#10662)
 	GoalContinuation bool // structured harness envelope; no prompt body retained
 }
 
@@ -282,6 +284,11 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 				Arguments string          `json:"arguments"`
 				Input     string          `json:"input"`
 				Output    json.RawMessage `json:"output"`
+				Info      struct {
+					LastTokenUsage struct {
+						InputTokens int `json:"input_tokens"`
+					} `json:"last_token_usage"`
+				} `json:"info"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal([]byte(line), &rec) != nil {
@@ -318,14 +325,14 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			case kindToolCall, "custom_tool_call":
 				head, targets := callHead(rec.Payload.Name, firstNonEmpty(rec.Payload.Arguments, rec.Payload.Input))
 				out = append(out, ARecord{
-					Kind: kindToolCall, TS: ts,
+					Kind: kindToolCall, PayloadKind: rec.Payload.Type, TS: ts,
 					CallID: firstNonEmpty(rec.Payload.CallID, rec.Payload.ID),
 					Tool:   strings.TrimSpace(rec.Payload.Name),
 					Head:   head, Targets: targets,
 				})
 			case "function_call_output", "custom_tool_call_output":
 				out = append(out, ARecord{
-					Kind: "function_call_output", TS: ts,
+					Kind: "function_call_output", PayloadKind: rec.Payload.Type, TS: ts,
 					CallID: firstNonEmpty(rec.Payload.CallID, rec.Payload.ID),
 					Env:    DecodeEnvelope(outputText(rec.Payload.Output)),
 				})
@@ -334,12 +341,13 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			switch rec.Payload.Type {
 			case KindStarted, KindComplete, KindAborted:
 				out = append(out, ARecord{
-					Kind: rec.Payload.Type, TS: ts,
+					Kind: rec.Payload.Type, PayloadKind: rec.Payload.Type, TS: ts,
 					TurnID: strings.TrimSpace(rec.Payload.TurnID),
 					Reason: rec.Payload.Reason, DurationMS: rec.Payload.DurationMS,
 				})
 			case kindTokens:
-				out = append(out, ARecord{Kind: kindTokens, TS: ts})
+				out = append(out, ARecord{Kind: kindTokens, PayloadKind: rec.Payload.Type, TS: ts,
+					InputTokens: rec.Payload.Info.LastTokenUsage.InputTokens})
 			}
 		}
 	}

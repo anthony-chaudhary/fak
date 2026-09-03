@@ -235,6 +235,9 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	resolvedBody = classifiedBody
 
 	labelList := issueFanoutSplit(*labels)
+	if !*rawBody {
+		labelList = issueCreateShiftLeftLabels(*title, resolvedBody, labelList)
+	}
 	args := []string{"issue", "create", "--title", *title, "--body", resolvedBody}
 	for _, l := range labelList {
 		args = append(args, "--label", l)
@@ -275,4 +278,124 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	}
 	fmt.Fprintln(stdout, result.URL)
 	return 0
+}
+
+// issueCreateShiftLeftLabels derives and defaults canonical fleet labels from title and body
+// when --labels is omitted or incomplete, shifting label derivation left to creation time.
+func issueCreateShiftLeftLabels(title, body string, explicit []string) []string {
+	var labels []string
+	seen := make(map[string]bool)
+	hasKind := false
+	hasClass := false
+	hasPriority := false
+	hasGen := false
+
+	add := func(l string) {
+		l = strings.TrimSpace(l)
+		if l == "" || seen[l] {
+			return
+		}
+		seen[l] = true
+		labels = append(labels, l)
+		switch {
+		case l == "enhancement" || l == "bug" || l == "documentation" || l == "performance" || l == "testing" || l == "build" || l == "research":
+			hasKind = true
+		case strings.HasPrefix(l, "class:"):
+			hasClass = true
+		case strings.HasPrefix(l, "priority/"):
+			hasPriority = true
+		case strings.HasPrefix(l, "gen/"):
+			hasGen = true
+		}
+	}
+
+	for _, l := range explicit {
+		add(l)
+	}
+
+	lowerTitle := strings.ToLower(title)
+	lowerBody := strings.ToLower(body)
+
+	// 1. Kind from conventional commit prefix if not explicitly set
+	if !hasKind {
+		switch {
+		case strings.HasPrefix(lowerTitle, "feat"):
+			add("enhancement")
+		case strings.HasPrefix(lowerTitle, "fix"):
+			add("bug")
+		case strings.HasPrefix(lowerTitle, "docs"):
+			add("documentation")
+		case strings.HasPrefix(lowerTitle, "perf"):
+			add("performance")
+		case strings.HasPrefix(lowerTitle, "test"):
+			add("testing")
+		case strings.HasPrefix(lowerTitle, "build") || strings.HasPrefix(lowerTitle, "ci"):
+			add("build")
+		case strings.HasPrefix(lowerTitle, "research"):
+			add("research")
+		default:
+			add("enhancement")
+		}
+	}
+
+	// 2. Class: default to class:dev if no class:* label set
+	if !hasClass {
+		add("class:dev")
+	}
+
+	// 3. Priority: default to priority/P1 if not explicitly set
+	if !hasPriority {
+		add("priority/P1")
+	}
+
+	// 4. Generation: fix/docs are gen/now, otherwise gen/next
+	if !hasGen {
+		if strings.HasPrefix(lowerTitle, "fix") || strings.HasPrefix(lowerTitle, "docs") {
+			add("gen/now")
+		} else {
+			add("gen/next")
+		}
+	}
+
+	// 5. Area from conventional commit scope in title e.g. type(scope):
+	if start := strings.Index(lowerTitle, "("); start != -1 {
+		if end := strings.Index(lowerTitle[start:], ")"); end != -1 {
+			scope := lowerTitle[start+1 : start+end]
+			switch scope {
+			case "compute", "cuda", "gpu":
+				add("compute")
+			case "model", "moe", "loader":
+				add("model")
+			case "cachemeta", "kv", "radixkv":
+				add("compute")
+			case "gateway", "serve", "proxy":
+				add("agentic-serving")
+			case "cmd", "dispatch", "taskmgr":
+				add("dispatch")
+			case "bench":
+				add("benchmark")
+			case "security", "guard", "adjudicator":
+				add("security")
+			}
+		}
+	}
+
+	// 6. Keywords from title/body for domain tags if explicit was empty
+	if len(explicit) == 0 {
+		text := lowerTitle + " " + lowerBody
+		if strings.Contains(text, "cuda") {
+			add("cuda")
+		}
+		if strings.Contains(text, "moe") || strings.Contains(text, "expert") {
+			add("moe")
+		}
+		if strings.Contains(text, "quant") {
+			add("quantization")
+		}
+		if strings.Contains(text, "pagedattention") || strings.Contains(text, "kv cache") || strings.Contains(text, "kv-cache") {
+			add("pagedattention")
+		}
+	}
+
+	return labels
 }

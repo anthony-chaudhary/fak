@@ -3472,6 +3472,21 @@
           "category": "incidental",
           "reason": "Carrying-cost driver label in a debt record, not an executable guard gate.",
           "token": "explicit_retirement_gate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Thin launch-flag registration helper on the shared guard/manage launcher; the name is self-descriptive, its serve twin is documented inline, and it introduces no overloaded root or ambiguous root word.",
+          "token": "registerGuardAdmissionFlag"
+        },
+        {
+          "category": "incidental",
+          "reason": "Construction twin of newServeNativeAdmissionController for the guard/manage launcher; the pair and their identical policy seam are documented inline, so no namespace ambiguity remains to disambiguate.",
+          "token": "newGuardNativeAdmissionController"
+        },
+        {
+          "category": "incidental",
+          "reason": "Shared policy seam both launchers derive their admission budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
+          "token": "nativeAdmissionPolicyForBudget"
         }
       ],
       "exclude": [
@@ -3832,9 +3847,11 @@
         "mapBehaviorProbe",
         "markGuardChildTerminalIntent",
         "marshalGuardProfileCapture",
+        "nativeAdmissionPolicyForBudget",
         "nativeReasonMessageRoleUnsupported",
         "nativeq4kgateupoutputslab",
         "newGuardCompactionWitness",
+        "newGuardNativeAdmissionController",
         "newguardlaunchnonce",
         "next_gate_review",
         "nodeGateScript",
@@ -3866,6 +3883,7 @@
         "recordGuardProviderSessionClose",
         "recordGuardSessionStartIdentityFor",
         "recordGuardSessionStartJournalFor",
+        "registerGuardAdmissionFlag",
         "renderguardstartupreport",
         "reservedGuardBanner",
         "runCacheValueGateScore",
@@ -9158,6 +9176,11 @@
           "category": "incidental",
           "reason": "internal Go identifier in the #9714 incumbent definition surface; implementation symbol, not a domain concept",
           "token": "runModelIncumbentPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Shared admission-policy seam both launchers derive their operator budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
+          "token": "nativeAdmissionPolicyForBudget"
         }
       ],
       "exclude": [
@@ -9298,6 +9321,7 @@
         "manageParityPosture",
         "mergePolicy",
         "multi_capability",
+        "nativeAdmissionPolicyForBudget",
         "naturalAdjudicator",
         "naturalPolicySummary",
         "naturalTrafficAdjudicator",
@@ -12162,11 +12186,17 @@
           "category": "incidental",
           "reason": "Provider-specific typed result; not a general decision primitive",
           "token": "TorchAODecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Output type of the internal/gitresource AdmitCleanup seam (typed admit/deny for one cleanup candidate); distinct from dosdecision loop decisions and TurnTaxDecision because it admits Git-resource mutation, not agent-loop actions; leaf-local symbol.",
+          "token": "CleanupDecision"
         }
       ],
       "id": "decision",
       "ignore": [
         "AddedDecisionOverheadMS",
+        "CleanupDecision",
         "DECISION_INVALID",
         "DecideStop",
         "DecisionAbstain",
@@ -13831,6 +13861,11 @@
           "category": "incidental",
           "reason": "Mapping helper that enforces the existing supervision policy process-class-to-fault-domain invariant, not a separate user-facing plan concept.",
           "token": "processClassPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Input type of the internal/gitresource AdmitCleanup seam (one proposed Git resource mutation with resource kind, scope, owner+epoch, terminal evidence); leaf-local contract symbol, not a cross-subsystem concept and no overloaded root.",
+          "token": "CleanupCandidate"
         }
       ],
       "exclude": [
@@ -13859,6 +13894,7 @@
         "CandidateSamples",
         "CandidateTaskAccuracy",
         "Candidates",
+        "CleanupCandidate",
         "ControlPlaneOwner",
         "DecodeInterleavePlan",
         "EventPlanUpdated",

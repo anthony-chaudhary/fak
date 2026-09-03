@@ -1,6 +1,6 @@
 ---
 title: "fak learning path — L500"
-description: "A staged part of the fak learning path, split out of LEARNING-PATH.md so each stage stays a bounded read."
+description: "The L500 serving stage connects gateway operation, agent integrations, and the fak-native in-kernel model through practical labs."
 ---
 
 # L500 — Serving, Integration, and the In-Kernel Model

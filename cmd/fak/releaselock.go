@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/release"
@@ -40,18 +41,30 @@ func runReleaseLock(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("release-lock "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		owner   = fs.String("owner", "", "lock owner token (default: $FAK_RELEASE_OWNER, else $CLAUDE_CODE_SESSION_ID, else host+user+pid)")
-		ttl     = fs.Duration("ttl", release.DefaultTTL, "lock time-to-live; a crashed holder auto-recovers after this")
-		note    = fs.String("note", "", "free-text note recorded in the lock (diagnostics)")
-		force   = fs.Bool("force", false, "steal a live lock / release a lock you do not own")
-		noSteal = fs.Bool("no-steal-stale", false, "do NOT take over an expired (stale) lock on acquire")
-		asJSON  = fs.Bool("json", false, "emit the lock state as JSON")
+		owner          = fs.String("owner", "", "lock owner token (default: $FAK_RELEASE_OWNER, else $CLAUDE_CODE_SESSION_ID, else host+user+pid)")
+		ttl            = fs.Duration("ttl", release.DefaultTTL, "lock time-to-live; a crashed holder auto-recovers after this")
+		note           = fs.String("note", "", "free-text note recorded in the lock (diagnostics)")
+		force          = fs.Bool("force", false, "steal a live lock / release a lock you do not own")
+		takeoverReason = fs.String("takeover-reason", "", "required audit reason when --force takes a live lock")
+		noSteal        = fs.Bool("no-steal-stale", false, "do NOT take over an expired (stale) lock on acquire")
+		asJSON         = fs.Bool("json", false, "emit the lock state as JSON")
 	)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
 
 	opts := release.Options{Owner: *owner, Root: repoRoot()}
+	if *force && (sub == "acquire" || sub == "renew") {
+		state := release.Status(opts)
+		resolvedOwner := strings.TrimSpace(*owner)
+		if resolvedOwner == "" {
+			resolvedOwner = release.DefaultOwner()
+		}
+		if state.Held && !state.Stale && state.Lock != nil && state.Lock.Owner != resolvedOwner && strings.TrimSpace(*takeoverReason) == "" {
+			fmt.Fprintln(stderr, "fak release-lock: --takeover-reason is required to take over a live release lock")
+			return 2
+		}
+	}
 
 	switch sub {
 	case "acquire":

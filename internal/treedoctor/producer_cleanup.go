@@ -72,19 +72,9 @@ func CleanScratchProducer(repoRoot, producer string) (ScratchProducerReceipt, er
 		return refuseScratchProducer(receipt, err)
 	}
 
-	scratchInfo, err := os.Lstat(scratchRoot)
-	if os.IsNotExist(err) {
-		receipt.Verdict = ScratchProducerAbsent
-		return receipt, nil
-	}
-	if err != nil {
-		return failScratchProducer(receipt, fmt.Errorf("inspect scratch root: %w", err))
-	}
-	if err := refuseReparse(scratchRoot, scratchInfo); err != nil {
-		return refuseScratchProducer(receipt, err)
-	}
-	if !scratchInfo.IsDir() {
-		return refuseScratchProducer(receipt, fmt.Errorf("scratch root %q is not a directory", scratchRoot))
+	receipt, terminal, err := inspectScratchDirectory(receipt, scratchRoot, "scratch root")
+	if terminal {
+		return receipt, err
 	}
 	resolvedScratch, err := filepath.EvalSymlinks(scratchRoot)
 	if err != nil {
@@ -94,19 +84,9 @@ func CleanScratchProducer(repoRoot, producer string) (ScratchProducerReceipt, er
 		return refuseScratchProducer(receipt, fmt.Errorf("scratch root resolves outside its declared path: %s", resolvedScratch))
 	}
 
-	targetInfo, err := os.Lstat(target)
-	if os.IsNotExist(err) {
-		receipt.Verdict = ScratchProducerAbsent
-		return receipt, nil
-	}
-	if err != nil {
-		return failScratchProducer(receipt, fmt.Errorf("inspect producer target: %w", err))
-	}
-	if err := refuseReparse(target, targetInfo); err != nil {
-		return refuseScratchProducer(receipt, err)
-	}
-	if !targetInfo.IsDir() {
-		return refuseScratchProducer(receipt, fmt.Errorf("producer target %q is not a directory", target))
+	receipt, terminal, err = inspectScratchDirectory(receipt, target, "producer target")
+	if terminal {
+		return receipt, err
 	}
 	resolvedTarget, err := filepath.EvalSymlinks(target)
 	if err != nil {
@@ -169,6 +149,26 @@ func requireDirectScratchChild(scratchRoot, target, producer string) error {
 	return nil
 }
 
+func inspectScratchDirectory(receipt ScratchProducerReceipt, path, label string) (ScratchProducerReceipt, bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		receipt.Verdict = ScratchProducerAbsent
+		return receipt, true, nil
+	}
+	if err != nil {
+		receipt, err = failScratchProducer(receipt, fmt.Errorf("inspect %s: %w", label, err))
+		return receipt, true, err
+	}
+	if err := refuseReparse(path, info); err != nil {
+		receipt, err = refuseScratchProducer(receipt, err)
+		return receipt, true, err
+	}
+	if !info.IsDir() {
+		receipt, err = refuseScratchProducer(receipt, fmt.Errorf("%s %q is not a directory", label, path))
+		return receipt, true, err
+	}
+	return receipt, false, nil
+}
 func enumerateScratchProducer(root string) (files []string, directories []string, retErr error) {
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {

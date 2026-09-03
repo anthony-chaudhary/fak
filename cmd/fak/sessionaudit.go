@@ -39,6 +39,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditFeed(stdout, stderr, argv[1:])
 	case "codex":
 		return runSessionAuditCodex(stdout, stderr, argv[1:])
+	case "posttool":
+		return runSessionAuditPosttool(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		sessionAuditUsage(stdout)
 		return 0
@@ -62,6 +64,8 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "            (fold the window into ONE scrubbed row and APPEND it to the durable ledger)")
 	fmt.Fprintln(w, "       fak session-audit codex   [--json] [--root DIR] [--cwd DIR|--here] [--fresh-mins N] [--top N] [--max N]")
 	fmt.Fprintln(w, "            (native Codex rollout store: typed critical-path + tool-outcome corpus report)")
+	fmt.Fprintln(w, "       fak session-audit posttool [--json] [--root DIR] [--cwd DIR|--here] [--max N]")
+	fmt.Fprintln(w, "            (post-tool model latency attribution by context band and call ordinal)")
 }
 
 type rootFlags []string

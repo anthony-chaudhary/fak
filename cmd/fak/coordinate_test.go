@@ -12,7 +12,7 @@ import (
 
 func TestCoordinateHarnessNeutralWholePath(t *testing.T) {
 	var baseline coordinateReceipt
-	for _, h := range []string{"claude", "codex", "fak-native"} {
+	for _, h := range []string{"claude", "codex", "opencode", "fak-native"} {
 		got, err := coordinate(coordinateDemoInput(h))
 		if err != nil {
 			t.Fatal(err)

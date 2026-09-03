@@ -64,7 +64,7 @@ func fullPressure() HarnessPressure {
 func TestHarnessAdapterNormalizeEquivalentHarnesses(t *testing.T) {
 	a := NewHarnessAdapter()
 	var want NeutralHarnessIntent
-	for i, h := range []Harness{HarnessClaude, HarnessCodex, HarnessFakNative} {
+	for i, h := range []Harness{HarnessClaude, HarnessCodex, HarnessOpencode, HarnessFakNative} {
 		got, err := a.Normalize(validHarnessWorkflow(h))
 		if err != nil {
 			t.Fatalf("Normalize(%q): %v", h, err)

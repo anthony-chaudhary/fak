@@ -62,6 +62,7 @@ jobs:
     timeout-minutes: 90
     env:
       GOTOOLCHAIN: auto
+      FAK_RELEASE_OWNER: release-cadence-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
       contents: write
       actions: read
@@ -292,8 +293,6 @@ jobs:
         if: >-
           steps.decide.outputs.decision == 'release' &&
           steps.arm.outputs.execute == 'true'
-        env:
-          FAK_RELEASE_OWNER: release-cadence-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           set +e
@@ -327,7 +326,6 @@ jobs:
           steps.release_lock.outputs.acquired == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
         run: |
           set -euo pipefail
           git config user.name "fleet-release-cadence[bot]"
@@ -363,7 +361,6 @@ jobs:
         if: steps.cut.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
         run: |
           set -euo pipefail
           python tools/release_tag.py \
@@ -399,10 +396,28 @@ jobs:
             exit 1
           fi
 
-      - name: Release release lock
+      - name: Release release lock with auditable receipt
         if: always() && steps.release_lock.outputs.acquired == 'true'
-        env:
-          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
         run: |
           set -euo pipefail
-          python tools/release_lock.py release
+          if [ -f cut.json ]; then
+            release_commit="$(python -c 'import json; print(json.load(open("cut.json")).get("commit_sha", ""))')"
+          else
+            release_commit=""
+          fi
+          if [ -n "$release_commit" ]; then
+            python tools/release_lock.py release \
+              --receipt-commit "$release_commit" \
+              --receipt-path release-lease-receipt.json
+            cat release-lease-receipt.json
+          else
+            python tools/release_lock.py release
+          fi
+
+      - name: Preserve release lease receipt
+        if: always() && hashFiles('release-lease-receipt.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-lease-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-lease-receipt.json
+          if-no-files-found: error

@@ -17,15 +17,20 @@ func TestDefaultProviderContractsAreCompleteAndDeterministic(t *testing.T) {
 	if err := ValidateProviderContracts(contracts); err != nil {
 		t.Fatal(err)
 	}
-	if len(contracts) != 2 || contracts[0].Provider != "anthropic" || contracts[1].Provider != "openai" {
+	if len(contracts) != 3 || contracts[0].Provider != "anthropic" || contracts[1].Provider != "openai" || contracts[2].Provider != "openrouter" {
 		t.Fatalf("registry ordering/coverage = %+v", contracts)
 	}
 	for _, contract := range contracts {
 		if contract.ContextTokens.State != KnowledgeUnknown || contract.MaxOutputTokens.State != KnowledgeUnknown {
 			t.Errorf("%s guessed model-specific token limits: context=%s output=%s", contract.Provider, contract.ContextTokens.State, contract.MaxOutputTokens.State)
 		}
-		if contract.PromptCaching.State != KnowledgeKnown || !contract.PromptCaching.Value || contract.UsageDetails.State != KnowledgeKnown {
-			t.Errorf("%s cache contract incomplete: %+v", contract.Provider, contract)
+		// PromptCaching must be KnowledgeKnown (explicitly declared), but Value can be true or false
+		if contract.PromptCaching.State != KnowledgeKnown {
+			t.Errorf("%s prompt_caching state must be known: %+v", contract.Provider, contract)
+		}
+		// UsageDetails must be explicitly declared (known or not_applicable), not unknown
+		if contract.UsageDetails.State != KnowledgeKnown && contract.UsageDetails.State != KnowledgeNotApplicable {
+			t.Errorf("%s usage_details state must be known or not_applicable: %+v", contract.Provider, contract)
 		}
 	}
 	first, err := ProviderContractsJSON()
@@ -53,7 +58,7 @@ func TestProviderProfilesProjectCanonicalContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "openrouter"} {
 		contract, ok := LookupProviderContract(provider)
 		if !ok {
 			t.Fatalf("missing %s contract", provider)

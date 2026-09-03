@@ -179,12 +179,13 @@ def lock_state(root: Path, at: float | None = None) -> dict:
 
 
 def acquire(root: Path, *, ttl: int, owner: str, snapshot: list[str], note: str | None,
-            steal_stale: bool, force: bool) -> tuple[dict, int]:
+            steal_stale: bool, force: bool, takeover_reason: str | None = None) -> tuple[dict, int]:
     started = now()
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     head = git(root, "rev-parse", "--short", "HEAD").strip()
     payload = {
         "owner": owner,
+        "lease_id": owner,
         "pid": os.getpid(),
         "host": host(),
         "branch": branch or None,
@@ -194,6 +195,7 @@ def acquire(root: Path, *, ttl: int, owner: str, snapshot: list[str], note: str 
         "ttl": ttl,
         "expires_at": started + ttl,
         "snapshot": [s.replace("\\", "/") for s in snapshot],
+        "lifecycle": [{"event": "acquired", "at": started, "owner": owner}],
     }
     if note:
         payload["note"] = note
@@ -210,8 +212,19 @@ def acquire(root: Path, *, ttl: int, owner: str, snapshot: list[str], note: str 
                 stale, why = True, "corrupt lock file"
             else:
                 stale, why = is_stale(existing, started)
+            if force and not stale and not (takeover_reason or "").strip():
+                return {"ok": False, "reason": "takeover reason required", "holder": existing}, EXIT_USAGE
             if force or (steal_stale and stale):
-                stole = {**(existing or {}), "_stolen_because": "force" if (force and not stale) else why}
+                cause = "force: " + takeover_reason.strip() if (force and not stale) else why
+                stole = {**(existing or {}), "_stolen_because": cause}
+                payload["takeover"] = {
+                    "previous_owner": (existing or {}).get("owner"),
+                    "previous_lease_id": (existing or {}).get("lease_id", (existing or {}).get("owner")),
+                    "reason": cause,
+                    "stale": stale,
+                    "at": started,
+                }
+                payload["lifecycle"].append({"event": "takeover", "at": started, "reason": cause, "stale": stale})
                 try:
                     os.unlink(str(path))
                 except FileNotFoundError:
@@ -228,7 +241,7 @@ def acquire(root: Path, *, ttl: int, owner: str, snapshot: list[str], note: str 
     return {"ok": False, "reason": "contended", "detail": "lost the steal race 5x"}, EXIT_DENIED
 
 
-def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
+def renew(root: Path, *, owner: str, ttl: int, force: bool, takeover_reason: str | None = None) -> tuple[dict, int]:
     """Extend a lock the caller already holds — the heartbeat half of the
     short-TTL/renew design, mirroring internal/release.Renew.
 
@@ -247,6 +260,8 @@ def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
         return {"ok": False, "reason": "gone"}, EXIT_DENIED
     if lock is not None and not mine and not force:
         return {"ok": False, "reason": "held by another", "holder": lock}, EXIT_DENIED
+    if force and not mine and lock is not None and not (takeover_reason or "").strip():
+        return {"ok": False, "reason": "takeover reason required", "holder": lock}, EXIT_USAGE
 
     started = now()
     acquired = started
@@ -254,8 +269,13 @@ def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
         acquired = lock["acquired_at"]
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     head = git(root, "rev-parse", "--short", "HEAD").strip()
+    lifecycle = list(lock.get("lifecycle", [])) if mine else []
+    if force and not mine and lock is not None:
+        lifecycle.append({"event": "takeover", "at": started, "reason": "force: " + takeover_reason.strip(), "stale": False})
+    lifecycle.append({"event": "renewed", "at": started, "owner": owner})
     payload = {
         "owner": owner,
+        "lease_id": lock.get("lease_id", owner) if mine else owner,
         "pid": os.getpid(),
         "host": host(),
         "branch": branch or None,
@@ -265,6 +285,7 @@ def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
         "ttl": ttl,
         "expires_at": started + ttl,
         "snapshot": list(lock.get("snapshot", [])) if mine else [],
+        "lifecycle": lifecycle,
     }
     if mine and lock.get("note"):
         payload["note"] = lock["note"]
@@ -275,22 +296,47 @@ def renew(root: Path, *, owner: str, ttl: int, force: bool) -> tuple[dict, int]:
     os.replace(str(tmp), str(path))
     out = {"ok": True, "renewed": True, "lock": payload}
     if force and not mine and lock is not None:
-        out["stole"] = lock
+        out["stole"] = {**lock, "_stolen_because": "force: " + takeover_reason.strip()}
     return out, EXIT_OK
 
 
-def release(root: Path, *, owner: str | None, force: bool) -> tuple[dict, int]:
+def release(root: Path, *, owner: str | None, force: bool, receipt_commit: str | None = None,
+            receipt_path: str | None = None) -> tuple[dict, int]:
     lock = read_lock(root)
     if lock is None:
         return {"ok": True, "released": False, "reason": "no lock present"}, EXIT_OK
     if not force and (owner is None or lock.get("owner") != owner):
         return {"ok": False, "reason": "not owner", "holder": lock,
                 "hint": "pass --owner <token> or --force"}, EXIT_DENIED
+    if bool(receipt_commit) != bool(receipt_path):
+        return {"ok": False, "reason": "receipt requires both commit and path"}, EXIT_USAGE
+
+    out = {"ok": True, "released": True, "was": lock}
+    if receipt_commit and receipt_path:
+        released_at = now()
+        receipt = {
+            "schema": "fak.release-lease-receipt/v1",
+            "owner": lock.get("owner"),
+            "lease_id": lock.get("lease_id", lock.get("owner")),
+            "commit_sha": receipt_commit,
+            "released_at": released_at,
+            "lease": lock,
+            "lifecycle": [*list(lock.get("lifecycle", [])), {"event": "released", "at": released_at, "owner": lock.get("owner")}],
+        }
+        target = Path(receipt_path)
+        if not target.is_absolute():
+            target = root / target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(target))
+        out["receipt"] = {"path": str(target), **receipt}
+
     try:
         os.unlink(str(lock_path(root)))
     except FileNotFoundError:
         pass
-    return {"ok": True, "released": True, "was": lock}, EXIT_OK
+    return out, EXIT_OK
 
 
 def staged_paths(root: Path) -> list[str]:
@@ -356,11 +402,13 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--note", default=None, help="free-text note recorded in the lock")
     a.add_argument("--no-steal-stale", action="store_true", help="do NOT auto-steal an expired lock")
     a.add_argument("--force", action="store_true", help="steal even a live lock (use sparingly)")
+    a.add_argument("--takeover-reason", default=None, help="required audit reason when --force steals a live lock")
 
     rn = sub.add_parser("renew", help="extend a lock you already hold (heartbeat for long critical sections)")
     rn.add_argument("--ttl", type=int, default=DEFAULT_TTL, help=f"new lifetime in seconds from now (default {DEFAULT_TTL})")
     rn.add_argument("--owner", default=None, help="owner token (default: session id)")
     rn.add_argument("--force", action="store_true", help="renew even if the lock is gone or held by another")
+    rn.add_argument("--takeover-reason", default=None, help="required audit reason when --force takes another owner's live lock")
 
     v = sub.add_parser("verify", help="exit 0 iff the lock is held by --owner")
     v.add_argument("--owner", default=None, help="owner token to check (default: session id)")
@@ -375,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("release", help="release the lock if owned")
     r.add_argument("--owner", default=None, help="owner token (default: session id)")
     r.add_argument("--force", action="store_true", help="release regardless of owner")
+    r.add_argument("--receipt-commit", default=None, help="release commit SHA to bind into a durable receipt")
+    r.add_argument("--receipt-path", default=None, help="JSON receipt path; requires --receipt-commit")
 
     args = ap.parse_args(argv)
     root = repo_root()
@@ -383,13 +433,13 @@ def main(argv: list[str] | None = None) -> int:
         owner = args.owner or default_owner()
         payload, code = acquire(
             root, ttl=args.ttl, owner=owner, snapshot=args.snapshot, note=args.note,
-            steal_stale=not args.no_steal_stale, force=args.force,
+            steal_stale=not args.no_steal_stale, force=args.force, takeover_reason=args.takeover_reason,
         )
         return _emit(payload, code)
 
     if args.cmd == "renew":
         owner = args.owner or default_owner()
-        payload, code = renew(root, owner=owner, ttl=args.ttl, force=args.force)
+        payload, code = renew(root, owner=owner, ttl=args.ttl, force=args.force, takeover_reason=args.takeover_reason)
         return _emit(payload, code)
 
     if args.cmd == "verify":
@@ -406,7 +456,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "release":
         owner = None if args.force else (args.owner or default_owner())
-        payload, code = release(root, owner=owner, force=args.force)
+        payload, code = release(root, owner=owner, force=args.force, receipt_commit=args.receipt_commit, receipt_path=args.receipt_path)
         return _emit(payload, code)
 
     ap.error(f"unknown command {args.cmd!r}")

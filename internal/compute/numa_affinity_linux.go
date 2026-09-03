@@ -89,27 +89,17 @@ func affinityMaskForCPUs(cpus []int) (cpuAffinityMask, error) {
 }
 
 func getCurrentThreadAffinity(mask *cpuAffinityMask) error {
-	_, _, errno := syscall.RawSyscall(
-		syscall.SYS_SCHED_GETAFFINITY,
-		0,
-		uintptr(len(mask)*8),
-		uintptr(unsafe.Pointer(&mask[0])),
-	)
-	if errno != 0 {
-		return fmt.Errorf("compute: read current thread affinity: %w", errno)
-	}
-	return nil
+	return currentThreadAffinity(syscall.SYS_SCHED_GETAFFINITY, "read", mask)
 }
 
 func setCurrentThreadAffinity(mask *cpuAffinityMask) error {
-	_, _, errno := syscall.RawSyscall(
-		syscall.SYS_SCHED_SETAFFINITY,
-		0,
-		uintptr(len(mask)*8),
-		uintptr(unsafe.Pointer(&mask[0])),
-	)
+	return currentThreadAffinity(syscall.SYS_SCHED_SETAFFINITY, "set", mask)
+}
+
+func currentThreadAffinity(operation uintptr, action string, mask *cpuAffinityMask) error {
+	_, _, errno := syscall.RawSyscall(operation, 0, uintptr(len(mask)*8), uintptr(unsafe.Pointer(&mask[0])))
 	if errno != 0 {
-		return fmt.Errorf("compute: set current thread affinity: %w", errno)
+		return fmt.Errorf("compute: %s current thread affinity: %w", action, errno)
 	}
 	return nil
 }

@@ -193,7 +193,11 @@ func BuildLoop(packet Packet, opt LoopOptions) LoopPlan {
 		unit.BatchKey = batchKey(unit.TruthSource, unit.AcceptanceWitness)
 		generated := contractCandidate(candidate, digest)
 		title, body := renderIssue(generated, candidate, digest)
-		genReview := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: title, Body: body}, issuepolicy.Options{StrictWitness: true})
+		labels := make([]issuepolicy.IssueLabel, len(generated.Labels))
+		for i, l := range generated.Labels {
+			labels[i] = issuepolicy.IssueLabel{Name: l}
+		}
+		genReview := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: title, Body: body, Labels: labels}, issuepolicy.Options{StrictWitness: true})
 		unit.Issue = IssuePlan{
 			Action: "create", Title: title, Body: body, Review: genReview,
 			Command: issueCreateCommand(title, body, !opt.LiveIssueCreate),
@@ -400,7 +404,8 @@ func renderIssue(c issuepolicy.Candidate, source Candidate, digest string) (stri
 		"", "## Core through-line", c.InScope,
 		"", "## Gold-plating boundary", c.OutOfScope,
 		"", "## Problem frame", problemFrameLines(c.ProblemFrame),
-		"", "## Done condition", c.DoneCondition,
+		"", "## Definition of done",
+		"- [ ] " + c.DoneCondition,
 		"", "## Witness", c.Witness,
 		"", "## Acceptance gate", c.AcceptanceGate,
 		"", "## Lane", c.Lane,

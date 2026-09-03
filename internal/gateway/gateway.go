@@ -697,7 +697,7 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	// encoding (0 = the agent default, negative = disabled, out-of-band = the default), so a
 	// Config nobody configures leaves the planner at the 300s default byte-for-byte.
 	p.StreamProgressTimeout = cfg.StreamProgressTimeout
-	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
+	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver, cfg.UpstreamFailureObserver)
 	return p, nil
 }
 

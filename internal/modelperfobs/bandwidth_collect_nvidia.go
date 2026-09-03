@@ -77,12 +77,8 @@ func collectNVIDIADeviceSnapshot(ctx context.Context, selector NVIDIADeviceSelec
 	return deviceSnapshot{device: DeviceSignals{ComputeUtilization: gpu, MemoryControllerUtilization: memory, MemoryClockMHz: clock, PowerWatts: power, TemperatureC: temp}, capacity: CapacitySignals{UsedBytes: used, TotalBytes: total}, provenanceDevice: name + " (" + uuid + ")", collector: "nvidia-smi", available: true}, nil
 }
 
-func nvidiaUnavailable(s string) bool {
-	s = strings.TrimSpace(strings.ToLower(s))
-	return s == "" || s == "n/a" || s == "[not supported]" || s == "not supported"
-}
 func parseNvidiaFloat(s string) (*float64, error) {
-	if nvidiaUnavailable(s) {
+	if deviceMetricUnavailable(s) {
 		return nil, nil
 	}
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
@@ -103,7 +99,7 @@ func parseNvidiaRatio(s string) (*float64, error) {
 	return v, nil
 }
 func parseNvidiaMiB(s string) (*uint64, error) {
-	if nvidiaUnavailable(s) {
+	if deviceMetricUnavailable(s) {
 		return nil, nil
 	}
 	v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)

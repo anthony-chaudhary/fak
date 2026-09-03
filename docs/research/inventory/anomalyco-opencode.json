@@ -1,0 +1,158 @@
+{
+  "schema": "fak-study/1",
+  "title": "anomalyco/opencode open source coding agent architecture and session runtime study",
+  "observed": "2026-09-02",
+  "sources": [{
+    "url": "https://github.com/anomalyco/opencode",
+    "revision": "4eb29a64f0054672950acf789f2b09487ebfbb20",
+    "license": "MIT"
+  }],
+  "observations": [
+    "OpenCode is an Effect.ts-based monorepo coding agent separating durable prompt admission from model execution.",
+    "SystemContext organizes privileged context into typed sources with baseline/update/removed renderers and ContextEpoch provider-cache prefix reuse.",
+    "Session execution uses process-local coordination (Session Drain) rather than durable entity wrappers, recovering from prompts, history, provider attempts, and tool state.",
+    "Tool execution applies generic output bounding (max lines/bytes) at settlement and spills full output to managed temporary files.",
+    "Permission system evaluates action/resource wildcards dynamically per-agent and persists 'always' allow rules per-project.",
+    "Catalog maintains provider/model availability, default model selection, cost/age small model heuristics, and policy enforcement.",
+    "EmbeddedOpenCode executes the Server HttpRouter in-memory with the same OpenCodeClient and scoped lifecycle."
+  ],
+  "candidates": [
+    {
+      "effect": "Compose typed system context sources with baseline/update/removed renderers and snapshot reconciliation.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/system-context/index.ts:32@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/system-context/index.ts:198@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/ctxmmu"
+      ],
+      "issue": "#10701",
+      "outcome": "Filed #10701 to add composable Source/Registry/Snapshot pattern above ctxmmu."
+    },
+    {
+      "effect": "Isolate baseline system context into explicit Context Epochs for provider cache prefix stability.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/system-context/index.ts:26@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/system-context/index.ts:130@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/ctxmmu"
+      ],
+      "issue": "#10702",
+      "outcome": "Filed #10702 to integrate Context Epoch into gateway cache key computation."
+    },
+    {
+      "effect": "Admit prompts into durable inbox and promote via steer or queue delivery modes.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "CONTEXT.md:42@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/session.ts:147@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/sessionctl"
+      ],
+      "issue": "#10703",
+      "outcome": "Filed #10703 to add durable admitted prompt inbox with steer and queue modes."
+    },
+    {
+      "effect": "Emit chronological Mid-Conversation System Messages when context sources change.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "CONTEXT.md:22@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/system-context/index.ts:218@4eb29a64f0054672950acf789f2b09487ebfbb20"
+      ],
+      "issue": "#10704",
+      "outcome": "Filed #10704 to emit Mid-Conversation System Messages instead of raw prompt replacement."
+    },
+    {
+      "effect": "Bound tool output at settlement and retain complete output in managed temporary files.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/tool/registry.ts:50@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "CONTEXT.md:189@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/headroom"
+      ],
+      "issue": "#10705",
+      "outcome": "Filed #10705 to add generic output bounding and managed spill files to tool settlement."
+    },
+    {
+      "effect": "Evaluate permission rulesets with wildcard matching and persist project-level always rules.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/permission.ts:76@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/permission.ts:250@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/policy"
+      ],
+      "issue": "#10706",
+      "outcome": "Filed #10706 to add dynamic Ruleset evaluation and saved always-rules persistence."
+    },
+    {
+      "effect": "Select default and small models from catalog with availability and policy gating.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/catalog.ts:47@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/core/src/catalog.ts:215@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/modelroute"
+      ],
+      "issue": "#10707",
+      "outcome": "Filed #10707 to port Catalog availability, default/small selection, and policy gating."
+    },
+    {
+      "effect": "Run embedded in-process gateway host over in-memory router with shared client interface.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "CONTEXT.md:73@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/gateway"
+      ],
+      "issue": "#10708",
+      "outcome": "Filed #10708 to add embedded in-process gateway mode for testing and local tools."
+    },
+    {
+      "effect": "Provide durable session replay event stream and live instance subscription stream.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "CONTEXT.md:165@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "internal/guard"
+      ],
+      "issue": "#10711",
+      "outcome": "Filed #10711 to expose durable replay and live subscription event streams."
+    },
+    {
+      "effect": "Discover remote skill indexes with versioned caching and atomic swap staging.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/core/src/skill/discovery.ts:55@4eb29a64f0054672950acf789f2b09487ebfbb20"
+      ],
+      "issue": "#10712",
+      "outcome": "Filed #10712 to add remote skill index discovery, versioning, and atomic staging."
+    },
+    {
+      "effect": "Connect interactive CLI session to remote server via --attach mode.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/opencode/src/cli/cmd/run.ts:4@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/opencode/src/cli/cmd/run.ts:263@4eb29a64f0054672950acf789f2b09487ebfbb20"
+      ],
+      "issue": "#10713",
+      "outcome": "Filed #10713 to support --attach mode for remote server agent execution."
+    },
+    {
+      "effect": "Provide GitHub Actions runner integration with comment trigger workflow.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "packages/opencode/src/github/@4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "packages/opencode/src/cli/cmd/github.ts@4eb29a64f0054672950acf789f2b09487ebfbb20"
+      ],
+      "issue": "#10714",
+      "outcome": "Filed #10714 to create GitHub Actions runner integration and slash-command trigger."
+    }
+  ]
+}

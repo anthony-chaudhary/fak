@@ -78,14 +78,23 @@ func newServeStartupMessage(source, kind, level, text string) gateway.StartupMes
 // shipping policy. Keeping the other axes derived from DefaultAdmissionPolicy
 // prevents this operator declaration from drifting scheduler semantics.
 func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error) {
-	policy := gateway.DefaultAdmissionPolicy()
 	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
-		return policy, errors.New("--native-admission-token-budget is unavailable")
+		return gateway.DefaultAdmissionPolicy(), errors.New("--native-admission-token-budget is unavailable")
 	}
-	if *sf.nativeAdmissionTokenBudget <= 0 {
-		return policy, fmt.Errorf("--native-admission-token-budget must be positive (got %d)", *sf.nativeAdmissionTokenBudget)
+	return nativeAdmissionPolicyForBudget(*sf.nativeAdmissionTokenBudget)
+}
+
+// nativeAdmissionPolicyForBudget is the one seam every launcher that runs the
+// in-kernel model derives its admission policy through (serve via serveFlags,
+// guard/manage via the guard launch flag set), so the two front doors cannot
+// drift apart on what an operator-declared budget means. A non-positive budget
+// is refused loud — a typo must never silently shrink or disable the gate.
+func nativeAdmissionPolicyForBudget(budget int) (gateway.AdmissionPolicy, error) {
+	policy := gateway.DefaultAdmissionPolicy()
+	if budget <= 0 {
+		return policy, fmt.Errorf("--native-admission-token-budget must be positive (got %d)", budget)
 	}
-	policy.TokenBudget = *sf.nativeAdmissionTokenBudget
+	policy.TokenBudget = budget
 	return policy, nil
 }
 

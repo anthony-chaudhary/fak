@@ -221,22 +221,24 @@ func qGemm8CellRect(qt *q8Tensor, qp *q8Panel, dst []float32, rowLo, rowHi, toke
 			qx := qp.q[token*qp.in : (token+1)*qp.in]
 			dx := qp.d[token*qp.nblk : (token+1)*qp.nblk]
 			for row := rowLo; row < rowHi; row++ {
-				qw := qt.q[row*qt.in : (row+1)*qt.in]
-				dw := qt.d[row*qt.nblk : (row+1)*qt.nblk]
-				dst[token*qt.out+row] = qgemm8cell(qw, dw, qx, dx, qt.nblk, lanes)
+				qGemm8CellAt(qt, dst, row, token, qx, dx, lanes)
 			}
 		}
 		return
 	}
 	for row := rowLo; row < rowHi; row++ {
-		qw := qt.q[row*qt.in : (row+1)*qt.in]
-		dw := qt.d[row*qt.nblk : (row+1)*qt.nblk]
 		for token := tokenLo; token < tokenHi; token++ {
 			qx := qp.q[token*qp.in : (token+1)*qp.in]
 			dx := qp.d[token*qp.nblk : (token+1)*qp.nblk]
-			dst[token*qt.out+row] = qgemm8cell(qw, dw, qx, dx, qt.nblk, lanes)
+			qGemm8CellAt(qt, dst, row, token, qx, dx, lanes)
 		}
 	}
+}
+
+func qGemm8CellAt(qt *q8Tensor, dst []float32, row, token int, qx []int8, dx []float32, lanes int) {
+	qw := qt.q[row*qt.in : (row+1)*qt.in]
+	dw := qt.d[row*qt.nblk : (row+1)*qt.nblk]
+	dst[token*qt.out+row] = qgemm8cell(qw, dw, qx, dx, qt.nblk, lanes)
 }
 
 // qGemm8scalar is the fully-portable batched Q8_0 GEMM: Y[t·out+o] = qgemm8cell(weight row

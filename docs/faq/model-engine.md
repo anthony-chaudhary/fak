@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — The in-kernel model engine"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak selects and runs model engines, handles routing and fallbacks, reports engine identity, and keeps native inference evidence honest."
 ---
 
 # The in-kernel model engine

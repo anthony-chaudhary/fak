@@ -4,6 +4,7 @@ package modelperfobs
 
 import (
 	"bufio"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -16,14 +17,12 @@ func collectHostSnapshot() (hostSnapshot, error) {
 	if f, e := os.Open("/proc/meminfo"); e == nil {
 		defer f.Close()
 		m := map[string]uint64{}
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			p := strings.Fields(sc.Text())
+		scanFields(f, func(p []string) {
 			if len(p) >= 2 {
 				v, _ := strconv.ParseUint(p[1], 10, 64)
 				m[strings.TrimSuffix(p[0], ":")] = v * 1024
 			}
-		}
+		})
 		if m["MemTotal"] > 0 {
 			total := m["MemTotal"]
 			s.host.PhysicalTotalBytes = cloneU64(&total)
@@ -44,16 +43,14 @@ func collectHostSnapshot() (hostSnapshot, error) {
 	}
 	if f, e := os.Open("/proc/self/status"); e == nil {
 		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			p := strings.Fields(sc.Text())
+		scanFields(f, func(p []string) {
 			if len(p) >= 2 && p[0] == "VmRSS:" {
 				v, _ := strconv.ParseUint(p[1], 10, 64)
 				v *= 1024
 				s.host.ProcessResidentBytes = &v
 				s.availability.ProcessMemory = true
 			}
-		}
+		})
 	}
 	if b, e := os.ReadFile("/proc/self/stat"); e == nil {
 		if minor, major, ok := parseProcSelfStatFaults(string(b)); ok {
@@ -74,9 +71,7 @@ func collectHostSnapshot() (hostSnapshot, error) {
 	}
 	if f, e := os.Open("/proc/self/io"); e == nil {
 		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			p := strings.Fields(sc.Text())
+		scanFields(f, func(p []string) {
 			if len(p) == 2 {
 				v, _ := strconv.ParseUint(p[1], 10, 64)
 				if p[0] == "read_bytes:" {
@@ -86,7 +81,7 @@ func collectHostSnapshot() (hostSnapshot, error) {
 					s.host.ProcessWriteBytes = &v
 				}
 			}
-		}
+		})
 		if s.host.ProcessReadBytes != nil || s.host.ProcessWriteBytes != nil {
 			s.host.ProcessIOScope = "process-storage-io-not-dram"
 			s.availability.ProcessIO = true
@@ -263,5 +258,12 @@ func legacyVMStatBase(key string) (string, bool) {
 		return base, true
 	default:
 		return "", false
+	}
+}
+
+func scanFields(r io.Reader, visit func([]string)) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		visit(strings.Fields(scanner.Text()))
 	}
 }

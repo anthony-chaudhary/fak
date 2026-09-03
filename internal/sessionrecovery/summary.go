@@ -28,6 +28,10 @@ type SummaryCounts struct {
 	AlreadyActive     int `json:"already_active"`
 	AlreadyReceipted  int `json:"already_receipted"`
 	Launched          int `json:"launched"`
+	Attempted         int `json:"attempted"`
+	ProvenActive      int `json:"proven_active"`
+	FailedAndReaped   int `json:"failed_and_reaped"`
+	OperatorOwnedLive int `json:"operator_owned_live"`
 	Active            int `json:"active"`
 	Productive        int `json:"productive"`
 	Completed         int `json:"completed"`
@@ -65,6 +69,7 @@ type Result struct {
 	PostAt               string   `json:"post_at,omitempty"`
 	Advanced             bool     `json:"advanced"`
 	ProgressEvidence     string   `json:"progress_evidence,omitempty"`
+	LaunchIdentity       string   `json:"launch_identity,omitempty"`
 	HostHandles          []string `json:"host_handles,omitempty"`
 	IdentityProvenance   string   `json:"identity_provenance,omitempty"`
 	QualifyingEvidenceAt string   `json:"qualifying_evidence_at,omitempty"`
@@ -123,6 +128,10 @@ func (s *Summary) Recount() {
 			s.Counts.Substantive++
 		}
 		switch result.Status {
+		case "launch_intent", "launched_unproven", "active", "productive", "completed", "cardinality_failed", "launch_failed", "verification_failed", "failed_and_reaped", "reap_failed":
+			s.Counts.Attempted++
+		}
+		switch result.Status {
 		case "already_receipted":
 			s.Counts.AlreadyReceipted++
 		case "launched_unproven":
@@ -131,6 +140,11 @@ func (s *Summary) Recount() {
 		case "active":
 			s.Counts.Launched++
 			s.Counts.Active++
+			if result.Advanced {
+				s.Counts.ProvenActive++
+			} else {
+				s.Counts.OperatorOwnedLive++
+			}
 		case "productive":
 			s.Counts.Launched++
 			s.Counts.Productive++
@@ -141,6 +155,12 @@ func (s *Summary) Recount() {
 			s.Counts.Launched++
 			s.Counts.CardinalityFailed++
 			s.Counts.Failed++
+		case "failed_and_reaped":
+			s.Counts.Failed++
+			s.Counts.FailedAndReaped++
+		case "reap_failed":
+			s.Counts.Failed++
+			s.Counts.OperatorOwnedLive++
 		case "launch_failed", "receipt_failed", "verification_failed":
 			s.Counts.Failed++
 		case "identity_blocked":
@@ -288,7 +308,7 @@ func guardedTreeCount(session Session) int {
 
 func TerminalStatus(status string) bool {
 	switch status {
-	case "productive", "completed", "cardinality_failed", "launch_failed", "receipt_failed", "verification_failed", "already_receipted":
+	case "productive", "completed", "cardinality_failed", "launch_failed", "receipt_failed", "verification_failed", "failed_and_reaped", "reap_failed", "already_receipted":
 		return true
 	default:
 		return false
@@ -307,7 +327,7 @@ func Remediation(result Result) string {
 		return "fak session recover --thread " + result.ThreadID + " --json"
 	case "cardinality_failed":
 		return "fak session audit actions --here"
-	case "launch_failed", "receipt_failed", "verification_failed", "refused":
+	case "launch_failed", "receipt_failed", "verification_failed", "failed_and_reaped", "reap_failed", "refused":
 		if result.ThreadID != "" {
 			return "fak session recover --thread " + result.ThreadID + " --json"
 		}

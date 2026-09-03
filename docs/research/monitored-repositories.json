@@ -1,8 +1,115 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-09-01",
+  "updated_at": "2026-09-02",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+    {
+      "repository": "wkljohn/ds4-strix-halo-tp-odinlink",
+      "url": "https://github.com/wkljohn/ds4-strix-halo-tp-odinlink",
+      "status": "studied",
+      "priority": 1,
+      "why": "High-performance C99/HIP inference engine for DeepSeek-V4 and GLM-5 on dual AMD Strix Halo APU clusters, featuring Tensor Parallelism over USB4 OdinLink and RoCE v2, contiguous range expert sharding, direct slab RDMA, AVX-512 WC streaming copy, Wave32 KDA linear recurrence, and direct I/O.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "48e10779d4723e40a8949d0ba59c262d35379a03",
+      "stars_at_check": 15,
+      "last_push_at_check": "2026-09-02T12:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-DS4-STRIX-HALO-TP-ODINLINK-2026-09-02.md",
+      "receipt_id": "study_dc99f78a887e2ab60a9ccf5807650b6da85ac992d7f69d96b335360c55892811",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "48e10779d4723e40a8949d0ba59c262d35379a03",
+        "subsystem_count": 5,
+        "candidate_count": 8,
+        "filed_issue_count": 8,
+        "issue_refs": [
+          "#10755",
+          "#10756",
+          "#10758",
+          "#10759",
+          "#10760",
+          "#10761",
+          "#10762",
+          "#10763"
+        ]
+      }
+    },
+    {
+      "repository": "OpenRouterTeam/go-sdk",
+      "url": "https://github.com/OpenRouterTeam/go-sdk",
+      "status": "studied",
+      "priority": 1,
+      "why": "Official OpenRouter Go SDK defining the typed ProviderPreferences contract, Responses API, Server Tools, and multi-model deliberation schemas.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "23ee7e759807efe760c2870002390a957b2875a7",
+      "stars_at_check": 142,
+      "last_push_at_check": "2026-09-01T20:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OPENROUTER-2026-09-02.md",
+      "receipt_id": "study_c16fcd81b174bedf20107e88c0f6f1c8ca3020dc3116346667751b346ab71780",
+      "inventory": {
+        "mode": "deep",
+        "indexed_revision": "23ee7e759807efe760c2870002390a957b2875a7",
+        "subsystem_count": 8,
+        "candidate_count": 7,
+        "filed_issue_count": 5,
+        "issue_refs": [
+          "#10742",
+          "#10744",
+          "#10745",
+          "#10746",
+          "#10747"
+        ]
+      }
+    },
+    {
+      "repository": "anomalyco/opencode",
+      "url": "https://github.com/anomalyco/opencode",
+      "status": "studied",
+      "priority": 1,
+      "why": "Leading open-source AI coding agent with Effect.ts runtime, separating durable prompt admission from model execution. Deeply studied for composable SystemContext, ContextEpoch prefix reuse, generic tool output bounding, dynamic permission rulesets, Catalog selection, and embedded in-process gateway host.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "4eb29a64f0054672950acf789f2b09487ebfbb20",
+      "stars_at_check": 203243,
+      "last_push_at_check": "2026-09-02T13:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-OPENCODE-2026-09-02.md",
+      "refresh_issue": "#10701",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anomalyco-opencode.json",
+        "indexed_revision": "4eb29a64f0054672950acf789f2b09487ebfbb20",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 32,
+        "candidate_count": 16,
+        "filed_issue_count": 12,
+        "completeness_critic": "Exhaustive monorepo inventory covering core (session, system-context, tool, permission, plugin, catalog, agent, model) and opencode CLI/TUI packages; 12 independent issues filed across context, gateway, agent, tool, policy, modelroute, guard, skill, and integrations; durable receipt study_5e1d3f474b8d6240719d16e9bc97e159957340e9c0e3d32bcbb5aa9e8a1a761f recorded.",
+        "issue_refs": [
+          "#10701",
+          "#10702",
+          "#10703",
+          "#10704",
+          "#10705",
+          "#10706",
+          "#10707",
+          "#10708",
+          "#10711",
+          "#10712",
+          "#10713",
+          "#10714"
+        ]
+      }
+    },
     {
       "repository": "modular/modular",
       "url": "https://github.com/modular/modular",
@@ -2129,13 +2236,14 @@
     {
       "repository": "vllm-project/vllm",
       "url": "https://github.com/vllm-project/vllm",
-      "status": "candidate",
+      "status": "studied",
       "priority": 23,
       "why": "Primary high-throughput serving reference for scheduler, prefix-cache, memory-allocation, speculative-decode, and determinism tradeoffs. Existing fak notes cite vLLM heavily, but the exact current source identity was not in the durable registry; refresh against #2236, #8395, and #8923 before filing any new performance gap.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "80771bbbddf9e5153eea3aca8055049ee5aaaed1",
-      "stars_at_check": 90021,
-      "last_push_at_check": "2026-08-25T19:35:05Z"
+      "last_checked": "2026-09-02",
+      "checked_revision": "a56654d6de060495ff2db3b1d9ff0b187084d1a9",
+      "stars_at_check": 90799,
+      "last_push_at_check": "2026-09-02T19:43:08Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-VLLM-2026-09-02.md"
     },
     {
       "repository": "sgl-project/sglang",
@@ -2371,13 +2479,45 @@
     {
       "repository": "lightseekorg/tokenspeed",
       "url": "https://github.com/lightseekorg/tokenspeed",
-      "status": "candidate",
+      "status": "studied",
       "priority": 31,
-      "why": "MIT speed-of-light inference engine with fresh performance workflow work. Candidate as a sanity check for lower-bound measurement, benchmark harness shape, and no-excuses profiling before #8923 selects a borrowed hot path.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "1468fe0cbe92d389015ce73842fbaf349ce052d1",
+      "why": "MIT speed-of-light inference engine for agentic workloads deeply studied across scheduler (C++ FSM control plane, overlap scheduling with in-flight tracking), modular kernel registry with capability gating and format signatures, and MLA kernels on Blackwell. Clean-room FAK borrows decompose into #10743 (FSM), #10748 (overlap scheduling), #10749 (declarative registry), and #10750 (selection objectives) under parent #10741.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
       "stars_at_check": 1967,
-      "last_push_at_check": "2026-08-25T20:23:02Z"
+      "last_push_at_check": "2026-08-30T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-TOKENSPEED-2026-09-02.md",
+      "refresh_issue": "#10741",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/lightseekorg-tokenspeed.json",
+        "indexed_revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 12,
+        "filed_issue_count": 4,
+        "completeness_critic": "Exhaustive fan-out across scheduler (C++ FSM + Python), kernel registry/selection, MLA, entrypoint, event loop, models/layers. Skipped third-party vendored code (CUTLASS, FlashInfer, DeepEP). All load-bearing subsystems opened.",
+        "issue_refs": [
+          "#10741",
+          "#10743",
+          "#10748",
+          "#10749",
+          "#10750"
+        ]
+      }
     },
     {
       "repository": "Luce-Org/lucebox",
@@ -3788,7 +3928,7 @@
       "url": "https://github.com/ActaClad/plumbline",
       "status": "studied",
       "priority": 76,
-      "why": "Apache-2.0 Python reliability and architecture analyzer for LLM/agent systems. Pinned study retained four bounded adaptations—SARIF projection, labeled precision/recall corpora, stable finding baseline deltas, and one bounded cross-function value-flow rule—while rejecting a duplicate Python analyzer framework. Refresh after a post-v0.0.2 release, a material engine/reporter change, or a witnessed determinism fix.",
+      "why": "Apache-2.0 Python reliability and architecture analyzer for LLM/agent systems. Pinned study retained four bounded adaptations\u2014SARIF projection, labeled precision/recall corpora, stable finding baseline deltas, and one bounded cross-function value-flow rule\u2014while rejecting a duplicate Python analyzer framework. Refresh after a post-v0.0.2 release, a material engine/reporter change, or a witnessed determinism fix.",
       "last_checked": "2026-08-31",
       "checked_revision": "cae5eeaa244830ef88bd47e18d39b7b7761df41e",
       "stars_at_check": 26,
@@ -3985,6 +4125,327 @@
           "#10591"
         ],
         "completeness_critic": "Major tracked source classes were exhaustively inventoried, but the 1,086-document investigation corpus was clustered rather than read line-by-line; older benchmark identity and statistical rigor are uneven; selected active PRs lacked formal review; and the pinned submodule license was not locally verified."
+      }
+    },
+    {
+      "repository": "varjoranta/turboquant-vllm",
+      "url": "https://github.com/varjoranta/turboquant-vllm",
+      "status": "studied",
+      "priority": 25,
+      "why": "TurboQuant+ KV cache and 3-bit weight compression plugin for vLLM. Source of sparse top-k MoE dequant into shared scratch pool (8.4x decode speedup at bs=1 on Qwen3-30B-A3B) and served-benchmark validation of shape-gain norm correction + asymmetric K4/V3 bits.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "c8a7e0a73b2b9bb93dc66c9380dceab985a0fbc5",
+      "stars_at_check": 80,
+      "last_push_at_check": "2026-07-14T06:43:07Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-TURBOQUANT-VLLM-2026-09-02.md",
+      "refresh_issue": "#10709"
+    },
+    {
+      "repository": "portkey-ai/gateway",
+      "url": "https://github.com/portkey-ai/gateway",
+      "status": "studied",
+      "priority": 75,
+      "why": "Multi-provider AI gateway with unified OpenAI-compatible API, 1600+ models across 45+ providers, declarative provider normalization, routing strategies (fallback/loadbalance/conditional), guardrails plugin architecture, multi-backend caching, OTLP observability, and MCP gateway. Direct seam overlap with fak's routing, policy, caching, and observability surfaces.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "669825cbe89ee51569918b8f78a9db486fd69dd4",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-09-02T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md",
+        "indexed_revision": "669825cbe89ee51569918b8f78a9db486fd69dd4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 8,
+        "candidate_count": 14,
+        "filed_issue_count": 9,
+        "source_evidence": [
+          {
+            "class": "runtime_source",
+            "evidence": [
+              "git -C C:/Users/USER/AppData/Local/Temp/study-portkey-gateway rev-parse HEAD -> 669825cbe89ee51569918b8f78a9db486fd69dd4"
+            ],
+            "note": "Shallow clone at pinned revision; 766 tracked files across 8 load-bearing subsystems deep-read via parallel agents"
+          },
+          {
+            "class": "architecture_design",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md#candidate-matrix"
+            ],
+            "note": "Core routing engine, provider abstraction, caching, guardrails, observability, MCP gateway all mapped to source"
+          },
+          {
+            "class": "license_provenance",
+            "evidence": [
+              "C:/Users/USER/AppData/Local/Temp/study-portkey-gateway/LICENSE -> MIT"
+            ],
+            "note": "MIT license compatible with Apache-2.0; direct port/adapt permitted with attribution"
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"multi-provider routing\"",
+              "fak capabilities \"conditional routing\"",
+              "fak capabilities \"guardrails plugin architecture\"",
+              "fak capabilities \"cache backend\"",
+              "fak capabilities \"OTLP spans\"",
+              "fak capabilities \"provider normalization\""
+            ],
+            "note": "Capability/index queries plus raw source search decided PRESENT/PARTIAL/ABSENT dispositions"
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md#candidate-matrix"
+            ],
+            "note": "14 candidates with on-axis status, disposition, and evidence"
+          },
+          {
+            "class": "completeness_critic",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md#completeness-critic"
+            ],
+            "note": "All 8 load-bearing subsystems deeply read; tests, cookbooks, deployments, PR history justified as out of kernel-scope"
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10692",
+              "https://github.com/anthony-chaudhary/fak/issues/10693",
+              "https://github.com/anthony-chaudhary/fak/issues/10694",
+              "https://github.com/anthony-chaudhary/fak/issues/10695",
+              "https://github.com/anthony-chaudhary/fak/issues/10696",
+              "https://github.com/anthony-chaudhary/fak/issues/10697",
+              "https://github.com/anthony-chaudhary/fak/issues/10698",
+              "https://github.com/anthony-chaudhary/fak/issues/10699",
+              "https://github.com/anthony-chaudhary/fak/issues/10700"
+            ],
+            "note": "9 issues filed and verified independently"
+          }
+        ],
+        "issue_refs": [
+          "#10692",
+          "#10693",
+          "#10694",
+          "#10695",
+          "#10696",
+          "#10697",
+          "#10698",
+          "#10699",
+          "#10700"
+        ],
+        "completeness_critic": "All 8 load-bearing subsystems (core routing, provider abstraction, caching, guardrails, observability, MCP, transformation, streaming) deeply read via fan-out agents. Tests, cookbooks, deployment configs, and git history justified as non-kernel-relevant. No material kernel-relevant subsystem unopened."
+      }
+    },
+    {
+      "repository": "eunomia-bpf/agentsight",
+      "url": "https://github.com/eunomia-bpf/agentsight",
+      "status": "studied",
+      "priority": 77,
+      "why": "eBPF-based boundary tracing for AI agents: SSL/TLS uprobes for plaintext LLM traffic, process/file/network tracing via tracepoints, multi-protocol HTTP/SSE/WebSocket parsing, session-centric live top, agent-native session parsers, materialized view with row sinks. Direct overlap with fak's gateway, observability, and session surfaces.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "934f441eff8ca210807333633f47b2efcb8cd020",
+      "stars_at_check": 0,
+      "last_push_at_check": "2026-09-02T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/eunomia-bpf-agentsight.json",
+        "indexed_revision": "934f441eff8ca210807333633f47b2efcb8cd020",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 14,
+        "candidate_count": 14,
+        "filed_issue_count": 0,
+        "source_evidence": [
+          {
+            "class": "runtime_source",
+            "evidence": [
+              "bpf/sslsniff.bpf.c:1-590@934f441",
+              "bpf/process.bpf.c:1-327@934f441",
+              "ext/analysis/src/analyzers/http_parser.rs:1-1184@934f441",
+              "ext/analysis/src/analyzers/sse_processor.rs:1-1052@934f441",
+              "ext/analysis/src/view/mod.rs:1-1038@934f441",
+              "ext/session/src/parser.rs:1-5273@934f441"
+            ],
+            "note": "Shallow clone at pinned revision; 14 load-bearing subsystems deep-read via parallel agents"
+          },
+          {
+            "class": "architecture_design",
+            "evidence": [
+              "docs/design/materialized-view-architecture.md@934f441",
+              "docs/design/session-centric-top.md@934f441",
+              "docs/design/paper.txt:1-300@934f441"
+            ],
+            "note": "Boundary tracing rationale, session-centric top, academic paper all mapped to source"
+          },
+          {
+            "class": "license_provenance",
+            "evidence": [
+              "LICENSE -> MIT"
+            ],
+            "note": "MIT license compatible with Apache-2.0; direct port/adapt permitted with attribution"
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"SSL/TLS interception\"",
+              "fak capabilities \"materialized view\"",
+              "fak capabilities \"session discovery\"",
+              "fak capabilities \"token usage normalization\"",
+              "fak capabilities \"process tree\"",
+              "fak capabilities \"OTel GenAI export\"",
+              "fak capabilities \"bounded retention\""
+            ],
+            "note": "Capability/index queries plus raw source search decided PRESENT/PARTIAL/ABSENT/DIVERGENT dispositions"
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md#candidate-borrows",
+              "study_8e02e83cb64d8494cf8fe3d320cf13be15d6d1b9f9a296f4f52eaba07f124f0d"
+            ],
+            "note": "14 candidates with on-axis status, disposition, evidence, and durable study receipt"
+          },
+          {
+            "class": "completeness_critic",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-agentsight-2026-09-02.md#what-was-read-fan-out-coverage"
+            ],
+            "note": "All 14 load-bearing subsystems deeply read; no material kernel-relevant subsystem unopened"
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10736",
+              "https://github.com/anthony-chaudhary/fak/issues/10737",
+              "https://github.com/anthony-chaudhary/fak/issues/10738",
+              "https://github.com/anthony-chaudhary/fak/issues/10739",
+              "https://github.com/anthony-chaudhary/fak/issues/10740"
+            ],
+            "note": "Parent study tracker and 4 independently dispatchable child issues filed and verified"
+          }
+        ],
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#10736",
+          "#10737",
+          "#10738",
+          "#10739",
+          "#10740"
+        ],
+        "completeness_critic": "All 14 load-bearing subsystems (eBPF SSL uprobes, process tracepoints, HTTP/2+SSE+WS parsers, token normalization, materialized view, session parsing, process correlation, container resolution, OTel export, bounded retention, session-centric top, paper framing) deeply read via fan-out agents. Tests, CI, docker, frontend, experimental browsertrace justified as non-kernel-relevant. No material kernel-relevant subsystem unopened."
+      }
+    },
+    {
+      "repository": "ovg-project/kvcached",
+      "url": "https://github.com/ovg-project/kvcached",
+      "status": "studied",
+      "priority": 15,
+      "why": "Virtualized elastic KV cache bringing CUDA VMM (cuMemAddressReserve/cuMemMap) to LLM serving on shared GPUs. Deeply studied for virtual-physical capacity decoupling, page-aligned eviction, zero-copy prefix sharing, page-granular CPU offloading, and compound-page layout negative knowledge.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "60cad949389af6bbf1d65c4eddf325113df5a9eb",
+      "stars_at_check": 1281,
+      "last_push_at_check": "2026-08-23T05:24:49Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md",
+      "refresh_issue": "#10720",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/notes/CONCEPT-STUDY-KVCACHED-2026-09-02.md",
+        "indexed_revision": "60cad949389af6bbf1d65c4eddf325113df5a9eb",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 6,
+        "candidate_count": 8,
+        "filed_issue_count": 4,
+        "completeness_critic": "Exhaustive exploration across kvcached/ Python core, csrc/ CUDA/C++ VMM driver layer, engine_integration/ runtime patches, controller/ router and sleep manager, examples, benchmarks, tests, and docs; 4 independent issues filed (#10720, #10721, #10722, #10723) under epic #2236; durable receipt study_7f18852854b61725455e62ba7e29fbbc289a2e1775ca418021c0cfcfee7703ff recorded.",
+        "issue_refs": [
+          "#10720",
+          "#10721",
+          "#10722",
+          "#10723"
+        ]
+      }
+    },
+    {
+      "repository": "julianmb/q38rocm",
+      "url": "https://github.com/julianmb/q38rocm",
+      "status": "studied",
+      "priority": 1,
+      "why": "Dedicated single-model deployment package for Qwen 3.8 27B ROCmFP4 on AMD Strix Halo (Ryzen AI Max+ 395). Hardware-aligned block quantization (block 32), MTP speculative decoding, asymmetric TurboQuant KV cache, prompt-cache coexistence, and tuning/benchmark tooling.",
+      "last_checked": "2026-09-02",
+      "checked_revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
+      "stars_at_check": 185,
+      "last_push_at_check": "2026-09-02T18:30:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
+      "refresh_issue": "#10730",
+      "inventory": {
+        "mode": "deep",
+        "map_path": "docs/notes/CONCEPT-STUDY-q38rocm-2026-09-02.md",
+        "indexed_revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 8,
+        "candidate_count": 12,
+        "filed_issue_count": 6,
+        "completeness_critic": "Exhaustive exploration across quantization pipeline, MTP speculative decoding, KV cache and prompt caching, benchmarks and quality eval, NPU hybrid pipeline, engine build and provenance, server launcher, Docker integration, and upstream tracking; 6 independent issues filed (#10730, #10731, #10732, #10733, #10734, #10735) under epics #6221, #2236, #10193; durable receipt study_6777fd46608e1a1293a3f111c4a4f17a9aab28c16431e689f0e011cffc965cb6 recorded.",
+        "issue_refs": [
+          "#10730",
+          "#10731",
+          "#10732",
+          "#10733",
+          "#10734",
+          "#10735"
+        ]
       }
     }
   ]

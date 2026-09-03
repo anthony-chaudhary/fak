@@ -57,13 +57,7 @@ func ReplayResidency(arrivals []ResidencyArrival, capacity int64) (ResidencyRepl
 			r.MaxQueueNanoseconds = a.QueueNanoseconds
 		}
 		if _, ok := bases[a.Base]; !ok {
-			for resident+a.BaseBytes > capacity && len(order) > 0 {
-				k := order[0]
-				order = order[1:]
-				resident -= deltas[k]
-				r.EvictionBytes += deltas[k]
-				delete(deltas, k)
-			}
+			resident = evictResidencyDeltas(resident, a.BaseBytes, capacity, &order, deltas, &r)
 			if resident+a.BaseBytes > capacity {
 				return ResidencyReplayReceipt{}, fmt.Errorf("model: base residency exceeds capacity")
 			}
@@ -74,13 +68,7 @@ func ReplayResidency(arrivals []ResidencyArrival, capacity int64) (ResidencyRepl
 		}
 		key := a.Base + "|" + a.Adapter + "|" + a.Variant + "|" + a.HotSet
 		if _, ok := deltas[key]; !ok {
-			for resident+a.DeltaBytes > capacity && len(order) > 0 {
-				k := order[0]
-				order = order[1:]
-				resident -= deltas[k]
-				r.EvictionBytes += deltas[k]
-				delete(deltas, k)
-			}
+			resident = evictResidencyDeltas(resident, a.DeltaBytes, capacity, &order, deltas, &r)
 			if resident+a.DeltaBytes > capacity {
 				return ResidencyReplayReceipt{}, fmt.Errorf("model: delta residency exceeds capacity")
 			}
@@ -98,4 +86,15 @@ func ReplayResidency(arrivals []ResidencyArrival, capacity int64) (ResidencyRepl
 		r.ReloadBytesPerAccepted = float64(r.ReloadBytes) / float64(r.AcceptedTokens)
 	}
 	return r, nil
+}
+
+func evictResidencyDeltas(resident, incoming, capacity int64, order *[]string, deltas map[string]int64, receipt *ResidencyReplayReceipt) int64 {
+	for resident+incoming > capacity && len(*order) > 0 {
+		key := (*order)[0]
+		*order = (*order)[1:]
+		resident -= deltas[key]
+		receipt.EvictionBytes += deltas[key]
+		delete(deltas, key)
+	}
+	return resident
 }

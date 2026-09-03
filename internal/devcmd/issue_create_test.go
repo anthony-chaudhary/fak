@@ -352,3 +352,37 @@ func TestIssueCreateMalformedProblemFrameReturnsCanonicalRepair(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueCreateShiftLeftDefaultLabels(t *testing.T) {
+	body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame("Core")
+	var stdout, stderr bytes.Buffer
+	code := runIssueCreateWith(&stdout, &stderr, []string{
+		"--title", "feat(model): decompress MoE quant experts",
+		"--body", body,
+		"--estimate-points", "1",
+		"--parent-baseline-points", "1",
+		"--target-envelope", "- paths: >= 1 command",
+		"--witnessed-envelope", "- paths: 1 command",
+		"--dry-run", "--json",
+	}, nil)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var result issueCreateResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{"enhancement", "class:dev", "priority/P1", "gen/next", "model", "moe", "quantization"}
+	for _, exp := range expected {
+		found := false
+		for _, l := range result.Labels {
+			if l == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("result.Labels = %v, missing expected default label %q", result.Labels, exp)
+		}
+	}
+}

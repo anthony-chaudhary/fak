@@ -97,6 +97,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+		"native-admission-token-budget",
 		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
 		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},

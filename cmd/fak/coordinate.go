@@ -104,7 +104,7 @@ func coordinate(in coordinateInput) (coordinateReceipt, error) {
 	if in.Schema != coordinateSchema || in.TaskID == "" || in.Workers < 1 {
 		return coordinateReceipt{}, errors.New("schema, task_id, and positive workers are required")
 	}
-	if in.Harness != "claude" && in.Harness != "codex" && in.Harness != "fak-native" {
+	if in.Harness != "claude" && in.Harness != "codex" && in.Harness != "opencode" && in.Harness != "fak-native" {
 		return coordinateReceipt{}, fmt.Errorf("unknown harness %q", in.Harness)
 	}
 	if !in.Coordination {

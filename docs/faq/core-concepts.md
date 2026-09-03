@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Core concepts and the mental model"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "The fak mental model: treat model output as untrusted, route tool calls through a syscall-like boundary, and enforce policy below the agent."
 ---
 
 # Core concepts and the mental model

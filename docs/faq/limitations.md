@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Limitations and honest scope"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "What fak does not guarantee, where its security and performance boundaries end, and which deployments still require external controls."
 ---
 
 # Limitations and honest scope

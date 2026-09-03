@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — The lock — how adjudication works"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak adjudicates tool calls with default-deny policy, closed refusal reasons, capability manifests, caching, and explicit human approvals."
 ---
 
 # The lock — how adjudication works

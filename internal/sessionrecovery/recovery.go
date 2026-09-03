@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
@@ -704,8 +705,59 @@ func FinalizeReceipt(req Request, state, reason string, now time.Time) error {
 	return os.Rename(tmpName, req.ReceiptPath)
 }
 
-type Launcher interface{ Launch(Request) error }
+// LaunchHandle is cleanup authority for exactly one process tree created by a
+// recovery launch. Identity is immutable evidence; callers must never infer
+// cleanup ownership from a later broad inventory snapshot.
+type LaunchHandle interface {
+	Identity() string
+	Reap() error
+}
+
+type Launcher interface {
+	Launch(Request) (LaunchHandle, error)
+}
+
 type VisibleLauncher struct{ TerminalBin string }
+
+type processLaunchHandle struct {
+	pid   int
+	start string
+}
+
+func (h processLaunchHandle) Identity() string {
+	if h.start == "" {
+		return fmt.Sprintf("pid:%d", h.pid)
+	}
+	return fmt.Sprintf("pid:%d@%s", h.pid, h.start)
+}
+
+func (h processLaunchHandle) Reap() error {
+	procs, collectErr := procguard.CollectProcesses()
+	if collectErr != "" {
+		return fmt.Errorf("verify launch identity before reap: %s", collectErr)
+	}
+	found := false
+	for _, process := range procs {
+		if process.PID != h.pid {
+			continue
+		}
+		found = true
+		if h.start != "" && process.Start != h.start {
+			return fmt.Errorf("launch identity changed for pid %d", h.pid)
+		}
+		break
+	}
+	if !found {
+		return nil
+	}
+	if ok, detail := procguard.KillPID(h.pid); !ok {
+		if detail == "" {
+			detail = "process-tree reaper refused"
+		}
+		return errors.New(detail)
+	}
+	return nil
+}
 
 type visibleLaunchPlan struct {
 	bin   string
@@ -728,17 +780,17 @@ const terminalAppleScript = `on run argv
 end run
 `
 
-func (l VisibleLauncher) Launch(req Request) error {
+func (l VisibleLauncher) Launch(req Request) (LaunchHandle, error) {
 	if len(req.Argv) == 0 {
-		return errors.New("visible launch: empty argv")
+		return nil, errors.New("visible launch: empty argv")
 	}
 	command, err := exec.LookPath(req.Argv[0])
 	if err != nil {
-		return fmt.Errorf("visible launch: resolve %q: %w", req.Argv[0], err)
+		return nil, fmt.Errorf("visible launch: resolve %q: %w", req.Argv[0], err)
 	}
 	plan, err := planVisibleLaunch(runtime.GOOS, l.TerminalBin, req, command)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cmd := exec.Command(plan.bin, plan.args...)
 	cmd.Dir = plan.dir
@@ -746,9 +798,22 @@ func (l VisibleLauncher) Launch(req Request) error {
 		cmd.Stdin = strings.NewReader(plan.stdin)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("visible launch: %w", err)
+		return nil, fmt.Errorf("visible launch: %w", err)
 	}
-	return cmd.Process.Release()
+	pid := cmd.Process.Pid
+	start := ""
+	if procs, collectErr := procguard.CollectProcesses(); collectErr == "" {
+		for _, process := range procs {
+			if process.PID == pid {
+				start = process.Start
+				break
+			}
+		}
+	}
+	if err := cmd.Process.Release(); err != nil {
+		return nil, err
+	}
+	return processLaunchHandle{pid: pid, start: start}, nil
 }
 
 func planVisibleLaunch(goos, terminalBin string, req Request, command string) (visibleLaunchPlan, error) {

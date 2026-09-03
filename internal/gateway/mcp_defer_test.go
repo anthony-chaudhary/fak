@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -180,5 +181,49 @@ func TestDeferredToolStillCallable(t *testing.T) {
 	_, rerr := srv.handleMethod(context.Background(), "tools/call", params)
 	if rerr != nil {
 		t.Fatalf("deferred tool fak_memory_drivers should still dispatch via tools/call, got rpc error: %v", rerr.Message)
+	}
+}
+
+func TestFakReadDiscoverySchemaDocumentsReceipt(t *testing.T) {
+	srv := newDeferServer(t, true)
+	resp, err := srv.toolsSearch(ToolsSearchRequest{Query: "verified fresh file read outcome receipt", DetailLevel: "full"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tool map[string]any
+	for _, candidate := range resp.Tools {
+		if candidate["name"] == "fak_read" {
+			tool = candidate
+			break
+		}
+	}
+	if tool == nil {
+		t.Fatalf("fak_read not discoverable: %v", resp.Tools)
+	}
+	description, _ := tool["description"].(string)
+	for _, term := range []string{"executed_cold_read", "verified_fresh_reuse", "duration_ns", "witness", "typed errors"} {
+		if !strings.Contains(description, term) {
+			t.Fatalf("description omits %q: %s", term, description)
+		}
+	}
+	schemaBytes, err := json.Marshal(tool["inputSchema"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(schemaBytes)
+	for _, term := range []string{"file_path", "file_paths", "anyOf"} {
+		if !strings.Contains(schema, term) {
+			t.Fatalf("input schema omits %q: %s", term, schema)
+		}
+	}
+	resident, _ := srv.toolsListView()
+	found := false
+	for _, candidate := range resident {
+		if candidate["name"] == "fak_read" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fak_read must remain in bootstrap discovery")
 	}
 }

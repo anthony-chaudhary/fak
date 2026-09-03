@@ -1,6 +1,6 @@
 ---
 title: "fak learning path — L400"
-description: "A staged part of the fak learning path, split out of LEARNING-PATH.md so each stage stays a bounded read."
+description: "The L400 performance stage explains cache reuse, addressable eviction, scaling laws, and the labs that verify them."
 ---
 
 # L400 — The Performance Core: cache reuse, addressable eviction, and the scaling laws

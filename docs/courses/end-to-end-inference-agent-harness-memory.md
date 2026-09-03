@@ -1,3 +1,8 @@
+---
+title: "End-to-end inference, agent harness, and memory course"
+description: "A bounded course following one fak request through native inference, agent tools, policy, context admission, memory recall, and verification."
+---
+
 # End-to-End Inference, Agent Harness, and Memory
 
 > **Flagship bounded course.** Follow one fak request from runtime admission through fak-native model execution, agent tool use, policy, local fast paths, context admission, memory recall, and durable verification. This page is a syllabus and lab guide; the linked canonical documents remain authoritative.

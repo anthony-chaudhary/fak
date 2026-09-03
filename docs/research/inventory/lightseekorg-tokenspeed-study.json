@@ -1,0 +1,104 @@
+{
+  "schema": "fak-study/1",
+  "title": "lightseekorg/tokenspeed agentic inference engine and scheduler FSM mechanisms",
+  "observed": "2026-09-02",
+  "sources": [
+    {
+      "url": "https://github.com/lightseekorg/tokenspeed",
+      "revision": "b174a3186d9a6eb3192389afbb25611a976eefc7",
+      "license": "MIT"
+    }
+  ],
+  "observations": [
+    "TokenSpeed separates the control plane (C++ FSM with compile-time type safety) from the execution plane (Python), enforcing request lifecycle and KV cache invariants via the type system.",
+    "Overlap scheduling with in_flight_depth and results_in_flight counters hides CPU scheduling latency behind GPU execution without explicit pipeline logic.",
+    "Chunked prefill tracks extend_prefix_lens to bound memory usage during long-context prompt processing.",
+    "Capacity retraction with victim selection (decode-origin first, then oldest epoch) and host snapshotting provides graceful degradation under memory pressure.",
+    "Kernel registry uses declarative FormatSignature, capability requirements (vendor, arch, features), and per-family oracles for hardware-aware selection.",
+    "SelectionObjective enum (latency, throughput, portability, determinism, debug) provides first-class optimization targets per call site."
+  ],
+  "candidates": [
+    {
+      "effect": "Enforce request lifecycle state transitions via typed finite-state machine with compile-time transition verification.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "tokenspeed-scheduler/csrc/fsm/states.h:32@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "tokenspeed-scheduler/csrc/fsm/forward_events.h:42@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/adjudicator/eval.go:45",
+        "internal/adjudicator/policy.go:88"
+      ],
+      "issue": "#10743",
+      "outcome": "FAK has policy/guard evaluation but lacks a typed state-machine contract for tool-call and session lifecycle transitions."
+    },
+    {
+      "effect": "Overlap schedule execution by decoupling step planning from result landing using bounded in-flight depth and in-flight tracking.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "tokenspeed-scheduler/csrc/fsm/forward_states.h:116@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "python/tokenspeed/runtime/engine/event_loop.py:915@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/engine/engine.go:120"
+      ],
+      "issue": "#10748",
+      "outcome": "FAK currently executes tool calls sequentially; bounded overlap planning can hide host-side validation latency behind model turns."
+    },
+    {
+      "effect": "Select execution kernels through declarative capability gating, format signatures, and per-family domain oracles.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "tokenspeed-kernel/python/tokenspeed_kernel/registry.py:157@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "tokenspeed-kernel/python/tokenspeed_kernel/selection.py:118@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/model/registry.go:35"
+      ],
+      "issue": "#10749",
+      "outcome": "FAK model registry resolves models procedurally; adopting declarative format signature and capability matching improves multi-backend routing."
+    },
+    {
+      "effect": "Provide first-class selection objectives (latency, throughput, portability, determinism, debug) to steer execution ranking.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "tokenspeed-kernel/python/tokenspeed_kernel/selection.py:79@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/gateway/route.go:50"
+      ],
+      "issue": "#10750",
+      "outcome": "FAK routing policies support cost and score but lack explicit first-class optimization objective tags."
+    },
+    {
+      "effect": "Recover from capacity exhaustion via victim retraction with epoch-ordered readmission and host-backed snapshotting.",
+      "status": "ABSENT",
+      "disposition": "WATCH",
+      "evidence": [
+        "tokenspeed-scheduler/csrc/scheduler/scheduler.h:238@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "tokenspeed-scheduler/csrc/fsm/forward_events.h:174@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/ctxmmu/alloc.go:80"
+      ],
+      "issue": "",
+      "outcome": "FAK manages context via ctxmmu but does not implement epoch-ordered victim retraction under multi-session concurrency."
+    },
+    {
+      "effect": "Coordinate multi-tier KV caches with two-tier prefix probe and asynchronous host streaming.",
+      "status": "PARTIAL",
+      "disposition": "WATCH",
+      "evidence": [
+        "tokenspeed-scheduler/csrc/cache/coordinator/cache_coordinator.h:103@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "internal/ctxmmu/pager.go:60"
+      ],
+      "issue": "",
+      "outcome": "FAK context pager operates on local memory spans; tiered host/device prefix coordination is relevant when scaling local inference."
+    },
+    {
+      "effect": "Run headless inference scheduler driven directly by external orchestrator over compact binary messaging.",
+      "status": "PARTIAL",
+      "disposition": "WATCH",
+      "evidence": [
+        "python/tokenspeed/runtime/entrypoints/engine.py:638@b174a3186d9a6eb3192389afbb25611a976eefc7",
+        "cmd/fak/serve.go:85"
+      ],
+      "issue": "",
+      "outcome": "FAK provides gateway serve mode but does not export an embeddable headless scheduler protocol for third-party control planes."
+    }
+  ]
+}

@@ -3,31 +3,22 @@ package gateway
 import (
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-// upstream_observe.go is the host's read-only window onto UPSTREAM provider
-// responses. The proxy planners speak to the provider through their own
-// http.Client; wrapping that client's transport here lets a host observe each
-// response's status + headers — the provider's anthropic-ratelimit-* /
-// x-ratelimit-* ACCOUNT-usage headers `fak guard` folds into its account view
-// (internal/accountobs) — on every upstream hop (buffered, streaming, and every
-// retry) without touching the request path or the body. The gateway itself stays
-// account-blind: it only carries the seam.
-
-// upstreamObserveTransport wraps an http.RoundTripper and reports each response's
-// status + headers to the observer. Errors and bodies pass through untouched; the
-// observer is called after headers arrive (before the body is read), so a
-// streaming response is observed at stream open.
 type upstreamObserveTransport struct {
-	base         http.RoundTripper
-	observe      func(status int, header http.Header)
-	observeError func(error)
+	base           http.RoundTripper
+	observe        func(status int, header http.Header)
+	observeError   func(error)
+	observeFailure func(UpstreamFailureReceipt)
+	mu             sync.Mutex
+	attempts       map[any]int
 }
 
 func (t *upstreamObserveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	attempt := t.nextAttempt(req)
 	resp, err := t.base.RoundTrip(req)
 	if resp != nil && t.observe != nil {
 		t.observe(resp.StatusCode, resp.Header)
@@ -35,21 +26,41 @@ func (t *upstreamObserveTransport) RoundTrip(req *http.Request) (*http.Response,
 	if err != nil && t.observeError != nil && transientUpstreamTransportError(err) {
 		t.observeError(err)
 	}
+	if t.observeFailure != nil {
+		if err != nil && transientUpstreamTransportError(err) {
+			t.observeFailure(upstreamFailureReceipt(req, 0, nil, attempt, err))
+		} else if resp != nil && resp.StatusCode >= 400 {
+			t.observeFailure(upstreamFailureReceipt(req, resp.StatusCode, resp.Header, attempt, nil))
+		} else if resp != nil && resp.Body != nil {
+			resp.Body = &receiptBody{ReadCloser: resp.Body, req: req, status: resp.StatusCode, header: resp.Header.Clone(), attempt: attempt, emit: t.observeFailure}
+		}
+	}
 	return resp, err
 }
 
-// wrapUpstreamObserver installs observe onto client's transport. A nil observer or
-// client leaves everything untouched, so the default (no Config.
-// UpstreamResponseObserver) path keeps its transport byte-for-byte.
-func wrapUpstreamObserver(client *http.Client, observe func(status int, header http.Header), observeError func(error)) {
-	if client == nil || (observe == nil && observeError == nil) {
+func (t *upstreamObserveTransport) nextAttempt(req *http.Request) int {
+	if req == nil {
+		return 1
+	}
+	key := any(req.Context())
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.attempts == nil {
+		t.attempts = make(map[any]int)
+	}
+	t.attempts[key]++
+	return t.attempts[key]
+}
+
+func wrapUpstreamObserver(client *http.Client, observe func(int, http.Header), observeError func(error), observeFailure func(UpstreamFailureReceipt)) {
+	if client == nil || (observe == nil && observeError == nil && observeFailure == nil) {
 		return
 	}
 	base := client.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	client.Transport = &upstreamObserveTransport{base: base, observe: observe, observeError: observeError}
+	client.Transport = &upstreamObserveTransport{base: base, observe: observe, observeError: observeError, observeFailure: observeFailure}
 }
 
 func transientUpstreamTransportError(err error) bool {
@@ -59,8 +70,7 @@ func transientUpstreamTransportError(err error) bool {
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	var ne net.Error
-	if errors.As(err, &ne) && (ne.Timeout() || ne.Temporary()) {
+	if transientTransportError(err) {
 		return true
 	}
 	low := strings.ToLower(err.Error())

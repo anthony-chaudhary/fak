@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLiftTextToolCalls_Hermes(t *testing.T) {
 	m := Message{
@@ -301,5 +304,64 @@ func TestNormalizeToolArguments(t *testing.T) {
 		if got := normalizeToolArguments([]byte(in)); got != want {
 			t.Errorf("normalize(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestLiftTextToolCalls_BareQwenFunctionParameterDialect covers the UNWRAPPED antl form
+// Qwen2.5-Coder-3B emits under a tools-bearing prompt (issue #10600): a bare
+// <function=name>\n<parameter=key>value block with NO <tool_call> wrapper. The wrapped
+// gate in normalizeQwenFunctionToolCalls never saw it, so the call stayed text and never
+// reached adjudication; the bare-antl dialect must lift it into a structured call.
+func TestLiftTextToolCalls_BareQwenFunctionParameterDialect(t *testing.T) {
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: `<function=bash>
+<parameter=command>
+echo "fak-10600-tool-ok"
+</parameter>
+</function>`})
+	if len(m.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
+	}
+	tc := m.ToolCalls[0]
+	if tc.Function.Name != "bash" {
+		t.Fatalf("lifted name = %q, want bash", tc.Function.Name)
+	}
+	if tc.Function.Arguments != `{"command":"echo \"fak-10600-tool-ok\""}` {
+		t.Fatalf("lifted arguments = %q, want the command string", tc.Function.Arguments)
+	}
+	if strings.TrimSpace(m.Content) != "" {
+		t.Fatalf("lifted call remained in content: %q", m.Content)
+	}
+}
+
+// TestLiftTextToolCalls_BareQwenFunctionWithProse: the same dialect with prose around
+// the block — the block span is stripped, the prose survives, and typed parameter values
+// (a JSON number here) keep their parsed form.
+func TestLiftTextToolCalls_BareQwenFunctionWithProse(t *testing.T) {
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: "Let me check.\n<function=Read>\n<parameter=path>\ngo.mod\n</parameter>\n<parameter=line>\n10\n</parameter>\n</function>\nDone."})
+	if len(m.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
+	}
+	tc := m.ToolCalls[0]
+	if tc.Function.Name != "Read" {
+		t.Fatalf("lifted name = %q, want Read", tc.Function.Name)
+	}
+	if tc.Function.Arguments != `{"line":10,"path":"go.mod"}` {
+		t.Fatalf("lifted arguments = %q, want typed path + line", tc.Function.Arguments)
+	}
+	if m.Content != "Let me check.\n\nDone." {
+		t.Fatalf("content = %q, want prose kept with the block stripped", m.Content)
+	}
+}
+
+// TestLiftTextToolCalls_MalformedBareQwenFunctionNotLifted: a TRUNCATED bare antl block
+// (no </function>) must not fabricate a call — conservative posture, content preserved.
+func TestLiftTextToolCalls_MalformedBareQwenFunctionNotLifted(t *testing.T) {
+	content := "<function=bash>\n<parameter=command>\necho truncated"
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: content})
+	if len(m.ToolCalls) != 0 {
+		t.Fatalf("truncated bare antl block wrongly lifted %d calls", len(m.ToolCalls))
+	}
+	if m.Content != content {
+		t.Fatalf("content was modified: %q", m.Content)
 	}
 }

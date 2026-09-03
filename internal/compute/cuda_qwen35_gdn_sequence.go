@@ -28,8 +28,7 @@ func (c *cudaBackend) Qwen35GDNSequence(
 	tokens, hidden := normalizedInput.Shape[0], normalizedInput.Shape[1]
 	row := normalizedInput
 	row.Shape = []int{hidden}
-	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
-	_, keyDim, valueDim, convDim, operands, err := in.entry(row, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
+	in, _, keyDim, valueDim, convDim, operands, err := qwen35GDNEntry(normalizedInput, row, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon)
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}

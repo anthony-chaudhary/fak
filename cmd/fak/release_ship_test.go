@@ -2114,6 +2114,33 @@ func TestReleaseShipPushRetryableGate(t *testing.T) {
 	}
 }
 
+func TestReleaseShipLockLifecycleUsesOneExplicitOwner(t *testing.T) {
+	result := releaseShipResult{ReleaseOwner: "stable-cutter", CommitSHA: "abc123", CommandTail: map[string]string{}}
+	var calls [][]string
+	oldRunner := releaseShipRunCommand
+	releaseShipRunCommand = func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		calls = append(calls, append([]string(nil), args...))
+		return 0, `{"ok":true}`
+	}
+	t.Cleanup(func() { releaseShipRunCommand = oldRunner })
+
+	opts := defaultReleaseShipOptions("main")
+	_ = runReleaseShipLockAcquire(&result, t.TempDir(), nil, opts)
+	_ = runReleaseShipLockRenew(&result, t.TempDir(), nil, 60, "test")
+	_ = runReleaseShipLockRelease(&result, t.TempDir(), nil)
+	if len(calls) != 3 {
+		t.Fatalf("lock lifecycle calls = %d, want 3", len(calls))
+	}
+	for _, args := range calls {
+		if !containsArgPair(args, "--owner", result.ReleaseOwner) {
+			t.Fatalf("lock lifecycle call did not bind stable owner: %v", args)
+		}
+	}
+	if !containsArgPair(calls[2], "--receipt-commit", result.CommitSHA) || !containsArgPair(calls[2], "--receipt-path", result.ReleaseLockReceipt) {
+		t.Fatalf("release did not bind durable receipt to commit/path: %v", calls[2])
+	}
+}
+
 const fakeReleaseWorktree = "C:\\tmp\\fak-release-ship-test"
 
 func stubReleaseShipRunner(t *testing.T, runner releaseShipCommandRunner) func() {

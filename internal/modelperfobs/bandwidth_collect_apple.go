@@ -312,6 +312,14 @@ func requireExactJSONKeys(path string, object map[string]json.RawMessage, allowe
 func rejectDuplicateJSONNames(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var walk func(json.Token) error
+	var walkNext func() error
+	walkNext = func() error {
+		valueToken, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		return walk(valueToken)
+	}
 	walk = func(token json.Token) error {
 		delim, ok := token.(json.Delim)
 		if !ok {
@@ -333,11 +341,7 @@ func rejectDuplicateJSONNames(data []byte) error {
 					return fmt.Errorf("duplicate JSON object name %q", name)
 				}
 				seen[name] = struct{}{}
-				valueToken, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				if err := walk(valueToken); err != nil {
+				if err := walkNext(); err != nil {
 					return err
 				}
 			}
@@ -350,11 +354,7 @@ func rejectDuplicateJSONNames(data []byte) error {
 			}
 		case '[':
 			for dec.More() {
-				valueToken, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				if err := walk(valueToken); err != nil {
+				if err := walkNext(); err != nil {
 					return err
 				}
 			}
@@ -571,23 +571,14 @@ func parseGenericAppleMemoryCounter(counter genericAppleMemoryCounter, scope App
 		Unit:      counter.Unit,
 		Scope:     counter.Scope,
 	}
+	if err := validateAppleCounterShape(counter); err != nil {
+		return AppleMemoryCounterArtifact{}, err
+	}
 	switch counter.Unit {
 	case "bytes_per_second":
-		if counter.RateBytesPerSecond == nil {
-			return AppleMemoryCounterArtifact{}, fmt.Errorf("generic Apple counter %q is missing rate_bytes_per_second", counter.Field)
-		}
-		if len(counter.Snapshots) != 0 {
-			return AppleMemoryCounterArtifact{}, fmt.Errorf("generic Apple counter %q mixes a direct rate with snapshots", counter.Field)
-		}
 		out.RateBytesPerSecond = counter.RateBytesPerSecond
 		out.ByteProvenance = "direct-byte-rate"
 	case "bytes":
-		if counter.RateBytesPerSecond != nil {
-			return AppleMemoryCounterArtifact{}, fmt.Errorf("generic Apple counter %q mixes byte snapshots with a direct rate", counter.Field)
-		}
-		if len(counter.Snapshots) != 2 {
-			return AppleMemoryCounterArtifact{}, fmt.Errorf("generic Apple counter %q requires exactly two byte snapshots", counter.Field)
-		}
 		for i, snapshot := range counter.Snapshots {
 			captured, err := time.Parse(time.RFC3339Nano, snapshot.CapturedAt)
 			if err != nil {
@@ -622,6 +613,30 @@ func parseGenericAppleMemoryCounter(counter genericAppleMemoryCounter, scope App
 		return AppleMemoryCounterArtifact{}, fmt.Errorf("unsupported Apple memory counter unit %q for %q", counter.Unit, counter.Field)
 	}
 	return out, nil
+}
+
+func appleCounterHasRate(counter genericAppleMemoryCounter) bool {
+	return counter.RateBytesPerSecond != nil
+}
+
+func validateAppleCounterShape(counter genericAppleMemoryCounter) error {
+	switch counter.Unit {
+	case "bytes_per_second":
+		if !appleCounterHasRate(counter) {
+			return fmt.Errorf("generic Apple counter %q is missing rate_bytes_per_second", counter.Field)
+		}
+		if len(counter.Snapshots) != 0 {
+			return fmt.Errorf("generic Apple counter %q mixes a direct rate with snapshots", counter.Field)
+		}
+	case "bytes":
+		if counter.RateBytesPerSecond != nil {
+			return fmt.Errorf("generic Apple counter %q mixes byte snapshots with a direct rate", counter.Field)
+		}
+		if len(counter.Snapshots) != 2 {
+			return fmt.Errorf("generic Apple counter %q requires exactly two byte snapshots", counter.Field)
+		}
+	}
+	return nil
 }
 
 func rejectNonMemoryTrafficField(field string) error {

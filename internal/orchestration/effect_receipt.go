@@ -2,8 +2,6 @@ package orchestration
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -111,7 +109,7 @@ func ValidateEffectCohort(runID string, admitted []AdmittedEffect, receipts []Ef
 	for _, a := range admitted {
 		id := strings.TrimSpace(a.ChildID)
 		if id == "" || !a.Admitted || strings.TrimSpace(a.RunID) != strings.TrimSpace(runID) ||
-			strings.TrimSpace(a.SuccessorID) == "" || strings.TrimSpace(a.EffectClass) == "" || !scrubbedDigest(a.ExpectedScrubbedDigest) {
+			strings.TrimSpace(a.SuccessorID) == "" || strings.TrimSpace(a.EffectClass) == "" || !canonicalSHA256(a.ExpectedScrubbedDigest) {
 			cohortFailed = true
 			results[id] = EffectChildResult{ChildID: id, State: EffectFailed, Reason: "invalid admission"}
 			continue
@@ -191,7 +189,7 @@ func validateEffectReceipt(runID string, admitted AdmittedEffect, receipt Effect
 	if strings.TrimSpace(receipt.RunID) != strings.TrimSpace(runID) || receipt.SuccessorID != admitted.SuccessorID || receipt.EffectClass != admitted.EffectClass {
 		return EffectFailed, "run or effect identity mismatch"
 	}
-	if !scrubbedDigest(receipt.ExpectedScrubbedDigest) || !scrubbedDigest(receipt.ObservedScrubbedDigest) || receipt.ExpectedScrubbedDigest != admitted.ExpectedScrubbedDigest {
+	if !canonicalSHA256(receipt.ExpectedScrubbedDigest) || !canonicalSHA256(receipt.ObservedScrubbedDigest) || receipt.ExpectedScrubbedDigest != admitted.ExpectedScrubbedDigest {
 		return EffectFailed, "invalid or mismatched digest binding"
 	}
 	if receipt.ExpectedScrubbedDigest != receipt.ObservedScrubbedDigest {
@@ -204,12 +202,4 @@ func validateEffectReceipt(runID string, admitted AdmittedEffect, receipt Effect
 		return EffectUnknown, "effect not authoritatively reconciled"
 	}
 	return EffectVerified, ""
-}
-
-func scrubbedDigest(value string) bool {
-	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }

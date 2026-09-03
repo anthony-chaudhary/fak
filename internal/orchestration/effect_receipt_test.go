@@ -143,7 +143,7 @@ func TestEffectReceiptPrivacySurface(t *testing.T) {
 			}
 		}
 	}
-	if scrubbedDigest("ABCDEF0000000000000000000000000000000000000000000000000000000000") || scrubbedDigest("not-a-digest") {
+	if canonicalSHA256("ABCDEF0000000000000000000000000000000000000000000000000000000000") || canonicalSHA256("not-a-digest") {
 		t.Fatal("scrubbed digest validation accepted a non-canonical digest")
 	}
 }

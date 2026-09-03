@@ -1,6 +1,6 @@
 ---
 title: "fak FAQ — Comparisons with other tools"
-description: "Deep-dive FAQ theme split out of docs/FAQ.md; the essentials and the theme index live there."
+description: "How fak differs from inference servers, agent frameworks, sandboxes, policy engines, observability tools, and provider-native controls."
 ---
 
 # Comparisons with other tools

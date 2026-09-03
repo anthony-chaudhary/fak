@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -30,17 +31,36 @@ func installSessionRecoverIdentityFixture(t *testing.T) {
 	t.Setenv("FLEET_REG_DIR", regDir)
 }
 
-type captureLauncher struct {
-	got      []sessionrecovery.Request
-	onLaunch func(int, sessionrecovery.Request)
+type captureLaunchHandle struct {
+	identity string
+	reaped   int
+	reapErr  error
 }
 
-func (c *captureLauncher) Launch(r sessionrecovery.Request) error {
+func (h *captureLaunchHandle) Identity() string { return h.identity }
+func (h *captureLaunchHandle) Reap() error {
+	h.reaped++
+	return h.reapErr
+}
+
+type captureLauncher struct {
+	got       []sessionrecovery.Request
+	onLaunch  func(int, sessionrecovery.Request)
+	handles   []*captureLaunchHandle
+	launchErr error
+}
+
+func (c *captureLauncher) Launch(r sessionrecovery.Request) (sessionrecovery.LaunchHandle, error) {
 	c.got = append(c.got, r)
 	if c.onLaunch != nil {
 		c.onLaunch(len(c.got), r)
 	}
-	return nil
+	if c.launchErr != nil {
+		return nil, c.launchErr
+	}
+	h := &captureLaunchHandle{identity: fmt.Sprintf("test-launch:%d", len(c.got))}
+	c.handles = append(c.handles, h)
+	return h, nil
 }
 
 func TestRecoveryInventoryReconcilesRuntimeSources(t *testing.T) {
@@ -496,6 +516,9 @@ func TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality(t *te
 	}
 	if calls != 3 || sleeps != 1 || len(got.Results) != 1 || got.Results[0].Status != "productive" || got.Results[0].GuardedProcessTrees != 1 {
 		t.Fatalf("calls=%d sleeps=%d summary=%+v", calls, sleeps, got)
+	}
+	if got.Results[0].LaunchIdentity != "test-launch:1" {
+		t.Fatalf("launch identity missing from run witness: %+v", got.Results[0])
 	}
 }
 
