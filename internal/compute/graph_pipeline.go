@@ -25,6 +25,8 @@ const (
 	GraphOpIdentity GraphOp = "identity"
 	GraphOpAdd      GraphOp = "add"
 	GraphOpMultiply GraphOp = "multiply"
+	GraphOpDivide   GraphOp = "divide"
+	GraphOpSelect   GraphOp = "select"
 	GraphOpIf       GraphOp = "if"
 )
 
@@ -81,8 +83,10 @@ func validateGraphOp(node GraphNode) error {
 		want = 0
 	case GraphOpIdentity:
 		want = 1
-	case GraphOpAdd, GraphOpMultiply:
+	case GraphOpAdd, GraphOpMultiply, GraphOpDivide:
 		want = 2
+	case GraphOpSelect:
+		want = 3
 	case GraphOpIf:
 		if len(node.Inputs) == 0 {
 			return fmt.Errorf("compute graph: if node %q has 0 inputs, want at least condition", node.ID)

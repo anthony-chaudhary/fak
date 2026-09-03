@@ -132,7 +132,18 @@ func replayFixture(t *testing.T, name string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return raw
+	// Normalize CRLF to LF so comparisons are stable regardless of git checkout transport.
+	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+}
+
+func TestReplayFixtureNormalizesCRLF(t *testing.T) {
+	raw := replayFixture(t, "ledger.json")
+	// Convert LF to CRLF to simulate Windows checkout transport.
+	simulatedCRLF := bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
+	normalized := bytes.ReplaceAll(simulatedCRLF, []byte("\r\n"), []byte("\n"))
+	if !bytes.Equal(normalized, raw) {
+		t.Fatal("normalizing CRLF did not recover original LF ledger bytes")
+	}
 }
 
 func replayManifestForCase(t *testing.T, corpus ReplayCorpus, id string) ReleaseManifest {
