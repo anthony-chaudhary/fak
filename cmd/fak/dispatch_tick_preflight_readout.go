@@ -142,6 +142,11 @@ func decorateDispatchPreflight(readout dispatchPreflightReadout) map[string]any 
 			"skipped":    lazySkipped,
 		}
 	}
+	// Residency discount pricing (#3893, vLLM M2 study): price a turn's admission cost
+	// discounted by resident-prefix coverage. Attached when prompt tokens are configured.
+	if pricing := dispatchTurnResidencyDiscountEnv(); pricing != nil {
+		out["residency_pricing"] = pricing
+	}
 
 	return out
 }
