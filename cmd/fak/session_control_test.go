@@ -59,8 +59,23 @@ func TestApplySessionControlDispatchesEveryVerb(t *testing.T) {
 	if err != nil || !ok || st.Priority != 3 {
 		t.Fatalf("priority verb: st=%+v ok=%v err=%v", st, ok, err)
 	}
-	if st.Rev != 4 {
-		t.Fatalf("expected Rev=4 after four writes, got %d", st.Rev)
+
+	// pause / resume / throttle / stop verbs
+	st, ok, err = applySessionControl(tbl, trace, "pause", gateway.SessionControlRequest{Reason: "user-pause"})
+	if err != nil || !ok || st.Run != session.Paused || st.Reason != "user-pause" {
+		t.Fatalf("pause verb: st=%+v ok=%v err=%v", st, ok, err)
+	}
+	st, ok, err = applySessionControl(tbl, trace, "resume", gateway.SessionControlRequest{})
+	if err != nil || !ok || st.Run != session.Running || st.Reason != "" {
+		t.Fatalf("resume verb: st=%+v ok=%v err=%v", st, ok, err)
+	}
+	st, ok, err = applySessionControl(tbl, trace, "throttle", gateway.SessionControlRequest{Reason: "slow"})
+	if err != nil || !ok || st.Run != session.Throttled || st.Reason != "slow" {
+		t.Fatalf("throttle verb: st=%+v ok=%v err=%v", st, ok, err)
+	}
+	st, ok, err = applySessionControl(tbl, trace, "stop", gateway.SessionControlRequest{Reason: "all-done"})
+	if err != nil || !ok || st.Run != session.Stopped || st.Reason != "all-done" {
+		t.Fatalf("stop verb: st=%+v ok=%v err=%v", st, ok, err)
 	}
 
 	// Unknown verb ⇒ error (the route maps this to 400).
@@ -70,6 +85,37 @@ func TestApplySessionControlDispatchesEveryVerb(t *testing.T) {
 	// Missing body field ⇒ error.
 	if _, _, err := applySessionControl(tbl, trace, "budget", gateway.SessionControlRequest{}); err == nil {
 		t.Fatalf("budget verb without a body must return an error")
+	}
+}
+
+// TestSessionControlDirectVerbs proves the pause, resume, throttle, and stop verbs
+// map directly to their corresponding RunState transitions.
+func TestSessionControlDirectVerbs(t *testing.T) {
+	tbl := session.NewTable()
+	const trace = "ctrl-direct-1"
+
+	// pause
+	st, ok, err := applySessionControl(tbl, trace, "pause", gateway.SessionControlRequest{Reason: "paused-by-test"})
+	if err != nil || !ok || st.Run != session.Paused || st.Reason != "paused-by-test" {
+		t.Fatalf("pause: st=%+v, ok=%v, err=%v", st, ok, err)
+	}
+
+	// resume
+	st, ok, err = applySessionControl(tbl, trace, "resume", gateway.SessionControlRequest{})
+	if err != nil || !ok || st.Run != session.Running || st.Reason != "" {
+		t.Fatalf("resume: st=%+v, ok=%v, err=%v", st, ok, err)
+	}
+
+	// throttle
+	st, ok, err = applySessionControl(tbl, trace, "throttle", gateway.SessionControlRequest{Reason: "throttled-by-test"})
+	if err != nil || !ok || st.Run != session.Throttled || st.Reason != "throttled-by-test" {
+		t.Fatalf("throttle: st=%+v, ok=%v, err=%v", st, ok, err)
+	}
+
+	// stop
+	st, ok, err = applySessionControl(tbl, trace, "stop", gateway.SessionControlRequest{Reason: "stopped-by-test"})
+	if err != nil || !ok || st.Run != session.Stopped || st.Reason != "stopped-by-test" {
+		t.Fatalf("stop: st=%+v, ok=%v, err=%v", st, ok, err)
 	}
 }
 

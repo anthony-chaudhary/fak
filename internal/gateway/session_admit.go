@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 )
@@ -135,8 +136,16 @@ func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (serv
 		turn.state = SessionState{TraceID: trace, Run: spendBreachRunToken(brk.Action), Reason: brk.Reason}
 		return turn, false, false
 	}
+	var v SessionVerdict
+	hasDecide := false
 	if s.decideSession != nil {
-		v := s.decideSession(ctx, trace)
+		v = s.decideSession(ctx, trace)
+		hasDecide = true
+	} else if s.table != nil {
+		v = toGatewaySessionVerdict(s.table.Decide(trace))
+		hasDecide = true
+	}
+	if hasDecide {
 		turn.state = v.State
 		turn.maxTokens = v.MaxTokens
 		turn.minGapMs = v.MinGapMs
@@ -343,10 +352,20 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 	// DebitSession hook. A breach fires its counter + webhook here; the NEXT turn's
 	// beginServedSessionTurn refuses on the accumulated total. No-op when unattached.
 	s.chargeSpend(turn.traceID, usage)
-	if s.debitSession == nil || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0 && su.DurationNanos <= 0) {
+	if (s.debitSession == nil && s.table == nil) || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0 && su.DurationNanos <= 0) {
 		return
 	}
-	st := s.debitSession(ctx, turn.traceID, su)
+	var st SessionState
+	if s.debitSession != nil {
+		st = s.debitSession(ctx, turn.traceID, su)
+	} else if s.table != nil {
+		sessUsage := session.Usage{
+			OutputTokens:  su.CompletionTokens,
+			ContextTokens: su.ContextTokens,
+			DurationNanos: su.DurationNanos,
+		}
+		st = toGatewaySessionState(s.table.DebitUsage(turn.traceID, sessUsage))
+	}
 	if s.budgetDrained != nil && isBudgetResetReason(st) {
 		s.budgetDrained(ctx, st, append([]agent.Message(nil), messages...))
 	}
@@ -629,4 +648,129 @@ func spendBreachRunToken(a SpendAction) string {
 		return lifecycle.TokenStopped
 	}
 	return lifecycle.TokenPaused
+}
+
+// toGatewaySessionState projects internal/session.State into gateway SessionState.
+func toGatewaySessionState(s session.State) SessionState {
+	return toGatewaySessionStateAt(s, time.Now())
+}
+
+func toGatewaySessionStateAt(s session.State, now time.Time) SessionState {
+	return SessionState{
+		TraceID:    s.TraceID,
+		Run:        s.Run.String(),
+		TokensUsed: s.Cost.TotalTokens(),
+		TokenUsage: s.Cost.TotalTokens(),
+		Budget: SessionBudget{
+			TurnsLeft:             s.Budget.TurnsLeft,
+			TokensLeft:            s.Budget.TokensLeft,
+			ContextTokensLeft:     s.Budget.ContextTokensLeft,
+			ContextTokensCap:      s.Budget.ContextTokensCap,
+			ResidentContextTokens: s.Cost.LatestContextTokens(),
+			SpendMicroCentsLeft:   s.Budget.SpendMicroCentsLeft,
+			SpendMicroCentsCap:    s.Budget.SpendMicroCentsCap,
+		},
+		Priority:       s.Priority,
+		Pace:           SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},
+		Reason:         s.Reason,
+		ContinuationID: s.ContinuationID,
+		ParentTrace:    s.ParentTrace,
+		Generation:     s.Generation,
+		CacheAffinity: SessionCacheAffinity{
+			Action:      s.CacheAffinity.Action,
+			AffinityKey: s.CacheAffinity.AffinityKey,
+			FromTraceID: s.CacheAffinity.FromTraceID,
+			ToTraceID:   s.CacheAffinity.ToTraceID,
+			Reason:      s.CacheAffinity.Reason,
+		},
+		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
+		ProviderBoundary: SessionProviderBoundary{
+			Schema:            s.ProviderBoundary.Schema,
+			Provider:          s.ProviderBoundary.Provider,
+			Source:            s.ProviderBoundary.Source,
+			PreviousTrace:     s.ProviderBoundary.PreviousTrace,
+			ProviderSessionID: s.ProviderBoundary.ProviderSessionID,
+		},
+		Assumptions: toGatewaySessionAssumptions(s.Assumptions),
+		Time:        toGatewaySessionTime(s.Time, now),
+		Throughput: SessionThroughput{
+			ExpectedTokensPerSec: s.Throughput.ExpectedTokensPerSec,
+			MinTokensPerSec:      s.Throughput.MinTokensPerSec,
+			ObservedTokensPerSec: s.Throughput.ObservedTokensPerSec(),
+		},
+		Rev: s.Rev,
+	}
+}
+
+func toGatewaySessionTime(tb session.TimeBudget, now time.Time) SessionTime {
+	q := tb.Query(now)
+	elapsed := tb.Elapsed(now)
+	if !q.Bounded && elapsed <= 0 {
+		return SessionTime{}
+	}
+	return SessionTime{
+		Bounded:          q.Bounded,
+		Exceeded:         q.Exceeded,
+		ElapsedSeconds:   int64(elapsed / time.Second),
+		RemainingSeconds: int64(q.Remaining / time.Second),
+		LimitSeconds:     int64(q.Limit / time.Second),
+	}
+}
+
+func toGatewaySessionAssumptions(in []session.Assumption) []SessionAssumption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]SessionAssumption, 0, len(in))
+	for _, a := range in {
+		out = append(out, SessionAssumption{
+			Key:        a.Key,
+			Statement:  a.Statement,
+			Source:     a.Source,
+			Confidence: a.Confidence,
+			Expiry:     a.Expiry,
+			SourceRef:  a.SourceRef,
+		})
+	}
+	return out
+}
+
+func toGatewayResetTransaction(tx session.ResetTransaction) SessionResetTransaction {
+	out := SessionResetTransaction{
+		Schema:       tx.Schema,
+		OldTrace:     tx.OldTrace,
+		NewTrace:     tx.NewTrace,
+		SeedDigest:   tx.SeedDigest,
+		Contributors: append([]string(nil), tx.Contributors...),
+		BudgetRearm: SessionResetBudgetRearm{
+			TurnsLeft:         tx.BudgetRearm.TurnsLeft,
+			TokensLeft:        tx.BudgetRearm.TokensLeft,
+			ContextTokensLeft: tx.BudgetRearm.ContextTokensLeft,
+			ContextTokensCap:  tx.BudgetRearm.ContextTokensCap,
+		},
+		WarmPrefixDigest: tx.WarmPrefixDigest,
+	}
+	if len(tx.OmittedSpans) > 0 {
+		out.OmittedSpans = make([]SessionResetOmittedSpan, 0, len(tx.OmittedSpans))
+		for _, span := range tx.OmittedSpans {
+			out.OmittedSpans = append(out.OmittedSpans, SessionResetOmittedSpan{
+				Index:  span.Index,
+				Role:   span.Role,
+				Digest: span.Digest,
+				Reason: span.Reason,
+			})
+		}
+	}
+	return out
+}
+
+func toGatewaySessionVerdict(v session.Verdict) SessionVerdict {
+	return SessionVerdict{
+		Proceed:   v.Proceed,
+		MaxTokens: v.MaxTokens,
+		MinGapMs:  v.MinGapMs,
+		State:     toGatewaySessionState(v.State),
+		Stop:      v.Stop,
+		Reason:    v.Reason,
+	}
 }

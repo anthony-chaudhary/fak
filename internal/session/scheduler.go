@@ -270,6 +270,41 @@ func (s *Scheduler) Pick() (State, bool) {
 	}
 }
 
+// PickFrom selects the next session to run from an explicit candidate snapshot under
+// the scheduler's configured Policy.
+func (s *Scheduler) PickFrom(snap []State) (State, bool) {
+	if s == nil {
+		return State{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.policy == WeightedFair {
+		return s.pickWeightedFairLocked(snap)
+	}
+	return pickStrictPriority(snap)
+}
+
+// PickWeightedFair selects the next session to run from an explicit candidate snapshot
+// using the weighted fair-share algorithm, regardless of the scheduler's configured policy.
+func (s *Scheduler) PickWeightedFair(snap []State) (State, bool) {
+	if s == nil {
+		return State{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pickWeightedFairLocked(snap)
+}
+
+// Policy returns the scheduler's configured policy.
+func (s *Scheduler) Policy() Policy {
+	if s == nil {
+		return StrictPriority
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.policy
+}
+
 // lockAndPruneReservations acquires s.mu and reclaims stale advisory reservations at
 // now, returning the dropped reservations plus an unlock func the caller must defer —
 // e.g. `defer s.lockAndPruneReservations(now)()`, whose immediate call locks+prunes and

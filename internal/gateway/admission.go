@@ -65,6 +65,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
@@ -124,11 +125,21 @@ type AdmissionTrust struct {
 // planned decode; the KV-block estimate folds onto this axis once paged KV is exact).
 type SeqRequest struct {
 	TraceID   string
+	SessionID string
 	Priority  int
 	Tokens    int
 	Trust     AdmissionTrust
 	CreatedAt time.Time
 	DecodeTTL time.Duration
+}
+
+// baseTraceID strips any "#..." suffix from traceID and trims space.
+func baseTraceID(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
+	if idx := strings.Index(traceID, "#"); idx != -1 {
+		traceID = traceID[:idx]
+	}
+	return strings.TrimSpace(traceID)
 }
 
 // AdmissionVerdict is the outcome of offering a request to the gate.
@@ -216,6 +227,11 @@ type AdmissionController struct {
 	stats        AdmissionStats        // cumulative counters (gauges are derived in Stats)
 	seq          uint64                // internal per-request suffix for duplicate caller traces
 	clock        func() time.Time      // injectable clock, defaults to time.Now
+	table        *session.Table
+	scheduler    *session.Scheduler
+	pool         *session.Pool
+	orderPolicy  session.Policy
+	credits      map[string]int64
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -256,7 +272,107 @@ func newAdmissionControllerWithBudgets(p AdmissionPolicy, budgets ...batchBudget
 		policy:  p,
 		budgets: append([]batchBudget(nil), budgets...),
 		running: map[string]SeqRequest{},
+		credits: make(map[string]int64),
 	}
+}
+
+// SetTable attaches or replaces the session table.
+func (c *AdmissionController) SetTable(tbl *session.Table) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.table = tbl
+}
+
+// Table returns the configured session table.
+func (c *AdmissionController) Table() *session.Table {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.table
+}
+
+// SetSequencer attaches or replaces the session scheduler.
+func (c *AdmissionController) SetSequencer(sched *session.Scheduler) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scheduler = sched
+}
+
+// Scheduler returns the configured session scheduler.
+func (c *AdmissionController) Scheduler() *session.Scheduler {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scheduler
+}
+
+// SetFleet attaches or replaces the fleet-wide token pool.
+func (c *AdmissionController) SetFleet(pool *session.Pool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pool = pool
+	c.syncFleetBudgetLocked()
+}
+
+// Pool returns the configured fleet-wide token pool.
+func (c *AdmissionController) Pool() *session.Pool {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pool
+}
+
+func (c *AdmissionController) syncFleetBudgetLocked() {
+	budgets := make([]batchBudget, 0, len(c.budgets)+1)
+	for _, b := range c.budgets {
+		if b == nil {
+			continue
+		}
+		check := b(batchBudgetSnapshot{}, SeqRequest{})
+		if check.budget == "fleet_tokens" {
+			continue
+		}
+		budgets = append(budgets, b)
+	}
+	if c.pool != nil {
+		budgets = append(budgets, fleetBatchBudget(c.pool))
+	}
+	c.budgets = budgets
+}
+
+// SetOrder configures the admission queue scheduling policy.
+func (c *AdmissionController) SetOrder(p session.Policy) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.orderPolicy = p
+}
+
+// Order returns the admission queue scheduling policy.
+func (c *AdmissionController) Order() session.Policy {
+	if c == nil {
+		return session.StrictPriority
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.orderPolicy
 }
 
 // AdmissionLease is the live request's hold on one admitted scheduler slot, plus (when a
@@ -339,6 +455,9 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.nowLocked()
+	if req.SessionID == "" {
+		req.SessionID = baseTraceID(req.TraceID)
+	}
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = now
 	}
@@ -388,6 +507,9 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if req.SessionID == "" {
+		req.SessionID = baseTraceID(req.TraceID)
 	}
 	req.TraceID = c.admissionTraceID(req.TraceID)
 
@@ -463,30 +585,119 @@ func (c *AdmissionController) Schedule() []SeqRequest {
 func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	c.round++
 	if len(c.waiting) == 0 {
+		c.credits = make(map[string]int64)
 		return nil
 	}
-	sort.SliceStable(c.waiting, func(i, j int) bool {
-		ei, ej := c.effectivePriorityLocked(c.waiting[i]), c.effectivePriorityLocked(c.waiting[j])
-		if ei != ej {
-			return ei < ej // lower effective priority value served first
+
+	isWeightedFair := c.orderPolicy == session.WeightedFair || (c.scheduler != nil && c.scheduler.Policy() == session.WeightedFair)
+	if !isWeightedFair {
+		sort.SliceStable(c.waiting, func(i, j int) bool {
+			ei, ej := c.effectivePriorityLocked(c.waiting[i]), c.effectivePriorityLocked(c.waiting[j])
+			if ei != ej {
+				return ei < ej // lower effective priority value served first
+			}
+			if c.waiting[i].enqueuedRound != c.waiting[j].enqueuedRound {
+				return c.waiting[i].enqueuedRound < c.waiting[j].enqueuedRound // older waiter first
+			}
+			return c.waiting[i].req.TraceID < c.waiting[j].req.TraceID // deterministic final tiebreak
+		})
+		var admitted []SeqRequest
+		for _, e := range c.waiting {
+			check := c.batchBudgetStatusLocked(e.req)
+			if check.status == batchBudgetExhausted {
+				break // head-of-line: do not let a lower-priority request skip a blocked one
+			}
+			c.admitLocked(e.req)
+			c.queuedTokens -= e.req.Tokens
+			if e.ready != nil {
+				close(e.ready)
+			}
+			admitted = append(admitted, e.req)
+			if check.status == batchBudgetReached {
+				break
+			}
 		}
-		if c.waiting[i].enqueuedRound != c.waiting[j].enqueuedRound {
-			return c.waiting[i].enqueuedRound < c.waiting[j].enqueuedRound // older waiter first
+		if c.queuedTokens < 0 {
+			c.queuedTokens = 0
 		}
-		return c.waiting[i].req.TraceID < c.waiting[j].req.TraceID // deterministic final tiebreak
-	})
+		// The admitted set is the sorted prefix; keep the rest. Copy so the released entries
+		// are not retained by the backing array across later Offer appends.
+		c.waiting = append([]waitEntry(nil), c.waiting[len(admitted):]...)
+		return admitted
+	}
+
 	var admitted []SeqRequest
-	for _, e := range c.waiting {
+	for len(c.waiting) > 0 {
+		var traceKeys []string
+		traceFirstReq := make(map[string]SeqRequest)
+		for _, w := range c.waiting {
+			tid := w.req.SessionID
+			if tid == "" {
+				tid = baseTraceID(w.req.TraceID)
+			}
+			if _, seen := traceFirstReq[tid]; !seen {
+				traceKeys = append(traceKeys, tid)
+				traceFirstReq[tid] = w.req
+			}
+		}
+
+		candidates := make([]session.State, 0, len(traceKeys))
+		for _, tid := range traceKeys {
+			priority := traceFirstReq[tid].Priority
+			if c.table != nil {
+				st := c.table.Get(tid)
+				if st.Rev > 0 {
+					priority = st.Priority
+				}
+			}
+			candidates = append(candidates, session.State{
+				TraceID:  tid,
+				Run:      session.Running,
+				Priority: priority,
+			})
+		}
+
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].Priority != candidates[j].Priority {
+				return candidates[i].Priority < candidates[j].Priority
+			}
+			return candidates[i].TraceID < candidates[j].TraceID
+		})
+
+		winnerID, ok := c.pickWeightedFairWinnerLocked(candidates)
+		if !ok {
+			break
+		}
+
+		winnerIdx := -1
+		for i, w := range c.waiting {
+			tid := w.req.SessionID
+			if tid == "" {
+				tid = baseTraceID(w.req.TraceID)
+			}
+			if tid == winnerID {
+				winnerIdx = i
+				break
+			}
+		}
+		if winnerIdx == -1 {
+			break
+		}
+
+		e := c.waiting[winnerIdx]
 		check := c.batchBudgetStatusLocked(e.req)
 		if check.status == batchBudgetExhausted {
-			break // head-of-line: do not let a lower-priority request skip a blocked one
+			break
 		}
+
 		c.admitLocked(e.req)
 		c.queuedTokens -= e.req.Tokens
 		if e.ready != nil {
 			close(e.ready)
 		}
 		admitted = append(admitted, e.req)
+		c.waiting = append(c.waiting[:winnerIdx], c.waiting[winnerIdx+1:]...)
+
 		if check.status == batchBudgetReached {
 			break
 		}
@@ -494,10 +705,45 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	if c.queuedTokens < 0 {
 		c.queuedTokens = 0
 	}
-	// The admitted set is the sorted prefix; keep the rest. Copy so the released entries
-	// are not retained by the backing array across later Offer appends.
-	c.waiting = append([]waitEntry(nil), c.waiting[len(admitted):]...)
 	return admitted
+}
+
+func (c *AdmissionController) pickWeightedFairWinnerLocked(candidates []session.State) (string, bool) {
+	if len(candidates) == 0 {
+		return "", false
+	}
+	if c.scheduler != nil {
+		winner, ok := c.scheduler.PickWeightedFair(candidates)
+		if ok {
+			return winner.TraceID, true
+		}
+	}
+	if c.credits == nil {
+		c.credits = make(map[string]int64)
+	}
+	maxPriority := candidates[0].Priority
+	for _, st := range candidates {
+		if st.Priority > maxPriority {
+			maxPriority = st.Priority
+		}
+	}
+	next := make(map[string]int64, len(candidates))
+	var total int64
+	bestIdx := -1
+	var bestCredit int64
+	for i, st := range candidates {
+		w := int64(maxPriority-st.Priority) + 1
+		total += w
+		cred := c.credits[st.TraceID] + w
+		next[st.TraceID] = cred
+		if bestIdx == -1 || cred > bestCredit {
+			bestIdx, bestCredit = i, cred
+		}
+	}
+	winner := candidates[bestIdx]
+	next[winner.TraceID] -= total
+	c.credits = next
+	return winner.TraceID, true
 }
 
 // ExpireRequests inspects waiting and running requests against now, pruning any request
@@ -592,7 +838,11 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 			return
 		}
 	}
-	if c.completeLocked(traceID) {
+	if req, ok := c.running[traceID]; ok {
+		if c.pool != nil {
+			c.pool.Return(req.Tokens)
+		}
+		c.completeLocked(traceID)
 		c.scheduleLocked()
 	}
 }
@@ -615,6 +865,9 @@ func (c *AdmissionController) batchBudgetStatusLocked(req SeqRequest) batchBudge
 
 // admitLocked moves a request into the running set and charges its tokens. Caller holds c.mu.
 func (c *AdmissionController) admitLocked(req SeqRequest) {
+	if c.pool != nil {
+		c.pool.Draw(req.Tokens)
+	}
 	c.running[req.TraceID] = req
 	c.tokens += req.Tokens
 	c.stats.Admitted++
@@ -704,6 +957,17 @@ func (s *Server) SetAdmissionController(c *AdmissionController) {
 	s.admissionMu.Lock()
 	s.admissionCtl = c
 	s.admissionMu.Unlock()
+	if c != nil {
+		if s.table != nil {
+			c.SetTable(s.table)
+		}
+		if s.scheduler != nil {
+			c.SetSequencer(s.scheduler)
+		}
+		if s.pool != nil {
+			c.SetFleet(s.pool)
+		}
+	}
 }
 
 // writeAdmissionMetrics folds the wired admission gate's L2 serving-metrics fragment

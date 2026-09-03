@@ -14,6 +14,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 func TestSessionObserveRouteReturnsDriveState(t *testing.T) {
@@ -197,3 +199,153 @@ func TestSessionControlRouteErrorAndConflict(t *testing.T) {
 
 // errSentinel is a stable non-nil error for the control-func error path.
 var errSentinel = errors.New("malformed control request")
+
+func TestSessionStateTokensUsedAndUsage(t *testing.T) {
+	tbl := session.NewTable()
+	const trace = "trace-cost-tokens"
+	tbl.DebitUsage(trace, session.Usage{OutputTokens: 120, ContextTokens: 30})
+	tbl.DebitUsage(trace, session.Usage{OutputTokens: 80, ContextTokens: 20})
+
+	st := tbl.Get(trace)
+	gwSt := toGatewaySessionState(st)
+	if gwSt.TokensUsed != 250 {
+		t.Fatalf("TokensUsed = %d, want 250", gwSt.TokensUsed)
+	}
+	if gwSt.TokenUsage != 250 {
+		t.Fatalf("TokenUsage = %d, want 250", gwSt.TokenUsage)
+	}
+}
+
+func TestSessionListFallbackToSessionTable(t *testing.T) {
+	srv := newTestServer(t)
+	srv.listSessions = nil
+	srv.table = session.NewTable()
+	srv.table.Transition("sess-a", session.Running, "")
+	srv.table.Transition("sess-b", session.Running, "")
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	r, err := http.Get(ts.URL + "/v1/fak/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.StatusCode)
+	}
+	var resp SessionListResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Count != 2 || len(resp.Sessions) != 2 {
+		t.Fatalf("resp Count = %d, want 2", resp.Count)
+	}
+}
+
+func TestSessionControlDirectVerbsViaSessionTable(t *testing.T) {
+	srv := newTestServer(t)
+	srv.controlSession = nil
+	srv.table = session.NewTable()
+	srv.table.Transition("sess-direct", session.Running, "")
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// pause
+	r, err := http.Post(ts.URL+"/v1/fak/session/sess-direct/pause", "application/json", strings.NewReader(`{"reason":"paused-direct"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("pause status = %d, want 200", r.StatusCode)
+	}
+	var st SessionState
+	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if st.Run != "paused" || st.Reason != "paused-direct" {
+		t.Fatalf("pause result: %+v", st)
+	}
+
+	// resume
+	r, err = http.Post(ts.URL+"/v1/fak/session/sess-direct/resume", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("resume status = %d, want 200", r.StatusCode)
+	}
+	var stResume SessionState
+	if err := json.NewDecoder(r.Body).Decode(&stResume); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if stResume.Run != "running" || stResume.Reason != "" {
+		t.Fatalf("resume result: %+v", stResume)
+	}
+
+	// throttle
+	r, err = http.Post(ts.URL+"/v1/fak/session/sess-direct/throttle", "application/json", strings.NewReader(`{"reason":"slow"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("throttle status = %d, want 200", r.StatusCode)
+	}
+	var stThrottle SessionState
+	if err := json.NewDecoder(r.Body).Decode(&stThrottle); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if stThrottle.Run != "throttled" || stThrottle.Reason != "slow" {
+		t.Fatalf("throttle result: %+v", stThrottle)
+	}
+
+	// stop
+	r, err = http.Post(ts.URL+"/v1/fak/session/sess-direct/stop", "application/json", strings.NewReader(`{"reason":"done"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("stop status = %d, want 200", r.StatusCode)
+	}
+	var stStop SessionState
+	if err := json.NewDecoder(r.Body).Decode(&stStop); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if stStop.Run != "stopped" || stStop.Reason != "done" {
+		t.Fatalf("stop result: %+v", stStop)
+	}
+}
+
+func TestSessionControlDirectVerbsForwarding(t *testing.T) {
+	srv := newTestServer(t)
+	calledVerb := ""
+	calledReqRun := ""
+	srv.controlSession = func(_ context.Context, _, verb string, req SessionControlRequest) (SessionState, bool, error) {
+		if verb == "pause" {
+			return SessionState{}, false, errors.New("unknown verb pause")
+		}
+		calledVerb = verb
+		calledReqRun = req.Run
+		return SessionState{TraceID: "sess-fwd", Run: req.Run}, true, nil
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	r, err := http.Post(ts.URL+"/v1/fak/session/sess-fwd/pause", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.StatusCode)
+	}
+	if calledVerb != "run" || calledReqRun != "paused" {
+		t.Fatalf("calledVerb=%q calledReqRun=%q, want run / paused fallback", calledVerb, calledReqRun)
+	}
+}

@@ -97,6 +97,17 @@ func (r CostRing) LatestContextTokens() int {
 	return latest.ContextTokens
 }
 
+// TotalTokens returns the sum of total token costs (output + context) across all live entries in the ring.
+func (r CostRing) TotalTokens() int {
+	sum := 0
+	for i := 0; i < r.Count; i++ {
+		if c, ok := r.at(i); ok {
+			sum += c.total()
+		}
+	}
+	return sum
+}
+
 // CostSummary is the render-ready fold of a session's cost ring — the numbers `fak ps` shows
 // in a cost-per-iteration column. Latest/Previous are the two most recent turns' combined cost;
 // Delta is Latest-Previous (a positive jump is a climbing cost); SpikeRatio is Latest over the

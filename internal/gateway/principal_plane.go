@@ -105,7 +105,7 @@ func kernelPrincipal(r *http.Request) Principal {
 // caps/taint/scope, and is stamped with its principal rather than refused.
 func controlVerbConsumesAuthority(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "run", "budget", "wall", "throughput":
+	case "run", "budget", "wall", "throughput", "pause", "resume", "stop":
 		return true
 	}
 	return false

@@ -2,13 +2,16 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 type codexServiceTier struct {
@@ -186,7 +189,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// POST applies a control verb. The verb is required from the path.
 		if verb == "" {
-			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority|wall|throughput}")
+			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|pause|resume|throttle|stop|budget|pace|priority|wall|throughput}")
 			return
 		}
 		// #2439: the kernel ASSIGNS this control event's authority principal from the
@@ -305,31 +308,93 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if s.controlSession == nil {
+		if s.controlSession == nil && s.table == nil {
 			writeErr(w, http.StatusNotFound, "session control is not configured")
 			return
 		}
 		var req SessionControlRequest
-		if !decodeRequestBody(w, r, &req) {
+		if r.Body != nil {
+			if err := decodeJSON(w, r, &req); err != nil && !errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+				return
+			}
+		}
+
+		var runStr string
+		switch verb {
+		case "pause":
+			runStr = "paused"
+		case "resume":
+			runStr = "running"
+		case "throttle":
+			runStr = "throttled"
+		case "stop":
+			runStr = "stopped"
+		}
+
+		if s.controlSession != nil {
+			st, ok, err := s.controlSession(r.Context(), traceID, verb, req)
+			if err != nil && runStr != "" {
+				reqCopy := req
+				reqCopy.Run = runStr
+				st, ok, err = s.controlSession(r.Context(), traceID, "run", reqCopy)
+			}
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if !ok {
+				// Terminal session, or an if_rev CAS guard lost the race: the client
+				// re-reads and retries. Not a malformed request.
+				writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
+				return
+			}
+			// #2439: an ADMITTED control verb is journaled with its principal too — the record
+			// answers "which principal drove this session" for every event, not only the refused
+			// ones, so an absent row is evidence of an unstamped path rather than of a clean run.
+			s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
+			s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, st.Rev, st.Run)
+			writeJSON(w, http.StatusOK, st)
 			return
 		}
-		st, ok, err := s.controlSession(r.Context(), traceID, verb, req)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+
+		if s.table != nil {
+			if runStr == "" && verb == "run" {
+				runStr = req.Run
+			}
+			if runStr == "" {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown verb %q", verb))
+				return
+			}
+			run, parsed := session.ParseRunState(runStr)
+			if !parsed {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown run-state %q", runStr))
+				return
+			}
+			var st session.State
+			var ok bool
+			if req.IfRev > 0 {
+				cur := s.table.Get(traceID)
+				cur.Run = run
+				if run == session.Running {
+					cur.Reason = ""
+				} else {
+					cur.Reason = req.Reason
+				}
+				st, ok = s.table.CompareAndSet(traceID, req.IfRev, cur)
+			} else {
+				st, ok = s.table.Transition(traceID, run, req.Reason)
+			}
+			if !ok {
+				writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
+				return
+			}
+			s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
+			gwSt := toGatewaySessionState(st)
+			s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, gwSt.Rev, gwSt.Run)
+			writeJSON(w, http.StatusOK, gwSt)
 			return
 		}
-		if !ok {
-			// Terminal session, or an if_rev CAS guard lost the race: the client
-			// re-reads and retries. Not a malformed request.
-			writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
-			return
-		}
-		// #2439: an ADMITTED control verb is journaled with its principal too — the record
-		// answers "which principal drove this session" for every event, not only the refused
-		// ones, so an absent row is evidence of an unstamped path rather than of a clean run.
-		s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
-		s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, st.Rev, st.Run)
-		writeJSON(w, http.StatusOK, st)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "use GET or POST")
 	}

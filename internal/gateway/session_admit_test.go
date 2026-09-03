@@ -633,3 +633,86 @@ func testSessionState(st session.State) SessionState {
 		Rev: st.Rev,
 	}
 }
+
+func TestSessionAdmitUsesSessionTableDecide(t *testing.T) {
+	srv := newTestServer(t)
+	tbl := session.NewTable()
+	srv.SetTable(tbl)
+
+	tbl.Transition("paused-trace", session.Paused, "operator-paused")
+	_, ok, _ := srv.beginServedSessionTurn(context.Background(), "paused-trace")
+	if ok {
+		t.Fatal("expected paused session to not proceed via sessionTable.Decide")
+	}
+
+	tbl.SetBudget("normal-trace", session.Budget{TurnsLeft: 5, TokensLeft: session.Unbounded})
+	turn, ok, _ := srv.beginServedSessionTurn(context.Background(), "normal-trace")
+	if !ok {
+		t.Fatal("expected normal session to proceed via sessionTable.Decide")
+	}
+	if turn.traceID != "normal-trace" {
+		t.Fatalf("expected turn.traceID = normal-trace, got %q", turn.traceID)
+	}
+	if rem := tbl.Get("normal-trace").Budget.TurnsLeft; rem != 4 {
+		t.Fatalf("expected TurnsLeft 4 after decide, got %d", rem)
+	}
+}
+
+func TestSessionAdmitUsesSessionTableDebitUsage(t *testing.T) {
+	srv := newTestServer(t)
+	tbl := session.NewTable()
+	srv.SetTable(tbl)
+
+	tbl.SetBudget("debit-trace", session.Budget{TokensLeft: 100})
+	srv.debitServedSessionTurn(context.Background(), servedSessionTurn{traceID: "debit-trace"}, agent.Usage{CompletionTokens: 40}, 0, nil)
+
+	if rem := tbl.Get("debit-trace").Budget.TokensLeft; rem != 60 {
+		t.Fatalf("expected TokensLeft 60 after debit, got %d", rem)
+	}
+}
+
+func TestGatewayNewWiresSessionTableDefaults(t *testing.T) {
+	tbl := session.NewTable()
+	tbl.SetPriority("wire-trace", 42)
+
+	cfg := Config{
+		EngineID: "mock",
+		Model:    "test-model",
+		Table:    tbl,
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	if s.observeSession == nil {
+		t.Fatal("expected observeSession to be wired from sessionTable")
+	}
+	st := s.observeSession(context.Background(), "wire-trace")
+	if st.Priority != 42 {
+		t.Fatalf("expected Priority 42 from observeSession, got %d", st.Priority)
+	}
+
+	if s.listSessions == nil {
+		t.Fatal("expected listSessions to be wired from sessionTable")
+	}
+	list := s.listSessions(context.Background())
+	if len(list) != 1 || list[0].TraceID != "wire-trace" {
+		t.Fatalf("expected 1 session in list, got %+v", list)
+	}
+
+	// Test WatchRevisions -> PublishSessionRevision
+	tbl.SetPriority("wire-trace", 99)
+
+	events, _ := s.sessionFeed.drain(0)
+	found := false
+	for _, ev := range events {
+		if ev.SessionState.TraceID == "wire-trace" && ev.SessionState.Priority == 99 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected revision event with priority 99 in sessionFeed, got %+v", events)
+	}
+}

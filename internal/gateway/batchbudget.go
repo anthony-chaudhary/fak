@@ -10,7 +10,11 @@ package gateway
 // installed: a "reached" result from one axis can never hide an "exhausted"
 // result from another.
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/session"
+)
 
 type batchBudgetStatus uint8
 
@@ -154,6 +158,30 @@ func tokenBatchBudget(capacity int) batchBudget {
 			return batchBudgetCheck{status: batchBudgetReached, budget: "tokens"}
 		default:
 			return batchBudgetCheck{status: batchBudgetAvailable, budget: "tokens"}
+		}
+	}
+}
+
+func fleetBatchBudget(pool *session.Pool) batchBudget {
+	return func(_ batchBudgetSnapshot, req SeqRequest) batchBudgetCheck {
+		if pool == nil {
+			return batchBudgetCheck{status: batchBudgetAvailable, budget: "fleet_tokens"}
+		}
+		rem := pool.Remaining()
+		if rem < 0 {
+			return batchBudgetCheck{status: batchBudgetAvailable, budget: "fleet_tokens"}
+		}
+		switch {
+		case rem < req.Tokens:
+			return batchBudgetCheck{
+				status: batchBudgetExhausted,
+				budget: "fleet_tokens",
+				reason: fmt.Sprintf("session pool budget exhausted (%d remaining < %d requested)", rem, req.Tokens),
+			}
+		case rem == req.Tokens:
+			return batchBudgetCheck{status: batchBudgetReached, budget: "fleet_tokens"}
+		default:
+			return batchBudgetCheck{status: batchBudgetAvailable, budget: "fleet_tokens"}
 		}
 	}
 }

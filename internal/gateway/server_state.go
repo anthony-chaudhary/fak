@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
@@ -36,6 +37,8 @@ type TraceResetResponse struct {
 type SessionState struct {
 	TraceID          string                  `json:"trace_id"`
 	Run              string                  `json:"run"`
+	TokensUsed       int                     `json:"tokens_used,omitempty"`
+	TokenUsage       int                     `json:"token_usage,omitempty"`
 	Budget           SessionBudget           `json:"budget"`
 	Priority         int                     `json:"priority"`
 	Pace             SessionPace             `json:"pace"`
@@ -421,6 +424,9 @@ type Server struct {
 	decideSession           SessionDecideFunc
 	stopGate                StopGateFunc
 	debitSession            SessionDebitFunc
+	table                   *session.Table
+	scheduler               *session.Scheduler
+	pool                    *session.Pool
 	resetOnBudget           ResetOnBudgetFunc
 	budgetDrained           BudgetExhaustedFunc
 	defaultTraceMu          sync.RWMutex
@@ -1062,4 +1068,46 @@ type Server struct {
 	// controlSocketMu guards the optional local Unix domain socket listener for control IPC.
 	controlSocketMu sync.Mutex
 	controlSocket   *ControlSocketServer
+}
+
+// SetTable attaches or replaces the session table on Server.
+func (s *Server) SetTable(tbl *session.Table) {
+	if s == nil {
+		return
+	}
+	s.table = tbl
+	s.admissionMu.RLock()
+	ctl := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if ctl != nil {
+		ctl.SetTable(tbl)
+	}
+}
+
+// SetSequencer attaches or replaces the session scheduler on Server.
+func (s *Server) SetSequencer(sched *session.Scheduler) {
+	if s == nil {
+		return
+	}
+	s.scheduler = sched
+	s.admissionMu.RLock()
+	ctl := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if ctl != nil {
+		ctl.SetSequencer(sched)
+	}
+}
+
+// SetFleet attaches or replaces the session pool on Server.
+func (s *Server) SetFleet(pool *session.Pool) {
+	if s == nil {
+		return
+	}
+	s.pool = pool
+	s.admissionMu.RLock()
+	ctl := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if ctl != nil {
+		ctl.SetFleet(pool)
+	}
 }

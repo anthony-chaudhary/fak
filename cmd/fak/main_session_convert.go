@@ -27,8 +27,10 @@ func toGatewaySessionState(s session.State) gateway.SessionState {
 // elapsed/remaining without a sleep.
 func toGatewaySessionStateAt(s session.State, now time.Time) gateway.SessionState {
 	return gateway.SessionState{
-		TraceID: s.TraceID,
-		Run:     s.Run.String(),
+		TraceID:    s.TraceID,
+		Run:        s.Run.String(),
+		TokensUsed: s.Cost.TotalTokens(),
+		TokenUsage: s.Cost.TotalTokens(),
 		Budget: gateway.SessionBudget{
 			TurnsLeft:         s.Budget.TurnsLeft,
 			TokensLeft:        s.Budget.TokensLeft,
