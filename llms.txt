@@ -44,6 +44,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
+- Memory-concept ranking dossier (superset): [`docs/superset/MEMORY-CONCEPT-RANKINGS.md`](docs/superset/MEMORY-CONCEPT-RANKINGS.md) — 10 memory concepts M1–M10 ranked fak-vs-engines with evidence, per-engine evidence tables, and adopt-or-SKIP verdicts
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
 - Builder stability and ownership ladder (CLI → semantic protocol → public Go API → sidecar → internal leaves): [`docs/builder-contract-ladder.md`](docs/builder-contract-ladder.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
