@@ -21,10 +21,10 @@
       {
         "hooks": [
           {
-            "command": "sh",
+            "command": "dos",
             "args": [
-              "-c",
-              "dos hook pretool; exit 0"
+              "hook",
+              "pretool"
             ],
             "type": "command"
           }
@@ -36,10 +36,10 @@
       {
         "hooks": [
           {
-            "command": "sh",
+            "command": "dos",
             "args": [
-              "-c",
-              "dos hook stop; exit 0"
+              "hook",
+              "stop"
             ],
             "type": "command"
           }
