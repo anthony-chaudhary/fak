@@ -51,7 +51,35 @@ func (t *Tree) ConfigureRemoteSnapshotStore(store SnapshotStore, modelID string,
 	t.remoteModelID = modelID
 	t.remoteBackend = backend
 	t.remoteConfig = cfg
+	if t.remoteBreaker == nil {
+		t.remoteBreaker = NewRemoteL3Breaker(DefaultBreakerConfig())
+	}
 	return nil
+}
+
+// RemoteL3Breaker returns the circuit breaker guarding remote L3 snapshot reads.
+func (t *Tree) RemoteL3Breaker() *RemoteL3Breaker {
+	if t == nil {
+		return nil
+	}
+	if t.remoteBreaker == nil {
+		t.remoteBreaker = NewRemoteL3Breaker(DefaultBreakerConfig())
+	}
+	return t.remoteBreaker
+}
+
+// SetRemoteL3Breaker installs an explicit circuit breaker on the tree.
+func (t *Tree) SetRemoteL3Breaker(b *RemoteL3Breaker) {
+	if t != nil {
+		t.remoteBreaker = b
+	}
+}
+
+// ConfigureRemoteL3Breaker configures the tree's circuit breaker with cfg.
+func (t *Tree) ConfigureRemoteL3Breaker(cfg BreakerConfig) {
+	if t != nil {
+		t.remoteBreaker = NewRemoteL3Breaker(cfg)
+	}
 }
 
 func (t *Tree) RemoteSnapshotEnabled() bool {
@@ -135,9 +163,15 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 		t.l3RestoreFaults++
 		return nil, false, ErrRemoteSnapshotScope
 	}
+	breaker := t.RemoteL3Breaker()
+	allowed, isProbe := breaker.Allow()
+	if !allowed {
+		return nil, false, nil
+	}
 	started := time.Now()
 	envelope, found, err := t.remoteSnapshotStore.Get(ctx, wantDigest)
 	t.l3RestoreNanos += time.Since(started).Nanoseconds()
+	breaker.RecordResult(err, isProbe)
 	if err != nil {
 		t.l3Faults++
 		t.l3RestoreFaults++
