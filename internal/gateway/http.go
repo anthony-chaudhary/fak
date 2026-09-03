@@ -100,6 +100,13 @@ func (s *Server) routeTable() []gatewayRoute {
 		// Tier 0 hot-swap control plane: dynamic scalar configuration table (#10867).
 		{"/v1/control/config", s.handleControlConfig},
 		{"/v1/fak/control/config", s.handleControlConfig},
+		// Shift-left dry-run validation, relational invariants, and canary auto-rollback (#10869).
+		{"/v1/control/apply", s.handleControlApply},
+		{"/v1/fak/control/apply", s.handleControlApply},
+		{"/v1/control/events", s.handleControlEvents},
+		{"/v1/fak/control/events", s.handleControlEvents},
+		{"/v1/control/telemetry", s.handleControlTelemetry},
+		{"/v1/fak/control/telemetry", s.handleControlTelemetry},
 		// /v1/fak/policy (exact, GET) is the read-only floor attestation (#3960); the
 		// longer exact /v1/fak/policy/reload (POST) is matched independently by the mux,
 		// so the observe route never shadows the reload route.
