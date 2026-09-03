@@ -18,6 +18,7 @@ type Harness string
 const (
 	HarnessClaude    Harness = "claude"
 	HarnessCodex     Harness = "codex"
+	HarnessOpencode  Harness = "opencode"
 	HarnessFakNative Harness = "fak_native"
 )
 
@@ -114,8 +115,8 @@ type NeutralRequirements struct {
 	Serve     []string `json:"serve"`
 }
 
-// HarnessWorkflow is the small common ingestion shape for Claude, Codex, and
-// fak_native. Exactly two workers are required by this contract.
+// HarnessWorkflow is the small common ingestion shape for Claude, Codex,
+// opencode, and fak_native. Exactly two workers are required by this contract.
 type HarnessWorkflow struct {
 	Harness       Harness                    `json:"harness"`
 	Coordination  bool                       `json:"coordination"`
@@ -344,7 +345,7 @@ func (a *HarnessAdapter) SelfCheck() HarnessAdapterSelfCheck {
 }
 
 func validHarness(v Harness) bool {
-	return v == HarnessClaude || v == HarnessCodex || v == HarnessFakNative
+	return v == HarnessClaude || v == HarnessCodex || v == HarnessOpencode || v == HarnessFakNative
 }
 
 func validateIntent(v NeutralHarnessIntent) error {

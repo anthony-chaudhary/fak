@@ -80,7 +80,7 @@ DEFAULT_ROUTE_MANIFEST = "examples/routing-presets/gardening.json"
 # so a routed id is mapped onto the same alias ladder the quality-tier path uses.
 ROUTED_ID_MODELS = {"small": "haiku", "medium": "sonnet", "large": "opus"}
 
-BACKENDS = ("claude",)
+BACKENDS = ("claude", "opencode")
 DEFAULT_BACKEND = "claude"
 
 # Default permission posture: read + propose, no execution of writes. The
@@ -246,11 +246,24 @@ def build_command(
     backend: str = DEFAULT_BACKEND,
 ) -> list[str]:
     """Pure: the logical argv for one gardener launch (no path resolution)."""
+    prompt = build_prompt(as_of=as_of, scope=scope, apply_mechanical=apply_mechanical)
+    if backend == "opencode":
+        # Same headless posture as the issue-resolve opencode worker
+        # (issue_resolve_dispatch.build_worker_command): --pure keeps account/
+        # project MCP tools out of the run, --print-logs surfaces run-level
+        # failures in unattended logs, and the full-access flag is bounded by
+        # fak guard. Claude's plan-mode has no 1:1 opencode flag, so the
+        # propose-only posture is carried by the prompt itself.
+        cmd = ["opencode", "run", "--pure", "--print-logs",
+               "--dangerously-skip-permissions"]
+        if model:
+            cmd += ["-m", model]  # an explicitly pinned model id (reproducible/traced)
+        cmd.append(prompt)
+        return cmd
     if backend != "claude":
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
     if not model:
         raise ValueError("model must be a non-empty string")
-    prompt = build_prompt(as_of=as_of, scope=scope, apply_mechanical=apply_mechanical)
     return [
         "claude",
         "-p",
@@ -389,12 +402,15 @@ def main(argv: list[str] | None = None) -> int:
                     choices=sorted(QUALITY_TIER_MODELS),
                     help="model quality-tier: 1=opus, 2=sonnet (default), 3=haiku")
     ap.add_argument("--backend", choices=BACKENDS, default=DEFAULT_BACKEND,
-                    help="worker backend (default: claude)")
+                    help="worker backend (default: claude); opencode forwards only "
+                         "an explicit --model pin, else its seat-configured model")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--scope", default=None,
                     help="limit to one bucket: priority|kind|area|orphans|stale|dup|question")
     ap.add_argument("--permission-mode", default=DEFAULT_PERMISSION_MODE,
-                    help="claude permission mode (default: plan — read + propose, no writes)")
+                    help="claude permission mode (default: plan — read + propose, no writes); "
+                         "ignored by the opencode backend, whose propose-only posture is "
+                         "carried by the prompt")
     ap.add_argument("--apply-mechanical", action="store_true",
                     help="also allow the calendar-defensible mechanical batch "
                          "(mark-stale / close-dormant); priorities/splits stay proposal-only")
@@ -416,6 +432,13 @@ def main(argv: list[str] | None = None) -> int:
         model = resolve_model(args.model, args.quality_tier, None, workspace=workspace)
     except ValueError as exc:
         error = str(exc)
+    if args.backend == "opencode" and not error:
+        # The tier/env/route ladder resolves Claude aliases (haiku/sonnet/opus),
+        # which are not opencode model ids; forwarding one would fail the launch
+        # at startup. Forward only an explicit --model pin and let an unpinned
+        # run use the seat's configured opencode model. Tier validation above
+        # still ran, so a garbage tier is refused on every backend.
+        model = args.model.strip() if args.model else ""
 
     dry_run = not args.live or bool(error)
 
