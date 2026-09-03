@@ -9304,6 +9304,11 @@
           "category": "incidental",
           "reason": "Combined policy composition struct for multi-tenant hierarchical policy algebra",
           "token": "CombinedPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "parser completeness count of records ignored by ingest policy",
+          "token": "IgnoredByPolicyRecords"
         }
       ],
       "exclude": [
@@ -9350,6 +9355,7 @@
         "GoCandidateCapability",
         "HeldSchedulePolicy",
         "HostSpillPolicy",
+        "IgnoredByPolicyRecords",
         "LocalPolicy",
         "MaxPostures",
         "MisfirePolicy",
@@ -12334,11 +12340,17 @@
           "category": "incidental",
           "reason": "demotion action outcome",
           "token": "DemotionDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed benchmark parser claim admission decision enum",
+          "token": "AdmissionDecision"
         }
       ],
       "id": "decision",
       "ignore": [
         "AddedDecisionOverheadMS",
+        "AdmissionDecision",
         "CleanupDecision",
         "DECISION_INVALID",
         "DecideStop",
