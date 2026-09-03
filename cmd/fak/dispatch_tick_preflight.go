@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetcap"
@@ -223,6 +224,43 @@ func dispatchFoldSetpoint(in dispatchtick.PreflightInput, raw string) (dispatcht
 		in.WorkerFloor = plan.DesiredCap
 	}
 	return in, plan
+}
+
+// dispatchTurnResidencyPricing calculates the residency-discounted admission token cost
+// using cacheprice.AdmissionTokens (#3893, vLLM M2 study). A warmer prefix is cheaper to
+// schedule — residency directly discounts the admission cost.
+func dispatchTurnResidencyPricing(promptTokens, residentPrefixTokens int) map[string]any {
+	billable := cacheprice.AdmissionTokens(promptTokens, residentPrefixTokens)
+	discount := promptTokens - billable
+	discountRate := 0.0
+	if promptTokens > 0 {
+		discountRate = float64(discount) / float64(promptTokens)
+	}
+	return map[string]any{
+		"prompt_tokens":   promptTokens,
+		"resident_tokens": residentPrefixTokens,
+		"billable_tokens": billable,
+		"discount_tokens": discount,
+		"discount_rate":   discountRate,
+	}
+}
+
+func dispatchTurnResidencyDiscountEnv() map[string]any {
+	rawPrompt := strings.TrimSpace(os.Getenv("FAK_DISPATCH_PROMPT_TOKENS"))
+	if rawPrompt == "" {
+		return nil
+	}
+	prompt, err := strconv.Atoi(rawPrompt)
+	if err != nil || prompt <= 0 {
+		return nil
+	}
+	resident := 0
+	if rawRes := strings.TrimSpace(os.Getenv("FAK_DISPATCH_RESIDENT_TOKENS")); rawRes != "" {
+		if r, err := strconv.Atoi(rawRes); err == nil {
+			resident = r
+		}
+	}
+	return dispatchTurnResidencyPricing(prompt, resident)
 }
 
 // forecastFloorPlan is the slow predictive loop's decision (#3368): the Little's-law forecast
