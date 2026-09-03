@@ -45,14 +45,15 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
-	"agentquery":      2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
-	"bgloop":          2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
-	"cmdutil":         2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
-	"abi":             0,
-	"launchguard":     1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
-	"storagepressure": 3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
-	"wipreadiness":    1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
-	"timeaware":       1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
+	"agentquery":         2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
+	"bgloop":             2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
+	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
+	"abi":                0,
+	"launchguard":        1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
+	"servingsupervision": 3, // serving failure-domain isolation and supervision; mechanism leaf, off the hot path.
+	"storagepressure":    3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
+	"wipreadiness":       1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
+	"timeaware":          1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
