@@ -232,3 +232,100 @@ func TestContextCompressionRequiresLLMLinguaIntegrationArm(t *testing.T) {
 		t.Fatal("context_compression contract missing")
 	}
 }
+
+func TestWitnessResolutionFromRootAndNestedDirectories(t *testing.T) {
+	tempRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempRoot, "go.mod"), []byte("module testroot\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempRoot, "docs", "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	witnessContent := []byte("# Test Witness\n")
+	if err := os.WriteFile(filepath.Join(tempRoot, "docs", "notes", "TEST-WITNESS.md"), witnessContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempRoot, "internal", "nativebench"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempRoot, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	testContracts := []Contract{
+		{
+			Capability:   "test_with_existing_witness",
+			NativePath:   "internal/nativebench/test.go",
+			Workload:     "workload",
+			Metrics:      []string{"metric"},
+			Alternatives: []Alternative{{Name: "base", Class: TunedBaseline, Source: "src"}, {Name: "alt", Class: NextBest, Source: "src"}},
+			Witness:      "../../docs/notes/TEST-WITNESS.md",
+		},
+		{
+			Capability:   "test_with_missing_witness",
+			NativePath:   "internal/nativebench/test.go",
+			Workload:     "workload",
+			Metrics:      []string{"metric"},
+			Alternatives: []Alternative{{Name: "base", Class: TunedBaseline, Source: "src"}, {Name: "alt", Class: NextBest, Source: "src"}},
+			Witness:      "../../docs/notes/NONEXISTENT-WITNESS.md",
+		},
+		{
+			Capability:   "test_with_blank_witness",
+			NativePath:   "internal/nativebench/test.go",
+			Workload:     "workload",
+			Metrics:      []string{"metric"},
+			Alternatives: []Alternative{{Name: "base", Class: TunedBaseline, Source: "src"}, {Name: "alt", Class: NextBest, Source: "src"}},
+			Witness:      "",
+		},
+	}
+
+	// 1. ValidateRoot directly from tempRoot
+	findingsFromRoot := ValidateRoot(testContracts, tempRoot)
+	if len(findingsFromRoot) != 2 {
+		t.Fatalf("expected exactly 2 findings (missing + blank), got %d: %+v", len(findingsFromRoot), findingsFromRoot)
+	}
+	for _, f := range findingsFromRoot {
+		if f.Capability == "test_with_existing_witness" {
+			t.Fatalf("existing witness was falsely flagged: %s", f.Reason)
+		}
+	}
+
+	// 2. Validate from nested directories using chdir
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origWd) }()
+
+	for _, dir := range []string{tempRoot, filepath.Join(tempRoot, "cmd", "fak"), filepath.Join(tempRoot, "internal", "nativebench")} {
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		findings := Validate(testContracts)
+		if len(findings) != len(findingsFromRoot) {
+			t.Fatalf("at %s: expected %d findings, got %d: %+v", dir, len(findingsFromRoot), len(findings), findings)
+		}
+		for i, f := range findings {
+			if f.Capability != findingsFromRoot[i].Capability || !strings.Contains(f.Reason, "witness") {
+				t.Fatalf("at %s: mismatch finding %d: got %+v, want %+v", dir, i, f, findingsFromRoot[i])
+			}
+		}
+	}
+}
+
+func TestCommittedWitnessesAreNotReportedAsUnreadable(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleRoot, err := moduleRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := ValidateRoot(All(), moduleRoot)
+	for _, f := range findings {
+		if strings.Contains(f.Reason, "is not readable") {
+			t.Errorf("committed witness reported unreadable for %s: %s", f.Capability, f.Reason)
+		}
+	}
+}
