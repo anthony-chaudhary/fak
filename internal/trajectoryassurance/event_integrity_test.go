@@ -50,7 +50,7 @@ func TestAnalyzeEventIntegrityFaultInjection(t *testing.T) {
 	if report.Pass {
 		t.Fatal("strict zero-budget report passed")
 	}
-	if len(report.Violations) != 7 {
+	if len(report.Violations) != 7 { //boundarylint:ignore CHANGE_DETECTOR_TEST the fixture injects seven distinct fault classes
 		t.Fatalf("violations = %d, want 7: %#v", len(report.Violations), report.Violations)
 	}
 }
