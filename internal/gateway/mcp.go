@@ -812,7 +812,7 @@ func toolDescriptors() []map[string]any {
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured"},
     "context_tokens": {"type": "integer", "description": "optional provider/model context-token count to debit before checking the reset boundary"},
-    "messages": {"type": "array", "description": "optional transcript messages to distill into the fresh-window carryover seed"}
+    "messages": {"type": "array", "items": {"type": "object"}, "description": "optional transcript messages to distill into the fresh-window carryover seed"}
   }
 }`),
 		},
