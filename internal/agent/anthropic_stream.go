@@ -275,7 +275,11 @@ func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, onEvent func(Ant
 	// bytes) but deliberately not this one, so an upstream warm enough to keep pinging while
 	// producing no content trips in ≤the planner's configured progress window instead of
 	// riding the ceiling.
-	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow())
+	//
+	// The third deadline (FAK_STREAM_MAX_DURATION_S) is the absolute total-duration budget:
+	// armed once at stream open, never re-armed by bytes or progress, it ends a stream that
+	// outlives its configured ceiling with the same typed stall error (#10672).
+	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow(), streamMaxDuration())
 	defer sr.Close()
 	started := false
 	var frame []byte

@@ -2,12 +2,188 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+// incidentConfig holds the configuration for mid-stream incident packets.
+type incidentConfig struct {
+	enabled bool
+	dir     string
+}
+
+// newIncidentConfig creates an incident config from environment.
+// FAK_STREAM_INCIDENT_DIR sets the output directory.
+func newIncidentConfig() *incidentConfig {
+	if dir := os.Getenv("FAK_STREAM_INCIDENT_DIR"); dir != "" {
+		return &incidentConfig{enabled: true, dir: dir}
+	}
+	return &incidentConfig{}
+}
+
+// checkpointConfig holds the configuration for partial-output checkpoints.
+type checkpointConfig struct {
+	enabled bool
+	dir     string
+}
+
+// newCheckpointConfig creates a checkpoint config from environment.
+// FAK_STREAM_CHECKPOINT_DIR sets the output directory.
+func newCheckpointConfig() *checkpointConfig {
+	if dir := os.Getenv("FAK_STREAM_CHECKPOINT_DIR"); dir != "" {
+		return &checkpointConfig{enabled: true, dir: dir}
+	}
+	return &checkpointConfig{}
+}
+
+// writeIncident writes a mid-stream incident packet to the incident directory.
+// It captures the correlated slice: phase, counts, durations, upstream status class, bound policy.
+func (ic *incidentConfig) writeIncident(wire, phase, statusClass, boundPolicy, cause string, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge int64) {
+	if !ic.enabled {
+		return
+	}
+	_ = os.MkdirAll(ic.dir, 0o750)
+	path := filepath.Join(ic.dir, "incidents.jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	pkt := map[string]any{
+		"wire":                  wire,
+		"phase":                 phase,
+		"first_token_ms":        ttft,
+		"elapsed_ms":            elapsed,
+		"bytes_emitted":         bytesEmitted,
+		"events_emitted":        eventsEmitted,
+		"last_event_age_ms":     lastEventAge,
+		"upstream_status_class": statusClass,
+		"bound_policy":          boundPolicy,
+		"cause":                 cause,
+	}
+	data, _ := json.Marshal(pkt)
+	f.WriteString(string(data) + "\n")
+}
+
+// writeCheckpoint writes a durable partial-output checkpoint for mid-stream death.
+func (c *checkpointConfig) writeCheckpoint(wire, traceID, model, phase string, elapsedMS int64, text string, estimatedTokens int, boundPolicy, reason string) {
+	if !c.enabled {
+		return
+	}
+	ck := map[string]any{
+		"schema":           "fak-stream-checkpoint/1",
+		"wire":             wire,
+		"trace_id":         traceID,
+		"model":            model,
+		"phase":            phase,
+		"elapsed_ms":       elapsedMS,
+		"text":             text,
+		"estimated_tokens": estimatedTokens,
+		"bound_policy":     boundPolicy,
+		"reason":           reason,
+	}
+	data, err := json.Marshal(ck)
+	if err != nil {
+		return
+	}
+	filename := fmt.Sprintf("checkpoint-%s-%d.json", traceID, time.Now().UnixNano())
+	path := filepath.Join(c.dir, filename)
+	_ = os.WriteFile(path, data, 0644)
+}
+
+// estimateTokens provides a rough token estimate for the checkpoint (chars/4 proxy).
+func estimateTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	return (len(text) + 3) / 4
+}
+
+// heartbeatConfig holds the configuration for stream progress heartbeats (#10672).
+type heartbeatConfig struct {
+	enabled       bool
+	interval      time.Duration
+	started       bool
+	mu            sync.Mutex
+	streamStart   time.Time
+	lastEvent     time.Time
+	bytesEmitted  int64
+	eventsEmitted int64
+}
+
+// newHeartbeatConfig creates a heartbeat config from environment.
+// FAK_STREAM_HEARTBEAT_S sets the interval in seconds (clamped to [1, 60]).
+// Zero or unset means heartbeats are disabled.
+func newHeartbeatConfig() *heartbeatConfig {
+	hb := &heartbeatConfig{}
+	if v := os.Getenv("FAK_STREAM_HEARTBEAT_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 60 {
+			hb.enabled = true
+			hb.interval = time.Duration(n) * time.Second
+		}
+	}
+	return hb
+}
+
+// markStreamStart marks the moment the first token was emitted (stream committed).
+func (h *heartbeatConfig) markStreamStart() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.started {
+		h.started = true
+		h.streamStart = time.Now()
+		h.lastEvent = h.streamStart
+	}
+}
+
+// recordEvent records that a content event was emitted.
+func (h *heartbeatConfig) recordEvent(byteCount int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.started {
+		h.bytesEmitted += int64(byteCount)
+		h.eventsEmitted++
+		h.lastEvent = time.Now()
+	}
+}
+
+// emitHeartbeat writes a heartbeat comment frame if heartbeats are enabled and stream has started.
+func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
+	h.mu.Lock()
+	if !h.enabled || !h.started {
+		h.mu.Unlock()
+		return false
+	}
+	now := time.Now()
+	elapsed := now.Sub(h.streamStart)
+	lastEventAge := now.Sub(h.lastEvent)
+	bytesEmitted := h.bytesEmitted
+	eventsEmitted := h.eventsEmitted
+	h.mu.Unlock()
+
+	hb := map[string]any{
+		"elapsed_ms":         elapsed.Milliseconds(),
+		"phase":              "mid_stream",
+		"bytes_emitted":      bytesEmitted,
+		"events_emitted":     eventsEmitted,
+		"last_event_age_ms":  lastEventAge.Milliseconds(),
+	}
+	data, _ := json.Marshal(hb)
+	_, _ = fmt.Fprintf(w, ": fak-heartbeat %s\n\n", data)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return true
+}
 
 // streamChatLive serves POST /v1/chat/completions as a TRUE token stream: it
 // forwards each upstream CONTENT fragment to the client as an OpenAI SSE chunk the
@@ -30,10 +206,11 @@ import (
 // from the live stream so the bytes that reach the wire are a prefix of the buffered
 // post-lift content (see stream_lift_guard.go).
 //
-// It returns true once it owns the response (streamed a turn, or wrote a clean HTTP
-// error before any byte hit the wire); false when the configured planner cannot
-// stream this wire, in which case it has written NOTHING and the caller falls back to
-// the buffered+synthesized path.
+// Typed progress heartbeats (#10672): when FAK_STREAM_HEARTBEAT_S is set, the gateway
+// emits periodic SSE comment frames (`: fak-heartbeat {json}`) during the streaming
+// window, carrying only counts and durations (elapsed, phase, bytes/events emitted,
+// last-event age). Heartbeats are SILENT before the first token (the response is not
+// committed yet) and contain NO prompt or output content.
 func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt) bool {
 	sp, ok := s.planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
@@ -51,6 +228,31 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 	}
 
+	// Heartbeat config for typed progress heartbeats (#10672).
+	hb := newHeartbeatConfig()
+	var hbTicker *time.Ticker
+	var hbDone chan struct{}
+	if hb.enabled {
+		hbTicker = time.NewTicker(hb.interval)
+		hbDone = make(chan struct{})
+		defer func() {
+			close(hbDone)
+			hbTicker.Stop()
+		}()
+		go func() {
+			for {
+				select {
+				case <-hbTicker.C:
+					hb.emitHeartbeat(w)
+				case <-hbDone:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	// Headers + the opening role chunk are written lazily on the first content
 	// fragment, so an upstream failure BEFORE any token still lets us return a real
 	// HTTP status (a 200 + SSE error is far worse for a client than a clean 502).
@@ -60,6 +262,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return nil
 		}
 		started = true
+		hb.markStreamStart()
 		h := w.Header()
 		h.Set("Content-Type", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
@@ -74,6 +277,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		if err := start(); err != nil {
 			return err
 		}
+		hb.recordEvent(len(contentDelta))
 		return writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
 	}
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
@@ -124,10 +328,42 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// Headers + content already went out; we cannot change the status. Emit a
 		// terminal error frame + [DONE] so the client's SSE parser ends cleanly rather
 		// than hanging, and log the cause for the operator.
-		_, _, _ = s.plannerErrorStatus(err)
+		_, _, msg := s.plannerErrorStatus(err)
 		s.logf("gateway: upstream model error mid-stream: %v", err)
+
+		// Write mid-stream incident packet (#10672).
+		ic := newIncidentConfig()
+		hb.mu.Lock()
+		ttft := int64(0)
+		if !hb.streamStart.IsZero() {
+			ttft = hb.streamStart.Sub(began).Milliseconds()
+		}
+		elapsed := time.Since(began).Milliseconds()
+		bytesEmitted := hb.bytesEmitted
+		eventsEmitted := hb.eventsEmitted
+		lastEventAge := time.Since(hb.lastEvent).Milliseconds()
+		hb.mu.Unlock()
+
+		statusClass := "error"
+		boundPolicy := "max-duration=off"
+		if v := os.Getenv("FAK_STREAM_MAX_DURATION_S"); v != "" {
+			boundPolicy = "max-duration=" + v + "s"
+		}
+		var cause string
+		var ue *agent.UpstreamStalledError
+		if errors.As(err, &ue) {
+			statusClass = "stall"
+			if ue.Kind == "max-duration" {
+				statusClass = "bound:max-stream-duration"
+			}
+			cause = ue.Kind
+		} else {
+			cause = "upstream_error"
+		}
+		ic.writeIncident("openai_chat_completions", "mid_stream", statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
+
 		_ = writeSSEData(w, map[string]any{
-			"error": map[string]any{"message": "upstream model error", "type": "server_error"},
+			"error": map[string]any{"message": msg, "type": "server_error"},
 		})
 		writeSSEDone(w, flusher)
 		return true

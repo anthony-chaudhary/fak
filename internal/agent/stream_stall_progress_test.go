@@ -284,12 +284,12 @@ func TestStreamProgressWindowResolvesTheConfigField(t *testing.T) {
 // window, so a plain dead socket is never mislabelled as a no-progress stall. A zero
 // progress window still means "disabled", not "raised".
 func TestStallReaderProgressWindowNeverUndercutsIdle(t *testing.T) {
-	raised := newStallReader(io.NopCloser(strings.NewReader("")), 60*time.Second, 5*time.Second)
+	raised := newStallReader(io.NopCloser(strings.NewReader("")), 60*time.Second, 5*time.Second, 0)
 	defer raised.Close()
 	if raised.progressWindow != 60*time.Second {
 		t.Errorf("progressWindow = %s, want it raised to the 60s idle window", raised.progressWindow)
 	}
-	off := newStallReader(io.NopCloser(strings.NewReader("")), 60*time.Second, 0)
+	off := newStallReader(io.NopCloser(strings.NewReader("")), 60*time.Second, 0, 0)
 	defer off.Close()
 	if off.progressWindow != 0 || off.progressTimer != nil {
 		t.Errorf("progressWindow = %s / timer set = %v, want the deadline disabled", off.progressWindow, off.progressTimer != nil)
