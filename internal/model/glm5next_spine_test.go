@@ -162,6 +162,64 @@ func TestGLM5NextGatePreservesExistingQwenAndGLMPaths(t *testing.T) {
 	}
 }
 
+func TestGLM5NextConfigCadenceHelpers(t *testing.T) {
+	cfg := DefaultGLM5NextConfig()
+	if cfg.NumHiddenLayers != 45 {
+		t.Fatalf("NumHiddenLayers = %d, want 45", cfg.NumHiddenLayers)
+	}
+	if cfg.NRoutedExperts != 288 || cfg.NSharedExperts != 1 || cfg.ExpertsPerToken != 8 {
+		t.Fatalf("MoE parameters mismatch: %+v", cfg)
+	}
+	if cfg.IndexKPool != 4 || cfg.ConvWindowSize != 4 || cfg.HCMult != 4 {
+		t.Fatalf("parameters mismatch: %+v", cfg)
+	}
+
+	modelCfg := Config{GLM5Next: true}
+
+	var kdaCount, dsaCount int
+	for l := 0; l < 45; l++ {
+		isKDA := cfg.IsKDALayer(l)
+		isDSA := cfg.IsDSALayer(l)
+		if isKDA == isDSA {
+			t.Fatalf("layer %d must be either KDA or DSA, got KDA=%v DSA=%v", l, isKDA, isDSA)
+		}
+		if modelCfg.IsGLM5NextKDALayer(l) != isKDA {
+			t.Fatalf("Config.IsGLM5NextKDALayer(%d) = %v, want %v", l, modelCfg.IsGLM5NextKDALayer(l), isKDA)
+		}
+		if modelCfg.IsGLM5NextDSALayer(l) != isDSA {
+			t.Fatalf("Config.IsGLM5NextDSALayer(%d) = %v, want %v", l, modelCfg.IsGLM5NextDSALayer(l), isDSA)
+		}
+		if isKDA {
+			kdaCount++
+		} else {
+			dsaCount++
+		}
+
+		isDense := cfg.IsDenseMLPLayer(l)
+		isMoE := cfg.IsSparseMoELayer(l)
+		if isDense == isMoE {
+			t.Fatalf("layer %d must be either dense MLP or sparse MoE, got dense=%v moe=%v", l, isDense, isMoE)
+		}
+		if modelCfg.IsGLM5NextDenseMLP(l) != isDense {
+			t.Fatalf("Config.IsGLM5NextDenseMLP(%d) = %v, want %v", l, modelCfg.IsGLM5NextDenseMLP(l), isDense)
+		}
+		if modelCfg.IsGLM5NextSparseMoE(l) != isMoE {
+			t.Fatalf("Config.IsGLM5NextSparseMoE(%d) = %v, want %v", l, modelCfg.IsGLM5NextSparseMoE(l), isMoE)
+		}
+	}
+	if kdaCount != 34 || dsaCount != 11 {
+		t.Fatalf("cadence counts mismatch: kda=%d (want 34), dsa=%d (want 11)", kdaCount, dsaCount)
+	}
+
+	// Non-GLM config should return false
+	nonGLM := Config{GLM5Next: false}
+	for l := 0; l < 45; l++ {
+		if nonGLM.IsGLM5NextKDALayer(l) || nonGLM.IsGLM5NextDSALayer(l) || nonGLM.IsGLM5NextDenseMLP(l) || nonGLM.IsGLM5NextSparseMoE(l) {
+			t.Fatalf("non-GLM config returned true for layer %d", l)
+		}
+	}
+}
+
 func readGLM5NextFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "glm5next", name))
