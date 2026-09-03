@@ -787,6 +787,7 @@ var tier = map[string]int{
 	"workspin":                   1, // stdlib-only deterministic busywork-trend classifier over bounded commit/issue observations; folded by the CLI (#10609).
 	"schemaadapter":              1,
 	"toolbound":                  1,
+	"overtonscore":               1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

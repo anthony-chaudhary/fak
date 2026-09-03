@@ -39,6 +39,7 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"negation-tax",
 		"negation_operator",
 		"negframe",
+		"overton",
 		"product",
 		"propagation",
 		"qa-process",

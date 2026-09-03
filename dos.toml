@@ -471,6 +471,7 @@ concurrent = [
   "timeaware",
   "schemaadapter",
   "toolbound",
+  "overtonscore",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -643,6 +644,7 @@ autopick = [
   "extensionfault",
   "schemaadapter",
   "toolbound",
+  "overtonscore",
   # new-leaf:lane
 ]
 
@@ -1518,6 +1520,7 @@ extensionfault = ["internal/extensionfault/**"]
 timeaware = ["internal/timeaware/**"]
 schemaadapter = ["internal/schemaadapter/**"]
 toolbound = ["internal/toolbound/**"]
+overtonscore = ["internal/overtonscore/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
