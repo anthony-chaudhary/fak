@@ -157,7 +157,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 
 func appendGuardResourceReceipt(path string, r guardResourceReceipt) error {
 	if strings.TrimSpace(path) == "" {
-		return errors.New("child resource receipt path is empty")
+		return errors.New("child resource receipt path is empty; recovery: provide a valid path via --child-resource-journal")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create child resource receipt directory: %w", err)

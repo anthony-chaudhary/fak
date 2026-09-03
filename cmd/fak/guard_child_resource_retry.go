@@ -147,7 +147,7 @@ func guardResourceReattachCommand(command []string, agentName, codexStatePath, g
 	if guardIsCodex(agentName) {
 		return guardCodexResourceResumeCommand(command, codexStatePath, guardTraceID)
 	}
-	return nil, fmt.Errorf("agent %q has no safe resource reattach transport", strings.TrimSpace(agentName))
+	return nil, fmt.Errorf("agent %q has no safe resource reattach transport; recovery: run with a supported harness (claude, codex) or without child resource restarts", strings.TrimSpace(agentName))
 }
 
 func guardResourceReattachUnavailableStatus(agentName, traceID string, cause error) string {
@@ -179,8 +179,8 @@ func guardResourceRestartGiveUpStatus(verdict guardResourceRetryVerdict, traceID
 	if verdict.Cause == guardResourceRestartCauseNoProgress {
 		detail = fmt.Sprintf("%d consecutive containment retries without HEAD progress", verdict.NoProgress)
 	}
-	return fmt.Sprintf("fak guard: %s: child resource containment recovery stopped after %s (trace %s); refusing another relaunch",
-		guardResourceRestartExhaustedReason, detail, strings.TrimSpace(traceID))
+	return fmt.Sprintf("fak guard: %s: child resource containment recovery stopped after %s (trace %s); refusing another relaunch; recovery: inspect memory leaks in child process, increase --child-max-memory-mb, or adjust %s",
+		guardResourceRestartExhaustedReason, detail, strings.TrimSpace(traceID), guardResourceRestartLimitEnv)
 }
 
 func guardRecordResourceRestart(auditJournal *journal.Journal, stderr io.Writer, agentName, traceID string, attempt int) {
