@@ -433,6 +433,7 @@ var tier = map[string]int{
 	"loopindex":           1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":             2, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
 	"superloop":           2, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens, plus the C6 model-fit eval (#3043) grading read-only meta decisions; imports modelroute(1) for the single-sourced risk class, off the hot path.
+	"superstream":         3, // super workstream orchestrator: queue-ordered task progression with dynamic per-item lane leasing and long-turn context safety; imports laneadmit(2)+ctxplan(1)+stdlib.
 	"sessionobs":          2, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to fak trajectory audit â€” grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), imports only cacheprice(1) for the canonical warm-shed marginal, off the hot path.
 	"sessionsteer":        1, // long-horizon steering + admission core (#3512, rung of #2198): folds a content-free session snapshot (ctxvalue step-advice + pending-work bits) into one typed directive — MANAGED/LEGACY admission (never silent), a BLOCK/ALLOW persist decision, and step-advice steering text. Consumed by the SessionStart hook (soft rule, default-on) and staged for the Stop hook (hard block, shadow). Pure Steer(Input)Directive, stdlib-only, imports nothing internal.
 	"compactcohere":       1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
@@ -800,6 +801,7 @@ var tier = map[string]int{
 	"orgdebt":                    1,
 	"tb4bench":                   4,
 	"agentopt":                   1,
+	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -4,6 +4,64 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "ROCm/hrx-system",
+      "url": "https://github.com/ROCm/hrx-system",
+      "status": "studied",
+      "priority": 1,
+      "why": "Alternative, ultra-low-latency HIP runtime and native asynchronous compiler substrate (Loom) for AMD GPUs (RDNA3.5 Strix Halo, RDNA4, CDNA3) with direct user-space AQL and PM4 command submission, zero-LLVM HSACO generation, KPACK compressed packaging, stream-ordered VMM slab allocation, and in-band device ASAN.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+      "stars_at_check": 32,
+      "last_push_at_check": "2026-09-03T21:53:40Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ROCM-HRX-SYSTEM-2026-09-03.md",
+      "receipt_id": "study_2f5d10b5eb90152e1263112cf68dda0387221ce77cf11f5fb7d586975e691016",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/rocm-hrx-system.json",
+        "indexed_revision": "4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "subsystem_count": 5,
+        "candidate_count": 8,
+        "filed_issue_count": 6,
+        "issue_refs": [
+          "#11092",
+          "#11093",
+          "#11094",
+          "#11095",
+          "#11096",
+          "#11097",
+          "#11098"
+        ]
+      }
+    },
+    {
+      "repository": "lemonade-sdk/lemonade",
+      "url": "https://github.com/lemonade-sdk/lemonade",
+      "status": "studied",
+      "priority": 1,
+      "why": "Local multi-backend AI model server and router featuring speculative draft companion GGUF discovery and quant-bit distance matching, zero-byte-streamed accelerator reset and replay, reload-cost-weighted model eviction scoring under memory pressure, in-band SSE route decision injection, OS suspend/idle inhibition, and dynamic model target aliasing with active-standby failover.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+      "stars_at_check": 5604,
+      "last_push_at_check": "2026-09-03T21:21:29Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-LEMONADE-2026-09-03.md",
+      "receipt_id": "study_cc3b4fe925b988801bccaeb92d141ee0e0f0a37cc17e8edb0e4fb3a883df1e69",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "bc8d99ccfee301742f1dd86a3f6ec406bb8a863d",
+        "subsystem_count": 8,
+        "candidate_count": 9,
+        "filed_issue_count": 6,
+        "issue_refs": [
+          "#11086",
+          "#11087",
+          "#11088",
+          "#11089",
+          "#11090",
+          "#11091"
+        ]
+      }
+    },
+    {
       "repository": "syv-ai/qwen38-27b-rtx3090",
       "url": "https://github.com/syv-ai/qwen38-27b-rtx3090",
       "status": "studied",

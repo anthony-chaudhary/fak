@@ -38,8 +38,20 @@ func runCodeQualityScore(stdout, stderr io.Writer, argv []string, run codeQualit
 	noDOS := fs.Bool("no-dos", false, "skip the dos review ship-integrity probe")
 	revRange := fs.String("range", "", "git range for ship-integrity")
 	since := fs.String("since", "", "skip-gate reference")
+	deterministic := fs.Bool("deterministic", false, "tree-deterministic mode (ignore sliding commit history)")
+	kpi := fs.String("kpi", "", "filter code debt by KPI")
+	category := fs.String("category", "", "filter code debt by structural category")
+	pathFilter := fs.String("path", "", "filter code debt by file or package path")
+	search := fs.String("search", "", "filter code debt by substring in defect text")
+	limit := fs.Int("limit", 0, "limit max defects returned")
+	countOnly := fs.Bool("count", false, "print matching defect count only")
+	summaryOnly := fs.Bool("summary", false, "print structural category & KPI debt summary")
+	native := fs.Bool("native", false, "run native Go code-debt engine instead of Python checker")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if *native {
+		return runCodeDebt(stdout, stderr, argv)
 	}
 	root := *workspace
 	if root == "" {
@@ -72,6 +84,30 @@ func runCodeQualityScore(stdout, stderr io.Writer, argv []string, run codeQualit
 	}
 	if *since != "" {
 		checkerArgs = append(checkerArgs, "--since", *since)
+	}
+	if *deterministic {
+		checkerArgs = append(checkerArgs, "--deterministic")
+	}
+	if *kpi != "" {
+		checkerArgs = append(checkerArgs, "--kpi", *kpi)
+	}
+	if *category != "" {
+		checkerArgs = append(checkerArgs, "--category", *category)
+	}
+	if *pathFilter != "" {
+		checkerArgs = append(checkerArgs, "--path", *pathFilter)
+	}
+	if *search != "" {
+		checkerArgs = append(checkerArgs, "--search", *search)
+	}
+	if *limit > 0 {
+		checkerArgs = append(checkerArgs, "--limit", fmt.Sprintf("%d", *limit))
+	}
+	if *countOnly {
+		checkerArgs = append(checkerArgs, "--count")
+	}
+	if *summaryOnly {
+		checkerArgs = append(checkerArgs, "--summary")
 	}
 	checkerArgs = append(checkerArgs, fs.Args()...)
 	out, errOut, code, runErr := run(context.Background(), root, append([]string{*python}, checkerArgs...))

@@ -1,0 +1,123 @@
+{
+  "schema": "fak-study/1",
+  "title": "ROCm/hrx-system low-latency HIP runtime, direct HSA/PM4 dispatch, and Loom JIT compiler substrate",
+  "observed": "2026-09-03",
+  "sources": [
+    {
+      "url": "https://github.com/ROCm/hrx-system",
+      "revision": "4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+      "license": "Apache-2.0 with LLVM Exceptions"
+    }
+  ],
+  "observations": [
+    "HRX System is a clean-slate runtime and compiler infrastructure providing an alternative implementation of HIP within ROCm, designed by IREE/Nod.ai maintainers for low-latency, high-performance integration with AMD GPUs, NPUs, and CPUs.",
+    "Bypasses the multi-layer legacy ROCm stack (hip-runtime, comgr, rocprofiler) by implementing direct HSA/KFD execution with user-space AQL packet queues and direct PM4 command processor packet emission.",
+    "Provides a drop-in binary replacement libamdhip64.so (24,764 lines in binding/hip/api.c) that accelerates existing HIP applications (vLLM, llama.cpp, PyTorch) via LD_PRELOAD with zero code modifications.",
+    "Introduces Loom: a source-first native compiler substrate with a public C API (loomc) that compiles async device kernels and model programs directly to native HSACO ELF64 objects in under 2ms without runtime LLVM/clang subprocess overhead.",
+    "Loom features comprehensive matrix contracts for AMDGPU (MFMA on CDNA3/gfx942, WMMA on RDNA3.5/gfx1151 and RDNA4/gfx1201, SMFMAC/SWMMAC sparse variants, scaled F8/F6/F4 micro-quantization).",
+    "Implements KPACK (common/kpack.c): a compressed kernel package format with MessagePack TOCs, zstd decompression, and subsettable AMDGPU target ID expansion (sramecc, xnack) for compact multi-architecture kernel distribution.",
+    "Includes a stream-ordered VMM slab allocator (vmm_slab_provider.c) that pairs large virtual address reservations with lazy physical page commits, preventing VRAM address fragmentation during dynamic batching.",
+    "Co-designs kernel correctness policy and benchmark workloads in source IR via check.case and check.benchmark operations, supporting parameter sweeps and assignment dictionaries.",
+    "Features compile reports (loom-compile-report) with exact structural LDS bank-conflict service models and scheduled vs final VGPR pressure analysis, enabling pre-silicon tile optimization.",
+    "Integrates an asynchronous device event bus with in-band GPU AddressSanitizer (ASAN) fault reporting, capturing exact faulting addresses, workgroup/workitem IDs, and shadow memory state."
+  ],
+  "candidates": [
+    {
+      "effect": "Direct AQL and PM4 packet builder for zero-overhead user-space AMD GPU command processor submission.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "runtime/src/iree/hal/drivers/amdgpu/pm4_command_buffer.c:1-80@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "runtime/src/iree/hal/drivers/amdgpu/aql_command_buffer.c:1-50@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "internal/compute"
+      ],
+      "issue": "#11093",
+      "outcome": "Filed #11093 to build AQL and PM4 packet generation in internal/compute for direct GPU submission."
+    },
+    {
+      "effect": "Standalone HSACO code-object assembler and ELF64 emitter without LLVM runtime dependencies.",
+      "status": "ABSENT",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "loom/src/loom/target/emit/native/amdgpu/hsaco.c:1-120@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "loom/src/loom/target/emit/native/amdgpu/encoding.c:1-60@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "internal/compute"
+      ],
+      "issue": "#11094",
+      "outcome": "Filed #11094 to implement native AMDGPU ELF64/HSACO emitter in internal/compute without runtime LLVM."
+    },
+    {
+      "effect": "KPACK compressed multi-target kernel package parser and dynamic architecture resolver.",
+      "status": "ABSENT",
+      "disposition": "OPTIONAL-MODULE",
+      "evidence": [
+        "libhrx/src/binding/common/kpack.c:1-120@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "libhrx/src/binding/common/kpack.h:1-50@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "internal/ggufload"
+      ],
+      "issue": "#11095",
+      "outcome": "Filed #11095 to add pure-Go KPACK container reader and target fallback resolver."
+    },
+    {
+      "effect": "Stream-ordered VMM slab allocator with virtual address reservation and lazy physical memory commit.",
+      "status": "PARTIAL",
+      "disposition": "DEFAULT",
+      "evidence": [
+        "libhrx/src/libhrx/vmm_slab_provider.c:1-100@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "libhrx/include/hrx_runtime.h:827-868@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "internal/xenginekv",
+        "internal/enginecache"
+      ],
+      "issue": "#11096",
+      "outcome": "Filed #11096 to introduce virtual memory reservation and physical page commit provider."
+    },
+    {
+      "effect": "In-IR test oracle and benchmark parameter specification with assignment dictionaries.",
+      "status": "PARTIAL",
+      "disposition": "RECIPE",
+      "evidence": [
+        "loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom:65-82@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "loom/src/loom/test/corpus/authoring/README.md:1-24@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "cmd/modelbench"
+      ],
+      "issue": "#11098",
+      "outcome": "Filed #11098 to unify kernel numeric verification oracles and benchmark parameter sweeps."
+    },
+    {
+      "effect": "Asynchronous device event bus for in-band GPU kernel AddressSanitizer (ASAN) fault attribution.",
+      "status": "ABSENT",
+      "disposition": "OPTIONAL-MODULE",
+      "evidence": [
+        "libhrx/include/hrx_runtime.h:296-367@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "runtime/src/iree/hal/drivers/amdgpu/asan_state.c:1-80@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "internal/hostdiag"
+      ],
+      "issue": "#11097",
+      "outcome": "Filed #11097 to add device event sink and in-band GPU kernel memory defect reporting."
+    },
+    {
+      "effect": "Transparent HIP runtime drop-in shim with stream batch memory operations for low-latency kernel dispatch.",
+      "status": "ABSENT",
+      "disposition": "WATCH",
+      "evidence": [
+        "libhrx/src/binding/hip/api.c:97-130@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "libhrx/src/binding/common/direct_transfer.c:1-40@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "cmd/fak/serve.go"
+      ],
+      "issue": "",
+      "outcome": "Watch for potential LD_PRELOAD interposition when benchmarking third-party ROCm/HIP engines without relinking."
+    },
+    {
+      "effect": "Compile-time LDS/shared-memory bank conflict and VGPR pressure diagnostic modeling.",
+      "status": "ABSENT",
+      "disposition": "WATCH",
+      "evidence": [
+        "loom/src/loom/test/corpus/authoring/README.md:445-510@4c5f2d9bfd80ad34343c61eadae99025923c26b3",
+        "loom/src/loom/target/arch/amdgpu/descriptors/",
+        "internal/nativeperf"
+      ],
+      "issue": "",
+      "outcome": "Watch as an offline heuristic model to reject suboptimal kernel tile shapes prior to hardware benchmarking."
+    }
+  ]
+}
