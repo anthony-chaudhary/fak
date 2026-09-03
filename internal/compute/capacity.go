@@ -60,13 +60,14 @@ func uint64ToCapInt64(v uint64) int64 {
 type MemoryClass string
 
 const (
-	MemoryUnknown    MemoryClass = "unknown"
-	MemoryWeights    MemoryClass = "weights"
-	MemoryKVCache    MemoryClass = "kv_cache"
-	MemoryDDRCache   MemoryClass = "ddr_cache"
-	MemoryOffload    MemoryClass = "offload"
-	MemoryScratchpad MemoryClass = "scratchpad"
-	MemoryActivation MemoryClass = "activation"
+	MemoryUnknown      MemoryClass = "unknown"
+	MemoryWeights      MemoryClass = "weights"
+	MemoryKVCache      MemoryClass = "kv_cache"
+	MemoryDDRCache     MemoryClass = "ddr_cache"
+	MemoryOffload      MemoryClass = "offload"
+	MemoryScratchpad   MemoryClass = "scratchpad"
+	MemoryActivation   MemoryClass = "activation"
+	MemorySignalBuffer MemoryClass = "signal_buffer"
 )
 
 // MemoryScope says which finite pool a demand consumes. Empty scope means device for backward
@@ -657,6 +658,7 @@ func memoryPlanSummary(plan MemoryPlan) string {
 		MemoryOffload,
 		MemoryScratchpad,
 		MemoryActivation,
+		MemorySignalBuffer,
 		MemoryUnknown,
 	}
 	seen := map[key]bool{}
