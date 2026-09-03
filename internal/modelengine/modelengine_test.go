@@ -197,3 +197,18 @@ func TestPreloadNilIsSafe(t *testing.T) {
 		t.Fatalf("nil Preload wedged the engine; lazy synthetic should still build")
 	}
 }
+
+func TestModelNameReportsSyntheticVsPreloadedHonestly(t *testing.T) {
+	// 1. Synthetic engine reports "smollm2-synthetic"
+	eSynth := New()
+	if got := eSynth.ModelName(); got != "smollm2-synthetic" {
+		t.Fatalf("synthetic ModelName = %q, want \"smollm2-synthetic\"", got)
+	}
+
+	// 2. Preloaded real model reports "smollm2-inkernel"
+	ePre := New()
+	ePre.Preload(model.NewSynthetic(SyntheticConfig()))
+	if got := ePre.ModelName(); got != "smollm2-inkernel" {
+		t.Fatalf("preloaded ModelName = %q, want \"smollm2-inkernel\"", got)
+	}
+}
