@@ -1,8 +1,35 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-09-02",
+  "updated_at": "2026-09-03",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+    {
+      "repository": "microsoft/vidur",
+      "url": "https://github.com/microsoft/vidur",
+      "status": "studied",
+      "priority": 1,
+      "why": "High-fidelity MLSys'24 LLM inference simulator and capacity planning engine with execution time regression modeling, prefix caching, multi-tier Disk/VRAM KV cache management, tolerance-slack sticky routing, uncached prefill volume balancing, and adaptive capacity binary search.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+      "stars_at_check": 671,
+      "last_push_at_check": "2026-08-24T12:47:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-MICROSOFT-VIDUR-2026-09-03.md",
+      "receipt_id": "study_722a05f7439411a3291e4a376f5e48b3da011f06448fbc4480d2e1cb635d9553",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "abae7f63aa857300f5cdc6f5e0d27860cd24721b",
+        "subsystem_count": 8,
+        "candidate_count": 5,
+        "filed_issue_count": 5,
+        "issue_refs": [
+          "#10852",
+          "#10853",
+          "#10854",
+          "#10856",
+          "#10861"
+        ]
+      }
+    },
     {
       "repository": "wkljohn/ds4-strix-halo-tp-odinlink",
       "url": "https://github.com/wkljohn/ds4-strix-halo-tp-odinlink",
