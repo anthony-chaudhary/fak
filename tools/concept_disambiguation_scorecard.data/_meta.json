@@ -9241,6 +9241,11 @@
           "category": "incidental",
           "reason": "Shared admission-policy seam both launchers derive their operator budget through, refactored out of serveNativeAdmissionPolicy; the name is self-descriptive and the doc comment names both callers, so there is no collision to disambiguate.",
           "token": "nativeAdmissionPolicyForBudget"
+        },
+        {
+          "category": "incidental",
+          "reason": "dev-only admission policy override for bounded smokes on pressure-critical hosts",
+          "token": "FAK_ADMISSION_POLICY"
         }
       ],
       "exclude": [
@@ -9275,6 +9280,7 @@
         "ErrNotAdjudicated",
         "EvidenceAdjudication",
         "EvidencePolicy",
+        "FAK_ADMISSION_POLICY",
         "FAK_APP_CAPABILITY",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",

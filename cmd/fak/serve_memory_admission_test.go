@@ -35,6 +35,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 
 	path := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_GPU_LEASE", path)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe$")
@@ -145,5 +146,23 @@ func TestLoadLocalLauncherModelWithMetalLeaseLeavesCPUAndEmptyModelUnserialized(
 				t.Fatalf("load callback calls = %d, want 1", loads)
 			}
 		})
+	}
+}
+
+func TestLoadLocalLauncherModelWithMetalLeasePressurePolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_GPU_LEASE", path)
+	t.Setenv("FAK_NATIVE_ADMISSION", "exclusive")
+
+	loaded := false
+	release, err := loadLocalLauncherModelWithMetalLease(true, "test.gguf", gpulease.Options{Path: path}, func() {
+		loaded = true
+	})
+	if err != nil {
+		t.Fatalf("exclusive rollback should admit without reservation gate: %v", err)
+	}
+	defer release()
+	if !loaded {
+		t.Fatal("expected load to run under exclusive admission")
 	}
 }
