@@ -40,6 +40,7 @@ type Config struct {
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
 	StaleAfter  time.Duration
+	Cooldown    time.Duration
 	Clock       Clock
 	Jitter      Jitter
 	PIDAlive    func(int) bool
@@ -64,6 +65,8 @@ type Status struct {
 	MaxAttempts   int
 	WindowStart   time.Time
 	LastFailure   time.Time
+	LastSuccess   time.Time
+	CooldownUntil time.Time
 	Active        bool
 	OwnerPID      int
 	Quarantined   bool
@@ -81,6 +84,7 @@ type Lease struct {
 type diskState struct {
 	Attempts      []time.Time `json:"attempts,omitempty"`
 	LastFailure   time.Time   `json:"last_failure,omitempty"`
+	LastSuccess   time.Time   `json:"last_success,omitempty"`
 	Quarantined   bool        `json:"quarantined,omitempty"`
 	QuarantinedAt time.Time   `json:"quarantined_at,omitempty"`
 }
@@ -93,8 +97,8 @@ type owner struct {
 
 // New validates cfg and creates its state directory.
 func New(cfg Config) (*Guard, error) {
-	if cfg.Dir == "" || cfg.MaxAttempts <= 0 || cfg.Window <= 0 || cfg.BaseBackoff < 0 || cfg.StaleAfter <= 0 {
-		return nil, errors.New("launchguard: dir, positive max attempts/window/stale age, and non-negative backoff are required")
+	if cfg.Dir == "" || cfg.MaxAttempts <= 0 || cfg.Window <= 0 || cfg.BaseBackoff < 0 || cfg.StaleAfter <= 0 || cfg.Cooldown < 0 {
+		return nil, errors.New("launchguard: dir, positive max attempts/window/stale age, and non-negative backoff/cooldown are required")
 	}
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = cfg.Window
@@ -137,15 +141,26 @@ func (g *Guard) Admit(identity string) (Decision, *Lease, error) {
 				g.releaseOwner(id, o.Token)
 				return Decision{}, nil, err
 			}
-			state.prune(now.Add(-g.cfg.Window))
+			var cooldownCutoff time.Time
+			if g.cfg.Cooldown > 0 {
+				cooldownCutoff = now.Add(-g.cfg.Cooldown)
+			}
+			state.prune(now.Add(-g.cfg.Window), cooldownCutoff)
 			status := g.status(id, state, &o)
 			if state.Quarantined {
 				g.releaseOwner(id, o.Token)
-				return Decision{Outcome: Quarantined, Identity: id, Status: status}, nil, nil
+				return Decision{Outcome: Quarantined, Identity: id, Status: g.status(id, state, nil)}, nil, nil
+			}
+			if g.cfg.Cooldown > 0 && !state.LastSuccess.IsZero() {
+				if elapsed := now.Sub(state.LastSuccess); elapsed < g.cfg.Cooldown {
+					g.releaseOwner(id, o.Token)
+					retryAfter := g.cfg.Cooldown - elapsed
+					return Decision{Outcome: DuplicateActive, Identity: id, RetryAfter: retryAfter, Status: g.status(id, state, nil)}, nil, nil
+				}
 			}
 			if delay := g.backoff(state, now); delay > 0 {
 				g.releaseOwner(id, o.Token)
-				return Decision{Outcome: Backoff, Identity: id, RetryAfter: delay, Status: status}, nil, nil
+				return Decision{Outcome: Backoff, Identity: id, RetryAfter: delay, Status: g.status(id, state, nil)}, nil, nil
 			}
 			if len(state.Attempts) >= g.cfg.MaxAttempts {
 				state.Quarantined = true
@@ -154,9 +169,8 @@ func (g *Guard) Admit(identity string) (Decision, *Lease, error) {
 					g.releaseOwner(id, o.Token)
 					return Decision{}, nil, err
 				}
-				status = g.status(id, state, &o)
 				g.releaseOwner(id, o.Token)
-				return Decision{Outcome: Quarantined, Identity: id, Status: status}, nil, nil
+				return Decision{Outcome: Quarantined, Identity: id, Status: g.status(id, state, nil)}, nil, nil
 			}
 			state.Attempts = append(state.Attempts, now)
 			if err := g.writeState(id, state); err != nil {
@@ -186,7 +200,11 @@ func (g *Guard) Admit(identity string) (Decision, *Lease, error) {
 			if stateErr != nil {
 				return Decision{}, nil, stateErr
 			}
-			return Decision{Outcome: DuplicateActive, Identity: id, Status: g.status(id, state, &existing)}, nil, nil
+			var retryAfter time.Duration
+			if age < g.cfg.StaleAfter {
+				retryAfter = g.cfg.StaleAfter - age
+			}
+			return Decision{Outcome: DuplicateActive, Identity: id, RetryAfter: retryAfter, Status: g.status(id, state, &existing)}, nil, nil
 		}
 		if err := os.Remove(g.ownerPath(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return Decision{}, nil, fmt.Errorf("launchguard: recover stale owner: %w", err)
@@ -212,9 +230,17 @@ func (l *Lease) Finish(success bool) error {
 		return err
 	}
 	now := g.cfg.Clock()
-	state.prune(now.Add(-g.cfg.Window))
+	var cooldownCutoff time.Time
+	if g.cfg.Cooldown > 0 {
+		cooldownCutoff = now.Add(-g.cfg.Cooldown)
+	}
+	state.prune(now.Add(-g.cfg.Window), cooldownCutoff)
 	if success {
-		state = diskState{}
+		if g.cfg.Cooldown > 0 {
+			state = diskState{LastSuccess: now}
+		} else {
+			state = diskState{}
+		}
 	} else {
 		state.LastFailure = now
 		if len(state.Attempts) >= g.cfg.MaxAttempts {
@@ -235,7 +261,12 @@ func (g *Guard) Inspect(identity string) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	state.prune(g.cfg.Clock().Add(-g.cfg.Window))
+	now := g.cfg.Clock()
+	var cooldownCutoff time.Time
+	if g.cfg.Cooldown > 0 {
+		cooldownCutoff = now.Add(-g.cfg.Cooldown)
+	}
+	state.prune(now.Add(-g.cfg.Window), cooldownCutoff)
 	var active *owner
 	if o, _, err := g.readOwner(id); err == nil {
 		active = &o
@@ -286,7 +317,7 @@ func (g *Guard) backoff(state diskState, now time.Time) time.Duration {
 	return remaining
 }
 
-func (s *diskState) prune(cutoff time.Time) {
+func (s *diskState) prune(cutoff, cooldownCutoff time.Time) {
 	first := 0
 	for first < len(s.Attempts) && s.Attempts[first].Before(cutoff) {
 		first++
@@ -295,12 +326,26 @@ func (s *diskState) prune(cutoff time.Time) {
 	if len(s.Attempts) == 0 && !s.Quarantined {
 		s.LastFailure = time.Time{}
 	}
+	if !s.LastSuccess.IsZero() && !cooldownCutoff.IsZero() && s.LastSuccess.Before(cooldownCutoff) {
+		s.LastSuccess = time.Time{}
+	}
 }
 
 func (g *Guard) status(id string, state diskState, o *owner) Status {
-	s := Status{Identity: id, Attempts: len(state.Attempts), MaxAttempts: g.cfg.MaxAttempts, LastFailure: state.LastFailure, Quarantined: state.Quarantined, QuarantinedAt: state.QuarantinedAt}
+	s := Status{
+		Identity:      id,
+		Attempts:      len(state.Attempts),
+		MaxAttempts:   g.cfg.MaxAttempts,
+		LastFailure:   state.LastFailure,
+		LastSuccess:   state.LastSuccess,
+		Quarantined:   state.Quarantined,
+		QuarantinedAt: state.QuarantinedAt,
+	}
 	if len(state.Attempts) > 0 {
 		s.WindowStart = state.Attempts[0]
+	}
+	if g.cfg.Cooldown > 0 && !state.LastSuccess.IsZero() {
+		s.CooldownUntil = state.LastSuccess.Add(g.cfg.Cooldown)
 	}
 	if o != nil {
 		s.Active = true

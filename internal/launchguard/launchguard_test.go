@@ -43,7 +43,7 @@ func TestStableIdentityStoresOnlyHash(t *testing.T) {
 	if d.Outcome != Admitted || lease == nil {
 		t.Fatalf("decision = %+v, lease=%v", d, lease)
 	}
-	if d.Identity == identity || len(d.Identity) != 64 {
+	if d.Identity == identity || len(d.Identity) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width is a fixed 64-character invariant
 		t.Fatalf("identity = %q", d.Identity)
 	}
 	entries, err := os.ReadDir(g.cfg.Dir)
@@ -245,6 +245,62 @@ func TestResetRefusesActiveIdentity(t *testing.T) {
 		t.Fatal("Reset succeeded while active")
 	}
 	if err := lease.Finish(true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCooldownRefusesDuplicateLaunchesUntilWindowExpires(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1000, 0)}
+	g, err := New(Config{
+		Dir:         t.TempDir(),
+		MaxAttempts: 1,
+		Window:      10 * time.Minute,
+		Cooldown:    10 * time.Minute,
+		BaseBackoff: time.Second,
+		MaxBackoff:  time.Minute,
+		StaleAfter:  15 * time.Minute,
+		Clock:       clock.Now,
+		PIDAlive:    func(int) bool { return true },
+		PID:         100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d, lease, err := g.Admit("job:alpha")
+	if err != nil || d.Outcome != Admitted || lease == nil {
+		t.Fatalf("first admit: decision=%+v err=%v", d, err)
+	}
+	if err := lease.Finish(true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Immediate second attempt within cooldown is refused with DuplicateActive and RetryAfter.
+	clock.Add(2 * time.Minute)
+	d2, lease2, err := g.Admit("job:alpha")
+	if err != nil || d2.Outcome != DuplicateActive || lease2 != nil {
+		t.Fatalf("within cooldown: decision=%+v lease=%v err=%v", d2, lease2, err)
+	}
+	if d2.RetryAfter != 8*time.Minute {
+		t.Fatalf("retry after = %v, want 8m", d2.RetryAfter)
+	}
+
+	// Different identity admits independently even during job:alpha's cooldown.
+	dOther, leaseOther, err := g.Admit("job:beta")
+	if err != nil || dOther.Outcome != Admitted || leaseOther == nil {
+		t.Fatalf("independent tag: decision=%+v err=%v", dOther, err)
+	}
+	if err := leaseOther.Finish(true); err != nil {
+		t.Fatal(err)
+	}
+
+	// After cooldown window expires, job:alpha can admit again.
+	clock.Add(8*time.Minute + time.Second)
+	d3, lease3, err := g.Admit("job:alpha")
+	if err != nil || d3.Outcome != Admitted || lease3 == nil {
+		t.Fatalf("after cooldown: decision=%+v lease=%v err=%v", d3, lease3, err)
+	}
+	if err := lease3.Finish(true); err != nil {
 		t.Fatal(err)
 	}
 }
