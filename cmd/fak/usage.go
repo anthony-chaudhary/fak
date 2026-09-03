@@ -322,6 +322,10 @@ const usageCoreText = `usage:
                  (Go/JSON in-process, Python/CUDA via their toolchains, degrading
                  to no-opinion where a checker is absent). The same Lint the
                  SWE-bench fleet runs on every agent file write. Exit 1 on an error)
+  fak lsp
+                (the NATIVE LANGUAGE SERVER: in-process stdio LSP server powered
+                 by codelint for Go and agent-written files. Emits instant diagnostics
+                 and document symbols with zero external toolchain dependencies)
   fak tool-coverage-audit [--workspace DIR] [--min-coverage PCT] [--json]
                 (audits load-bearing tools/*.py modules referenced by skills/CI and
                  reports which lack a sibling *_test.py. With --min-coverage, exits

@@ -331,13 +331,58 @@ func TestSelectTwentySessionCohort(t *testing.T) {
 		report.Sessions = append(report.Sessions, row)
 	}
 	got := Select(report, Options{Limit: 20, ReceiptDir: t.TempDir()})
-	if len(got) != 20 {
-		t.Fatalf("got %d candidates", len(got))
+	if len(got) != 25 {
+		t.Fatalf("got %d total rows", len(got))
 	}
+	candidates := 0
+	deferred := 0
 	for _, req := range got {
-		if req.Status != "candidate" {
-			t.Fatalf("request=%+v", req)
+		if req.Status == "candidate" {
+			candidates++
+		} else if req.Status == "deferred" && req.Reason == "launch_limit" {
+			deferred++
 		}
+	}
+	if candidates != 20 || deferred != 5 {
+		t.Fatalf("candidates=%d deferred=%d, want 20 and 5", candidates, deferred)
+	}
+}
+
+func TestSelectTwelveParentCohortDefaultUnboundedSelectsAll(t *testing.T) {
+	report := InventoryReport{}
+	for i := 0; i < 12; i++ {
+		row := candidate(`C:\work\fak`)
+		row.Thread.ID = fmt.Sprintf("parent-%02d", i)
+		report.Sessions = append(report.Sessions, row)
+	}
+	// With Limit 0 (default unbounded), all 12 safe candidates are selected deterministically.
+	requests := Select(report, Options{Limit: 0, ReceiptDir: t.TempDir()})
+	if len(requests) != 12 {
+		t.Fatalf("got %d requests, want 12", len(requests))
+	}
+	for i, req := range requests {
+		wantID := fmt.Sprintf("parent-%02d", i)
+		if req.ThreadID != wantID || req.Status != "candidate" {
+			t.Fatalf("request %d = %+v, want %s candidate", i, req, wantID)
+		}
+	}
+
+	summary := NewSummary("preview", report, requests, time.Now())
+	if summary.Counts.Actionable != 12 || summary.Counts.Selected != 12 || summary.Counts.OmittedByLimit != 0 {
+		t.Fatalf("summary counts = %+v, want actionable=12 selected=12 omitted=0", summary.Counts)
+	}
+	if summary.RecoverAllCommand != "" {
+		t.Fatalf("unbounded summary should have no recover-all command, got: %q", summary.RecoverAllCommand)
+	}
+
+	// With explicit Limit 4: exactly 4 are selected, 8 are deferred with launch_limit, and recover-all command is generated.
+	boundedReqs := Select(report, Options{Limit: 4, ReceiptDir: t.TempDir()})
+	boundedSummary := NewSummary("preview", report, boundedReqs, time.Now())
+	if boundedSummary.Counts.Actionable != 12 || boundedSummary.Counts.Selected != 4 || boundedSummary.Counts.OmittedByLimit != 8 {
+		t.Fatalf("bounded counts = %+v, want actionable=12 selected=4 omitted=8", boundedSummary.Counts)
+	}
+	if boundedSummary.RecoverAllCommand != "fak session recover --all" {
+		t.Fatalf("bounded recover-all command = %q, want 'fak session recover --all'", boundedSummary.RecoverAllCommand)
 	}
 }
 

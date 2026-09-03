@@ -140,9 +140,47 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 			Name: "OpenCode",
 			RequiredTools: []harnessToolProbe{
 				{"read", `{"filePath":"README.md"}`},
+				{"write", `{"filePath":"notes.txt","content":"hello"}`},
+				{"edit", `{"filePath":"notes.txt","oldString":"hello","newString":"world"}`},
 				{"grep", `{"pattern":"func"}`},
 				{"glob", `{"pattern":"**"}`},
 				{"list", `{"path":"."}`},
+				{"webfetch", `{"url":"https://github.com/anthony-chaudhary/fak"}`},
+				{"todowrite", `{"todos":[]}`},
+				{"task", `{"prompt":"inspect code"}`},
+				{"question", `{"questions":[{"question":"choice?"}]}`},
+				{"skill", `{"name":"test"}`},
+
+				{"dos_dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`},
+				{"dos_dos_arbitrate", `{"lane":"x"}`},
+				{"dos_dos_recall", `{"name":"test"}`},
+				{"dos_dos_review", `{"rev_range":"HEAD~1..HEAD"}`},
+				{"dos_dos_status", `{"run_id":"RID-1"}`},
+				{"dos_dos_doctor", `{}`},
+				{"dos_dos_answer", `{"query":"how do I verify"}`},
+				{"dos_dos_check_reason", `{"reason_class":"LANE_DRAINED"}`},
+				{"dos_dos_refuse_reasons", `{}`},
+				{"dos_dos_commit_audit", `{"ref":"HEAD"}`},
+				{"dos_dos_citation_resolve", `{"cite":"925 F.3d 1339"}`},
+				{"dos_dos_acme_lane_hint", `{}`},
+				{"dos_acme_lane_hint", `{}`},
+
+				{"fak_fak_adjudicate", `{"tool":"read","arguments":{}}`},
+				{"fak_fak_admit", `{"tool":"read","intent":"appeal"}`},
+				{"fak_fak_syscall", `{"tool":"read","arguments":{}}`},
+				{"fak_fak_read", `{"file_path":"README.md"}`},
+				{"fak_fak_changes", `{}`},
+				{"fak_fak_memory_drivers", `{}`},
+				{"fak_fak_memory_explain", `{"driver":"recall"}`},
+				{"fak_fak_memory_run", `{"driver":"recall","apply":false}`},
+				{"fak_fak_trajquery", `{"query":"test"}`},
+				{"fak_fak_tools_search", `{"query":"tool","detail_level":"name"}`},
+				{"fak_fak_feature_query", `{"query":"memory","detail":"name"}`},
+				{"fak_fak_capabilities", `{"query":"inspect guard loop"}`},
+				{"fak_fak_context_value", `{}`},
+				{"fak_fak_context_spans", `{}`},
+				{"fak_fak_context_restore", `{"id":"deadbeef"}`},
+				{"fak_fak_resume_history", `{}`},
 			},
 			ShellAliases: []shellAliasSpec{
 				{Name: "bash", Benign: "go test ./...", Denies: []string{"rm -rf /tmp/x", "sudo rm /etc/hosts"}},
@@ -339,6 +377,12 @@ func TestHarnessProfileFloorCoverage(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestGuardHarnessProfiles runs the harness profile floor coverage check to verify that all
+// first-class harnesses (including OpenCode with its double-prefixed tools) are covered.
+func TestGuardHarnessProfiles(t *testing.T) {
+	TestHarnessProfileFloorCoverage(t)
 }
 
 // TestHarnessProfileCoverageDetectsMissingRequiredTool proves the gate has teeth for

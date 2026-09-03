@@ -67,6 +67,20 @@ func TestManageBareCodexUsesDedicatedLauncher(t *testing.T) {
 	}
 }
 
+func TestManageBareOpencodeUsesDedicatedLauncher(t *testing.T) {
+	var dedicated bool
+	var generic []string
+	dispatchManageLaunchWithOpencode([]string{"opencode"}, func([]string) {}, func(args []string) {
+		dedicated = true
+		if len(args) != 0 {
+			t.Fatalf("dedicated args = %v, want none", args)
+		}
+	}, func(args []string) { generic = args })
+	if !dedicated || generic != nil {
+		t.Fatalf("dedicated = %v, generic = %v", dedicated, generic)
+	}
+}
+
 func TestManageCodexWithExplicitArgumentsStaysGeneric(t *testing.T) {
 	for _, argv := range [][]string{
 		{"--", "codex"},

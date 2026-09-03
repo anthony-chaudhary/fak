@@ -89,6 +89,16 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	}
 	rep.Command, rep.Args = command, append([]string(nil), args...)
 	resolved, err := exec.LookPath(command)
+	if err != nil && errors.Is(err, exec.ErrDot) {
+		target := command
+		if resolved != "" {
+			target = resolved
+		}
+		if abs, absErr := filepath.Abs(target); absErr == nil {
+			resolved = abs
+			err = nil
+		}
+	}
 	if err != nil {
 		cause := "EXECUTABLE_MISSING"
 		remediation := "install/rebuild the configured executable, then update mcp_servers." + server + ".command"

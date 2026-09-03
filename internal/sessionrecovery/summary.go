@@ -13,18 +13,21 @@ import (
 const SummarySchema = "fak.session_recovery.summary.v2"
 
 type Summary struct {
-	Schema      string        `json:"schema"`
-	Mode        string        `json:"mode"`
-	StartedAt   string        `json:"started_at"`
-	FinishedAt  string        `json:"finished_at"`
-	WitnessPath string        `json:"witness_path"`
-	Counts      SummaryCounts `json:"counts"`
-	Results     []Result      `json:"results"`
+	Schema            string        `json:"schema"`
+	Mode              string        `json:"mode"`
+	StartedAt         string        `json:"started_at"`
+	FinishedAt        string        `json:"finished_at"`
+	WitnessPath       string        `json:"witness_path"`
+	RecoverAllCommand string        `json:"recover_all_command,omitempty"`
+	Counts            SummaryCounts `json:"counts"`
+	Results           []Result      `json:"results"`
 }
 
 type SummaryCounts struct {
 	Discovered        int `json:"discovered"`
+	Actionable        int `json:"actionable,omitempty"`
 	Selected          int `json:"selected"`
+	OmittedByLimit    int `json:"omitted_by_limit,omitempty"`
 	AlreadyActive     int `json:"already_active"`
 	AlreadyReceipted  int `json:"already_receipted"`
 	Launched          int `json:"launched"`
@@ -36,6 +39,7 @@ type SummaryCounts struct {
 	Productive        int `json:"productive"`
 	Completed         int `json:"completed"`
 	Failed            int `json:"failed"`
+	Stalled           int `json:"stalled,omitempty"`
 	LaunchedUnproven  int `json:"launched_unproven"`
 	ExactCardinality  int `json:"exact_cardinality"`
 	CardinalityFailed int `json:"cardinality_failed"`
@@ -77,10 +81,16 @@ type Result struct {
 
 func NewSummary(mode string, report InventoryReport, requests []Request, now time.Time) Summary {
 	results := make([]Result, 0, len(requests))
+	actionable := 0
 	selected := 0
+	omittedByLimit := 0
 	for _, req := range requests {
 		if req.Status == "candidate" {
+			actionable++
 			selected++
+		} else if req.Status == "deferred" && req.Reason == "launch_limit" {
+			actionable++
+			omittedByLimit++
 		}
 		result := Result{
 			ThreadID: req.ThreadID, CWD: req.CWD, Source: req.Source,
@@ -103,7 +113,12 @@ func NewSummary(mode string, report InventoryReport, requests []Request, now tim
 	stamp := now.UTC().Format(time.RFC3339Nano)
 	summary := Summary{Schema: SummarySchema, Mode: mode, StartedAt: stamp, FinishedAt: stamp, Results: results}
 	summary.Counts.Discovered = len(report.Sessions)
+	summary.Counts.Actionable = actionable
 	summary.Counts.Selected = selected
+	summary.Counts.OmittedByLimit = omittedByLimit
+	if omittedByLimit > 0 {
+		summary.RecoverAllCommand = "fak session recover --all"
+	}
 	for _, session := range report.Sessions {
 		if session.Thread != nil && guardedTreeCount(session) == 1 {
 			summary.Counts.AlreadyActive++
@@ -114,8 +129,14 @@ func NewSummary(mode string, report InventoryReport, requests []Request, now tim
 }
 
 func (s *Summary) Recount() {
-	discovered, selected, alreadyActive := s.Counts.Discovered, s.Counts.Selected, s.Counts.AlreadyActive
-	s.Counts = SummaryCounts{Discovered: discovered, Selected: selected, AlreadyActive: alreadyActive}
+	discovered, actionable, selected, omittedByLimit, alreadyActive := s.Counts.Discovered, s.Counts.Actionable, s.Counts.Selected, s.Counts.OmittedByLimit, s.Counts.AlreadyActive
+	s.Counts = SummaryCounts{
+		Discovered:     discovered,
+		Actionable:     actionable,
+		Selected:       selected,
+		OmittedByLimit: omittedByLimit,
+		AlreadyActive:  alreadyActive,
+	}
 	for _, result := range s.Results {
 		switch result.Category {
 		case CategoryProbe:
@@ -137,6 +158,7 @@ func (s *Summary) Recount() {
 		case "launched_unproven":
 			s.Counts.Launched++
 			s.Counts.LaunchedUnproven++
+			s.Counts.Stalled++
 		case "active":
 			s.Counts.Launched++
 			s.Counts.Active++
@@ -374,5 +396,14 @@ func WriteSummary(path string, summary Summary) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	var rerr error
+	for _, backoff := range []time.Duration{0, time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond, 16 * time.Millisecond, 32 * time.Millisecond} {
+		if backoff > 0 {
+			time.Sleep(backoff)
+		}
+		if rerr = os.Rename(tmpPath, path); rerr == nil {
+			return nil
+		}
+	}
+	return rerr
 }

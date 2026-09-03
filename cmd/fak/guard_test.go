@@ -172,7 +172,6 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"DesignSync allowed (ultracode orchestration)", "DesignSync", `{"method":"list_projects"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_verify allowed", "mcp__dos__dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`, abi.VerdictAllow},
 		{"read-only DOS verb dos_arbitrate allowed", "mcp__dos__dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
-		{"opencode DOS arbitrate spelling allowed", "dos_dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
 		{"fak MCP tool search allowed", "mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
 		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"query":"README ownership"}`, abi.VerdictAllow},
 		{"fak MCP capabilities task query allowed", "mcp__fak__fak_capabilities", `{"query":"inspect guard loop"}`, abi.VerdictAllow},
@@ -226,6 +225,41 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"opencode edit into .git refused", "edit", `{"filePath":".git/config","oldString":"a","newString":"b"}`, abi.VerdictDeny},
 		{"opencode unlisted tool fails closed", "exfiltrate", `{}`, abi.VerdictDeny},
 
+		// OpenCode double-prefixed DOS tools (#10825)
+		{"opencode DOS verify spelling allowed", "dos_dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`, abi.VerdictAllow},
+		{"opencode DOS arbitrate spelling allowed", "dos_dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
+		{"opencode DOS recall spelling allowed", "dos_dos_recall", `{"name":"test"}`, abi.VerdictAllow},
+		{"opencode DOS review spelling allowed", "dos_dos_review", `{"rev_range":"HEAD~1..HEAD"}`, abi.VerdictAllow},
+		{"opencode DOS status spelling allowed", "dos_dos_status", `{"run_id":"RID-1"}`, abi.VerdictAllow},
+		{"opencode DOS doctor spelling allowed", "dos_dos_doctor", `{}`, abi.VerdictAllow},
+		{"opencode DOS answer spelling allowed", "dos_dos_answer", `{"query":"how do I verify"}`, abi.VerdictAllow},
+		{"opencode DOS check_reason spelling allowed", "dos_dos_check_reason", `{"reason_class":"LANE_DRAINED"}`, abi.VerdictAllow},
+		{"opencode DOS refuse_reasons spelling allowed", "dos_dos_refuse_reasons", `{}`, abi.VerdictAllow},
+		{"opencode DOS commit_audit spelling allowed", "dos_dos_commit_audit", `{"ref":"HEAD"}`, abi.VerdictAllow},
+		{"opencode DOS citation_resolve spelling allowed", "dos_dos_citation_resolve", `{"cite":"925 F.3d 1339"}`, abi.VerdictAllow},
+		{"opencode DOS acme_lane_hint spelling allowed", "dos_dos_acme_lane_hint", `{}`, abi.VerdictAllow},
+		{"opencode DOS acme_lane_hint single-prefix spelling allowed", "dos_acme_lane_hint", `{}`, abi.VerdictAllow},
+
+		// OpenCode double-prefixed fak tools (#10825)
+		{"opencode fak adjudicate spelling allowed", "fak_fak_adjudicate", `{"tool":"read","arguments":{}}`, abi.VerdictAllow},
+		{"opencode fak admit spelling allowed", "fak_fak_admit", `{"tool":"read","intent":"appeal"}`, abi.VerdictAllow},
+		{"opencode fak syscall spelling allowed", "fak_fak_syscall", `{"tool":"read","arguments":{}}`, abi.VerdictAllow},
+		{"opencode fak read spelling allowed", "fak_fak_read", `{"file_path":"README.md"}`, abi.VerdictAllow},
+		{"opencode fak changes spelling allowed", "fak_fak_changes", `{}`, abi.VerdictAllow},
+		{"opencode fak memory drivers spelling allowed", "fak_fak_memory_drivers", `{}`, abi.VerdictAllow},
+		{"opencode fak memory explain spelling allowed", "fak_fak_memory_explain", `{"driver":"recall"}`, abi.VerdictAllow},
+		{"opencode fak memory run effectful denied", "fak_fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
+		{"opencode fak memory run proposal allowed", "fak_fak_memory_run", `{"driver":"recall","apply":false}`, abi.VerdictAllow},
+		{"opencode fak memory run default apply allowed", "fak_fak_memory_run", `{"driver":"recall"}`, abi.VerdictAllow},
+		{"opencode fak trajquery spelling allowed", "fak_fak_trajquery", `{"query":"test"}`, abi.VerdictAllow},
+		{"opencode fak tools search spelling allowed", "fak_fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
+		{"opencode fak feature query spelling allowed", "fak_fak_feature_query", `{"query":"memory","detail":"name"}`, abi.VerdictAllow},
+		{"opencode fak capabilities spelling allowed", "fak_fak_capabilities", `{"query":"inspect guard loop"}`, abi.VerdictAllow},
+		{"opencode fak context value spelling allowed", "fak_fak_context_value", `{}`, abi.VerdictAllow},
+		{"opencode fak context spans spelling allowed", "fak_fak_context_spans", `{}`, abi.VerdictAllow},
+		{"opencode fak context restore spelling allowed", "fak_fak_context_restore", `{"id":"deadbeef"}`, abi.VerdictAllow},
+		{"opencode fak resume history spelling allowed", "fak_fak_resume_history", `{}`, abi.VerdictAllow},
+
 		// Hermes Agent (#1327: signature tool names — snake_case tools, `path` arg,
 		// `execute_code` collapse-a-pipeline call). The doc headlines a bare
 		// `fak guard -- hermes` loading "a secure default capability floor", so the
@@ -276,10 +310,97 @@ func TestGuardDefaultPolicyKeepsArgGatedVerbsAdvertised(t *testing.T) {
 	if floor.NeverAdmits("mcp__fak__fak_memory_run") {
 		t.Errorf("the shipped floor marks mcp__fak__fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted and the same binary advertises the verb in guard-sessionstart and `fak-dev capabilities`")
 	}
+	if floor.NeverAdmits("fak_fak_memory_run") {
+		t.Errorf("the shipped floor marks fak_fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted")
+	}
 	// The control: a name the floor genuinely never admits is still droppable, so
 	// this test cannot pass by disabling pruning wholesale.
 	if !floor.NeverAdmits("mcp__fak__fak_definitely_not_a_real_tool") {
 		t.Errorf("an unknown name must stay never-admitted (droppable); NeverAdmits reported reachable, which would disable tool-def pruning entirely")
+	}
+}
+
+// TestGuardPolicyAdmitsOpenCodeDoublePrefixedTools covers #10825: all OpenCode
+// double-prefixed DOS and fak tool names are admitted on the default guard floor,
+// and fak_fak_memory_run carries the mirrored apply=true restriction.
+func TestGuardPolicyAdmitsOpenCodeDoublePrefixedTools(t *testing.T) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	if err != nil {
+		t.Fatalf("embedded guard floor is not a valid manifest: %v", err)
+	}
+	adj := adjudicator.New(rt.Adjudicator)
+	res := abi.ActiveResolver()
+	if res == nil {
+		t.Fatal("no Ref resolver registered (internal/registrations blank import missing)")
+	}
+	ctx := context.Background()
+	decide := func(tool, args string) abi.Verdict {
+		ref, err := res.Put(ctx, []byte(args))
+		if err != nil {
+			t.Fatalf("put args for %s: %v", tool, err)
+		}
+		return adj.Adjudicate(ctx, &abi.ToolCall{Tool: tool, Args: ref})
+	}
+
+	dosTools := []struct {
+		tool string
+		args string
+	}{
+		{"dos_dos_verify", `{"plan":"AUTH","phase":"AUTH2"}`},
+		{"dos_dos_arbitrate", `{"lane":"x"}`},
+		{"dos_dos_recall", `{"name":"test"}`},
+		{"dos_dos_review", `{"rev_range":"HEAD~1..HEAD"}`},
+		{"dos_dos_status", `{"run_id":"RID-1"}`},
+		{"dos_dos_doctor", `{}`},
+		{"dos_dos_answer", `{"query":"how do I verify"}`},
+		{"dos_dos_check_reason", `{"reason_class":"LANE_DRAINED"}`},
+		{"dos_dos_refuse_reasons", `{}`},
+		{"dos_dos_commit_audit", `{"ref":"HEAD"}`},
+		{"dos_dos_citation_resolve", `{"cite":"925 F.3d 1339"}`},
+		{"dos_dos_acme_lane_hint", `{}`},
+		{"dos_acme_lane_hint", `{}`},
+	}
+	for _, tc := range dosTools {
+		if got := decide(tc.tool, tc.args).Kind; got != abi.VerdictAllow {
+			t.Errorf("DOS tool %s got verdict %v, want allow", tc.tool, got)
+		}
+	}
+
+	fakTools := []struct {
+		tool string
+		args string
+	}{
+		{"fak_fak_adjudicate", `{"tool":"read","arguments":{}}`},
+		{"fak_fak_admit", `{"tool":"read","intent":"appeal"}`},
+		{"fak_fak_syscall", `{"tool":"read","arguments":{}}`},
+		{"fak_fak_read", `{"file_path":"README.md"}`},
+		{"fak_fak_changes", `{}`},
+		{"fak_fak_memory_drivers", `{}`},
+		{"fak_fak_memory_explain", `{"driver":"recall"}`},
+		{"fak_fak_trajquery", `{"query":"test"}`},
+		{"fak_fak_tools_search", `{"query":"tool","detail_level":"name"}`},
+		{"fak_fak_feature_query", `{"query":"memory","detail":"name"}`},
+		{"fak_fak_capabilities", `{"query":"inspect guard loop"}`},
+		{"fak_fak_context_value", `{}`},
+		{"fak_fak_context_spans", `{}`},
+		{"fak_fak_context_restore", `{"id":"deadbeef"}`},
+		{"fak_fak_resume_history", `{}`},
+	}
+	for _, tc := range fakTools {
+		if got := decide(tc.tool, tc.args).Kind; got != abi.VerdictAllow {
+			t.Errorf("fak tool %s got verdict %v, want allow", tc.tool, got)
+		}
+	}
+
+	// fak_fak_memory_run: apply=true is denied, apply=false or omitted is allowed
+	if got := decide("fak_fak_memory_run", `{"driver":"recall","apply":true}`).Kind; got != abi.VerdictDeny {
+		t.Errorf("fak_fak_memory_run with apply=true got %v, want deny", got)
+	}
+	if got := decide("fak_fak_memory_run", `{"driver":"recall","apply":false}`).Kind; got != abi.VerdictAllow {
+		t.Errorf("fak_fak_memory_run with apply=false got %v, want allow", got)
+	}
+	if got := decide("fak_fak_memory_run", `{"driver":"recall"}`).Kind; got != abi.VerdictAllow {
+		t.Errorf("fak_fak_memory_run with omitted apply got %v, want allow", got)
 	}
 }
 

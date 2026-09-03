@@ -199,3 +199,77 @@ func TestWaitResumeCASResume(t *testing.T) {
 		t.Fatal("WaitResume did not wake on a CAS resume")
 	}
 }
+
+// TestTableResumeAllWakesAllPausedSessions proves Table.ResumeAll transitions every paused session
+// to Running, wakes each WaitResume waiter, preserves non-paused sessions, and behaves idempotently.
+func TestTableResumeAllWakesAllPausedSessions(t *testing.T) {
+	tbl := NewTable()
+	traces := []string{"sess-1", "sess-2", "sess-3"}
+	for _, tr := range traces {
+		if _, ok := tbl.Transition(tr, Paused, "hold"); !ok {
+			t.Fatalf("pause %s rejected", tr)
+		}
+	}
+	// Add an unpaused session and a stopped session.
+	if _, ok := tbl.Transition("sess-running", Running, ""); !ok {
+		t.Fatal("running transition rejected")
+	}
+	if _, ok := tbl.Transition("sess-stopped", Stopped, "finished"); !ok {
+		t.Fatal("stopped transition rejected")
+	}
+
+	verdicts := make(map[string]chan ResumeVerdict)
+	for _, tr := range traces {
+		ch := make(chan ResumeVerdict, 1)
+		verdicts[tr] = ch
+		trCopy := tr
+		go func() { ch <- tbl.WaitResume(context.Background(), trCopy) }()
+	}
+	time.Sleep(15 * time.Millisecond)
+
+	// Resume all.
+	resumed := tbl.ResumeAll("operator batch resume")
+	if len(resumed) != len(traces) {
+		t.Fatalf("ResumeAll returned %d sessions, want %d", len(resumed), len(traces))
+	}
+	for i, st := range resumed {
+		if st.TraceID != traces[i] {
+			t.Errorf("resumed[%d].TraceID = %q, want %q", i, st.TraceID, traces[i])
+		}
+		if st.Run != Running {
+			t.Errorf("resumed[%d].Run = %v, want Running", i, st.Run)
+		}
+		if st.Reason != "" {
+			t.Errorf("resumed[%d].Reason = %q, want empty", i, st.Reason)
+		}
+	}
+
+	// Verify each parked WaitResume was woken.
+	for _, tr := range traces {
+		select {
+		case v := <-verdicts[tr]:
+			if !v.Resumed {
+				t.Errorf("%s: verdict = %+v, want Resumed=true", tr, v)
+			}
+			if v.State.Run != Running {
+				t.Errorf("%s: state run = %v, want Running", tr, v.State.Run)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s: WaitResume did not wake on ResumeAll", tr)
+		}
+	}
+
+	// Verify unpaused and stopped sessions were untouched.
+	if cur := tbl.Get("sess-running"); cur.Run != Running {
+		t.Errorf("sess-running run = %v, want Running", cur.Run)
+	}
+	if cur := tbl.Get("sess-stopped"); cur.Run != Stopped {
+		t.Errorf("sess-stopped run = %v, want Stopped", cur.Run)
+	}
+
+	// Calling ResumeAll again when no sessions are paused returns empty.
+	second := tbl.ResumeAll("")
+	if len(second) != 0 {
+		t.Fatalf("second ResumeAll returned %d sessions, want 0", len(second))
+	}
+}
