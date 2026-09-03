@@ -28,3 +28,20 @@ func Q2_0PayloadBytes(out, in int) int {
 	nblk := in / Q2_0BlockWeights
 	return out * nblk * (Q2_0BlockBytes + 4)
 }
+
+// Q2_0G128BlockWeights is the block width for standard GGUF group-128 Q2_0: 128 weights share one f16 scale.
+const Q2_0G128BlockWeights = 128
+
+// Q2_0G128BlockBytes is the byte size of one group-128 Q2_0 block: 2 bytes f16 scale + 32 bytes 2-bit codes = 34 bytes.
+const Q2_0G128BlockBytes = 34
+
+// Q2_0G128PayloadBytes returns the resident byte cost of an [out, in] group-128 GGUF Q2_0 weight:
+// out * (in / 128) * 34 bytes. It returns 0 when in is not a multiple of Q2_0G128BlockWeights or a
+// dimension is non-positive — the same shapes UploadQ2_0G128 refuses.
+func Q2_0G128PayloadBytes(out, in int) int {
+	if out <= 0 || in <= 0 || in%Q2_0G128BlockWeights != 0 {
+		return 0
+	}
+	nblk := in / Q2_0G128BlockWeights
+	return out * nblk * Q2_0G128BlockBytes
+}

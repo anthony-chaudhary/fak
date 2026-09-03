@@ -9,13 +9,36 @@ import (
 	"math"
 )
 
+func q2kF16Bits(h uint16) uint32 {
+	sign := uint32(h&0x8000) << 16
+	exp := (h >> 10) & 0x1f
+	frac := uint32(h & 0x03ff)
+	switch exp {
+	case 0:
+		if frac == 0 {
+			return sign
+		}
+		e := int32(-14)
+		for frac&0x0400 == 0 {
+			frac <<= 1
+			e--
+		}
+		frac &= 0x03ff
+		return sign | uint32(e+127)<<23 | frac<<13
+	case 0x1f:
+		return sign | 0x7f800000 | frac<<13
+	default:
+		return sign | uint32(int32(exp)-15+127)<<23 | frac<<13
+	}
+}
+
 // q2kDequantBlock dequantizes one 84-byte Q2_K super-block into 256 float32 elements.
 // Matches the GGML_TYPE_Q2_K arithmetic in ggufload.dequantQ2KScalar byte-for-byte.
 func q2kDequantBlock(dst []float32, blk []byte) {
 	scales := blk[:16]
 	q := blk[16:80]
-	d := math.Float32frombits(q4kTestF16Bits(binary.LittleEndian.Uint16(blk[80:82])))
-	min := math.Float32frombits(q4kTestF16Bits(binary.LittleEndian.Uint16(blk[82:84])))
+	d := math.Float32frombits(q2kF16Bits(binary.LittleEndian.Uint16(blk[80:82])))
+	min := math.Float32frombits(q2kF16Bits(binary.LittleEndian.Uint16(blk[82:84])))
 	qi := 0
 	is := 0
 	for n := 0; n < Q2KBlockWeights; n += 128 {

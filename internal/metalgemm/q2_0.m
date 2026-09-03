@@ -124,10 +124,75 @@ kernel void q2_0_gemv(device const uchar* W    [[buffer(0)]],  // out*nblk*8 pac
     acc = simd_sum(acc);
     if (lid == 0) Y[o] = acc;
 }
+
+// q2_0_g128_block_dot: dot one 34-byte GGUF group-128 Q2_0 block (128 weights) against 128 activation elements.
+// Layout: 2 bytes f16 scale d + 32 bytes 2-bit codes (4/byte low-first).
+// Dequant: (code - 1) * d for code in {0, 1, 2}.
+inline float q2_0_g128_block_dot(device const uchar* blk, device const float* xs) {
+    float d = (float)(*(device const half*)blk);
+    device const uchar* qs = blk + 2;
+    float s = 0.0f;
+    for (int i = 0; i < 32; i++) {
+        uchar b = qs[i];
+        int k = i * 4;
+        s += (float)((int)( b       & 0x3) - 1) * xs[k + 0];
+        s += (float)((int)((b >> 2) & 0x3) - 1) * xs[k + 1];
+        s += (float)((int)((b >> 4) & 0x3) - 1) * xs[k + 2];
+        s += (float)((int)((b >> 6) & 0x3) - 1) * xs[k + 3];
+    }
+    return s * d;
+}
+
+// q2_0_g128_gemv: decode GEMV for group-128 GGUF Q2_0 weights.
+// ONE 32-lane SIMD group per output row. Lanes stride over nblk blocks and reduce via simd_sum.
+kernel void q2_0_g128_gemv(device const uchar* W [[buffer(0)]],
+                          device const float* X [[buffer(1)]],
+                          device float*       Y [[buffer(2)]],
+                          constant int&    nblk [[buffer(3)]],
+                          constant int&     out [[buffer(4)]],
+                          uint o   [[threadgroup_position_in_grid]],
+                          uint lid [[thread_index_in_threadgroup]]) {
+    if (o >= (uint)out) return;
+    device const uchar* row = W + (long)o * nblk * 34;
+    float acc = 0.0f;
+    for (int b = (int)lid; b < nblk; b += 32) {
+        acc += q2_0_g128_block_dot(row + (long)b * 34, X + (long)b * 128);
+    }
+    acc = simd_sum(acc);
+    if (lid == 0) {
+        Y[o] = acc;
+    }
+}
+
+// q2_0_g128_gemm: prefill GEMM for group-128 GGUF Q2_0 weights.
+// ONE 32-lane SIMD group per (output row, prompt token).
+kernel void q2_0_g128_gemm(device const uchar* W [[buffer(0)]],
+                          device const float* X [[buffer(1)]],
+                          device float*       Y [[buffer(2)]],
+                          constant int&    nblk [[buffer(3)]],
+                          constant int&     out [[buffer(4)]],
+                          uint2 tg [[threadgroup_position_in_grid]],
+                          uint  lid [[thread_index_in_threadgroup]]) {
+    uint o = tg.x;
+    uint t = tg.y;
+    if (o >= (uint)out) return;
+    device const uchar* row = W + (long)o * nblk * 34;
+    device const float* xs  = X + (long)t * nblk * 128;
+    float acc = 0.0f;
+    for (int b = (int)lid; b < nblk; b += 32) {
+        acc += q2_0_g128_block_dot(row + (long)b * 34, xs + (long)b * 128);
+    }
+    acc = simd_sum(acc);
+    if (lid == 0) {
+        Y[(long)t * out + o] = acc;
+    }
+}
 )MSL";
 
 static id<MTLComputePipelineState> psoQ2Gemv;
 static id<MTLComputePipelineState> psoQ2Gemm, psoQ2MLPGate, psoQ2MLPDown;
+static id<MTLComputePipelineState> psoQ2G128Gemv = nil;
+static id<MTLComputePipelineState> psoQ2G128Gemm = nil;
 static int gQ2Ready;
 
 static int q2_0_init(void) {
@@ -140,7 +205,9 @@ static int q2_0_init(void) {
     psoQ2Gemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_gemm"] error:&err];
     psoQ2MLPGate = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_mlp_gate"] error:&err];
     psoQ2MLPDown = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_mlp_down"] error:&err];
-    if (!psoQ2Gemv || !psoQ2Gemm || !psoQ2MLPGate || !psoQ2MLPDown) { NSLog(@"q2_0: pipeline build failed: %@", err); return 0; }
+    psoQ2G128Gemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_g128_gemv"] error:&err];
+    psoQ2G128Gemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_g128_gemm"] error:&err];
+    if (!psoQ2Gemv || !psoQ2Gemm || !psoQ2MLPGate || !psoQ2MLPDown || !psoQ2G128Gemv || !psoQ2G128Gemm) { NSLog(@"q2_0: pipeline build failed: %@", err); return 0; }
     gQ2Ready = 1;
     return 1;
 }
@@ -155,6 +222,15 @@ typedef struct {
 static Q2W gQ2[MG_MAX_Q2];
 static int gNQ2 = 0;
 
+typedef struct {
+    CFTypeRef buf; // retained id<MTLBuffer>
+    int out, in, nblk;
+} Q2G128W;
+
+#define MG_MAX_Q2_G128 8192
+static Q2G128W gQ2G128[MG_MAX_Q2_G128];
+static int gNQ2G128 = 0;
+
 // Reused per-call scratch: the f32 activation and the f32 result. Weights are persistent; only the
 // per-call X/Y move (same discipline as q8.m's gQ8XBuf/gQ8YBuf).
 static id<MTLBuffer> gQ2XBuf = nil; static long gQ2XCap = 0; // activation (f32), elems
@@ -168,6 +244,20 @@ static void q2_0_grow_scratch(long xElems, long yElems) {
     if (gQ2YBuf == nil || gQ2YCap < yElems) {
         gQ2YBuf = [gDev newBufferWithLength:(NSUInteger)(yElems * 4) options:MTLResourceStorageModeShared];
         gQ2YCap = yElems;
+    }
+}
+
+static id<MTLBuffer> gQ2G128XBuf = nil; static long gQ2G128XCap = 0;
+static id<MTLBuffer> gQ2G128YBuf = nil; static long gQ2G128YCap = 0;
+
+static void q2_0_g128_grow_scratch(long xElems, long yElems) {
+    if (gQ2G128XBuf == nil || gQ2G128XCap < xElems) {
+        gQ2G128XBuf = [gDev newBufferWithLength:(NSUInteger)(xElems * 4) options:MTLResourceStorageModeShared];
+        gQ2G128XCap = xElems;
+    }
+    if (gQ2G128YBuf == nil || gQ2G128YCap < yElems) {
+        gQ2G128YBuf = [gDev newBufferWithLength:(NSUInteger)(yElems * 4) options:MTLResourceStorageModeShared];
+        gQ2G128YCap = yElems;
     }
 }
 
@@ -339,4 +429,97 @@ void mg_q2_0_reset(void) {
     gNQ2 = 0;
     gQ2XBuf = nil; gQ2XCap = 0;
     gQ2YBuf = nil; gQ2YCap = 0;
+}
+
+// mg_q2_0_g128_upload copies a group-128 GGUF Q2_0 weight (out * nblk * 34 bytes, nblk = in / 128)
+// resident onto the GPU and returns an integer handle (>= 0), or -1 on failure.
+int mg_q2_0_g128_upload(const unsigned char* raw, int out, int in) {
+    if (gDev == nil) return -1;
+    if (!q2_0_init()) return -1;
+    if (in <= 0 || in % 128 != 0 || out <= 0) return -1;
+    if (gNQ2G128 >= MG_MAX_Q2_G128) {
+        static int capWarned = 0;
+        if (!capWarned) { capWarned = 1; NSLog(@"mg_q2_0_g128_upload: q2_0_g128 weight table full (%d)", MG_MAX_Q2_G128); }
+        return -1;
+    }
+    int nblk = in / 128;
+    long bytes = (long)out * nblk * 34;
+    id<MTLBuffer> b = [gDev newBufferWithLength:(NSUInteger)bytes options:MTLResourceStorageModeShared];
+    if (b == nil) {
+        NSLog(@"mg_q2_0_g128_upload: device buffer alloc failed for %.1f MB", (double)bytes / 1e6);
+        return -1;
+    }
+    memcpy(b.contents, raw, (size_t)bytes);
+    int id = gNQ2G128++;
+    gQ2G128[id].buf  = CFBridgingRetain(b);
+    gQ2G128[id].out  = out;
+    gQ2G128[id].in   = in;
+    gQ2G128[id].nblk = nblk;
+    return id;
+}
+
+// mg_q2_0_g128_gemv computes y[out] = W[wid] · x for one f32 activation row x[in]. f32 result.
+void mg_q2_0_g128_gemv(int wid, const float* x, float* y) {
+    if (wid < 0 || wid >= gNQ2G128) return;
+    @autoreleasepool {
+        Q2G128W W = gQ2G128[wid];
+        q2_0_g128_grow_scratch((long)W.in, (long)W.out);
+        memcpy(gQ2G128XBuf.contents, x, (size_t)W.in * 4);
+
+        id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ2G128Gemv];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+        [e setBuffer:gQ2G128XBuf offset:0 atIndex:1];
+        [e setBuffer:gQ2G128YBuf offset:0 atIndex:2];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        [e endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+
+        memcpy(y, gQ2G128YBuf.contents, (size_t)W.out * 4);
+    }
+}
+
+// mg_q2_0_g128_gemm computes Y[p, out] = X[p, in] · W[wid]ᵀ for resident group-128 Q2_0 rows.
+void mg_q2_0_g128_gemm(int wid, const float* X, int p, float* Y) {
+    if (wid < 0 || wid >= gNQ2G128 || p <= 0) return;
+    @autoreleasepool {
+        if (!q2_0_init()) return;
+        Q2G128W W = gQ2G128[wid];
+        q2_0_g128_grow_scratch((long)p * W.in, (long)p * W.out);
+        memcpy(gQ2G128XBuf.contents, X, (size_t)p * W.in * 4);
+
+        id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ2G128Gemm];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+        [e setBuffer:gQ2G128XBuf offset:0 atIndex:1];
+        [e setBuffer:gQ2G128YBuf offset:0 atIndex:2];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, (NSUInteger)p, 1)
+            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        [e endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+
+        memcpy(Y, gQ2G128YBuf.contents, (size_t)p * W.out * 4);
+    }
+}
+
+// mg_q2_0_g128_reset releases every resident group-128 Q2_0 weight buffer and the reused scratch.
+void mg_q2_0_g128_reset(void) {
+    for (int i = 0; i < gNQ2G128; i++) {
+        if (gQ2G128[i].buf != NULL) {
+            CFBridgingRelease(gQ2G128[i].buf);
+            gQ2G128[i].buf = NULL;
+        }
+    }
+    gNQ2G128 = 0;
+    gQ2G128XBuf = nil; gQ2G128XCap = 0;
+    gQ2G128YBuf = nil; gQ2G128YCap = 0;
 }
