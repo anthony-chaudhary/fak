@@ -273,8 +273,28 @@ type SyscallResponse struct {
 	Result               *ResultEnvelope                `json:"result,omitempty"`
 	RepairedArguments    json.RawMessage                `json:"repaired_arguments,omitempty"`
 	TraceID              string                         `json:"trace_id,omitempty"`
+	Receipt              *AdjudicateReceipt             `json:"receipt,omitempty"`
 	PluginTrace          []toolplugin.TraceEvent        `json:"plugin_trace,omitempty"`
 	EffectivePreferences *toolplugin.ResolvedPreference `json:"effective_preferences,omitempty"`
+}
+
+// AdjudicateReceipt is additive evidence for the pre-execution fak_adjudicate
+// boundary. Its closed vocabulary lets clients distinguish every kernel decision
+// without parsing prose while preserving the legacy verdict/trace fields.
+type AdjudicateReceipt struct {
+	Schema     string                  `json:"schema"`
+	Outcome    string                  `json:"outcome"`
+	DurationNS int64                   `json:"duration_ns"`
+	Execution  string                  `json:"execution"`
+	Provenance string                  `json:"provenance"`
+	Error      *AdjudicateReceiptError `json:"error,omitempty"`
+}
+
+// AdjudicateReceiptError is deliberately bounded: raw arguments, paths, secrets,
+// and platform-specific error strings never cross the model-facing boundary.
+type AdjudicateReceiptError struct {
+	Code   string `json:"code"`
+	Source string `json:"source"`
 }
 
 // ResultEnvelope is a tool result rendered for the wire (bytes resolved, never a
