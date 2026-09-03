@@ -438,3 +438,132 @@ func assertSeq(t *testing.T, got, want []string) {
 		}
 	}
 }
+
+func TestSchedulerPickFrom(t *testing.T) {
+	unbounded := Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded}
+
+	t.Run("nil scheduler", func(t *testing.T) {
+		var s *Scheduler
+		cand := []State{{TraceID: "a", Run: Running, Budget: unbounded}}
+		got, ok := s.PickFrom(cand)
+		if ok || got.TraceID != "" {
+			t.Fatalf("nil PickFrom = (%+v, %v), want zero State and false", got, ok)
+		}
+	})
+
+	t.Run("empty candidate slice", func(t *testing.T) {
+		s := NewScheduler(StrictPriority)
+		got, ok := s.PickFrom(nil)
+		if ok || got.TraceID != "" {
+			t.Fatalf("empty PickFrom = (%+v, %v), want zero State and false", got, ok)
+		}
+	})
+
+	t.Run("strict priority policy", func(t *testing.T) {
+		s := NewScheduler(StrictPriority)
+		snap := []State{
+			{TraceID: "paused", Run: Paused, Budget: unbounded, Priority: 0},
+			{TraceID: "exhausted", Run: Running, Budget: Budget{TurnsLeft: 0, TokensLeft: Unbounded}, Priority: 1},
+			{TraceID: "first-eligible", Run: Running, Budget: unbounded, Priority: 5},
+			{TraceID: "second-eligible", Run: Running, Budget: unbounded, Priority: 2},
+		}
+		got, ok := s.PickFrom(snap)
+		if !ok || got.TraceID != "first-eligible" {
+			t.Fatalf("PickFrom strict = (%q, %v), want (first-eligible, true)", got.TraceID, ok)
+		}
+	})
+
+	t.Run("weighted fair policy", func(t *testing.T) {
+		s := NewScheduler(WeightedFair)
+		snap := []State{
+			{TraceID: "a", Run: Running, Budget: unbounded, Priority: 0}, // weight 3
+			{TraceID: "b", Run: Running, Budget: unbounded, Priority: 2}, // weight 1
+		}
+		want := []string{"a", "a", "b", "a"}
+		got := make([]string, len(want))
+		for i := range want {
+			st, ok := s.PickFrom(snap)
+			if !ok {
+				t.Fatalf("PickFrom WF round %d returned ok=false", i)
+			}
+			got[i] = st.TraceID
+		}
+		assertSeq(t, got, want)
+	})
+
+	t.Run("all ineligible returns false", func(t *testing.T) {
+		s := NewScheduler(StrictPriority)
+		snap := []State{
+			{TraceID: "p", Run: Paused, Budget: unbounded},
+			{TraceID: "s", Run: Stopped, Budget: unbounded},
+		}
+		got, ok := s.PickFrom(snap)
+		if ok || got.TraceID != "" {
+			t.Fatalf("all ineligible PickFrom = (%+v, %v), want false", got, ok)
+		}
+	})
+}
+
+func TestSchedulerPickWeightedFair(t *testing.T) {
+	unbounded := Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded}
+
+	t.Run("nil scheduler", func(t *testing.T) {
+		var s *Scheduler
+		cand := []State{{TraceID: "a", Run: Running, Budget: unbounded}}
+		got, ok := s.PickWeightedFair(cand)
+		if ok || got.TraceID != "" {
+			t.Fatalf("nil PickWeightedFair = (%+v, %v), want zero State and false", got, ok)
+		}
+	})
+
+	t.Run("empty candidate slice", func(t *testing.T) {
+		s := NewScheduler(WeightedFair)
+		got, ok := s.PickWeightedFair(nil)
+		if ok || got.TraceID != "" {
+			t.Fatalf("empty PickWeightedFair = (%+v, %v), want zero State and false", got, ok)
+		}
+	})
+
+	t.Run("overrides strict priority default", func(t *testing.T) {
+		s := NewScheduler(StrictPriority)
+		snap := []State{
+			{TraceID: "a", Run: Running, Budget: unbounded, Priority: 0}, // weight 3
+			{TraceID: "b", Run: Running, Budget: unbounded, Priority: 2}, // weight 1
+		}
+		want := []string{"a", "a", "b", "a"}
+		got := make([]string, len(want))
+		for i := range want {
+			st, ok := s.PickWeightedFair(snap)
+			if !ok {
+				t.Fatalf("PickWeightedFair round %d returned ok=false", i)
+			}
+			got[i] = st.TraceID
+		}
+		assertSeq(t, got, want)
+	})
+
+	t.Run("skips ineligible sessions", func(t *testing.T) {
+		s := NewScheduler(WeightedFair)
+		snap := []State{
+			{TraceID: "paused", Run: Paused, Budget: unbounded, Priority: 0},
+			{TraceID: "a", Run: Running, Budget: unbounded, Priority: 1},
+		}
+		for i := 0; i < 3; i++ {
+			st, ok := s.PickWeightedFair(snap)
+			if !ok || st.TraceID != "a" {
+				t.Fatalf("PickWeightedFair round %d = (%q, %v), want (a, true)", i, st.TraceID, ok)
+			}
+		}
+	})
+
+	t.Run("all ineligible returns false", func(t *testing.T) {
+		s := NewScheduler(WeightedFair)
+		snap := []State{
+			{TraceID: "paused", Run: Paused, Budget: unbounded},
+		}
+		got, ok := s.PickWeightedFair(snap)
+		if ok || got.TraceID != "" {
+			t.Fatalf("all ineligible PickWeightedFair = (%+v, %v), want false", got, ok)
+		}
+	})
+}

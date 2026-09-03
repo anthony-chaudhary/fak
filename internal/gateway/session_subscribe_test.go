@@ -319,3 +319,111 @@ func TestSessionSubscribeIsDocumentedInOpenAPISpec(t *testing.T) {
 		t.Errorf("%s documents the subscribe path but not its ?wait= hold budget (#4310)", openAPISpecPath)
 	}
 }
+
+func TestSessionSubscribeStreamingSSE(t *testing.T) {
+	s := &Server{sessionFeed: newSessionFeed(0)}
+	s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "running", Rev: 1})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.handleFakSession(w, r)
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/session/gw-1/subscribe?format=sse", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	dec := json.NewDecoder(resp.Body)
+	_ = dec
+	// Read first event (already published)
+	buf := make([]byte, 1024)
+	n, err := resp.Body.Read(buf)
+	if err != nil && n == 0 {
+		t.Fatal(err)
+	}
+	data := string(buf[:n])
+	if !strings.Contains(data, "gw-1") || !strings.Contains(data, "running") {
+		t.Fatalf("first event output: %s", data)
+	}
+
+	// Publish live event
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "paused", Rev: 2})
+	}()
+
+	n2, err := resp.Body.Read(buf)
+	if err != nil && n2 == 0 {
+		t.Fatal(err)
+	}
+	data2 := string(buf[:n2])
+	if !strings.Contains(data2, "paused") {
+		t.Fatalf("second event output: %s", data2)
+	}
+	cancel()
+}
+
+func TestSessionSubscribeStreamingNDJSON(t *testing.T) {
+	s := &Server{sessionFeed: newSessionFeed(0)}
+	s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "running", Rev: 1})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.handleFakSession(w, r)
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/session/gw-1/subscribe?format=ndjson", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "application/x-ndjson" {
+		t.Fatalf("Content-Type = %q, want application/x-ndjson", ct)
+	}
+
+	buf := make([]byte, 1024)
+	n, err := resp.Body.Read(buf)
+	if err != nil && n == 0 {
+		t.Fatal(err)
+	}
+	data := string(buf[:n])
+	if !strings.Contains(data, "gw-1") || !strings.Contains(data, "running") {
+		t.Fatalf("first event output: %s", data)
+	}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		s.PublishSessionRevision(SessionState{TraceID: "gw-1", Run: "throttled", Rev: 2})
+	}()
+
+	n2, err := resp.Body.Read(buf)
+	if err != nil && n2 == 0 {
+		t.Fatal(err)
+	}
+	data2 := string(buf[:n2])
+	if !strings.Contains(data2, "throttled") {
+		t.Fatalf("second event output: %s", data2)
+	}
+	cancel()
+}

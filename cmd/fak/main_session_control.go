@@ -262,6 +262,26 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 		}
 		st, ok := tbl.Transition(traceID, run, req.Reason)
 		return st, ok, nil
+	case "pause", "resume", "throttle", "stop":
+		var run session.RunState
+		switch verb {
+		case "pause":
+			run = session.Paused
+		case "resume":
+			run = session.Running
+		case "throttle":
+			run = session.Throttled
+		case "stop":
+			run = session.Stopped
+		}
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) {
+				s.Run = run
+				s.Reason = transitionReason(run, req.Reason)
+			})
+		}
+		st, ok := tbl.Transition(traceID, run, req.Reason)
+		return st, ok, nil
 	case "budget":
 		if req.Budget == nil {
 			return session.State{}, false, errors.New("budget is required")
@@ -340,7 +360,7 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 		st, ok := tbl.SetThroughputBudget(traceID, tp)
 		return st, ok, nil
 	}
-	return session.State{}, false, fmt.Errorf("unknown verb %q (want run|budget|pace|priority|wall|throughput)", verb)
+	return session.State{}, false, fmt.Errorf("unknown verb %q (want run|pause|resume|throttle|stop|budget|pace|priority|wall|throughput)", verb)
 }
 
 // casApply reads the current drive record, mutates it in place, and CompareAndSets
@@ -359,7 +379,7 @@ func casApply(tbl *session.Table, traceID string, expectRev uint64, apply func(*
 // and Stopped carry the reason, Running clears it.
 func transitionReason(to session.RunState, reason string) string {
 	switch to {
-	case session.Throttled, session.Stopped, session.Terminating:
+	case session.Throttled, session.Stopped, session.Terminating, session.Paused, session.Draining:
 		return reason
 	case session.Running:
 		return ""

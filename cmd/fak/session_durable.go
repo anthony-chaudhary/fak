@@ -255,7 +255,7 @@ func registerServeSessionDurability(ctx context.Context, id string) error {
 }
 
 func applySessionControlDurable(ctx context.Context, tbl *session.Table, mirror *sessionDurability, traceID, verb string, req gateway.SessionControlRequest) (session.State, bool, error) {
-	if mirror != nil && verb == "run" {
+	if mirror != nil && (verb == "run" || verb == "pause" || verb == "resume" || verb == "throttle" || verb == "stop") {
 		if err := mirror.requireKnown(tbl, traceID); err != nil {
 			return session.State{}, false, err
 		}
@@ -265,7 +265,7 @@ func applySessionControlDurable(ctx context.Context, tbl *session.Table, mirror 
 		return st, ok, err
 	}
 	switch verb {
-	case "run", "budget", "pace", "priority", "wall", "throughput":
+	case "run", "budget", "pace", "priority", "wall", "throughput", "pause", "resume", "throttle", "stop":
 		if err := mirror.writeThrough(ctx, traceID, st); err != nil {
 			return st, false, err
 		}

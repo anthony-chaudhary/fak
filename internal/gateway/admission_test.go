@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -483,6 +484,7 @@ func TestDecodeTTLSchedulerWitness(t *testing.T) {
 	c.Offer(SeqRequest{TraceID: "blocking", Tokens: 10})
 
 	t0 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	c.SetClock(func() time.Time { return t0 })
 
 	// Queue request A: short TTL 100ms
 	vA := c.Offer(SeqRequest{
@@ -533,5 +535,113 @@ func TestDecodeTTLSchedulerWitness(t *testing.T) {
 
 	if st := c.Stats(); st.Running != 1 || st.Waiting != 0 {
 		t.Fatalf("expected 1 running, 0 waiting; got running=%d, waiting=%d", st.Running, st.Waiting)
+	}
+}
+
+func TestAdmissionSessionID(t *testing.T) {
+	if got := baseTraceID("trace-1"); got != "trace-1" {
+		t.Fatalf("expected trace-1, got %q", got)
+	}
+	if got := baseTraceID("trace-1#123"); got != "trace-1" {
+		t.Fatalf("expected trace-1, got %q", got)
+	}
+	if got := baseTraceID("   trace-1#456   "); got != "trace-1" {
+		t.Fatalf("expected trace-1, got %q", got)
+	}
+
+	c := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 5, TokenBudget: 100})
+	lease, err := c.Acquire(context.Background(), SeqRequest{TraceID: "sess-abc", Tokens: 10})
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	defer lease.Release()
+
+	st := c.Stats()
+	if st.Running != 1 {
+		t.Fatalf("expected 1 running, got %d", st.Running)
+	}
+	for _, req := range c.running {
+		if req.SessionID != "sess-abc" {
+			t.Fatalf("expected req.SessionID == sess-abc, got %q", req.SessionID)
+		}
+		if !strings.HasPrefix(req.TraceID, "sess-abc#") {
+			t.Fatalf("expected req.TraceID to have sess-abc# prefix, got %q", req.TraceID)
+		}
+	}
+}
+
+func TestAdmissionSessionPoolBatchBudget(t *testing.T) {
+	pool := session.NewPool(100)
+	c := NewAdmissionController(AdmissionPolicy{TokenBudget: 1000, MaxNumSeqs: 10})
+	c.SetFleet(pool)
+	if c.Pool() != pool {
+		t.Fatal("Pool() getter mismatch")
+	}
+
+	// 60 tokens fit within pool (100) and token budget (1000)
+	v1 := c.Offer(SeqRequest{TraceID: "req-1", Tokens: 60})
+	if v1 != VerdictAdmitted {
+		t.Fatalf("expected req-1 admitted, got %v", v1)
+	}
+	if rem := pool.Remaining(); rem != 40 {
+		t.Fatalf("expected pool remaining 40, got %d", rem)
+	}
+
+	// 50 tokens exceed remaining 40 in pool -> shed
+	v2 := c.Offer(SeqRequest{TraceID: "req-2", Tokens: 50})
+	if v2 != VerdictShed {
+		t.Fatalf("expected req-2 shed due to pool budget, got %v", v2)
+	}
+
+	// Cancel req-1 -> tokens returned to pool
+	c.cancelAdmission("req-1")
+	if rem := pool.Remaining(); rem != 100 {
+		t.Fatalf("expected pool remaining 100 after cancel, got %d", rem)
+	}
+}
+
+func TestAdmissionWeightedFairScheduling(t *testing.T) {
+	c := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 10, TokenBudget: 1000})
+	tbl := session.NewTable()
+	sched := session.NewScheduler(session.WeightedFair)
+	c.SetTable(tbl)
+	c.SetSequencer(sched)
+	c.SetOrder(session.WeightedFair)
+
+	if c.Table() != tbl {
+		t.Fatal("Table getter mismatch")
+	}
+	if c.Scheduler() != sched {
+		t.Fatal("Scheduler getter mismatch")
+	}
+	if c.Order() != session.WeightedFair {
+		t.Fatal("Order getter mismatch")
+	}
+
+	tbl.SetPriority("sess-a", 0) // weight (2-0)+1 = 3
+	tbl.SetPriority("sess-b", 2) // weight (2-2)+1 = 1
+
+	// Block admission so requests queue up
+	c.Offer(SeqRequest{TraceID: "blocker", Tokens: 1000})
+
+	// Offer 3 requests for sess-a, 1 for sess-b
+	c.Offer(SeqRequest{TraceID: "req_a1", SessionID: "sess-a", Tokens: 10})
+	c.Offer(SeqRequest{TraceID: "req_a2", SessionID: "sess-a", Tokens: 10})
+	c.Offer(SeqRequest{TraceID: "req_a3", SessionID: "sess-a", Tokens: 10})
+	c.Offer(SeqRequest{TraceID: "req_b1", SessionID: "sess-b", Tokens: 10})
+
+	// Unblock
+	c.Complete("blocker")
+
+	// Schedule should pick in 3:1 smooth sequence: req_a1, req_a2, req_b1, req_a3
+	admitted := c.Schedule()
+	if len(admitted) != 4 {
+		t.Fatalf("expected 4 admitted, got %d", len(admitted))
+	}
+	want := []string{"req_a1", "req_a2", "req_b1", "req_a3"}
+	for i, w := range want {
+		if admitted[i].TraceID != w {
+			t.Fatalf("admitted[%d] = %q, want %q", i, admitted[i].TraceID, w)
+		}
 	}
 }
