@@ -18,10 +18,13 @@ import (
 // the Codex account picker and every guarded Codex launch. Keep the exact flagship slug here
 // (rather than the moving gpt-5.6 alias) so the picker, launch plan, and child config all name
 // the same effective model. The Codex config reference calls the reasoning key
-// model_reasoning_effort and admits xhigh on supported Responses models.
+// model_reasoning_effort and admits xhigh on supported Responses models. The default effort
+// is the user-configured `high` (#10669): guarded sessions must never silently escalate to
+// xhigh — measured to roughly double the post-tool wait — so xhigh is opt-in only at the
+// launch site (FAK_GUARD_CODEX_REASONING_EFFORT), never a shared default.
 const (
 	CodexDefaultModel           = "gpt-5.6-sol"
-	CodexDefaultReasoningEffort = "xhigh"
+	CodexDefaultReasoningEffort = "high"
 )
 
 // harness.go generalizes the account model so a NON-Claude harness's config homes — the

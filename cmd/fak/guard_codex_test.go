@@ -226,8 +226,9 @@ func TestGuardCodexEnvKey(t *testing.T) {
 }
 
 func TestGuardCodexGatewayModel(t *testing.T) {
-	if guardCodexDefaultModelID != "gpt-5.6-sol" || guardCodexDefaultReasoningEffort != "xhigh" {
-		t.Fatalf("Codex defaults = model %q effort %q, want gpt-5.6-sol/xhigh",
+	// #10669: the shared Codex default effort is the user-configured high; xhigh is opt-in.
+	if guardCodexDefaultModelID != "gpt-5.6-sol" || guardCodexDefaultReasoningEffort != "high" {
+		t.Fatalf("Codex defaults = model %q effort %q, want gpt-5.6-sol/high",
 			guardCodexDefaultModelID, guardCodexDefaultReasoningEffort)
 	}
 	if got := guardCodexGatewayModel([]string{"codex"}, "", "openai-responses"); got != guardCodexDefaultModelID {
@@ -315,6 +316,7 @@ func TestGuardCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
 // path because the current Codex docs prefer Responses while Chat Completions is
 // deprecated for future removal. This test pins the exact emitted sequence.
 func TestGuardCodexConfigArgs(t *testing.T) {
+	t.Setenv(guardCodexReasoningEffortEnv, "")
 	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "")
 	want := []string{
 		"-c", "model_provider=fak",
@@ -324,7 +326,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 		"-c", `model_providers.fak.wire_api="responses"`,
 		"-c", `model_providers.fak.env_key="OPENAI_API_KEY"`,
 		"-c", `mcp_servers.fak_guard.url="http://127.0.0.1:8137/mcp"`,
-		"-c", `model_reasoning_effort="xhigh"`,
+		"-c", `model_reasoning_effort="high"`,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("guardCodexConfigArgs len = %d, want %d\n got=%v", len(got), len(want), got)
@@ -347,8 +349,8 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 	if !containsArg(gotKey, `mcp_servers.fak_guard.url="http://h:1/mcp"`) {
 		t.Errorf("guardCodexConfigArgs did not derive the gateway MCP route: %v", gotKey)
 	}
-	if !containsArg(gotKey, `model="gpt-custom"`) || containsArg(gotKey, `model_reasoning_effort="xhigh"`) {
-		t.Errorf("custom model must be pinned without forcing the managed GPT-5.6 effort: %v", gotKey)
+	if !containsArg(gotKey, `model="gpt-custom"`) || containsArg(gotKey, "model_reasoning_effort=") {
+		t.Errorf("custom model must be pinned without a managed effort value (#10669: only an explicit opt-in may pin one): %v", gotKey)
 	}
 
 	// wire_api is responses on every code path for the first-class guard route.
@@ -364,6 +366,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 // command, and it must report what it did in the guardCodexInstall struct for the banner.
 func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 	const gw = "http://127.0.0.1:8137"
+	t.Setenv(guardCodexReasoningEffortEnv, "")
 
 	t.Run("codex enabled rewrites argv with overrides before the subcommand", func(t *testing.T) {
 		in := []string{"codex", "exec", "do the thing"}
@@ -384,10 +387,11 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 		if ix < 0 || lastC < 0 || lastC > ix {
 			t.Errorf("`-c` overrides must precede the subcommand: lastC=%d exec=%d argv=%v", lastC, ix, out)
 		}
-		// The struct the banner reads is fully populated.
+		// The struct the banner reads is fully populated (#10669: the resolved effort, and
+		// that it is the configured default rather than an operator opt-in).
 		if info.ProviderID != "fak" || info.EnvKey != "OPENAI_API_KEY" || info.BaseURL != gw+"/v1" ||
-			info.Model != "gpt-5.6-sol" || info.Reasoning != "xhigh" {
-			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-5.6-sol effort=xhigh", info, gw)
+			info.Model != "gpt-5.6-sol" || info.Reasoning != "high" || info.ReasoningOptIn {
+			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-5.6-sol effort=high not-opt-in", info, gw)
 		}
 	})
 
