@@ -1,12 +1,12 @@
 # Concept study: varjoranta/turboquant-vllm
 
-**Verdict:** TurboQuant-vLLM is an applied inference-compression plugin for vLLM whose primary value to fak is its **operational and kernel negative knowledge** and **served-benchmark-witnessed designs**, not the raw algorithm (which converged onto scalar HIGGS). At pinned revision `c8a7e0a73b2b9bb93dc66c9380dceab985a0fbc5`, it provides production-measured evidence that decompressing only router-activated experts into a shared scratch pool is an 8.4× bs=1 decode win on MoE models, that shape-gain norm correction and asymmetric K4/V3 bits hold conversation quality where raw scalar quantization degrades, that QJL residual correction degrades attention in practice, and that CUDA-graph safety requires unconditional constant uploads and autotune pre-warming. Two new issues were filed (#10709, #10710).
+**Verdict:** TurboQuant-vLLM is an applied inference-compression plugin for vLLM whose primary value to fak is its **operational and kernel negative knowledge** and **served-benchmark-witnessed designs**, not the raw algorithm (which converged onto scalar HIGGS). At pinned revision `c8a7e0a73b2b9bb93dc66c9380dceab985a0fbc5`, it provides production-measured evidence that decompressing only router-activated experts into a shared scratch pool is an 8.4× bs=1 decode win on MoE models, that shape-gain norm correction and asymmetric K4/V3 bits hold conversation quality where raw scalar quantization degrades, that QJL residual correction degrades attention in practice, that partial-rotary models require block-diagonal rotation, that CUDA-graph safety requires unconditional constant uploads and autotune pre-warming, and that layerwise streaming bounds peak memory during large model dequantization. Six new issues were filed (#10709, #10710, #10715, #10716, #10717, #10718).
 
 - **Source:** `https://github.com/varjoranta/turboquant-vllm`
 - **Pin:** `c8a7e0a73b2b9bb93dc66c9380dceab985a0fbc5`
 - **Observed:** 2026-09-02
-- **Filed issues:** #10709 (sparse MoE dequant into shared scratch pool), #10710 (3/4-bit rotated ladder rung design dossier)
-- **Durable receipt:** `study_993da97ddccc68c1158488bcaddb101c9df8f9000eff30abc235171bc564c5a0`
+- **Filed issues:** #10709 (sparse MoE dequant into shared scratch pool), #10710 (3/4-bit rotated ladder rung design dossier), #10715 (block-diagonal rotation for partial-rotary models), #10716 (self-contained constant-upload invariant under CUDA graphs), #10717 (one-layer peak memory bound during model dequantization), #10718 (kurtosis-guided bit allocation for mixed precision)
+- **Durable receipt:** `study_dfab2b4d679f385d6e467c7f9dc1d7ff25a151550c6090d94603d6e413a0e8e3` (supersedes `study_993da97ddccc68c1158488bcaddb101c9df8f9000eff30abc235171bc564c5a0`)
 - **Prior notes deduped:** [#1266](RESEARCH-turboquant-kv-quant-triage-1266.md) (paper/repo triage), [#9342](RESEARCH-google-turboquant-release-9342.md) (Google release study)
 
 ---
@@ -81,7 +81,10 @@ Six subsystems were investigated across the codebase:
 |---|---|---|---|---|---|
 | **Sparse top-k MoE dequant into shared scratch pool** | Wasted decompression work on inactive experts during decode | Serving large MoEs at bs=1 on metered GPUs; inactive-expert work was 93.75% of dequant time | ABSENT. `internal/model` has FP4 plan (#3019) and GGUF load, but no runtime active-only dequant. Host experts dequant-fuse; device compressed tier has no contract. | INSPIRE | **#10709** |
 | **3/4-bit rotated Lloyd-Max rung with shape-gain norm correction & asymmetric K/V** | Magnitude fidelity & capacity of sub-q8 KV tiers | Maximizing context capacity under strict hardware budget; K4/V3 won served benchmarks | PARTIAL. `internal/compute/capacity.go:103` has `f32-Kraw + q8_0-K/V` and `internal/cachemeta/quantized_demote.go` gates demote, but #2240 ladder lacks the 3/4-bit rung design. | INSPIRE | **#10710** |
-| **CUDA-graph capture safety: unconditional constant upload** | Self-containment of replayed graph nodes | Mixing per-layer quantization configs broke graph replay when constant uploads were conditionally skipped | PRESENT. `internal/compute/cuda.go:178` gates capture, pre-warms, and prevents realloc. Constants are passed via kernel arguments rather than global constant banks. | EXCLUDE | — |
+| **Block-diagonal rotation for partial-rotary model architectures** | Preservation of RoPE prefix isolation under orthogonal rotation in partial-rotary architectures | Qwen3.6-35B-A3B and MiniMax M2.5 apply RoPE to head prefix only; full WHT corrupts position encoding | ABSENT. `internal/compute/cuda_qwen35_sequence.go` has no rotary-prefix splitting during rotation. | INSPIRE | **#10715** |
+| **CUDA-graph capture safety: unconditional constant upload** | Self-containment of replayed graph nodes across differing layer configs | Mixing per-layer quantization configs broke graph replay when constant uploads were conditionally skipped | PARTIAL. `internal/compute/cuda.go:178` gates capture and pre-warms, but lacks an explicit test checking that per-layer device constants are self-contained during capture. | INSPIRE | **#10716** |
+| **Bound load-time memory peak to one layer during model dequantization** | Peak memory bound during model weight loading and format conversion | Decompressing full models at load blows VRAM/RAM; streaming shard-by-shard layerwise bounds peak to ~1 layer | PARTIAL. `docs/industry-scorecard/models.md:57` records fak's own generic GGUF-dequant engine ceiling at ~7B due to whole-model dequantization OOM. | INSPIRE | **#10717** |
+| **Kurtosis-guided bit allocation for mixed-precision quantization** | Tail-distribution-aware bit allocation in mixed-precision quantization | Uniform bit widths waste precision on light tails and clip heavy tails; $\kappa$-guided allocation gave +2.0 ppt GSM8K | ABSENT. `internal/cachemeta/quantized_demote.go` and `internal/compute/capacity.go` assume uniform bit width per precision tier. | INSPIRE | **#10718** |
 | **Autotune key narrowing (drop batch_size)** | Graph capture stall duration | 51 capture batch sizes × multi-layer shapes caused 10–25 min startup stalls | PRESENT. `internal/model/hal.go:636` gates capture behind `halLogitsWarm` so JIT/warmup runs outside capture. | EXCLUDE | — |
 | **Prebuilt extension arch manifest (`.arches.json`)** | Distribution reach across diverse GPU architectures | Distributing Python wheels across consumer and datacenter GPUs | DIVERGENT. FAK embeds cubin tables + PTX floors at build time and classifies coverage via `cuda_arch_coverage.go`. FAK does not runtime-JIT from source. | EXCLUDE | — |
 | **MLX Metal SIMD-group GEMV kernels** | Apple Silicon decode throughput | Local development without cloud GPU cost; Qwen3.5-35B on 48 GB MacBook | DIVERGENT. FAK native inference is focused on CUDA fleet nodes; Mac path uses llama.cpp/Metal reference. | WATCH | — |
@@ -92,7 +95,7 @@ Six subsystems were investigated across the codebase:
 ## Negative knowledge & engineering lessons
 
 1. **The MoE shape recovery trap (Walls #9 and #10):** Native checkpoints for models like DeepSeek-V4 and Qwen3.6 often report un-fused or pre-mapper dimensions in their HuggingFace configs. Commits `f9bd39d` and `8c9faed` established that loaders must derive expert dimensions from the **norms tensor shape** `(n_experts * out_dim, n_groups)`, never trusting the registered model config shapes.
-2. **CUDA-graph constant upload corruption:** In `csrc/tq_weight_dequant.cu:25-52`, attempting to cache constant uploads (`cudaMemcpyToSymbolAsync`) by skipping when values match previous layers caused silent graph corruption. Skipped uploads produce no graph nodes; upon graph replay with different layer configs, stale constants from earlier launches were reused. The fix: **unconditionally upload constants per launch** on the capturing stream.
+2. **CUDA-graph constant upload corruption:** In `csrc/tq_weight_dequant.cu:25-52`, attempting to cache constant uploads (`cudaMemcpyToSymbolAsync`) by skipping when values match previous layers caused silent graph corruption. Skipped uploads produce no graph nodes; upon graph replay with different layer configs, stale constants from earlier launches were reused. The fix: **unconditionally upload constants per launch** on the capturing stream (tracked in #10716).
 3. **Graph-capture host sync trap:** The FWHT-on-input cache used a host-synchronizing `.cpu()` fingerprint to detect PyTorch memory reuse. Under vLLM 0.19 graph capture, this triggered `cudaErrorStreamCaptureUnsupported`. The cache was deleted (−186 LOC, commit `05b7692`), which was acceptable because modern models use fused `qkv_proj` where input reuse across separate calls does not occur.
 4. **Autotune key explosion:** Autotuning Triton kernels with `batch_size` in the key caused vLLM to run full autotune sweeps across all ~51 graph capture batch sizes, creating a 10–25 minute startup stall (`triton_ops.py:390-413`). Removing `batch_size` from the autotune key reduced capture time by 16×.
 5. **QJL residual degrades attention in practice:** While mathematically elegant for unbiased inner products, QJL's 1-bit residual projection added variance that softmax amplified, degrading end-to-end conversation quality (`torch_ops.py:442-447`). The maintainer disabled QJL by default, keeping full-bit MSE PolarQuant.
@@ -113,12 +116,12 @@ The entire tracked repository at commit `c8a7e0a` was examined. All core algorit
 - **Vendored Marlin utils:** Apache-2.0, © Elias Frantar (`csrc/flute/marlin_utils.hpp:2-14`).
 - **CUTLASS submodule:** BSD-3-Clause, © NVIDIA (`NOTICE:34-40`).
 - **Hadamard transform:** `csrc/flute/hadamard_transform.cpp` cites `pytorch-labs/applied-ai` without an explicit license header.
-- **Verdict for FAK (Apache-2.0):** SAFE. Both filed issues are clean-room INSPIRE borrows (design-pattern adoptions); no foreign code is copied into FAK.
+- **Verdict for FAK (Apache-2.0):** SAFE. All six filed issues are clean-room INSPIRE borrows (design-pattern adoptions); no foreign code is copied into FAK.
 
 ---
 
 ## Companions
 
-- Issues filed: #10709, #10710
+- Issues filed: #10709, #10710, #10715, #10716, #10717, #10718
 - Prior triage: #1266, #9342
-- Related FAK seams: #3019 (FP4 expert weights), #5612 (MoE expert spill), #2240 (KV quantization ladder), #1474 (quantized demote lever)
+- Related FAK seams: #3019 (FP4 expert weights), #2240 (KV quantization ladder), #483 (CUDA graphs), #440 (model load memory churn), #5612 (MoE expert spill), #1474 (quantized demote lever)
