@@ -294,15 +294,15 @@ concurrent = [
   "agenticbench", "agentreadinessscore", "agentsindex", "agenttest", "amdgpu", "antipattern",
   "assumecheck", "astquery", "atif", "attemptbudget", "auditpane", "auditreason", "auditusage",
   "balance", "benchauthority", "benchcatalog", "benchckpt", "benchcli", "benchids",
-  "benchlineagegate", "benchpost", "benchscore", "bgloop", "binstamp", "blastradius",
-  "blockerpost", "brittleness", "browseraction", "buildwitness", "cacheobs", "cacheprice",
+  "benchlineagegate", "benchpost", "benchscore", "benchsnapshot", "bgloop", "binstamp", "blastradius",
+  "blockerpost", "brittleness", "browseraction", "buildwitness", "cache", "cacheobs", "cacheprice",
   "cachesweep", "cachevalue", "cachevalueledger", "cachevaluepost", "cachevaluereport",
   "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
   "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
   "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
   "commitissuelink", "commitsubject", "compactcohere", "completiondist", "computeadmit",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
-  "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
+  "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "dataslot", "deadlineadmit",
   "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
   "dispatchdoa",
@@ -880,7 +880,7 @@ planresolve = ["internal/planresolve/**"]
 modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
-market = ["internal/marketplace/**"]
+market = ["internal/market/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -917,6 +917,8 @@ benchids = ["internal/benchids/**"]
 benchlineagegate = ["internal/benchlineagegate/**"]
 benchpost = ["internal/benchpost/**"]
 benchscore = ["internal/benchscore/**"]
+benchingest = ["internal/benchingest/**"]
+benchsnapshot = ["internal/benchsnapshot/**"]
 bgloop = ["internal/bgloop/**"]
 binstamp = ["internal/binstamp/**"]
 blastradius = ["internal/blastradius/**"]
@@ -924,6 +926,7 @@ blockerpost = ["internal/blockerpost/**"]
 brittleness = ["internal/brittleness/**"]
 browseraction = ["internal/browseraction/**"]
 buildwitness = ["internal/buildwitness/**"]
+cache = ["internal/cache/**"]
 cacheobs = ["internal/cacheobs/**"]
 cacheprice = ["internal/cacheprice/**"]
 cachesweep = ["internal/cachesweep/**"]
@@ -962,7 +965,8 @@ corelockaudit = ["internal/corelockaudit/**"]
 corelocks = ["internal/corelocks/**"]
 covmatrix = ["internal/covmatrix/**"]
 ctxknobs = ["internal/ctxknobs/**"]
-ctxplans = ["internal/ctxplanlint/**"]
+ctxplans = ["internal/ctxplans/**"]
+dataslot = ["internal/dataslot/**"]
 deadlineadmit = ["internal/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
 deepseekv4kv = ["internal/deepseekv4kv/**"]
@@ -1569,7 +1573,7 @@ docs        = ["docs/**", "README.md", "INDEX.md", "llms.txt", "llms-full.txt", 
 tools       = ["tools/**"]
 scripts     = ["scripts/**"]
 visuals     = ["visuals/**"]
-claude      = [".claude/**"]
+claude      = [".claude/**", ".agents/**"]
 ci          = [".github/**"]
 abi         = ["internal/abi/**"]
 # internal/release joins the release lane's tree rather than getting a concurrent lane of its
@@ -2200,8 +2204,8 @@ see_also = ["PUBLIC-SCRUB-POLICY.md", "tools/githooks/pre-commit", "tools/scrub_
 [reasons.FILE_ADMISSION]
 category = "OPERATOR_GATE"
 refusal  = true
-summary  = "a staged path must not enter the PUBLIC tree -- it is private-only content (the lab GPU-connection subsystem cmd//internal/ *dgx* / cmd/slackgc, which lives only in fak-private), regenerable junk (cache/compiled/log/demo-output), or an oversized blob"
-fix      = "move private-only code to the fak-private companion repo; drop regenerable junk (it rebuilds) or gitignore it; put real data under experiments/ or testdata/; trim an oversized blob or use Git LFS. Floor: tools/githooks/pre-commit blocks the commit by default; set FLEET_FILE_GUARD=warn for advisory mode, or ALLOW_STRAY_FILE=1 to override once."
+summary  = "a staged path must not enter the PUBLIC tree -- it is private-only content (the lab GPU-connection subsystem cmd//internal/ *dgx* / cmd/slackgc, which lives only in fak-private), an un-grandfathered random script (.ps1/.sh/.bat/.cmd -- prefer Go sub-modules/applications), regenerable junk (cache/compiled/log/demo-output), or an oversized blob"
+fix      = "move private-only code to the fak-private companion repo; write new tooling or automation as Go sub-modules (nested modules under tools/<name>/) or cmd applications rather than shell/PowerShell scripts; drop regenerable junk (it rebuilds) or gitignore it; put real data under experiments/ or testdata/; trim an oversized blob or use Git LFS. Floor: tools/githooks/pre-commit blocks the commit by default; set FLEET_FILE_GUARD=warn for advisory mode, or ALLOW_STRAY_FILE=1 to override once."
 see_also = ["tools/check_committed_files.py", "tools/githooks/pre-commit", "PUBLIC-SCRUB-POLICY.md", "tools/repo_guard.py"]
 
 # Out-of-tree write guard: a destructive/write op that escapes the repo into a

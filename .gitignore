@@ -265,6 +265,13 @@ fak/.*.log
 *.local.sh
 !*.local.ps1.example
 !*.local.sh.example
+# Scratch, ad-hoc, and temporary scripts to prevent random scripts cluttering git status
+*.tmp.ps1
+*.tmp.sh
+scratch*.ps1
+scratch*.sh
+temp*.ps1
+temp*.sh
 *.pem
 *.key
 *.p12
@@ -869,6 +876,7 @@ docs/dispatch-status.md
 # --exclude-standard), which drops ignored and untracked paths alike.
 /.*
 !/.aider.conf.yml
+!/.agents
 !/.claude
 !/.claude-plugin
 !/.codex
