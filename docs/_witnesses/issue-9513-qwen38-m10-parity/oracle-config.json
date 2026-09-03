@@ -1,0 +1,37 @@
+{
+  "schema": "fak.qwen38-llamacpp-oracle-config/1",
+  "llama_cpp_revision": "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0",
+  "llama_cpp_license": "MIT",
+  "revision_command": [
+    "/bin/echo",
+    "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
+  ],
+  "build_flags": [
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DGGML_METAL=ON",
+    "-DLLAMA_BUILD_TESTS=OFF"
+  ],
+  "logit_tolerance": 0.001,
+  "reference": {
+    "name": "llama.cpp",
+    "adapter_config": "docs/_witnesses/issue-9513-qwen38-m10-parity/llama-adapter.json",
+    "campaign_report": "docs/_witnesses/issue-9513-qwen38-m10-parity/llama-campaign-report.json",
+    "campaign_archive": "docs/_witnesses/issue-9513-qwen38-m10-parity/llama-campaign-archive.json",
+    "measurement_command": [
+      "cat",
+      "docs/_witnesses/issue-9513-qwen38-m10-parity/llama-measurement.json"
+    ]
+  },
+  "candidate": {
+    "name": "fak",
+    "adapter_config": "docs/_witnesses/issue-9513-qwen38-m10-parity/fak-adapter.json",
+    "campaign_report": "docs/_witnesses/issue-9513-qwen38-m10-parity/fak-campaign-report.json",
+    "campaign_archive": "docs/_witnesses/issue-9513-qwen38-m10-parity/fak-campaign-archive.json",
+    "measurement_command": [
+      "cat",
+      "docs/_witnesses/issue-9513-qwen38-m10-parity/fak-measurement.json"
+    ]
+  },
+  "stale_after": "2026-11-21",
+  "rollback_threshold": "any exact-effect, token, or logit failure"
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "fak.qwen38-adapter-config/1",
+  "runtime_source": "github.com/ggml-org/llama.cpp",
+  "source_observed_at": "2026-09-03",
+  "source_license": "MIT",
+  "supported_arms": [
+    "q4_k_m"
+  ],
+  "endpoint": {
+    "endpoint": "http://127.0.0.1:8080",
+    "api_key": "\u003csecret\u003e",
+    "model": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe"
+  },
+  "execution_engine": "llama.cpp",
+  "arm": "q4_k_m",
+  "expected": {
+    "Model": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "CheckpointSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "ArtifactSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "QuantizerRevision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "RuntimeRevision": "llama.cpp@b9828",
+    "FakModuleRev": "internal/qwen38quantrun@r10+gm10parity"
+  },
+  "command": [
+    "llama-cli",
+    "-m",
+    "Qwen3.8-27B-Q4_K_M.gguf",
+    "-ngl",
+    "99"
+  ],
+  "require_device": "metal",
+  "stale_after": "2026-11-21",
+  "rollback_threshold": "any exact-effect, token, or logit failure",
+  "observation_command": [
+    "cat",
+    "docs/_witnesses/issue-9513-qwen38-m10-parity/llama-observation.json"
+  ],
+  "restart_command": [
+    "/bin/echo",
+    "restart"
+  ],
+  "ready_command": [
+    "/bin/echo",
+    "ready"
+  ],
+  "cleanup_command": [
+    "/bin/echo",
+    "cleanup"
+  ]
+}
