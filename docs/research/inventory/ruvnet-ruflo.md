@@ -8,7 +8,7 @@ description: "- Schema: fak-study-inventory-map/1 - Indexed revision: 4dcff48348
 - **Indexed revision:** `4dcff483482cee316f47552a961bcbaadc89f378`
 - **Source:** https://github.com/ruvnet/ruflo
 - **Observed at:** 2026-08-25T00:00:00Z
-- **Totals:** 5517 files, 1542 directories, 2334 runtime files, 625 tests/fixtures, 2015 docs, 1613340 text lines
+- **Totals:** 5517 files, 1542 directories, 2315 runtime files, 645 tests/fixtures, 2015 docs, 1613340 text lines
 
 ## Source Classes
 
@@ -39,7 +39,7 @@ description: "- Schema: fak-study-inventory-map/1 - Indexed revision: 4dcff48348
 | `.agents` | 144 | 9 | 0 | 135 | Docs:135, Shell:8, Config:1 | .agents/README.md<br>.agents/config.toml<br>.agents/skills/agent-adaptive-coordinator/SKILL.md<br>.agents/skills/agent-agent/SKILL.md<br>.agents/skills/agent-agentic-payments/SKILL.md<br>.agents/skills/agent-analyze-code-quality/SKILL.md<br>.agents/skills/agent-app-store/SKILL.md<br>.agents/skills/agent-arch-system-design/SKILL.md |
 | `scripts` | 105 | 6 | 2 | 0 | Shell:6 | scripts/__tests__/audit-supply-chain.test.mjs<br>scripts/__tests__/stage-internal-runtime-bundles.test.mjs<br>scripts/cleanup-v3.sh<br>scripts/install.sh<br>scripts/smoke-agentbbs.sh<br>scripts/smoke-agenticow.sh<br>scripts/verify-appliance.sh<br>scripts/verify-federation-plugin.sh |
 | `.github` | 38 | 32 | 0 | 5 | Config:32, Docs:5 | .github/ISSUE_PATTERN_PERSISTENCE.md<br>.github/ISSUE_TEMPLATE/rollback-incident.md<br>.github/actions/npm-ci-retry/action.yml<br>.github/dependabot.yml<br>.github/issues/alpha-89-telemetry-implementation.md<br>.github/supply-chain/README.md<br>.github/supply-chain/accepted-findings.json<br>.github/supply-chain/allowed-deps.json |
-| `tests` | 31 | 19 | 11 | 1 | Shell:16, TypeScript:8, Config:4, Docs:1 | tests/context-persistence-hook.test.mjs<br>tests/docker-regression/Dockerfile<br>tests/docker-regression/Makefile<br>tests/docker-regression/README.md<br>tests/docker-regression/docker-compose.yml<br>tests/docker-regression/fixtures/sample-code.ts<br>tests/docker-regression/fixtures/sample-patterns.json<br>tests/docker-regression/scripts/run-all-tests.sh |
+| `tests` | 31 | 0 | 31 | 1 | Shell:16, TypeScript:8, Config:4, Docs:1 | tests/context-persistence-hook.test.mjs<br>tests/docker-regression/Dockerfile<br>tests/docker-regression/Makefile<br>tests/docker-regression/README.md<br>tests/docker-regression/docker-compose.yml<br>tests/docker-regression/fixtures/sample-code.ts<br>tests/docker-regression/fixtures/sample-patterns.json<br>tests/docker-regression/scripts/run-all-tests.sh |
 | `.` | 20 | 6 | 0 | 8 | Docs:8, Config:6 | AGENTS.md<br>CHANGELOG.md<br>CLAUDE.local.md<br>CLAUDE.md<br>CONTRIBUTING.md<br>Cargo.toml<br>LICENSE<br>README.md |
 | `verification` | 16 | 7 | 0 | 3 | Config:7, Docs:3 | verification/CAPABILITIES.md<br>verification/README.md<br>verification/cli-mcp-tool-baseline.json<br>verification/inventory.json<br>verification/linux/manifest.md.json<br>verification/macos/manifest.md.json<br>verification/mcp-tool-baseline.json<br>verification/results.md |
 | `.claude-plugin` | 13 | 7 | 0 | 5 | Docs:5, Shell:4, Config:3 | .claude-plugin/README.md<br>.claude-plugin/docs/INSTALLATION.md<br>.claude-plugin/docs/PLUGIN_SUMMARY.md<br>.claude-plugin/docs/QUICKSTART.md<br>.claude-plugin/docs/STRUCTURE.md<br>.claude-plugin/hooks/hooks.json<br>.claude-plugin/marketplace.json<br>.claude-plugin/plugin.json |

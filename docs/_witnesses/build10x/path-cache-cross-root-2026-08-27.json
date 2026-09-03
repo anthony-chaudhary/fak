@@ -13,7 +13,7 @@
     "goos": "darwin",
     "goarch": "arm64",
     "cgo_enabled": "1",
-    "module_cache": "/Users/anthony/go/pkg/mod",
+    "module_cache": "operator-local Go module cache",
     "cache_setup": "two initially empty GOCACHE directories, one shared only by control samples and one shared only by treatment samples"
   },
   "target": "./cmd/fak",
