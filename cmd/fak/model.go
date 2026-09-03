@@ -21,6 +21,7 @@ const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen3
 	"  fak model qwen38-ladder prove concepts cheaply, then promote to exact Qwen3.8-27B evidence\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
 	"  fak model canary-run  own one guarded Darwin local-model canary transaction\n" +
+	"  fak model incumbent   own the preserved Qwen3.6 incumbent service identity (#9714): render | preflight | install\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a latest-generation exact-model campaign (older generations require a named exception)\n" +
 	"  fak model acceptance-refold replay immutable raw streams with the current parser\n" +
@@ -54,6 +55,8 @@ func cmdModel(args []string) {
 		os.Exit(runModelCanaryGate(os.Stdout, os.Stderr, args[1:]))
 	case "canary-run":
 		os.Exit(runModelCanaryRun(os.Stdout, os.Stderr, args[1:]))
+	case "incumbent":
+		cmdModelIncumbent(args[1:])
 	case "acceptance-gate":
 		os.Exit(runModelAcceptanceGate(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-run":

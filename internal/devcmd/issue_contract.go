@@ -1085,7 +1085,11 @@ func renderIssueContract(r issueContractResult) string {
 			lines = append(lines, "    missing_fields: "+renderIssueContractReasonCounts(queue.MissingFields))
 		}
 	}
-	for _, review := range r.Reviews {
+	return renderIssueContractReviews(lines, r.Reviews)
+}
+
+func renderIssueContractReviews(lines []string, reviews []issuepolicy.Review) string {
+	for _, review := range reviews {
 		key := review.Key
 		if strings.TrimSpace(key) == "" {
 			key = "(missing-key)"

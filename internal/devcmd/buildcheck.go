@@ -128,67 +128,12 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 	defer os.RemoveAll(scratch)
 
-	var masked, kept, staleMine []string
-	var compileSet workdelivery.CompileSet
-	overlayPath := ""
-	if *isolate {
-		untracked, uerr := buildCheckUntracked(root)
-		if uerr != nil {
-			fmt.Fprintf(stderr, "fak buildcheck: listing untracked files: %v\n", uerr)
-			return 1
-		}
-		// A package with an in-flight tracked .go edit keeps its untracked .go siblings in the
-		// build: they are almost always the matched new file that edit references, and masking
-		// them would red the edit's own compile. Fail OPEN -- if git can't answer, mask all as
-		// before rather than block the check.
-		modifiedDirs, merr := buildCheckModifiedDirs(root)
-		if merr != nil {
-			if !*asJSON {
-				fmt.Fprintf(stderr, "fak buildcheck: cannot read in-flight edits (%v); masking all untracked siblings\n", merr)
-			}
-			modifiedDirs = nil
-		}
-		masked, kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
-
-		if len(compileManifests) > 0 {
-			compileSet, err = workdelivery.LoadCompileSet(compileManifests...)
-			if err != nil {
-				if *asJSON {
-					_ = writeIndentedJSONNoEscape(stdout, buildCheckReport{Schema: "fak.buildcheck.v1", Verdict: "COMPILE_ADMISSION_BLOCKED", ExitCode: 1, Mode: mode, Packages: pkgs, Isolate: *isolate, CompileManifests: compileManifests, Reason: err.Error()})
-				} else {
-					fmt.Fprintf(stderr, "fak buildcheck: compile admission: %v\n", err)
-				}
-				return 1
-			}
-			mine = append(mine, compileSet.Admitted...)
-			masked, kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
-			masked = append(masked, compileSet.Excluded...)
-			sort.Strings(masked)
-			masked = slices.Compact(masked)
-		}
-		for _, m := range staleMine {
-			fmt.Fprintf(stderr, "fak buildcheck: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
-		}
-		if !*asJSON && len(kept) > 0 {
-			fmt.Fprintf(stderr, "fak buildcheck: keeping %d untracked .go file(s) whose package has in-flight tracked edits (matched new files, kept so the edit compiles):\n", len(kept))
-			for _, f := range kept {
-				fmt.Fprintf(stderr, "  - %s\n", f)
-			}
-		}
-		if len(masked) > 0 {
-			overlayPath = filepath.Join(scratch, "overlay.json")
-			if werr := buildoverlay.Write(overlayPath, buildoverlay.Build(root, masked)); werr != nil {
-				fmt.Fprintf(stderr, "fak buildcheck: writing overlay: %v\n", werr)
-				return 1
-			}
-			if !*asJSON {
-				fmt.Fprintf(stderr, "fak buildcheck: masking %d untracked sibling .go file(s) in packages with no in-flight edits so peers' WIP cannot red this compile:\n", len(masked))
-				for _, f := range masked {
-					fmt.Fprintf(stderr, "  - %s\n", f)
-				}
-			}
-		}
+	isolation, ok := prepareBuildCheckIsolation(stdout, stderr, root, scratch, *isolate, *asJSON, mine, compileManifests, mode, pkgs)
+	if !ok {
+		return 1
 	}
+	masked, kept := isolation.masked, isolation.kept
+	compileSet, overlayPath := isolation.compileSet, isolation.overlayPath
 
 	// go build always writes SOMEWHERE for a main package; target the null device so a
 	// compile check never drops a binary in the tree (the #2373 lock war), universally
@@ -306,6 +251,78 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return code
+}
+
+type buildCheckIsolation struct {
+	masked      []string
+	kept        []string
+	compileSet  workdelivery.CompileSet
+	overlayPath string
+}
+
+func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, isolate, asJSON bool, mine, compileManifests pathList, mode string, pkgs []string) (buildCheckIsolation, bool) {
+	var result buildCheckIsolation
+	if !isolate {
+		return result, true
+	}
+	untracked, err := buildCheckUntracked(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak buildcheck: listing untracked files: %v\n", err)
+		return result, false
+	}
+	// A package with an in-flight tracked .go edit keeps its untracked .go siblings in the
+	// build: they are almost always the matched new file that edit references, and masking
+	// them would red the edit's own compile. Fail OPEN -- if git can't answer, mask all as
+	// before rather than block the check.
+	modifiedDirs, err := buildCheckModifiedDirs(root)
+	if err != nil {
+		if !asJSON {
+			fmt.Fprintf(stderr, "fak buildcheck: cannot read in-flight edits (%v); masking all untracked siblings\n", err)
+		}
+		modifiedDirs = nil
+	}
+	var staleMine []string
+	result.masked, result.kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
+	if len(compileManifests) > 0 {
+		result.compileSet, err = workdelivery.LoadCompileSet(compileManifests...)
+		if err != nil {
+			if asJSON {
+				_ = writeIndentedJSONNoEscape(stdout, buildCheckReport{Schema: "fak.buildcheck.v1", Verdict: "COMPILE_ADMISSION_BLOCKED", ExitCode: 1, Mode: mode, Packages: pkgs, Isolate: isolate, CompileManifests: compileManifests, Reason: err.Error()})
+			} else {
+				fmt.Fprintf(stderr, "fak buildcheck: compile admission: %v\n", err)
+			}
+			return result, false
+		}
+		mine = append(mine, result.compileSet.Admitted...)
+		result.masked, result.kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
+		result.masked = append(result.masked, result.compileSet.Excluded...)
+		sort.Strings(result.masked)
+		result.masked = slices.Compact(result.masked)
+	}
+	for _, path := range staleMine {
+		fmt.Fprintf(stderr, "fak buildcheck: --mine %s is not an untracked file; ignoring (it is already in the build)\n", path)
+	}
+	if !asJSON && len(result.kept) > 0 {
+		fmt.Fprintf(stderr, "fak buildcheck: keeping %d untracked .go file(s) whose package has in-flight tracked edits (matched new files, kept so the edit compiles):\n", len(result.kept))
+		for _, path := range result.kept {
+			fmt.Fprintf(stderr, "  - %s\n", path)
+		}
+	}
+	if len(result.masked) == 0 {
+		return result, true
+	}
+	result.overlayPath = filepath.Join(scratch, "overlay.json")
+	if err := buildoverlay.Write(result.overlayPath, buildoverlay.Build(root, result.masked)); err != nil {
+		fmt.Fprintf(stderr, "fak buildcheck: writing overlay: %v\n", err)
+		return result, false
+	}
+	if !asJSON {
+		fmt.Fprintf(stderr, "fak buildcheck: masking %d untracked sibling .go file(s) in packages with no in-flight edits so peers' WIP cannot red this compile:\n", len(result.masked))
+		for _, path := range result.masked {
+			fmt.Fprintf(stderr, "  - %s\n", path)
+		}
+	}
+	return result, true
 }
 
 // buildoverlay.SelectMaskedFiles is the pure selection behind --isolate: from the repo-relative

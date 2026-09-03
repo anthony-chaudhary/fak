@@ -1,0 +1,91 @@
+{
+  "schema": "fak-adjudicate-proof/1",
+  "issue": 10661,
+  "base": "747f53ca23f31bdc96083f28ae5af7b76a5cd65c",
+  "generated_at": "2026-09-02",
+  "scope": {
+    "included": "fak_adjudicate outcome receipt, adversarial non-execution and non-leakage invariants, discovery/schema semantics, and direct k.Decide equal-fixture baseline",
+    "excluded": "fak_syscall execution, vDSO execution, result admission quarantine, and plugin tracing"
+  },
+  "contract": {
+    "receipt_schema": "fak-adjudicate-receipt/1",
+    "outcomes": [
+      "allowed",
+      "denied",
+      "transformed",
+      "witness_required",
+      "failed"
+    ],
+    "fields": [
+      "schema",
+      "outcome",
+      "duration_ns",
+      "execution",
+      "provenance",
+      "error.code",
+      "error.source"
+    ],
+    "execution_invariant": "execution is always 'not_executed'",
+    "provenance_invariant": "provenance is always 'kernel_decide'",
+    "compatibility": "legacy verdict, trace_id, and repaired_arguments fields are preserved; repaired_arguments appears only on TRANSFORM",
+    "sanitized_error": "malformed inputs return sanitized error code and source without leaking paths, secrets, or raw arguments"
+  },
+  "deterministic": {
+    "command": "go test ./internal/gateway -run '^TestFakAdjudicate' -count=1 -timeout=60s",
+    "result": "pass",
+    "packages": {
+      "github.com/anthony-chaudhary/fak/internal/gateway": "ok 0.027s"
+    },
+    "cases": [
+      "allowed outcome mapping from ALLOW",
+      "denied outcome mapping from DENY",
+      "transformed outcome mapping from TRANSFORM with repaired_arguments",
+      "witness_required outcome mapping from REQUIRE_WITNESS",
+      "default-deny outcome mapping from unknown tool",
+      "trace ID preservation when supplied",
+      "trace ID minting when omitted",
+      "argument non-leakage in successful responses",
+      "sanitized failure contract on missing tool name",
+      "secret and path non-leakage in error receipts",
+      "discovery tool descriptor documentation and non-execution contract"
+    ]
+  },
+  "fuzz": [
+    {
+      "command": "go test ./internal/gateway -run '^$' -fuzz FuzzFakAdjudicateReceiptInvariants -fuzztime=2s -parallel=1 -timeout=30s",
+      "result": "pass",
+      "executions": 3096,
+      "new_interesting": 10
+    }
+  ],
+  "benchmark_environment": {
+    "goos": "windows",
+    "goarch": "amd64",
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor"
+  },
+  "benchmarks": [
+    {
+      "command": "go test ./internal/gateway -run '^$' -bench '^BenchmarkFakAdjudicateEqualFixture$' -benchmem -count=1",
+      "results": [
+        {
+          "name": "BenchmarkFakAdjudicateEqualFixture/direct_kernel_decide-32",
+          "iterations": 1972354,
+          "ns_per_op": 583.0,
+          "bytes_per_op": 721,
+          "allocs_per_op": 8
+        },
+        {
+          "name": "BenchmarkFakAdjudicateEqualFixture/mcp_fak_adjudicate-32",
+          "iterations": 226958,
+          "ns_per_op": 5822,
+          "bytes_per_op": 4716,
+          "allocs_per_op": 63
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "The MCP benchmark includes JSON-RPC decoding, argument validation, trace allocation, receipt synthesis, and JSON response formatting; direct k.Decide measures only in-kernel policy adjudication without transport overhead.",
+    "These measurements are a local baseline; no speedup is claimed for the MCP layer, and the mediation overhead is recorded honestly."
+  ]
+}

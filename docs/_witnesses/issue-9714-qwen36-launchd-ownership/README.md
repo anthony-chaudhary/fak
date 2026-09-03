@@ -40,6 +40,33 @@ the exact PID and command before every lifecycle action and requiring at least
 - [issue-comment.md](issue-comment.md) — the verbatim issue comment carrying this HOLD verdict.
 - [receipt.json](receipt.json) — the machine-readable preflight and sample receipt.
 - [stability-samples.tsv](stability-samples.tsv) — the 91 read-only stability samples.
+- [definition-preflight-receipt.json](definition-preflight-receipt.json) — the read-only
+  observation captured by the reviewed definition surface (`fak model incumbent preflight --json`),
+  reproducing this HOLD state deterministically from the same preserved identities.
+
+## The reviewed definition deliverable
+
+The HOLD verdicts name the missing artifact: a reviewed `com.fak.qwen36-model` service
+definition plus a typed ownership check. The `fak model incumbent` surface now supplies it:
+
+- `fak model incumbent render` renders the reviewed LaunchAgent definition
+  (KeepAlive/RunAtLoad exact-restore semantics) from the operator-supplied private argv,
+  refusing unless the space-joined ProgramArguments hash to the preserved command digest
+  `a0c13c8d…` (or a consciously supplied migration digest). Rendered definitions are
+  refused inside the repository, so private paths never enter the public tree.
+- `fak model incumbent preflight` classifies the ownership state read-only:
+  `OWNED_EXPECTED_JOB` (exit 0 — the drill gate's admission), `EXPECTED_JOB_ABSENT`
+  with `alternate_launchd_supervisor_owns_incumbent`, `INCUMBENT_UNHEALTHY`,
+  `COMMAND_IDENTITY_MISMATCH`, or `OBSERVATION_FAILED` (exit 2).
+- `fak model incumbent install` bootstraps a rendered definition dry-run-first and
+  refuses a foreign supervisor's incumbent; migration away from the proven alternate
+  owner remains the operator's explicit act.
+
+The tracked [definition-preflight-receipt.json](definition-preflight-receipt.json) is the
+surface's own verdict on the live machine at the time of this packet: the incumbent binds
+the preserved command digest, the alternate owner resolves to the preserved label digest
+`b567298d…`, both endpoints return 200 with alias `qwen3.6-27b`, and the expected job is
+still absent — the exact state the next authorized migration + drill resolves.
 
 ## Readback
 

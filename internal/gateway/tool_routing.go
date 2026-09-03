@@ -68,6 +68,47 @@ func (s *Server) adjudicate(ctx context.Context, tool, rawArgs string, readOnly 
 	return s.adjudicateWithSeq(ctx, tool, rawArgs, readOnly, witness, traceID, 0)
 }
 
+func adjudicateReceipt(wv WireVerdict, err error, duration time.Duration) AdjudicateReceipt {
+	receipt := AdjudicateReceipt{
+		Schema:     "fak-adjudicate-receipt/1",
+		Outcome:    adjudicateOutcome(wv, err),
+		DurationNS: duration.Nanoseconds(),
+		Execution:  "not_executed",
+		Provenance: "kernel_decide",
+	}
+	if err != nil {
+		receipt.Error = &AdjudicateReceiptError{Code: adjudicateErrorCode(err), Source: "gateway"}
+	}
+	return receipt
+}
+
+func adjudicateOutcome(wv WireVerdict, err error) string {
+	if err != nil {
+		return "failed"
+	}
+	switch wv.Kind {
+	case "ALLOW":
+		return "allowed"
+	case "DENY":
+		return "denied"
+	case "TRANSFORM":
+		return "transformed"
+	case "REQUIRE_WITNESS":
+		return "witness_required"
+	default:
+		// The folded kernel normally lowers restrictive unknown/defer verdicts to
+		// DENY. Fail closed if a future kind reaches this projection.
+		return "denied"
+	}
+}
+
+func adjudicateErrorCode(err error) string {
+	if err != nil && strings.Contains(err.Error(), "missing tool name") {
+		return "invalid_arguments"
+	}
+	return "adjudication_failed"
+}
+
 func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, readOnly bool, witness, traceID string, callSeq uint64) (wv WireVerdict, repaired string, err error) {
 	start := time.Now()
 	opTrace, opTool := traceID, tool
