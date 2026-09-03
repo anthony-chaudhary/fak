@@ -14038,6 +14038,11 @@
           "category": "incidental",
           "reason": "traversal method on composite planners for gateway retry telemetry (#10323)",
           "token": "WalkPlanners"
+        },
+        {
+          "category": "incidental",
+          "reason": "treatment topology of candidate benchmark arm",
+          "token": "CandidateTopology"
         }
       ],
       "exclude": [
@@ -14065,6 +14070,7 @@
         "CandidateRuntimeSHA",
         "CandidateSamples",
         "CandidateTaskAccuracy",
+        "CandidateTopology",
         "Candidates",
         "CleanupCandidate",
         "ControlPlaneOwner",

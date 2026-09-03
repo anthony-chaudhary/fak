@@ -4,6 +4,7 @@
 package nativebench
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,21 +20,131 @@ const (
 	FirstClassIntegration AlternativeClass = "first_class_integration"
 )
 
+// TreatmentType distinguishes whether an alternative or contract represents an
+// additive enhancement (e.g. layered on existing stack) or a replacement treatment.
+type TreatmentType = TreatmentTopology
+
+const (
+	TreatmentAdditive    = AdditiveTreatment
+	TreatmentReplacement = ReplacementTreatment
+)
+
 type Alternative struct {
-	Name        string           `json:"name"`
-	Class       AlternativeClass `json:"class"`
-	Integration string           `json:"integration,omitempty"`
-	Source      string           `json:"source"`
+	Name                string            `json:"name"`
+	Class               AlternativeClass  `json:"class"`
+	Integration         string            `json:"integration,omitempty"`
+	Source              string            `json:"source"`
+	Treatment           TreatmentType     `json:"treatment,omitempty"`
+	TreatmentTopology   TreatmentTopology `json:"treatment_topology,omitempty"`
+	CandidateTopology   TreatmentTopology `json:"candidate_topology,omitempty"`
+	BaselineTopology    TreatmentTopology `json:"baseline_topology,omitempty"`
+	BaselineComposition string            `json:"baseline_composition,omitempty"`
+}
+
+// TreatmentKind returns the explicit or derived treatment kind for this alternative.
+func (a Alternative) TreatmentKind() TreatmentType {
+	if a.TreatmentTopology != "" {
+		return a.TreatmentTopology
+	}
+	if a.Treatment != "" {
+		return a.Treatment
+	}
+	if a.Class == FirstClassIntegration || strings.HasPrefix(a.Name, "fak + ") {
+		return TreatmentAdditive
+	}
+	return TreatmentReplacement
+}
+
+// Topology returns the explicit or derived treatment topology for this alternative.
+func (a Alternative) Topology() TreatmentTopology {
+	return a.TreatmentKind()
 }
 
 type Contract struct {
-	Capability   string        `json:"capability"`
-	NativePath   string        `json:"native_path"`
-	Workload     string        `json:"workload"`
-	Metrics      []string      `json:"metrics"`
-	Alternatives []Alternative `json:"alternatives"`
-	Witness      string        `json:"witness,omitempty"`
-	Integrations []string      `json:"integrations,omitempty"`
+	Capability        string            `json:"capability"`
+	NativePath        string            `json:"native_path"`
+	Workload          string            `json:"workload"`
+	Metrics           []string          `json:"metrics"`
+	Alternatives      []Alternative     `json:"alternatives"`
+	Witness           string            `json:"witness,omitempty"`
+	Integrations      []string          `json:"integrations,omitempty"`
+	Treatment         TreatmentType     `json:"treatment,omitempty"`
+	TreatmentTopology TreatmentTopology `json:"treatment_topology,omitempty"`
+	CandidateTopology TreatmentTopology `json:"candidate_topology,omitempty"`
+}
+
+// Topology returns the explicit or derived treatment topology for this contract.
+func (c Contract) Topology() TreatmentTopology {
+	if c.TreatmentTopology != "" {
+		return c.TreatmentTopology
+	}
+	if c.CandidateTopology != "" {
+		return c.CandidateTopology
+	}
+	if c.Treatment != "" {
+		return c.Treatment
+	}
+	return AdditiveTreatment
+}
+
+// TreatmentKind returns the explicit or derived treatment kind for this contract.
+func (c Contract) TreatmentKind() TreatmentType {
+	return c.Topology()
+}
+
+// CandidateArm returns the candidate arm representation for this contract.
+func (c Contract) CandidateArm() CandidateArm {
+	return CandidateArm{
+		Name:              c.Capability,
+		CandidateTopology: c.Topology(),
+		NativePath:        c.NativePath,
+	}
+}
+
+// BaselineArm returns the primary baseline alternative arm for this contract, if present.
+func (c Contract) BaselineArm() (BaselineArm, bool) {
+	for _, a := range c.Alternatives {
+		if a.Class == TunedBaseline {
+			topology := a.BaselineTopology
+			if topology == "" {
+				topology = a.TreatmentTopology
+			}
+			if topology == "" {
+				topology = ReplacementTreatment
+			}
+			comp := a.BaselineComposition
+			if comp == "" {
+				comp = a.Name
+			}
+			return BaselineArm{
+				Name:                a.Name,
+				BaselineTopology:    topology,
+				BaselineComposition: comp,
+			}, true
+		}
+	}
+	return BaselineArm{}, false
+}
+
+// Human returns a human-readable rendering of the contract including treatment topology.
+func (c Contract) Human() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contract: %s (treatment_topology=%s)\n", c.Capability, c.Topology())
+	fmt.Fprintf(&b, "  native_path: %s\n", c.NativePath)
+	fmt.Fprintf(&b, "  workload:    %s\n", c.Workload)
+	return strings.TrimSpace(b.String())
+}
+
+func (c Contract) MarshalJSON() ([]byte, error) {
+	type Alias Contract
+	aux := (Alias)(c)
+	if aux.TreatmentTopology == "" {
+		aux.TreatmentTopology = c.Topology()
+	}
+	if aux.CandidateTopology == "" {
+		aux.CandidateTopology = aux.TreatmentTopology
+	}
+	return json.Marshal(aux)
 }
 
 type Finding struct {
@@ -982,6 +1093,14 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 
 func All() []Contract {
 	out := append([]Contract(nil), contracts...)
+	for i := range out {
+		if out[i].TreatmentTopology == "" {
+			out[i].TreatmentTopology = out[i].Topology()
+		}
+		if out[i].CandidateTopology == "" {
+			out[i].CandidateTopology = out[i].TreatmentTopology
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Capability < out[j].Capability })
 	return out
 }
@@ -1107,6 +1226,11 @@ func ValidateRoot(cs []Contract, root string) []Finding {
 		}
 	}
 	return findings
+}
+
+// ResolveWitness resolves a benchmark witness path relative to the module root.
+func ResolveWitness(root, path string) string {
+	return resolveArmPath(root, path)
 }
 
 func resolveArmPath(root, path string) string {
