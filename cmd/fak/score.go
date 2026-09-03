@@ -52,6 +52,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"negation-tax":        cmdNegationTaxScore,
 	"negation_operator":   cmdNegationOperatorScore,
 	"negframe":            cmdNegframeScore,
+	"org-debt":            cmdOrgDebtScore,
 	"overton":             cmdOvertonScore,
 	"product":             func(argv []string) { os.Exit(runProductScorecard(os.Stdout, os.Stderr, argv)) },
 	"propagation":         cmdPropagationScorecard,
