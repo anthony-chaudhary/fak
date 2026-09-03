@@ -424,6 +424,7 @@ var tier = map[string]int{
 	"nightrun":            2, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	"claimcheck":          1, // pure net-true-value claim grader; stdlib-only, off the hot path.
 	"ideascout":           2, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
+	"perfscout":           2, // open-source performance scout for Qwen 3.8 and GLM 5.3 Flash models; stdlib-only + ghexec/windowgate, off hot path.
 	"studymonitor":        2, // stdlib-only external source registry validator and report renderer; off the runtime hot path.
 	"study":               1, // stdlib-only immutable source-to-decision receipt store; off the runtime hot path.
 	"edgequal":            1, // stdlib-only offline evidence contract validator; off the runtime hot path.
@@ -796,6 +797,7 @@ var tier = map[string]int{
 	"servingsim":                 1, // trace-driven discrete-event LLM serving simulator; stdlib-only (#10841).
 	"cache":                      1,
 	"benchsnapshot":              1,
+	"promptcomp":                 1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1478,6 +1480,7 @@ var chatEndpointRole = map[string]string{
 	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
 	"quality":           "the off-path bounded pre-dataset capability probe (#10030/#10162): one-token generation/reasoning calls classify endpoint support, infrastructure, and provenance (not a live planner)",
 	"serveradapter":     "independent local llama-server adapter and readiness probe owned by the serveradapter leaf",
+	"tb4bench":          "the off-path Terminal-Bench 4 benchmark client comparing fak harness vs reference runner (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
