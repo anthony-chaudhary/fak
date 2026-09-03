@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
@@ -118,6 +119,11 @@ type serveFlags struct {
 	engineCacheAdminKeyEnv       *string
 	engineCacheIdleTimeout       *time.Duration
 	engineCacheRequireExactSpan  *bool
+	remoteKVMode                 *string
+	remoteKVBackend              *string
+	remoteKVURL                  *string
+	remoteKVToken                *string
+	remoteKVTimeout              *time.Duration
 	engineID                     *string
 	backendName                  *string
 	qwen38Runtime                *string
@@ -209,6 +215,11 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
 	sf.engineCacheIdleTimeout = fs.Duration("engine-cache-idle-timeout", 0, "SGLang /flush_cache idle timeout, e.g. 30s (0 fails fast)")
 	sf.engineCacheRequireExactSpan = fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
+	sf.remoteKVMode = fs.String("remote-kv-mode", string(l3kv.RemoteKVModeOptional), "remote KV store availability mode: optional|required|disabled (default: optional)")
+	sf.remoteKVBackend = fs.String("remote-kv-backend", "l3kv-blobhttp", "remote KV backend: l3kv-blobhttp|none")
+	sf.remoteKVURL = fs.String("remote-kv-url", "", "remote KV store URL (default: FAK_REMOTE_KV_URL or FAK_BLOB_HTTP_URL)")
+	sf.remoteKVToken = fs.String("remote-kv-token", "", "remote KV store auth token (default: FAK_REMOTE_KV_TOKEN or FAK_BLOB_HTTP_TOKEN)")
+	sf.remoteKVTimeout = fs.Duration("remote-kv-timeout", l3kv.DefaultRemoteKVTimeout, "remote KV connectivity probe timeout")
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
 	nativeControls := registerNativeControlFlags(fs)
@@ -445,6 +456,14 @@ func cmdServe(argv []string) {
 	// before the gateway exists but installed only after it does.
 	rt.resolveCompute(sf)
 	defer rt.closeEPGroup()
+	if isRemoteKVConfigured(sf) {
+		if receipt, err := checkServeRemoteKV(context.Background(), sf, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: remote kv preflight: %v\n", err)
+			os.Exit(2)
+		} else {
+			rt.addStartupMessage(serveRemoteKVStartupMessage(receipt))
+		}
+	}
 	releaseMetalResidency, err := loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
 		rt.loadModel(sf)
 	})
