@@ -115,10 +115,10 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/ABLATE-RESULTS.md",
 	},
 	{
-		Name: "armbench", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
-		Summary: "Arm-native inference benchmark: measures native kernels in their declared execution envelope.",
-		Run:     "fak armbench",
-		Flags:   []string{"--out  -  write the benchmark receipt"},
+		Name: "armbench", Kind: KindVerb, Need: NeedNone, Level: LevelServing,
+		Summary: "Arm-native inference benchmark: runs harness comparison arms and selfcheck proofs.",
+		Run:     "fak armbench selfcheck",
+		Flags:   []string{"selfcheck  -  run the deterministic fake-provider spine and every fail-closed proof", "run  -  execute the arms and write the raw trial ledger", "report  -  roll a ledger up per arm", "--out  -  write the benchmark receipt"},
 		Doc:     "docs/benchmarks/README.md",
 	},
 	{
@@ -278,10 +278,10 @@ var registry = []Bench{
 		Doc:     "docs/model-engine-env.md",
 	},
 	{
-		Name: "native-benchmarks", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
-		Summary: "Native benchmark cohort: runs canonical fak-native measurements without changing inference engines.",
-		Run:     "fak native-benchmarks",
-		Flags:   []string{"--out  -  write the cohort receipt"},
+		Name: "native-benchmarks", Kind: KindVerb, Need: NeedNone, Level: LevelServing,
+		Summary: "Native benchmark cohort: audits comparison obligations for fak-native capabilities.",
+		Run:     "fak native-benchmarks -json",
+		Flags:   []string{"-json  -  emit the benchmark-obligation report as JSON", "-check  -  exit non-zero while any required benchmark witness is missing"},
 		Doc:     "docs/native-inference-goal.md",
 	},
 	{

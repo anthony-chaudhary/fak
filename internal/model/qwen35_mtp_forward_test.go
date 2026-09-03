@@ -269,3 +269,59 @@ func TestQwen35MTPFuseEmbeddingFirstWitness(t *testing.T) {
 		}
 	}
 }
+
+// TestQwen35MTPFuseNormGain1pWitness (#9961):
+// First witness: a nonzero norm-weight fixture compares MTP fusion against an independent (1+w) oracle
+// and proves plain-w diverges.
+func TestQwen35MTPFuseNormGain1pWitness(t *testing.T) {
+	// Nonzero norm weights:
+	normWeight := []float32{0.5, -0.2}
+	fcData := []float32{
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+	}
+
+	m := qwen35MTPForwardTestModel(t, map[string]testMTPWeight{
+		"mtp.pre_fc_norm_hidden.weight":    {shape: []int{2}, data: normWeight},
+		"mtp.pre_fc_norm_embedding.weight": {shape: []int{2}, data: normWeight},
+		"mtp.fc.weight":                    {shape: []int{2, 4}, data: fcData},
+	})
+	m.Cfg.NormGain1p = true
+
+	embedding := []float32{3.0, 4.0}
+	hidden := []float32{1.0, 2.0}
+
+	got, err := m.Qwen35MTPFuse(hidden, embedding)
+	if err != nil {
+		t.Fatalf("Qwen35MTPFuse failed: %v", err)
+	}
+
+	// Independent (1 + w) oracle for embedding:
+	// ss = (9 + 16) / 2 = 12.5
+	// inv = 1 / sqrt(12.5) = 0.2828427
+	// out[0] = 3.0 * inv * (1 + 0.5) = 3.0 * inv * 1.5
+	// out[1] = 4.0 * inv * (1 - 0.2) = 4.0 * inv * 0.8
+	rmsInv := float32(1.0 / math.Sqrt(12.5))
+	wantOracle := []float32{
+		3.0 * rmsInv * (1 + 0.5),
+		4.0 * rmsInv * (1 - 0.2),
+	}
+
+	// Plain w (incorrect without +1 gain) would be:
+	// plain[0] = 3.0 * rmsInv * 0.5
+	// plain[1] = 4.0 * rmsInv * (-0.2)
+	plainW := []float32{
+		3.0 * rmsInv * 0.5,
+		4.0 * rmsInv * (-0.2),
+	}
+
+	for i := range wantOracle {
+		if math.Abs(float64(got[i]-wantOracle[i])) > 1e-6 {
+			t.Fatalf("dim %d: got %v, want oracle %v", i, got[i], wantOracle[i])
+		}
+		// Prove plain w diverges
+		if math.Abs(float64(got[i]-plainW[i])) < 0.1 {
+			t.Fatalf("dim %d: got %v unexpectedly close to plain-w %v", i, got[i], plainW[i])
+		}
+	}
+}

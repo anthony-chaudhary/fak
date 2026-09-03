@@ -259,8 +259,8 @@ func (f *Qwen35MTPForward) qwen38MTPFuse(priorHidden, currentEmbedding []float32
 	}
 	eps := float32(f.target.Cfg.RMSNormEps)
 	fusedInput := make([]float32, 0, 2*h)
-	normedEmbedding := rmsnorm(currentEmbedding, embeddingNorm, eps)
-	normedHidden := rmsnorm(priorHidden, hiddenNorm, eps)
+	normedEmbedding := rmsnormCfg(currentEmbedding, embeddingNorm, eps, f.target.Cfg)
+	normedHidden := rmsnormCfg(priorHidden, hiddenNorm, eps, f.target.Cfg)
 	fusedInput = append(fusedInput, normedEmbedding...)
 	fusedInput = append(fusedInput, normedHidden...)
 	qt := f.draft.M.q4kw["mtp.fc.weight"]
