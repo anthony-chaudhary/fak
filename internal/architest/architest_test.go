@@ -252,6 +252,7 @@ var tier = map[string]int{
 	"benchauthority":   1, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); stdlib-only, imports nothing internal, off the hot path.
 	"closureaudit":     1, // pure stdlib-only port of the issue_closure_audit grader (#1406): binds commits to issue numbers and grades each issue's closure; imports nothing internal, off the hot path.
 	"ctxplans":         1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
+	"ctxplanlint":      1,
 	"fleetverify":      2, // throwaway compile-witness isolating the operator.go fleet helpers' loopfleet/loopmgr API usage from the churning cmd/fak; imports loopfleet(1)+loopmgr(1), off the hot path.
 	"issueownerprompt": 1, // stdlib-only canonical resolver lifecycle and drift validator (#6848).
 	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
@@ -580,6 +581,7 @@ var tier = map[string]int{
 	"modelaccept":           4,
 	"executionroute":        4,
 	"market":                4,
+	"marketplace":           4,
 	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
 	"tokencache":            2, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
 	"guardcorpus":           3, // guarded-session corpus fold consumes journal semantics and emits durable analysis records; off the request hot path.
@@ -799,6 +801,7 @@ var tier = map[string]int{
 	"promptcomp":                 1,
 	"orgdebt":                    1,
 	"tb4bench":                   4,
+	"agentopt":                   1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

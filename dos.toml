@@ -482,6 +482,7 @@ concurrent = [
   "promptcomp",
   "servingsim",
   "control",
+  "agentopt",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -665,6 +666,7 @@ autopick = [
   "promptcomp",
   "servingsim",
   "control",
+  "agentopt",
   # new-leaf:lane
 ]
 
@@ -878,7 +880,7 @@ planresolve = ["internal/planresolve/**"]
 modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
-market = ["internal/market/**"]
+market = ["internal/marketplace/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -960,7 +962,7 @@ corelockaudit = ["internal/corelockaudit/**"]
 corelocks = ["internal/corelocks/**"]
 covmatrix = ["internal/covmatrix/**"]
 ctxknobs = ["internal/ctxknobs/**"]
-ctxplans = ["internal/ctxplans/**"]
+ctxplans = ["internal/ctxplanlint/**"]
 deadlineadmit = ["internal/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
 deepseekv4kv = ["internal/deepseekv4kv/**"]
@@ -1551,6 +1553,7 @@ perfscout = ["internal/perfscout/**"]
 promptcomp = ["internal/promptcomp/**"]
 servingsim = ["internal/servingsim/**"]
 control = ["internal/control/**"]
+agentopt = ["internal/agentopt/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

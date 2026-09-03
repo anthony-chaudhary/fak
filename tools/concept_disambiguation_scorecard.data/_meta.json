@@ -8196,6 +8196,16 @@
           "category": "incidental",
           "reason": "dataslot migration engine type",
           "token": "MigrationEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "speculative tool execution pipeline engine in agentopt",
+          "token": "SpeculativeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "constructor for speculative tool execution engine in agentopt",
+          "token": "NewSpeculativeEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8225,6 +8235,7 @@
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
         "NewSessionAffinityGateway",
+        "NewSpeculativeEngine",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
@@ -8232,6 +8243,7 @@
         "RegisterEngines",
         "RemotePlacement",
         "SessionAffinityGateway",
+        "SpeculativeEngine",
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
         "WithAffinity",
