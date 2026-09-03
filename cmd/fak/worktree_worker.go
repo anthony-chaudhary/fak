@@ -13,9 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -222,32 +224,81 @@ func worktreeWorkerPrepare(argv []string) {
 	}
 }
 
-func worktreeWorkerLand(argv []string) {
-	fs := flag.NewFlagSet("worktree worker land", flag.ExitOnError)
+func worktreeCommitSubject(wtPath, msgFile string) string {
+	if strings.TrimSpace(msgFile) != "" {
+		if b, err := os.ReadFile(msgFile); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					return line
+				}
+			}
+		}
+	}
+	cmd := windowgate.Command("git", "-C", wtPath, "log", "-1", "--format=%s")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	if out, err := cmd.Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
+}
+
+func isFixSubject(s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(lower, "fix(") || strings.HasPrefix(lower, "fix:")
+}
+
+func verifyWorkerLandSymptom(wtPath string) workerworktree.Result {
+	resolver := witness.NewWithRunner(nil, wtPath)
+	outcome := resolver.ResolveSymptom(context.Background(), "HEAD", true)
+	switch outcome {
+	case abi.WitnessConfirmed:
+		return workerworktree.Result{OK: true}
+	default:
+		return workerworktree.Result{
+			OK:     false,
+			Code:   "SYMPTOM_UNWITNESSED",
+			Reason: "SYMPTOM_UNWITNESSED: fix commit must include a test that fails on parent and passes on fix (red-then-green); bypass only with --unsafe-skip-symptom-witness",
+		}
+	}
+}
+
+func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworktree.Result, int) {
+	fs := flag.NewFlagSet("worktree worker land", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
 	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD)")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verify := fs.String("verify", "off", "pre-land witness run IN the worktree: off | go-build")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
 	disambiguationTimeoutMS := fs.String("disambiguation-timeout-ms", "", "one shared whole-tree disambiguation deadline in milliseconds (1..900000; default 120000; no retries)")
-	// Same flag name and same semantics as `fak commit --core-lock-maintenance-witness`
-	// (#5392): the claim is RESOLVED against independent evidence, and only a CONFIRMED
-	// resolution clears a hard-self core-lock pathset. Without it the land is refused
-	// with CORE_SELF_MODIFY. A worker that has no CLI to pass a flag through carries the
-	// same claim as a workerworktree.CoreLockWitnessTrailer line in its commit message.
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "",
 		"independent witness claim that clears a hard-self core-lock land (same claim vocabulary as fak commit)")
 	recoveryRemote := fs.String("recovery-remote", "", "publish/read-back candidate on this git remote before trunk CAS")
 	requireRemote := fs.Bool("require-remote-recovery", false, "refuse trunk CAS unless remote recovery read-back succeeds")
+	unsafeSkipSymptomWitness := fs.Bool("unsafe-skip-symptom-witness", false,
+		"bypass mandatory fail-to-pass symptom witness for fix(*) commits")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
-	fs.Parse(argv)
+	if err := fs.Parse(argv); err != nil {
+		return workerworktree.Result{OK: false, Reason: err.Error()}, 2
+	}
 
-	if strings.TrimSpace(*worktree) == "" {
-		fmt.Fprintln(os.Stderr, "fak worktree worker land: --worktree is required")
-		os.Exit(2)
+	worktreeDir := strings.TrimSpace(*worktree)
+	if worktreeDir == "" {
+		fmt.Fprintln(stderr, "fak worktree worker land: --worktree is required")
+		return workerworktree.Result{OK: false, Reason: "--worktree is required"}, 2
 	}
 	repoRoot := worktreeWorkerRoot(*root)
+
+	// Mandatory fail-to-pass symptom witness for fix(*) commits (#10926)
+	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*msgFile))
+	if isFixSubject(subj) && !*unsafeSkipSymptomWitness {
+		symptomRes := verifyWorkerLandSymptom(worktreeDir)
+		if !symptomRes.OK {
+			return symptomRes, 1
+		}
+	}
 
 	var hook workerworktree.VerifyHook
 	switch strings.ToLower(strings.TrimSpace(*verify)) {
@@ -256,13 +307,13 @@ func worktreeWorkerLand(argv []string) {
 	case "go-build", "gobuild", "build":
 		hook = worktreeWorkerGoBuildVerify
 	default:
-		fmt.Fprintf(os.Stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)
+		return workerworktree.Result{OK: false, Reason: fmt.Sprintf("unknown --verify %q", *verify)}, 2
 	}
 
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),
-		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(os.Stderr)),
+		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(stderr)),
 	}
 	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
 		remote := strings.TrimSpace(*recoveryRemote)
@@ -273,7 +324,7 @@ func worktreeWorkerLand(argv []string) {
 	}
 	timeoutSet := flagWasSet(fs, "disambiguation-timeout-ms")
 	res, err := withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, timeoutSet, func() workerworktree.Result {
-		return workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
+		return workerworktree.Land(repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
 	})
 	if err != nil {
 		res = workerworktree.Result{
@@ -281,8 +332,16 @@ func worktreeWorkerLand(argv []string) {
 			Reason: "configure worker land disambiguation timeout: " + err.Error(),
 		}
 	}
+	return res, 0
+}
+
+func worktreeWorkerLand(argv []string) {
+	res, code := runWorktreeWorkerLand(os.Stdout, os.Stderr, argv)
 	worktreeWorkerEmit(res)
 	if !res.OK {
+		if code != 0 {
+			os.Exit(code)
+		}
 		os.Exit(1)
 	}
 }

@@ -56,9 +56,11 @@ func SymptomExecEnabled() bool {
 	}
 }
 
-// resolveSymptom adjudicates a `symptom:<ref>` claim: does the fix at <ref> carry a witness that
+// ResolveSymptom adjudicates a `symptom:<ref>` claim: does the fix at <ref> carry a witness that
 // the symptom is gone? See the package doc for the two-rung contract.
-func (r *Resolver) resolveSymptom(ctx context.Context, ref string) abi.WitnessOutcome {
+// When mandatoryExec is true, it forces the red-then-green execution check even when
+// FAK_WITNESS_SYMPTOM is not set in the environment.
+func (r *Resolver) ResolveSymptom(ctx context.Context, ref string, mandatoryExec bool) abi.WitnessOutcome {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return abi.WitnessAbstain
@@ -78,11 +80,15 @@ func (r *Resolver) resolveSymptom(ctx context.Context, ref string) abi.WitnessOu
 		return abi.WitnessRefuted // a fix with no symptom witness — the whole point
 	}
 
-	// EXECUTION rung is opt-in; without it the structural pass is as far as we honestly go.
-	if !SymptomExecEnabled() {
+	// EXECUTION rung is opt-in via env or mandatoryExec; without it the structural pass is as far as we honestly go.
+	if !mandatoryExec && !SymptomExecEnabled() {
 		return abi.WitnessAbstain
 	}
 	return r.resolveSymptomExec(ctx, ref, tests)
+}
+
+func (r *Resolver) resolveSymptom(ctx context.Context, ref string) abi.WitnessOutcome {
+	return r.ResolveSymptom(ctx, ref, false)
 }
 
 // changedTestFiles extracts the repo-relative `_test.go` paths from `git show --name-only`
