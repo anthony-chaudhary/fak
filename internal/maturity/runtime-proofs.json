@@ -128,11 +128,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/amoprofpub",
-            "lane": "amoprofpub"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/answershape",
             "lane": "answershape"
         },
