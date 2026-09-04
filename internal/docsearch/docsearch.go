@@ -1,6 +1,10 @@
 // Package docsearch loads and searches the repository's curated documentation map.
 // It is deliberately independent of devindex so runtime discovery can use the
 // documentation surface without importing repository-development tooling.
+//
+// Invariant: doc search ranking is fail-closed and deterministic across all catalog queries.
+// Precondition: empty or whitespace queries return nil without modifying catalog state.
+// Guard: missing documentation sources degrade safely to an empty catalog.
 package docsearch
 
 import (
