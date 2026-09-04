@@ -1,8 +1,15 @@
 package hooks
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // gate_commitmsg.go — the COMMIT_MSG gate, a port of tools/check_commit_msg.py. It nudges the
@@ -87,15 +94,68 @@ var subjectRE = regexp.MustCompile(`^([a-z]+)(\([^)]+\))?(!)?:\s+(.+)$`)
 
 var exemptSubjectPrefixes = []string{"Merge ", "Revert ", "fixup! ", "squash! ", "amend! "}
 
+// isGitDirectory reports whether root contains a .git directory or file (worktree pointer).
+func isGitDirectory(root string) bool {
+	if root == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(root, ".git"))
+	return err == nil
+}
+
+// HasMultipleParentsRef checks whether a commit has >= 2 topological parents (#10882).
+// When ref is empty (e.g. at commit-msg hook time during an in-flight commit), it checks
+// if MERGE_HEAD exists and is valid, or if HEAD has >= 2 parents. When ref is provided,
+// it checks if ref^2 exists.
+func HasMultipleParentsRef(root string, ref string) bool {
+	if root == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if ref != "" {
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", ref+"^2")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Run() == nil
+	}
+
+	// 1. In-flight merge: MERGE_HEAD exists
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	if err := cmd.Run(); err == nil {
+		return true
+	}
+
+	// 2. Existing commit at HEAD has >= 2 parents
+	cmd = exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "HEAD^2")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Run() == nil
+}
+
 // CommitMsgVerdict reports whether a commit message's subject is witness-gradeable, and if not,
 // why. It mirrors check_commit_msg.py verdict() (L61-77).
 func CommitMsgVerdict(msg string) (ok bool, why string) {
+	return CommitMsgVerdictWithGit(msg, "")
+}
+
+// CommitMsgVerdictWithGit reports whether a commit message's subject is witness-gradeable,
+// taking into account repository git topology for Merge subjects (#10882).
+// When subject starts with "Merge ", it verifies that >= 2 topological parents exist.
+// A single-parent pseudo-merge is rejected with MERGE_WITNESS_FAIL.
+func CommitMsgVerdictWithGit(msg string, root string) (ok bool, why string) {
 	subject := firstSubjectLine(msg)
 	if subject == "" {
 		return false, "empty subject"
 	}
+	if strings.HasPrefix(subject, "Merge ") {
+		if root != "" && isGitDirectory(root) && !HasMultipleParentsRef(root, "") {
+			return false, "MERGE_WITNESS_FAIL: commit subject starts with 'Merge ' but has fewer than 2 topological parents; pseudo-merges cannot bypass Conventional Commits and DCO"
+		}
+		return true, ""
+	}
 	for _, p := range exemptSubjectPrefixes {
-		if strings.HasPrefix(subject, p) {
+		if p != "Merge " && strings.HasPrefix(subject, p) {
 			return true, ""
 		}
 	}

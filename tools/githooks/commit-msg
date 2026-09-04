@@ -88,7 +88,7 @@ chk="$root/tools/check_commit_msg.py"
 
 set -- "$PY_A" $PY_B
 
-out="$("$@" "$chk" --file "$msgfile" 2>&1)"; status=$?
+out="$("$@" "$chk" --file "$msgfile" --root "$root" 2>&1)"; status=$?
 [ "$status" -eq 0 ] && exit 0
 # status 2 (could-not-read) -> fail open, never wedge a commit over a style check
 [ "$status" -ne 1 ] && exit 0

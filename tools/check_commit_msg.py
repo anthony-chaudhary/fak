@@ -21,7 +21,9 @@ reports the verdict via exit code.
 """
 from __future__ import annotations
 import argparse
+import os
 import re
+import subprocess
 import sys
 
 TYPES = ("feat", "fix", "docs", "refactor", "perf", "test", "chore", "build",
@@ -85,6 +87,27 @@ SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")
 
 
+def check_is_merge_parent(root: str | None = None) -> bool:
+    cmd = ["git"]
+    if root:
+        cmd.extend(["-C", root])
+    try:
+        r = subprocess.run(cmd + ["rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(cmd + ["rev-parse", "-q", "--verify", "HEAD^2"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def first_line(text: str) -> str:
     for ln in text.splitlines():
         s = ln.strip()
@@ -93,10 +116,16 @@ def first_line(text: str) -> str:
     return ""
 
 
-def verdict(subject: str):
+def verdict(subject: str, root: str | None = None):
     """Return None if ok, else a reason string."""
     if not subject:
         return "empty subject"
+    if subject.startswith("Merge "):
+        if root is not None or os.path.exists(".git"):
+            if not check_is_merge_parent(root):
+                return ("MERGE_WITNESS_FAIL: commit subject starts with 'Merge ' but has fewer than "
+                        "2 topological parents; pseudo-merges cannot bypass Conventional Commits and DCO")
+        return None
     if subject.startswith(EXEMPT_PREFIXES):
         return None
     m = SUBJECT_RE.match(subject)
@@ -117,6 +146,7 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--file", help="path to the commit-message file")
     g.add_argument("--message", help="subject string (for testing)")
+    ap.add_argument("--root", default=None, help="repo root (for verifying merge parent count)")
     a = ap.parse_args()
 
     if a.message is not None:
@@ -129,7 +159,7 @@ def main() -> int:
             print(f"COMMIT_MSG (warn): cannot read {a.file}: {e}", file=sys.stderr)
             return 2
 
-    why = verdict(subject)
+    why = verdict(subject, root=a.root)
     if why is None:
         print("commit-msg: gradeable.")
         return 0

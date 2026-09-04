@@ -85,7 +85,10 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 	exempt := r.StampKind == "release" || bookkeepingRE.MatchString(r.Subject)
 
 	// 1. Witness-gradeability (the existing commit-msg gate, reused not duplicated).
-	ok, why := CommitMsgVerdict(message)
+	ok, why := CommitMsgVerdictWithGit(message, root)
+	if strings.HasPrefix(r.Subject, "Merge ") && !ok {
+		exempt = false
+	}
 	if exempt {
 		r.Gradeable = true
 	} else {
