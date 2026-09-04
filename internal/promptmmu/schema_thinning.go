@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -190,6 +191,176 @@ func FaultInColdTools(query string, catalog map[string]string, activeSet map[str
 		if strings.Contains(lowerName, q) || strings.Contains(strings.ToLower(desc), q) {
 			newlyFaulted = append(newlyFaulted, name)
 			activeSet[lowerName] = true
+		}
+	}
+
+	return newlyFaulted
+}
+
+// FaultedToolRecord tracks turn lifecycle and invocation history for a cold tool
+// faulted into the prompt context.
+type FaultedToolRecord struct {
+	Name            string `json:"name"`
+	FaultedTurn     int    `json:"faulted_turn"`
+	LastInvokedTurn int    `json:"last_invoked_turn"`
+}
+
+// FaultedToolTracker manages turn-decay and LRU aging for faulted cold tool schemas.
+type FaultedToolTracker struct {
+	MaxIdleTurns int                           `json:"max_idle_turns"` // default 5 if <= 0
+	records      map[string]*FaultedToolRecord // lowercased tool name -> record
+}
+
+// NewFaultedToolTracker initializes a FaultedToolTracker with the specified max idle turns.
+// If maxIdleTurns <= 0, defaults to 5.
+func NewFaultedToolTracker(maxIdleTurns int) *FaultedToolTracker {
+	if maxIdleTurns <= 0 {
+		maxIdleTurns = 5
+	}
+	return &FaultedToolTracker{
+		MaxIdleTurns: maxIdleTurns,
+		records:      make(map[string]*FaultedToolRecord),
+	}
+}
+
+// RecordFault registers or updates a faulted tool at currentTurn.
+// Sets FaultedTurn to currentTurn. If LastInvokedTurn is 0, sets LastInvokedTurn to currentTurn.
+func (t *FaultedToolTracker) RecordFault(toolName string, currentTurn int) {
+	if t == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(toolName)
+	if trimmed == "" {
+		return
+	}
+	if t.records == nil {
+		t.records = make(map[string]*FaultedToolRecord)
+	}
+	lower := strings.ToLower(trimmed)
+	rec, exists := t.records[lower]
+	if !exists {
+		t.records[lower] = &FaultedToolRecord{
+			Name:            trimmed,
+			FaultedTurn:     currentTurn,
+			LastInvokedTurn: currentTurn,
+		}
+		return
+	}
+	rec.FaultedTurn = currentTurn
+	if rec.LastInvokedTurn == 0 {
+		rec.LastInvokedTurn = currentTurn
+	}
+	if rec.Name == "" {
+		rec.Name = trimmed
+	}
+}
+
+// RecordInvocation updates LastInvokedTurn to currentTurn if tool is tracked.
+func (t *FaultedToolTracker) RecordInvocation(toolName string, currentTurn int) {
+	if t == nil || len(t.records) == 0 {
+		return
+	}
+	lower := strings.ToLower(strings.TrimSpace(toolName))
+	if rec, ok := t.records[lower]; ok {
+		rec.LastInvokedTurn = currentTurn
+	}
+}
+
+// PruneColdTools computes which tools have been idle for >= MaxIdleTurns turns
+// (idle turns = currentTurn - max(FaultedTurn, LastInvokedTurn)). Evicts them from
+// records and returns the pruned tool names in deterministic sorted order.
+func (t *FaultedToolTracker) PruneColdTools(currentTurn int) []string {
+	if t == nil || len(t.records) == 0 {
+		return nil
+	}
+	maxIdle := t.MaxIdleTurns
+	if maxIdle <= 0 {
+		maxIdle = 5
+	}
+
+	var pruned []string
+	for key, rec := range t.records {
+		lastActive := rec.FaultedTurn
+		if rec.LastInvokedTurn > lastActive {
+			lastActive = rec.LastInvokedTurn
+		}
+		idleTurns := currentTurn - lastActive
+		if idleTurns >= maxIdle {
+			prunedName := rec.Name
+			if prunedName == "" {
+				prunedName = key
+			}
+			pruned = append(pruned, prunedName)
+			delete(t.records, key)
+		}
+	}
+	sort.Strings(pruned)
+	return pruned
+}
+
+// ActiveFaultedTools returns the currently active faulted tool names, sorted
+// alphabetically for deterministic prompt caching.
+func (t *FaultedToolTracker) ActiveFaultedTools() []string {
+	if t == nil || len(t.records) == 0 {
+		return []string{}
+	}
+	active := make([]string, 0, len(t.records))
+	for _, rec := range t.records {
+		if rec.Name != "" {
+			active = append(active, rec.Name)
+		}
+	}
+	sort.Strings(active)
+	return active
+}
+
+// IsActive returns true if the tool is currently tracked.
+func (t *FaultedToolTracker) IsActive(toolName string) bool {
+	if t == nil || len(t.records) == 0 {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(toolName))
+	_, ok := t.records[lower]
+	return ok
+}
+
+// ActiveSet returns a map of lowercased active faulted tool names.
+func (t *FaultedToolTracker) ActiveSet() map[string]bool {
+	set := make(map[string]bool)
+	if t == nil {
+		return set
+	}
+	for k := range t.records {
+		set[k] = true
+	}
+	return set
+}
+
+// FaultInColdToolsWithTracker searches catalog for tools matching query, records
+// fault in tracker for each new tool, and returns newly faulted tool names.
+func FaultInColdToolsWithTracker(query string, catalog map[string]string, tracker *FaultedToolTracker, currentTurn int) []string {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" || tracker == nil {
+		return nil
+	}
+
+	keys := make([]string, 0, len(catalog))
+	for name := range catalog {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+
+	var newlyFaulted []string
+	for _, name := range keys {
+		lowerName := strings.ToLower(name)
+		if tracker.IsActive(lowerName) {
+			continue
+		}
+
+		desc := catalog[name]
+		if strings.Contains(lowerName, q) || strings.Contains(strings.ToLower(desc), q) {
+			tracker.RecordFault(name, currentTurn)
+			newlyFaulted = append(newlyFaulted, name)
 		}
 	}
 
