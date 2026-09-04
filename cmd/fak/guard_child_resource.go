@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -90,6 +91,7 @@ type guardResourceConfig struct {
 	MaxMemoryMB  uint64
 	PollInterval time.Duration
 	ReceiptPath  string
+	UsagePath    string
 }
 
 var guardResourceConfigured guardResourceConfig
@@ -141,8 +143,15 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	headroom := procguard.EvaluateSystemCommitHeadroom(s, p.MinSystemHeadroom)
 	d.HeadroomBytes = headroom.ObservedBytes
 	if len(s.Processes) > 0 {
-		sort.Slice(s.Processes, func(i, j int) bool { return s.Processes[i].Bytes > s.Processes[j].Bytes })
-		d.Offender = s.Processes[0]
+		procs := make([]procguard.MemoryProcess, len(s.Processes))
+		copy(procs, s.Processes)
+		sort.Slice(procs, func(i, j int) bool {
+			if procs[i].Bytes == procs[j].Bytes {
+				return procs[i].PID < procs[j].PID
+			}
+			return procs[i].Bytes > procs[j].Bytes
+		})
+		d.Offender = procs[0]
 	}
 	if p.MaxTreeBytes > 0 && s.TreeBytes >= p.MaxTreeBytes {
 		d.Stop = true
@@ -190,9 +199,28 @@ func guardResourceReceiptPath() string {
 	return filepath.Join(os.TempDir(), "fak", "guard", "child-resource.jsonl")
 }
 
+func guardChildResourceUsagePath() string {
+	if p := strings.TrimSpace(os.Getenv("FAK_CHILD_RESOURCE_USAGE_PATH")); p != "" {
+		return p
+	}
+	if p := strings.TrimSpace(guardResourceConfigured.UsagePath); p != "" {
+		return p
+	}
+	if info, err := os.Stat(".dos"); err == nil && info.IsDir() {
+		return filepath.Join(".dos", "child-resource-usage.jsonl")
+	}
+	if base, err := os.UserConfigDir(); err == nil && strings.TrimSpace(base) != "" {
+		return filepath.Join(base, "fak", "guard", "child-resource-usage.jsonl")
+	}
+	return filepath.Join(os.TempDir(), "fak", "guard", "child-resource-usage.jsonl")
+}
+
 // foldChildResourceReceiptsByWeek reads the child-resource containment ledger and
 // surfaces invocation counts grouped by ISO week (e.g. "2026-W35").
 func foldChildResourceReceiptsByWeek(path string) (map[string]int, error) {
+	if strings.TrimSpace(path) == "" {
+		path = guardChildResourceUsagePath()
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -228,6 +256,61 @@ func foldChildResourceReceiptsByWeek(path string) (map[string]int, error) {
 		return nil, fmt.Errorf("scan child resource ledger: %w", err)
 	}
 	return counts, nil
+}
+
+type guardChildResourceUsageWeek struct {
+	Week        string `json:"week"`
+	Invocations int    `json:"invocations"`
+}
+
+type guardChildResourceUsageSummary struct {
+	Schema string                        `json:"schema"`
+	Weeks  []guardChildResourceUsageWeek `json:"weeks"`
+}
+
+func runChildResourceUsage(stdout, stderr io.Writer, path string, jsonOut bool) int {
+	counts, err := foldChildResourceReceiptsByWeek(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak usage: child resource ledger: %v\n", err)
+		return 1
+	}
+	if jsonOut {
+		weeks := make([]string, 0, len(counts))
+		for w := range counts {
+			weeks = append(weeks, w)
+		}
+		sort.Strings(weeks)
+		summaryWeeks := make([]guardChildResourceUsageWeek, 0, len(weeks))
+		for _, w := range weeks {
+			summaryWeeks = append(summaryWeeks, guardChildResourceUsageWeek{
+				Week:        w,
+				Invocations: counts[w],
+			})
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(guardChildResourceUsageSummary{
+			Schema: "fak-guard-child-resource-usage-summary/1",
+			Weeks:  summaryWeeks,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak usage: child resource ledger: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if len(counts) == 0 {
+		fmt.Fprintln(stdout, "child resource usage: no recorded invocations")
+		return 0
+	}
+	weeks := make([]string, 0, len(counts))
+	for w := range counts {
+		weeks = append(weeks, w)
+	}
+	sort.Strings(weeks)
+	for _, w := range weeks {
+		fmt.Fprintf(stdout, "%s invocations=%d\n", w, counts[w])
+	}
+	return 0
 }
 
 func guardResourceReason(d guardResourceDecision) string {
@@ -275,6 +358,7 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 }
 
 func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
+	recordGuardChildResourceUsage(traceID, agent, rootPID, policy)
 	out := make(chan guardChildWaitEvent, 1)
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
@@ -389,6 +473,50 @@ func newGuardResourceActivationID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+
+func newGuardResourceInvocationReceipt(traceID, agent string, rootPID int, policy guardResourcePolicy) guardResourceReceipt {
+	identity := guardResourceBuildIdentity()
+	metric := policy.Metric
+	if metric == "" {
+		metric = procguard.MemoryMetricCommit
+	}
+	receipt := guardResourceReceipt{
+		Schema:             "fak.guard.child-resource.v1",
+		At:                 time.Now().UTC().Format(time.RFC3339Nano),
+		TraceID:            traceID,
+		Agent:              agent,
+		RootPID:            rootPID,
+		MemoryMetric:       string(metric),
+		ThresholdBytes:     policy.MaxTreeBytes,
+		HeadroomBytes:      policy.MinSystemHeadroom,
+		Reason:             "CHILD_RESOURCE_CONTAINMENT_ACTIVE",
+		Action:             "containment_active",
+		DescendantsSurvive: true,
+		BuildCommit:        identity.Commit,
+		BuildModule:        identity.ModuleVersion,
+		BuildDirty:         identity.Dirty,
+		ActivationID:       guardResourceActivationID,
+	}
+	if receipt.BuildModule == "" {
+		receipt.BuildModule = "cmd/fak"
+	}
+	if metric == procguard.MemoryMetricRSS {
+		receipt.TreeRSSBytes = uint64Pointer(0)
+	} else {
+		receipt.TreeCommitBytes = uint64Pointer(0)
+	}
+	return receipt
+}
+
+func recordGuardChildResourceUsage(traceID, agent string, rootPID int, policy guardResourcePolicy) {
+	path := guardChildResourceUsagePath()
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	receipt := newGuardResourceInvocationReceipt(traceID, agent, rootPID, policy)
+	_ = appendGuardResourceReceipt(path, receipt)
+}
+
 func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResourceDecision) guardResourceReceipt {
 	identity := guardResourceBuildIdentity()
 	action := "reap_tree"
