@@ -26,19 +26,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
-// FieldType is a minimal JSON Schema scalar type.
+// FieldType defines the canonical scalar or composite JSON-Schema type identifier
+// recognized by the preflight rung-ladder validation engine.
 type FieldType string
 
 const (
+	// TypeString identifies JSON string scalar payload values.
 	TypeString FieldType = "string"
+	// TypeNumber identifies JSON numeric (float64 or integer) scalar payload values.
 	TypeNumber FieldType = "number"
-	TypeBool   FieldType = "boolean"
+	// TypeBool identifies JSON boolean scalar payload values.
+	TypeBool FieldType = "boolean"
+	// TypeObject identifies JSON key-value map or object container values.
 	TypeObject FieldType = "object"
-	TypeArray  FieldType = "array"
-	TypeAny    FieldType = ""
+	// TypeArray identifies JSON sequence or array container values.
+	TypeArray FieldType = "array"
+	// TypeAny indicates an unconstrained payload value where any valid JSON type is permitted.
+	TypeAny FieldType = ""
 )
 
-// Schema is a tiny JSON-Schema subset: required keys + their expected types.
+// Schema specifies a lightweight JSON Schema contract defining required argument
+// keys along with their expected field types for rung-1 validation.
 type Schema struct {
 	Required map[string]FieldType
 }
@@ -55,7 +63,8 @@ type Schema struct {
 // (the unit-50 harvest), so eviction shortens the harvest, never a verdict.
 const DefaultMaxNegatives = 8192
 
-// Ladder is the rung ladder. Construct with New; Default is registered.
+// Ladder implements the multi-rung pre-flight validation pipeline, evaluating tool
+// invocations cheapest-first to intercept invalid arguments before model turns fire.
 type Ladder struct {
 	mu        sync.RWMutex
 	schemas   map[string]Schema
@@ -67,14 +76,15 @@ type Ladder struct {
 	evicted   int64    // negatives dropped by the maxNeg bound (observability)
 }
 
-// New builds a ladder with the standard hard-negative-ledger bound
-// (DefaultMaxNegatives).
+// New constructs a preflight rung Ladder configured with the default maximum resident
+// hard-negative capacity (DefaultMaxNegatives) to prevent unbounded memory growth.
 func New() *Ladder { return NewWithLimit(DefaultMaxNegatives) }
 
-// NewWithLimit builds a ladder whose hard-negative ledger holds at most maxNeg
-// resident rows (oldest dropped first). A non-positive maxNeg falls back to
-// DefaultMaxNegatives. This is the seam the leak-regression test uses to exercise
-// eviction with a small bound.
+// Invariant: Resident capacity limit maxNeg must be strictly positive; non-positive parameters fall back to DefaultMaxNegatives.
+// Contract: The allocated ladder instance must initialize an empty schemas map and retain its configured capacity bound.
+// NewWithLimit constructs a preflight Ladder enforcing an explicit resident capacity
+// bound on the hard-negative ledger, falling back to DefaultMaxNegatives if non-positive.
+// This is the seam the leak-regression test uses to exercise eviction with a small bound.
 func NewWithLimit(maxNeg int) *Ladder {
 	if maxNeg < 1 {
 		maxNeg = DefaultMaxNegatives
@@ -82,19 +92,24 @@ func NewWithLimit(maxNeg int) *Ladder {
 	return &Ladder{schemas: map[string]Schema{}, maxNeg: maxNeg}
 }
 
-// SetSchema installs a schema for a tool (rung-1 input).
+// Contract: Updating tool schemas requires acquiring the ladder write lock to prevent concurrent adjudication race conditions.
+// Expectation: Registered schemas must only declare supported FieldType definitions to ensure deterministic rung-1 validation.
+// SetSchema registers the expected argument validation schema for a specific named tool,
+// establishing the rung-1 schema validation contract for subsequent calls.
 func (l *Ladder) SetSchema(tool string, s Schema) {
 	l.mu.Lock()
 	l.schemas[tool] = s
 	l.mu.Unlock()
 }
 
-// Schemas returns a deep copy of the installed per-tool schemas. The static tool
-// linter (internal/toollint) reads these to check what contract the kernel actually
-// ENFORCES at rung-1 — versus the contract a tool merely advertises to the model —
-// and to catch a Required field whose declared type falls outside the supported
-// subset (typeOK would silently treat it as TypeAny and never validate it). The
-// returned maps are copies; mutating them does not affect the ladder.
+// Contract: Schema retrieval must return deep copies of registered schemas to guarantee caller isolation from internal state.
+// Schemas returns a deep defensive copy of all currently installed tool schemas,
+// ensuring caller inspection or mutation cannot alter the internal adjudication state.
+// The static tool linter (internal/toollint) reads these to check what contract the kernel
+// actually ENFORCES at rung-1 — versus the contract a tool merely advertises to the model —
+// and to catch a Required field whose declared type falls outside the supported subset (typeOK
+// would silently treat it as TypeAny and never validate it). The returned maps are copies;
+// mutating them does not affect the ladder.
 func (l *Ladder) Schemas() map[string]Schema {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -109,10 +124,16 @@ func (l *Ladder) Schemas() map[string]Schema {
 	return out
 }
 
-// Caps reports the ladder's advertised capabilities; the rung ladder advertises none.
+// Caps returns the slice of capabilities advertised by this adjudicator; the preflight
+// ladder operates as a pure structural filter and advertises no extra capabilities.
 func (l *Ladder) Caps() []abi.Capability { return nil }
 
-// Adjudicate runs the rungs cheapest-first.
+// Contract: Rung execution order must remain strictly monotonic from cheapest to most expensive: rung 0 (syntax) before rung 1 (schema).
+// Invariant: Short-circuiting on any failed rung guarantees that a malformed payload never escalates to later rungs or burns compute.
+// Fail-closed guard: Unparseable non-empty payload arguments must trigger an immediate VerdictDeny with ReasonMalformed.
+// Precondition: Invocations must provide a non-nil ToolCall reference; empty arguments are treated as valid nil-body payloads.
+// Adjudicate evaluates tool invocation arguments through ascending rungs (syntax parse
+// followed by schema conformance) to intercept malformed calls before monitor execution.
 func (l *Ladder) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	l.mu.Lock()
 	l.total++
@@ -177,6 +198,9 @@ func (l *Ladder) caughtAt(c *abi.ToolCall, passed, failed int, r abi.ReasonCode)
 	return abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "preflight"}
 }
 
+// Invariant: Resident ledger count (len(negatives) - negHead) must never exceed maxNeg after eviction completes.
+// Contract: Evicted negative entries must be nil-cleared immediately so garbage collection reclaims dropped row memory.
+// Assumption: Callers of evictExcessLocked must hold the ladder write lock (l.mu) throughout eviction and slice compaction.
 // evictExcessLocked drops the oldest negatives (FIFO) until the resident count
 // (len(negatives) - negHead) is within maxNeg, niling each dropped slot so the
 // row's bytes are released for GC immediately. The consumed prefix is compacted
@@ -201,7 +225,8 @@ func (l *Ladder) evictExcessLocked() {
 	}
 }
 
-// CatchRate returns caught/total (unit 51).
+// CatchRate calculates and returns the lifetime telemetry metrics: total calls evaluated,
+// malformed calls caught by rungs, and the computed catch-rate ratio (unit 51).
 func (l *Ladder) CatchRate() (caught, total int64, rate float64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -211,29 +236,25 @@ func (l *Ladder) CatchRate() (caught, total int64, rate float64) {
 	return l.caught, l.total, rate
 }
 
-// Negatives returns the labeled hard-negative JSONL rows still resident in the
-// bounded ledger (the freshest ≤ maxNeg, in FIFO order), as a defensive copy so a
-// caller can never mutate the live ledger. Semantics are unchanged from the
-// pre-bound version except that rows evicted by the maxNeg cap are no longer
-// present (use Evicted for the lifetime drop count).
+// Negatives retrieves a defensive copy of resident labeled hard-negative JSONL rows,
+// preserving FIFO insertion order up to the configured resident ledger capacity limit.
 func (l *Ladder) Negatives() [][]byte {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return append([][]byte(nil), l.negatives[l.negHead:]...)
 }
 
-// NegativesLen reports the current number of resident hard-negative rows in the
-// bounded ledger (≤ maxNeg). Evicted reports how many were dropped by the bound
-// over the ladder's lifetime. Together they make the leak fix observable:
-// NegativesLen plateaus at the cap while Evicted climbs, instead of the resident
-// ledger growing without bound.
+// NegativesLen returns the count of resident hard-negative rows currently held in
+// the bounded memory buffer (always bounded by maxNeg). Evicted reports how many
+// were dropped by the bound over the ladder's lifetime.
 func (l *Ladder) NegativesLen() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return len(l.negatives) - l.negHead
 }
 
-// Evicted reports the lifetime count of negatives dropped by the maxNeg bound.
+// Evicted reports the cumulative lifetime count of hard-negative sample rows dropped
+// when ledger occupancy exceeded the resident maximum capacity threshold.
 func (l *Ladder) Evicted() int64 {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -267,7 +288,8 @@ func callHash(c *abi.ToolCall) string {
 	return c.Tool + ":" + c.Args.Digest
 }
 
-// Default is the registered ladder.
+// Default provides the globally registered preflight Ladder instance wired into the
+// kernel adjudication sequence at priority rank 10.
 var Default = New()
 
 func init() {
