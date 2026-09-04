@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/archcheck"
+	"github.com/anthony-chaudhary/fak/internal/archfitness"
+	"github.com/anthony-chaudhary/fak/internal/archrank"
 )
 
 func cmdArch(argv []string) {
@@ -21,26 +23,34 @@ func runArch(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "check":
 		return runArchCheck(stdout, stderr, argv[1:])
+	case "fitness":
+		return runArchFitness(stdout, stderr, argv[1:])
+	case "rank":
+		return runArchRank(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		archUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak arch: unknown subcommand %q (want check)\n", argv[0])
+		fmt.Fprintf(stderr, "fak arch: unknown subcommand %q (want check, fitness, rank)\n", argv[0])
 		archUsage(stderr)
 		return 2
 	}
 }
 
 func archUsage(w io.Writer) {
-	fmt.Fprint(w, `fak arch — shift-left architecture import DAG and tier validation
+	fmt.Fprint(w, `fak arch — shift-left architecture import DAG, fitness, and tier validation
 
 Usage:
   fak arch check [--package <pkg>] [--mine] [--json]
+  fak arch fitness [--json]
+  fak arch rank [--file <path>] [--json]
 
 Examples:
   fak arch check --package internal/agentquery
   fak arch check --mine
   fak arch check --json
+  fak arch fitness --json
+  fak arch rank --file candidates.json
 `)
 }
 
@@ -93,6 +103,58 @@ func runArchCheck(stdout, stderr io.Writer, argv []string) int {
 
 	if !res.OK {
 		return 1
+	}
+	return 0
+}
+
+func runArchFitness(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("arch fitness", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit result as structured JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	report := archfitness.Analyze(archfitness.Input{})
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, report); err != nil {
+			fmt.Fprintf(stderr, "fak arch fitness: encode json: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "Architecture Fitness: Score=%d HardDebt=%d\n", report.Score, report.HardDebt)
+	}
+	return 0
+}
+
+func runArchRank(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("arch rank", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fileFlag := fs.String("file", "", "candidates JSON file to rank")
+	asJSON := fs.Bool("json", false, "emit result as structured JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *fileFlag == "" {
+		fmt.Fprintf(stdout, "fak arch rank: candidates evaluation ready (quality per active byte)\n")
+		return 0
+	}
+	dataset, err := archrank.LoadFile(*fileFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak arch rank: %v\n", err)
+		return 1
+	}
+	ranked, err := archrank.Rank(*dataset)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak arch rank: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, ranked); err != nil {
+			fmt.Fprintf(stderr, "fak arch rank: encode json: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "Ranked %d architecture group(s) (%d unranked)\n", len(ranked.Groups), len(ranked.Unranked))
 	}
 	return 0
 }

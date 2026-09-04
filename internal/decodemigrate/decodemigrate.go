@@ -24,6 +24,7 @@ import (
 // Invariant: Migration steps must preserve token sequence identity and KV cache shape semantics across all supported version hops.
 // Guard: fail-closed state verification verifies checksums before and after every migration step; any mismatch aborts and restores prior state.
 
+// Decode migration error sentinels returned during validation, routing, and execution.
 var (
 	// ErrIncompatibleFormat indicates that source and destination formats cannot be bridged.
 	ErrIncompatibleFormat = errors.New("decodemigrate: incompatible format version")
@@ -41,6 +42,7 @@ var (
 // FormatVersion represents a supported encoding schema for model decode states.
 type FormatVersion uint32
 
+// FormatVersion identifiers defining supported decode state layouts.
 const (
 	// VersionUnknown denotes an invalid or unspecified format version.
 	VersionUnknown FormatVersion = 0
