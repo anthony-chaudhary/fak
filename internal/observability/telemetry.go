@@ -9,34 +9,45 @@ import (
 	"sort"
 )
 
-// TelemetryAlarmType identifies the telemetry alarm category.
+// TelemetryAlarmType identifies the specific category of telemetry anomaly being evaluated.
 type TelemetryAlarmType string
 
 const (
+	// AlarmPromptDoubling signals that prompt token volume has doubled the baseline or breached hard limits.
 	AlarmPromptDoubling TelemetryAlarmType = "PROMPT_DOUBLING"
-	AlarmLatencySpike   TelemetryAlarmType = "LATENCY_SPIKE"
-	AlarmDatabaseBloat  TelemetryAlarmType = "DATABASE_BLOAT"
+	// AlarmLatencySpike signals that turn execution latency exceeded threshold duration or median multipliers.
+	AlarmLatencySpike TelemetryAlarmType = "LATENCY_SPIKE"
+	// AlarmDatabaseBloat signals that SQLite storage footprint or freelist fragmentation exceeded acceptable bounds.
+	AlarmDatabaseBloat TelemetryAlarmType = "DATABASE_BLOAT"
 )
 
-// TelemetryAlarmSeverity represents the severity level of an alarm.
+// TelemetryAlarmSeverity represents the operational criticality classification of an alarm.
 type TelemetryAlarmSeverity string
 
 const (
-	SeverityOK   TelemetryAlarmSeverity = "OK"
+	// SeverityOK indicates metrics remain within safe operating thresholds and nominal bounds.
+	SeverityOK TelemetryAlarmSeverity = "OK"
+	// SeverityWarn indicates an anomaly was detected requiring operator triage or mitigation.
 	SeverityWarn TelemetryAlarmSeverity = "WARN"
 )
 
 // Default threshold constants for telemetry alarms (#11147).
 const (
-	DefaultHardPromptCapTokens            = 30000                  // >30k tokens
-	DefaultPromptDoublingFactor           = 2.0                    // >2x baseline
-	DefaultLatencySpikeThresholdSec       = 15.0                   // >15s turn latency
-	DefaultLatencySpikeMultiplier         = 2.5                    // >2.5x median latency
-	DefaultMaxDatabaseBytes         int64 = 1 * 1024 * 1024 * 1024 // >1GB DB bloat
-	DefaultFreelistRatioThreshold         = 0.25                   // >25% large freelist
+	// DefaultHardPromptCapTokens defines the absolute threshold limit for prompt tokens per turn.
+	DefaultHardPromptCapTokens = 30000 // >30k tokens
+	// DefaultPromptDoublingFactor defines the maximum allowed ratio relative to baseline prompt tokens.
+	DefaultPromptDoublingFactor = 2.0 // >2x baseline
+	// DefaultLatencySpikeThresholdSec defines the maximum allowed turn latency duration before triggering an alarm.
+	DefaultLatencySpikeThresholdSec = 15.0 // >15s turn latency
+	// DefaultLatencySpikeMultiplier defines the multiplier above median latency that classifies a turn as a spike.
+	DefaultLatencySpikeMultiplier = 2.5 // >2.5x median latency
+	// DefaultMaxDatabaseBytes defines the maximum permissible SQLite database file size before bloat alarms fire.
+	DefaultMaxDatabaseBytes int64 = 1 * 1024 * 1024 * 1024 // >1GB DB bloat
+	// DefaultFreelistRatioThreshold defines the maximum acceptable proportion of freelist pages relative to total pages.
+	DefaultFreelistRatioThreshold = 0.25 // >25% large freelist
 )
 
-// TelemetryAlarm captures the evaluation result of a single telemetry alarm check.
+// TelemetryAlarm captures the evaluation result and diagnostic findings of a single telemetry check.
 type TelemetryAlarm struct {
 	Type      TelemetryAlarmType     `json:"type"`
 	Severity  TelemetryAlarmSeverity `json:"severity"`
@@ -45,7 +56,7 @@ type TelemetryAlarm struct {
 	Detail    string                 `json:"detail,omitempty"`
 }
 
-// TelemetryHealthReport folds prompt, latency, and database telemetry checks.
+// TelemetryHealthReport aggregates multi-dimensional prompt, latency, and database telemetry evaluation results.
 type TelemetryHealthReport struct {
 	OK             bool             `json:"ok"`
 	PromptAlarm    TelemetryAlarm   `json:"prompt_alarm"`
@@ -65,7 +76,7 @@ type TelemetryHealthReport struct {
 	Findings       int              `json:"findings"`
 }
 
-// CheckPromptTokenAlarm checks for prompt doubling (>2x baseline) or hard cap breaches (>30k tokens).
+// CheckPromptTokenAlarm evaluates turn prompt tokens against doubling factor and hard capacity thresholds.
 func CheckPromptTokenAlarm(turnTokens int, baselineTokens int) TelemetryAlarm {
 	triggered := turnTokens > DefaultHardPromptCapTokens || (baselineTokens > 0 && float64(turnTokens) > DefaultPromptDoublingFactor*float64(baselineTokens))
 	if triggered {
@@ -94,7 +105,7 @@ func CheckPromptTokenAlarm(turnTokens int, baselineTokens int) TelemetryAlarm {
 	}
 }
 
-// CheckLatencyAlarm checks for turn latency spikes (>15s or >2.5x median).
+// CheckLatencyAlarm evaluates turn latency against duration caps and median multipliers.
 func CheckLatencyAlarm(currentLatencySec float64, medianLatencySec float64, consecutiveSpikes int) TelemetryAlarm {
 	triggered := currentLatencySec > DefaultLatencySpikeThresholdSec || (medianLatencySec > 0 && currentLatencySec > DefaultLatencySpikeMultiplier*medianLatencySec)
 	if triggered {
@@ -123,7 +134,7 @@ func CheckLatencyAlarm(currentLatencySec float64, medianLatencySec float64, cons
 	}
 }
 
-// CheckDatabaseBloatAlarm checks for database size bloat (>1GB) or excessive freelist fragmentation (>25%).
+// CheckDatabaseBloatAlarm evaluates SQLite storage footprint and freelist page fragmentation.
 func CheckDatabaseBloatAlarm(dbBytes int64, freelistPages int64, pageCount int64, pageSize int64) TelemetryAlarm {
 	freelistRatio := 0.0
 	if pageCount > 0 {
@@ -203,6 +214,18 @@ func InspectSQLiteFileHeader(dbPath string) (dbBytes, freelistPages, pageCount, 
 	pageCount = dbBytes / pageSize
 
 	return dbBytes, freelistPages, pageCount, pageSize, nil
+}
+
+// CheckLatencySpikeAlarm evaluates turn latency against spike thresholds and median multipliers.
+// It delegates to CheckLatencyAlarm to verify whether current turn latency exceeds safe bounds.
+func CheckLatencySpikeAlarm(currentLatencySec float64, medianLatencySec float64, consecutiveSpikes int) TelemetryAlarm {
+	return CheckLatencyAlarm(currentLatencySec, medianLatencySec, consecutiveSpikes)
+}
+
+// EvaluateHealth evaluates prompt, latency, and database telemetry against alarm thresholds.
+// It delegates to EvaluateTelemetryHealth to produce an aggregated TelemetryHealthReport.
+func EvaluateHealth(promptTokens, baselinePrompt int, latencies []float64, dbPath string) TelemetryHealthReport {
+	return EvaluateTelemetryHealth(promptTokens, baselinePrompt, latencies, dbPath)
 }
 
 // EvaluateTelemetryHealth evaluates prompt, latency, and database telemetry against alarm thresholds.
