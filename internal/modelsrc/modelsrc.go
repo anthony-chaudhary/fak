@@ -87,6 +87,9 @@ func (r *Registry) Register(scheme string, opener Opener) {
 }
 
 // Open resolves rawURL through the registered transport for its scheme.
+//
+// Invariant: model source resolution is fail-closed and bounded. Schemes without
+// a registered transport, empty schemes, or unparseable URLs return an error.
 func (r *Registry) Open(rawURL string) (io.ReaderAt, int64, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
