@@ -44,6 +44,12 @@ func isWorkerWorktree(path string) bool {
 type Runner interface {
 	Run(dir string, args ...string) ([]byte, error)
 }
+
+type StdinRunner interface {
+	Runner
+	RunWithStdin(dir string, in []byte, args ...string) ([]byte, error)
+}
+
 type GitRunner struct{}
 
 func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
@@ -57,6 +63,27 @@ func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
+}
+
+func (GitRunner) RunWithStdin(dir string, in []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(in)
+	configureDispatchHelperCommand(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+func runWithStdin(r Runner, dir string, in []byte, args ...string) ([]byte, error) {
+	if sr, ok := r.(StdinRunner); ok {
+		return sr.RunWithStdin(dir, in, args...)
+	}
+	return r.Run(dir, args...)
 }
 
 type Population struct {
@@ -135,7 +162,7 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	if err != nil {
 		rep.Errors = append(rep.Errors, "checkout "+rep.Main.Path+": "+err.Error())
 	}
-	rep.Ignored = populationZ(root, r, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+	rep.Ignored = populationZ(root, r, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
 	recordPopulationError(&rep, "ignored_generated", &rep.Ignored)
 	workerRoot := defaultWorkerRoot()
 	if len(opts) > 0 && opts[0].WorkerRoot != "" {
@@ -351,6 +378,7 @@ func checkpoints(root string, r Runner, rep *Report) ([]Checkpoint, bool) {
 	}
 	var result []Checkpoint
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
@@ -361,31 +389,73 @@ func checkpoints(root string, r Runner, rep *Report) ([]Checkpoint, bool) {
 		}
 		unix, _ := strconv.ParseInt(parts[2], 10, 64)
 		cp := Checkpoint{Ref: parts[0], SHA: parts[1], Unix: unix, Known: true}
-		diff, derr := r.Run(root, "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", parts[1])
+		result = append(result, cp)
+	}
+	if len(result) == 0 {
+		return result, true
+	}
+
+	bySHA := make(map[string][]*Checkpoint, len(result))
+	var shas []string
+	seenSHA := make(map[string]bool, len(result))
+	for i := range result {
+		sha := result[i].SHA
+		bySHA[sha] = append(bySHA[sha], &result[i])
+		if !seenSHA[sha] {
+			seenSHA[sha] = true
+			shas = append(shas, sha)
+		}
+	}
+
+	const chunkSize = 1000
+	for i := 0; i < len(shas); i += chunkSize {
+		end := i + chunkSize
+		if end > len(shas) {
+			end = len(shas)
+		}
+		chunk := shas[i:end]
+		input := []byte(strings.Join(chunk, "\n") + "\n")
+		diff, derr := runWithStdin(r, root, input, "diff-tree", "--root", "--name-status", "-r", "--stdin")
 		if derr != nil {
-			cp.Known = false
-			cp.Error = derr.Error()
-			rep.Errors = append(rep.Errors, "checkpoint "+cp.Ref+": "+derr.Error())
-		} else {
-			for _, row := range strings.Split(strings.TrimSpace(string(diff)), "\n") {
-				if row == "" {
-					continue
+			for _, sha := range chunk {
+				for _, cp := range bySHA[sha] {
+					cp.Known = false
+					cp.Error = derr.Error()
+					rep.Errors = append(rep.Errors, "checkpoint "+cp.Ref+": "+derr.Error())
 				}
-				cp.Changed++
-				parts := strings.SplitN(row, "\t", 2)
-				if len(parts) == 2 {
-					path := filepath.ToSlash(parts[1])
+			}
+			continue
+		}
+
+		var current []*Checkpoint
+		if len(result) == 1 {
+			current = []*Checkpoint{&result[0]}
+		}
+		for _, row := range strings.Split(strings.TrimSpace(string(diff)), "\n") {
+			row = strings.TrimRight(row, "\r")
+			if row == "" {
+				continue
+			}
+			if cps, ok := bySHA[row]; ok {
+				current = cps
+				continue
+			}
+			parts := strings.SplitN(row, "\t", 2)
+			if len(parts) == 2 {
+				path := filepath.ToSlash(parts[1])
+				isAdded := strings.HasPrefix(row, "A\t")
+				for _, cp := range current {
+					cp.Changed++
 					cp.allPaths = append(cp.allPaths, path)
 					if len(cp.Paths) < sampleLimit {
 						cp.Paths = append(cp.Paths, path)
 					}
-				}
-				if strings.HasPrefix(row, "A\t") {
-					cp.Added++
+					if isAdded {
+						cp.Added++
+					}
 				}
 			}
 		}
-		result = append(result, cp)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Ref < result[j].Ref })
 	return result, true
