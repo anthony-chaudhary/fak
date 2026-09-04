@@ -3,6 +3,7 @@ package polymodel
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,180 @@ func TestPoolLRUEvictsColdest(t *testing.T) {
 	if p.Used() > p.Budget() {
 		t.Fatalf("used %d exceeds budget %d", p.Used(), p.Budget())
 	}
+}
+
+// TestPoolLemonadeEvictionProtectsHeavyModel verifies that Lemonade reload-cost-weighted
+// eviction scoring (idle_duration / (load_duration * weight_factor)) evicts a fast-loading
+// model before an expensive-to-reload heavy model, even when the heavy model became idle
+// earlier (longer idle duration).
+func TestPoolLemonadeEvictionProtectsHeavyModel(t *testing.T) {
+	p := NewPool(100)
+	simTime := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	p.SetNow(func() time.Time { return simTime })
+
+	// heavy: 10s reload duration, weight factor 1.0.
+	heavy := Model{
+		ID:           "heavy-14b",
+		WeightBytes:  40,
+		LoadDuration: 10 * time.Second,
+		WeightFactor: 1.0,
+	}
+	// light: 500ms reload duration, weight factor 1.0.
+	light := Model{
+		ID:           "light-0.5b",
+		WeightBytes:  40,
+		LoadDuration: 500 * time.Millisecond,
+		WeightFactor: 1.0,
+	}
+
+	// Admit heavy at t=0.
+	mustAdmit(t, p, heavy)
+
+	// Advance time by 100ms and admit light at t=100ms.
+	simTime = simTime.Add(100 * time.Millisecond)
+	mustAdmit(t, p, light)
+
+	// Advance time by 100ms to t=200ms before triggering eviction.
+	// At this point:
+	// - heavy has been idle for 200ms.
+	// - light has been idle for 100ms.
+	// Under pure LRU, heavy would be evicted (longest idle: 200ms > 100ms).
+	// Under Lemonade eviction scoring:
+	// score(heavy) = 200ms / (10,000ms * 1.0) = 0.02
+	// score(light) = 100ms / (500ms * 1.0)    = 0.20
+	// score(light) is 10x higher -> light is the eviction victim.
+	simTime = simTime.Add(100 * time.Millisecond)
+
+	evicted, err := p.Admit(Model{ID: "incoming", WeightBytes: 40})
+	if err != nil {
+		t.Fatalf("admit incoming: %v", err)
+	}
+	if len(evicted) != 1 || evicted[0] != "light-0.5b" {
+		t.Fatalf("evicted = %v, want [light-0.5b] (cheap to reload, protected heavy-14b)", evicted)
+	}
+	if !p.Has("heavy-14b") {
+		t.Fatal("heavy-14b should remain resident in pool")
+	}
+	if p.Has("light-0.5b") {
+		t.Fatal("light-0.5b should have been evicted")
+	}
+	if !p.Has("incoming") {
+		t.Fatal("incoming should be resident in pool")
+	}
+
+	// Conversely, if heavy becomes genuinely cold (idle for a very long time),
+	// its eviction score rises and it should eventually be evicted.
+	// Advance by 1 hour (3600s). Touch incoming so incoming is fresh.
+	simTime = simTime.Add(3600 * time.Second)
+	p.Touch("incoming")
+	// At t=3600.2s:
+	// score(heavy)    = 3600.2s / 10s = 360.02
+	// score(incoming) = 0s / 1s       = 0
+	// Admitting a 40-byte model must now evict heavy-14b.
+	evicted2, err := p.Admit(Model{ID: "newer", WeightBytes: 40})
+	if err != nil {
+		t.Fatalf("admit newer: %v", err)
+	}
+	if len(evicted2) != 1 || evicted2[0] != "heavy-14b" {
+		t.Fatalf("evicted2 = %v, want [heavy-14b] after heavy became genuinely stale", evicted2)
+	}
+	if p.Has("heavy-14b") {
+		t.Fatal("heavy-14b should have been evicted after 1h idle")
+	}
+}
+
+// TestPoolLemonadeEvictionDefaultPreservesLRU confirms that when LoadDuration and
+// WeightFactor are unset (zero values), default values (1s, 1.0) are applied and
+// standard LRU recency ordering is strictly preserved.
+func TestPoolLemonadeEvictionDefaultPreservesLRU(t *testing.T) {
+	p := NewPool(100)
+	// Unset LoadDuration and WeightFactor
+	mustAdmit(t, p, Model{ID: "m1", WeightBytes: 40})
+	mustAdmit(t, p, Model{ID: "m2", WeightBytes: 40})
+
+	// Without touching, m1 was admitted first and is colder than m2.
+	// Admitting m3 (40) must evict m1.
+	evicted, err := p.Admit(Model{ID: "m3", WeightBytes: 40})
+	if err != nil {
+		t.Fatalf("admit m3: %v", err)
+	}
+	if len(evicted) != 1 || evicted[0] != "m1" {
+		t.Fatalf("evicted = %v, want [m1] (oldest admitted with default scores)", evicted)
+	}
+	if p.Has("m1") || !p.Has("m2") || !p.Has("m3") {
+		t.Fatalf("resident = %v, want m2, m3", p.Resident())
+	}
+
+	// Now touch m2, making m3 the colder one.
+	p.Touch("m2")
+	evicted2, err := p.Admit(Model{ID: "m4", WeightBytes: 40})
+	if err != nil {
+		t.Fatalf("admit m4: %v", err)
+	}
+	if len(evicted2) != 1 || evicted2[0] != "m3" {
+		t.Fatalf("evicted2 = %v, want [m3] (colder after m2 touched)", evicted2)
+	}
+	if p.Has("m3") || !p.Has("m2") || !p.Has("m4") {
+		t.Fatalf("resident = %v, want m2, m4", p.Resident())
+	}
+}
+
+// TestPoolLemonadeWeightFactorProtection asserts that between two models with equal
+// load durations and equal idle times, the one with higher WeightFactor receives a
+// lower score and is protected from eviction.
+func TestPoolLemonadeWeightFactorProtection(t *testing.T) {
+	p := NewPool(100)
+	simTime := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	p.SetNow(func() time.Time { return simTime })
+
+	// Both models take 1s to load, but vip has WeightFactor=5.0 and standard has WeightFactor=1.0.
+	vip := Model{ID: "vip", WeightBytes: 40, LoadDuration: 1 * time.Second, WeightFactor: 5.0}
+	std := Model{ID: "std", WeightBytes: 40, LoadDuration: 1 * time.Second, WeightFactor: 1.0}
+
+	mustAdmit(t, p, vip)
+	mustAdmit(t, p, std)
+
+	simTime = simTime.Add(1 * time.Second)
+	// At t=1s:
+	// score(vip) = 1s / (1s * 5.0) = 0.20
+	// score(std) = 1s / (1s * 1.0) = 1.00
+	// std has higher score -> std evicted, vip protected.
+	evicted, err := p.Admit(Model{ID: "c", WeightBytes: 40})
+	if err != nil {
+		t.Fatalf("admit c: %v", err)
+	}
+	if len(evicted) != 1 || evicted[0] != "std" {
+		t.Fatalf("evicted = %v, want [std] (vip protected by WeightFactor)", evicted)
+	}
+	if !p.Has("vip") || p.Has("std") {
+		t.Fatalf("resident = %v, want vip surviving", p.Resident())
+	}
+}
+
+// TestEvictionScoreHelper tests the pure EvictionScore function edge cases and formula.
+func TestEvictionScoreHelper(t *testing.T) {
+	const eps = 1e-9
+	check := func(name string, idle, load time.Duration, weight, want float64) {
+		got := EvictionScore(idle, load, weight)
+		if got < want-eps || got > want+eps {
+			t.Fatalf("%s: EvictionScore(%v, %v, %g) = %g, want %g", name, idle, load, weight, got, want)
+		}
+	}
+
+	// Basic calculation
+	check("1s idle / (1s load * 1.0 weight)", 1*time.Second, 1*time.Second, 1.0, 1.0)
+	check("500ms idle / (2s load * 2.0 weight)", 500*time.Millisecond, 2*time.Second, 2.0, 0.125)
+	check("2s idle / (500ms load * 1.0 weight)", 2*time.Second, 500*time.Millisecond, 1.0, 4.0)
+
+	// Defaults: load <= 0 defaults to 1s, weight <= 0 defaults to 1.0
+	check("zero load duration defaults to 1s", 500*time.Millisecond, 0, 1.0, 0.5)
+	check("negative load duration defaults to 1s", 500*time.Millisecond, -1*time.Second, 1.0, 0.5)
+	check("zero weight factor defaults to 1.0", 1*time.Second, 1*time.Second, 0, 1.0)
+	check("negative weight factor defaults to 1.0", 1*time.Second, 1*time.Second, -2.5, 1.0)
+
+	// Idle <= 0 clamps to 0
+	check("zero idle gives 0 score", 0, 1*time.Second, 1.0, 0.0)
+	check("negative idle clamps to 0", -500*time.Millisecond, 1*time.Second, 1.0, 0.0)
 }
 
 func TestPoolPinnedNeverEvicted(t *testing.T) {
