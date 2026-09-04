@@ -15,8 +15,10 @@ package model
 //     per-token GEMV prefill does. Prefill is compute-bound, so amortizing the dequant +
 //     weight bandwidth across the P free axes is what closes the gap to llama.cpp-Metal on
 //     the q4_k_m artifact (QWEN36-NATIVE-PERF-PLAN-2026-06-19.md P3).
-//   - the normalize-sensitive / Q6_K minority (self_attn.q_proj/k_proj always, plus any Q6_K
-//     weight such as mlp.down_proj or lm_head in a q4_k_m mix) runs q8GemmDispatch against the
+//   - the resident K-quant minority (kqw: Q5_K/Q6_K weights such as v_proj or down_proj
+//     in mixed-quant artifacts) runs kQuantGemmDispatch on the f32 activation.
+//   - the normalize-sensitive / Q8 minority (self_attn.q_proj/k_proj always, plus any Q8
+//     weight or un-quantized f32 manifest tensor) runs q8GemmDispatch against the
 //     q8w store — CPU qGemm8 by default, Metal Q8 GEMM when MetalQ4K is enabled — on a
 //     Q8-quantized activation panel.
 //
@@ -87,10 +89,12 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		return scratch
 	}
 	// proj dispatches a batched projection [P,out] by resident format: q4kw-resident →
-	// q4kGemmDispatch on the f32 activation Xf; otherwise → q8GemmDispatch on the Q8 panel Xq. The
-	// width is inferred from the resident tensor's .out, so the caller does not pass it. Xq
-	// may be nil when the caller knows the projection is q4k-resident (it is only read on the
-	// q8 branch); passing the matching panel is the caller's responsibility for minority names.
+	// q4kGemmDispatch on the f32 activation Xf; kqw-resident → kQuantGemmDispatch;
+	// otherwise → q8GemmDispatch on the Q8 panel Xq (with m.q8 quantizing on demand from
+	// the f32 manifest if un-quantized). The width is inferred from the resident tensor's
+	// .out, so the caller does not pass it. Xq may be nil when the caller knows the projection
+	// is q4k-resident (it is only read on the q8 branch); passing the matching panel is the
+	// caller's responsibility for minority names.
 	//
 	// q4kGemmDispatch is the CPU q4kGemm by default (pure-Go build, bit-identical to before);
 	// under -tags fakmetal with s.MetalQ4K set it routes the q4_k-majority batched GEMM to the
@@ -102,6 +106,8 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		var r []float32
 		if qt := m.q4kw[name]; qt != nil {
 			r = s.q4kGemmDispatch(name, qt, Xf, P)
+		} else if qt := m.kqw[name]; qt != nil {
+			r = s.kQuantGemmDispatch(name, qt, Xf, P)
 		} else {
 			r = s.q8GemmDispatch(name, m.q8(name), Xq)
 		}
