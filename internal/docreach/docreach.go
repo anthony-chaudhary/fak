@@ -1,6 +1,10 @@
 // Package docreach computes named document-reachability censuses from an
 // immutable corpus. Repository I/O belongs at the caller so this package can
 // prove resolver semantics without reading peer-dirty working trees.
+//
+// Invariant: docreach census resolution is fail-closed and deterministic across all executions.
+// Guard: ambiguous document basenames or unresolvable relative targets are treated as broken links.
+// Precondition: Blobs provided to Census are immutable, and file paths are repository-relative paths.
 package docreach
 
 import (
@@ -10,14 +14,21 @@ import (
 	"strings"
 )
 
+// Blob represents an immutable document path and its textual payload.
 type Blob struct{ Path, Text string }
+
+// Count captures reachability metrics for a specific named rule, including unreached targets.
 type Count struct {
 	Rule        string   `json:"rule"`
 	Numerator   int      `json:"numerator"`
 	Denominator int      `json:"denominator"`
 	Unreached   []string `json:"unreached"`
 }
+
+// BrokenLink records an unresolvable or ambiguous document reference from source to target.
 type BrokenLink struct{ Source, Target string }
+
+// Report aggregates census counts across rules and all identified broken references.
 type Report struct {
 	Commit      string       `json:"commit"`
 	Documents   int          `json:"documents"`
