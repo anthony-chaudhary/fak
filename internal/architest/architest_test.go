@@ -46,6 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 
 	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
+	"reflexagent":        3, // fast-dispatch micro-agent reflex loop (#11189).
 	"workspaceslot":      5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
 	"harnessbench":       5, // high-churn soak and thundering-herd saturation witness suite (#11183).
 	"effortbench":        5, // intra-model effort modulation and thinking budget benchmark (#11185).
