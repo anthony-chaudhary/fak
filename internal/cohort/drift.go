@@ -36,26 +36,30 @@ import (
 // major so a schema bump is a conscious migration, not a silent field drift.
 const DriftSchema = "fak-cohort-drift/1"
 
-// Well-known drift signals the #4581 scope names: input mix, output length,
-// language/task proxy, degeneration, and rubric score. The monitor is not
-// limited to these — any signal a cohort carries a baseline for is judged — but
-// naming them documents the intended coverage and keeps producers consistent.
+// Well-known drift signals: input mix, output length, task proxy, degeneration,
+// and rubric score. The monitor evaluates any signal a cohort defines a baseline for.
 const (
-	SignalMix          = "mix"
-	SignalLength       = "length"
+	// SignalMix tracks input task distribution stability.
+	SignalMix = "mix"
+	// SignalLength monitors generated token output length.
+	SignalLength = "length"
+	// SignalLanguageTask monitors language and task proxy stability.
 	SignalLanguageTask = "language_task"
+	// SignalDegeneration detects repetitive response degeneration.
 	SignalDegeneration = "degeneration"
-	SignalRubric       = "rubric"
+	// SignalRubric evaluates qualitative scoring against expected rubrics.
+	SignalRubric = "rubric"
 )
 
-// DriftTier is the cost/cadence class a cohort drift case is assigned to, so a
-// cheap PR check is never confused with a nightly or release suite (#4581: assign
-// an explicit PR, nightly, or release tier).
+// DriftTier is the cost and cadence class assigned to a cohort drift case.
 type DriftTier string
 
 const (
-	DriftTierPR      DriftTier = "pr"
+	// DriftTierPR evaluates fast checks during pull request review.
+	DriftTierPR DriftTier = "pr"
+	// DriftTierNightly runs comprehensive drift monitoring in scheduled runs.
 	DriftTierNightly DriftTier = "nightly"
+	// DriftTierRelease performs validation before tagging a formal release.
 	DriftTierRelease DriftTier = "release"
 )
 
@@ -70,16 +74,17 @@ func (t DriftTier) valid() bool {
 	return false
 }
 
-// DriftState is the closed set a cohort's drift evidence can be in. Only Stable
-// is a pass; Drifted, Missing, and Inconclusive all block. "No evidence"
-// (Missing) and "unclear evidence" (Inconclusive) are never a pass — the
-// fail-closed default is the point.
+// DriftState represents the adjudication state for a cohort's observed evidence.
 type DriftState string
 
 const (
-	DriftStable       DriftState = "stable"
-	DriftDrifted      DriftState = "drifted"
-	DriftMissing      DriftState = "missing"
+	// DriftStable indicates all baselined signals held within declared tolerances.
+	DriftStable DriftState = "stable"
+	// DriftDrifted indicates at least one signal exceeded its allowable divergence tolerance.
+	DriftDrifted DriftState = "drifted"
+	// DriftMissing indicates no baseline records were supplied for the cohort.
+	DriftMissing DriftState = "missing"
+	// DriftInconclusive indicates incomplete provenance, unassigned cadence, or missing observations.
 	DriftInconclusive DriftState = "inconclusive"
 )
 
@@ -241,11 +246,11 @@ func judgeCohort(rev string, o CohortObservation) CohortDrift {
 		return d
 	}
 
-	// stopAt ends the scan on the FIRST signal that is not cleanly within tolerance. That
-	// "first" is the contract: the scan walks signals in sorted order and the divergence it
-	// reports must be the earliest one, with a scrubbed replay attached, so two runs over the
-	// same inputs name the same signal. Each arm below supplies only what actually differs —
-	// the resulting state, the operator-facing reason, the divergence, and the replay note.
+	// stopAt ends the scan on the first signal that is not cleanly within tolerance.
+	// The scan walks signals in sorted order and reports the earliest divergence,
+	// with a scrubbed replay attached, so two runs over the same inputs name the same signal.
+	// Each arm below supplies only what actually differs — the resulting state,
+	// the operator-facing reason, the divergence, and the replay note.
 	stopAt := func(state DriftState, reason string, div *SignalDivergence, note string) CohortDrift {
 		d.State, d.Reason = state, reason
 		d.FirstDivergence = div
