@@ -464,7 +464,8 @@ type Payload struct {
 	// presence marks the payload as an incremental read, NOT a full measurement — so
 	// it must not be pinned or posted as a new floor. A full run leaves it nil (the
 	// field omits), keeping the full-run --json bytes unchanged.
-	Incremental *IncrementalInfo `json:"incremental,omitempty"`
+	Incremental  *IncrementalInfo       `json:"incremental,omitempty"`
+	OutOfControl *PortfolioOutOfControl `json:"out_of_control,omitempty"`
 }
 
 // Fold folds per-scorecard metrics into one control-pane payload + trend. It is a
@@ -594,6 +595,8 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 			"isn't blessed as the new floor; then: " + nextAction
 	}
 
+	ooc := AssessOutOfControl(metrics, baseline, totalDebt, gradeDebtTotal, DefaultOutOfControlBounds())
+
 	return Payload{
 		Schema: Schema, OK: ok, Verdict: verdict, Finding: finding,
 		Reason: reason, NextAction: nextAction, Workspace: workspace, Commit: commit,
@@ -601,6 +604,7 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 		GradeDebt: gradeDebtTotal, GradeBreakdown: gradeBreakdown,
 		Measured: len(measured), Errored: len(errors), EarlyWarning: earlyWarning,
 		Metrics: metrics, Trend: trend,
+		OutOfControl: &ooc,
 	}
 }
 
@@ -792,9 +796,16 @@ func CheckGate(p Payload) (int, string) {
 		if worsened == "" {
 			worsened = "see deltas"
 		}
-		return 1, fmt.Sprintf("RATCHET FAIL: same-version per-metric debt regressed; "+
+		extra := ""
+		if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
+			extra = fmt.Sprintf(" [OUT OF CONTROL %s]", p.OutOfControl.Status)
+		}
+		return 1, fmt.Sprintf("RATCHET FAIL: same-version per-metric debt regressed%s; "+
 			"worsened: %s; %s (total_debt=%d)",
-			worsened, TotalDebtSemantics, p.TotalDebt)
+			extra, worsened, TotalDebtSemantics, p.TotalDebt)
+	}
+	if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
+		return 1, fmt.Sprintf("RATCHET FAIL: OUT OF CONTROL debt dynamics (%s): %s", p.OutOfControl.Status, p.Reason)
 	}
 	gradeDelta := 0
 	if p.Trend.GradeDelta != nil {
@@ -884,6 +895,9 @@ func Render(p Payload) string {
 			fmt.Fprintf(&b, "  WARN early-warning: %s rose %d->%d (+%d) vs baseline — hidden under a green portfolio\n",
 				e.Label, e.From, e.To, e.Delta)
 		}
+	}
+	if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
+		b.WriteString("\n  OUT-OF-CONTROL DEBT ALERT: portfolio debt movement exceeds safety bounds\n")
 	}
 	if len(p.Trend.GradeRegressed) > 0 {
 		b.WriteString("\n")
