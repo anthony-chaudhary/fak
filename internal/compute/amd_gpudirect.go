@@ -386,6 +386,9 @@ func (e *AMDGPUDirectHAL) ExportVRAMToDMABUF(nodeID int, vaddr uintptr, size uin
 	if !ok {
 		return nil, fmt.Errorf("amddirect: unknown node ID %d", nodeID)
 	}
+	if !node.DMABUFCapable {
+		return nil, fmt.Errorf("amddirect: node %d does not support kernel DMA-BUF export", nodeID)
+	}
 	if size == 0 {
 		return nil, errors.New("amddirect: export size must be > 0")
 	}
@@ -415,6 +418,13 @@ func (e *AMDGPUDirectHAL) ExportVRAMToDMABUF(nodeID int, vaddr uintptr, size uin
 
 	e.dmabufs[handle.FD] = handle
 	return handle, nil
+}
+
+// GetDMABUF retrieves an exported DMA-BUF handle by file descriptor.
+func (e *AMDGPUDirectHAL) GetDMABUF(fd int) *DMABUFHandle {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.dmabufs[fd]
 }
 
 // CloseDMABUF releases an exported DMA-BUF handle.
@@ -497,6 +507,13 @@ func (e *AMDGPUDirectHAL) DeregisterRDMARegion(rkey uint32) error {
 	region.Active = false
 	delete(e.rdmaMRs, rkey)
 	return nil
+}
+
+// GetRDMARegion retrieves an active RDMA memory region by its registration key (rkey).
+func (e *AMDGPUDirectHAL) GetRDMARegion(rkey uint32) *RDMARegisteredRegion {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.rdmaMRs[rkey]
 }
 
 // ExecuteNVMeP2PTransfer executes a direct NVMe-to-GPU peer-to-peer DMA transfer (BaM / SPDK-lite).

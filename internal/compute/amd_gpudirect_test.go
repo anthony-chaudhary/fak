@@ -317,16 +317,55 @@ func TestAMDGPUDirectHAL_DMABUFAndRDMARegistration(t *testing.T) {
 		t.Errorf("SGE address mismatch: got 0x%x, want 0x%x", rdmaRegion.SGEs[0].Address, vramAddr)
 	}
 
+	// Verify retrieval
+	gotBuf := engine.GetDMABUF(dmabuf.FD)
+	if gotBuf == nil || gotBuf.FD != dmabuf.FD {
+		t.Errorf("GetDMABUF failed: got %+v", gotBuf)
+	}
+	gotMR := engine.GetRDMARegion(rdmaRegion.RKey)
+	if gotMR == nil || gotMR.RKey != rdmaRegion.RKey {
+		t.Errorf("GetRDMARegion failed: got %+v", gotMR)
+	}
+
 	// Deregister RDMA
 	err = engine.DeregisterRDMARegion(rdmaRegion.RKey)
 	if err != nil {
 		t.Fatalf("DeregisterRDMARegion failed: %v", err)
+	}
+	if engine.GetRDMARegion(rdmaRegion.RKey) != nil {
+		t.Errorf("expected GetRDMARegion to return nil after deregistration")
 	}
 
 	// Close DMA-BUF
 	err = engine.CloseDMABUF(dmabuf.FD)
 	if err != nil {
 		t.Fatalf("CloseDMABUF failed: %v", err)
+	}
+	if engine.GetDMABUF(dmabuf.FD) != nil {
+		t.Errorf("expected GetDMABUF to return nil after close")
+	}
+}
+
+func TestAMDGPUDirectHAL_DMABUFNotCapableRefusal(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "Legacy AMD GPU (No DMABUF)",
+		TotalVRAMBytes: 16 * 1024 * 1024 * 1024,
+		DMABUFCapable:  false, // Not capable
+	})
+	if err != nil {
+		t.Fatalf("register node failed: %v", err)
+	}
+
+	_, err = engine.ExportVRAMToDMABUF(0, uintptr(0x7f0000000000), 4096)
+	if err == nil {
+		t.Fatalf("expected error exporting DMA-BUF on non-capable node, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support kernel DMA-BUF export") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
