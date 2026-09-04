@@ -254,30 +254,53 @@ func parseNVIDIAProfileCSV(r io.Reader, o NVIDIAProfileOptions) (NVIDIAProfileRe
 	if len(launches) == 0 {
 		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("Nsight Compute CSV contains no required bandwidth metrics")
 	}
-	readAvailable, writeAvailable, durationAvailable := true, true, true
-	var readBytes, writeBytes uint64
-	var durationNS float64
+	totals, err := sumNVIDIAProfileEntries(launches)
+	if err != nil {
+		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, err
+	}
+	return buildNVIDIAProfileReceipt(o, len(launches), processID, processName, observedDevice, observedHost, totals)
+}
+
+type nvidiaProfileTotals struct {
+	readBytes         uint64
+	writeBytes        uint64
+	durationNS        float64
+	readAvailable     bool
+	writeAvailable    bool
+	durationAvailable bool
+}
+
+func sumNVIDIAProfileEntries(launches map[string]*nvidiaProfileLaunch) (nvidiaProfileTotals, error) {
+	totals := nvidiaProfileTotals{
+		readAvailable:     true,
+		writeAvailable:    true,
+		durationAvailable: true,
+	}
 	for key, launch := range launches {
 		if !launch.read.seen || !launch.write.seen || !launch.duration.seen {
-			return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, fmt.Errorf("launch %q is missing a required read/write/duration metric", key[strings.IndexByte(key, 0)+1:])
+			return totals, fmt.Errorf("launch %q is missing a required read/write/duration metric", key[strings.IndexByte(key, 0)+1:])
 		}
 		var ok bool
 		if !launch.read.available {
-			readAvailable = false
-		} else if readBytes, ok = addUint64(readBytes, launch.read.integerValue); !ok {
-			return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("cumulative read bytes overflow uint64")
+			totals.readAvailable = false
+		} else if totals.readBytes, ok = addUint64(totals.readBytes, launch.read.integerValue); !ok {
+			return totals, errors.New("cumulative read bytes overflow uint64")
 		}
 		if !launch.write.available {
-			writeAvailable = false
-		} else if writeBytes, ok = addUint64(writeBytes, launch.write.integerValue); !ok {
-			return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("cumulative write bytes overflow uint64")
+			totals.writeAvailable = false
+		} else if totals.writeBytes, ok = addUint64(totals.writeBytes, launch.write.integerValue); !ok {
+			return totals, errors.New("cumulative write bytes overflow uint64")
 		}
 		if !launch.duration.available {
-			durationAvailable = false
-		} else if durationNS, ok = addNVIDIAProfileFloat(durationNS, launch.duration.decimalValue); !ok {
-			return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("cumulative duration is not finite")
+			totals.durationAvailable = false
+		} else if totals.durationNS, ok = addNVIDIAProfileFloat(totals.durationNS, launch.duration.decimalValue); !ok {
+			return totals, errors.New("cumulative duration is not finite")
 		}
 	}
+	return totals, nil
+}
+
+func buildNVIDIAProfileReceipt(o NVIDIAProfileOptions, launchCount int, processID, processName, observedDevice, observedHost string, totals nvidiaProfileTotals) (NVIDIAProfileReceipt, LiveBandwidth, bool, error) {
 	hostEvidence := "unavailable"
 	if observedHost != "" {
 		hostEvidence = "single-host-nsight-csv-value-scrubbed"
@@ -293,7 +316,7 @@ func parseNVIDIAProfileCSV(r io.Reader, o NVIDIAProfileOptions) (NVIDIAProfileRe
 		ProfilerDevice:            observedDevice,
 		ProcessID:                 processID,
 		Process:                   processName,
-		LaunchCount:               len(launches),
+		LaunchCount:               launchCount,
 		AggregationScope:          "sum-cumulative-bytes-over-sum-profiled-kernel-active-nanoseconds",
 		CaptureStartedAt:          o.CaptureStartedAt.UTC().Format(time.RFC3339Nano),
 		CaptureEndedAt:            o.CaptureEndedAt.UTC().Format(time.RFC3339Nano),
@@ -308,26 +331,26 @@ func parseNVIDIAProfileCSV(r io.Reader, o NVIDIAProfileOptions) (NVIDIAProfileRe
 	if o.MeasuredDeviceGBS != nil {
 		receipt.DeviceRooflineEvidence = "operator-supplied-matched-device-measurement"
 	}
-	if readAvailable {
-		receipt.CumulativeReadBytes = uint64p(readBytes)
+	if totals.readAvailable {
+		receipt.CumulativeReadBytes = uint64p(totals.readBytes)
 	}
-	if writeAvailable {
-		receipt.CumulativeWriteBytes = uint64p(writeBytes)
+	if totals.writeAvailable {
+		receipt.CumulativeWriteBytes = uint64p(totals.writeBytes)
 	}
-	if durationAvailable {
-		receipt.CumulativeDurationNS = &durationNS
+	if totals.durationAvailable {
+		receipt.CumulativeDurationNS = &totals.durationNS
 	}
-	if durationAvailable && durationNS == 0 && (readAvailable || writeAvailable) {
+	if totals.durationAvailable && totals.durationNS == 0 && (totals.readAvailable || totals.writeAvailable) {
 		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("cumulative profiled kernel duration is zero")
 	}
 	var live LiveBandwidth
-	if durationAvailable && durationNS > 0 {
-		if readAvailable {
-			readGBS := float64(readBytes) / float64(durationNS)
+	if totals.durationAvailable && totals.durationNS > 0 {
+		if totals.readAvailable {
+			readGBS := float64(totals.readBytes) / float64(totals.durationNS)
 			live.ReadGBS = &readGBS
 		}
-		if writeAvailable {
-			writeGBS := float64(writeBytes) / float64(durationNS)
+		if totals.writeAvailable {
+			writeGBS := float64(totals.writeBytes) / float64(totals.durationNS)
 			live.WriteGBS = &writeGBS
 		}
 		if live.ReadGBS != nil && live.WriteGBS != nil {
