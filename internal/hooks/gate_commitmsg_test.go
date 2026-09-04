@@ -1,6 +1,14 @@
 package hooks
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
+)
 
 // TestSuggestGradeableSubject_correctsDeterministicFailures asserts that the two DETERMINISTIC
 // gradeability failures — a near-miss conventional type and an inflected leading verb — earn a
@@ -141,5 +149,88 @@ func TestLintCommitMessage_nounLedNoFalseSuggestion(t *testing.T) {
 	}
 	if !hasIssueContaining(r, "witness-gradeable") {
 		t.Fatalf("want the witness-gradeable prose advice, got %v", r.Issues)
+	}
+}
+
+// TestCommitMsgVerdict_rejectsSingleParentPseudoMerge proves issue #10882:
+// A commit claiming to be a "Merge " must actually have >= 2 topological parents.
+// Single-parent pseudo-merges are rejected with MERGE_WITNESS_FAIL.
+func TestCommitMsgVerdict_rejectsSingleParentPseudoMerge(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init", "-q")
+	runGit("config", "user.name", "Test")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "commit.gpgsign", "false")
+
+	// 1. Initial single commit (0 parents)
+	runGit("commit", "--allow-empty", "-m", "initial commit")
+
+	// Attempting a pseudo-merge on single-parent branch
+	ok, why := CommitMsgVerdictWithGit("Merge origin/main into main", root)
+	if ok {
+		t.Fatalf("CommitMsgVerdictWithGit accepted single-parent pseudo-merge")
+	}
+	if !strings.Contains(why, "MERGE_WITNESS_FAIL") {
+		t.Errorf("why %q does not contain MERGE_WITNESS_FAIL", why)
+	}
+
+	// 2. Add another commit so HEAD has 1 parent
+	runGit("commit", "--allow-empty", "-m", "feat(core): add feature (fak core)")
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'feature'", root)
+	if ok {
+		t.Fatalf("CommitMsgVerdictWithGit accepted single-parent pseudo-merge on second commit")
+	}
+	if !strings.Contains(why, "MERGE_WITNESS_FAIL") {
+		t.Errorf("why %q does not contain MERGE_WITNESS_FAIL", why)
+	}
+
+	// 3. Test LintCommitMessage rejects it
+	dosToml := "[lanes]\nconcurrent = [\"gateway\"]\n[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n"
+	_ = os.WriteFile(filepath.Join(root, "dos.toml"), []byte(dosToml), 0o644)
+	r := LintCommitMessage("Merge branch 'feature'", []string{"internal/gateway/x.go"}, root)
+	if r.OK {
+		t.Fatalf("LintCommitMessage accepted single-parent pseudo-merge; report: %+v", r)
+	}
+	if r.Gradeable {
+		t.Errorf("single-parent pseudo-merge should not be gradeable")
+	}
+	if !hasIssueContaining(r, "MERGE_WITNESS_FAIL") {
+		t.Errorf("expected issue containing MERGE_WITNESS_FAIL; got issues=%v", r.Issues)
+	}
+
+	// 4. Create a branch and perform a real merge
+	mainBranch := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	runGit("checkout", "-q", "-b", "side-branch")
+	runGit("commit", "--allow-empty", "-m", "feat(side): side change (fak core)")
+	runGit("checkout", "-q", mainBranch)
+	runGit("commit", "--allow-empty", "-m", "feat(main): main change (fak core)")
+
+	// Start merge with --no-commit: MERGE_HEAD exists
+	runGit("merge", "--no-ff", "--no-commit", "side-branch")
+
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'side-branch'", root)
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGit rejected real in-flight merge: %s", why)
+	}
+	r = LintCommitMessage("Merge branch 'side-branch'", []string{"internal/gateway/x.go"}, root)
+	if !r.OK || r.StampKind != "exempt" {
+		t.Fatalf("LintCommitMessage rejected real in-flight merge: ok=%v kind=%s issues=%v", r.OK, r.StampKind, r.Issues)
+	}
+
+	// Complete merge: HEAD has 2 parents
+	runGit("commit", "-m", "Merge branch 'side-branch'")
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'side-branch'", root)
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGit rejected committed multi-parent merge: %s", why)
 	}
 }

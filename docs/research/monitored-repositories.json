@@ -1,8 +1,57 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-09-03",
+  "updated_at": "2026-09-04",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+    {
+      "repository": "ROCm/rccl",
+      "url": "https://github.com/ROCm/rccl",
+      "status": "studied",
+      "priority": 1,
+      "why": "Radeon Collective Communication Library: direct P2P transport over xGMI (up to 896 GB/s, ~200ns latency) and PCIe P2P, GDRCopy MMIO doorbells, and ibv_reg_dmabuf_mr direct GPU VRAM registration over InfiniBand/RoCE verbs.",
+      "last_checked": "2026-09-04",
+      "checked_revision": "57e58688f44c77076ad536ef1f6b68741fc6e694",
+      "stars_at_check": 420,
+      "last_push_at_check": "2026-09-02T19:05:52Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-AMD-GPU-DIRECT-ROCM-RDMA-2026-09-04.md",
+      "receipt_id": "study_6f42749e9f4a8d98a9ca9bd3686fd5dc863fc131dd7c2951a30d4044645748f5",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "57e58688f44c77076ad536ef1f6b68741fc6e694",
+        "subsystem_count": 8,
+        "candidate_count": 4,
+        "filed_issue_count": 4,
+        "issue_refs": [
+          "#11226",
+          "#11227",
+          "#11228",
+          "#11230"
+        ]
+      }
+    },
+    {
+      "repository": "ZaidQureshi/bam",
+      "url": "https://github.com/ZaidQureshi/bam",
+      "status": "studied",
+      "priority": 1,
+      "why": "BaM: Accelerator-centric GPU-initiated direct I/O to NVMe SSDs over PCIe P2P DMA without CPU involvement; submission/completion queues in GPU VRAM with direct doorbell writes.",
+      "last_checked": "2026-09-04",
+      "checked_revision": "315fadfc5c5c018a64596157bfac94ecbb7d87a2",
+      "stars_at_check": 240,
+      "last_push_at_check": "2026-03-28T05:55:23Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-AMD-GPU-DIRECT-ROCM-RDMA-2026-09-04.md",
+      "receipt_id": "study_6f42749e9f4a8d98a9ca9bd3686fd5dc863fc131dd7c2951a30d4044645748f5",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "315fadfc5c5c018a64596157bfac94ecbb7d87a2",
+        "subsystem_count": 4,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "issue_refs": [
+          "#11229"
+        ]
+      }
+    },
     {
       "repository": "davidcanar/vllm-strix-halo",
       "url": "https://github.com/davidcanar/vllm-strix-halo",

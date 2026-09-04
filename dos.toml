@@ -1725,6 +1725,16 @@ worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 # typed-core direction is refusable with a structured, citable reason from a closed
 # set, not free-text -- the same discipline fak imposes on tool results. The floor
 # under each is the architest gate (`go test ./internal/architest`).
+# Single-parent pseudo-merge rejection (#10882): a commit claiming to be a `Merge `
+# must have >= 2 topological parents, preventing single-parent pseudo-merges from
+# bypassing DCO, Conventional Commits, and DOS ship stamps.
+[reasons.MERGE_WITNESS_FAIL]
+category = "MISROUTE"
+refusal  = true
+summary  = "A commit claiming to be a Merge has fewer than 2 topological parents — a single-parent pseudo-merge attempting to bypass DCO, Conventional Commits, and DOS ship stamp requirements."
+fix      = "Use a standard Conventional-Commits subject (`type(scope): <verb> <what> (fak <leaf>)`) with DCO signoff for single-parent commits, or perform a real multi-parent merge (`git merge`). Floor: `internal/hooks`."
+see_also = ["tools/githooks/commit-msg", "internal/hooks", "dos review"]
+
 [reasons.VALUECHAIN_UNWITNESSED]
 category = "STALE_CLAIM"
 refusal = false
