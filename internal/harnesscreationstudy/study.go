@@ -10,11 +10,13 @@ import (
 	"strings"
 )
 
+// Schema defines the canonical schema URI for harness-creation study records.
 const Schema = "fak.harness-creation-study/v1alpha1"
 
 var safeID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+// Study defines the protocol, reference baseline, and trial run records for a harness-creation evaluation.
 type Study struct {
 	Schema   string   `json:"schema"`
 	ID       string   `json:"id"`
@@ -23,6 +25,7 @@ type Study struct {
 	Runs     []Run    `json:"runs"`
 }
 
+// Protocol specifies frozen execution limits, assistance policies, and parity constraints.
 type Protocol struct {
 	Frozen                bool             `json:"frozen"`
 	TenMinuteLimitSeconds int              `json:"ten_minute_limit_seconds"`
@@ -32,6 +35,7 @@ type Protocol struct {
 	Parity                MatchedStudySpec `json:"parity"`
 }
 
+// MatchedStudySpec configures sample sizes and ratio bounds for counterbalanced paired arm evaluations.
 type MatchedStudySpec struct {
 	Frozen                bool    `json:"frozen"`
 	MinimumPairs          int     `json:"minimum_pairs"`
@@ -39,6 +43,7 @@ type MatchedStudySpec struct {
 	CounterbalancedOrder  bool    `json:"counterbalanced_order"`
 }
 
+// Baseline captures the runnable, tuned reference implementation against which trials are compared.
 type Baseline struct {
 	ID       string `json:"id"`
 	Runnable bool   `json:"runnable"`
@@ -47,6 +52,7 @@ type Baseline struct {
 	Evidence string `json:"evidence"`
 }
 
+// Run records environment parameters, timing, and outcome data for a single participant trial.
 type Run struct {
 	ID                    string   `json:"id"`
 	ParticipantID         string   `json:"participant_id"`
@@ -73,6 +79,7 @@ type Run struct {
 	ConformancePassed     bool     `json:"conformance_passed,omitempty"`
 }
 
+// Result summarizes validation findings, pass rates, and claim verdicts across study tracks.
 type Result struct {
 	Schema      string             `json:"schema"`
 	StudyID     string             `json:"study_id"`
@@ -83,6 +90,7 @@ type Result struct {
 	Parity      MatchedStudyResult `json:"parity"`
 }
 
+// MatchedStudyResult reports paired arm success counts, timing ratios, and parity claim status.
 type MatchedStudyResult struct {
 	CompletePairs      int      `json:"complete_pairs"`
 	IncompletePairs    int      `json:"incomplete_pairs"`
@@ -95,6 +103,7 @@ type MatchedStudyResult struct {
 	Reasons            []string `json:"reasons,omitempty"`
 }
 
+// TrackResult aggregates eligibility, success rates, and completion times for a study track.
 type TrackResult struct {
 	EligibleRuns         int      `json:"eligible_runs"`
 	DistinctParticipants int      `json:"distinct_participants"`
@@ -107,6 +116,7 @@ type TrackResult struct {
 	successTimes         []float64
 }
 
+// Parse decodes and validates a raw JSON study manifest against schema, privacy, and protocol invariants.
 func Parse(raw []byte) (Study, error) {
 	var s Study
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
@@ -206,6 +216,7 @@ func Parse(raw []byte) (Study, error) {
 	return s, nil
 }
 
+// Evaluate aggregates run outcomes and computes claim statuses across study tracks and paired arms.
 func Evaluate(s Study) Result {
 	baselineOK := s.Baseline.Runnable && s.Baseline.Tuned && s.Baseline.Frozen
 	result := Result{Schema: Schema, StudyID: s.ID, BaselineOK: baselineOK}
