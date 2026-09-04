@@ -156,7 +156,8 @@ func UnlandedCount(wtPath string, git GitRunner) int {
 	}
 	n := 0
 	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) != "" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasSuffix(trimmed, WorkerLeaseFileName) && !strings.HasSuffix(trimmed, WorkerLeaseFileName+".tmp") {
 			n++
 		}
 	}

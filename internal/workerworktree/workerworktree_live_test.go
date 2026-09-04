@@ -118,6 +118,7 @@ func TestLiveLandNewDirectoryContentsAtomically(t *testing.T) {
 	run(repo, "config", "user.email", "e2e@test")
 	run(repo, "config", "user.name", "e2e")
 	run(repo, "config", "commit.gpgsign", "false")
+	run(repo, "config", "core.autocrlf", "false")
 	os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644)
 	run(repo, "add", "base.txt")
 	run(repo, "commit", "-q", "-m", "base")
