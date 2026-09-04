@@ -58,6 +58,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/wipfence"
 	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
@@ -69,11 +70,31 @@ var (
 	buildCheckNow          = time.Now
 )
 
+type isolateWIPFlag struct {
+	value string
+	isSet bool
+}
+
+func (f *isolateWIPFlag) String() string {
+	return f.value
+}
+
+func (f *isolateWIPFlag) Set(s string) error {
+	f.isSet = true
+	f.value = s
+	return nil
+}
+
+func (f *isolateWIPFlag) IsBoolFlag() bool {
+	return true
+}
+
 type buildCheckReport struct {
 	Schema           string                           `json:"schema"`
 	Mode             string                           `json:"mode"`
 	Packages         []string                         `json:"packages"`
 	Isolate          bool                             `json:"isolate"`
+	IsolateWIP       string                           `json:"isolate_wip,omitempty"`
 	MaskedFiles      []string                         `json:"masked_files,omitempty"`
 	MaskedCount      int                              `json:"masked_count"`
 	KeptFiles        []string                         `json:"kept_files,omitempty"`
@@ -97,6 +118,8 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "buildcheck")
 	isolate := fs.Bool("isolate", true, "generate a go -overlay that hides untracked sibling .go files (except --mine) for a tracked-tree-equivalent compile immune to peers' WIP; --isolate=false builds the live tree as-is")
+	var isolateWIP isolateWIPFlag
+	fs.Var(&isolateWIP, "isolate-wip", "evaluate only tagged or trunk files (e.g. --isolate-wip=<tag> or empty/trunk)")
 	var mine pathList
 	var compileManifests pathList
 	fs.Var(&mine, "mine", "repo-relative untracked .go file to KEEP in the build (your own new file; repeatable)")
@@ -109,8 +132,23 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	pkgs := fs.Args()
+	if isolateWIP.isSet && isolateWIP.value == "true" && len(pkgs) > 0 {
+		first := pkgs[0]
+		if !strings.HasPrefix(first, ".") && !strings.Contains(first, "/") && first != "trunk" {
+			isolateWIP.value = first
+			pkgs = pkgs[1:]
+		}
+	}
 	if len(pkgs) == 0 {
 		pkgs = []string{"./..."}
+	}
+
+	wipTag := ""
+	if isolateWIP.isSet && isolateWIP.value != "" && isolateWIP.value != "true" && isolateWIP.value != "trunk" {
+		wipTag = isolateWIP.value
+		if !strings.HasPrefix(wipTag, "wip_") {
+			wipTag = "wip_" + wipfence.SlugFromPath(wipTag)
+		}
 	}
 	mode := "build"
 	if *vet {
@@ -128,7 +166,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 	defer os.RemoveAll(scratch)
 
-	isolation, ok := prepareBuildCheckIsolation(stdout, stderr, root, scratch, *isolate, *asJSON, mine, compileManifests, mode, pkgs)
+	isolation, ok := prepareBuildCheckIsolation(stdout, stderr, root, scratch, *isolate, *asJSON, mine, compileManifests, mode, wipTag, pkgs)
 	if !ok {
 		return 1
 	}
@@ -143,7 +181,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	if *outDir != "" {
 		outTarget = *outDir
 	}
-	args := buildCheckArgs(mode, overlayPath, outTarget, pkgs)
+	args := buildCheckArgs(mode, overlayPath, outTarget, wipTag, pkgs)
 
 	if !*asJSON {
 		fmt.Fprintf(stderr, "fak buildcheck: go %s\n", strings.Join(args, " "))
@@ -183,7 +221,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	liveCrossChecked := false
 	if overlayMasked && execErr == nil && code != 0 {
 		var liveBuf bytes.Buffer
-		liveArgs := buildCheckArgs(mode, "", outTarget, pkgs)
+		liveArgs := buildCheckArgs(mode, "", outTarget, wipTag, pkgs)
 		if code2, execErr2 := buildCheckRun(root, liveArgs, &liveBuf, &liveBuf); execErr2 == nil && code2 == 0 {
 			liveCrossChecked = true
 			verdict, reason, code = "OK", "", 0
@@ -207,11 +245,20 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
+		isolateWIPRep := ""
+		if isolateWIP.isSet {
+			if wipTag != "" {
+				isolateWIPRep = wipTag
+			} else {
+				isolateWIPRep = "trunk"
+			}
+		}
 		rep := buildCheckReport{
 			Schema:           "fak.buildcheck.v1",
 			Mode:             mode,
 			Packages:         pkgs,
 			Isolate:          *isolate,
+			IsolateWIP:       isolateWIPRep,
 			MaskedFiles:      masked,
 			MaskedCount:      len(masked),
 			KeptFiles:        kept,
@@ -260,7 +307,7 @@ type buildCheckIsolation struct {
 	overlayPath string
 }
 
-func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, isolate, asJSON bool, mine, compileManifests pathList, mode string, pkgs []string) (buildCheckIsolation, bool) {
+func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, isolate, asJSON bool, mine, compileManifests pathList, mode, wipTag string, pkgs []string) (buildCheckIsolation, bool) {
 	var result buildCheckIsolation
 	if !isolate {
 		return result, true
@@ -283,6 +330,22 @@ func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, 
 	}
 	var staleMine []string
 	result.masked, result.kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
+	if wipTag != "" {
+		var newMasked []string
+		for _, m := range result.masked {
+			full := filepath.Join(root, filepath.FromSlash(m))
+			b, rerr := os.ReadFile(full)
+			if rerr == nil {
+				if tag, ok := wipfence.IsFenced(string(b)); ok && tag == wipTag {
+					result.kept = append(result.kept, m)
+					continue
+				}
+			}
+			newMasked = append(newMasked, m)
+		}
+		result.masked = newMasked
+		sort.Strings(result.kept)
+	}
 	if len(compileManifests) > 0 {
 		result.compileSet, err = workdelivery.LoadCompileSet(compileManifests...)
 		if err != nil {
@@ -338,7 +401,7 @@ func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, 
 // closed because it could exonerate a real red). Inputs/outputs slash-normalized; sorted.
 // buildoverlay.Build maps each masked repo-relative file to an EMPTY backing path (absolute,
 // OS-native — how the go command keys the overlay), which hides it from the compile.
-func buildCheckArgs(mode, overlayPath, outTarget string, pkgs []string) []string {
+func buildCheckArgs(mode, overlayPath, outTarget, wipTag string, pkgs []string) []string {
 	// Every buildcheck checkout is disposable and may live under a different absolute
 	// root. Keep that root out of compile action identities so Go's shared content-addressed
 	// cache can reuse sound artifacts. This is verification-only: the debuggable developer
@@ -346,6 +409,9 @@ func buildCheckArgs(mode, overlayPath, outTarget string, pkgs []string) []string
 	args := []string{mode, "-trimpath"}
 	if overlayPath != "" {
 		args = append(args, "-overlay", overlayPath)
+	}
+	if wipTag != "" {
+		args = append(args, "-tags", wipTag)
 	}
 	if mode == "build" {
 		args = append(args, "-o", outTarget)

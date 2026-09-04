@@ -102,20 +102,22 @@ func TestBuildOverlayHidesEachFile(t *testing.T) {
 
 func TestBuildCheckArgs(t *testing.T) {
 	cases := []struct {
-		name                     string
-		mode, overlay, outTarget string
-		pkgs, want               []string
+		name                             string
+		mode, overlay, outTarget, wipTag string
+		pkgs, want                       []string
 	}{
-		{"build discards to null", "build", "", "NUL", []string{"./..."},
+		{"build discards to null", "build", "", "NUL", "", []string{"./..."},
 			[]string{"build", "-trimpath", "-o", "NUL", "./..."}},
-		{"build with overlay and out dir", "build", "ov.json", "out", []string{"./cmd/fak"},
+		{"build with overlay and out dir", "build", "ov.json", "out", "", []string{"./cmd/fak"},
 			[]string{"build", "-trimpath", "-overlay", "ov.json", "-o", "out", "./cmd/fak"}},
-		{"vet never takes -o", "vet", "ov.json", "out", []string{"./..."},
+		{"vet never takes -o", "vet", "ov.json", "out", "", []string{"./..."},
 			[]string{"vet", "-trimpath", "-overlay", "ov.json", "./..."}},
+		{"build with wip tag", "build", "", "NUL", "wip_feat", []string{"./..."},
+			[]string{"build", "-trimpath", "-tags", "wip_feat", "-o", "NUL", "./..."}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildCheckArgs(tc.mode, tc.overlay, tc.outTarget, tc.pkgs)
+			got := buildCheckArgs(tc.mode, tc.overlay, tc.outTarget, tc.wipTag, tc.pkgs)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("buildCheckArgs = %v, want %v", got, tc.want)
 			}
@@ -125,7 +127,7 @@ func TestBuildCheckArgs(t *testing.T) {
 
 func TestBuildCheckArgsCarryOneTrimpathFlag(t *testing.T) {
 	for _, mode := range []string{"build", "vet"} {
-		got := buildCheckArgs(mode, "", "NUL", []string{"./p"})
+		got := buildCheckArgs(mode, "", "NUL", "", []string{"./p"})
 		if len(got) < 2 || got[1] != "-trimpath" {
 			t.Fatalf("%s args = %v; want -trimpath as the first build flag", mode, got)
 		}
@@ -251,6 +253,52 @@ func TestRunBuildCheckJSONReport(t *testing.T) {
 	}
 	if rep.Delivery.Receipt.Transition.Axis == "integration" || rep.Delivery.Receipt.Transition.Axis == "release" {
 		t.Fatal("buildcheck inferred a downstream delivery axis")
+	}
+}
+
+func TestRunBuildCheckIsolateWIPTrunk(t *testing.T) {
+	var gotArgs []string
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, nil, func(_ string, args []string, _, _ io.Writer) (int, error) {
+		gotArgs = args
+		return 0, nil
+	})
+	var out, errb bytes.Buffer
+	if rc := RunBuildCheck(&out, &errb, []string{"--isolate-wip", "./cmd/fak"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+	for i, arg := range gotArgs {
+		if arg == "-tags" {
+			t.Errorf("expected no -tags for trunk isolate-wip, got %v", gotArgs[i:i+2])
+		}
+	}
+}
+
+func TestRunBuildCheckIsolateWIPTag(t *testing.T) {
+	var gotArgs []string
+	withBuildCheckSeams(t, []string{"cmd/fak/peer_wip.go"}, nil, func(_ string, args []string, _, _ io.Writer) (int, error) {
+		gotArgs = args
+		return 0, nil
+	})
+	var out, errb bytes.Buffer
+	if rc := RunBuildCheck(&out, &errb, []string{"--isolate-wip=myfeat", "--json", "./cmd/fak"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+	hasTag := false
+	for i, arg := range gotArgs {
+		if arg == "-tags" && i+1 < len(gotArgs) && gotArgs[i+1] == "wip_myfeat" {
+			hasTag = true
+			break
+		}
+	}
+	if !hasTag {
+		t.Errorf("args %v missing -tags wip_myfeat", gotArgs)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v", err)
+	}
+	if rep.IsolateWIP != "wip_myfeat" {
+		t.Errorf("rep.IsolateWIP = %q, want wip_myfeat", rep.IsolateWIP)
 	}
 }
 
