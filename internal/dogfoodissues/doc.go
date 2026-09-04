@@ -34,6 +34,13 @@
 // create / edit). Sync runs the gh subprocess for each planned row through an
 // injectable runner so the wiring is testable without gh present.
 //
+// # Contracts and Invariants
+//
+//   - Invariant: dogfood issues extraction is fail-closed and deterministic.
+//     Missing, corrupt, or zero-debt probes produce zero action items rather than speculative work.
+//   - Guard: network operations and tracker mutations are strictly opt-in and
+//     refused unless explicit live flags are provided by the caller.
+//
 // Tier: composer (3) — a tool-shaped fold that reads a report, derives a plan, and
 // (only when asked) composes the external `gh` tool; shells out off the hot path,
 // imports nothing internal.

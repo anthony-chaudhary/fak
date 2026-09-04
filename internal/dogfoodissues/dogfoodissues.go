@@ -390,6 +390,9 @@ func FormatReportDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd %dh", days, hour)
 }
 
+// Invariant: dogfood issues extraction is fail-closed and deterministic.
+// Missing or corrupt probes, non-ACTION probes, and zero-debt findings produce zero action items.
+//
 // ExtractActionItems folds the report's probes into the scorecard ACTION items
 // that warrant a tracked backlog issue. reportPath is recorded as the evidence
 // path on each item.
