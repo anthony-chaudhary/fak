@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ops"
@@ -95,9 +96,44 @@ func runOpsSweep(stdout, stderr io.Writer, root string, cfg ops.Config, args []s
 	}
 
 	ctx := context.Background()
+	start := time.Now()
 	healRes, _ := engine.Workspace.SweepLocksAndWorktrees(ctx, *dryRun)
 	reclaimRes, _ := engine.Storage.ReclaimCascade(ctx, *dryRun)
 	procRes, _ := engine.Process.SweepProcessRunaways(ctx, *dryRun)
+	dur := time.Since(start).Milliseconds()
+
+	if !*dryRun {
+		if len(healRes.LocksEvicted) > 0 {
+			_ = engine.Ledger.Record(ops.Event{
+				ActionType: ops.ActionLockEvict,
+				Details:    fmt.Sprintf("evicted dead locks: %s", strings.Join(healRes.LocksEvicted, ", ")),
+				DurationMS: dur,
+			})
+		}
+		if len(healRes.WorktreesPruned) > 0 {
+			_ = engine.Ledger.Record(ops.Event{
+				ActionType: ops.ActionWorktreePrune,
+				Details:    fmt.Sprintf("pruned cold worktrees: %s", strings.Join(healRes.WorktreesPruned, ", ")),
+				DurationMS: dur,
+			})
+		}
+		if len(procRes.PIDsReaped) > 0 {
+			_ = engine.Ledger.Record(ops.Event{
+				ActionType:   ops.ActionProcessReap,
+				Details:      fmt.Sprintf("reaped %d processes: %s", len(procRes.PIDsReaped), strings.Join(procRes.Names, ", ")),
+				PIDsAffected: procRes.PIDsReaped,
+				DurationMS:   dur,
+			})
+		}
+		if reclaimRes.TotalBytes > 0 {
+			_ = engine.Ledger.Record(ops.Event{
+				ActionType:     ops.ActionStorageReclaim,
+				Details:        fmt.Sprintf("reclaimed %d bytes across %d files (%s)", reclaimRes.TotalBytes, reclaimRes.FilesCount, strings.Join(reclaimRes.Actions, "; ")),
+				BytesReclaimed: reclaimRes.TotalBytes,
+				DurationMS:     dur,
+			})
+		}
+	}
 
 	result := struct {
 		DryRun         bool     `json:"dry_run"`
