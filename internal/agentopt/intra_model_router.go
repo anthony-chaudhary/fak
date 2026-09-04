@@ -51,6 +51,31 @@ func (e EffortTier) ThinkingBudget() int {
 	}
 }
 
+// VolumeMultiplier returns the rough expected output token volume multiplier for this tier,
+// anchored so that EffortMedium == 1.0. This aligns with internal/modelroute/effortcost.go,
+// where reasoning effort is modeled as an expected output token volume multiplier rather
+// than a $/Mtok rate change:
+//   - EffortNone: 0.4 (sub-second routine tools emit a fraction of medium output)
+//   - EffortLow: 0.7 (straightforward checks and verification)
+//   - EffortMedium: 1.0 (neutral anchor for multi-step diagnostics and diffs)
+//   - EffortHigh: 1.6 (full reasoning capability for planning, decomposition, and error recovery)
+//
+// Unknown or unrecognized tiers default to 1.0 (the neutral medium anchor).
+func (e EffortTier) VolumeMultiplier() float64 {
+	switch e {
+	case EffortNone:
+		return 0.4
+	case EffortLow:
+		return 0.7
+	case EffortMedium:
+		return 1.0
+	case EffortHigh:
+		return 1.6
+	default:
+		return 1.0
+	}
+}
+
 // ProviderEffort returns the provider-neutral effort label ("none", "low", "medium", "high").
 func (e EffortTier) ProviderEffort() string {
 	return string(e)
@@ -197,8 +222,16 @@ type TurnClassification struct {
 	Reason          string              `json:"reason"`
 }
 
+// VolumeMultiplier returns the expected output token volume multiplier for this classification's effort tier.
+func (c TurnClassification) VolumeMultiplier() float64 {
+	return c.Effort.VolumeMultiplier()
+}
+
 // TurnEffortDecision is an alias for TurnClassification to support dynamic effort modulation.
 type TurnEffortDecision = TurnClassification
+
+// Decision is an alias for TurnClassification representing the complete adjudication and effort decision for a turn.
+type Decision = TurnClassification
 
 // IntraModelEffortRouter routes and classifies turns into reasoning effort tiers.
 type IntraModelEffortRouter struct {
@@ -261,6 +294,16 @@ func Classify(input TurnContext) TurnClassification {
 	return defaultRouter.Classify(input)
 }
 
+// VolumeMultiplier returns the expected output token volume multiplier for an effort tier using the default router.
+func VolumeMultiplier(tier EffortTier) float64 {
+	return defaultRouter.VolumeMultiplier(tier)
+}
+
+// VolumeMultiplierForTurn evaluates a turn context and returns its volume multiplier using the default router.
+func VolumeMultiplierForTurn(input TurnContext) float64 {
+	return defaultRouter.VolumeMultiplierForTurn(input)
+}
+
 // RegisterToolCategory registers or overrides an operational category for a tool name.
 func (r *IntraModelEffortRouter) RegisterToolCategory(toolName string, category OperationalCategory) {
 	r.mu.Lock()
@@ -294,6 +337,16 @@ func (r *IntraModelEffortRouter) ClassifyTurn(input TurnContext) EffortTier {
 func (r *IntraModelEffortRouter) ThinkingBudgetForTurn(input TurnContext) int {
 	classification := r.Classify(input)
 	return classification.ThinkingBudget
+}
+
+// VolumeMultiplier returns the expected output token volume multiplier for an effort tier.
+func (r *IntraModelEffortRouter) VolumeMultiplier(tier EffortTier) float64 {
+	return tier.VolumeMultiplier()
+}
+
+// VolumeMultiplierForTurn evaluates a turn context and returns its expected output token volume multiplier.
+func (r *IntraModelEffortRouter) VolumeMultiplierForTurn(input TurnContext) float64 {
+	return r.Classify(input).VolumeMultiplier()
 }
 
 // Regex matchers for error, diagnostic, and planning detection.
