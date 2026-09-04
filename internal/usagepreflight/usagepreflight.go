@@ -13,8 +13,11 @@ import (
 type Policy string
 
 const (
-	PolicyConfirm    Policy = "confirm"
-	PolicyAuto       Policy = "auto"
+	// PolicyConfirm halts and requires operator confirmation when reserve is reached.
+	PolicyConfirm Policy = "confirm"
+	// PolicyAuto automatically selects an alternative seat when reserve is reached.
+	PolicyAuto Policy = "auto"
+	// PolicyFailClosed unconditionally refuses requests when reserve is reached.
 	PolicyFailClosed Policy = "fail-closed"
 )
 
@@ -22,15 +25,21 @@ const (
 type Action string
 
 const (
+	// ActionProceed allows the request to continue on the requested seat.
 	ActionProceed Action = "proceed"
-	ActionSwitch  Action = "switch-seat"
-	ActionRefuse  Action = "refuse"
+	// ActionSwitch redirects the request to an alternate seat.
+	ActionSwitch Action = "switch-seat"
+	// ActionRefuse blocks the request from proceeding.
+	ActionRefuse Action = "refuse"
 )
 
 var (
+	// ErrConfirmationRequired indicates spend was refused pending confirmation.
 	ErrConfirmationRequired = errors.New("usage preflight requires confirmation")
-	ErrReserveReached       = errors.New("usage preflight reserve reached")
-	ErrNoAlternateSeat      = errors.New("usage preflight found no alternate seat")
+	// ErrReserveReached indicates spend was refused because reserve quota was reached.
+	ErrReserveReached = errors.New("usage preflight reserve reached")
+	// ErrNoAlternateSeat indicates an auto-switch failed because no candidate seat was found.
+	ErrNoAlternateSeat = errors.New("usage preflight found no alternate seat")
 )
 
 // Reading is a provider's latest usage observation. Remaining and Limit use the
@@ -97,6 +106,9 @@ func (h Hook) Call(ctx context.Context, seat string, send func(context.Context, 
 	return send(ctx, selected)
 }
 
+// Invariant: usage preflight policy decisions are fail-closed and deterministic.
+// Guard: outbound admission never permits spend if reserve boundaries are reached without an alternate seat.
+//
 // Decide returns the seat to use and a structured decision.
 func (h Hook) Decide(ctx context.Context, seat string) (string, Record, error) {
 	rec := Record{Seat: seat, SelectedSeat: seat, Action: ActionProceed, Policy: h.Config.Policy, ReservePercent: h.Config.ReservePercent}
