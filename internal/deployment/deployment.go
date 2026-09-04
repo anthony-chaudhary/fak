@@ -25,12 +25,14 @@ type DesiredContext struct {
 	AllowedEffects []string        `json:"allowed_effects,omitempty"`
 }
 
+// ManagedObject declares a content-addressed entity required by the runtime environment.
 type ManagedObject struct {
 	Type    string `json:"type"`
 	ID      string `json:"id"`
 	Content []byte `json:"content"`
 }
 
+// LockedInput pins an external artifact dependency by its content digest.
 type LockedInput struct {
 	Name   string `json:"name"`
 	Digest string `json:"digest"`
@@ -84,9 +86,11 @@ func (r Realization) Compatible(derivationID string, target Target) bool {
 	return r.DerivationID == derivationID && r.Target.OS == target.OS && r.Target.Architecture == target.Architecture && equalStrings(r.Target.Capabilities, target.Capabilities)
 }
 
-// Store is a local content-addressed realization store.
+// Store is a local content-addressed realization store on disk.
 type Store struct{ Root string }
 
+// Invariant: deployment materialization is fail-closed and deterministic.
+// Guard: path traversal and realization hash mismatches cause immediate rejection before any disk mutation.
 // Materialize verifies and atomically installs a realization without activating it.
 func (s Store) Materialize(r Realization) (string, error) {
 	if s.Root == "" {

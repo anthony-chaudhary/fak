@@ -12,6 +12,10 @@
 // filesystem or cross-machine receipts cannot distinguish build from substitution. The
 // invalidating assumption is that rename within one activation filesystem is atomic.
 //
+// Invariant: deployment materialization is fail-closed and deterministic.
+// Precondition: store root and realization identities must match byte-exact hashes.
+// Guard: untrusted file paths and directory traversals are strictly rejected before writing.
+//
 // Tier: primitive (1) - see internal/architest. This package may import only
 // packages whose tier is <= 1; an upward import fails the architest gate.
 package deployment
