@@ -152,3 +152,82 @@ func (d *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		Meta:   map[string]string{"logit": fmt.Sprintf("%.4f", z)},
 	}
 }
+
+// Descriptor summarizes the operational parameters, feature volume, and
+// evaluation metrics of an advisory adjudication model.
+type Descriptor struct {
+	Schema       string  `json:"schema"`
+	FeatureCount int     `json:"feature_count"`
+	Bias         float64 `json:"bias"`
+	Threshold    float64 `json:"threshold"`
+	Precision    float64 `json:"precision"`
+	Recall       float64 `json:"recall"`
+	F1           float64 `json:"f1"`
+	Trained      string  `json:"trained,omitempty"`
+}
+
+// Valid reports whether the descriptor represents a valid, non-empty model specification.
+func (d Descriptor) Valid() bool {
+	return d.Schema == ArtifactSchema && d.FeatureCount > 0
+}
+
+// Descriptor extracts the operational descriptor summarizing the model artifact.
+// If the receiver is nil or uninitialized, an empty descriptor is returned.
+func (a *Artifact) Descriptor() Descriptor {
+	if a == nil {
+		return Descriptor{}
+	}
+	return Descriptor{
+		Schema:       a.Schema,
+		FeatureCount: len(a.Features),
+		Bias:         a.Bias,
+		Threshold:    a.Threshold,
+		Precision:    a.Meta.Precision,
+		Recall:       a.Meta.Recall,
+		F1:           a.Meta.F1,
+		Trained:      a.Meta.Trained,
+	}
+}
+
+// Descriptor returns the operational descriptor of the underlying artifact,
+// or an empty descriptor if the adjudicator has no configured artifact.
+func (d *Adjudicator) Descriptor() Descriptor {
+	if d == nil || d.art == nil {
+		return Descriptor{}
+	}
+	return d.art.Descriptor()
+}
+
+// Model returns the underlying Artifact associated with the adjudicator, or nil
+// if none was configured.
+func (d *Adjudicator) Model() *Artifact {
+	if d == nil {
+		return nil
+	}
+	return d.art
+}
+
+// Resolve parses and validates serialized artifact bytes into an Artifact and its
+// operational Descriptor.
+func Resolve(b []byte) (*Artifact, Descriptor, error) {
+	art, err := LoadBytes(b)
+	if err != nil {
+		return nil, Descriptor{}, err
+	}
+	return art, art.Descriptor(), nil
+}
+
+// ResolveModel parses and validates serialized artifact bytes into an Artifact and its
+// operational Descriptor. It is an alias for Resolve.
+func ResolveModel(b []byte) (*Artifact, Descriptor, error) {
+	return Resolve(b)
+}
+
+// ResolvePath reads a model artifact from disk and resolves its operational descriptor.
+func ResolvePath(path string) (*Artifact, Descriptor, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, Descriptor{}, fmt.Errorf("advmodel: read artifact %s: %w", path, err)
+	}
+	return Resolve(b)
+}
