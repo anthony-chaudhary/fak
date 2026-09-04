@@ -99,6 +99,10 @@ type Options struct {
 
 // Project folds attributions plus the live-session set into an Occupancy.
 //
+// Contract: WIP lease projection is fail-closed, pure, and deterministic.
+// Invariant: WIP lease projection is fail-closed and deterministic.
+// Guard: Absent or empty session IDs fail toward reclaimable rather than active blocking leases.
+//
 // live maps session id -> alive. A session absent from the map is treated as NOT live:
 // the projection fails toward "reclaimable", never toward "blocked". That direction is
 // deliberate. Over-reporting a lease would serialize a peer behind a session that no
