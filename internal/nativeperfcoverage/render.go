@@ -15,7 +15,9 @@ import (
 type RenderMode string
 
 const (
-	RenderPopulated   RenderMode = "POPULATED"
+	// RenderPopulated renders the dashboard preview matrix in the populated fixture state.
+	RenderPopulated RenderMode = "POPULATED"
+	// RenderUnavailable renders the dashboard preview matrix in the explicit unavailable state.
 	RenderUnavailable RenderMode = "UNAVAILABLE"
 )
 

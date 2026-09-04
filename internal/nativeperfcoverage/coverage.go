@@ -16,9 +16,12 @@ import (
 )
 
 const (
+	// LiveReceiptSchema identifies the schema specification version for native performance live receipts.
 	LiveReceiptSchema = "fak-nativeperf-live-receipt/v1"
-	NativeEngine      = "fak-native"
-	Qwen38Prefix      = "Qwen3.8"
+	// NativeEngine specifies the expected engine identifier string for in-kernel fak execution.
+	NativeEngine = "fak-native"
+	// Qwen38Prefix defines the required model family name prefix for native inference targets.
+	Qwen38Prefix = "Qwen3.8"
 )
 
 // Spec binds one dashboard to its authoritative public contract and fixture.
@@ -138,9 +141,12 @@ type Series struct {
 type QueryKind string
 
 const (
+	// PanelTarget indicates that a query originated from a dashboard panel target metric.
 	PanelTarget QueryKind = "panel"
-	Annotation  QueryKind = "annotation"
-	Variable    QueryKind = "variable"
+	// Annotation indicates that a query originated from an event annotation rule.
+	Annotation QueryKind = "annotation"
+	// Variable indicates that a query originated from a templating variable definition.
+	Variable QueryKind = "variable"
 )
 
 // QueryCoverage is the deterministic proof row for one extracted query.
@@ -203,6 +209,7 @@ type QueryChecker interface {
 // QueryCheckerFunc adapts a function to QueryChecker.
 type QueryCheckerFunc func(context.Context, string) error
 
+// Check invokes the underlying query checking function on the given expression.
 func (f QueryCheckerFunc) Check(ctx context.Context, expr string) error { return f(ctx, expr) }
 
 // Config controls deterministic contract validation.
@@ -222,6 +229,10 @@ type loadedSpec struct {
 	allowed   map[string]bool
 }
 
+// Invariant: all dashboard metrics must match authoritative producer contracts.
+// Contract: query expressions are validated against controlled static fixtures
+// and reject zero-coercion fallbacks to guarantee fail-closed absence reporting.
+//
 // Validate loads and proves all four exact dashboard/contract/fixture triples.
 func Validate(ctx context.Context, cfg Config) (Matrix, error) {
 	if cfg.Root == "" {

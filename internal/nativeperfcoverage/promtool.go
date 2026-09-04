@@ -19,6 +19,7 @@ type PromtoolChecker struct {
 	Path string
 }
 
+// Check validates the supplied PromQL expression using promtool rules checking in an isolated directory.
 func (p PromtoolChecker) Check(ctx context.Context, expr string) error {
 	path := p.Path
 	if path == "" {

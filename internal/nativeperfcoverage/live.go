@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// PublicLiveProofSchema identifies the schema version for public live verification evidence proofs.
 const PublicLiveProofSchema = "fak-native-performance-live-proof/v1"
 
 // LiveState separates an honest unavailable witness from observed execution.
@@ -17,8 +18,10 @@ const PublicLiveProofSchema = "fak-native-performance-live-proof/v1"
 type LiveState string
 
 const (
+	// LivePending indicates that live hardware execution is currently pending or awaiting route attempts.
 	LivePending LiveState = "LIVE_PENDING"
-	LiveProven  LiveState = "LIVE_PROVEN"
+	// LiveProven indicates that verified native execution has been observed and recorded.
+	LiveProven LiveState = "LIVE_PROVEN"
 )
 
 type executionIdentity struct {
