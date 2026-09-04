@@ -420,6 +420,7 @@ type Trend struct {
 	EarlyWarning       []EarlyWarning          `json:"early_warning"`
 	GradeRegressed     []GradeRegression       `json:"grade_regressed"`
 	VersionChanged     []DetectorVersionChange `json:"version_changed"`
+	OutOfControl       *PortfolioOutOfControl  `json:"out_of_control,omitempty"`
 }
 
 // Baseline is the pinned per-metric baseline body (the tracked baseline file shape).
@@ -438,23 +439,24 @@ type Baseline struct {
 // Payload is the folded control-pane payload. Field order/tags match the Python
 // fold() return dict so the --json bytes are contract-compatible.
 type Payload struct {
-	Schema             string         `json:"schema"`
-	OK                 bool           `json:"ok"`
-	Verdict            string         `json:"verdict"`
-	Finding            string         `json:"finding"`
-	Reason             string         `json:"reason"`
-	NextAction         string         `json:"next_action"`
-	Workspace          string         `json:"workspace"`
-	Commit             string         `json:"commit"`
-	TotalDebt          int            `json:"total_debt"`
-	TotalDebtSemantics string         `json:"total_debt_semantics"`
-	GradeDebt          int            `json:"grade_debt"`
-	GradeBreakdown     string         `json:"grade_breakdown"`
-	Measured           int            `json:"measured"`
-	Errored            int            `json:"errored"`
-	EarlyWarning       []EarlyWarning `json:"early_warning"`
-	Metrics            []Metric       `json:"metrics"`
-	Trend              Trend          `json:"trend"`
+	Schema             string                 `json:"schema"`
+	OK                 bool                   `json:"ok"`
+	Verdict            string                 `json:"verdict"`
+	Finding            string                 `json:"finding"`
+	Reason             string                 `json:"reason"`
+	NextAction         string                 `json:"next_action"`
+	Workspace          string                 `json:"workspace"`
+	Commit             string                 `json:"commit"`
+	TotalDebt          int                    `json:"total_debt"`
+	TotalDebtSemantics string                 `json:"total_debt_semantics"`
+	GradeDebt          int                    `json:"grade_debt"`
+	GradeBreakdown     string                 `json:"grade_breakdown"`
+	Measured           int                    `json:"measured"`
+	Errored            int                    `json:"errored"`
+	EarlyWarning       []EarlyWarning         `json:"early_warning"`
+	OutOfControl       *PortfolioOutOfControl `json:"out_of_control,omitempty"`
+	Metrics            []Metric               `json:"metrics"`
+	Trend              Trend                  `json:"trend"`
 	// GateExit/GateMessage are populated only under --check (the ratchet contract),
 	// matching the Python gated payload.
 	GateExit    *int   `json:"gate_exit,omitempty"`
@@ -464,8 +466,7 @@ type Payload struct {
 	// presence marks the payload as an incremental read, NOT a full measurement — so
 	// it must not be pinned or posted as a new floor. A full run leaves it nil (the
 	// field omits), keeping the full-run --json bytes unchanged.
-	Incremental  *IncrementalInfo       `json:"incremental,omitempty"`
-	OutOfControl *PortfolioOutOfControl `json:"out_of_control,omitempty"`
+	Incremental *IncrementalInfo `json:"incremental,omitempty"`
 }
 
 // Fold folds per-scorecard metrics into one control-pane payload + trend. It is a
@@ -595,16 +596,15 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 			"isn't blessed as the new floor; then: " + nextAction
 	}
 
-	ooc := AssessOutOfControl(metrics, baseline, totalDebt, gradeDebtTotal, DefaultOutOfControlBounds())
-
 	return Payload{
 		Schema: Schema, OK: ok, Verdict: verdict, Finding: finding,
 		Reason: reason, NextAction: nextAction, Workspace: workspace, Commit: commit,
 		TotalDebt: totalDebt, TotalDebtSemantics: TotalDebtSemantics,
 		GradeDebt: gradeDebtTotal, GradeBreakdown: gradeBreakdown,
 		Measured: len(measured), Errored: len(errors), EarlyWarning: earlyWarning,
-		Metrics: metrics, Trend: trend,
-		OutOfControl: &ooc,
+		OutOfControl: trend.OutOfControl,
+		Metrics:      metrics,
+		Trend:        trend,
 	}
 }
 
@@ -711,6 +711,11 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 	if baseGrade != nil && gradeDelta != nil && *gradeDelta != 0 {
 		summary += fmt.Sprintf("; grade-debt %d->%d (%+d)", *baseGrade, gradeDebtTotal, *gradeDelta)
 	}
+	ooc := AssessOutOfControl(metrics, baseline, totalDebt, gradeDebtTotal, DefaultOutOfControlBounds())
+	var oocPtr *PortfolioOutOfControl
+	if ooc.Status != StatusUnpinned {
+		oocPtr = &ooc
+	}
 	return Trend{
 		Direction: direction, Summary: summary, ComparisonBasis: MetricComparisonBasis,
 		Comparable: len(versionChanged) == 0, TotalDelta: totalDelta,
@@ -718,6 +723,7 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 		BaselineCommit: baseCommit, BaselineTotal: baseTotal, BaselineGrade: baseGrade,
 		GradeDebt: gradeDebtTotal, Deltas: deltas, Worsened: worsened, Improved: improved,
 		EarlyWarning: earlyWarning, GradeRegressed: gradeRegressed, VersionChanged: versionChanged,
+		OutOfControl: oocPtr,
 	}
 }
 
@@ -798,11 +804,11 @@ func CheckGate(p Payload) (int, string) {
 		}
 		extra := ""
 		if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
-			extra = fmt.Sprintf(" [OUT OF CONTROL %s]", p.OutOfControl.Status)
+			extra = fmt.Sprintf(" [OUT OF CONTROL: %s]", strings.Join(p.OutOfControl.Reasons, "; "))
 		}
-		return 1, fmt.Sprintf("RATCHET FAIL: same-version per-metric debt regressed%s; "+
-			"worsened: %s; %s (total_debt=%d)",
-			extra, worsened, TotalDebtSemantics, p.TotalDebt)
+		return 1, fmt.Sprintf("RATCHET FAIL: same-version per-metric debt regressed; "+
+			"worsened: %s; %s (total_debt=%d)%s",
+			worsened, TotalDebtSemantics, p.TotalDebt, extra)
 	}
 	if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
 		return 1, fmt.Sprintf("RATCHET FAIL: OUT OF CONTROL debt dynamics (%s): %s", p.OutOfControl.Status, p.Reason)
@@ -911,6 +917,25 @@ func Render(p Payload) string {
 		for _, v := range p.Trend.VersionChanged {
 			fmt.Fprintf(&b, "  INCOMPARABLE: %s detector changed %s->%s — review, then re-pin\n",
 				v.Label, v.Baseline, v.Current)
+		}
+	}
+	if p.OutOfControl != nil && p.OutOfControl.IsOutOfControl {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "  OUT-OF-CONTROL DEBT ALERT (status %s):\n", p.OutOfControl.Status)
+		for _, r := range p.OutOfControl.Reasons {
+			fmt.Fprintf(&b, "    ! %s\n", r)
+		}
+		for _, om := range p.OutOfControl.Metrics {
+			fmt.Fprintf(&b, "    * %s: %s (%d->%d, %+d) — %s\n",
+				om.Label, om.Severity, om.From, om.To, om.Delta, strings.Join(om.Reasons, "; "))
+		}
+	} else if p.OutOfControl != nil && p.OutOfControl.Status == StatusElevated {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "  ELEVATED DEBT ALERT (status %s — %d metric(s) exceeding rate/velocity bounds):\n",
+			p.OutOfControl.Status, len(p.OutOfControl.Metrics))
+		for _, om := range p.OutOfControl.Metrics {
+			fmt.Fprintf(&b, "    * %s: %s (%d->%d, %+d) — %s\n",
+				om.Label, om.Severity, om.From, om.To, om.Delta, strings.Join(om.Reasons, "; "))
 		}
 	}
 	fmt.Fprintf(&b, "\n  → %s\n", p.NextAction)
