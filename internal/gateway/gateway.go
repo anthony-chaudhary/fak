@@ -271,6 +271,7 @@ func New(cfg Config) (*Server, error) {
 		exposeAllow:                  exposeAllow,
 		deferMCPTools:                cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),
 		disableMCPDefer:              cfg.DisableMCPDefer,
+		mcpToolCeiling:               cfg.MCPToolCeiling,
 		modelVision:                  cfg.ModelVision,
 		deferColdTools:               cfg.DeferColdTools || envEnabled("FAK_DEFER_COLD_TOOLS"),
 		cacheStream:                  cacheStream,

@@ -762,6 +762,10 @@ type Config struct {
 	// and advertises the full tool catalog on tools/list (equivalent to FAK_ABLATE_MCP_TOOL_FILTER=1).
 	// Used by clients like OpenCode that query tools/list once at startup and lack dynamic tool fault-in.
 	DisableMCPDefer bool
+	// MCPToolCeiling, when positive, clamps the number of advertised tools on tools/list
+	// to a curated active set when deferral is disabled (e.g. DisableMCPDefer or ablation).
+	// 0 preserves unbounded tool advertisement.
+	MCPToolCeiling int
 	// ModelVision declares whether the active model supports multimodal vision/image inputs (#10779).
 	// When false (or unset for text-only models), image tools like view_image are omitted from advertised schemas.
 	ModelVision bool

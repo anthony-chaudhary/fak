@@ -30,6 +30,25 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
+// DefaultMCPToolAdvertisementCeiling is the default ceiling on advertised MCP tools
+// when deferral is disabled, clamping the schema footprint to a curated active set.
+const DefaultMCPToolAdvertisementCeiling = 10
+
+// curatedPriorityToolNames defines the ordered precedence for selecting the active
+// top-K tool set when an advertisement ceiling is in effect.
+var curatedPriorityToolNames = []string{
+	"fak_adjudicate",
+	"fak_syscall",
+	"fak_read",
+	"fak_tools_search",
+	"fak_context_change",
+	"fak_context_restore",
+	"fak_feature_query",
+	"fak_trajquery",
+	"fak_memory_drivers",
+	"fak_memory_explain",
+}
+
 // bootstrapToolNames is the hot resident core kept eager on tools/list when
 // deferral is on: the syscall/read/adjudicate spine plus the tool_search_tool
 // entry (fak_tools_search) the model uses to fault every other schema back in.
@@ -84,6 +103,12 @@ func (s *Server) toolsListViewWithAblation(ablate bool) ([]map[string]any, MCPTo
 			status.Mode = "active"
 			status.Reason = "default_on"
 		}
+	} else if s != nil && s.mcpToolCeiling > 0 {
+		if len(full) > s.mcpToolCeiling {
+			resident = s.curatedCeilingToolDescriptors(full, s.mcpToolCeiling)
+		}
+		status.Mode = "ceiling"
+		status.Reason = "advertisement_ceiling"
 	}
 
 	before, _ := json.Marshal(full)
@@ -221,6 +246,54 @@ func (s *Server) bootstrapToolDescriptors() []map[string]any {
 	for _, td := range full {
 		if n, _ := td["name"].(string); bootstrapToolNames[n] {
 			out = append(out, td)
+		}
+	}
+	return out
+}
+
+// curatedCeilingToolDescriptors selects a curated top-K active set of tools up to ceiling.
+// It prioritizes the core tools (bootstrapToolNames), then common tools
+// (fak_context_change, fak_context_restore, fak_feature_query, fak_trajquery,
+// fak_memory_drivers, fak_memory_explain, etc.), followed by any remaining exposed tools.
+func (s *Server) curatedCeilingToolDescriptors(full []map[string]any, ceiling int) []map[string]any {
+	if ceiling <= 0 || len(full) <= ceiling {
+		return full
+	}
+	out := make([]map[string]any, 0, ceiling)
+	byName := make(map[string]map[string]any, len(full))
+	for _, td := range full {
+		if n, _ := td["name"].(string); n != "" {
+			byName[n] = td
+		}
+	}
+	seen := make(map[string]bool, ceiling)
+	for _, name := range curatedPriorityToolNames {
+		if td, ok := byName[name]; ok && !seen[name] {
+			out = append(out, td)
+			seen[name] = true
+			if len(out) == ceiling {
+				return out
+			}
+		}
+	}
+	for _, td := range full {
+		n, _ := td["name"].(string)
+		if bootstrapToolNames[n] && !seen[n] {
+			out = append(out, td)
+			seen[n] = true
+			if len(out) == ceiling {
+				return out
+			}
+		}
+	}
+	for _, td := range full {
+		n, _ := td["name"].(string)
+		if !seen[n] {
+			out = append(out, td)
+			seen[n] = true
+			if len(out) == ceiling {
+				return out
+			}
 		}
 	}
 	return out
