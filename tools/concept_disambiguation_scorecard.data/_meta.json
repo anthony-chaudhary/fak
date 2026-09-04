@@ -14901,12 +14901,30 @@
           "category": "incidental",
           "reason": "ROCmFP4 layout validator function",
           "token": "ValidateROCmFP4Layout"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE memory layout descriptor",
+          "token": "ExpertStorageLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE storage layout constructor",
+          "token": "LayoutExpertStorage"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE storage layout constructor alias",
+          "token": "NewExpertStorageLayout"
         }
       ],
       "id": "layout",
       "ignore": [
+        "ExpertStorageLayout",
         "ExportLayout",
         "ImportLayout",
+        "LayoutExpertStorage",
+        "NewExpertStorageLayout",
         "ROCmFP4LayoutName",
         "ReplayOutcome",
         "ValidateROCmFP4Layout",
