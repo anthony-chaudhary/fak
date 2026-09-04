@@ -1,6 +1,9 @@
 // Package faultlab provides a fault injection laboratory for agentic serving,
 // network stream disruptions, JSON corruption, mid-turn truncation, and simulated kernel faults.
 //
+// Invariant: fault lab injection is fail-closed and deterministic across all failure modes.
+// Guard: unmatched targets bypass interception cleanly and context cancellations abort artificial latency.
+//
 // The package is pure Go and stdlib-only, designed to test resilience against real-world
 // failures observed in LLM agent pipelines: partial network reads, ill-formed tool-call JSON,
 // simulated OOM / memory pressure, catastrophic kernel resets, and latency tail spikes.

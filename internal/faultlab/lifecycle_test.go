@@ -447,8 +447,8 @@ func TestFaultLifecycle_ConcurrentSimulation(t *testing.T) {
 	}
 }
 
-// BenchmarkFaultLab benchmarks the primary Inject path under alternating fault and clean workloads.
-func BenchmarkFaultLab(b *testing.B) {
+// BenchmarkFaultLab_AlternatingWorkload benchmarks the primary Inject path under alternating fault and clean workloads.
+func BenchmarkFaultLab_AlternatingWorkload(b *testing.B) {
 	fi := NewFaultInjector()
 	ctx := context.Background()
 
