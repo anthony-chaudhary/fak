@@ -1,6 +1,9 @@
 // Package configguide turns user intent into minimal, reviewable fak.toml
 // deltas. It deliberately depends on deploymanifest for validation so guided
 // postures cannot become a parallel configuration system.
+//
+// Invariant: configuration posture resolution is fail-closed and bounded.
+// Guard: all synthesized manifests are parsed and verified through deploymanifest before emission.
 package configguide
 
 import (
@@ -11,8 +14,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 )
 
+// Schema identifies the versioned JSON contract emitted by configguide results.
 const Schema = "fak-config-guide/1"
 
+// Change describes an atomic mutation to a manifest field with operator rationale.
 type Change struct {
 	Field          string `json:"field"`
 	Value          any    `json:"value"`
@@ -20,6 +25,7 @@ type Change struct {
 	EquivalentFlag string `json:"equivalent_flag,omitempty"`
 }
 
+// Result captures the guided posture outcome, TOML manifest delta, and recommended command.
 type Result struct {
 	Schema      string   `json:"schema"`
 	Posture     string   `json:"posture"`
@@ -30,6 +36,7 @@ type Result struct {
 	Run         string   `json:"run"`
 }
 
+// Options contains operator inputs for parameterizing the requested posture.
 type Options struct {
 	Posture    string
 	PolicyPath string
@@ -100,6 +107,7 @@ func configuredOr(value, fallback string) string {
 	return value
 }
 
+// Names returns the canonical list of supported posture identifiers in stable order.
 func Names() []string {
 	names := make([]string, len(postures))
 	for i, p := range postures {
@@ -108,6 +116,11 @@ func Names() []string {
 	return names
 }
 
+// Guide resolves requested options into a validated posture configuration result.
+//
+// Invariant: configuration posture resolution is fail-closed and bounded.
+// Precondition: budget must be non-negative; unknown postures are rejected without side-effects.
+// Postcondition: generated manifests strictly round-trip through deploymanifest.Parse.
 func Guide(opts Options) (Result, error) {
 	name := strings.TrimSpace(opts.Posture)
 	if name == "" {
