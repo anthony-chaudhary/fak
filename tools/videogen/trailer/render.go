@@ -103,80 +103,8 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 		circle(im, X(x), Y(y), max(2, X(radius)), clr)
 	}
 	switch s.Kind {
-	case "harness-hook":
-		C(82, s.Eyebrow, 26, cyan, true, false)
-		C(180+yoff, s.Title, 68, alpha(white, fade), true, false)
-		C(244+yoff, s.Subtitle, 30, alpha(muted, fade), false, false)
-		cx, cy := X(640), Y(470)
-		labels := []string{"UI", "MODEL", "TOOLS", "MEMORY", "POLICY"}
-		for i, label := range labels {
-			a := -math.Pi/2 + float64(i)*2*math.Pi/float64(len(labels))
-			px, py := cx+int(math.Cos(a)*float64(X(300))), cy+int(math.Sin(a)*float64(Y(145)))
-			progress := min(1, max(0, t*1.4-float64(i)*.13))
-			ex, ey := cx+int(float64(px-cx)*progress), cy+int(float64(py-cy)*progress)
-			lineSegment(im, cx, cy, ex, ey, alpha(cyan, .55), X(3))
-			if progress > .9 {
-				node := image.Rect(px-X(74), py-Y(28), px+X(74), py+Y(28))
-				fill(im, node, color.RGBA{13, 25, 36, 255})
-				stroke(im, node, alpha(cyan, .7), X(2))
-				centerBoxText(im, p, node, label, S(21), white)
-			}
-			beam := math.Mod(t*.65+float64(i)*.16, 1)
-			particle(int(float64(cx)/sx+float64(px-cx)/sx*beam), int(float64(cy)/sy+float64(py-cy)/sy*beam), 6, green, true)
-		}
-		circle(im, cx, cy, X(78), color.RGBA{9, 46, 55, 255})
-		circleStroke(im, cx, cy, X(78), cyan, X(3))
-		centerBoxText(im, p, image.Rect(cx-X(68), cy-Y(42), cx+X(68), cy+Y(42)), "YOU", S(34), white)
-	case "harness-blueprint":
-		C(78, s.Eyebrow, 26, cyan, true, false)
-		C(154+yoff, s.Title, 58, alpha(white, fade), true, false)
-		positions := [][2]int{{250, 300}, {640, 300}, {1030, 300}, {250, 520}, {640, 520}, {1030, 520}}
-		for i, item := range s.Items {
-			px, py := positions[i][0], positions[i][1]
-			delay := float64(i) * .18
-			reveal := ease(min(1, max(0, (t-delay)/.65)))
-			w := int(150 * reveal)
-			node := R(px-w, py-58, px+w, py+58)
-			fill(im, node, alpha(color.RGBA{13, 25, 36, 255}, reveal))
-			stroke(im, node, alpha(cyan, reveal*.8), X(2))
-			if reveal > .75 {
-				centerBoxText(im, p, node, item, S(25), alpha(white, reveal))
-			}
-			if i > 0 {
-				prev := positions[i-1]
-				lineProgress := min(1, max(0, (t-delay-.2)/.45))
-				x1, y1 := X(prev[0]), Y(prev[1])
-				x2, y2 := X(px), Y(py)
-				lineSegment(im, x1, y1, x1+int(float64(x2-x1)*lineProgress), y1+int(float64(y2-y1)*lineProgress), alpha(green, .6), X(3))
-			}
-		}
-		C(670, s.Detail, 24, alpha(muted, fade), false, true)
-	case "harness-run":
-		C(76, s.Eyebrow, 26, cyan, true, false)
-		C(150+yoff, s.Title, 56, alpha(white, fade), true, false)
-		left := []int{145, 485, 825}
-		for i, item := range s.Items {
-			r := R(left[i], 315, left[i]+310, 455)
-			fill(im, r, color.RGBA{13, 25, 36, 255})
-			stroke(im, r, alpha(cyan, .55), X(2))
-			centerBoxText(im, p, r, item, S(26), white)
-			if i < 2 {
-				lineSegment(im, X(left[i]+310), Y(385), X(left[i+1]), Y(385), alpha(cyan, .45), X(3))
-			}
-		}
-		pathStart, pathEnd := 455, 825
-		travel := ease(min(1, t/2.0))
-		px := pathStart + int(float64(pathEnd-pathStart)*travel)
-		particle(px, 385, 11, green, true)
-		for i := 0; i < 5; i++ {
-			tail := max(0, travel-float64(i+1)*.045)
-			particle(pathStart+int(float64(pathEnd-pathStart)*tail), 385, max(3, 9-i), alpha(green, .45), false)
-		}
-		verdict := R(390, 540, 890, 630)
-		show := min(1, max(0, (t-1.6)/.5))
-		fill(im, verdict, alpha(color.RGBA{8, 55, 42, 255}, show))
-		stroke(im, verdict, alpha(green, show), X(3))
-		centerBoxText(im, p, verdict, s.Verdict, S(30), alpha(green, show))
+	case "harness-hook", "harness-blueprint", "harness-run":
+		renderHarnessScene(im, p, s, t, fade, yoff, sx, sy)
 	case "token-hook":
 		C(82, s.Eyebrow, 26, cyan, true, false)
 		C(180+yoff, s.Title, 68, alpha(white, fade), true, false)
@@ -283,6 +211,98 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 		C(675, s.Subtitle, 27, muted, false, false)
 	}
 	return im
+}
+
+func renderHarnessScene(im *image.RGBA, p *painter, s Scene, t, fade float64, yoff int, sx, sy float64) {
+	X := func(v int) int { return int(math.Round(float64(v) * sx)) }
+	Y := func(v int) int { return int(math.Round(float64(v) * sy)) }
+	S := func(v float64) float64 { return v * min(sx, sy) }
+	R := func(x1, y1, x2, y2 int) image.Rectangle { return image.Rect(X(x1), Y(y1), X(x2), Y(y2)) }
+	C := func(y int, value string, size float64, clr color.Color, bold, mono bool) {
+		centerFit(im, p, Y(y), X(140), value, S(size), clr, bold, mono)
+	}
+	particle := func(x, y, radius int, clr color.RGBA, glow bool) {
+		if glow {
+			circle(im, X(x), Y(y), X(radius+8), alpha(clr, .12))
+		}
+		circle(im, X(x), Y(y), max(2, X(radius)), clr)
+	}
+	switch s.Kind {
+	case "harness-hook":
+		C(82, s.Eyebrow, 26, cyan, true, false)
+		C(180+yoff, s.Title, 68, alpha(white, fade), true, false)
+		C(244+yoff, s.Subtitle, 30, alpha(muted, fade), false, false)
+		cx, cy := X(640), Y(470)
+		labels := []string{"UI", "MODEL", "TOOLS", "MEMORY", "POLICY"}
+		for i, label := range labels {
+			a := -math.Pi/2 + float64(i)*2*math.Pi/float64(len(labels))
+			px, py := cx+int(math.Cos(a)*float64(X(300))), cy+int(math.Sin(a)*float64(Y(145)))
+			progress := min(1, max(0, t*1.4-float64(i)*.13))
+			ex, ey := cx+int(float64(px-cx)*progress), cy+int(float64(py-cy)*progress)
+			lineSegment(im, cx, cy, ex, ey, alpha(cyan, .55), X(3))
+			if progress > .9 {
+				node := image.Rect(px-X(74), py-Y(28), px+X(74), py+Y(28))
+				fill(im, node, color.RGBA{13, 25, 36, 255})
+				stroke(im, node, alpha(cyan, .7), X(2))
+				centerBoxText(im, p, node, label, S(21), white)
+			}
+			beam := math.Mod(t*.65+float64(i)*.16, 1)
+			particle(int(float64(cx)/sx+float64(px-cx)/sx*beam), int(float64(cy)/sy+float64(py-cy)/sy*beam), 6, green, true)
+		}
+		circle(im, cx, cy, X(78), color.RGBA{9, 46, 55, 255})
+		circleStroke(im, cx, cy, X(78), cyan, X(3))
+		centerBoxText(im, p, image.Rect(cx-X(68), cy-Y(42), cx+X(68), cy+Y(42)), "YOU", S(34), white)
+	case "harness-blueprint":
+		C(78, s.Eyebrow, 26, cyan, true, false)
+		C(154+yoff, s.Title, 58, alpha(white, fade), true, false)
+		positions := [][2]int{{250, 300}, {640, 300}, {1030, 300}, {250, 520}, {640, 520}, {1030, 520}}
+		for i, item := range s.Items {
+			px, py := positions[i][0], positions[i][1]
+			delay := float64(i) * .18
+			reveal := ease(min(1, max(0, (t-delay)/.65)))
+			w := int(150 * reveal)
+			node := R(px-w, py-58, px+w, py+58)
+			fill(im, node, alpha(color.RGBA{13, 25, 36, 255}, reveal))
+			stroke(im, node, alpha(cyan, reveal*.8), X(2))
+			if reveal > .75 {
+				centerBoxText(im, p, node, item, S(25), alpha(white, reveal))
+			}
+			if i > 0 {
+				prev := positions[i-1]
+				lineProgress := min(1, max(0, (t-delay-.2)/.45))
+				x1, y1 := X(prev[0]), Y(prev[1])
+				x2, y2 := X(px), Y(py)
+				lineSegment(im, x1, y1, x1+int(float64(x2-x1)*lineProgress), y1+int(float64(y2-y1)*lineProgress), alpha(green, .6), X(3))
+			}
+		}
+		C(670, s.Detail, 24, alpha(muted, fade), false, true)
+	case "harness-run":
+		C(76, s.Eyebrow, 26, cyan, true, false)
+		C(150+yoff, s.Title, 56, alpha(white, fade), true, false)
+		left := []int{145, 485, 825}
+		for i, item := range s.Items {
+			r := R(left[i], 315, left[i]+310, 455)
+			fill(im, r, color.RGBA{13, 25, 36, 255})
+			stroke(im, r, alpha(cyan, .55), X(2))
+			centerBoxText(im, p, r, item, S(26), white)
+			if i < 2 {
+				lineSegment(im, X(left[i]+310), Y(385), X(left[i+1]), Y(385), alpha(cyan, .45), X(3))
+			}
+		}
+		pathStart, pathEnd := 455, 825
+		travel := ease(min(1, t/2.0))
+		px := pathStart + int(float64(pathEnd-pathStart)*travel)
+		particle(px, 385, 11, green, true)
+		for i := 0; i < 5; i++ {
+			tail := max(0, travel-float64(i+1)*.045)
+			particle(pathStart+int(float64(pathEnd-pathStart)*tail), 385, max(3, 9-i), alpha(green, .45), false)
+		}
+		verdict := R(390, 540, 890, 630)
+		show := min(1, max(0, (t-1.6)/.5))
+		fill(im, verdict, alpha(color.RGBA{8, 55, 42, 255}, show))
+		stroke(im, verdict, alpha(green, show), X(3))
+		centerBoxText(im, p, verdict, s.Verdict, S(30), alpha(green, show))
+	}
 }
 
 func fittedTextSize(p *painter, available int, s string, size, floor float64, bold, mono bool) (float64, int) {
