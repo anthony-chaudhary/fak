@@ -20,30 +20,44 @@ import (
 
 // FaultType defines the classification of simulated failures.
 // Invariant: A FaultType must be one of the registered closed-vocabulary constants.
+// Guard: Unrecognized fault types fail validation checks and default to ErrFaultInjected.
 type FaultType string
 
 const (
 	// Truncation truncates payload data mid-turn or cuts streams short before EOF.
+	// Invariant: Truncation strictly bounds delivered payload to less than full length.
+	// Guard: Truncation ratio must reside in the open interval (0.0, 1.0) unless explicit byte count is supplied.
 	Truncation FaultType = "truncation"
 
 	// CorruptedJSON injects structural syntax errors into JSON payloads.
+	// Invariant: Emitted payload bytes fail standard JSON parser validation.
+	// Guard: Corruptions preserve non-JSON prefixes while altering closing delimiters or structure.
 	CorruptedJSON FaultType = "corrupted_json"
 
 	// LatencySpike introduces an artificial delay or timeout spike.
+	// Invariant: Elapsed injection duration matches or exceeds the specified rule delay.
+	// Guard: Context cancellation aborts artificial delays promptly.
 	LatencySpike FaultType = "latency_spike"
 
 	// MemoryPressure simulates out-of-memory or high resource exhaustion.
+	// Invariant: Simulates resource exhaustion by halting payload delivery with ErrMemoryPressure.
+	// Guard: Callers receive nil payload and an unrecoverable memory pressure error.
 	MemoryPressure FaultType = "memory_pressure"
 
 	// NetworkDrop simulates an abrupt disconnection or dropped socket.
+	// Invariant: Halts active streams immediately, returning ErrNetworkDrop without sending remaining bytes.
+	// Guard: Stream readers close or halt on first read without further underlying reads.
 	NetworkDrop FaultType = "network_drop"
 
 	// HostReset simulates an unrecoverable host panic, crash, or reset.
+	// Invariant: Yields ErrHostReset to simulate sudden compute termination.
+	// Guard: Execution halts immediately for the targeted component.
 	HostReset FaultType = "host_reset"
 )
 
 // IsValid reports whether the FaultType is a known member of the closed vocabulary.
 // Invariant: Returns true strictly for registered fault types; unrecognized types return false.
+// Guard: Bypasses string reflection and evaluates strictly against constant enumeration.
 func (t FaultType) IsValid() bool {
 	switch t {
 	case Truncation, CorruptedJSON, LatencySpike, MemoryPressure, NetworkDrop, HostReset:
@@ -54,12 +68,15 @@ func (t FaultType) IsValid() bool {
 }
 
 // String returns the string representation of the fault type.
+// Invariant: Emits the exact underlying string value without mutation or allocation.
+// Guard: Returns raw underlying string even for unrecognized fault types.
 func (t FaultType) String() string {
 	return string(t)
 }
 
 // Sentinel errors returned or recorded by faultlab.
 // Invariant: Sentinel errors are immutable and comparable using errors.Is.
+// Guard: Each error provides distinct, static failure semantics across the package.
 var (
 	// ErrFaultInjected indicates an unclassified or default simulated fault was injected.
 	ErrFaultInjected = errors.New("faultlab: fault injected")
@@ -102,6 +119,7 @@ type FaultRule struct {
 
 // NewFaultRule returns an enabled FaultRule with default 100% probability.
 // Invariant: The constructed rule has Probability initialized to 1.0 and Active set to true.
+// Guard: Caller-supplied parameters are assigned directly; validation occurs upon rule registration.
 func NewFaultRule(id string, fType FaultType, target string) FaultRule {
 	return FaultRule{
 		ID:          id,
@@ -114,6 +132,7 @@ func NewFaultRule(id string, fType FaultType, target string) FaultRule {
 
 // FaultScenario represents a named group of rules simulating a coordinated failure environment.
 // Invariant: When enabled, all constituent rules are registered and activated.
+// Guard: Scenario ID must be non-empty upon registration.
 type FaultScenario struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
@@ -124,6 +143,8 @@ type FaultScenario struct {
 }
 
 // FaultHit records one incident of a fault being injected.
+// Invariant: Captures the timestamp, rule identifier, fault classification, and error context.
+// Guard: Error field is empty when the fault does not produce an operational error.
 type FaultHit struct {
 	RuleID    string        `json:"rule_id"`
 	Type      FaultType     `json:"type"`
@@ -133,7 +154,9 @@ type FaultHit struct {
 	Error     string        `json:"error,omitempty"`
 }
 
-// FaultReport contains aggregated statistics and recent history of injected faults.
+// FaultReport contains summary statistics and recent history of injected faults.
+// Invariant: Deep copies of all metrics maps and slices protect internal ledger counters.
+// Guard: TotalInjections is monotonically non-decreasing over the lifetime of the metrics epoch.
 type FaultReport struct {
 	TotalInjections int64               `json:"total_injections"`
 	HitsByType      map[FaultType]int64 `json:"hits_by_type"`
@@ -145,10 +168,13 @@ type FaultReport struct {
 }
 
 // Option configures a FaultInjector instance.
+// Invariant: Option functions mutate injector configuration prior to concurrent operation.
+// Guard: Passing a nil Option to NewFaultInjector will panic during initialization.
 type Option func(*FaultInjector)
 
 // WithSeed sets a deterministic random seed for probabilistic fault evaluation.
 // Invariant: Injector RNG produces reproducible results for identical seeds.
+// Guard: A fixed seed renders probabilistic rule outcomes deterministic across runs.
 func WithSeed(seed int64) Option {
 	return func(fi *FaultInjector) {
 		fi.rng = rand.New(rand.NewSource(seed))
@@ -156,6 +182,7 @@ func WithSeed(seed int64) Option {
 }
 
 // WithMaxRecentHits sets the maximum number of recent hits kept in memory.
+// Invariant: Recent hits slice length is bounded above by max.
 // Guard: Values <= 0 are ignored to maintain a positive hit history capacity.
 func WithMaxRecentHits(max int) Option {
 	return func(fi *FaultInjector) {
@@ -166,6 +193,8 @@ func WithMaxRecentHits(max int) Option {
 }
 
 // WithTimeNow overrides the clock provider for deterministic timestamping.
+// Invariant: Allows synthetic time sources for deterministic hit recording and testing.
+// Guard: Nil provider functions are ignored, preserving the existing clock.
 func WithTimeNow(fn func() time.Time) Option {
 	return func(fi *FaultInjector) {
 		if fn != nil {
@@ -175,6 +204,8 @@ func WithTimeNow(fn func() time.Time) Option {
 }
 
 // WithSleep overrides the sleep provider for testing delays without wall-clock waits.
+// Invariant: Enables deterministic latency simulation without wall-clock blocking.
+// Guard: Nil sleep functions are ignored, preserving the default timer sleep.
 func WithSleep(fn func(context.Context, time.Duration) error) Option {
 	return func(fi *FaultInjector) {
 		if fn != nil {
@@ -185,6 +216,7 @@ func WithSleep(fn func(context.Context, time.Duration) error) Option {
 
 // FaultInjector manages fault rules, evaluates targets, disrupts streams, and collects metrics.
 // Invariant: All exported methods are safe for concurrent access across goroutines.
+// Guard: Fault evaluation fails closed, returning original payload and nil error when no rules match.
 type FaultInjector struct {
 	mu            sync.RWMutex
 	rules         map[string]*FaultRule
@@ -206,6 +238,7 @@ type FaultInjector struct {
 
 // NewFaultInjector instantiates a thread-safe fault injector.
 // Invariant: Initializes internal rule and metrics maps, defaulting to a 100-hit recent history cap.
+// Guard: Always returns a non-nil, ready-to-use injector instance.
 func NewFaultInjector(opts ...Option) *FaultInjector {
 	fi := &FaultInjector{
 		rules:         make(map[string]*FaultRule),
@@ -335,6 +368,7 @@ func (fi *FaultInjector) GetRule(id string) (*FaultRule, error) {
 
 // GetRules returns all registered rules in registration order.
 // Invariant: Returns deep copies of rules ordered by registration sequence.
+// Guard: Returns an empty slice (never nil) when no rules are registered.
 func (fi *FaultInjector) GetRules() []FaultRule {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -551,6 +585,7 @@ func (fi *FaultInjector) Inject(ctx context.Context, target string, data []byte)
 
 // InterceptReader wraps an io.Reader to inject streaming faults (truncation, delays, drops, corruptions).
 // Invariant: Stream evaluation is deferred until the initial Read call on the returned reader.
+// Guard: If context is canceled before or during reading, streaming halts with context error.
 func (fi *FaultInjector) InterceptReader(ctx context.Context, target string, r io.Reader) io.Reader {
 	return &faultReader{
 		ctx:        ctx,
@@ -683,6 +718,7 @@ func (fr *faultReader) Read(p []byte) (int, error) {
 
 // Close closes the underlying reader if it implements io.Closer.
 // Invariant: Calling Close on a reader whose underlying source does not implement io.Closer is a safe no-op.
+// Guard: Passes underlying Close errors directly to the caller.
 func (fr *faultReader) Close() error {
 	if closer, ok := fr.underlying.(io.Closer); ok {
 		return closer.Close()
@@ -692,6 +728,7 @@ func (fr *faultReader) Close() error {
 
 // RecordHit manually records an observed fault hit into the injector's ledger.
 // Invariant: Hit metrics and recent hit ring buffers are updated under mutual exclusion.
+// Guard: Bounded ring buffer evicts oldest hits once capacity exceeds maxRecentHits.
 func (fi *FaultInjector) RecordHit(ruleID string, faultType FaultType, target string, err error) {
 	fi.recordHitInternal(ruleID, faultType, target, 0, err)
 }
@@ -725,8 +762,9 @@ func (fi *FaultInjector) recordHitInternal(ruleID string, faultType FaultType, t
 	}
 }
 
-// Report returns an aggregated snapshot of all recorded fault metrics.
+// Report returns a summary snapshot of all recorded fault metrics.
 // Invariant: Returns deep-copied maps and slices to protect internal counters from external mutation.
+// Guard: Returned report values reflect a consistent snapshot captured under read lock.
 func (fi *FaultInjector) Report() FaultReport {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -776,6 +814,7 @@ func (fi *FaultInjector) Report() FaultReport {
 
 // Reset clears all registered rules, scenarios, and collected metrics.
 // Invariant: Restores injector state to an empty registry and zeroed counters.
+// Guard: Existing in-flight stream readers holding rule pointers are unaffected.
 func (fi *FaultInjector) Reset() {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
@@ -792,6 +831,7 @@ func (fi *FaultInjector) Reset() {
 
 // ResetMetrics clears hit counts and history while preserving rules and scenarios.
 // Invariant: Rule definitions and scenario configurations remain intact.
+// Guard: Counters are zeroed without removing registered rules or scenarios.
 func (fi *FaultInjector) ResetMetrics() {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
@@ -805,6 +845,7 @@ func (fi *FaultInjector) ResetMetrics() {
 
 // CorruptJSON produces malformed bytes guaranteed to fail standard JSON parsing.
 // Invariant: The returned payload fails json.Valid verification.
+// Guard: Empty input returns a fixed malformed JSON fragment with unclosed key or value.
 func CorruptJSON(data []byte) []byte {
 	if len(data) == 0 {
 		return []byte(`{"faultlab_corrupted": `)
@@ -835,6 +876,7 @@ func CorruptJSON(data []byte) []byte {
 
 // TruncateData slices data according to the provided ratio or explicit byte limit.
 // Invariant: Never exceeds len(data); slices up to maxBytes if > 0, else by ratio in (0.0, 1.0), defaulting to half.
+// Guard: Empty input returns unchanged empty slice without allocation or panic.
 func TruncateData(data []byte, ratio float64, maxBytes int) []byte {
 	if len(data) == 0 {
 		return data
