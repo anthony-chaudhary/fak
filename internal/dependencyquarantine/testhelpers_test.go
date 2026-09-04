@@ -11,9 +11,24 @@ import (
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
+	return findRepoRoot(t)
+}
+
+func repoRootBenchmark(b *testing.B) string {
+	b.Helper()
+	return findRepoRoot(b)
+}
+
+type failer interface {
+	Helper()
+	Fatal(args ...any)
+}
+
+func findRepoRoot(f failer) string {
+	f.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatal(err)
+		f.Fatal(err)
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -21,25 +36,40 @@ func repoRoot(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("repository go.mod not found")
+			f.Fatal("repository go.mod not found")
 		}
 		dir = parent
 	}
 }
+
+func fixtureBenchmark(b *testing.B, mod, sum string) string {
+	b.Helper()
+	root := b.TempDir()
+	writeHelper(b, filepath.Join(root, "go.mod"), mod)
+	writeHelper(b, filepath.Join(root, "go.sum"), sum)
+	return root
+}
+
 func fixture(t *testing.T, mod, sum string) string {
 	t.Helper()
 	root := t.TempDir()
-	write(t, filepath.Join(root, "go.mod"), mod)
-	write(t, filepath.Join(root, "go.sum"), sum)
+	writeHelper(t, filepath.Join(root, "go.mod"), mod)
+	writeHelper(t, filepath.Join(root, "go.sum"), sum)
 	return root
 }
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
+	writeHelper(t, path, body)
+}
+
+func writeHelper(f failer, path, body string) {
+	f.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatal(err)
+		f.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
-		t.Fatal(err)
+		f.Fatal(err)
 	}
 }
 func keys(m map[string]bool) []string {
