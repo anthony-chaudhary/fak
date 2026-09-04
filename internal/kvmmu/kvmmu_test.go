@@ -667,3 +667,63 @@ func TestRuntimeMemoryPagingMultiTurnLifecycle(t *testing.T) {
 		t.Fatalf("SegmentByID should return false for unknown id")
 	}
 }
+
+// BenchmarkAttributeRow benchmarks attribution of attention rows across live segments.
+func BenchmarkAttributeRow(b *testing.B) {
+	m := model.NewSynthetic(synthCfg())
+	c := kvmmu.New(m.NewSession())
+	// Seed segments
+	for i := 0; i < 16; i++ {
+		c.Append(fmt.Sprintf("seg-%d", i), "tool", make([]int, 64))
+	}
+	keyPositions := make([]int, 512)
+	weights := make([]float32, 512)
+	for i := range keyPositions {
+		keyPositions[i] = i * 2
+		weights[i] = 1.0 / 512.0
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = c.AttributeRow(keyPositions, weights)
+	}
+}
+
+// BenchmarkAccumulatorObserve benchmarks accumulator folding across multi-segment turn maps.
+func BenchmarkAccumulatorObserve(b *testing.B) {
+	acc := kvmmu.NewAttentionAccumulator(0.9, 0)
+	turnMass := make(map[string]float64, 32)
+	for i := 0; i < 32; i++ {
+		turnMass[fmt.Sprintf("seg-%d", i)] = float64(i + 1)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		acc.Observe(turnMass)
+	}
+}
+
+// BenchmarkRetainedMass benchmarks the recall calculation of kept spans vs observed mass.
+func BenchmarkRetainedMass(b *testing.B) {
+	acc := kvmmu.NewAttentionAccumulator(1.0, 0)
+	turnMass := make(map[string]float64, 32)
+	cost := make(map[string]int, 32)
+	var kept []string
+	for i := 0; i < 32; i++ {
+		id := fmt.Sprintf("seg-%d", i)
+		turnMass[id] = float64(i + 1)
+		cost[id] = 64
+		if i%2 == 0 {
+			kept = append(kept, id)
+		}
+	}
+	acc.Observe(turnMass)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = kvmmu.RetainedMass(acc, kept, cost)
+	}
+}
