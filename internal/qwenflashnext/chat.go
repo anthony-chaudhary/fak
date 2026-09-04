@@ -1,3 +1,9 @@
+// Package qwenflashnext implements prompt formatting and response parsing for
+// the Qwen3.8 Flash-Next generation model family.
+//
+// Invariant: Prompt formatting matches the pinned upstream chat template exactly across system, user, assistant, and tool roles.
+// Contract: ParseResponse extracts reasoning blocks, final text responses, and tool calls deterministically without side effects.
+// Precondition: Non-empty message slices must begin with a system message if any system message is present.
 package qwenflashnext
 
 // Invariant: qwen flash next preserves bounded memory envelope and strict context limits during prompt rendering and response parsing.
