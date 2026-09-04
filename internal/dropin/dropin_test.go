@@ -142,7 +142,7 @@ func TestInjectedEnv(t *testing.T) {
 // PlanFor must compose the resolution steps faithfully: the common drop-ins resolve
 // to the wire, base URL, and injected env a real `fak guard -- <agent>` would wire.
 func TestPlanFor(t *testing.T) {
-	const gw = "http://127.0.0.1:9000"
+	const gw = "http://127.0.0.1:0"
 
 	claude := PlanFor("claude", "", "", gw)
 	if claude.Provider != "anthropic" || !claude.Autodetected || !claude.Recognized {
