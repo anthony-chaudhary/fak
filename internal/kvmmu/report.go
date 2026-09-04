@@ -2,29 +2,9 @@ package kvmmu
 
 import "sort"
 
-// report.go — issue #857, rung 6 of the attention-witness epic (#851): the post-hoc analyst surface.
-//
-// Rung 4 (#855, accumulator.go) keeps, per span, the undecayed cumulative attention mass and a
-// per-turn trajectory. This file folds that into the session-integrated picture an operator reads
-// to answer "was this 9000-token blob ever worth its residency, and for how many turns was it dead
-// weight?": the hottest spans by cumulative mass, the coldest-but-resident spans (the dead weight),
-// the S/N(t) curve over the run, and a "bloated since turn K" marker.
-//
-// This is the WITNESSED counterpart of the density proxy the session auditor computes from raw
-// transcripts (tools/session_audit.py). Where the attention witness is available, the integrated
-// S/N here is the real thing; offline / API-only sessions fall back to the proxy. Same WITNESSED-
-// vs-OBSERVED line the rest of the epic holds.
-//
-// The report takes the per-turn S/N as plain recorded floats (TurnSN), not a ctxplan type, so it
-// stays dependency-free: a session driver computes each turn's S/N via
-// ctxplan.SignalNoiseFromAttention (#854) and feeds Ratio() in. Feed the accumulator from a
-// post-hoc (λ=1, no-Forget) pass so it carries every span's full-session history — that is what
-// makes "cold-but-resident-through-the-session" an honest label.
+// report.go — post-hoc attention reporting and signal-to-noise aggregation.
 
-// TurnSN is one recorded sample of a turn's witnessed signal-to-noise plus the resident token cost
-// that turn (the integral weight) and the provider cache-hit ratio. The cache-hit field is what lets
-// the report expose the exact pathology from docs/explainers/context-signal-to-noise.md: S/N(t)
-// falling while cache-hit climbs (a window that bloats even as it "hits" more).
+// TurnSN records one turn's witnessed signal-to-noise ratio, resident cost, and cache-hit ratio.
 type TurnSN struct {
 	Turn     int     `json:"turn"`
 	Ratio    float64 `json:"ratio"`     // witnessed S/N for the turn (ctxplan SignalNoise.Ratio)
@@ -44,7 +24,7 @@ type SpanReport struct {
 	LastHot    int     `json:"last_hot,omitempty"`  // last turn with mass > 0 (0 = never attended)
 }
 
-// SessionAttentionReport is the post-hoc session picture (#857).
+// SessionAttentionReport summarizes post-hoc session attention metrics.
 type SessionAttentionReport struct {
 	Turns        int          `json:"turns"`
 	Hottest      []SpanReport `json:"hottest"`       // top-N by cumulative attention mass
@@ -53,27 +33,11 @@ type SessionAttentionReport struct {
 	IntegratedSN float64      `json:"integrated_sn"` // cost-weighted mean of S/N(t) over the run
 	BloatedSince int          `json:"bloated_since"` // first turn from which S/N declines as cache-hit climbs, or -1
 
-	// RetainedCeiling is the #3901 retained-mass gauge (#5123) for the BEST topN-span retention
-	// this session admits: the mass-maximizing set TopKSpansByMass names, which no other
-	// topN-subset can beat. It is not a decision anything took — it is the reference a real
-	// decision's own retained_mass_fraction (Context.LastRetainedMass, emitted at the
-	// eviction/selection boundary) is read against, so "we kept 0.94" becomes "we kept 0.94 where
-	// the best possible keep of that size was 0.99." Fail-closed with the gauge: Available is
-	// false when no attention was observed.
+	// RetainedCeiling records the retention ceiling gauge for the best topN-span retention.
 	RetainedCeiling RetainedMassGauge `json:"retained_ceiling"`
 }
 
-// BuildSessionAttentionReport folds the accumulator and a recorded per-turn S/N curve into the
-// session report. topN bounds the hottest / dead-weight lists; deadThreshold is the cumulative-mass
-// ceiling below which a still-tracked span counts as dead weight (cold). cost maps span id to its
-// resident token count (may be nil — dead weight then ranks by coldness alone; with cost it ranks the
-// big cold blobs first, the ones whose residency cost the most for the least attention).
-//
-// IntegratedSN is the cost-weighted mean Σ_t Ratio(t)·Cost(t) / Σ_t Cost(t): the run's S/N weighted
-// by how much window each turn carried (a lean turn and a bloated turn are not equal votes). With all
-// costs zero or an empty curve it is 0.
-//
-// Pure and deterministic: same (accumulator snapshot, curve, cost) yields the same report.
+// BuildSessionAttentionReport folds an accumulator and recorded per-turn S/N curve into a session report.
 func BuildSessionAttentionReport(acc *AttentionAccumulator, curve []TurnSN, cost map[string]int, topN int, deadThreshold float64) SessionAttentionReport {
 	r := SessionAttentionReport{
 		Turns:        acc.Turns(),
@@ -107,7 +71,6 @@ func BuildSessionAttentionReport(acc *AttentionAccumulator, curve []TurnSN, cost
 		})
 	}
 
-	// Hottest: highest cumulative mass first (ties by id for determinism).
 	hot := append([]SpanReport(nil), rows...)
 	sort.Slice(hot, func(i, j int) bool {
 		if hot[i].Cumulative != hot[j].Cumulative {
@@ -117,8 +80,6 @@ func BuildSessionAttentionReport(acc *AttentionAccumulator, curve []TurnSN, cost
 	})
 	r.Hottest = clip(hot, topN)
 
-	// Dead weight: still-resident spans at or below the cold threshold, ranked by cost desc (the big
-	// cold blobs first) then by coldest cumulative, then id. Names the residency that did not earn its keep.
 	dead := make([]SpanReport, 0, len(rows))
 	for _, row := range rows {
 		if row.Cumulative <= deadThreshold {

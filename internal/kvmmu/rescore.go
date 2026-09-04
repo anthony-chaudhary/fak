@@ -1,20 +1,6 @@
 package kvmmu
 
-// rescore.go — issue #2626: the ReScore entry point, the Tier-1 → Tier-2a handoff of
-// docs/notes/CONTEXT-VIEWS-AT-MARGINAL-COST-2026-07-04.md.
-//
-// The ledger's kept scalars (Attended/EMA/Cumulative, #855) answer "what mattered to
-// the OLD queries"; they cannot answer "which of these spans matters to THIS NEW
-// query" — attention is query-dependent. ReScore answers that the cheap way
-// (position-independent caching): the backend re-rotates each candidate's pre-RoPE
-// Kraw keys into scratch and runs one layer-0 QK^T·softmax read for the probe — no
-// forward pass, no re-prefill, no mutation of the cached K/Kraw/V.
-//
-// HONEST MODE LABEL: the relevance is a LAYER-0 signal (the probe's Q never runs the
-// deeper layers — that is what makes it cheap). The top-k oracle in rescore_test.go
-// adjudicated it against a full re-attend: the top-k SET agrees on the fixture, the
-// order of near-tied leaders does not. Use ReScore to SELECT spans (a narrowing
-// signal), not to totally order them — exact ranking needs the full re-attend.
+// rescore.go — cheap layer-0 attention re-score over KV-resident candidates.
 
 import "fmt"
 

@@ -6,46 +6,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// attention.go — issue #853, rung 2 of the attention-witness epic (#851).
-//
-// Rung 1 (#852, internal/model/attn_observer.go) emits the post-softmax attention
-// weights at the softmax seam as a stream of per-(layer, query, head) rows, each row a
-// set of normalized weights over ABSOLUTE key positions. This file attributes that
-// stream to SPANS: a weight on key position p is accumulated onto the Segment whose
-// recorded [From, From+Len) range owns p. The span-to-KV map already exists — it is the
-// same ledger the quarantine/eviction path renumbers — so attribution is a pure read of
-// the From/Len partition the bridge already maintains.
-//
-// This produces the witnessed a_s term #851's S/N formula needs: the attention mass a
-// span actually received, rather than the inferred lexical-overlap hit ctxplan's rung-0
-// path guesses (the consumer is #854's SignalNoiseFromAttention).
-//
-// CONSERVATION. The live segments partition the cache positions [0, kv.Len()) with no
-// gaps and no overlap (Append lays each new span at From == kv.Len(); evict renumbers
-// survivors to close the gap). So every key position a row names is owned by exactly one
-// live segment, and the sum of all segments' attributed mass equals the total emitted
-// mass — no weight lost, none double-counted. The one exception is a position owned by
-// NO live segment (a weight on an evicted/held span, which cannot happen on the
-// write-time path but is possible if an observer is fed a stale row): that residual is
-// counted in Unattributed rather than silently dropped, so conservation is auditable.
-//
-// EVICTION COHERENCE. evict() zeroes the evicted span's Attended (its mass is gone — the
-// model can no longer attend to a span that is not in the cache) and leaves every
-// survivor's Attended untouched. Attended is mass, not a position, so the From
-// renumbering evict already does does not touch it: the surviving span keeps exactly the
-// mass it accumulated.
+// attention.go — attribution of post-softmax attention weights to recorded spans.
 
-// AttributeRow routes one post-softmax attention row onto the segment ledger: for each
-// key position keyPositions[i], it adds weights[i] to the Attended accumulator of the
-// live segment whose [From, From+Len) range contains that position. Any weight on a
-// position owned by no live segment is returned as the unattributed residual (it is NOT
-// added to any span), so a caller can assert conservation (sum of span deltas + residual
-// == sum of weights).
-//
-// Efficiency: keyPositions is ascending and contiguous on the witness paths (decode /
-// prefill emit kp[i] = j0+i), and the live segments are sorted by From, so a single
-// linear cursor over the small live-segment ledger attributes the whole row in
-// O(positions + spans) with no per-position search.
+// AttributeRow routes one post-softmax attention row onto the segment ledger.
+// Returns unattributed residual weight for keys not owned by any live segment.
 func (c *Context) AttributeRow(keyPositions []int, weights []float32) (unattributed float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -92,19 +56,7 @@ func (c *Context) liveSegsByFrom() []*Segment {
 	return live
 }
 
-// AttentionObserver returns a model.AttnObserver that attributes every emitted row onto
-// this Context's span ledger via AttributeRow. Install it on the model for the duration
-// of a forward pass (model.SetAttnObserver) to accumulate witnessed per-span attention
-// mass across the turn; the layer/query/head dimensions are summed into the span's
-// scalar Attended mass (the per-(layer,head) breakdown is rung 4's concern, #855). The
-// unattributed residual is discarded here; use AttributeRow directly when a caller wants
-// to assert conservation.
-//
-// Concurrency: model.AttnObserver may fire from parallel attention workers, so the
-// returned observer must not be installed while the ledger is being mutated by the
-// eviction path on another goroutine. The witness paths emit synchronously from within
-// the forward pass; attribute under the same single-flight discipline the rest of the
-// bridge assumes (one turn's prefill/decode at a time per Context).
+// AttentionObserver returns a model.AttnObserver attributing emitted rows onto Context segments.
 func (c *Context) AttentionObserver() model.AttnObserver {
 	return func(_, _, _ int, keyPositions []int, weights []float32) {
 		c.AttributeRow(keyPositions, weights)
@@ -134,23 +86,8 @@ const trajCap = 64
 // bounded-ring acceptance test can assert the window size without hardcoding the constant.
 func TrajCapForTest() int { return trajCap }
 
-// CloseTurn ends the current turn for the rolling accumulators (#855, rung 4): for every
-// live segment it folds the turn's accumulated a_s(t) (the in-flight Attended) into the
-// two reductions of the SAME stream, appends it to the bounded trajectory ring, then
-// resets Attended to 0 for the next turn. lambda is the ONLY knob separating the two
-// consumers:
-//
-//	Cumulative += a_s(t)                 (undecayed — "mattered overall", the audit signal)
-//	EMA         = lambda*EMA + a_s(t)    (recency-decayed — "hot now", the eviction signal)
-//
-// One accumulator, two lambda: pass lambda<1 for the real-time heavy-hitter controller
-// (#856 evicts the lowest EMA); pass lambda==1 and the EMA recurrence is exactly the
-// cumulative sum, so a post-hoc analyst reading EMA at lambda=1 sees Cumulative (the
-// identity the issue requires). Held segments are skipped — an evicted span has no turn
-// to close. Deterministic given a fixed per-turn mass stream.
-//
-// Call once per turn boundary, AFTER the turn's attention has been attributed (the
-// AttributeRow / observer calls) and BEFORE the next turn's attribution begins.
+// CloseTurn ends the current turn for rolling accumulators.
+// Updates Cumulative and EMA per-span and resets in-flight Attended.
 func (c *Context) CloseTurn(lambda float64) {
 	for _, s := range c.segs {
 		if s.Held {
@@ -217,14 +154,8 @@ type EvictedSpan struct {
 	Positions int
 }
 
-// EvictColdest drops the coldest-by-attention unpinned spans until at least
-// targetPositions cache positions have been freed, or until no unpinned live spans
-// remain. Pinned spans are excluded from the candidate set entirely.
+// EvictColdest drops coldest-by-attention unpinned spans until targetPositions are freed.
 func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
-	// #5123: grade this decision with the #3901 retained-mass gauge — captured before the
-	// selection (evict clears a dropped span's mass) and folded after it, so LastRetainedMass
-	// reports the fraction of the observed attention mass the survivors carried. Observability
-	// only: it does not participate in the ranking below or change what is evicted.
 	before, cost := c.liveMassLedger()
 	defer c.gradeRetention(before, cost)
 
@@ -262,13 +193,10 @@ func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
 	return out
 }
 
-// EvictUnderBudget applies EvictColdest only when live residency exceeds the budget.
+// EvictUnderBudget applies EvictColdest only when live residency exceeds budgetPositions.
 func (c *Context) EvictUnderBudget(budgetPositions int) []EvictedSpan {
 	over := c.kv.Len() - budgetPositions
 	if over <= 0 {
-		// Keeping everything is still a selection decision, and a decision the gauge can grade
-		// honestly: the survivors are every observed span, so it reads all of the mass at all of
-		// the tokens (#5123). Suppressing it here would leave a stale reading from an earlier one.
 		before, cost := c.liveMassLedger()
 		c.gradeRetention(before, cost)
 		return nil

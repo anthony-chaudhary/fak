@@ -2,38 +2,9 @@ package kvmmu
 
 import "sort"
 
-// accumulator.go — issue #855, rung 4 of the attention-witness epic (#851).
-//
-// Rung 2 (#853, attention.go) gives each Segment a scalar Attended: the witnessed
-// post-softmax attention mass a span received DURING ONE TURN. A span's value, though,
-// spans many turns — it can idle then turn load-bearing, or run hot then die. This file
-// adds the temporal dual over that per-turn signal, with two reductions chosen by one knob:
-//
-//	real-time controller   A_s(t) = λ·A_s(t-1) + a_s(t)   — an EMA (recency-decayed rolling
-//	                       sum). With λ<1 this IS the H2O / heavy-hitter signal, but as a
-//	                       WITNESSED kernel quantity (see #851's novelty boundary — we did
-//	                       not invent heavy-hitters; we witness them from the live forward pass).
-//	post-hoc analyst       A_s   = Σ_t a_s(t)             — the undecayed cumulative sum, plus
-//	                       the trajectory {a_s(t)} (which turns was the span hot?).
-//
-// ONE ACCUMULATOR, TWO λ. λ is the only knob separating "hot now" (eviction, #856) from
-// "mattered overall" (audit, #857). λ=1 collapses the EMA onto the plain cumulative sum;
-// λ=0 keeps only the most recent turn.
-//
-// The accumulator lives BESIDE the span ledger but does not own it: at a turn boundary it
-// reads each live segment's per-turn Attended (ObserveContext) and folds it in; the segment's
-// own scalar is cleared by ResetAttention before the next turn refills it. Reset-on-evict
-// carries over from rung 2: evict() already zeroes a held span's Segment.Attended, and the
-// accumulator's counterpart is Forget(id) — but WHO forgets is a consumer policy, not the
-// accumulator's. The real-time controller (#856) forgets an evicted span (it can no longer be
-// attended to); the post-hoc analyst (#857) deliberately keeps it (its history is the answer
-// to "was that 9000-token blob ever worth its residency?"). The accumulator stays policy-free
-// and exposes both EMA/Cumulative and Forget so each consumer picks its own posture.
+// accumulator.go — temporal attention accumulation over per-turn per-span signals.
 
-// defaultTrajectoryCap bounds the per-span trajectory ring so a long session stays O(cap) per
-// span, not O(turns). A turn boundary pushes one entry per resident span; the ring keeps the
-// most recent cap turns. Chosen generously (a span attended across hundreds of turns is already
-// the outlier the post-hoc report wants) but finite so memory cannot grow without bound.
+// defaultTrajectoryCap bounds the per-span trajectory ring.
 const defaultTrajectoryCap = 512
 
 // TurnMass is one entry in a span's attention trajectory: the witnessed mass it drew in a
@@ -90,19 +61,9 @@ func NewAttentionAccumulator(lambda float64, ringCap int) *AttentionAccumulator 
 	return &AttentionAccumulator{lambda: lambda, ringCap: ringCap, spans: make(map[string]*spanAccum)}
 }
 
-// Observe folds one turn's witnessed per-span mass into the accumulator. It advances the global
-// turn counter, decays EVERY known span's EMA by λ (so a resident span that drew no mass this
-// turn cools toward zero — the "ran hot then died" case), then adds this turn's mass to the EMA,
-// the cumulative sum, and the trajectory ring. A span named for the first time starts at
-// A_s = a_s(t). Masses are the raw witnessed Attended scalar (not normalized); a consumer
-// normalizes when it needs a ratio.
-//
-// Pure and deterministic: the same sequence of turnMass maps yields the same accumulator state.
+// Observe folds one turn's witnessed per-span mass into the accumulator.
 func (a *AttentionAccumulator) Observe(turnMass map[string]float64) {
 	a.turn++
-	// Decay + add for every span already known. This is what makes the EMA an EMA: an
-	// unobserved-this-turn span (mass 0, absent from turnMass) still decays. It also keeps the
-	// trajectory dense (a real 0 for "resident but cold"), so post-hoc alignment is by index.
 	for id, sp := range a.spans {
 		sp.ema *= a.lambda
 		m := turnMass[id]
@@ -110,7 +71,6 @@ func (a *AttentionAccumulator) Observe(turnMass map[string]float64) {
 		sp.cum += m
 		a.push(sp, m)
 	}
-	// Spans seen for the first time this turn: A_s starts at a_s(t) (λ·0 + m == m).
 	for id, m := range turnMass {
 		if _, ok := a.spans[id]; ok {
 			continue
