@@ -77,6 +77,9 @@ The main delta is implementation maturity, not a demonstrated architectural wind
   fused MLP at **1.62×** (1.962 ms vs 3.175 ms, 76.6 GB/s), and Qwen3.5-0.8B Metal decode at
   **11.42 tok/s** with zero swap growth. These are focused sequence/kernel microbenchmarks;
   full Qwen3.8-27B remeasurement remains awaiting a comparable end-to-end receipt.
+- The Qwen3.8-27B Metal serving curve sweep (#11138) runs via `fak macbench all --gateway http://127.0.0.1:8080 --model qwen38:27b --json`,
+  capturing decode length (16, 32, 64, 128 tokens), long generation (256, 512 tokens), prefill sweep (128, 512, 2048, 4096 prompt tokens),
+  and 2-stream concurrency in the standard `fak.macbench.result.v1` schema with sanitized endpoints and zero secret leakage.
 
 ## August 27–28 update
 

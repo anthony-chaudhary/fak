@@ -128,6 +128,18 @@ func witnessTasks() []Task {
 			Doc:         "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md",
 		},
 		{
+			ID:          "witness-qwen38-27b-metal-auto-gateway-sweep",
+			Title:       "auto-collect the Mac Qwen3.8-27B Metal serving curve sweep: decode, longgen, prefill sweep, and 2-stream concurrency against the fak serve gateway",
+			Source:      SourceWitness,
+			Value:       ValueFrontier,
+			Requires:    []Requirement{ReqMetal, ReqWeights},
+			Run:         "fak macbench all --gateway http://127.0.0.1:8080 --model qwen38:27b --json",
+			Acceptance:  "a fak.macbench.result.v1 artifact with observed tok/s rows for decode-longgen, prefill-sweep, and 2stream; gateway reported only as loopback/remote-sanitized and bearer never printed",
+			RecheckDays: 14,
+			TimeoutSec:  7200,
+			Doc:         "docs/benchmarks/QWEN38-27B-LATEST.md",
+		},
+		{
 			ID:          "witness-q8-decode-matvec-bw",
 			Title:       "re-measure the 7B Q8 GPU-resident decode mat-vec kernel bandwidth on the Mac Metal node after a mul_mv_q8_0 tune (residual was 96 vs ~143 GB/s)",
 			Source:      SourceWitness,
