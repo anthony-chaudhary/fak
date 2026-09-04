@@ -19,9 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/perfrsiscore"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
-	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
@@ -263,63 +261,9 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	childArgv := append([]string(nil), cmdArgs...)
-	admitReason := "GUARD_ADMITTED"
-	admitSummary := "loop wrapper admitted command under fak guard"
-	if guardEnabled {
-		if violations := loopContainmentViolations(cmdArgs); len(violations) > 0 {
-			m := cloneLoopMetrics(baseMetrics)
-			m["violations"] = int64(len(violations))
-			summary := repoguard.RenderReason(violations)
-			if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-				Kind:    loopmgr.EventAdmit,
-				Status:  loopmgr.StatusRefused,
-				Reason:  repoguard.Reason,
-				Summary: summary,
-				Metrics: m,
-			})); err != nil {
-				fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-				return 1
-			}
-			fmt.Fprintf(stderr, "fak loop run: containment refused command: %s\n", summary)
-			if *asJSON && !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
-				"status":    "refused",
-				"reason":    repoguard.Reason,
-				"exit_code": 3,
-			}) {
-				return 1
-			}
-			return 3
-		}
-		fakBin, err := loopExecutable()
-		if err != nil {
-			m := cloneLoopMetrics(baseMetrics)
-			m["exit_code"] = 127
-			_ = appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-				Kind:    loopmgr.EventEnd,
-				Status:  loopmgr.StatusFailed,
-				Reason:  "GUARD_UNAVAILABLE",
-				Summary: err.Error(),
-				Metrics: m,
-			}))
-			fmt.Fprintf(stderr, "fak loop run: resolve fak guard binary: %v\n", err)
-			return 127
-		}
-		childArgv = loopGuardArgv(fakBin, cmdArgs)
-	} else {
-		admitReason = "GUARD_DISABLED"
-		admitSummary = "--no-guard disabled fak guard containment"
-		fmt.Fprintln(stderr, "fak loop run: WARNING --no-guard disables fak guard containment for this run")
-	}
-	if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-		Kind:    loopmgr.EventAdmit,
-		Status:  loopmgr.StatusAdmitted,
-		Reason:  admitReason,
-		Summary: admitSummary,
-		Metrics: cloneLoopMetrics(baseMetrics),
-	})); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-		return 1
+	childArgv, admitExit, ok := loopRunAdmit(stdout, stderr, *ledger, *loopID, *runID, cmdArgs, guardEnabled, baseMetrics, loopEvent, *asJSON)
+	if !ok {
+		return admitExit
 	}
 
 	// Per-run Slack is EXPLICITLY armed: --notify-slack uses the resolved channel,
@@ -332,24 +276,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		Command: filepath.Base(cmdArgs[0]),
 	})
 
-	performanceRSIInput := strings.TrimSpace(os.Getenv(perfrsiscore.LoopTurnInputEnv))
-	var performanceRSIOutput string
-	var performanceRSIPrepErr error
-	var childEnv []string
-	if performanceRSIInput == "" {
-		performanceRSIOutput, performanceRSIPrepErr = reserveLoopPerformanceRSIOutput(*ledger)
-		env := envMap(os.Environ())
-		env[loopIDEnv] = *loopID
-		env[loopRunIDEnv] = *runID
-		if performanceRSIOutput != "" {
-			env[loopPerformanceRSIOutputEnv] = performanceRSIOutput
-		} else {
-			delete(env, loopPerformanceRSIOutputEnv)
-		}
-		env[loopSandboxEnvAllow] = appendLoopEnvAllow(env[loopSandboxEnvAllow],
-			loopPerformanceRSIOutputEnv, loopIDEnv, loopRunIDEnv)
-		childEnv = envSliceFromMap(env)
-	}
+	childEnv, performanceRSIOutput, performanceRSIPrepErr := prepareLoopChildEnv(*ledger, *loopID, *runID)
 
 	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
 		ledger:    *ledger,
@@ -386,14 +313,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	// package directly, never a shell. Its receipt is always observable on stderr,
 	// while missing/invalid independently produced input remains nonfatal so the
 	// dispatch's exit code and stdout report keep their existing meaning.
-	performanceRSIReceipt := perfrsiscore.ScoreLoopTurnFromEnvironment()
-	if performanceRSIInput == "" {
-		performanceRSIReceipt = scoreAutomaticLoopPerformanceRSI(performanceRSIOutput, *runID, performanceRSIPrepErr)
-	}
-	if err := perfrsiscore.RecordLoopTurnUsage(performanceRSIReceipt); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: record performance-rsi usage: %v\n", err)
-	}
-	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
+	recordLoopRunPerformanceRSI(stderr, *runID, performanceRSIOutput, performanceRSIPrepErr)
 
 	if *asJSON {
 		if !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
@@ -1003,147 +923,6 @@ func runLoopPolicyPropose(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func defaultLoopLedger() string {
-	if v := os.Getenv("FAK_LOOP_LEDGER"); v != "" {
-		return v
-	}
-	return filepath.Join(".fak", "loops.jsonl")
-}
-
-func defaultLoopPolicy() string {
-	if v := os.Getenv("FAK_LOOP_POLICY"); v != "" {
-		return v
-	}
-	return filepath.Join(".fak", "loop-policy.json")
-}
-
-func defaultLoopRegistry() string {
-	if v := os.Getenv("FAK_LOOP_REGISTRY"); v != "" {
-		return v
-	}
-	return filepath.Join("tools", "loop-registry.json")
-}
-
-func appendLoopRunEvent(ledger string, ev loopmgr.Event) error {
-	_, err := loopmgr.Append(ledger, ev)
-	return err
-}
-
-func cloneLoopMetrics(in map[string]int64) map[string]int64 {
-	out := make(map[string]int64, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func defaultLoopRunID(loopID string) string {
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	name := strings.Trim(replacer.Replace(loopID), "-")
-	if name == "" {
-		name = "loop"
-	}
-	return fmt.Sprintf("%s-%s-%d", name, time.Now().UTC().Format("20060102T150405Z"), os.Getpid())
-}
-
-func loopGuardArgv(fakBin string, cmdArgs []string) []string {
-	out := []string{fakBin, "guard", "--"}
-	out = append(out, cmdArgs...)
-	return out
-}
-
-func loopContainmentViolations(cmdArgs []string) []repoguard.Violation {
-	command := loopRepoguardCommand(cmdArgs)
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
-	cwd, _ := os.Getwd()
-	workspaceRoot := repoguard.FindRepoRoot(cwd)
-	return repoguard.ClassifyCommand(command, workspaceRoot, repoguard.SafeRootsForWorkspace(workspaceRoot))
-}
-
-func loopRepoguardCommand(cmdArgs []string) string {
-	if len(cmdArgs) == 0 {
-		return ""
-	}
-	if command, ok := loopShellCCommand(cmdArgs); ok {
-		return command
-	}
-	parts := make([]string, 0, len(cmdArgs))
-	for _, arg := range cmdArgs {
-		parts = append(parts, loopShellQuote(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
-func loopShellCCommand(cmdArgs []string) (string, bool) {
-	if len(cmdArgs) < 3 {
-		return "", false
-	}
-	base := strings.ToLower(strings.TrimSuffix(filepath.Base(cmdArgs[0]), ".exe"))
-	switch base {
-	case "bash", "sh", "zsh", "dash", "ksh":
-	default:
-		return "", false
-	}
-	for i := 1; i < len(cmdArgs)-1; i++ {
-		arg := cmdArgs[i]
-		if arg == "--" {
-			return "", false
-		}
-		if strings.HasPrefix(arg, "--") {
-			continue
-		}
-		if arg == "-c" || (strings.HasPrefix(arg, "-") && strings.Contains(arg[1:], "c")) {
-			return cmdArgs[i+1], true
-		}
-	}
-	return "", false
-}
-
-func loopShellQuote(arg string) string {
-	if arg == "" {
-		return "''"
-	}
-	if strings.IndexFunc(arg, func(r rune) bool {
-		return r <= ' ' || strings.ContainsRune(`'"$`+"\\"+`;|&<>(){}[]*?~!`, r)
-	}) < 0 {
-		return arg
-	}
-	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
-}
-
-type loopKVList []string
-
-func (l *loopKVList) String() string {
-	if l == nil {
-		return ""
-	}
-	return strings.Join(*l, ",")
-}
-
-func (l *loopKVList) Set(v string) error {
-	*l = append(*l, v)
-	return nil
-}
-
-func parseLoopEvidence(items []string) []loopmgr.EvidenceRef {
-	out := make([]loopmgr.EvidenceRef, 0, len(items))
-	for _, item := range items {
-		kind, ref, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		kind = strings.TrimSpace(kind)
-		ref = strings.TrimSpace(ref)
-		if kind == "" || ref == "" {
-			continue
-		}
-		out = append(out, loopmgr.EvidenceRef{Kind: kind, Ref: ref})
-	}
-	return out
-}
-
 func renderLoopStatus(w io.Writer, st loopmgr.Status) {
 	if len(st.Loops) == 0 {
 		fmt.Fprintf(w, "no loops found (ledger %s)\n", st.LedgerPath)
@@ -1422,81 +1201,4 @@ func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOve
 		return
 	}
 	fmt.Fprintf(stderr, "fak loop run: dispatch result posted to %s\n", ch)
-}
-
-func loopUsage(w io.Writer) {
-	fmt.Fprint(w, `fak loop - durable long-running loop ledger
-
-  fak loop append --loop ID --kind KIND [--ledger FILE] [--run ID]
-                  [--source NAME] [--principal ID] [--status STATUS]
-                  [--reason CODE] [--summary TEXT] [--evidence KIND=REF]
-                  [--metric NAME=INT64] [--json]
-  fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] [--notify-slack] [--no-guard] -- CMD [ARG...]
-  fak loop status [--ledger FILE] [--json]
-  fak loop health [--ledger FILE] [--registry FILE] [--check] [--json]
-  fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
-  fak loop economics [--ledger FILE] [--loop ID] [--provider-cache-tokens N]
-                  [--fak-authored-tokens N] [--modeled-tokens-per-avoided N] [--json]
-  fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
-  fak loop policy propose [--ledger FILE] [--policy FILE] [--json]
-  fak loop region [--lane LANE] [--tree GLOB ...] [--actor ID] [--self LEASE-ID]
-                  [--dir DIR] [--json]
-  fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
-  fak loop repair [--ledger FILE] --confirm [--json]
-  fak loop drive [--loop ID] [--goal GOAL.md] [--ledger FILE] [--policy FILE]
-                  [--max-iters N] [--max-tokens N] [--deadline RFC3339|DUR]
-                  [--review-model M] -- CMD [ARG...]
-  fak loop drive --template [--loop ID]
-  fak loop reap [--reap] [--allow-unfenced] [--supervisor-marker SUB ...]
-                  [--worker-marker SUB ...] [--json]
-
-Append records one scheduler/script/control event in the canonical hash-chained
-ledger. Run wraps an OS scheduler command under fak guard by default and records
-fire/admit/start/end around it; a direct out-of-tree write/delete is refused before
-spawn with OUT_OF_TREE_WRITE, and --no-guard is an explicit logged opt-out.
-Status folds that ledger into the current loop/run view using the recovered
-valid prefix when the hash chain is forked or corrupt, warning on stderr without
-rewriting the audit log. Health joins the ledger with the durable registry and
-renders live/stale/dark-loop state plus current learning_debt for the
-docs-freshness loop. Rollup folds MANY nodes' ledgers into one fleet-wide "how
-often did every loop run" view — per-loop run counts, cadence, and last-run —
-reusing the fak ps table format; it is a read-only aggregation that ingests
-journals and writes nothing. Economics folds that same ledger into one honest
-loop-economics readout — baseline vs observed open count, close/retry rate,
-duplicate attempts avoided, effective workers, and wall time as WITNESSED figures —
-and keeps the provider-cache, fak-authored, and modeled token-saving accounts
-strictly separate, each defaulting to not_yet until an explicit witness is folded so
-it never invents a saving the ledger cannot prove. Admit applies the tunable
-admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
-prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
-scheduler line can gate work on it. Recover folds the ledger into the cross-run
-RECOVERY worklist: the dispatched runs that started but were never finished
-(orphaned) or never witnessed (unwitnessed) — the work to re-dispatch or re-verify.
-Repair is the explicit operator mutation: it archives a broken ledger tail and
-rewrites only the valid prefix; readers never invoke it automatically. The ledger
-records events; admission, scheduler authority, and completion witnesses live in
-producers.
-Drive reads a GOAL.md goal-spec fresh before every turn, gates each turn through
-the loop admission policy, appends fire/admit/start/end/witness events to this ledger,
-and re-spawns CMD until the configured DOS witness reports witnessed_done or a
-budget is spent. With --review-model it also exports FAK_REVIEW_* so fak commit
-asks a scout reviewer to pass/refute the turn diff before committing; review
-verdicts are recorded as loop-ledger evidence. A NOT_YET witness refusal is
-appended under Scratch and exposed through FAK_GOAL_LAST_REFUSAL so the next
-fresh-context turn can see it. A GOAL.md lane:/region: declaration (or --lane/
---tree) additionally holds a region lease on the shared lease fabric while the
-drive runs, refusing COLLISION_RISK instead of racing a live peer.
-Region is the surface-neutral admission question by itself: "may ACTOR act on
-this lane/tree right now?" answered against the live lease fabric and the
-dos.toml lane taxonomy (exit 0 admit / 3 refuse) — the check a manual session
-or a super-loop enter path runs before touching a region. It decides only;
-holding a lease stays with fak leaseref acquire.
-Reap scans the live process table for detached loop/drainer supervisors and folds
-them through the pure looporphan core: it KEEPs the one parenting live work (or an
-attached idle engine), REAPs orphaned/duplicate idle engines, flags same-lane
-COLLISIONs for an operator, and fails closed to UNKNOWN on a missing start-time
-fence or thin identity. It reports only by default (exit 3 when any supervisor is
-reap-eligible); --reap tree-kills exactly the REAP set via the same native reaper
-the loop supervisor uses, never the current process or its parent.
-`)
 }

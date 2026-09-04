@@ -17,14 +17,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -303,19 +299,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 	if !*testOnly {
-		phase = recorder.start("gofmt")
-		files, ferr := validateGofmtOwnedPathsWithin(ctx, r, dir, paths, wslWorkspace)
-		if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "gofmt", *asJSON); timedOut {
+		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, *asJSON); timedOut {
 			return code
-		}
-		if ferr != nil {
-			recordValidateFailure(&res, phase, "gofmt", ferr.Error(), ferr)
-		} else if len(files) > 0 {
-			phase.finishAs("failed", "owned Go files are not gofmt-clean")
-			res.OK = false
-			res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
-		} else {
-			phase.finish(nil)
 		}
 	}
 	phase = recorder.start("list_graph")
@@ -329,78 +314,18 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-select", Detail: graphErr.Error()})
 	} else {
 		buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
-		if !*testOnly && len(buildTargets) > 0 {
-			// The base is a committed tip; only changed packages and their importer closure
-			// can become newly red. Rebuilding ./... made two-file checks scale with the
-			// entire repository and was the dominant #6568 timeout signature.
-			phase = recorder.start("build")
-			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "build", errors.New("affected package build failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
-			}); timedOut {
+		if !*testOnly {
+			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, buildTargets); timedOut {
 				return code
 			}
-
-			phase = recorder.start("vet")
-			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "vet", errors.New("affected package vet failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", buildTargets)...)
-			}); timedOut {
-				return code
-			}
-		} else if !*testOnly {
-			recorder.skip("build", "no affected package")
-			recorder.skip("vet", "no affected package")
 		}
-		var selectedObservation affectedtests.TestObservation
-		if len(res.Tested) > 0 {
-			res.Runner = validateTestRunner(runtime.GOOS, *wslTests)
-			testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
-			args := validateTestArgs(effectiveTestRun, testTargets)
-			if *auditSelection {
-				args = validateJSONTestArgs(args)
-			}
-			phase = recorder.start("test")
-			detail, ok := runValidateTestCommand(ctx, r, dir, tip, args, *wslTests, wslWorkspace)
-			if *auditSelection {
-				selectedObservation = parseValidateTestObservation(detail, res.Tested, ctx.Err() == nil)
-			}
-			if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "test", *asJSON); timedOut {
-				return code
-			}
-			if ok {
-				phase.finish(nil)
-			} else {
-				recordValidateFailure(&res, phase, "test", detail, errors.New("affected tests failed"))
-			}
-		} else {
-			selectedObservation = affectedtests.TestObservation{Complete: true, Packages: []affectedtests.PackageObservation{}}
-			recorder.skip("test", "no affected test-bearing package")
+		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON)
+		if timedOut {
+			return code
 		}
 		if *auditSelection {
-			fullPackages := validateAllPackages(fileToPkg)
-			phase = recorder.start("test_audit_full")
-			fullArgs := validateJSONTestArgs(validateTestArgs("", packagePatternsForRoot(dir, fullPackages, fileToPkg)))
-			detail, _ := runValidateTestCommand(ctx, r, dir, tip, fullArgs, *wslTests, wslWorkspace)
-			fullObservation := parseValidateTestObservation(detail, fullPackages, ctx.Err() == nil)
-			if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "test_audit_full", *asJSON); timedOut {
+			if code, timedOut := runValidateAuditSelectionPhase(ctx, stdout, &res, &recorder, r, dir, tip, paths, fileToPkg, selectedObservation, *wslTests, wslWorkspace, *asJSON); timedOut {
 				return code
-			}
-			audit := affectedtests.AuditSelection(selectedObservation, fullObservation)
-			selectedPackages := append([]string(nil), res.Tested...)
-			sort.Strings(selectedPackages)
-			res.SelectionAudit = &validateSelectionAudit{
-				Base: tip, Head: validateAuditHead(r, tip, paths),
-				SelectedPackages: selectedPackages, SelectionAudit: audit,
-			}
-			if audit.Sound {
-				phase.finish(nil)
-			} else {
-				detail := "affected-test selection was not sound"
-				if !audit.Complete {
-					detail = "affected-test selection audit was incomplete"
-				}
-				phase.finishAs("failed", detail)
-				res.OK = false
-				res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-audit-selection", Detail: detail})
 			}
 		}
 	}
@@ -410,6 +335,107 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runValidateGofmtPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir string, paths []string, wslWorkspace, asJSON bool) (int, bool) {
+	phase := recorder.start("gofmt")
+	files, ferr := validateGofmtOwnedPathsWithin(ctx, r, dir, paths, wslWorkspace)
+	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, "gofmt", asJSON); timedOut {
+		return code, true
+	}
+	if ferr != nil {
+		recordValidateFailure(res, phase, "gofmt", ferr.Error(), ferr)
+	} else if len(files) > 0 {
+		phase.finishAs("failed", "owned Go files are not gofmt-clean")
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
+	} else {
+		phase.finish(nil)
+	}
+	return 0, false
+}
+
+func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool, buildTargets []string) (int, bool) {
+	if len(buildTargets) == 0 {
+		recorder.skip("build", "no affected package")
+		recorder.skip("vet", "no affected package")
+		return 0, false
+	}
+	// The base is a committed tip; only changed packages and their importer closure
+	// can become newly red. Rebuilding ./... made two-file checks scale with the
+	// entire repository and was the dominant #6568 timeout signature.
+	phase := recorder.start("build")
+	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "build", errors.New("affected package build failed"), asJSON, func() (string, bool) {
+		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
+	}); timedOut {
+		return code, true
+	}
+
+	phase = recorder.start("vet")
+	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "vet", errors.New("affected package vet failed"), asJSON, func() (string, bool) {
+		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", buildTargets)...)
+	}); timedOut {
+		return code, true
+	}
+	return 0, false
+}
+
+func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip, effectiveTestRun string, fileToPkg map[string]string, wslTests, wslWorkspace, auditSelection, asJSON bool) (affectedtests.TestObservation, int, bool) {
+	if len(res.Tested) == 0 {
+		recorder.skip("test", "no affected test-bearing package")
+		return affectedtests.TestObservation{Complete: true, Packages: []affectedtests.PackageObservation{}}, 0, false
+	}
+	res.Runner = validateTestRunner(runtime.GOOS, wslTests)
+	testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
+	args := validateTestArgs(effectiveTestRun, testTargets)
+	if auditSelection {
+		args = validateJSONTestArgs(args)
+	}
+	phase := recorder.start("test")
+	detail, ok := runValidateTestCommand(ctx, r, dir, tip, args, wslTests, wslWorkspace)
+	var obs affectedtests.TestObservation
+	if auditSelection {
+		obs = parseValidateTestObservation(detail, res.Tested, ctx.Err() == nil)
+	}
+	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, "test", asJSON); timedOut {
+		return obs, code, true
+	}
+	if ok {
+		phase.finish(nil)
+	} else {
+		recordValidateFailure(res, phase, "test", detail, errors.New("affected tests failed"))
+	}
+	return obs, 0, false
+}
+
+func runValidateAuditSelectionPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip string, paths []string, fileToPkg map[string]string, selectedObservation affectedtests.TestObservation, wslTests, wslWorkspace, asJSON bool) (int, bool) {
+	fullPackages := validateAllPackages(fileToPkg)
+	phase := recorder.start("test_audit_full")
+	fullArgs := validateJSONTestArgs(validateTestArgs("", packagePatternsForRoot(dir, fullPackages, fileToPkg)))
+	detail, _ := runValidateTestCommand(ctx, r, dir, tip, fullArgs, wslTests, wslWorkspace)
+	fullObservation := parseValidateTestObservation(detail, fullPackages, ctx.Err() == nil)
+	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, "test_audit_full", asJSON); timedOut {
+		return code, true
+	}
+	audit := affectedtests.AuditSelection(selectedObservation, fullObservation)
+	selectedPackages := append([]string(nil), res.Tested...)
+	sort.Strings(selectedPackages)
+	res.SelectionAudit = &validateSelectionAudit{
+		Base: tip, Head: validateAuditHead(r, tip, paths),
+		SelectedPackages: selectedPackages, SelectionAudit: audit,
+	}
+	if audit.Sound {
+		phase.finish(nil)
+	} else {
+		detail := "affected-test selection was not sound"
+		if !audit.Complete {
+			detail = "affected-test selection audit was incomplete"
+		}
+		phase.finishAs("failed", detail)
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-audit-selection", Detail: detail})
+	}
+	return 0, false
 }
 
 // selectValidatePackages restores deleted-path graph context, then records live
@@ -544,10 +570,6 @@ func normalizeMinePathsWithin(ctx context.Context, root string, raw []string) ([
 	return out, nil
 }
 
-func validateSkipWalkDir(name string) bool {
-	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
-}
-
 // overlayMinePaths copies each owned working-tree path onto the materialized tip.
 //
 // The containment check canonicalizes both sides, the same both-sides discipline
@@ -680,46 +702,6 @@ func gofmtOwnedPathsWithin(ctx context.Context, root string, paths []string) ([]
 		}
 	}
 	return files, nil
-}
-
-func packagePatternsForRoot(root string, packages []string, fileToPkg map[string]string) []string {
-	pkgDirs := make(map[string]string)
-	for file, pkg := range fileToPkg {
-		dir := filepath.ToSlash(filepath.Dir(file))
-		if dir == "." {
-			dir = ""
-		}
-		if old, ok := pkgDirs[pkg]; !ok || len(dir) < len(old) {
-			pkgDirs[pkg] = dir
-		}
-	}
-	out := make([]string, 0, len(packages))
-	for _, pkg := range packages {
-		if dir, ok := pkgDirs[pkg]; ok {
-			if dir == "" {
-				out = append(out, ".")
-			} else {
-				out = append(out, "./"+dir)
-			}
-			continue
-		}
-		out = append(out, pkg)
-	}
-	return out
-}
-
-func appendUniqueStrings(dst []string, values ...string) []string {
-	seen := make(map[string]bool, len(dst)+len(values))
-	for _, value := range dst {
-		seen[value] = true
-	}
-	for _, value := range values {
-		if !seen[value] {
-			seen[value] = true
-			dst = append(dst, value)
-		}
-	}
-	return dst
 }
 
 var validateWSLCommandSurface = []struct {
@@ -865,39 +847,6 @@ func validateWSLCapabilityScript(required []string) string {
 		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done"
 }
 
-func validateCommandDetail(out []byte, err error) string {
-	if detail := strings.TrimSpace(string(out)); detail != "" {
-		return detail
-	}
-	return err.Error()
-}
-
-func defaultValidateWSLTests(goos string) bool { return goos == "windows" }
-
-func validateTestRunner(goos string, wsl bool) string {
-	if goos == "windows" && wsl {
-		return "wsl.exe bash -lc go test"
-	}
-	return "go test"
-}
-
-func validateTestArgs(testRun string, targets []string) []string {
-	// Tests require filesystem-valid source paths from runtime.Caller(0) (e.g. for
-	// package introspection and dos.toml validation); do not pass -trimpath here (#9788).
-	args := []string{"test", "-count=1"}
-	if testRun != "" {
-		args = append(args, "-run", testRun)
-	}
-	return append(args, targets...)
-}
-
-func validateGoCheckArgs(mode string, targets []string) []string {
-	// validate materializes the same committed bytes under a fresh root on every run.
-	// Normalize that disposable root in compile identities so the shared Go cache can
-	// reuse artifacts without changing the developer/release build's debug-path contract.
-	return append([]string{mode, "-trimpath"}, targets...)
-}
-
 func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []string, wsl bool) (string, bool) {
 	// The archive checkout is isolated from peer WIP. Windows defaults to WSL so test
 	// binaries execute under Linux rather than the host application-control boundary.
@@ -958,10 +907,6 @@ func prepareValidateGitIdentityWithin(ctx context.Context, repo, dir, tip string
 		}
 	}
 	return nil
-}
-
-func posixQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func runGoCheckWithin(ctx context.Context, dir string, args ...string) (string, bool) {
@@ -1280,178 +1225,11 @@ func runValidateTestsInWSLWorkspaceWithin(ctx context.Context, root string, args
 	return strings.TrimSpace(string(out)), err == nil
 }
 
-type validateGoTestEvent struct {
-	Action  string `json:"Action"`
-	Package string `json:"Package"`
-}
-
-func validateAuditHead(root, tip string, paths []string) string {
-	hash := sha256.New()
-	_, _ = io.WriteString(hash, tip+"\x00")
-	for _, rel := range paths {
-		_, _ = io.WriteString(hash, rel+"\x00")
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			_, _ = io.WriteString(hash, "<deleted>\x00")
-			continue
-		}
-		_, _ = hash.Write(data)
-		_, _ = io.WriteString(hash, "\x00")
-	}
-	return fmt.Sprintf("%s+mine:%x", tip, hash.Sum(nil)[:6])
-}
-
-func validateJSONTestArgs(args []string) []string {
-	out := append([]string(nil), args...)
-	if len(out) == 0 {
-		return out
-	}
-	return append(out[:1], append([]string{"-json"}, out[1:]...)...)
-}
-
 func runValidateTestCommand(ctx context.Context, repo, dir, tip string, args []string, wsl, wslWorkspace bool) (string, bool) {
 	if wslWorkspace {
 		return runValidateTestsInWSLWorkspaceWithin(ctx, dir, args)
 	}
 	return runValidateTestsWithin(ctx, repo, dir, tip, args, wsl)
-}
-
-func validateAllPackages(fileToPkg map[string]string) []string {
-	seen := make(map[string]struct{}, len(fileToPkg))
-	for _, pkg := range fileToPkg {
-		seen[pkg] = struct{}{}
-	}
-	packages := make([]string, 0, len(seen))
-	for pkg := range seen {
-		packages = append(packages, pkg)
-	}
-	sort.Strings(packages)
-	return packages
-}
-
-func parseValidateTestObservation(output string, packages []string, commandComplete bool) affectedtests.TestObservation {
-	observed := make(map[string]affectedtests.PackageObservation, len(packages))
-	terminal := make(map[string]bool, len(packages))
-	for _, pkg := range packages {
-		observed[pkg] = affectedtests.PackageObservation{Package: pkg}
-	}
-	dec := json.NewDecoder(strings.NewReader(output))
-	for {
-		var event validateGoTestEvent
-		if err := dec.Decode(&event); err != nil {
-			break
-		}
-		observation, wanted := observed[event.Package]
-		if !wanted {
-			continue
-		}
-		switch event.Action {
-		case "fail":
-			observation.Failed = true
-			observed[event.Package] = observation
-			terminal[event.Package] = true
-		case "pass", "skip":
-			terminal[event.Package] = true
-		}
-	}
-	result := affectedtests.TestObservation{Complete: commandComplete, Packages: make([]affectedtests.PackageObservation, 0, len(packages))}
-	for _, pkg := range packages {
-		result.Packages = append(result.Packages, observed[pkg])
-		if !terminal[pkg] {
-			result.Complete = false
-		}
-	}
-	return result
-}
-
-func hasDeletedMinePath(root string, paths []string) bool {
-	for _, rel := range paths {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); os.IsNotExist(err) {
-			return true
-		}
-	}
-	return false
-}
-
-func ownedTestRunExpression(root string, paths []string) (string, error) {
-	seen := map[string]bool{}
-	var names []string
-	for _, rel := range paths {
-		if !strings.HasSuffix(strings.ToLower(rel), "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, filepath.FromSlash(rel)), nil, 0)
-		if err != nil {
-			return "", err
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Name == nil {
-				continue
-			}
-			name := fn.Name.Name
-			if !(strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Example") || strings.HasPrefix(name, "Fuzz")) || seen[name] {
-				continue
-			}
-			seen[name] = true
-			names = append(names, regexp.QuoteMeta(name))
-		}
-	}
-	if len(names) == 0 {
-		return "", nil
-	}
-	sort.Strings(names)
-	return "^(" + strings.Join(names, "|") + ")$", nil
-}
-
-func requestedMinePaths(raw []string) []string {
-	out := make([]string, 0, len(raw))
-	for _, path := range raw {
-		out = append(out, filepath.ToSlash(filepath.Clean(path)))
-	}
-	return out
-}
-
-func subtractValidatePaths(all, checked []string) []string {
-	done := make(map[string]bool, len(checked))
-	for _, path := range checked {
-		done[path] = true
-	}
-	left := make([]string, 0, len(all)-len(done))
-	for _, path := range all {
-		if !done[path] {
-			left = append(left, path)
-		}
-	}
-	return left
-}
-
-func validateWriterIsTerminal(w io.Writer) bool {
-	type statter interface {
-		Stat() (os.FileInfo, error)
-	}
-	f, ok := w.(statter)
-	if !ok {
-		return false
-	}
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func validatePhaseOrder(testOnly, auditSelection bool) []string {
-	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay"}
-	if !testOnly {
-		phases = append(phases, "gofmt")
-	}
-	phases = append(phases, "list_graph", "test_select")
-	if !testOnly {
-		phases = append(phases, "build", "vet")
-	}
-	phases = append(phases, "test")
-	if auditSelection {
-		phases = append(phases, "test_audit_full")
-	}
-	return phases
 }
 
 func finishValidateTimeout(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase string, asJSON bool) int {
