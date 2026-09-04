@@ -10,12 +10,18 @@ import (
 type DatabaseFamily string
 
 const (
-	FamilySQLite   DatabaseFamily = "sqlite"
-	FamilyDuckDB   DatabaseFamily = "duckdb"
+	// FamilySQLite identifies embedded SQLite database files.
+	FamilySQLite DatabaseFamily = "sqlite"
+	// FamilyDuckDB identifies columnar DuckDB embedded database files.
+	FamilyDuckDB DatabaseFamily = "duckdb"
+	// FamilyPostgres identifies PostgreSQL network service targets.
 	FamilyPostgres DatabaseFamily = "postgres"
-	FamilyMySQL    DatabaseFamily = "mysql"
-	FamilyRedis    DatabaseFamily = "redis"
-	FamilyDBT      DatabaseFamily = "dbt"
+	// FamilyMySQL identifies MySQL and MariaDB service targets.
+	FamilyMySQL DatabaseFamily = "mysql"
+	// FamilyRedis identifies Redis in-memory cache service targets.
+	FamilyRedis DatabaseFamily = "redis"
+	// FamilyDBT identifies dbt data modeling project roots.
+	FamilyDBT DatabaseFamily = "dbt"
 )
 
 // ValidFamilies enumerates recognized database families.
@@ -32,11 +38,17 @@ var ValidFamilies = map[DatabaseFamily]bool{
 type MigrationEngine string
 
 const (
-	MigrationNone    MigrationEngine = "none"
-	MigrationPrisma  MigrationEngine = "prisma"
+	// MigrationNone indicates no detected migration framework.
+	MigrationNone MigrationEngine = "none"
+	// MigrationPrisma identifies Prisma ORM schema migrations.
+	MigrationPrisma MigrationEngine = "prisma"
+	// MigrationAlembic identifies Python Alembic database migrations.
 	MigrationAlembic MigrationEngine = "alembic"
-	MigrationGoose   MigrationEngine = "goose"
-	MigrationFlyway  MigrationEngine = "flyway"
+	// MigrationGoose identifies Goose database migration scripts.
+	MigrationGoose MigrationEngine = "goose"
+	// MigrationFlyway identifies Java Flyway versioned SQL migrations.
+	MigrationFlyway MigrationEngine = "flyway"
+	// MigrationDrizzle identifies Drizzle TypeScript ORM schema migrations.
 	MigrationDrizzle MigrationEngine = "drizzle"
 )
 
@@ -44,10 +56,14 @@ const (
 type SlotStatus string
 
 const (
-	StatusAbsent         SlotStatus = "absent"
+	// StatusAbsent indicates a declared data capability is absent from the workspace.
+	StatusAbsent SlotStatus = "absent"
+	// StatusUnmaterialized indicates migration artifacts exist without a live database file.
 	StatusUnmaterialized SlotStatus = "dormant:unmaterialized"
-	StatusReady          SlotStatus = "dormant:ready"
-	StatusActive         SlotStatus = "active"
+	// StatusReady indicates the database file or service is ready for read-only binding.
+	StatusReady SlotStatus = "dormant:ready"
+	// StatusActive indicates the database capability is currently bound and active.
+	StatusActive SlotStatus = "active"
 )
 
 // ValidStatuses enumerates valid progressive lifecycle states.
@@ -88,11 +104,9 @@ func (d DataSlotDescriptor) IsActive() bool {
 	return d.Status == StatusActive
 }
 
-// Validate checks that required descriptor fields are present and valid.
-//
-// Invariant: data slot detection and validation is fail-closed and deterministic.
-// Descriptors with missing identifiers, unmapped database families, or invalid
-// lifecycle statuses are strictly rejected before any runtime admission.
+// Validate checks that required descriptor fields are present and valid,
+// rejecting missing identifiers, unmapped database families, or invalid
+// lifecycle statuses before runtime admission.
 func (d DataSlotDescriptor) Validate() error {
 	if strings.TrimSpace(d.ID) == "" {
 		return errors.New("dataslot: descriptor ID is required")
