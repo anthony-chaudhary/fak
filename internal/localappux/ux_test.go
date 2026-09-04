@@ -25,12 +25,12 @@ func TestCapturedStateRenders(t *testing.T) {
 }
 
 func TestDiagnosticPreviewIsConsentSafe(t *testing.T) {
-	b, err := PreviewDiagnostic(Diagnostic{AppVersion: "1.2", State: StateHelperRestart, Mode: ModeLocalOnly, Engine: "fak-native", ErrorCode: "HELPER_EXIT", Paths: []string{"/Users/alice/private"}, Prompt: "private application", Token: "secret"})
+	b, err := PreviewDiagnostic(Diagnostic{AppVersion: "1.2", State: StateHelperRestart, Mode: ModeLocalOnly, Engine: "fak-native", ErrorCode: "HELPER_EXIT", Paths: []string{"/Users/USER/private"}, Prompt: "private application", Token: "secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, secret := range []string{"alice", "private application", "secret", "paths", "prompt", "token"} {
+	for _, secret := range []string{"USER", "private application", "secret", "paths", "prompt", "token"} {
 		if strings.Contains(s, secret) {
 			t.Fatalf("preview leaked %q: %s", secret, s)
 		}
