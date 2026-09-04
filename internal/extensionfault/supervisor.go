@@ -1,5 +1,9 @@
 // Package extensionfault supervises optional extension subprocesses behind bounded
 // startup/call deadlines and a per-extension circuit breaker.
+//
+// Invariants: supervisor handles extension process crashes and enforces restart limits.
+// Assumptions: extension processes communicate via JSON framing over stdin/stdout.
+// Fail-closed guard: faulty or crashing extensions are quarantined without impacting siblings.
 package extensionfault
 
 import (
@@ -15,10 +19,13 @@ import (
 )
 
 var (
+	// ErrQuarantined indicates the extension has exhausted its restart budget or failed startup and is isolated.
 	ErrQuarantined = errors.New("extension quarantined")
+	// ErrUnavailable indicates the requested extension is not registered in the supervisor.
 	ErrUnavailable = errors.New("extension unavailable")
 )
 
+// Spec defines the configuration and operational constraints for a managed extension subprocess.
 type Spec struct {
 	Name           string
 	Command        []string
@@ -28,6 +35,7 @@ type Spec struct {
 	MaxRestarts    int
 }
 
+// Status captures runtime health, process identity, and failure telemetry for an extension.
 type Status struct {
 	Name        string
 	Running     bool
@@ -38,6 +46,7 @@ type Status struct {
 	LastError   string
 }
 
+// Supervisor manages the lifecycle, execution deadlines, and fault isolation of extension processes.
 type Supervisor struct {
 	mu         sync.Mutex
 	extensions map[string]*extension
@@ -62,6 +71,7 @@ type frame struct {
 	PID     int    `json:"pid,omitempty"`
 }
 
+// New creates a new Supervisor configured with the provided extension specifications.
 func New(specs ...Spec) (*Supervisor, error) {
 	s := &Supervisor{extensions: make(map[string]*extension, len(specs))}
 	for _, spec := range specs {
@@ -212,6 +222,7 @@ func (e *extension) stop() {
 	e.cmd, e.stdin, e.stdout, e.pid = nil, nil, nil, 0
 }
 
+// Status returns the current runtime status and quarantine state for the named extension.
 func (s *Supervisor) Status(name string) (Status, bool) {
 	s.mu.Lock()
 	e := s.extensions[name]
@@ -224,6 +235,7 @@ func (s *Supervisor) Status(name string) (Status, bool) {
 	return Status{Name: name, Running: e.cmd != nil, Quarantined: e.quarantined, Failures: e.failures, Restarts: e.restarts, PID: e.pid, LastError: e.lastErr}, true
 }
 
+// Close gracefully terminates all running extension subprocesses and releases resources.
 func (s *Supervisor) Close() error {
 	s.mu.Lock()
 	list := make([]*extension, 0, len(s.extensions))
