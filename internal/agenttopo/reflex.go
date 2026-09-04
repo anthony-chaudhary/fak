@@ -204,6 +204,20 @@ type ReflexMicroReceipt struct {
 	ElapsedMs   int64  `json:"elapsed_ms"`
 }
 
+// BuildReflexReceipt constructs a ReflexMicroReceipt with the canonical schema and elapsed duration in milliseconds.
+func BuildReflexReceipt(lane, witness, state string, allowed, denied, tokensSaved int, elapsed time.Duration) ReflexMicroReceipt {
+	return ReflexMicroReceipt{
+		Schema:      ReflexMicroReceiptSchema,
+		Lane:        lane,
+		Witness:     witness,
+		State:       state,
+		Allowed:     allowed,
+		Denied:      denied,
+		TokensSaved: tokensSaved,
+		ElapsedMs:   elapsed.Milliseconds(),
+	}
+}
+
 // ReflexWorkerConfig configures a reflex worker candidate for tree-disjoint lease admission and topology declaration.
 type ReflexWorkerConfig struct {
 	Model       string   `json:"model"`

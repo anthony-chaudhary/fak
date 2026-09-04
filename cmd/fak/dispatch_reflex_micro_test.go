@@ -40,16 +40,7 @@ func TestParallelReflexMicroAgentsExecution(t *testing.T) {
 	simulatedDelay := 35 * time.Millisecond
 	executor := func(ctx context.Context, task ReflexMicroTask) (agenttopo.ReflexMicroReceipt, error) {
 		time.Sleep(simulatedDelay)
-		return agenttopo.ReflexMicroReceipt{
-			Schema:      agenttopo.ReflexMicroReceiptSchema,
-			Lane:        task.Lane,
-			Witness:     task.Witness,
-			State:       "completed",
-			Allowed:     1,
-			Denied:      0,
-			TokensSaved: 12500,
-			ElapsedMs:   simulatedDelay.Milliseconds(),
-		}, nil
+		return agenttopo.BuildReflexReceipt(task.Lane, task.Witness, "completed", 1, 0, 12500, simulatedDelay), nil
 	}
 
 	req := ReflexMicroDispatchRequest{

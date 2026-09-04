@@ -154,6 +154,56 @@ func TestDryRunPayloadDoesNotLaunch(t *testing.T) {
 	}
 }
 
+func TestReflexProfileDefaultModelAndEnv(t *testing.T) {
+	// 1. Profile reflex sets default worker model to glm-4.5-air when unset
+	model, env := applyProfile("reflex", "", map[string]string{})
+	if model != "glm-4.5-air" {
+		t.Errorf("model = %q, want glm-4.5-air", model)
+	}
+	if env["FAK_PROFILE"] != "reflex" {
+		t.Errorf("FAK_PROFILE = %q, want reflex", env["FAK_PROFILE"])
+	}
+	if env["DISPATCH_PROFILE"] != "reflex" {
+		t.Errorf("DISPATCH_PROFILE = %q, want reflex", env["DISPATCH_PROFILE"])
+	}
+	if env["FAK_MAX_TURNS"] != "3" {
+		t.Errorf("FAK_MAX_TURNS = %q, want 3", env["FAK_MAX_TURNS"])
+	}
+	if env["DISPATCH_MAX_TURNS"] != "3" {
+		t.Errorf("DISPATCH_MAX_TURNS = %q, want 3", env["DISPATCH_MAX_TURNS"])
+	}
+
+	// 2. Explicit worker model is preserved under reflex profile
+	modelExplicit, _ := applyProfile("reflex", "qwen3.8-7b", nil)
+	if modelExplicit != "qwen3.8-7b" {
+		t.Errorf("explicit model = %q, want qwen3.8-7b", modelExplicit)
+	}
+
+	// 3. ChildEnv applies reflex profile settings
+	cEnv := childEnv("gateway", "claude", "/tmp/ws", map[string]string{"EXISTING": "1"}, "reflex")
+	if cEnv["FAK_PROFILE"] != "reflex" || cEnv["DISPATCH_PROFILE"] != "reflex" {
+		t.Errorf("childEnv missing reflex profile: %v", cEnv)
+	}
+	if cEnv["FAK_MAX_TURNS"] != "3" || cEnv["DISPATCH_MAX_TURNS"] != "3" {
+		t.Errorf("childEnv missing max turns: %v", cEnv)
+	}
+	if cEnv["EXISTING"] != "1" {
+		t.Errorf("childEnv dropped existing env: %v", cEnv)
+	}
+
+	// 4. BuildPayload stamps profile and reflex env
+	p := buildPayload("gateway", "claude", "/tmp/ws", true, nil, "", nil, false, "reflex")
+	if p.Profile != "reflex" {
+		t.Errorf("payload profile = %q, want reflex", p.Profile)
+	}
+	if p.Env["FAK_PROFILE"] != "reflex" || p.Env["DISPATCH_PROFILE"] != "reflex" {
+		t.Errorf("payload env missing reflex profile: %v", p.Env)
+	}
+	if p.Env["FAK_MAX_TURNS"] != "3" || p.Env["DISPATCH_MAX_TURNS"] != "3" {
+		t.Errorf("payload env missing max turns: %v", p.Env)
+	}
+}
+
 // TestNewLaunchCmdWiresTreeKillAndWaitDelay witnesses the runaway-containment
 // wiring without spawning a process: every launched worker cmd carries a Cancel
 // hook (configureProcTree's process-tree reaper) and the WaitDelay backstop, so a
