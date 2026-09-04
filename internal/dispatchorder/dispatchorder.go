@@ -356,6 +356,13 @@ func (r Result) Pick() string {
 	return r.Keep[0]
 }
 
+// Invariant: dispatch ordering is fail-closed and deterministic across all candidate inputs.
+// Given identical candidate sets and clock inputs, Plan guarantees reproducible ordering,
+// deterministic tiebreaking, and fail-closed isolation of unknown blast radiuses.
+//
+// Guard: candidates with unresolvable tree or compute collisions are serialized before launch,
+// and unknown blast radiuses fail closed by colliding conservatively against concurrent participants.
+//
 // Plan is THE deterministic dispatch-order decision: same Input in, same Result out — no clock,
 // no I/O. It collapses same-key duplicates to the freshest unit, folds in the live/cooldown
 // skips, and returns the survivors in freshest-first order. Total over any input (an empty
