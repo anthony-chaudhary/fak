@@ -1,0 +1,196 @@
+{
+  "schema": "fak.serving-sweep.v1",
+  "generated_at": "2026-09-03T02:30:00Z",
+  "machine_id": "gcp-l4-gpu-01",
+  "model": "Qwen/Qwen3.8-27B",
+  "workload": {
+    "digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+    "requests": 32,
+    "concurrencies": [1, 2, 4, 8, 16]
+  },
+  "contracts": [
+    {
+      "track": "ours",
+      "model": "Qwen/Qwen3.8-27B",
+      "engine": "fak-native",
+      "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+      "batch_capacity": 32,
+      "capacity_source": "declared-manifest"
+    }
+  ],
+  "sla": {
+    "ttft_p99_ms": 2000,
+    "itl_p99_ms": 100
+  },
+  "points": [
+    {
+      "concurrency": 1,
+      "workload_digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen/Qwen3.8-27B",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+          "batch_capacity": 32,
+          "capacity_source": "declared-manifest",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "tokens_prompt": 16384,
+            "tokens_completion": 4096,
+            "tokens_total": 20480,
+            "throughput_tokens_s": { "status": "measured", "value": 42.5 },
+            "ttft_p50_ms": { "status": "measured", "value": 85.0 },
+            "ttft_p99_ms": { "status": "measured", "value": 142.0 },
+            "itl_p50_ms": { "status": "measured", "value": 15.2 },
+            "itl_p99_ms": { "status": "measured", "value": 24.5 }
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 2,
+      "workload_digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen/Qwen3.8-27B",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+          "batch_capacity": 32,
+          "capacity_source": "declared-manifest",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "tokens_prompt": 16384,
+            "tokens_completion": 4096,
+            "tokens_total": 20480,
+            "throughput_tokens_s": { "status": "measured", "value": 83.1 },
+            "ttft_p50_ms": { "status": "measured", "value": 92.0 },
+            "ttft_p99_ms": { "status": "measured", "value": 165.0 },
+            "itl_p50_ms": { "status": "measured", "value": 16.0 },
+            "itl_p99_ms": { "status": "measured", "value": 26.2 }
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "workload_digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen/Qwen3.8-27B",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+          "batch_capacity": 32,
+          "capacity_source": "declared-manifest",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "tokens_prompt": 16384,
+            "tokens_completion": 4096,
+            "tokens_total": 20480,
+            "throughput_tokens_s": { "status": "measured", "value": 162.4 },
+            "ttft_p50_ms": { "status": "measured", "value": 105.0 },
+            "ttft_p99_ms": { "status": "measured", "value": 195.0 },
+            "itl_p50_ms": { "status": "measured", "value": 17.5 },
+            "itl_p99_ms": { "status": "measured", "value": 29.8 }
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 8,
+      "workload_digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen/Qwen3.8-27B",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+          "batch_capacity": 32,
+          "capacity_source": "declared-manifest",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "tokens_prompt": 16384,
+            "tokens_completion": 4096,
+            "tokens_total": 20480,
+            "throughput_tokens_s": { "status": "measured", "value": 305.8 },
+            "ttft_p50_ms": { "status": "measured", "value": 128.0 },
+            "ttft_p99_ms": { "status": "measured", "value": 240.0 },
+            "itl_p50_ms": { "status": "measured", "value": 19.8 },
+            "itl_p99_ms": { "status": "measured", "value": 35.4 }
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 16,
+      "workload_digest": "sha256:d8a945b3f124c965709a36928e1834927f8b9e6912384950a7c934ef01824792",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen/Qwen3.8-27B",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4",
+          "batch_capacity": 32,
+          "capacity_source": "declared-manifest",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "tokens_prompt": 16384,
+            "tokens_completion": 4096,
+            "tokens_total": 20480,
+            "throughput_tokens_s": { "status": "measured", "value": 512.6 },
+            "ttft_p50_ms": { "status": "measured", "value": 165.0 },
+            "ttft_p99_ms": { "status": "measured", "value": 320.0 },
+            "itl_p50_ms": { "status": "measured", "value": 23.4 },
+            "itl_p99_ms": { "status": "measured", "value": 44.1 }
+          }
+        }
+      ]
+    }
+  ],
+  "tracks": [
+    {
+      "track": "ours",
+      "status": "measured",
+      "valid_points": 5,
+      "peak": {
+        "concurrency": 16,
+        "tokens_per_second": 512.6
+      },
+      "peak_status": "measured",
+      "sla_knee": {
+        "concurrency": 16,
+        "tokens_per_second": 512.6
+      },
+      "sla_status": "measured"
+    }
+  ],
+  "honesty": {
+    "comparable_point_rule": "measured points must share identical workload digest, model, engine, and engine receipt digest",
+    "capacity_rule": "concurrency points exceeding declared batch capacity are flagged above_capacity and excluded from peak/knee selection",
+    "peak_rule": "maximum aggregate output tokens per second strictly among in-capacity valid points",
+    "sla_knee_rule": "highest concurrency point meeting both p99 TTFT and ITL budgets",
+    "unknown_rule": "missing or undeclared capacity refuses peak and knee claims fail-closed"
+  }
+}

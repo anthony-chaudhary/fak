@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
@@ -286,5 +287,48 @@ func TestWipReapPersistsHistoryAfterDeletingCheckpointRef(t *testing.T) {
 	}
 	if len(receipts) != 1 || receipts[0].Kind != "checkpoint-reap" || receipts[0].FinishedAt == "" {
 		t.Fatalf("post-ref lifecycle history missing: %#v", receipts)
+	}
+}
+
+func TestWipReapPurgesStaleOrphanedCheckpoints(t *testing.T) {
+	ctx := context.Background()
+	dir, file := wipTestRepo(t)
+	if err := os.WriteFile(file, []byte("unlanded work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := wipCheckpoint(ctx, dir, "stale-session", true, time.Now().Unix())
+	if err != nil || checkpoint.Object == "" {
+		t.Fatalf("checkpoint=%+v err=%v", checkpoint, err)
+	}
+
+	// Give a small elapsed window so commit creation is older than 50ms
+	time.Sleep(100 * time.Millisecond)
+
+	// First verify dry-run reports it but does not delete
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := runWipReap(&out, &errOut, []string{"-C", dir, "--max-age", "50ms", "--dry-run", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "stale-session") || !strings.Contains(out.String(), "stale orphaned checkpoint") {
+		t.Fatalf("dry-run missing expected verdict: %s", out.String())
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "show-ref", "--verify", checkpoint.Ref); err != nil {
+		t.Fatalf("dry-run should not have deleted ref %s", checkpoint.Ref)
+	}
+
+	// Live reap should delete it
+	out.Reset()
+	errOut.Reset()
+	code = runWipReap(&out, &errOut, []string{"-C", dir, "--max-age", "50ms", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "stale-session") {
+		t.Fatalf("reap output missing stale-session: %s", out.String())
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "show-ref", "--verify", checkpoint.Ref); err == nil {
+		t.Fatalf("live reap should have deleted ref %s", checkpoint.Ref)
 	}
 }

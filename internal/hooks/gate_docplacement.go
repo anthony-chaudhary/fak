@@ -13,7 +13,7 @@ import (
 // Python fallback.
 var allowedRootMD = map[string]bool{
 	"README.md": true, "START-HERE.md": true, "INSTALL.md": true, "INDEX.md": true, "LEARNING-PATH.md": true,
-	"CONTRIBUTING.md": true, "CLA.md": true, "AGENTS.md": true, "AGENT.md": true, "CLAUDE.md": true, "GEMINI.md": true,
+	"CONTRIBUTING.md": true, "CLA.md": true, "AGENTS.md": true, "AGENT.md": true, "CLAUDE.md": true, "GEMINI.md": true, "GOAL.md": true,
 	"SECURITY.md": true, "PUBLIC-SCRUB-POLICY.md": true,
 	"ARCHITECTURE.md": true, "EXTENDING.md": true, "GETTING-STARTED.md": true, "GPU.md": true,
 	"POLICY.md": true, "PARTITION.md": true, "STATUS.md": true, "CLAIMS.md": true,

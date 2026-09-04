@@ -10587,6 +10587,26 @@
           "category": "incidental",
           "reason": "Implementation enum for debt lifecycle state.",
           "token": "DebtDisposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "handler for fak code-debt CLI",
+          "token": "runCodeDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "command entrypoint for fak code-debt CLI",
+          "token": "cmdCodeDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "corpus field mapping debt count by category",
+          "token": "DebtByCategory"
+        },
+        {
+          "category": "incidental",
+          "reason": "json field mapping debt count by package",
+          "token": "debt_by_package"
         }
       ],
       "id": "score-debt",
@@ -10596,6 +10616,7 @@
         "CacheValueGateDebtKey",
         "CoverageDebtUnit",
         "DebtByBand",
+        "DebtByCategory",
         "DebtCaughtAtOrigin",
         "DebtDisposition",
         "DebtFoundLate",
@@ -10631,6 +10652,7 @@
         "appendDebtSection",
         "appendFullDebtSection",
         "baseline_debt_non_integer",
+        "cmdCodeDebt",
         "cmdGeneralizationScorecard",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
@@ -10638,6 +10660,7 @@
         "debtLine",
         "debtPath",
         "debtSummary",
+        "debt_by_package",
         "dogfoodDebtNextAction",
         "flow_debt",
         "generalizationdebt",
@@ -10648,6 +10671,7 @@
         "pluralDebt",
         "portfolio-discovery",
         "producer_debt_capped",
+        "runCodeDebt",
         "runGeneralizationScorecard",
         "runScorecardPortfolioDiscovery",
         "scorecardPath",
@@ -14121,6 +14145,11 @@
           "category": "incidental",
           "reason": "treatment topology of candidate benchmark arm",
           "token": "CandidateTopology"
+        },
+        {
+          "category": "incidental",
+          "reason": "context-plan-required lint package",
+          "token": "ctxplanlint"
         }
       ],
       "exclude": [
@@ -14270,6 +14299,7 @@
         "clonePlan",
         "compareCandidate",
         "componentPlan",
+        "ctxplanlint",
         "dedupCandidate",
         "defaultsCheckPlanner",
         "deriveSelfUpdateCandidateCacheDisposition",

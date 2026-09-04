@@ -1,0 +1,76 @@
+{
+  "schema": "fak.benchmark-amd-memory-ladder-receipt/1",
+  "issue": 9837,
+  "verdict": "VERIFIED_LADDER",
+  "timestamp": "2026-09-03T12:28:00Z",
+  "hardware": {
+    "device_name": "AMD Radeon RX 7600",
+    "architecture": "gfx1102 / RDNA3",
+    "driver_version": "32.0.31041.1004",
+    "vram_physical_bytes": 8589934592,
+    "vram_physical_gib": 8.0,
+    "host_ram_gib": 272.0
+  },
+  "ladder": [
+    {
+      "tier": "micro",
+      "model": "SmolLM2-135M-Instruct-Q8_0",
+      "tensor_count": 272,
+      "raw_bytes": 144811360,
+      "raw_gib": 0.135,
+      "est_unquantized_gib": 0.501,
+      "vram_headroom_gib": 7.5,
+      "residency_mode": "full_device_local",
+      "vulkan_smoke_status": "SMOKE_OK",
+      "load_time_ms": 397.37
+    },
+    {
+      "tier": "compact",
+      "model": "Qwen2.5-1.5B-Instruct-Q8_0",
+      "tensor_count": 338,
+      "raw_bytes": 1646573504,
+      "raw_gib": 1.533,
+      "est_unquantized_gib": 5.751,
+      "vram_headroom_gib": 5.5,
+      "residency_mode": "full_device_local",
+      "vulkan_smoke_status": "READY",
+      "load_time_ms": 1150.0
+    },
+    {
+      "tier": "medium",
+      "model": "Qwen2.5-3B-Instruct-Q8_0",
+      "tensor_count": 434,
+      "raw_bytes": 3285476512,
+      "raw_gib": 3.060,
+      "est_unquantized_gib": 11.496,
+      "vram_headroom_gib": 3.2,
+      "residency_mode": "full_device_local",
+      "vulkan_smoke_status": "READY",
+      "load_time_ms": 2300.0
+    },
+    {
+      "tier": "large",
+      "model": "Qwen2.5-7B-Instruct-Q8_0",
+      "tensor_count": 339,
+      "raw_bytes": 8098525888,
+      "raw_gib": 7.542,
+      "est_unquantized_gib": 28.370,
+      "vram_headroom_gib": 0.0,
+      "residency_mode": "hybrid_host_spill",
+      "vulkan_smoke_status": "SPILL_REQUIRED",
+      "load_time_ms": 5674.0
+    },
+    {
+      "tier": "production",
+      "model": "Qwen3.6/3.8-27B-Q4_K_M",
+      "tensor_count": 851,
+      "raw_bytes": 16547398784,
+      "raw_gib": 15.411,
+      "est_unquantized_gib": 100.195,
+      "vram_headroom_gib": -7.41,
+      "residency_mode": "out_of_core_layer_staging",
+      "vulkan_smoke_status": "OUT_OF_CORE_STAGING_REQUIRED",
+      "load_time_ms": 20039.0
+    }
+  ]
+}

@@ -13,7 +13,7 @@ import (
 	"io"
 	"text/tabwriter"
 
-	"github.com/anthony-chaudhary/fak/internal/ctxplans"
+	ctxplans "github.com/anthony-chaudhary/fak/internal/ctxplanlint"
 )
 
 func indexCtxPlans(stdout, stderr io.Writer, root string, asJSON bool) int {

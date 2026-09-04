@@ -36,7 +36,7 @@ ALLOWED_ROOT_MD = {
     # entry points
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "LEARNING-PATH.md",
     # contributor + agent contract
-    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md",
+    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md", "GOAL.md",
     # policy / security
     "SECURITY.md", "PUBLIC-SCRUB-POLICY.md",
     # public front-door docs: deliberately at the root because README.md and

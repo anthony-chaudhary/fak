@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
+	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
@@ -944,6 +945,7 @@ func runWipReap(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the reap result as JSON")
 	dryRun := fs.Bool("dry-run", false, "report what would be reaped without deleting any ref")
 	census := fs.Bool("census", false, "read-only: classify every checkpoint ref by owner-state and print the counts (deletes NOTHING; #5340)")
+	maxAge := fs.Duration("max-age", 7*24*time.Hour, "purge orphaned checkpoint refs older than this age")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -953,8 +955,52 @@ func runWipReap(stdout, stderr io.Writer, argv []string) int {
 	if *census {
 		return runWipCensus(context.Background(), stdout, stderr, *repo, *asJSON)
 	}
-	res, err := wipReap(context.Background(), *repo, *dryRun)
-	if code, done := emitResultOrError(stdout, stderr, "fak wip reap", *asJSON, res, err); done {
+	targetDir := *repo
+	if targetDir == "" {
+		targetDir = "."
+	}
+	invRes, invErr := wipinventory.Reap(targetDir, *maxAge, *dryRun, wipinventory.GitRunner{})
+	if invErr != nil {
+		if code, done := emitResultOrError(stdout, stderr, "fak wip reap", *asJSON, wipReapResult{}, invErr); done {
+			return code
+		}
+	}
+	var res wipReapResult
+	if len(invRes.Kept) > 0 {
+		keptMap := make(map[string]bool, len(invRes.Kept))
+		for _, ref := range invRes.Kept {
+			keptMap[ref] = true
+		}
+		var err error
+		res, err = wipReapSubset(context.Background(), *repo, *dryRun, keptMap)
+		if err != nil {
+			if code, done := emitResultOrError(stdout, stderr, "fak wip reap", *asJSON, res, err); done {
+				return code
+			}
+		}
+	} else {
+		res = wipReapResult{DryRun: *dryRun, Reaped: []wipref.ReapVerdict{}, Kept: []wipref.ReapVerdict{}}
+	}
+
+	reapedSet := make(map[string]bool, len(res.Reaped)+len(invRes.Reaped))
+	for _, v := range res.Reaped {
+		reapedSet[v.Ref] = true
+	}
+	for _, ref := range invRes.Reaped {
+		if !reapedSet[ref] {
+			reapedSet[ref] = true
+			sha := invRes.SHAs[ref]
+			res.Reaped = append(res.Reaped, wipref.ReapVerdict{
+				Session: wipref.SessionFromRef(ref),
+				Ref:     ref,
+				Object:  sha,
+				Action:  wipref.ReapDelete,
+				Reason:  fmt.Sprintf("stale orphaned checkpoint older than %s", *maxAge),
+			})
+		}
+	}
+	res.DryRun = *dryRun
+	if code, done := emitResultOrError(stdout, stderr, "fak wip reap", *asJSON, res, nil); done {
 		return code
 	}
 	if len(res.Reaped) == 0 {
@@ -978,12 +1024,21 @@ func runWipReap(stdout, stderr io.Writer, argv []string) int {
 // concurrent checkpoint advanced since the listing is left intact, not reaped out
 // from under it. With dryRun it computes verdicts but issues no deletes.
 func wipReap(ctx context.Context, repo string, dryRun bool) (wipReapResult, error) {
+	return wipReapSubset(ctx, repo, dryRun, nil)
+}
+
+func wipReapSubset(ctx context.Context, repo string, dryRun bool, filterRefs map[string]bool) (wipReapResult, error) {
 	recs, err := wipListRecords(ctx, repo)
 	if err != nil {
 		return wipReapResult{}, err
 	}
 	owners := make(map[string]wipref.OwnerState, len(recs))
+	var filteredRecs []wipref.RefRecord
 	for _, r := range recs {
+		if filterRefs != nil && !filterRefs[r.Ref] {
+			continue
+		}
+		filteredRecs = append(filteredRecs, r)
 		st, err := wipOwnerState(ctx, repo, r)
 		if err != nil {
 			return wipReapResult{}, err
@@ -991,7 +1046,7 @@ func wipReap(ctx context.Context, repo string, dryRun bool) (wipReapResult, erro
 		owners[wipSessionOf(r)] = st
 	}
 	res := wipReapResult{DryRun: dryRun, Reaped: []wipref.ReapVerdict{}, Kept: []wipref.ReapVerdict{}}
-	for _, v := range wipref.Reap(recs, owners) {
+	for _, v := range wipref.Reap(filteredRecs, owners) {
 		if v.Action != wipref.ReapDelete {
 			res.Kept = append(res.Kept, v)
 			continue

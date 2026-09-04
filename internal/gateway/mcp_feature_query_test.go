@@ -50,6 +50,7 @@ func TestMCPFeatureQueryMemoryCards(t *testing.T) {
 		"root":  root,
 		"query": "memory",
 		"plane": "all",
+		"limit": 10,
 	})
 	names := map[string]bool{}
 	for _, c := range resp.Cards {

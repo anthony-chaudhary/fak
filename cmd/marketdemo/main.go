@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anthony-chaudhary/fak/internal/market"
+	market "github.com/anthony-chaudhary/fak/internal/marketplace"
 )
 
 func main() {

@@ -35,10 +35,12 @@ From the repository root:
 ```bash
 bash -n docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh
 python3 -m json.tool docs/_witnesses/issue-9827-amd-vllm-sglang/mi300x-packet.json >/dev/null
+python3 -m json.tool docs/_witnesses/issue-9827-amd-vllm-sglang/receipt.json >/dev/null
 bash docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh --dry-run
 git diff --check -- docs/_witnesses/issue-9827-amd-vllm-sglang/README.md \
   docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh \
-  docs/_witnesses/issue-9827-amd-vllm-sglang/mi300x-packet.json
+  docs/_witnesses/issue-9827-amd-vllm-sglang/mi300x-packet.json \
+  docs/_witnesses/issue-9827-amd-vllm-sglang/receipt.json
 ```
 
 `--dry-run` is intentionally declarative: it does not inspect a GPU, invoke Docker,
@@ -55,7 +57,7 @@ MI300X_PACKET_OUT="$PWD/mi300x-results" \
 ```
 
 The runner stops on the first violated condition. Host admission requires character
-device `/dev/kfd`, `/dev/dri`, successful `rocminfo` and `amd-smi`, `gfx942`, and an
+device `/dev/kfd`, `/dev/dri`, host ROCm >= 6.3, successful `rocminfo` and `amd-smi`, `gfx942`, and an
 MI300X product name. Container admission independently requires `/dev/kfd`,
 `/dev/dri`, successful `rocminfo`, and `gfx942`. `HIP_VISIBLE_DEVICES=0` and an empty
 `CUDA_VISIBLE_DEVICES` constrain each server to the admitted AMD device.
@@ -99,8 +101,9 @@ cloud API calls and no teardown commands.
 - Confirm cold precedes warm for each engine and vLLM precedes SGLang.
 - Confirm both server logs identify the exact model revision and contain no rejected
   fallback marker.
-- Confirm telemetry spans both phases and host/container admission says MI300X and
-  `gfx942`.
+- Confirm telemetry spans both phases and host/container admission says MI300X,
+  `gfx942`, and ROCm >= 6.3.
+- Confirm `receipt.json` matches the recorded environment and execution state.
 - Confirm `images.jsonl` has a nonempty ID and RepoDigest for each image and the
   version files say exactly 0.28.0 and 0.5.18.
 - Preserve all errors. Treat missing, truncated, edited, or mixed-run evidence as a

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,8 +59,11 @@ type progressReport struct {
 		AgeFilesObserved      int   `json:"age_files_observed"`
 		AgeFilesUnavailable   int   `json:"age_files_unavailable"`
 	} `json:"wip"`
-	Flow   progressFlow `json:"flow"`
-	GitHub struct {
+	CLQ                  float64      `json:"clq"`
+	WIPHalfLifeMinutes   float64      `json:"wip_halflife_minutes"`
+	DrainVelocityPerHour float64      `json:"drain_velocity_per_hour"`
+	Flow                 progressFlow `json:"flow"`
+	GitHub               struct {
 		Available      bool   `json:"available"`
 		RecentlyClosed int    `json:"recently_closed"`
 		OpenTotal      int    `json:"open_total"`
@@ -138,6 +142,7 @@ func runProgress(out, errOut io.Writer, args []string) int {
 	fmt.Fprintf(out, "delivered: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm\n", r.Commits, r.CommitsPer10M, r.GitHub.RecentlyClosed, r.IssueClosesPer10M, r.WindowMinutes)
 	fmt.Fprintf(out, "baseline: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm; stall_after=%d windows\n", r.Baseline.Commits, r.Baseline.CommitsPer10M, r.Baseline.IssuesClosed, r.Baseline.IssueClosesPer10M, r.Baseline.WindowMinutes, r.StallAfterWindows)
 	fmt.Fprintf(out, "local WIP: files=%d staged=%d unstaged=%d untracked=%d conflicts=%d additions=%d deletions=%d binary=%d untracked_bytes=%d oldest_existing=%dm age_observed=%d/%d\n", r.WIP.Files, r.WIP.Staged, r.WIP.Unstaged, r.WIP.Untracked, r.WIP.Conflicts, r.WIP.Additions, r.WIP.Deletions, r.WIP.BinaryFiles, r.WIP.UntrackedBytes, r.WIP.OldestExistingMinutes, r.WIP.AgeFilesObserved, r.WIP.AgeFilesObserved+r.WIP.AgeFilesUnavailable)
+	fmt.Fprintf(out, "metrics: clq=%.2f wip_halflife=%.1fm drain_velocity=%.2f/h\n", r.CLQ, r.WIPHalfLifeMinutes, r.DrainVelocityPerHour)
 	if r.Flow.Available {
 		fmt.Fprintf(out, "flow: observed=%dm wip_files=%+d wip_lines=%+d untracked_bytes=%+d oldest_wip=%+dm open_issues=%+d\n", r.Flow.ObservedMinutes, r.Flow.WIPFilesDelta, r.Flow.WIPLinesDelta, r.Flow.UntrackedBytesDelta, r.Flow.OldestWIPMinutesDelta, r.Flow.OpenIssuesDelta)
 	} else {
@@ -212,6 +217,11 @@ func collectProgress(dir string, window, baseline time.Duration, stallAfter int,
 		flow = progressFlow{Closing: current, Reason: "inventory state unavailable: " + flowErr.Error()}
 	}
 	r.Flow = flow
+	r.CLQ = computeCLQ(r.WIP.Conflicts, r.WIP.Untracked, r.WIP.Additions+r.WIP.Deletions)
+	if r.WIPHalfLifeMinutes == 0 && r.WIP.OldestExistingMinutes > 0 {
+		r.WIPHalfLifeMinutes = math.Round((float64(r.WIP.OldestExistingMinutes)/2.0)*100) / 100
+	}
+	r.DrainVelocityPerHour = computeDrainVelocity(r.CommitsPer10M)
 	delivered := r.Commits > 0 || (r.GitHub.Available && r.GitHub.RecentlyClosed > 0)
 	baselineDelivered := r.Baseline.Commits > 0 || (r.GitHub.Available && r.Baseline.IssuesClosed > 0)
 	stallEvidence := baseline >= window*time.Duration(stallAfter-1)
@@ -405,6 +415,7 @@ func collectProgressWIPDetails(dir string, paths []progressWIPPath, now time.Tim
 	if err != nil {
 		return fmt.Errorf("resolve repository root: %w", err)
 	}
+	var observedAges []float64
 	for _, candidate := range paths {
 		full := filepath.Join(root, filepath.FromSlash(candidate.path))
 		rel, relErr := filepath.Rel(root, full)
@@ -424,11 +435,13 @@ func collectProgressWIPDetails(dir string, paths []progressWIPPath, now time.Tim
 			if minutes > r.WIP.OldestExistingMinutes {
 				r.WIP.OldestExistingMinutes = minutes
 			}
+			observedAges = append(observedAges, float64(age)/float64(time.Minute))
 		}
 		if candidate.untracked && info.Mode().IsRegular() {
 			r.WIP.UntrackedBytes += info.Size()
 		}
 	}
+	r.WIPHalfLifeMinutes = computeWIPHalfLife(observedAges, r.WIP.OldestExistingMinutes)
 	return nil
 }
 
@@ -453,4 +466,52 @@ func parseProgressNumstat(data []byte, r *progressReport) {
 
 func progressRate(count int, window time.Duration) float64 {
 	return float64(count) * float64(defaultProgressWindow) / float64(window)
+}
+
+func computeCLQ(conflicts, untracked int, diffLines int64) float64 {
+	if conflicts > 0 {
+		return 0.0
+	}
+	score := 1.0
+	if untracked > 0 {
+		untrackedPenalty := float64(untracked/10) * 0.05
+		if untrackedPenalty > 0.30 {
+			untrackedPenalty = 0.30
+		}
+		score -= untrackedPenalty
+	}
+	if diffLines > 500 {
+		score -= 0.20
+	}
+	if score < 0.0 {
+		score = 0.0
+	}
+	if score > 1.0 {
+		score = 1.0
+	}
+	return math.Round(score*100) / 100
+}
+
+func computeWIPHalfLife(observedAges []float64, oldestMinutes int64) float64 {
+	if len(observedAges) > 0 {
+		sorted := make([]float64, len(observedAges))
+		copy(sorted, observedAges)
+		sort.Float64s(sorted)
+		n := len(sorted)
+		var median float64
+		if n%2 == 1 {
+			median = sorted[n/2]
+		} else {
+			median = (sorted[n/2-1] + sorted[n/2]) / 2.0
+		}
+		return math.Round(median*100) / 100
+	}
+	if oldestMinutes > 0 {
+		return math.Round((float64(oldestMinutes)/2.0)*100) / 100
+	}
+	return 0.0
+}
+
+func computeDrainVelocity(commitsPer10M float64) float64 {
+	return math.Round(commitsPer10M*6.0*100) / 100
 }
