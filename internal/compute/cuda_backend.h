@@ -182,6 +182,7 @@ void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float
  * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
  * path (the weight, not the activation, is the narrow operand). */
 void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+void fcuda_q4k_mmvq_dp4a(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
 
 /* fcuda_q2_0_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident PACKED TERNARY
  * Q2_0 (#4872) — 2-bit codes dCodes[out*in/4] (4 weights/byte, LSB-first, u∈{0,1,2} → t=u-1)

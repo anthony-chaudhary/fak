@@ -362,4 +362,7 @@ func TestPrewarmClaimRegistry_Concurrency(t *testing.T) {
 	}
 
 	wg.Wait()
+	if l := reg.Len(); l < 0 {
+		t.Fatalf("unexpected negative registry length: %d", l)
+	}
 }
