@@ -1,6 +1,10 @@
 // Package cohort is a fail-closed cohort shrink and agreement leaf over
 // comm.Group.
 //
+// Invariant: cohort agreement is fail-closed and quorum-bounded; missing members
+// cannot satisfy quorum floor requirements and unhandled drift signals fail
+// closed without silent tolerance expansion.
+//
 // A Cohort is a generation-stamped view of a comm.Group. Shrink removes the
 // members the caller reports failed, preserves the survivors' existing rank
 // order, and returns a new Cohort with generation+1. Agree is the scalar quorum
