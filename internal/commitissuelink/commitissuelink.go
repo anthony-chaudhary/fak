@@ -17,6 +17,10 @@
 // The package is deterministic and stdlib-only: it takes pre-read Commit
 // facts (SHA, subject, body) and folds them into a Report. All git plumbing
 // -- resolving a revision range, reading `git log` -- is the caller's job.
+//
+// Invariant: commit issue linking is fail-closed and deterministic across all evaluation paths.
+// Guard: untracked commits lacking leaf ship-stamps are safely exempted from subject issue link checks.
+// Guard: commit linked issues fail closed unless supported by trunk reachability and diff-witnessed audit verdicts.
 package commitissuelink
 
 import (
@@ -62,10 +66,15 @@ type Report struct {
 	Findings []Finding `json:"findings"`
 }
 
+// Reason constants describe fail-closed gate refusal categories.
 const (
-	ReasonMissingIssueLink         = "missing_issue_link"
-	ReasonFailedAudit              = "failed_audit"
-	ReasonStaleSHA                 = "stale_sha"
+	// ReasonMissingIssueLink indicates that neither subject nor body references the issue number.
+	ReasonMissingIssueLink = "missing_issue_link"
+	// ReasonFailedAudit indicates that the commit audit verification returned a non-OK verdict.
+	ReasonFailedAudit = "failed_audit"
+	// ReasonStaleSHA indicates that the commit SHA cannot be reached from audited trunk HEAD.
+	ReasonStaleSHA = "stale_sha"
+	// ReasonInsufficientDiffEvidence indicates that audit evidence lacks diff-witnessed proof.
 	ReasonInsufficientDiffEvidence = "insufficient_diff_evidence"
 )
 
@@ -84,6 +93,7 @@ type CommitLinkedIssue struct {
 	Reachable    *bool  `json:"reachable,omitempty"`
 }
 
+// UnresolvedFinding describes a specific validation failure preventing an issue from closing.
 type UnresolvedFinding struct {
 	Number int    `json:"number"`
 	SHA    string `json:"sha,omitempty"`
@@ -91,6 +101,7 @@ type UnresolvedFinding struct {
 	Detail string `json:"detail"`
 }
 
+// UnresolvedReport aggregates all failed witness checks across evaluated linked issues.
 type UnresolvedReport struct {
 	Scanned  int                 `json:"scanned"`
 	Findings []UnresolvedFinding `json:"findings"`
@@ -117,6 +128,7 @@ func Fold(commits []Commit) Report {
 	return rep
 }
 
+// FoldUnresolvedCommitLinkedIssues evaluates linked issues against fail-closed closure gates.
 func FoldUnresolvedCommitLinkedIssues(rows []CommitLinkedIssue) UnresolvedReport {
 	rep := UnresolvedReport{Scanned: len(rows)}
 	for _, row := range rows {
