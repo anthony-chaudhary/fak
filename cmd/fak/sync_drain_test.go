@@ -14,9 +14,12 @@ import (
 // inject a window/stranded/flush/clock without leaking state into its siblings.
 func snapshotSyncDrainSeams(t *testing.T) {
 	t.Helper()
-	win, strand, flush, now := syncDrainWindow, syncDrainStranded, syncDrainFlush, syncDrainNow
+	win, strand, flush, now, cap := syncDrainWindow, syncDrainStranded, syncDrainFlush, syncDrainNow, syncCaptureSource
+	syncCaptureSource = func(string) (string, error) {
+		return "0f1e2d3c4b5a60718293a4b5c6d7e8f90a1b2c3d", nil
+	}
 	t.Cleanup(func() {
-		syncDrainWindow, syncDrainStranded, syncDrainFlush, syncDrainNow = win, strand, flush, now
+		syncDrainWindow, syncDrainStranded, syncDrainFlush, syncDrainNow, syncCaptureSource = win, strand, flush, now, cap
 	})
 }
 
@@ -133,6 +136,79 @@ func TestSyncDrainGreenWindowSingleFlush(t *testing.T) {
 	}
 	if len(persisted.Entries) != 0 || persisted.Attempts != 0 {
 		t.Fatalf("queue not cleared after flush: %+v", persisted)
+	}
+}
+
+// TestSyncDrainRedThenGreenLandsQueuedCommit tests the multi-tick transition:
+// Round 1 (RED): a stranded commit is queued and push is withheld.
+// Round 2 (GREEN): the queued commit is flushed in one push and cleared from the queue.
+func TestSyncDrainRedThenGreenLandsQueuedCommit(t *testing.T) {
+	snapshotSyncDrainSeams(t)
+	qp := filepath.Join(t.TempDir(), "queue.json")
+
+	isGreen := false
+	syncDrainWindow = func(_ context.Context, _ syncDrainConfig) syncDrainWindowVerdict {
+		if !isGreen {
+			return syncDrainWindowVerdict{
+				Green:        false,
+				Reason:       "trunk build not green: TRUNK_WOULD_NOT_COMPILE",
+				BuildVerdict: "TRUNK_WOULD_NOT_COMPILE",
+				PeerState:    "behind",
+			}
+		}
+		return syncDrainWindowVerdict{Green: true, BuildVerdict: "OK", PeerState: "in-sync"}
+	}
+
+	strandedList := []syncDrainEntry{{SHA: "abc1231111111111111111111111111111111111", Subject: "fix: queued commit"}}
+	syncDrainStranded = func(_ context.Context, _ syncDrainConfig) ([]syncDrainEntry, error) {
+		return strandedList, nil
+	}
+
+	flushCalls := 0
+	syncDrainFlush = func(_ context.Context, _ syncDrainConfig) (safesync.PushResult, error) {
+		flushCalls++
+		return safesync.PushResult{Pushed: true, Attempts: 1}, nil
+	}
+
+	// Round 1: RED window -> commit must be queued, no push.
+	syncDrainNow = func() int64 { return 1000 }
+	var out1, err1 bytes.Buffer
+	code1 := runSyncDrain(&out1, &err1, syncDrainConfig{queuePath: qp, asJSON: true})
+	if code1 != syncExitRefused {
+		t.Fatalf("round1 exit = %d, want %d (refused/queued); stderr=%s", code1, syncExitRefused, err1.String())
+	}
+	if flushCalls != 0 {
+		t.Fatalf("round1 flushCalls = %d, want 0 on red window", flushCalls)
+	}
+	rep1 := decodeSyncDrainReport(t, out1.Bytes())
+	if rep1.Verdict != "QUEUED" || len(rep1.Queued) != 1 {
+		t.Fatalf("round1 verdict = %q queued = %+v, want QUEUED with 1 entry", rep1.Verdict, rep1.Queued)
+	}
+
+	// Round 2: Window turns GREEN, no newly stranded commits -> queued commit is flushed.
+	isGreen = true
+	strandedList = nil
+	syncDrainNow = func() int64 { return 2000 }
+	var out2, err2 bytes.Buffer
+	code2 := runSyncDrain(&out2, &err2, syncDrainConfig{queuePath: qp, asJSON: true})
+	if code2 != syncExitOK {
+		t.Fatalf("round2 exit = %d, want %d (ok/flushed); stderr=%s", code2, syncExitOK, err2.String())
+	}
+	if flushCalls != 1 {
+		t.Fatalf("round2 flushCalls = %d, want exactly 1 flush", flushCalls)
+	}
+	rep2 := decodeSyncDrainReport(t, out2.Bytes())
+	if rep2.Verdict != "FLUSHED" || len(rep2.Flushed) != 1 || rep2.Flushed[0].SHA != "abc1231111111111111111111111111111111111" {
+		t.Fatalf("round2 verdict = %q flushed = %+v, want FLUSHED with landed commit", rep2.Verdict, rep2.Flushed)
+	}
+
+	// Queue must now be cleared.
+	persisted, err := loadSyncDrainQueue(qp)
+	if err != nil {
+		t.Fatalf("reload queue: %v", err)
+	}
+	if len(persisted.Entries) != 0 {
+		t.Fatalf("persisted queue not empty after green flush: %+v", persisted)
 	}
 }
 
