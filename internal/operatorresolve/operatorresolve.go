@@ -13,10 +13,14 @@ import (
 type Reason string
 
 const (
-	ReasonWitnessedOption    Reason = "WITNESSED_OPTION"
+	// ReasonWitnessedOption indicates an option is backed by positive evidence.
+	ReasonWitnessedOption Reason = "WITNESSED_OPTION"
+	// ReasonNeedsInvestigation indicates evidence is absent or insufficient to decide.
 	ReasonNeedsInvestigation Reason = "NEEDS_INVESTIGATION"
-	ReasonAuthorityFork      Reason = "AUTHORITY_FORK"
-	ReasonEvidenceTie        Reason = "EVIDENCE_TIE"
+	// ReasonAuthorityFork indicates a policy or authority decision requiring human escalation.
+	ReasonAuthorityFork Reason = "AUTHORITY_FORK"
+	// ReasonEvidenceTie indicates competing options have identical positive evidence scores.
+	ReasonEvidenceTie Reason = "EVIDENCE_TIE"
 )
 
 // Evidence is one oracle-authored fact attached to an option.
@@ -65,8 +69,10 @@ type GitIsolationOracle struct {
 	Runner ReadOnlyRunner
 }
 
+// Name returns the identifier for GitIsolationOracle.
 func (GitIsolationOracle) Name() string { return "git-isolation-readonly" }
 
+// Inspect checks git status and history to evaluate commit isolation.
 func (o GitIsolationOracle) Inspect(ctx context.Context, q operatorquestion.OperatorQuestion, option operatorquestion.Option) (Evidence, bool, error) {
 	if o.Runner == nil || !containsFold(q.Question+" "+q.Detail, "commit") {
 		return Evidence{}, false, nil
@@ -116,8 +122,10 @@ type ScorecardAxisOracle struct {
 	Reversible map[string]bool
 }
 
+// Name returns the identifier for ScorecardAxisOracle.
 func (ScorecardAxisOracle) Name() string { return "scorecard-axis-readonly" }
 
+// Inspect checks Pareto dominance across declared scorecard axes.
 func (o ScorecardAxisOracle) Inspect(_ context.Context, q operatorquestion.OperatorQuestion, option operatorquestion.Option) (Evidence, bool, error) {
 	if len(q.Options) < 2 || len(o.Axes) == 0 || !o.Reversible[option.Label] {
 		return Evidence{}, false, nil
@@ -166,8 +174,10 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
+// Name returns the identifier for TrackedArtifactOracle.
 func (TrackedArtifactOracle) Name() string { return "tracked-artifact-readonly" }
 
+// Inspect verifies whether candidate file paths are already tracked in git.
 func (o TrackedArtifactOracle) Inspect(ctx context.Context, q operatorquestion.OperatorQuestion, option operatorquestion.Option) (Evidence, bool, error) {
 	if o.Runner == nil || !containsAnyFold(q.Question+" "+q.Detail, "new file", "create", "existing", "edit", "rewrite", "which file", "separate file", "add to") {
 		return Evidence{}, false, nil
@@ -188,6 +198,7 @@ func (o TrackedArtifactOracle) Inspect(ctx context.Context, q operatorquestion.O
 	return Evidence{Claim: "option references a path git does not track (" + path + ")", Witness: witness, Score: 0}, true, nil
 }
 
+// Resolve evaluates question options against configured oracles and produces a verdict.
 func (r Resolver) Resolve(ctx context.Context, q operatorquestion.OperatorQuestion) (Verdict, error) {
 	if q.Kind != operatorquestion.Clarify && q.Kind != operatorquestion.ChooseApproach {
 		return Verdict{}, fmt.Errorf("operatorresolve: unsupported question kind %q", q.Kind)
@@ -248,7 +259,10 @@ type OracleFunc struct {
 	InspectFn  func(context.Context, operatorquestion.OperatorQuestion, operatorquestion.Option) (Evidence, bool, error)
 }
 
+// Name returns the configured oracle name.
 func (f OracleFunc) Name() string { return f.OracleName }
+
+// Inspect delegates inspection to InspectFn.
 func (f OracleFunc) Inspect(ctx context.Context, q operatorquestion.OperatorQuestion, o operatorquestion.Option) (Evidence, bool, error) {
 	return f.InspectFn(ctx, q, o)
 }
