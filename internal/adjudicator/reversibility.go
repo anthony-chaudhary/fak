@@ -55,6 +55,7 @@ type ReversibilityEnvelope struct {
 // — TestSidestepRewriteMatchesRemedyTable binds the two so the machine-readable
 // rewrite target and the human-facing advisory hint can never drift apart.
 const gitPushSidestepCommand = "fak sync push"
+const gitPullSidestepCommand = "fak sync apply --fetch"
 
 var previewSecretRE = regexp.MustCompile(`(?i)(password|token|secret|api[_-]?key|authorization)(=|:)[^\s]+`)
 
@@ -75,9 +76,14 @@ func ClassifyReversibility(tool string, args map[string]any) ReversibilityEnvelo
 	// future `env.RewriteCommand != ""` gate can never see a dangerous push. Reads
 	// the same sink-scoped view the classifier does (#5898): a declared tool's
 	// payload prose can no more offer a sidestep than it can classify.
-	if cmd := actionCommandText(tool, args); cmd != "" && safeBareGitPush(cmd) {
-		env.RewriteCommand = gitPushSidestepCommand
-		env.RewriteTool = tool
+	if cmd := actionCommandText(tool, args); cmd != "" {
+		if safeBareGitPush(cmd) {
+			env.RewriteCommand = gitPushSidestepCommand
+			env.RewriteTool = tool
+		} else if safeBareGitPull(cmd) {
+			env.RewriteCommand = gitPullSidestepCommand
+			env.RewriteTool = tool
+		}
 	}
 	return env
 }
@@ -127,6 +133,43 @@ func safeBareGitPush(cmd string) bool {
 		positional++
 		if positional > 1 {
 			return false // a second positional names a specific branch, not the current one
+		}
+	}
+	return true
+}
+
+// safeBareGitPull reports whether cmd is the SAFE pull subset a sidestep may substitute:
+// a single command (no sibling riding along a `&&`/`;`/`|`) whose head is `git pull`
+// with, at most, 2 positionals (remote and branch) and NO flags and NO refspec with `:`.
+func safeBareGitPull(cmd string) bool {
+	var nonEmpty []string
+	for _, raw := range commandSegmentRE.Split(cmd, -1) {
+		if strings.TrimSpace(raw) != "" {
+			nonEmpty = append(nonEmpty, raw)
+		}
+	}
+	if len(nonEmpty) != 1 { // a sibling command disqualifies the whole line
+		return false
+	}
+	fields := strings.Fields(nonEmpty[0])
+	for len(fields) > 0 &&
+		(envAssignmentRE.MatchString(fields[0]) || commandWrapperHeads[strings.ToLower(fields[0])]) {
+		fields = fields[1:]
+	}
+	if len(fields) < 2 || strings.ToLower(fields[0]) != "git" || strings.ToLower(fields[1]) != "pull" {
+		return false
+	}
+	positional := 0
+	for _, tok := range fields[2:] {
+		if strings.HasPrefix(tok, "-") {
+			return false // any flag starting with - (--rebase, --autostash, --force, -f, etc.)
+		}
+		if strings.Contains(tok, ":") {
+			return false // refspec with :
+		}
+		positional++
+		if positional > 2 {
+			return false // at most 2 positionals after pull (e.g. git pull origin main)
 		}
 	}
 	return true
@@ -330,6 +373,13 @@ var reversibilityFamilies = []reversibilityFamily{
 		prefixes:     [][]string{{"git", "push"}},
 		toolContains: []string{"git_push"},
 		hint:         "push with the safe compiled verb: fak sync push (a trusted-binary non-force push the kernel admits), or preview first with git push --dry-run",
+	},
+	{
+		name:         "git-pull",
+		class:        ReversibilityOutwardFacing,
+		prefixes:     [][]string{{"git", "pull"}},
+		toolContains: []string{"git_pull"},
+		hint:         "integrate with the safe compiled verb: fak sync apply --fetch (a trusted-binary fast-forward that preserves peer WIP), or preview first with fak sync check",
 	},
 	// The gh-write carve-out (#3560, see the gh note above): a `gh api` mutation
 	// (--method/-X POST|PUT|PATCH|DELETE) or `gh repo fork|rename|delete` is the

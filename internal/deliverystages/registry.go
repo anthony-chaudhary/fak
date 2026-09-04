@@ -8,11 +8,17 @@ import (
 	"strings"
 )
 
+// Schema is the schema identifier for delivery stages manifests.
 const Schema = "fak.delivery-stages/v1"
 
+// StageID uniquely identifies a delivery stage in the execution lifecycle.
 type StageID string
+
+// BottleneckID uniquely identifies a failure or obstruction classification.
 type BottleneckID string
 
+// Stage models a single discrete step in the agent development lifecycle,
+// including its ownership, prerequisite gates, and invalidation rules.
 type Stage struct {
 	ID              StageID   `json:"id"`
 	Name            string    `json:"name"`
@@ -27,6 +33,7 @@ type Stage struct {
 	Invalidates     []StageID `json:"invalidates,omitempty"`
 }
 
+// Bottleneck defines a structured recovery boundary when execution is blocked.
 type Bottleneck struct {
 	ID                BottleneckID `json:"id"`
 	Name              string       `json:"name"`
@@ -34,12 +41,14 @@ type Bottleneck struct {
 	DefaultNextAction string       `json:"default_next_action"`
 }
 
+// Crosswalk maps local command or failure signals to standardized stages and bottlenecks.
 type Crosswalk struct {
 	Local      string       `json:"local"`
 	Stage      StageID      `json:"stage"`
 	Bottleneck BottleneckID `json:"bottleneck"`
 }
 
+// Registry contains the declared stages, bottlenecks, and crosswalk mappings.
 type Registry struct {
 	Schema      string       `json:"schema"`
 	Stages      []Stage      `json:"stages"`
@@ -95,6 +104,8 @@ var bottleneckSpecs = []struct {
 	{"unknown-irreducible", "Unknown or irreducible", "run recursive diagnosis or declare the missing discriminator"},
 }
 
+// Default returns the canonical delivery-stages registry with all standard
+// stages, bottlenecks, and crosswalks populated.
 func Default() Registry {
 	r := Registry{Schema: Schema}
 	for i, spec := range stageSpecs {
@@ -119,6 +130,8 @@ func Default() Registry {
 	return r
 }
 
+// Validate checks the registry for schema compliance, duplicate IDs,
+// dangling prerequisites or invalidations, cycles, and missing recovery metadata.
 func (r Registry) Validate() error {
 	if r.Schema != Schema {
 		return fmt.Errorf("schema: want %q, got %q", Schema, r.Schema)
@@ -164,6 +177,7 @@ func (r Registry) Validate() error {
 	return nil
 }
 
+// Stage looks up a stage by its StageID, returning false if not found.
 func (r Registry) Stage(id StageID) (Stage, bool) {
 	for _, stage := range r.Stages {
 		if stage.ID == id {
@@ -173,6 +187,7 @@ func (r Registry) Stage(id StageID) (Stage, bool) {
 	return Stage{}, false
 }
 
+// InvalidatedAfter returns all downstream stages invalidated when the given stage changes.
 func (r Registry) InvalidatedAfter(id StageID) ([]StageID, error) {
 	stage, ok := r.Stage(id)
 	if !ok {
@@ -181,6 +196,7 @@ func (r Registry) InvalidatedAfter(id StageID) ([]StageID, error) {
 	return append([]StageID(nil), stage.Invalidates...), nil
 }
 
+// ResolveLocal maps a tool command or failure string to its crosswalk definition using case-insensitive matching.
 func (r Registry) ResolveLocal(local string) (Crosswalk, bool) {
 	for _, item := range r.Crosswalks {
 		if strings.EqualFold(item.Local, local) {

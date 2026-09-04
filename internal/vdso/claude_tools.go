@@ -35,8 +35,8 @@ func IsClaudeNativeReadTool(tool string) bool {
 
 // IsClaudeNativeWriteTool reports whether tool is a Claude/Cursor/OpenCode mutating tool.
 func IsClaudeNativeWriteTool(tool string) bool {
-	switch tool {
-	case "Write", "Edit", "write", "edit", "WriteFile":
+	switch strings.ToLower(tool) {
+	case "write", "edit", "writefile", "delete", "rm", "truncate":
 		return true
 	default:
 		return false

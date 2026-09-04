@@ -71,7 +71,7 @@ var dogfoodManifestCases = []dogfoodCase{
 	{"bash ls", "Bash", `{"command":"ls -la"}`, abi.VerdictAllow, abi.ReasonNone},
 	{"bash cat", "Bash", `{"command":"cat README.md"}`, abi.VerdictAllow, abi.ReasonNone},
 	{"bash git commit", "Bash", `{"command":"git commit -m wip"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
-	{"read", "Read", `{"file_path":"README.md"}`, abi.VerdictAllow, abi.ReasonNone},
+	{"read", "Read", `{"file_path":"README.md"}`, abi.VerdictTransform, abi.ReasonNone},
 	{"edit normal file", "Edit", `{"file_path":"fak/README.md"}`, abi.VerdictAllow, abi.ReasonNone},
 
 	// Denied by argument value — the deny demos.

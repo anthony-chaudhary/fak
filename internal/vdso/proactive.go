@@ -136,16 +136,38 @@ type readTarget struct {
 }
 
 var (
-	mutationVerbsRe = regexp.MustCompile(`(?i)\b(edit|write|delete|remove|create|overwrite|modify|update|truncate|rm|mv|git\s+commit|git\s+push)\b`)
-	grepWordRe      = regexp.MustCompile(`(?i)\b(grep|search)\b`)
-	globWordRe      = regexp.MustCompile(`(?i)\b(glob|find\s+files)\b`)
-	readWordRe      = regexp.MustCompile(`(?i)\b(read|cat|inspect|examine|view|open|load)\b`)
-	backtickRe      = regexp.MustCompile("`([^`]+)`")
-	doubleQuoteRe   = regexp.MustCompile(`"([^"]+)"`)
-	singleQuoteRe   = regexp.MustCompile(`'([^']+)'`)
-	pathWithSlashRe = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\.]+(?:/[a-zA-Z0-9_\-\.]+)+)(?:$|[\s),;:?])`)
-	fileWithExtRe   = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\./\\]+\.(?:go|txt|md|json|toml|yaml|yml|c|h|cpp|py|ts|js|sh|rs|proto|sql|html|css))(?:$|[\s),;:?])`)
+	mutationVerbsRe   = regexp.MustCompile(`(?i)\b(edit|write|delete|remove|create|overwrite|modify|update|truncate|rm|mv|git\s+commit|git\s+push)\b`)
+	leadingMutationRe = regexp.MustCompile(`(?i)^\s*[` + "`" + `"'({[]*\s*(edit|write|delete|remove|create|overwrite|modify|update|truncate|rm|mv|cp|touch|mkdir|chmod|chown|git\s+commit|git\s+push|git\s+checkout|git\s+merge|git\s+rebase|git\s+reset)\b`)
+	grepWordRe        = regexp.MustCompile(`(?i)\b(grep|search)\b`)
+	globWordRe        = regexp.MustCompile(`(?i)\b(glob|find\s+files)\b`)
+	readWordRe        = regexp.MustCompile(`(?i)\b(read|cat|inspect|examine|view|open|load)\b`)
+	backtickRe        = regexp.MustCompile("`([^`]+)`")
+	doubleQuoteRe     = regexp.MustCompile(`"([^"]+)"`)
+	singleQuoteRe     = regexp.MustCompile(`'([^']+)'`)
+	pathWithSlashRe   = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\.]+(?:/[a-zA-Z0-9_\-\.]+)+)(?:$|[\s),;:?])`)
+	fileWithExtRe     = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\./\\]+\.(?:go|txt|md|json|toml|yaml|yml|c|h|cpp|py|ts|js|sh|rs|proto|sql|html|css))(?:$|[\s),;:?])`)
 )
+
+func isMutationCommand(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if leadingMutationRe.MatchString(s) {
+		return true
+	}
+	lower := strings.ToLower(s)
+	for _, prefix := range []string{"bash:", "bash -c", "sh:", "sh -c", "run "} {
+		if strings.HasPrefix(lower, prefix) {
+			rest := strings.TrimSpace(s[len(prefix):])
+			rest = strings.Trim(rest, "`\"'")
+			if leadingMutationRe.MatchString(rest) || mutationVerbsRe.MatchString(stripQuoted(rest)) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func cleanPathString(p string) string {
 	p = strings.TrimSpace(p)
@@ -168,7 +190,41 @@ func resolveDiskPath(workDir, p string) string {
 			return cand
 		}
 	}
+	if _, err := os.Stat(cleaned); err == nil {
+		return cleaned
+	}
+	if workDir == "" {
+		if cand := findRepoPath(cleaned); cand != "" {
+			return cand
+		}
+	}
 	return cleaned
+}
+
+func findRepoPath(relPath string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	dir := cwd
+	for {
+		cand := filepath.Join(dir, relPath)
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			cand := filepath.Join(dir, relPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // extractReadTarget analyzes turn state to determine if an unambiguous deterministic read target exists.
@@ -176,6 +232,9 @@ func (pi *ProactiveInterceptor) extractReadTarget(turn TurnState) (*readTarget, 
 	// 1. Explicit target fields in turn
 	if turn.TargetTool != "" {
 		tool := strings.TrimSpace(turn.TargetTool)
+		if IsClaudeNativeWriteTool(tool) {
+			return nil, false
+		}
 		switch strings.ToLower(tool) {
 		case "read", "readfile", "read_file":
 			if turn.TargetPath == "" {
@@ -243,6 +302,9 @@ func isDeterministicReadOnlyBashCommand(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
+	if strings.ContainsAny(cmd, ">|;&") {
+		return false
+	}
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
 		return false
@@ -292,9 +354,11 @@ func parseReadTargetFromText(text string) (*readTarget, bool) {
 		}
 	}
 
-	// Reject if text outside quoted strings states mutation intent
+	// Reject if text states mutation intent
 	outside := stripQuoted(text)
-	if mutationVerbsRe.MatchString(outside) {
+	trimmed := strings.TrimSpace(text)
+	unquoted := strings.Trim(trimmed, "`\"'")
+	if mutationVerbsRe.MatchString(outside) || isMutationCommand(trimmed) || isMutationCommand(unquoted) {
 		return nil, false
 	}
 
@@ -463,6 +527,27 @@ func parseGrepIntent(text string) (*readTarget, bool) {
 		}
 	}
 
+	if pattern == "" {
+		fields := strings.Fields(text)
+		for i, f := range fields {
+			if strings.EqualFold(f, "grep") || strings.EqualFold(f, "search") {
+				if i+1 < len(fields) {
+					cand := strings.Trim(fields[i+1], "`\"',;:()")
+					if cand != "" && !strings.EqualFold(cand, "in") && !strings.EqualFold(cand, "for") {
+						pattern = cand
+						break
+					} else if i+2 < len(fields) {
+						cand = strings.Trim(fields[i+2], "`\"',;:()")
+						if cand != "" && !strings.EqualFold(cand, "in") {
+							pattern = cand
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if pattern != "" {
 		if path == "" {
 			path = "."
@@ -580,7 +665,11 @@ func extractFileCandidates(text string) []string {
 	// 1. Backticked strings
 	for _, m := range backtickRe.FindAllStringSubmatch(text, -1) {
 		if len(m) > 1 {
-			add(m[1])
+			cand := strings.TrimSpace(m[1])
+			if isMutationCommand(cand) || isDeterministicReadOnlyBashCommand(cand) {
+				continue
+			}
+			add(cand)
 		}
 	}
 
@@ -697,9 +786,14 @@ func (pi *ProactiveInterceptor) probeVDSO(
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, target.path))
 		if diskPath != target.path && diskPath != "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, diskPath))
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, filepath.ToSlash(diskPath)))
 		}
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, target.path))
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, target.path))
+		if diskPath != target.path && diskPath != "" {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, diskPath))
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, diskPath))
+		}
 	case ToolClaudeGlob:
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q,"path":%q}`, target.pattern, target.path))
 		if target.path == "." || target.path == "" {

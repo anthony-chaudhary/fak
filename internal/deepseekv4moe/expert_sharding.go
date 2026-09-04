@@ -29,11 +29,16 @@ import (
 
 // Sharding errors.
 var (
-	ErrInvalidWorldSize      = errors.New("deepseekv4moe: world size must be positive and <= total experts")
-	ErrInvalidExpertSpan     = errors.New("deepseekv4moe: invalid expert span")
+	// ErrInvalidWorldSize indicates the number of participating ranks is non-positive or exceeds the expert count.
+	ErrInvalidWorldSize = errors.New("deepseekv4moe: world size must be positive and <= total experts")
+	// ErrInvalidExpertSpan indicates a span's rank, base, count, or total experts violate boundary invariants.
+	ErrInvalidExpertSpan = errors.New("deepseekv4moe: invalid expert span")
+	// ErrInvalidBytesPerExpert indicates the byte size per expert is non-positive.
 	ErrInvalidBytesPerExpert = errors.New("deepseekv4moe: bytes per expert must be positive")
-	ErrUnownedExpert         = errors.New("deepseekv4moe: expert is unowned by this rank")
-	ErrExpertOutOfRange      = errors.New("deepseekv4moe: expert index out of range")
+	// ErrUnownedExpert indicates an expert index is not within the span owned by the rank.
+	ErrUnownedExpert = errors.New("deepseekv4moe: expert is unowned by this rank")
+	// ErrExpertOutOfRange indicates an expert index exceeds the total model expert count.
+	ErrExpertOutOfRange = errors.New("deepseekv4moe: expert index out of range")
 )
 
 // Sentinels for router remapping.

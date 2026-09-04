@@ -60,8 +60,8 @@ func TestDevAgentAllowsShipReleaseAtFloor(t *testing.T) {
 func TestDevAgentAllowsHostReadForFakReadMCP(t *testing.T) {
 	a := New(DevAgentPolicy())
 	v := a.Adjudicate(context.Background(), inlineCall("Read", `{"file_path":"AGENTS.md"}`))
-	if v.Kind != abi.VerdictAllow {
-		t.Fatalf("Read at the floor: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictTransform && v.Kind != abi.VerdictAllow {
+		t.Fatalf("Read at the floor: got %v/%s, want Transform or Allow", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
 
