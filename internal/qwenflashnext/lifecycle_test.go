@@ -238,24 +238,24 @@ func TestQwenFlashNextMaturityDocumentationAndContracts(t *testing.T) {
 		}
 	}
 
-	// Verify benchmark_test.go exists and defines BenchmarkEvaluatePrompt
-	benchPath := filepath.Join(".", "benchmark_test.go")
+	// Verify bench_test.go exists and defines BenchmarkRender
+	benchPath := filepath.Join(".", "bench_test.go")
 	benchContent, err := os.ReadFile(benchPath)
 	if err != nil {
-		t.Fatalf("failed to read benchmark_test.go: %v", err)
+		t.Fatalf("failed to read bench_test.go: %v", err)
 	}
 	benchNode, err := parser.ParseFile(fset, benchPath, benchContent, 0)
 	if err != nil {
-		t.Fatalf("failed to parse benchmark_test.go: %v", err)
+		t.Fatalf("failed to parse bench_test.go: %v", err)
 	}
 
 	hasEvaluateBenchmark := false
 	for _, decl := range benchNode.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "BenchmarkEvaluatePrompt" {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "BenchmarkRender" {
 			hasEvaluateBenchmark = true
 		}
 	}
 	if !hasEvaluateBenchmark {
-		t.Errorf("benchmark_test.go must define BenchmarkEvaluatePrompt")
+		t.Errorf("bench_test.go must define BenchmarkRender")
 	}
 }

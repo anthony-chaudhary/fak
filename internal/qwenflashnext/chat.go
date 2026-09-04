@@ -1,5 +1,8 @@
 package qwenflashnext
 
+// Invariant: qwen flash next preserves bounded memory envelope and strict context limits during prompt rendering and response parsing.
+// Guard: Render and ParseResponse reject malformed message sequences and enforce fail-closed token boundaries without state mutation.
+
 import (
 	"encoding/json"
 	"errors"
@@ -8,20 +11,19 @@ import (
 	"strings"
 )
 
-const (
-	// IMStart designates the opening delimiter token for ChatML envelope sections.
-	IMStart = "<|im_start|>"
-	// IMEnd designates the terminating delimiter token closing ChatML message envelopes.
-	IMEnd = "<|im_end|>"
-)
+// IMStart marks the delimiter beginning a conversation turn or prompt block in ChatML formatting.
+const IMStart = "<|im_start|>"
 
-// StopTokens lists the string literals that instruct the engine to cease token generation.
+// IMEnd marks the delimiter terminating a conversation turn or generated segment in ChatML formatting.
+const IMEnd = "<|im_end|>"
+
+// StopTokens lists the canonical string delimiters that signal generation termination for Qwen flash next.
 var StopTokens = []string{IMEnd}
 
-// StopTokenIDs enumerates the integer vocabulary identifiers mapped to stop generation boundaries.
+// StopTokenIDs lists the authoritative vocabulary token identifiers that trigger hardware sampling cessation.
 var StopTokenIDs = []int{248046}
 
-// Message structures an individual dialogue turn spanning role, textual payload, reasoning, and tool calls.
+// Message specifies an individual dialog turn including role designation, text content, reasoning analysis, and tool invocations.
 type Message struct {
 	Role             string
 	Content          string
@@ -29,13 +31,13 @@ type Message struct {
 	ToolCalls        []ToolCall
 }
 
-// ToolCall describes an individual function invocation emitted by an assistant model turn.
+// ToolCall records a structured function invocation dispatched by the model with named parameter bindings.
 type ToolCall struct {
 	Name      string
 	Arguments map[string]any
 }
 
-// RenderOptions configures formatting controls including prompt generation suffixes and reasoning flags.
+// RenderOptions configures prompt formatting behavior including thinking preservation, reasoning intensity, and generation prefixes.
 type RenderOptions struct {
 	AddGenerationPrompt bool
 	EnableThinking      bool
@@ -43,8 +45,7 @@ type RenderOptions struct {
 	ReasoningEffort     string
 }
 
-// Render reproduces the text-only, no-tools-declaration path of the pinned upstream Jinja fixture.
-// Precondition: messages slice must contain at least one dialogue turn with system roles preceding all others.
+// Render formats a sequence of structured dialog messages into a byte-exact ChatML prompt string following pinned template rules.
 func Render(messages []Message, opts RenderOptions) (string, error) {
 	if len(messages) == 0 {
 		return "", errors.New("no messages provided")
@@ -175,7 +176,7 @@ func renderToolCall(b *strings.Builder, call ToolCall) {
 	b.WriteString("</function>\n</tool_call>")
 }
 
-// ParsedResponse holds the decomposed segments of model output across thinking traces, text, and calls.
+// ParsedResponse encapsulates decomposed model output partitioned across reasoning trace, user-facing commentary, final text, and tool calls.
 type ParsedResponse struct {
 	Analysis   string
 	Final      string
@@ -184,8 +185,7 @@ type ParsedResponse struct {
 	Stopped    bool
 }
 
-// ParseResponse splits Qwen's thinking, user-facing text, and recipient tool calls.
-// Precondition: generated input string must contain raw model output potentially enclosed within ChatML assistant tags.
+// ParseResponse decomposes raw generated token output into isolated reasoning trace, conversational commentary, and recipient tool calls.
 func ParseResponse(generated string) (ParsedResponse, error) {
 	var result ParsedResponse
 	generated = strings.TrimPrefix(generated, IMStart+"assistant\n")

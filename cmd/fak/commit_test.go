@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1311,5 +1312,62 @@ func TestCommitDrainMayMarkDoneUsesDeliveryContract(t *testing.T) {
 	green = safecommit.FinalizeEvidence(green, safecommit.EvidenceContract{})
 	if !commitDrainMayMarkDone(green, true) || commitDrainMayMarkDone(green, false) {
 		t.Fatal("delivery/pathset closure gate is inconsistent")
+	}
+}
+
+func TestRunCommit_SanctionedWorkerWorktreeSucceeds(t *testing.T) {
+	// Create real repo with an initial commit
+	repo := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed in %s: %v\n%s", args, dir, err, string(out))
+		}
+	}
+	runGit(repo, "init", "-b", "main")
+	runGit(repo, "config", "user.name", "Test Committer")
+	runGit(repo, "config", "user.email", "test@example.com")
+	initFile := filepath.Join(repo, "README.md")
+	if err := os.WriteFile(initFile, []byte("# Test Repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repo, "add", "README.md")
+	runGit(repo, "commit", "-m", "chore: initial commit")
+
+	// Create detached worker worktree with sanctioned marker
+	wtDir := filepath.Join(t.TempDir(), "fak-worker-wt-test-8813")
+	runGit(repo, "worktree", "add", "--detach", wtDir, "HEAD")
+	t.Cleanup(func() {
+		_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", wtDir).Run()
+	})
+
+	// Add file in worker worktree
+	wtFile := filepath.Join(wtDir, "worker.txt")
+	if err := os.WriteFile(wtFile, []byte("worker content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--dir", wtDir,
+		"--no-build-check",
+		"--path", "worker.txt",
+		"-m", "feat(test): worker commit in detached worktree (#8813) (fak test)",
+	})
+	if code != 0 {
+		t.Fatalf("fak commit in sanctioned worker worktree failed: exit %d\nstdout: %s\nstderr: %s", code, out.String(), errb.String())
+	}
+
+	// Verify commit was created at HEAD of worker worktree and has expected subject
+	cmd := exec.Command("git", "-C", wtDir, "log", "-1", "--format=%s")
+	outBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to read git log in worker worktree: %v", err)
+	}
+	subj := strings.TrimSpace(string(outBytes))
+	if !strings.Contains(subj, "worker commit in detached worktree") {
+		t.Fatalf("unexpected commit subject in worker worktree: %q", subj)
 	}
 }

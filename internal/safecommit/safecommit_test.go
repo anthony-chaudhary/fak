@@ -592,6 +592,33 @@ func TestDetachedHead_isOffTrunk(t *testing.T) {
 	}
 }
 
+func TestDetachedHead_inSanctionedWorkerWorktreeAllowed(t *testing.T) {
+	// A sanctioned detached worker worktree with marker directory name (e.g. fak-worker-wt-*)
+	// must be allowed to commit without being refused as OFF_TRUNK (#8813).
+	tmp := t.TempDir()
+	workerDir := filepath.Join(tmp, "fak-worker-wt-testlane-42")
+	if err := os.MkdirAll(workerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "fatal: ref HEAD is not a symbolic ref\n", code: 128}
+
+	opts := baseOpts()
+	opts.Dir = workerDir
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("sanctioned worker worktree should be allowed to commit, got: %+v", res)
+	}
+	if res.Reason == ReasonOffTrunk {
+		t.Fatalf("sanctioned worker worktree must not be refused as OFF_TRUNK")
+	}
+}
+
 func TestConfiguredDevelopmentBranchAllowsDev(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0o644); err != nil {

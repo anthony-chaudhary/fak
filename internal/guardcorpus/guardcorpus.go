@@ -48,12 +48,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
+// Invariant: guard corpus entries maintain deterministic immutable hash signatures and valid category taxonomy.
+
 // Schema identifiers for the two dataset record kinds. Bump on any shape change.
 const (
-	// SessionSchema identifies the canonical schema version for session record entries.
+	// SessionSchema is the schema identifier for the version 1 session record dataset.
 	SessionSchema = "fak-guard-session/1"
-
-	// ExampleSchema identifies the canonical schema version for individual redacted decision examples.
+	// ExampleSchema is the schema identifier for the version 1 guard example record dataset.
 	ExampleSchema = "fak-guard-example/1"
 
 	// maxAllowExamples bounds how many ALLOW rows a single session contributes as
@@ -85,13 +86,11 @@ var knownVerdicts = map[string]bool{
 
 // Outcome classes for a session.
 const (
-	// OutcomeClean indicates that the guarded session completed normally without crashes or unhandled faults.
+	// OutcomeClean indicates that the guarded session completed without crashes or rate limits.
 	OutcomeClean = "CLEAN"
-
-	// OutcomeCrashed indicates that the child process terminated unexpectedly due to an unhandled crash or fatal signal.
+	// OutcomeCrashed indicates that the child process wrapped by the guard terminated abnormally.
 	OutcomeCrashed = "CRASHED"
-
-	// OutcomeRateLimited indicates that the session halted because provider throughput limits were exceeded.
+	// OutcomeRateLimited indicates that the session terminated due to provider capacity or rate limits.
 	OutcomeRateLimited = "RATE_LIMITED"
 )
 
@@ -119,7 +118,7 @@ type HonestyHoles struct {
 	ChildCrash        int `json:"child_crash"`
 }
 
-// SessionRecord encapsulates aggregate execution metrics, verdict distributions, and integrity indicators for a session.
+// SessionRecord represents one row of the fak-guard-session/1 dataset capturing aggregate session metrics.
 type SessionRecord struct {
 	Schema          string         `json:"schema"`
 	TraceID         string         `json:"trace_id,omitempty"`
@@ -137,7 +136,8 @@ type SessionRecord struct {
 	ChainVerified   bool           `json:"chain_verified"`
 }
 
-// Example encapsulates a single redacted, replayable adjudication record suitable for model evaluation.
+// Example represents one row of the fak-guard-example/1 dataset: a redacted, labeled,
+// replayable adjudication. Only journal-redacted fields are carried.
 type Example struct {
 	Schema       string `json:"schema"`
 	TraceID      string `json:"trace_id,omitempty"`
@@ -156,9 +156,7 @@ type Example struct {
 // is the pure core; the CLI shell owns discovery, chain verification, and the
 // SessionMeta join. Rows are taken in journal order (the caller preserves it).
 //
-// Invariant: Journal row ordering is strictly preserved when aggregating decisions and computing session duration bounds.
-// Precondition: Input meta provides resolved session provenance and rows slice contains sequential decision journal records.
-// Postcondition: SessionRecord aggregates complete verdict distributions while examples slice contains bounded, redacted records.
+// Contract: Fold is pure, deterministic, and preserves input journal row ordering.
 func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	rec := SessionRecord{
 		Schema:        SessionSchema,

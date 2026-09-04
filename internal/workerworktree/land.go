@@ -13,6 +13,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/wipfence"
 )
 
+const (
+	// LandResult* are the typed terminal results emitted by worker land (#8813).
+	LandResultSuccess   = "success"
+	LandResultNoOp      = "no-op"
+	LandResultConflict  = "conflict"
+	LandResultStaleBase = "stale-base"
+)
+
 // LandRefusalRetryable reports whether a refused Land is worth re-attempting on
 // the same worktree (#3613). True only for the readback-mismatch race class: a
 // concurrent commit on the shared index swept the worker's paths, so the refusal
@@ -204,8 +212,26 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if strings.TrimSpace(diff) == "" {
 		// No net change since the base: the worker landed nothing. The caller's
 		// commit-witness (dos commit-audit) decides whether the slot was productive.
-		return Result{OK: true, Applied: false, Committed: false,
+		return Result{OK: true, Code: LandResultNoOp, Applied: false, Committed: false,
 			Reason: "no net diff in worktree vs " + diffRef + " to land"}
+	}
+	checkBase := strings.TrimSpace(baseSHA)
+	if checkBase == "" {
+		if in, err := LoadIntent(wtPath); err == nil {
+			checkBase = strings.TrimSpace(in.BaseSHA)
+		}
+	}
+	if checkBase != "" {
+		rc, _ := run(git, root, []string{"merge-base", "--is-ancestor", checkBase, "HEAD"})
+		if rc != 0 {
+			return Result{
+				OK:        false,
+				Code:      LandResultStaleBase,
+				Applied:   false,
+				Committed: false,
+				Reason:    fmt.Sprintf("base commit %s is not an ancestor of trunk HEAD (stale base)", shortSHA(checkBase)),
+			}
+		}
 	}
 	// The landing pathset, read ONCE: it feeds both the out-of-lane ledger and the
 	// hard-self core-lock gate below, so the two can never disagree about what this
@@ -239,7 +265,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	phaseDone := beginLandPhase(tracker, "policy-admission", 0)
 	// Resolve a message file: use the caller's, else materialize the worktree tip's
 	// message to a temp file so the landed commit keeps the worker's own subject.
-	msgFile, cleanup, err := resolveMsgFile(wtPath, commitMsgFile, git)
+	msgFile, cleanup, err := resolveMsgFile(wtPath, baseSHA, commitMsgFile, git)
 	if err != nil {
 		phaseDone()
 		return Result{OK: false, Applied: false, Committed: false,
@@ -278,6 +304,9 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		if isolatedLandEnabled() && len(paths) > 0 {
 			if r, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
 				r.DroppedOutOfLane = droppedOutOfLane
+				if r.OK && r.Committed {
+					r.Code = LandResultSuccess
+				}
 				return r
 			}
 		}
@@ -287,7 +316,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		applied := gitApply(root, diff, git)
 		finishApply()
 		if !applied.OK {
-			return Result{OK: false, Applied: false, Committed: false,
+			return Result{OK: false, Code: LandResultConflict, Applied: false, Committed: false,
 				Reason: "git apply to trunk failed", Detail: applied.Detail}
 		}
 		commitArgs := []string{"commit", "-s", "-F", msgFile}
@@ -299,6 +328,9 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		rc, out := run(git, root, commitArgs)
 		finishCommit()
 		r := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
+		if rc == 0 {
+			r.Code = LandResultSuccess
+		}
 		// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
 		// actually carries our intended paths. A missing path means our staged change
 		// was swept into a concurrent commit on the shared index (#3547); refuse rather
@@ -322,18 +354,37 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 // commitMsgFile is used verbatim (no cleanup). Otherwise the worktree tip message
 // (git log -1 --format=%B) is written to a temp file so the trunk commit preserves
 // the worker's own stamped subject; the temp file is removed by cleanup.
-func resolveMsgFile(wtPath, commitMsgFile string, git GitRunner) (string, func(), error) {
+// If the worker has not committed (HEAD == baseSHA), it uses the intent message or
+// falls back to a neutral chore subject rather than inheriting an unrelated commit subject (#8813).
+func resolveMsgFile(wtPath, baseSHA, commitMsgFile string, git GitRunner) (string, func(), error) {
 	if strings.TrimSpace(commitMsgFile) != "" {
 		return commitMsgFile, func() {}, nil
 	}
-	rc, out := run(git, wtPath, []string{"log", "-1", "--format=%B"})
-	msg := strings.TrimRight(out, "\n")
-	if rc != 0 || strings.TrimSpace(msg) == "" {
-		// No worktree commit to borrow a subject from (worker left the change
-		// staged/unstaged). A conservative fallback keeps the land honest: it is a
-		// plain, un-stamped subject that dos commit-audit will grade as ABSTAIN
-		// rather than a forged claim.
-		msg = "chore(dispatch): land worker worktree diff"
+	base := strings.TrimSpace(baseSHA)
+	if base == "" {
+		if in, err := LoadIntent(wtPath); err == nil {
+			base = strings.TrimSpace(in.BaseSHA)
+		}
+	}
+	var head string
+	if rc, out := run(git, wtPath, []string{"rev-parse", "HEAD"}); rc == 0 {
+		head = strings.TrimSpace(out)
+	}
+	// A worker commit at tip is present when HEAD differs from base.
+	hasWorkerCommit := head != "" && (base == "" || head != base)
+	var msg string
+	if hasWorkerCommit || head == "" {
+		rc, out := run(git, wtPath, []string{"log", "-1", "--format=%B"})
+		if rc == 0 && strings.TrimSpace(out) != "" {
+			msg = strings.TrimRight(out, "\n")
+		}
+	}
+	if strings.TrimSpace(msg) == "" {
+		if in, err := LoadIntent(wtPath); err == nil && strings.TrimSpace(in.Message) != "" {
+			msg = in.Message
+		} else {
+			msg = "chore(dispatch): land worker worktree diff"
+		}
 	}
 	f, err := os.CreateTemp("", "fak-wt-msg-*.txt")
 	if err != nil {
@@ -607,7 +658,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
 		}
 		finishSync()
-		return Result{OK: true, Applied: true, Committed: true,
+		return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}

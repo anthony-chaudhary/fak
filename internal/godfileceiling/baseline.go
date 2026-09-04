@@ -3,6 +3,8 @@
 
 package godfileceiling
 
+// Invariant: baseline caps are monotonically non-increasing and pin only first-party files exceeding HardCeiling.
+
 // Baseline pins today's god-files (> HardCeiling lines) at their current LOC. A
 // pinned file may only shrink; an unpinned file may not exceed HardCeiling. See doc.go.
 var Baseline = map[string]int{

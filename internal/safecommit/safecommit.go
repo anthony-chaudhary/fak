@@ -48,6 +48,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 	"github.com/anthony-chaudhary/fak/internal/workdelivery"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It is the
@@ -719,7 +720,17 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
 	}
 	branch = strings.TrimSpace(branch)
-	if code != 0 || branch != trunk {
+	isSanctionedWorker := false
+	if code != 0 {
+		if workerworktree.IsWorkerWorktree(opts.Dir) {
+			isSanctionedWorker = true
+		} else if cwd, err := os.Getwd(); err == nil && workerworktree.IsWorkerWorktree(cwd) {
+			isSanctionedWorker = true
+		} else if isSanctionedWorkerWorktreeDir(opts.Dir) || isSanctionedWorkerWorktreeDir("") {
+			isSanctionedWorker = true
+		}
+	}
+	if !isSanctionedWorker && (code != 0 || branch != trunk) {
 		res.Reason = ReasonOffTrunk
 		// A non-zero symbolic-ref is a detached HEAD; the captured output is git's stderr
 		// ("fatal: ref HEAD is not a symbolic ref"), not a branch name — don't echo it.
@@ -1169,4 +1180,29 @@ func landedEscapesLease(dir string, diffTreeOut string, requested []string) []st
 	}
 	sort.Strings(escaped)
 	return escaped
+}
+
+// isSanctionedWorkerWorktreeDir checks whether dir or any of its parent directories
+// is a sanctioned worker worktree.
+func isSanctionedWorkerWorktreeDir(dir string) bool {
+	if dir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			dir = cwd
+		}
+	}
+	if dir == "" {
+		return false
+	}
+	curr := filepath.Clean(dir)
+	for {
+		if workerworktree.IsWorkerWorktree(curr) {
+			return true
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr || parent == "." || parent == "" {
+			break
+		}
+		curr = parent
+	}
+	return false
 }

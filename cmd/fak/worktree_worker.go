@@ -246,7 +246,7 @@ func worktreeWorkerPrepare(argv []string) {
 	}
 }
 
-func worktreeCommitSubject(wtPath, msgFile string) string {
+func worktreeCommitSubject(wtPath, baseSHA, msgFile string) string {
 	if strings.TrimSpace(msgFile) != "" {
 		if b, err := os.ReadFile(msgFile); err == nil {
 			for _, line := range strings.Split(string(b), "\n") {
@@ -257,10 +257,38 @@ func worktreeCommitSubject(wtPath, msgFile string) string {
 			}
 		}
 	}
-	cmd := windowgate.Command("git", "-C", wtPath, "log", "-1", "--format=%s")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	if out, err := cmd.Output(); err == nil {
-		return strings.TrimSpace(string(out))
+	base := strings.TrimSpace(baseSHA)
+	if base == "" {
+		if in, err := workerworktree.LoadIntent(wtPath); err == nil {
+			base = strings.TrimSpace(in.BaseSHA)
+		}
+	}
+	var head string
+	headCmd := windowgate.Command("git", "-C", wtPath, "rev-parse", "HEAD")
+	windowgate.ConfigureBackgroundCommand(headCmd)
+	if headOut, err := headCmd.Output(); err == nil {
+		head = strings.TrimSpace(string(headOut))
+	}
+	// A worktree commit at tip is present when HEAD differs from base.
+	// When HEAD == base, the worker made no tip commit; do not inherit the base commit subject (#8813).
+	hasWorkerCommit := head != "" && (base == "" || head != base)
+	if hasWorkerCommit || head == "" {
+		cmd := windowgate.Command("git", "-C", wtPath, "log", "-1", "--format=%s")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if out, err := cmd.Output(); err == nil {
+			subj := strings.TrimSpace(string(out))
+			if subj != "" {
+				return subj
+			}
+		}
+	}
+	if in, err := workerworktree.LoadIntent(wtPath); err == nil && strings.TrimSpace(in.Message) != "" {
+		for _, line := range strings.Split(in.Message, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				return line
+			}
+		}
 	}
 	return ""
 }
@@ -314,7 +342,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	repoRoot := worktreeWorkerRoot(*root)
 
 	// Mandatory fail-to-pass symptom witness for fix(*) commits (#10926)
-	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*msgFile))
+	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile))
 	if isFixSubject(subj) && !*unsafeSkipSymptomWitness {
 		symptomRes := verifyWorkerLandSymptom(worktreeDir)
 		if !symptomRes.OK {

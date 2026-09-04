@@ -170,8 +170,9 @@ func TestGoldenCorpusRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (regenerate with FAK_UPDATE_GOLDEN=1): %v", err)
 	}
-	if got != string(want) {
-		t.Fatalf("corpus golden mismatch — a fold change flipped the dataset.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if got != wantStr {
+		t.Fatalf("corpus golden mismatch — a fold change flipped the dataset.\n--- got ---\n%s\n--- want ---\n%s", got, wantStr)
 	}
 }
 
@@ -477,7 +478,7 @@ func TestGuardCorpusMaturityDocumentationAndContracts(t *testing.T) {
 		}
 	}
 
-	benchPath := "benchmark_test.go"
+	benchPath := "bench_test.go"
 	benchContent, err := os.ReadFile(benchPath)
 	if err != nil {
 		t.Fatalf("failed to read benchmark_test.go: %v", err)
@@ -489,13 +490,13 @@ func TestGuardCorpusMaturityDocumentationAndContracts(t *testing.T) {
 
 	hasScanBenchmark := false
 	for _, decl := range benchNode.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "BenchmarkCorpusScan" {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "BenchmarkFoldPlanted" {
 			if testIsSubstantiveBenchmark(fn) {
 				hasScanBenchmark = true
 			}
 		}
 	}
 	if !hasScanBenchmark {
-		t.Errorf("benchmark_test.go must define a substantive BenchmarkCorpusScan with a b.N loop")
+		t.Errorf("bench_test.go must define a substantive BenchmarkFoldPlanted with a b.N loop")
 	}
 }
