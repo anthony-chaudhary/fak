@@ -51,6 +51,7 @@ func TestNightrunLedgerPathHelper(t *testing.T) {
 	t.Helper()
 	rel := os.Getenv(ledgerPathHelperEnv)
 	if rel == "" {
+		t.Skip("helper process")
 		return
 	}
 	_, _ = os.Stdout.WriteString(nightrunLedgerPath(rel))
@@ -86,8 +87,17 @@ func runLedgerGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func evalPath(p string) string {
+	p = filepath.Clean(p)
+	dir, file := filepath.Split(p)
+	if resolvedDir, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(resolvedDir, file)
+	}
+	return p
+}
+
 func sameLedgerPath(a, b string) bool {
-	a, b = filepath.Clean(a), filepath.Clean(b)
+	a, b = evalPath(a), evalPath(b)
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(a, b)
 	}
