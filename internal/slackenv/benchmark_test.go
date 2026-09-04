@@ -14,7 +14,7 @@ var (
 )
 
 const benchEnvBody = `# Production-representative .env.slack.local configuration for fak
-export FAK_SCOREBOARD_TOKEN=xoxb-1234567890-abcdef1234567890
+export FAK_SCOREBOARD_TOKEN=xoxb-mock-token-not-a-real-secret
 FAK_SCOREBOARD_CHANNEL=C0123456789
 export FAK_BLOCKERS_CHANNEL=C0987654321
 FAK_DISPATCH_CHANNEL=C1122334455
