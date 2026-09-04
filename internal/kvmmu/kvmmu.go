@@ -34,15 +34,6 @@
 // not the *detection* better (see RECALL-RESULTS.md on the evadable content
 // gate). The contribution is that the trust floor now reaches the model's own
 // working memory, model-independently.
-//
-// Contract: kvmmu enforces content admission decisions at the KV-cache layer by mechanically
-// evicting quarantined spans before downstream attention can incorporate their key/value representations.
-//
-// Invariant: Live segments strictly partition cache positions [0, kv.Len()) without gaps or overlaps;
-// evictions renumber subsequent surviving segments monotonically to preserve cache compaction equivalence.
-//
-// Fail-closed: An unhandled or quarantine verdict immediately triggers physical cache eviction
-// and yields nil logits, preventing poisoned tool results from contaminating subsequent decoding turns.
 package kvmmu
 
 import (
@@ -225,6 +216,9 @@ func (FoldedGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi
 // *model.Session into the in-process backend; NewBackend / NewBackendWithGate take
 // an already-built abi.KVBackend (a remote/zero-copy KV backend, the disaggregated
 // direction) so enforcement can run against an engine fak does not itself host.
+//
+// Precondition: caller provides an initialized KV backend and result gate to establish the bridge.
+// Postcondition: context is initialized with empty segment ledger and tracks live cache residency.
 type Context struct {
 	mu          sync.Mutex
 	kv          abi.KVBackend
@@ -272,11 +266,8 @@ func NewBackendWithGate(kv abi.KVBackend, gate Gate) *Context {
 // untrusted tool output. The caller decodes from the returned logits via
 // model.Session.Step (only the final chunk before a model turn needs them).
 //
-// Contract: Callers provide valid token sequences; the assigned segment starts at the current
-// backend length and is recorded in the ledger prior to prefill to guarantee observer coherence.
-//
-// Invariant: The assigned From offset strictly equals the pre-append cache length kv.Len(),
-// preserving contiguous layout across consecutive appends.
+// Precondition: token ids sequence must be non-empty and represent a discrete contiguous prompt segment.
+// Postcondition: returns non-nil segment record positioned at the prior cache boundary with matching length.
 func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
 	from := c.kv.Len()
 	// Register before Prefill: the attention observer fires while the model appends
@@ -326,10 +317,8 @@ func (c *Context) TrackEntry(e cachemeta.Entry) {
 // just removed; the loop appends the next trusted query and decodes from there)
 // and otherwise the distribution the model would continue from.
 //
-// Contract: Untrusted tool output must be screened through the configured admission gate before decoding continues.
-//
-// Fail-closed: If the gate returns VerdictQuarantine, the newly appended span is immediately evicted
-// from the KV backend and nil logits are returned to prevent attention contamination.
+// Precondition: context and tool name must be initialized; body carries raw tool execution bytes.
+// Postcondition: quarantined results are immediately evicted and stripped of next-token logits.
 func (c *Context) AdmitResult(ctx context.Context, id, tool string, ids []int, body []byte) (v abi.Verdict, evicted bool, logits []float32) {
 	logits, seg := c.Append(id, tool, ids)
 	call := &abi.ToolCall{Tool: tool}
@@ -361,9 +350,8 @@ func (c *Context) AdmitResult(ctx context.Context, id, tool string, ids []int, b
 // evict a span downstream tokens already absorbed get a compacted cache but not a
 // never-saw guarantee — use AdmitResult for the guarantee.
 //
-// Contract: Out-of-band quarantine requests evict the target segment identified by id if it is resident and not currently held.
-//
-// Invariant: Quarantine on an already-held or non-existent segment safely returns a zero position count and false status.
+// Precondition: target segment identifier must specify a recorded, non-empty span in the ledger.
+// Postcondition: returns evicted position count and true if target was found and successfully removed.
 func (c *Context) Quarantine(id string) (evicted int, ok bool) {
 	for _, s := range c.segs {
 		if s.ID == id && !s.Held {
@@ -383,10 +371,8 @@ func (c *Context) Quarantine(id string) (evicted int, ok bool) {
 // Returns false if the id is unknown or already held. A non-positive expiresAtUnix clears
 // the TTL (the segment will not expire on its own; only an explicit Quarantine can remove it).
 //
-// Contract: Callers stamp an absolute Unix timestamp on an active segment to arm time-based eviction;
-// kvmmu remains time-agnostic and relies strictly on injected clock readings.
-//
-// Invariant: Non-positive TTL values disarm automated expiry, retaining the segment until explicit quarantine or compaction.
+// Precondition: id must name an existing segment in the ledger that has not already been evicted.
+// Postcondition: returns true if the segment was found and live, updating its expiration timestamp.
 func (c *Context) SetTTL(id string, expiresAtUnix int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -427,10 +413,8 @@ func (c *Context) SetTTL(id string, expiresAtUnix int64) bool {
 // guarantee). Expire does not claim bit-exactness where the boundary does not hold; a
 // caller that needs the never-saw guarantee reads seg.Disposition after the call.
 //
-// Contract: Expire evicts all active segments whose stamped TTL is less than or equal to nowUnix.
-//
-// Invariant: Segments are evaluated and evicted in reverse position order (highest From first)
-// so that cache renumbering preserves valid indices for earlier surviving spans.
+// Precondition: nowUnix is an injected epoch timestamp compared against recorded segment expiration times.
+// Postcondition: returns total count of expired segments evicted in reverse position order.
 func (c *Context) Expire(nowUnix int64) (evicted int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -474,9 +458,8 @@ func (c *Context) Expire(nowUnix int64) (evicted int) {
 // correctly. Returns the gate verdict and the count of segments actually evicted.
 // An unknown id, or one already held, is silently skipped.
 //
-// Contract: Compaction swaps a target set of resident segments for a single summary segment only if the summary passes admission.
-//
-// Fail-closed: If the summary yields VerdictQuarantine, the compaction swap is aborted, preserving all existing spans intact.
+// Precondition: summary tokens and payload bytes must represent a coherent candidate replacement span.
+// Postcondition: quarantined summaries leave existing segments untouched; allowed summaries swap all IDs.
 func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool string, summaryIDs []int, summaryBody []byte) (v abi.Verdict, swapped int) {
 	call := &abi.ToolCall{Tool: tool}
 	res := &abi.Result{
@@ -523,7 +506,7 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 // handle, so evicting it loses nothing — it pages back in on demand from the
 // lossless store, exactly as a forecast miss does.
 //
-// id correspondence is the adapter contract: a segment is evicted iff its
+// id correspondence is the adapter mapping rule: a segment is evicted iff its
 // Segment.ID matches an elided ctxplan.Span.ID. The layer that lowers history
 // into both ctxplan.Spans and kvmmu segments MUST use the same ids (the same way
 // recall/cdb share page ids). A segment whose id is neither selected nor elided
@@ -545,9 +528,8 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 // eliding an earlier span a survivor already attended to shrinks residency but is not
 // reported bit-exact (the live elider asserts the invariant only where it holds).
 //
-// Contract: ApplyPlan adjusts cache residency to match a ctxplan.Plan by evicting all elided segments.
-//
-// Invariant: Any segment designated in the plan's Selected set is preserved even if conflictingly listed as elided.
+// Precondition: plan specifies candidate elision and selection sets with stable segment identifiers.
+// Postcondition: returns number of elided segments evicted to compress KV cache to the resident view.
 func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 	// #5123: grade this selection with the #3901 retained-mass gauge. Captured BEFORE the
 	// eviction (evict clears a dropped span's mass, which would shrink the denominator to the
@@ -583,10 +565,6 @@ func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 // evict drops a segment's span from the kernel-owned cache and renumbers the
 // ledger so every segment after it shifts down by the evicted length — keeping
 // the ledger consistent with model.KVCache.Evict's own compaction.
-//
-// Contract: Drops the specified segment from the underlying KV backend and adjusts subsequent segment offsets.
-//
-// Invariant: All surviving segments with From > seg.From are shifted downward by seg.Len, and the evicted segment is marked Held.
 func (c *Context) evict(seg *Segment) int {
 	// A hybrid (Gated-DeltaNet recurrent) cache cannot evict a span in place: its
 	// linear-attention layers hold an accumulated recurrence with no per-token journal,
@@ -673,7 +651,8 @@ func (c *Context) SegmentByID(id string) (*Segment, bool) {
 	return nil, false
 }
 
-// LivePositions returns the aggregate count of active token positions spanning all non-held segments in the ledger.
+// LivePositions returns the total number of live (un-evicted) positions across
+// all recorded segments in the ledger.
 func (c *Context) LivePositions() int {
 	total := 0
 	for _, s := range c.segs {
@@ -688,7 +667,7 @@ func (c *Context) LivePositions() int {
 // caller should treat the entries as read-only).
 func (c *Context) Segments() []*Segment { return c.segs }
 
-// Pin marks a live segment by ID as immune or vulnerable to budget-driven attention eviction sweeps.
+// Pin marks a live segment as protected from budget-driven attention eviction.
 func (c *Context) Pin(id string, pinned bool) bool {
 	for _, s := range c.segs {
 		if s.ID == id && !s.Held {
@@ -699,21 +678,21 @@ func (c *Context) Pin(id string, pinned bool) bool {
 	return false
 }
 
-// Entries returns a defensive copy of currently live cache metadata entries tracked by this bridge context.
+// Entries returns currently live cache metadata entries tracked by this bridge.
 func (c *Context) Entries() []cachemeta.Entry { return append([]cachemeta.Entry(nil), c.meta...) }
 
-// InvalidatedEntries returns a defensive copy of all cache metadata entries invalidated by prior K/V segment evictions.
+// InvalidatedEntries returns entries invalidated by K/V segment eviction.
 func (c *Context) InvalidatedEntries() []cachemeta.Entry {
 	return append([]cachemeta.Entry(nil), c.invalidated...)
 }
 
-// ExternalInvalidations returns all pending remote-engine invalidation directives derived
+// ExternalInvalidations returns remote-engine invalidation directives derived
 // from evicted K/V spans and tracked cache metadata.
 func (c *Context) ExternalInvalidations() []cachemeta.ExternalInvalidationDirective {
 	return append([]cachemeta.ExternalInvalidationDirective(nil), c.external...)
 }
 
-// CacheLen returns the total count of active, un-evicted key/value positions present in the backing KV cache.
+// CacheLen is the number of live K/V positions in the enforced KV backend's cache.
 func (c *Context) CacheLen() int { return c.kv.Len() }
 
 // Evicted counts the segments whose K/V has been evicted from the cache — the

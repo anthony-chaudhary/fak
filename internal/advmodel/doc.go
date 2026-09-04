@@ -2,6 +2,10 @@
 // harvest LabelRow corpus and the closing edge of the kernel's self-improvement
 // loop (issue #580).
 //
+// Invariant: The advisory adjudicator may only emit VerdictDeny or VerdictDefer, never VerdictAllow.
+// Contract: An unconfigured, empty, or nil artifact defers on all evaluations (fail-closed no-op).
+// Precondition: Artifact schema must match ArtifactSchema exactly during unmarshaling or load.
+//
 // THE MISSING EDGE. internal/harvest folds every adjudication into a frozen
 // abi.LabelRow — the kernel harvests its own verdicts — but nothing CONSUMED
 // that corpus. This package is the consumer: a small classifier trained over

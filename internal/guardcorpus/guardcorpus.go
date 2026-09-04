@@ -3,6 +3,10 @@
 // session plus the replayable, redacted Example rows a training/regression
 // consumer needs (docs/GUARD-SESSION-DATASET-PLAN.md).
 //
+// Invariant: Fold operates as a pure, deterministic transformation over input journal rows without disk I/O or RNG.
+// Contract: Output Example and SessionRecord structures only retain bounded, scrubbed fields from upstream journal producers.
+// Precondition: Input journal rows must maintain monotonic sequence ordering within each session stream.
+//
 // WHY IT EXISTS. The raw journal (internal/journal) is host-local, gitignored,
 // and reaped (internal/guardaudit); guardrsi scores it and auditusage rolls it
 // up, but nothing turns it into a committed, schema-versioned, per-session
@@ -155,6 +159,7 @@ type Example struct {
 // Fold projects one session's rows into its SessionRecord and Example rows. It
 // is the pure core; the CLI shell owns discovery, chain verification, and the
 // SessionMeta join. Rows are taken in journal order (the caller preserves it).
+//
 // Contract: Fold is pure, deterministic, and preserves input journal row ordering.
 func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	rec := SessionRecord{
@@ -248,6 +253,8 @@ func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	return rec, examples
 }
 
+// Invariant: Example redaction bounds are inherited directly from journal-scrubbed fields without secondary expansion.
+// Postcondition: Returns an immutable Example record populated with sanitized arguments, taints, and witness prose.
 func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example {
 	return Example{
 		Schema:       ExampleSchema,
@@ -267,6 +274,9 @@ func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example 
 // normalizeVerdict resolves the row's verdict, falling back to the decision Kind
 // when the explicit verdict field is blank (a DENY row's Kind is "DENY"). It
 // mirrors guardrsi's resolution so the two folds classify identically.
+//
+// Precondition: Candidate verdict and kind tokens represent raw classification strings extracted from journal rows.
+// Postcondition: Returns an uppercase canonical verdict or empty string if the row represents an operational event.
 func normalizeVerdict(verdict, kind string) string {
 	if v := strings.TrimSpace(verdict); v != "" {
 		return strings.ToUpper(v)
@@ -286,6 +296,8 @@ func normalizeVerdict(verdict, kind string) string {
 // bounded evidence points at rate limiting, else "". A rate-limit exit is a
 // terminal outcome but not process instability, so it must not count as a crash.
 // Mirrors guardrsi.childRateLimitExitClass over the same bounded fields.
+//
+// Postcondition: Returns a normalized rate limit category string when matching evidence is present, or empty string otherwise.
 func rateLimitClass(r journal.Row) string {
 	for _, raw := range []string{r.Reason, r.Witness, r.ArgsLabel} {
 		low := strings.ToLower(strings.TrimSpace(raw))

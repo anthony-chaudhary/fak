@@ -4,22 +4,49 @@ package codexmcpdiag
 import "strings"
 
 const (
-	VerdictFalseNegative       = "CLIENT_STATUS_FALSE_NEGATIVE"
-	VerdictServerFailure       = "SERVER_FAILURE"
+	// VerdictFalseNegative signals that all target MCP servers initialized cleanly
+	// despite client-side warning banners suggesting offline status.
+	VerdictFalseNegative = "CLIENT_STATUS_FALSE_NEGATIVE"
+
+	// VerdictServerFailure indicates fatal startup errors or missing initialization
+	// for one or more target MCP servers.
+	VerdictServerFailure = "SERVER_FAILURE"
+
+	// VerdictRuntimeCancellation indicates initialization was interrupted by
+	// a concurrent runtime configuration refresh or context reload.
 	VerdictRuntimeCancellation = "RUNTIME_REFRESH_CANCELLATION"
-	VerdictInsufficient        = "INSUFFICIENT_EVIDENCE"
+
+	// VerdictInsufficient indicates recorded telemetry logs lack definitive
+	// startup completion or failure markers for requested servers.
+	VerdictInsufficient = "INSUFFICIENT_EVIDENCE"
 )
 
+// Event captures a single filtered telemetry entry from startup logs,
+// preserving message metadata without logging sensitive prompt payloads.
 type Event struct{ Level, Target, Body string }
+
+// Server describes the resolved health state and operational status
+// for a single named MCP server instance.
 type Server struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 }
+
+// Report summarizes the aggregate diagnostic verdict and individual status
+// determinations across all evaluated MCP server targets.
 type Report struct {
 	Verdict string   `json:"verdict"`
 	Servers []Server `json:"servers"`
 }
 
+// Invariant: Diagnostic classification never echoes raw event bodies or private tokens into the report.
+
+// Precondition: names specifies target server identifiers; events supplies captured telemetry records.
+
+// Postcondition: Every requested server identifier receives exactly one classified status in output order.
+
+// Classify evaluates captured startup log events against target server names to
+// produce an aggregate health diagnosis without leaking sensitive log contents.
 func Classify(names []string, events []Event) Report {
 	r := Report{Verdict: VerdictInsufficient, Servers: make([]Server, 0, len(names))}
 	allReady := len(names) > 0

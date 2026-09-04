@@ -13,9 +13,12 @@ import (
 )
 
 var (
+	// ErrSnapshotNotFound indicates the requested snapshot directory or metadata is absent.
 	ErrSnapshotNotFound = errors.New("dataslot: snapshot not found")
-	ErrRollbackFailed   = errors.New("dataslot: snapshot rollback failed")
-	ErrCorruptBackup    = errors.New("dataslot: snapshot backup file is corrupted or missing")
+	// ErrRollbackFailed indicates restoring database files from backup encountered an error.
+	ErrRollbackFailed = errors.New("dataslot: snapshot rollback failed")
+	// ErrCorruptBackup indicates a backup file is missing or has a checksum mismatch.
+	ErrCorruptBackup = errors.New("dataslot: snapshot backup file is corrupted or missing")
 )
 
 // FileItem represents a backed-up database or journal file.

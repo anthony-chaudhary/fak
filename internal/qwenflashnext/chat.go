@@ -1,3 +1,9 @@
+// Package qwenflashnext implements prompt formatting and response parsing for
+// the Qwen3.8 Flash-Next generation model family.
+//
+// Invariant: Prompt formatting matches the pinned upstream chat template exactly across system, user, assistant, and tool roles.
+// Contract: ParseResponse extracts reasoning blocks, final text responses, and tool calls deterministically without side effects.
+// Precondition: Non-empty message slices must begin with a system message if any system message is present.
 package qwenflashnext
 
 // Invariant: qwen flash next preserves bounded memory envelope and strict context limits during prompt rendering and response parsing.
@@ -63,6 +69,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 		return "", err
 	}
 
+	// Invariant: rendered prompt envelope delimiters maintain byte-exact alignment with upstream Jinja template boundaries.
 	var b strings.Builder
 	firstMessage := 0
 	if messages[0].Role == "system" {
@@ -128,6 +135,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			return "", fmt.Errorf("unexpected message role %q", message.Role)
 		}
 	}
+	// Postcondition: generation prompt returns trailing assistant think block for continuous token completion.
 	if opts.AddGenerationPrompt {
 		b.WriteString(IMStart + "assistant\n<think>\n")
 		if !opts.EnableThinking {
@@ -207,6 +215,7 @@ func ParseResponse(generated string) (ParsedResponse, error) {
 	result.Commentary = strings.TrimSpace(generated[:firstCall])
 	calls, err := parseToolCalls(generated[firstCall:])
 	result.ToolCalls = calls
+	// Postcondition: splits output into isolated thinking analysis, user-facing commentary, and typed tool call structures without thought leakage.
 	return result, err
 }
 

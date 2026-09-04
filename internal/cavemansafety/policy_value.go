@@ -151,8 +151,8 @@ func RunValueBenchmark(arms []ValueArm, corpus []ValueCase) (ValueReport, error)
 	return r, nil
 }
 
-// Invariant: caveman safety evaluation is fail-closed and deterministic. Unrecognized tools default to denied.
-// Guard: destructive actions, unauthorized writes, refunds, and prompt injection patterns trigger immediate structural denials.
+// evaluateCase evaluates a single tool invocation against structural safety rules,
+// denying destructive actions, unauthorized writes, refunds, and prompt injections.
 func evaluateCase(c ValueCase) (bool, string) {
 	switch c.Tool {
 	case "delete_account":

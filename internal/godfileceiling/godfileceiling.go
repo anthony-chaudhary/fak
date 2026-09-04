@@ -34,6 +34,8 @@ var ExcludeDirs = map[string]bool{
 }
 
 // Excluded reports whether a repo-relative path lies under an excluded tree.
+//
+// Postcondition: Returns true if any path segment matches ExcludeDirs, false otherwise.
 func Excluded(rel string) bool {
 	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
 		if ExcludeDirs[seg] {
@@ -46,6 +48,8 @@ func Excluded(rel string) bool {
 // LineCount returns the physical line count of text, matching the scorecard's
 // len(text.splitlines()): the number of "\n"-separated lines, with a final line that has
 // no trailing newline still counted.
+//
+// Postcondition: Returns total newline count plus one if the final line lacks a trailing newline.
 func LineCount(text []byte) int {
 	if len(text) == 0 {
 		return 0
@@ -101,6 +105,9 @@ type Verdict struct {
 
 // Evaluate applies the two rules to a measured {path: lines} tree against caps (the pinned
 // baseline). Pure: no I/O, deterministic, sorted output — the unit-testable core.
+//
+// Precondition: measured maps repo-relative file paths to physical line counts; caps provides pinned ratchet thresholds.
+// Postcondition: Returns an OK verdict only when zero violations are detected across all measured files.
 func Evaluate(measured map[string]int, caps map[string]int) Verdict {
 	var grew, newGod []Violation
 	var shrunk []Shrunk
@@ -146,6 +153,8 @@ func Evaluate(measured map[string]int, caps map[string]int) Verdict {
 
 // ProposeBaseline recomputes the caps map from a measured tree: every file over
 // HardCeiling, pinned at its current line count. This is the ratchet's candidate baseline.
+//
+// Postcondition: Returns a candidate map containing only files whose line count exceeds HardCeiling.
 func ProposeBaseline(measured map[string]int) map[string]int {
 	caps := map[string]int{}
 	for rel, n := range measured {
@@ -161,6 +170,9 @@ func ProposeBaseline(measured map[string]int) map[string]int {
 // cap for a file already pinned; it refuses (non-empty refusals, nil baseline) if the
 // proposal would RAISE any cap or pin a brand-new over-ceiling file — both would defeat
 // the ratchet. A new god-file must be caught by Evaluate and split, never pinned.
+//
+// Precondition: The old baseline map must provide existing caps for all previously admitted god-files.
+// Invariant: Ratchet caps can only decrease monotonically and new over-ceiling files are strictly refused.
 func Repin(measured map[string]int, old map[string]int) (accepted map[string]int, refusals []string) {
 	proposed := ProposeBaseline(measured)
 	names := make([]string, 0, len(proposed))
@@ -191,6 +203,9 @@ func Repin(measured map[string]int, old map[string]int) (accepted map[string]int
 // MeasureTree returns {rel: lines} for every counted tracked .go file under root. It shells
 // to `git ls-files '*.go'` (tracked set) and counts physical lines, skipping ExcludeDirs.
 // This is the impure shell; Evaluate/Repin hold the testable logic.
+//
+// Precondition: Root directory must be an initialized git repository containing tracked source files.
+// Postcondition: Returns physical line counts for all first-party non-test Go source files under root.
 func MeasureTree(root string) (map[string]int, error) {
 	cmd := exec.Command("git", "ls-files", "*.go")
 	cmd.Dir = root
@@ -207,18 +222,13 @@ func MeasureTree(root string) (map[string]int, error) {
 		if rel == "" || Excluded(rel) {
 			continue
 		}
-		// _test.go files are graded by the tests KPI, not architecture — they churn
-		// constantly (every new leaf appends a row to a shared *_test.go), so pinning
-		// them reds the gate on unrelated growth. Match internal/hooks/gate_godfile.go
-		// and tools/code_quality_scorecard.py, which both exclude tests from the
-		// architecture corpus.
+		// Exclude test files from god-file measurements; they churn per package test additions.
 		if strings.HasSuffix(rel, "_test.go") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			// A tracked path we cannot read (deleted in the working tree) is skipped, not
-			// fatal: Evaluate surfaces its baseline entry as a stale pin instead.
+			// Deleted working-tree files are skipped; Evaluate flags them as stale pins.
 			continue
 		}
 		measured[rel] = LineCount(data)
@@ -231,6 +241,8 @@ func MeasureTree(root string) (map[string]int, error) {
 
 // FormatBaseline renders a caps map as the Go source of baseline.go — the ratchet's
 // regenerate output. Sorted by path for a stable diff.
+//
+// Postcondition: Returns formatted Go source code declaring Baseline with lexicographically sorted paths.
 func FormatBaseline(caps map[string]int) string {
 	names := make([]string, 0, len(caps))
 	for rel := range caps {

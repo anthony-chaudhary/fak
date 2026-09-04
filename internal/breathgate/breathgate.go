@@ -85,17 +85,8 @@ type Stats struct {
 
 // Gate manages pacing intervals, pause control, debounce, and cooldowns.
 // It enforces minimum breathing intervals between autonomous tool turns,
-// serializes bursts, and protects against runaway thrashing.
-//
-// Invariant: breathgate pacing decisions are fail-closed and bounded.
-// Guard: Check and Wait prevent runaway loops by enforcing minimum intervals and burst cooldowns.
-//
-// Contract:
-//   - Safe for concurrent use across multiple goroutines.
-//   - Check() is non-blocking and reports whether a turn can run immediately.
-//   - Wait(ctx) blocks until the pacing interval and cooldown have elapsed, or ctx cancels.
-//   - RecordTurn() logs turn completion and triggers cooldown if burst limits are exceeded.
-//   - Reset() clears all cooldowns and throttling, returning the gate to initial ready state.
+// serializes rapid bursts, and protects against runaway thrashing loops.
+// All methods on Gate are safe for concurrent use across multiple goroutines.
 type Gate struct {
 	mu sync.Mutex
 
