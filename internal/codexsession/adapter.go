@@ -94,7 +94,7 @@ func New(cfg Config) (*Adapter, error) {
 	return &Adapter{cfg: cfg}, nil
 }
 
-func (a *Adapter) Run(ctx context.Context, text string) error {
+func (a *Adapter) checkCompatibility() error {
 	if a.cfg.Compatibility != nil || a.cfg.TestedReceipt != nil {
 		if a.cfg.Compatibility == nil || a.cfg.TestedReceipt == nil {
 			return errors.New("codexsession: compatibility envelope and tested receipt must be configured together")
@@ -102,6 +102,93 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		if err := CheckCompatibility(*a.cfg.Compatibility, *a.cfg.TestedReceipt, a.cfg.AuthorityMethods); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (a *Adapter) handshake(stdin io.Writer, write func(int64, string, any) error, wait func(int64) (json.RawMessage, error)) error {
+	a.nextID = 1
+	if err := write(1, "initialize", map[string]any{"clientInfo": map[string]any{"name": "fak", "title": "fak native UI", "version": "1"}}); err != nil {
+		return err
+	}
+	if _, err := wait(1); err != nil {
+		return fmt.Errorf("initialize: %w", err)
+	}
+	return json.NewEncoder(stdin).Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"})
+}
+
+func (a *Adapter) startThread(execution sessionctl.CodexExecution, write func(int64, string, any) error, wait func(int64) (json.RawMessage, error)) (string, error) {
+	threadMethod := "thread/start"
+	threadParams := map[string]any{"cwd": a.cfg.Workspace, "ephemeral": a.cfg.Session == nil, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}
+	if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
+		threadMethod = "thread/resume"
+		if execution.Mode == sessionctl.CodexFork {
+			threadMethod = "thread/fork"
+		}
+		threadParams["threadId"] = execution.ThreadID
+	}
+	if err := write(2, threadMethod, threadParams); err != nil {
+		return "", err
+	}
+	raw, err := wait(2)
+	if err != nil {
+		if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
+			reason := sessionctl.CodexThreadIncompatible
+			if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "missing") {
+				reason = sessionctl.CodexThreadMissing
+			}
+			return "", &sessionctl.CodexRecoveryError{Reason: reason, Choices: []sessionctl.CodexStartMode{sessionctl.CodexNew, sessionctl.CodexFork}, Detail: err.Error()}
+		}
+		return "", fmt.Errorf("%s: %w", threadMethod, err)
+	}
+	var ts struct {
+		Thread struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	if err = json.Unmarshal(raw, &ts); err != nil || ts.Thread.ID == "" {
+		return "", errors.New("thread/start returned no thread id")
+	}
+	a.mu.Lock()
+	a.threadID = ts.Thread.ID
+	a.mu.Unlock()
+	if a.cfg.Session != nil {
+		var err error
+		if execution.Mode == sessionctl.CodexFork {
+			err = a.cfg.Session.RecordFork(execution.Epoch, execution.ThreadID, ts.Thread.ID)
+		} else {
+			err = a.cfg.Session.RecordThread(execution.Epoch, ts.Thread.ID)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return ts.Thread.ID, nil
+}
+
+func (a *Adapter) startTurn(threadID string, text string, write func(int64, string, any) error, wait func(int64) (json.RawMessage, error)) error {
+	if err := write(3, "turn/start", map[string]any{"threadId": threadID, "cwd": a.cfg.Workspace, "input": []any{map[string]any{"type": "text", "text": text, "textElements": []any{}}}}); err != nil {
+		return err
+	}
+	raw, err := wait(3)
+	if err != nil {
+		return fmt.Errorf("turn/start: %w", err)
+	}
+	var tr struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	_ = json.Unmarshal(raw, &tr)
+	a.mu.Lock()
+	a.turnID = tr.Turn.ID
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *Adapter) Run(ctx context.Context, text string) error {
+	if err := a.checkCompatibility(); err != nil {
+		return err
 	}
 	var execution sessionctl.CodexExecution
 	if a.cfg.Session != nil {
@@ -195,77 +282,16 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		}
 		return nil, io.ErrUnexpectedEOF
 	}
-	a.nextID = 1
-	if err := write(1, "initialize", map[string]any{"clientInfo": map[string]any{"name": "fak", "title": "fak native UI", "version": "1"}}); err != nil {
+	if err := a.handshake(stdin, write, wait); err != nil {
 		return err
 	}
-	if _, err = wait(1); err != nil {
-		return fmt.Errorf("initialize: %w", err)
-	}
-	if err := json.NewEncoder(stdin).Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"}); err != nil {
-		return err
-	}
-	threadMethod := "thread/start"
-	threadParams := map[string]any{"cwd": a.cfg.Workspace, "ephemeral": a.cfg.Session == nil, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}
-	if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
-		threadMethod = "thread/resume"
-		if execution.Mode == sessionctl.CodexFork {
-			threadMethod = "thread/fork"
-		}
-		threadParams["threadId"] = execution.ThreadID
-	}
-	if err := write(2, threadMethod, threadParams); err != nil {
-		return err
-	}
-	raw, err := wait(2)
+	threadID, err := a.startThread(execution, write, wait)
 	if err != nil {
-		if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
-			reason := sessionctl.CodexThreadIncompatible
-			if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "missing") {
-				reason = sessionctl.CodexThreadMissing
-			}
-			return &sessionctl.CodexRecoveryError{Reason: reason, Choices: []sessionctl.CodexStartMode{sessionctl.CodexNew, sessionctl.CodexFork}, Detail: err.Error()}
-		}
-		return fmt.Errorf("%s: %w", threadMethod, err)
-	}
-	var ts struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-	}
-	if err = json.Unmarshal(raw, &ts); err != nil || ts.Thread.ID == "" {
-		return errors.New("thread/start returned no thread id")
-	}
-	a.mu.Lock()
-	a.threadID = ts.Thread.ID
-	a.mu.Unlock()
-	if a.cfg.Session != nil {
-		var err error
-		if execution.Mode == sessionctl.CodexFork {
-			err = a.cfg.Session.RecordFork(execution.Epoch, execution.ThreadID, ts.Thread.ID)
-		} else {
-			err = a.cfg.Session.RecordThread(execution.Epoch, ts.Thread.ID)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	if err := write(3, "turn/start", map[string]any{"threadId": ts.Thread.ID, "cwd": a.cfg.Workspace, "input": []any{map[string]any{"type": "text", "text": text, "textElements": []any{}}}}); err != nil {
 		return err
 	}
-	raw, err = wait(3)
-	if err != nil {
-		return fmt.Errorf("turn/start: %w", err)
+	if err := a.startTurn(threadID, text, write, wait); err != nil {
+		return err
 	}
-	var tr struct {
-		Turn struct {
-			ID string `json:"id"`
-		} `json:"turn"`
-	}
-	_ = json.Unmarshal(raw, &tr)
-	a.mu.Lock()
-	a.turnID = tr.Turn.ID
-	a.mu.Unlock()
 	for scan.Scan() {
 		var m rpcMessage
 		if err := json.Unmarshal(scan.Bytes(), &m); err != nil {
