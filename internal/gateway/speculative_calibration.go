@@ -54,79 +54,15 @@ func EvaluateSpeculativeAcceptance(
 
 	switch mode {
 	case SpecAcceptGreedy:
-		accepted := 0
-		for i := 0; i < k; i++ {
-			// Find argmax of targetLogits[i]
-			logits := targetLogits[i]
-			if len(logits) == 0 {
-				return receipt, fmt.Errorf("target logits for step %d is empty", i)
-			}
-			maxIdx := 0
-			maxVal := logits[0]
-			for j, v := range logits {
-				if v > maxVal {
-					maxVal = v
-					maxIdx = j
-				}
-			}
-			if draftTokens[i] == maxIdx {
-				accepted++
-			} else {
-				break // in speculative decode, rejection stops the accepted prefix
-			}
+		accepted, err := countGreedyAccepted(k, targetLogits, draftTokens)
+		if err != nil {
+			return receipt, err
 		}
-
-		rate := float64(accepted) / float64(k)
-		return SpeculativeCalibrationReceipt{
-			Mode:                   mode,
-			DraftTokens:            k,
-			AcceptedTokens:         accepted,
-			AcceptanceRate:         rate,
-			TargetLogitsEvaluated:  k,
-			IsSyntheticCalibration: false,
-			QualityClaimAllowed:    true,
-		}, nil
+		return makeRealCalibrationReceipt(mode, k, accepted), nil
 
 	case SpecAcceptStochastic:
-		accepted := 0
-		for i := 0; i < k; i++ {
-			logits := targetLogits[i]
-			// compute softmax probability of draft token
-			mx := logits[0]
-			for _, v := range logits {
-				if v > mx {
-					mx = v
-				}
-			}
-			var sum float64
-			for _, v := range logits {
-				sum += math.Exp(float64(v - mx))
-			}
-			pTarget := float32(math.Exp(float64(logits[draftTokens[i]]-mx)) / sum)
-			pDraft := draftProbs[i]
-			if pDraft <= 0 {
-				pDraft = 1e-6
-			}
-
-			// Acceptance ratio = min(1, pTarget / pDraft)
-			ratio := float64(pTarget / pDraft)
-			if ratio >= 1.0 {
-				accepted++
-			} else {
-				break
-			}
-		}
-
-		rate := float64(accepted) / float64(k)
-		return SpeculativeCalibrationReceipt{
-			Mode:                   mode,
-			DraftTokens:            k,
-			AcceptedTokens:         accepted,
-			AcceptanceRate:         rate,
-			TargetLogitsEvaluated:  k,
-			IsSyntheticCalibration: false,
-			QualityClaimAllowed:    true,
-		}, nil
+		accepted := countStochasticAccepted(k, targetLogits, draftTokens, draftProbs)
+		return makeRealCalibrationReceipt(mode, k, accepted), nil
 
 	case SpecAcceptSynthetic:
 		if syntheticRate < 0 || syntheticRate > 1.0 {
@@ -155,4 +91,68 @@ func CertifyQualityClaim(receipt SpeculativeCalibrationReceipt) error {
 		return ErrSyntheticQualityClaimProhibited
 	}
 	return nil
+}
+
+func countGreedyAccepted(k int, targetLogits [][]float32, draftTokens []int) (int, error) {
+	accepted := 0
+	for i := 0; i < k; i++ {
+		logits := targetLogits[i]
+		if len(logits) == 0 {
+			return 0, fmt.Errorf("target logits for step %d is empty", i)
+		}
+		maxIdx := 0
+		maxVal := logits[0]
+		for j, v := range logits {
+			if v > maxVal {
+				maxVal = v
+				maxIdx = j
+			}
+		}
+		if draftTokens[i] == maxIdx {
+			accepted++
+		} else {
+			break
+		}
+	}
+	return accepted, nil
+}
+
+func countStochasticAccepted(k int, targetLogits [][]float32, draftTokens []int, draftProbs []float32) int {
+	accepted := 0
+	for i := 0; i < k; i++ {
+		logits := targetLogits[i]
+		mx := logits[0]
+		for _, v := range logits {
+			if v > mx {
+				mx = v
+			}
+		}
+		var sum float64
+		for _, v := range logits {
+			sum += math.Exp(float64(v - mx))
+		}
+		pTarget := float32(math.Exp(float64(logits[draftTokens[i]]-mx)) / sum)
+		pDraft := draftProbs[i]
+		if pDraft <= 0 {
+			pDraft = 1e-6
+		}
+		if float64(pTarget/pDraft) >= 1.0 {
+			accepted++
+		} else {
+			break
+		}
+	}
+	return accepted
+}
+
+func makeRealCalibrationReceipt(mode SpeculativeAcceptanceMode, k, accepted int) SpeculativeCalibrationReceipt {
+	return SpeculativeCalibrationReceipt{
+		Mode:                   mode,
+		DraftTokens:            k,
+		AcceptedTokens:         accepted,
+		AcceptanceRate:         float64(accepted) / float64(k),
+		TargetLogitsEvaluated:  k,
+		IsSyntheticCalibration: false,
+		QualityClaimAllowed:    true,
+	}
 }
