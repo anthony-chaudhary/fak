@@ -35,6 +35,7 @@ func setupTestRepo(t *testing.T) (string, string) {
 	testGit(t, dir, "config", "user.email", "test@wip.local")
 	testGit(t, dir, "config", "user.name", "wip test")
 	testGit(t, dir, "config", "commit.gpgSign", "false")
+	testGit(t, dir, "config", "core.autocrlf", "false")
 
 	// Base commit
 	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base content\n"), 0644); err != nil {
