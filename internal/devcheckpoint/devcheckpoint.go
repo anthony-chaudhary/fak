@@ -13,16 +13,28 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
+// Invariant: dev checkpoint progress calculation is fail-closed and monotonic.
+// Contract: stage bounds require 1 <= current <= total whenever stages are evaluated.
+// Guard: transitions in blocked state require at least one explicit blocker explanation.
+// Guard: transitions in progress state require positive non-zero stage bounds.
+
+// State defines the execution lifecycle state of a developer progress checkpoint.
 type State string
 
 const (
-	StateStarted  State = "started"
+	// StateStarted indicates the initial kickoff of an agent work session.
+	StateStarted State = "started"
+	// StateProgress indicates active forward movement with stage tracking.
 	StateProgress State = "progress"
-	StateBlocked  State = "blocked"
-	StateHandoff  State = "handoff"
-	StateDone     State = "done"
+	// StateBlocked indicates execution halted due to explicit blocking dependencies.
+	StateBlocked State = "blocked"
+	// StateHandoff indicates delegation of execution context to a peer or supervisor.
+	StateHandoff State = "handoff"
+	// StateDone indicates verified terminal completion of the assigned task scope.
+	StateDone State = "done"
 )
 
+// Stage captures structured phase progress bounds and calculated completion percentage.
 type Stage struct {
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
@@ -30,6 +42,7 @@ type Stage struct {
 	Percent int    `json:"percent"`
 }
 
+// Record contains an immutable checkpoint entry persisted to the durable progress log.
 type Record struct {
 	Timestamp time.Time `json:"timestamp"`
 	Actor     string    `json:"actor"`
@@ -43,6 +56,7 @@ type Record struct {
 	GitHub    string    `json:"github,omitempty"`
 }
 
+// Input provides parameter values required to construct a valid checkpoint record.
 type Input struct {
 	Actor        string
 	Scope        string
@@ -57,6 +71,7 @@ type Input struct {
 	GitHub       string
 }
 
+// New validates input against fail-closed rules and constructs an immutable Record in UTC.
 func New(in Input, now time.Time) (Record, error) {
 	in.Actor, in.Scope, in.Summary = strings.TrimSpace(in.Actor), strings.TrimSpace(in.Scope), strings.TrimSpace(in.Summary)
 	in.StageName, in.Next, in.GitHub = strings.TrimSpace(in.StageName), strings.TrimSpace(in.Next), strings.TrimSpace(in.GitHub)
@@ -95,6 +110,7 @@ func New(in Input, now time.Time) (Record, error) {
 	return r, nil
 }
 
+// Append writes a serialized checkpoint record to disk under an exclusive file lock.
 func Append(path string, record Record) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create checkpoint directory: %w", err)
