@@ -1,6 +1,9 @@
 // Package nativeperfcorrelation provides a bounded, scrubbed index that joins
 // native-performance evidence without exporting high-cardinality identifiers as
 // metric labels.
+//
+// Invariant: all indexed records scrub raw client identifiers into one-way sha256
+// digests and store bounded relative locators so public metrics never leak trace data.
 package nativeperfcorrelation
 
 import (
@@ -20,16 +23,24 @@ import (
 )
 
 const (
-	Schema             = "fak/native-performance-correlation/v1"
-	NativeEngine       = "fak-native"
+	// Schema identifies the wire format version of native performance correlation records.
+	Schema = "fak/native-performance-correlation/v1"
+	// NativeEngine defines the required engine identity name for native execution traces.
+	NativeEngine = "fak-native"
+	// DefaultMaxArtifact bounds the maximum streamable artifact size to sixty-four megabytes.
 	DefaultMaxArtifact = int64(64 << 20)
 )
 
 var (
-	ErrNotFound         = errors.New("native performance correlation not found")
-	ErrCollision        = errors.New("native performance correlation key collision")
-	ErrArtifactMissing  = errors.New("native performance correlation artifact missing")
-	ErrDigestMismatch   = errors.New("native performance correlation artifact digest mismatch")
+	// ErrNotFound reports that a requested correlation key does not exist in the index.
+	ErrNotFound = errors.New("native performance correlation not found")
+	// ErrCollision reports that a distinct record produced an identical correlation key.
+	ErrCollision = errors.New("native performance correlation key collision")
+	// ErrArtifactMissing reports that an expected artifact kind or locator file is absent.
+	ErrArtifactMissing = errors.New("native performance correlation artifact missing")
+	// ErrDigestMismatch reports that the streamed artifact payload does not match expected sha256.
+	ErrDigestMismatch = errors.New("native performance correlation artifact digest mismatch")
+	// ErrArtifactTooLarge reports that artifact payload exceeds the permitted byte size limit.
 	ErrArtifactTooLarge = errors.New("native performance correlation artifact exceeds size limit")
 
 	hexDigestRE  = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -69,11 +80,15 @@ type Artifact struct {
 	SHA256  string       `json:"sha256"`
 }
 
+// ArtifactKind enumerates recognized categories of scrubbed performance artifacts.
 type ArtifactKind string
 
 const (
+	// ArtifactReceipt denotes execution receipts proving native invocation parameters.
 	ArtifactReceipt ArtifactKind = "receipt"
-	ArtifactTrace   ArtifactKind = "trace"
+	// ArtifactTrace denotes timing and span traces proving native runtime execution.
+	ArtifactTrace ArtifactKind = "trace"
+	// ArtifactProfile denotes serialized profiler captures witnessing kernel hotspots.
 	ArtifactProfile ArtifactKind = "profile"
 )
 
@@ -110,6 +125,7 @@ type Index struct {
 	order    []string
 }
 
+// Option configures mutable parameters when initializing a new Index instance.
 type Option func(*Index)
 
 // WithKeyFunc exists for deterministic collision testing and specialized
@@ -122,6 +138,7 @@ func WithKeyFunc(fn func(Record) string) Option {
 	}
 }
 
+// NewIndex constructs a thread-safe bounded correlation cache with specified capacity.
 func NewIndex(capacity int, options ...Option) (*Index, error) {
 	if capacity <= 0 {
 		return nil, errors.New("native performance correlation capacity must be positive")
@@ -137,6 +154,7 @@ func NewIndex(capacity int, options ...Option) (*Index, error) {
 	return index, nil
 }
 
+// Add scrubs and inserts an input record into the bounded eviction ring.
 func (i *Index) Add(input Input) (Record, error) {
 	record, err := scrub(input)
 	if err != nil {
@@ -164,6 +182,7 @@ func (i *Index) Add(input Input) (Record, error) {
 	return cloneRecord(record), nil
 }
 
+// Lookup retrieves a defensively cloned copy of a record by opaque key.
 func (i *Index) Lookup(key string) (Record, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -185,6 +204,7 @@ func (i *Index) Snapshot() []Record {
 	return out
 }
 
+// Exemplar constructs a metric-attaching exemplar value containing only the opaque key.
 func (i *Index) Exemplar(key string) (Exemplar, error) {
 	if _, err := i.Lookup(key); err != nil {
 		return Exemplar{}, err

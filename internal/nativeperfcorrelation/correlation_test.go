@@ -158,3 +158,57 @@ func digest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
+
+// BenchmarkIndexAdd evaluates throughput of record scrubbing, hashing, and insertion into the bounded index.
+func BenchmarkIndexAdd(b *testing.B) {
+	idx, err := NewIndex(1024)
+	if err != nil {
+		b.Fatal(err)
+	}
+	input := testInput("req-bench", "run-bench")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := idx.Add(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkIndexLookup measures key retrieval latency against an indexed correlation record.
+func BenchmarkIndexLookup(b *testing.B) {
+	idx, err := NewIndex(1024)
+	if err != nil {
+		b.Fatal(err)
+	}
+	record, err := idx.Add(testInput("req-lookup", "run-lookup"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := idx.Lookup(record.Key); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkVerifyArtifact evaluates streaming SHA-256 artifact integrity checking over simulated files.
+func BenchmarkVerifyArtifact(b *testing.B) {
+	idx, err := NewIndex(1024)
+	if err != nil {
+		b.Fatal(err)
+	}
+	record, err := idx.Add(testInput("req-verify", "run-verify"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	files := fstest.MapFS{
+		"artifacts/receipt.json": &fstest.MapFile{Data: []byte("receipt")},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := idx.VerifyArtifact(record.Key, ArtifactReceipt, files, 1024); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
