@@ -232,6 +232,13 @@ type Decision struct {
 // for a stalled loop. It is PURE: no clock, no I/O, no admission action — the shell
 // fills each AdmitStatus and applies the returned Action.
 //
+// Invariant: loop unblock decisions are fail-closed and deterministic. An empty candidate
+// list stands down, and unknown or unclassifiable blocks fail closed by escalating to an operator
+// rather than speculating or taking unsafe autonomous actions.
+//
+// Guard condition: when the head is blocked on non-transient or unclassifiable causes
+// and no bypass targets are admittable, the decision must escalate rather than loop or wait.
+//
 // The decision order is fixed so the verdict is deterministic:
 //
 //  1. no candidates            -> StandDown (nothing queued to unblock)
