@@ -160,3 +160,85 @@ diff --git a/lonely.go b/lonely.go
 		t.Errorf("lonely.go: want ORPHAN, got %s", a.State)
 	}
 }
+
+func TestAttributeInfersOwnershipWhenScopeEmptyAndLaneActive(t *testing.T) {
+	dirty := []Hunk{
+		h("internal/gateway/server.go", "+freshLine"),
+		h("cmd/fak/other.go", "+orphanLine"),
+	}
+	// Checkpoint has no hunks recorded for either edit
+	checkpoints := map[string][]Hunk{
+		"sess1": {},
+	}
+
+	dosToml := []byte(`
+[lanes]
+concurrent = ["gateway"]
+
+[lanes.trees]
+gateway = ["internal/gateway/**"]
+`)
+
+	// sess1 is active in lane "gateway", Scope is empty, dos.toml matches internal/gateway/**
+	got := Attribute(dirty, checkpoints,
+		WithActiveLane("sess1", "gateway", nil),
+		WithDOSToml(dosToml),
+	)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 attributions, got %d", len(got))
+	}
+	byFile := map[string]Attribution{}
+	for _, a := range got {
+		byFile[a.File] = a
+	}
+
+	// internal/gateway/server.go should be inferred as OWNED by sess1
+	gw := byFile["internal/gateway/server.go"]
+	if gw.State != AttrOwned || gw.Owner != "sess1" {
+		t.Errorf("internal/gateway/server.go: want OWNED by sess1, got %s owner=%q", gw.State, gw.Owner)
+	}
+
+	// cmd/fak/other.go is not in the active lane, so it falls back to ORPHAN
+	other := byFile["cmd/fak/other.go"]
+	if other.State != AttrOrphan {
+		t.Errorf("cmd/fak/other.go: want ORPHAN, got %s owner=%q", other.State, other.Owner)
+	}
+}
+
+func TestAttributeExplicitScopeOverridesOrTakesPrecedence(t *testing.T) {
+	dirty := []Hunk{
+		h("pkg/foo.go", "+lineA"),
+	}
+	checkpoints := map[string][]Hunk{"s1": {}}
+
+	got := Attribute(dirty, checkpoints,
+		WithSessionScope(SessionScope{
+			Session: "s1",
+			Scope:   []string{"pkg/foo.go"},
+			Active:  true,
+		}),
+	)
+	if len(got) != 1 || got[0].State != AttrOwned || got[0].Owner != "s1" {
+		t.Fatalf("want OWNED by s1 via explicit scope, got %+v", got)
+	}
+}
+
+func TestAttributeInferredLaneSharedWhenMultipleActiveLanesMatch(t *testing.T) {
+	dirty := []Hunk{
+		h("internal/shared/util.go", "+sharedLine"),
+	}
+	checkpoints := map[string][]Hunk{"s1": {}, "s2": {}}
+
+	manifest := []string{"internal/shared/**"}
+	got := Attribute(dirty, checkpoints,
+		WithActiveLane("s1", "shared", manifest),
+		WithActiveLane("s2", "shared", manifest),
+	)
+	if len(got) != 1 || got[0].State != AttrShared {
+		t.Fatalf("want SHARED across s1 and s2, got %+v", got)
+	}
+	if !reflect.DeepEqual(got[0].Owners, []string{"s1", "s2"}) {
+		t.Errorf("owners = %v, want [s1 s2]", got[0].Owners)
+	}
+}

@@ -278,3 +278,22 @@ func TestAdmitStartDeclaredDirectoryCoversChildren(t *testing.T) {
 		t.Fatalf("a declared directory must cover its dirty children; report = %+v", got)
 	}
 }
+
+// If Scope is empty but session/lane is active and dos.toml (or lane manifest) matches
+// the dirty files, ownership is inferred (AttrOwned by Self) so it does not hold as an orphan.
+func TestAdmitStartInfersOwnershipWhenScopeEmptyAndLaneActive(t *testing.T) {
+	got := AdmitStart(AdmitInput{
+		Self:         "self",
+		Intends:      []string{"internal/gateway/server.go"},
+		Attrs:        []Attribution{{File: "internal/gateway/server.go", State: AttrOrphan}},
+		Live:         liveSet("self"),
+		Lane:         "gateway",
+		LaneManifest: []string{"internal/gateway/**"},
+	})
+	if got.Verdict != AdmitOK {
+		t.Fatalf("verdict = %q, want %q; findings = %+v", got.Verdict, AdmitOK, got.Findings)
+	}
+	if got.SelfDirty != 1 {
+		t.Errorf("SelfDirty = %d, want 1", got.SelfDirty)
+	}
+}

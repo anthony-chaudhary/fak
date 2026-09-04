@@ -100,6 +100,14 @@ type AdmitInput struct {
 	SelfWIPCeiling int
 	// Strict promotes every soft finding to a hard hold.
 	Strict bool
+	// Lane is the active lane name for Self.
+	Lane string
+	// LaneManifest is the declared scope patterns / globs for the active lane.
+	LaneManifest []string
+	// SessionScopes conveys per-session scope / lane declarations.
+	SessionScopes []SessionScope
+	// DOSToml provides dos.toml configuration bytes to resolve lane patterns.
+	DOSToml []byte
 }
 
 // AdmitFinding is one reason a declared path (or the session as a whole) is not clear to
@@ -157,9 +165,39 @@ func AdmitStart(in AdmitInput) AdmitReport {
 	// One finding per declared path: the FIRST engaged dirty file under it decides, and
 	// the per-intent map keeps a directory that covers ten dirty files from emitting ten
 	// rows for one decision.
+	var selfPatterns []string
+	if len(in.LaneManifest) > 0 {
+		selfPatterns = in.LaneManifest
+	} else if in.Lane != "" && len(in.DOSToml) > 0 {
+		lanes := ParseDOSTomlLanes(in.DOSToml)
+		selfPatterns = lanes[strings.ToLower(in.Lane)]
+	}
+	if len(selfPatterns) == 0 {
+		for _, sc := range in.SessionScopes {
+			if sc.Session == in.Self && sc.Active {
+				if len(sc.Manifest) > 0 {
+					selfPatterns = sc.Manifest
+				} else if sc.Lane != "" && len(in.DOSToml) > 0 {
+					lanes := ParseDOSTomlLanes(in.DOSToml)
+					selfPatterns = lanes[strings.ToLower(sc.Lane)]
+				}
+				break
+			}
+		}
+	}
+	selfActive := in.Self != "" && (in.Live == nil || in.Live[in.Self] || len(in.Live) == 0)
+
 	seen := map[string]bool{}
 	for _, a := range in.Attrs {
 		file := pathutil.NormalizeScope(a.File)
+
+		// If Scope was empty and hunk was orphaned, but session/lane is active and dos.toml / manifest matches:
+		// infer ownership (AttrOwned, owner = session).
+		if a.State == AttrOrphan && selfActive && len(selfPatterns) > 0 && patternsMatch(selfPatterns, file) {
+			a.State = AttrOwned
+			a.Owner = in.Self
+		}
+
 		if a.State == AttrOwned && a.Owner == in.Self && in.Self != "" {
 			rep.SelfDirty++
 			continue
