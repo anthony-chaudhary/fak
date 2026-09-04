@@ -366,8 +366,8 @@ func TestImmunityDosReasonRegistered(t *testing.T) {
 	if !strings.Contains(block, "refusal  = true") && !strings.Contains(block, "refusal = true") {
 		t.Errorf("%s missing refusal = true", header)
 	}
-	if !strings.Contains(block, `category = "INTEGRITY_GATE"`) && !strings.Contains(block, `category = "SECURITY"`) {
-		t.Errorf("%s missing category INTEGRITY_GATE or SECURITY", header)
+	if !strings.Contains(block, `category = "INTEGRITY_GATE"`) && !strings.Contains(block, `category = "SECURITY"`) && !strings.Contains(block, `category = "OPERATOR_GATE"`) {
+		t.Errorf("%s missing category INTEGRITY_GATE, SECURITY, or OPERATOR_GATE", header)
 	}
 	if !strings.Contains(block, "Tool call attempted to write or edit gating test files under an implementation lane") {
 		t.Errorf("%s summary mismatch", header)
