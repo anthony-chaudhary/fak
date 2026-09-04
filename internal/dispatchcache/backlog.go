@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// Invariant: backlog snapshot reconciliation is fail-closed and deterministic; mismatched keys or corrupt state abort without modifying cache.
+
+// BacklogSchema defines the schema identifier for full backlog snapshots.
 const BacklogSchema = "fak.dispatch-backlog.v1"
 
 // BacklogWatermarkSchema tags the sidecar that carries the watermark of a tick whose delta
@@ -18,11 +21,13 @@ const BacklogSchema = "fak.dispatch-backlog.v1"
 // array is multi-megabyte, the watermark is 28 bytes, and a quiet tick only moves the latter.
 const BacklogWatermarkSchema = "fak.dispatch-backlog-watermark.v1"
 
+// BacklogIssue represents a single issue number and its raw JSON content payload.
 type BacklogIssue struct {
 	Number int             `json:"number"`
 	Data   json.RawMessage `json:"data"`
 }
 
+// BacklogSnapshot represents an on-disk snapshot of the backlog at a specific watermark time.
 type BacklogSnapshot struct {
 	Schema    string         `json:"schema"`
 	Key       string         `json:"key"`
@@ -38,6 +43,7 @@ type backlogWatermark struct {
 	Watermark time.Time `json:"watermark"`
 }
 
+// MergeBacklog merges baseline issues with updated issues and purges closed issue numbers.
 func MergeBacklog(base []BacklogIssue, changed []BacklogIssue, closed []int) []BacklogIssue {
 	byNumber := make(map[int]json.RawMessage, len(base)+len(changed))
 	for _, row := range base {
@@ -89,6 +95,7 @@ func sameBacklog(a, b []BacklogIssue) bool {
 	return true
 }
 
+// WriteBacklog atomically serializes and writes a full backlog snapshot to disk.
 func WriteBacklog(path, key string, watermark time.Time, issues []BacklogIssue) error {
 	if path == "" || key == "" {
 		return errors.New("dispatchcache: backlog path and key are required")
@@ -146,6 +153,7 @@ func writeAtomic(path string, b []byte) error {
 	return os.Rename(name, path)
 }
 
+// ReadBacklog loads and unmarshals a backlog snapshot matching the specified key.
 func ReadBacklog(path, key string) (BacklogSnapshot, bool) {
 	var s BacklogSnapshot
 	b, err := os.ReadFile(path)
