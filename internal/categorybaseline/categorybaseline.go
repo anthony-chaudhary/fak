@@ -1,5 +1,9 @@
 // Package categorybaseline defines the explicit, repository-owned boundary between a
 // good-enough completed category layer and the next layer that should receive capacity.
+//
+// Invariant: category baseline evaluation is fail-closed and deterministic.
+// Precondition: empty category or layer queries return a default Decision without hold.
+// Guard: corrupt registries, missing paths, or mismatched schema versions fail closed to an empty normalized registry.
 package categorybaseline
 
 import (
