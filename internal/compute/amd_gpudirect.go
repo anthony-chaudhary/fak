@@ -238,6 +238,26 @@ func (e *AMDGPUDirectHAL) RegisterNode(node AMDDeviceNode) error {
 	return nil
 }
 
+// RouteEntry represents a resolved peer route between two device nodes in a TopologyMatrix.
+type RouteEntry struct {
+	DirectP2PCapable bool          `json:"direct_p2p_capable"`
+	Fabric           AMDFabricType `json:"fabric"`
+	BandwidthGBps    float64       `json:"bandwidth_gbps"`
+	LatencyNanos     uint32        `json:"latency_nanos"`
+	Reason           string        `json:"reason,omitempty"`
+}
+
+// TopologyMatrix represents the complete N x N peer-to-peer route and bandwidth matrix across all discovered nodes.
+type TopologyMatrix struct {
+	NodeIDs []int                      `json:"node_ids"`
+	Routes  map[int]map[int]RouteEntry `json:"routes"`
+}
+
+// JSON encodes the TopologyMatrix as indented JSON bytes.
+func (tm TopologyMatrix) JSON() ([]byte, error) {
+	return json.MarshalIndent(tm, "", "  ")
+}
+
 // DiscoverTopology returns the active AMD device topology, connectivity matrix, and hardware posture.
 func (e *AMDGPUDirectHAL) DiscoverTopology() []AMDDeviceNode {
 	e.mu.RLock()
@@ -253,11 +273,67 @@ func (e *AMDGPUDirectHAL) DiscoverTopology() []AMDDeviceNode {
 	return res
 }
 
+// TopologyMatrix computes and returns the complete N x N peer route matrix across all registered nodes.
+func (e *AMDGPUDirectHAL) TopologyMatrix() TopologyMatrix {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	nodeIDs := make([]int, 0, len(e.nodes))
+	for id := range e.nodes {
+		nodeIDs = append(nodeIDs, id)
+	}
+
+	routes := make(map[int]map[int]RouteEntry, len(nodeIDs))
+	for _, srcID := range nodeIDs {
+		routes[srcID] = make(map[int]RouteEntry, len(nodeIDs))
+		for _, dstID := range nodeIDs {
+			ok, fabric, reason := e.validateP2PRouteLocked(srcID, dstID)
+			var bw float64
+			var lat uint32
+			if ok {
+				if srcID == dstID {
+					fabric = FabricXGMI
+					bw = 896.0
+					lat = 50
+				} else {
+					src := e.nodes[srcID]
+					for _, p := range src.Peers {
+						if p.TargetNodeID == dstID {
+							bw = p.BandwidthGBps
+							lat = p.LatencyNanos
+							break
+						}
+					}
+					if bw == 0 {
+						bw = 32.0 // fallback PCIe Gen4
+						lat = 800
+					}
+				}
+			}
+			routes[srcID][dstID] = RouteEntry{
+				DirectP2PCapable: ok,
+				Fabric:           fabric,
+				BandwidthGBps:    bw,
+				LatencyNanos:     lat,
+				Reason:           reason,
+			}
+		}
+	}
+
+	return TopologyMatrix{
+		NodeIDs: nodeIDs,
+		Routes:  routes,
+	}
+}
+
 // ValidateP2PRoute verifies whether two AMD devices can perform direct peer-to-peer DMA without CPU bounce.
 func (e *AMDGPUDirectHAL) ValidateP2PRoute(srcNodeID, dstNodeID int) (bool, AMDFabricType, string) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.validateP2PRouteLocked(srcNodeID, dstNodeID)
+}
 
+func (e *AMDGPUDirectHAL) validateP2PRouteLocked(srcNodeID, dstNodeID int) (bool, AMDFabricType, string) {
 	src, okSrc := e.nodes[srcNodeID]
 	dst, okDst := e.nodes[dstNodeID]
 	if !okSrc || !okDst {

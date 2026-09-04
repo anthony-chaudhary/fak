@@ -189,6 +189,83 @@ func TestAMDGPUDirectHAL_SmallBARWarningAndACSConflict(t *testing.T) {
 	}
 }
 
+func TestAMDGPUDirectHAL_TopologyMatrix(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		EnableLargeBARCheck:    true,
+		EnforceACSZeroRedirect: true,
+	})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Instinct MI300X (Node 0)",
+		Architecture:   "gfx942",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     1,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to register node 0: %v", err)
+	}
+
+	err = engine.RegisterNode(AMDDeviceNode{
+		NodeID:         1,
+		GPUID:          1,
+		DeviceName:     "AMD Instinct MI300X (Node 1)",
+		Architecture:   "gfx942",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     0,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to register node 1: %v", err)
+	}
+
+	tm := engine.TopologyMatrix()
+	if len(tm.NodeIDs) != 2 {
+		t.Fatalf("expected 2 nodes in TopologyMatrix, got %d", len(tm.NodeIDs))
+	}
+
+	// 0 -> 1 route check
+	r01, ok := tm.Routes[0][1]
+	if !ok || !r01.DirectP2PCapable || r01.Fabric != FabricXGMI || r01.BandwidthGBps != 896.0 {
+		t.Errorf("unexpected route 0 -> 1: %+v", r01)
+	}
+
+	// 1 -> 0 route check
+	r10, ok := tm.Routes[1][0]
+	if !ok || !r10.DirectP2PCapable || r10.Fabric != FabricXGMI || r10.BandwidthGBps != 896.0 {
+		t.Errorf("unexpected route 1 -> 0: %+v", r10)
+	}
+
+	// Local loopback checks
+	r00, ok := tm.Routes[0][0]
+	if !ok || !r00.DirectP2PCapable || r00.Fabric != FabricXGMI {
+		t.Errorf("unexpected loopback route 0 -> 0: %+v", r00)
+	}
+
+	data, err := tm.JSON()
+	if err != nil || len(data) == 0 {
+		t.Fatalf("failed to serialize TopologyMatrix JSON: %v", err)
+	}
+}
+
 func TestAMDGPUDirectHAL_DMABUFAndRDMARegistration(t *testing.T) {
 	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
 		DefaultPageSize: 4096,
