@@ -63,11 +63,11 @@ var FlagSources = []string{
 	"cmd/fak/serve.go",
 }
 
-// AmplificationSurface is the exit-summary source whose kernel.Counters fold check 2
+// AmplificationSurface is the exit-summary source whose kernel.Counters fold check
 // grades. It is the file that renders the `fak guard:` exit lines.
 const AmplificationSurface = "cmd/fak/guard.go"
 
-// ScoreSurfaces are the score/report surfaces check 3 grades for a default "planned"/
+// ScoreSurfaces are the score/report surfaces graded for a default "planned"/
 // modeled headline source.
 var ScoreSurfaces = []string{
 	"internal/vcachescore/score.go",
@@ -516,13 +516,14 @@ func kpiObservedNotModeledDefault(surfaces map[string]string) scorecard.KPI {
 	}
 }
 
-// Build reads the flag + exit-summary + score surfaces, runs the three KPIs, and folds
+// Build reads the flag, exit-summary, and score surfaces, runs the four KPIs, and folds
 // them into the control-pane payload via the shared kernel. root is the repo root.
 func Build(root string) scorecard.Payload {
 	return BuildAsOf(root, time.Now())
 }
 
-// BuildAsOf is the deterministic scoring seam used by tests and historical audits.
+// BuildAsOf evaluates the default-value scorecard as of a given timestamp, providing a
+// deterministic scoring seam for tests and historical audits. root is the repo root.
 func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 	var flags []valueFlag
 	for _, rel := range FlagSources {
