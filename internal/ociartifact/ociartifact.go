@@ -18,27 +18,44 @@ import (
 )
 
 const (
-	ProfileVersion         = "fak.oci.collection/v1"
+	// ProfileVersion identifies the canonical OCI collection schema profile version string.
+	ProfileVersion = "fak.oci.collection/v1"
+	// CollectionArtifactType defines the OCI media type identifier for top-level collection manifests.
 	CollectionArtifactType = "application/vnd.fak.collection.v1"
-	ManifestMediaType      = "application/vnd.oci.image.manifest.v1+json"
-	IndexMediaType         = "application/vnd.oci.image.index.v1+json"
-	ConfigMediaType        = "application/vnd.fak.collection.config.v1+json"
-	SkillMediaType         = "application/vnd.fak.skill.v1+json"
-	WorkflowMediaType      = "application/vnd.fak.workflow.v1+json"
-	PolicyMediaType        = "application/vnd.fak.policy.v1+json"
-	MCPServerMediaType     = "application/vnd.fak.mcp.server.v1+json"
-	SignatureMediaType     = "application/vnd.dev.cosign.simplesigning.v1+json"
-	AttestationMediaType   = "application/vnd.in-toto+json"
-	SBOMMediaType          = "application/vnd.cyclonedx+json"
-	StatementMediaType     = "application/vnd.fak.collection.statement.v1+json"
-	annotationTitle        = "org.opencontainers.image.title"
-	annotationKind         = "io.fak.object.kind"
+	// ManifestMediaType designates standard OCI image manifest serialization envelopes.
+	ManifestMediaType = "application/vnd.oci.image.manifest.v1+json"
+	// IndexMediaType designates standard OCI image index descriptor structures.
+	IndexMediaType = "application/vnd.oci.image.index.v1+json"
+	// ConfigMediaType defines the media type used for collection configuration blobs.
+	ConfigMediaType = "application/vnd.fak.collection.config.v1+json"
+	// SkillMediaType defines the media type identifying packaged agent skill descriptors.
+	SkillMediaType = "application/vnd.fak.skill.v1+json"
+	// WorkflowMediaType defines the media type identifying declarative workflow execution descriptors.
+	WorkflowMediaType = "application/vnd.fak.workflow.v1+json"
+	// PolicyMediaType defines the media type identifying runtime capability policy configurations.
+	PolicyMediaType = "application/vnd.fak.policy.v1+json"
+	// MCPServerMediaType defines the media type identifying Model Context Protocol server packages.
+	MCPServerMediaType = "application/vnd.fak.mcp.server.v1+json"
+	// SignatureMediaType designates detached Cosign signature payload layers.
+	SignatureMediaType = "application/vnd.dev.cosign.simplesigning.v1+json"
+	// AttestationMediaType designates in-toto supply-chain attestation statement layers.
+	AttestationMediaType = "application/vnd.in-toto+json"
+	// SBOMMediaType designates CycloneDX software bill of materials metadata layers.
+	SBOMMediaType = "application/vnd.cyclonedx+json"
+	// StatementMediaType designates structured evaluation assertion records.
+	StatementMediaType = "application/vnd.fak.collection.statement.v1+json"
+	annotationTitle    = "org.opencontainers.image.title"
+	annotationKind     = "io.fak.object.kind"
 )
 
+// Error describes structured operational failures with machine-readable error codes and targeted fields.
 type Error struct{ Code, Operation, Field, Message string }
 
+// Error formats the structured failure into a colon-delimited diagnostic message string.
 func (e *Error) Error() string                   { return e.Code + ": " + e.Operation + ": " + e.Message }
 func fail(code, op, field, message string) error { return &Error{code, op, field, message} }
+
+// Code extracts the machine-readable failure classifier token from an error value if present.
 func Code(err error) string {
 	var e *Error
 	if errors.As(err, &e) {
@@ -47,6 +64,7 @@ func Code(err error) string {
 	return ""
 }
 
+// Descriptor conforms to the OCI content descriptor specification identifying media types and content digests.
 type Descriptor struct {
 	MediaType    string            `json:"mediaType"`
 	Digest       string            `json:"digest"`
@@ -54,6 +72,8 @@ type Descriptor struct {
 	Annotations  map[string]string `json:"annotations,omitempty"`
 	ArtifactType string            `json:"artifactType,omitempty"`
 }
+
+// Manifest adheres to the OCI image manifest specification version 2 describing layers and configuration.
 type Manifest struct {
 	SchemaVersion int               `json:"schemaVersion"`
 	MediaType     string            `json:"mediaType"`
@@ -63,6 +83,8 @@ type Manifest struct {
 	Subject       *Descriptor       `json:"subject,omitempty"`
 	Annotations   map[string]string `json:"annotations,omitempty"`
 }
+
+// Object models an individual resource entry bundled within a collection manifest.
 type Object struct {
 	Name         string   `json:"name"`
 	Kind         string   `json:"kind"`
@@ -71,24 +93,31 @@ type Object struct {
 	Path         string   `json:"path"`
 	Dependencies []string `json:"dependencies,omitempty"`
 }
+
+// Config specifies collection metadata, profile schema version, and ordered component object descriptors.
 type Config struct {
 	Schema  string   `json:"schema"`
 	Name    string   `json:"name"`
 	Version string   `json:"version"`
 	Objects []Object `json:"objects"`
 }
+
+// Artifact encapsulates an in-memory OCI collection bundle alongside parsed manifest structures and blob content.
 type Artifact struct {
 	Manifest    Descriptor
 	RawManifest []byte
 	Parsed      Manifest
 	Blobs       map[string][]byte
 }
+
+// Receipt summarizes inspection outcomes, manifest digests, and activation state flags.
 type Receipt struct {
 	ManifestDigest string   `json:"manifest_digest"`
 	LayerDigests   []string `json:"layer_digests"`
 	Activated      bool     `json:"activated"`
 }
 
+// Digest computes the canonical sha256 hex string with sha256 prefix for arbitrary payload byte slices.
 func Digest(b []byte) string { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
 func descriptor(mt string, b []byte) Descriptor {
 	return Descriptor{MediaType: mt, Digest: Digest(b), Size: int64(len(b))}
@@ -129,6 +158,8 @@ func verifyBlob(d Descriptor, b []byte, op, field string) error {
 }
 func canonical(v any) ([]byte, error) { return json.Marshal(v) }
 
+// Invariant: collection building preserves content digests deterministically and produces valid OCI manifest layouts.
+// Build synthesizes an OCI collection artifact from configuration objects and payload byte maps.
 func Build(c Config, payloads map[string][]byte, annotations map[string]string) (Artifact, error) {
 	if c.Schema != ProfileVersion {
 		return Artifact{}, fail("CONFIG_VERSION", "build", "schema", "unsupported collection profile")
@@ -180,6 +211,9 @@ func Build(c Config, payloads map[string][]byte, annotations map[string]string) 
 	return Artifact{Manifest: md, RawManifest: mb, Parsed: m, Blobs: blobs}, nil
 }
 
+// Precondition: manifest payload and blob maps must provide valid JSON data and sha256 content hashes.
+// Postcondition: returns validated artifact records and an inert execution receipt without activating layers.
+// Inspect parses and validates an OCI manifest against payload blobs without executing runtime activations.
 func Inspect(raw []byte, blobs map[string][]byte) (Artifact, Receipt, error) {
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -300,6 +334,9 @@ func copyBlobs(m map[string][]byte) map[string][]byte {
 	return n
 }
 
+// Precondition: artifact manifest and constituent blobs must pass full structural validation before layout export.
+// Postcondition: creates an OCI image-layout compliant directory containing verified blobs and index manifest.
+// ExportLayout serializes an artifact into a conformant on-disk OCI layout directory hierarchy.
 func ExportLayout(dir string, a Artifact) error {
 	if _, _, err := Inspect(a.RawManifest, a.Blobs); err != nil {
 		return err
@@ -325,6 +362,10 @@ func ExportLayout(dir string, a Artifact) error {
 	}
 	return os.WriteFile(filepath.Join(dir, "oci-layout"), []byte("{\"imageLayoutVersion\":\"1.0.0\"}\n"), 0644)
 }
+
+// Precondition: directory must contain index.json, oci-layout, and verified blob storage paths.
+// Postcondition: returns the parsed artifact alongside an inert receipt without side-effect activation.
+// ImportLayout reads and validates an OCI layout directory returning parsed artifact payloads.
 func ImportLayout(dir string) (Artifact, Receipt, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "index.json"))
 	if err != nil {
@@ -358,7 +399,7 @@ func ImportLayout(dir string) (Artifact, Receipt, error) {
 	return Inspect(raw, bl)
 }
 
-// Client is a deliberately small OCI Distribution 1.1 client. Pull and Push only move bytes.
+// Client manages network transport operations against an OCI Distribution 1.1 compliant remote registry.
 type Client struct {
 	Base       string
 	HTTP       *http.Client
@@ -385,6 +426,10 @@ func (c Client) client() *http.Client {
 	}
 	return &http.Client{Timeout: 30 * time.Second}
 }
+
+// Precondition: artifact manifest and layers must pass structural validation before initiating upload.
+// Postcondition: blobs and manifest are successfully uploaded to the target repository reference.
+// Push uploads artifact blobs and manifests to the configured remote OCI registry endpoint.
 func (c Client) Push(reference string, a Artifact) error {
 	if _, _, e := Inspect(a.RawManifest, a.Blobs); e != nil {
 		return e
@@ -402,6 +447,9 @@ func (c Client) Push(reference string, a Artifact) error {
 	}
 	return nil
 }
+
+// Invariant: client registry resolution strictly requires canonical sha256 lowercase digest identifiers.
+// Resolve queries the remote registry via HEAD request to determine the content digest of a tag or reference.
 func (c Client) Resolve(reference string) (Descriptor, error) {
 	_, h, s, e := c.do("HEAD", "/manifests/"+url.PathEscape(reference), "", nil)
 	if e != nil || s/100 != 2 {
@@ -417,6 +465,10 @@ func (c Client) Resolve(reference string) (Descriptor, error) {
 	}
 	return Descriptor{MediaType: mediaType, Digest: d}, nil
 }
+
+// Precondition: reference must be an inspected sha256 digest string preventing ambiguous tag pulls.
+// Postcondition: downloads and returns the fully validated artifact alongside an inert receipt.
+// Pull downloads manifest descriptors and associated layer blobs by digest from the remote registry.
 func (c Client) Pull(reference string) (Artifact, Receipt, error) {
 	if !strings.HasPrefix(reference, "sha256:") {
 		return Artifact{}, Receipt{}, fail("DIGEST_REQUIRED", "pull", reference, "pull requires an inspected digest")
@@ -439,6 +491,10 @@ func (c Client) Pull(reference string) (Artifact, Receipt, error) {
 	}
 	return Inspect(raw, bl)
 }
+
+// Precondition: subject must be a valid sha256 digest string of an existing artifact manifest.
+// Postcondition: returns all matching content descriptors referring to the specified subject digest.
+// Referrers queries the registry for artifacts linked to the specified subject digest via referrers API or fallback tags.
 func (c Client) Referrers(subject string) ([]Descriptor, error) {
 	parse := func(b []byte) ([]Descriptor, error) {
 		var x struct {
@@ -461,6 +517,7 @@ func (c Client) Referrers(subject string) ([]Descriptor, error) {
 	return parse(b)
 }
 
+// MCPServer models the external server configuration schema for Model Context Protocol service definitions.
 type MCPServer struct {
 	Schema     string          `json:"$schema,omitempty"`
 	Name       string          `json:"name"`
@@ -471,6 +528,9 @@ type MCPServer struct {
 	Status     json.RawMessage `json:"status,omitempty"`
 }
 
+// Precondition: kind parameter must equal "mcp-service" and payload must contain valid JSON bytes.
+// Postcondition: returns the populated and validated MCPServer configuration structure.
+// ImportServerJSON parses and validates raw server.json payloads into typed MCPServer structures.
 func ImportServerJSON(kind string, b []byte) (MCPServer, error) {
 	if kind != "mcp-service" {
 		return MCPServer{}, fail("BRIDGE_SCOPE", "server-json", "kind", "server.json is only valid for MCP service objects")
@@ -484,6 +544,10 @@ func ImportServerJSON(kind string, b []byte) (MCPServer, error) {
 	}
 	return s, nil
 }
+
+// Precondition: kind parameter must equal "mcp-service" and server configuration must be initialized.
+// Postcondition: returns indented JSON configuration bytes representing the MCP server definition.
+// ExportServerJSON formats typed MCPServer structures into indented server.json configuration bytes.
 func ExportServerJSON(kind string, s MCPServer) ([]byte, error) {
 	if kind != "mcp-service" {
 		return nil, fail("BRIDGE_SCOPE", "server-json", "kind", "server.json is only valid for MCP service objects")
