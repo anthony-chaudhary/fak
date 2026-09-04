@@ -1,4 +1,10 @@
 // Package computetrace records bounded, opt-in compute events in a stable local artifact.
+//
+// Invariant: compute trace recording is fail-closed and bounded. When disabled
+// or uninitialized, tracing calls are zero-allocation no-ops and emit no events.
+// When enabled, recorders strictly enforce an upper bound on retained events;
+// excess events are dropped with dropped counters incremented, protecting host
+// memory from unbounded growth.
 package computetrace
 
 import (
