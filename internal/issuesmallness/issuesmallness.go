@@ -1,3 +1,5 @@
+// Package issuesmallness inspects issue descriptions to classify deliverable
+// and witness counts, ensuring tasks are scoped to atomic dispatchable units.
 package issuesmallness
 
 import (
@@ -8,12 +10,17 @@ import (
 )
 
 const (
+	// Schema identifies the JSON schema version emitted by the smallness linter.
 	Schema = "fak-issue-smallness-lint/1"
-	Pass   = "pass"
-	Warn   = "warn"
-	Fail   = "fail"
+	// Pass indicates the issue meets the single-deliverable and single-witness invariant.
+	Pass = "pass"
+	// Warn indicates two deliverables were found, requiring confirmation of one coherent unit.
+	Warn = "warn"
+	// Fail indicates three or more deliverables or an invalid witness count.
+	Fail = "fail"
 )
 
+// Result captures the outcome of linting an issue body.
 type Result struct {
 	Verdict       string   `json:"verdict"`
 	Count         int      `json:"count"`
@@ -24,18 +31,21 @@ type Result struct {
 	Reason        string   `json:"reason"`
 }
 
+// Issue represents an issue record with number, title, and body text.
 type Issue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 }
 
+// IssueReport bundles an issue's identifier and title with its lint Result.
 type IssueReport struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	Result
 }
 
+// OpenReport summarizes lint outcomes across a set of scanned open issues.
 type OpenReport struct {
 	Schema  string         `json:"schema"`
 	Mode    string         `json:"mode"`
@@ -50,6 +60,8 @@ var (
 	leadingVerbRE = regexp.MustCompile(`(?i)^(add|fix|remove|rewrite|refactor|create|build|update|write|implement|replace|delete|migrate|design|extend|wire|document|test|lint|register|surface|expose|ship)\b`)
 )
 
+// LintBody parses markdown sections in body, identifies deliverables and
+// witnesses, and returns a pass, warn, or fail Result.
 func LintBody(body string) Result {
 	goal := ExtractSection(body, "goal")
 	done := ExtractSection(body, "done condition", "done-condition", "acceptance")
@@ -98,6 +110,8 @@ func LintBody(body string) Result {
 	}
 }
 
+// ExtractSection scans markdown headings for the first section matching any
+// substring in headingSubstrings and returns its body content.
 func ExtractSection(body string, headingSubstrings ...string) string {
 	matches := headingRE.FindAllStringSubmatchIndex(body, -1)
 	for i, m := range matches {
@@ -122,6 +136,8 @@ func ExtractSection(body string, headingSubstrings ...string) string {
 	return ""
 }
 
+// FindDeliverables identifies distinct work deliverables from bullet points or
+// imperative verb clauses within section text.
 func FindDeliverables(section string) []string {
 	section = strings.TrimSpace(section)
 	if section == "" {
@@ -157,6 +173,8 @@ func FindDeliverables(section string) []string {
 	return []string{flat}
 }
 
+// ReportOpen runs LintBody across open issues, aggregates verdict counts,
+// and returns an OpenReport with non-passing issues sorted by number.
 func ReportOpen(issues []Issue) OpenReport {
 	counts := map[string]int{Pass: 0, Warn: 0, Fail: 0}
 	flagged := []IssueReport{}
@@ -172,6 +190,7 @@ func ReportOpen(issues []Issue) OpenReport {
 	return OpenReport{Schema: Schema, Mode: "open", Scanned: len(issues), Counts: counts, Flagged: flagged}
 }
 
+// HasFailReport reports whether an OpenReport contains at least one failing issue.
 func HasFailReport(r OpenReport) bool {
 	return r.Counts[Fail] > 0
 }
