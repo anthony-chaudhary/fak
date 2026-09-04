@@ -255,8 +255,12 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdTrajectory(args)
 	case "quantwatch":
 		cmdQuantwatch(args)
+	case "cubicquanteval":
+		cmdCubicQuantEval(args)
 	case "bitnetmeta":
 		cmdBitnetmeta(args)
+	case "codebookmeta":
+		cmdCodebookmeta(args)
 	case "work-delivery":
 		cmdWorkDelivery(args)
 	case "worktype":
@@ -332,6 +336,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdHeadlessLint(args)
 	case "hwgate-lint":
 		cmdHwGateLint(args)
+	case "ctxplans":
+		cmdCtxPlans(args)
 	case "check-tool-failure":
 		cmdCheckToolFailure(args)
 	case "doctor":
@@ -711,6 +717,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdLearningDebtDispatch(args)
 	case "code-debt":
 		cmdCodeDebt(args)
+	case "cloud-handoff", "cloudhandoff":
+		cmdCloudHandoff(args)
 	case "harness-debt-dispatch":
 		// The harness-strength fan-out (#4414, epic #4396, under self-ablation #607 /
 		// open ablation registry #2828): consume the sibling model-strength

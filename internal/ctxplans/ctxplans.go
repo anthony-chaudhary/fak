@@ -63,6 +63,9 @@ type Report struct {
 // deterministic: the same tree yields byte-identical output. A missing scan root
 // (no cmd/fak/main.go, no .claude/skills) is not an error — that source simply
 // contributes nothing, and Scan returns an empty report.
+//
+// Contract: Scan preserves the ordering invariant that returned Surfaces are
+// sorted deterministically by Kind then Name.
 func Scan(root string) (Report, error) {
 	directives, err := scanDirectives(filepath.Join(root, "cmd", "fak"))
 	if err != nil {
