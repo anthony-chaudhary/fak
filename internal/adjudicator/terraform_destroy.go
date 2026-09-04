@@ -47,7 +47,7 @@ func isTerraformDestroyArgRule(pr *ArgPredicate) bool {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "bash", "powershell", "shell_command", "functions.shell_command", "exec_command":
+	case "bash", "powershell", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command":
 	default:
 		return false
 	}

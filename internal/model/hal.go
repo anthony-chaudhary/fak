@@ -97,6 +97,9 @@ func (s *Session) Close() {
 		s.closeQwen35HALState()
 		if s.Backend != nil {
 			s.halClosed = true
+			if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
+				gr.GraphReset()
+			}
 			if b, ok := s.Backend.(batchBackend); ok {
 				b.FlushBatch()
 			}
@@ -660,11 +663,18 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// step is left uncaptured: its topology differs from the decode graph, and it never warms
 	// the logits path, so it must not be the step that instantiates the reused exec.
 	gr, canGraph := be.(graphBackend)
-	// The current CUDA GDN whole operation synchronizes before success, and the retained
-	// full-attention correctness bridge performs bounded host readback for partial RoPE /
-	// output gating. Neither is legal inside a reusable graph capture.
+	// Qwen hybrid decode is graph-replay safe when device-side partial RoPE and
+	// query-gate split backends are available with unscaled RoPE and pre-warmed state
+	// (s.qwen35HybridGraphSafe()). Unsafe hybrid configurations gracefully fall back
+	// to eager execution.
 	gpuLayers, isSplit := s.validateDenseGPULayers()
-	canGraph = canGraph && !cfg.IsQwen35Hybrid() && !isSplit
+	if cfg.IsQwen35Hybrid() && !s.qwen35HybridGraphSafe() {
+		if resetter, ok := be.(interface{ GraphReset() }); ok {
+			resetter.GraphReset()
+		}
+		s.halLogitsWarm = false
+	}
+	canGraph = canGraph && !isSplit && (!cfg.IsQwen35Hybrid() || s.qwen35HybridGraphSafe())
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()

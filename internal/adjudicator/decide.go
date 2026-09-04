@@ -159,18 +159,14 @@ type Policy struct {
 	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
 	AutoRepairSidestep bool
 
-	// DisableTestImmunity (opt-out, issue #10923) turns off the test-immunity
-	// gate that refuses write/edit/delete proposals targeting gating test suites
-	// under an implementation lane. Off by default (gate is active).
-	DisableTestImmunity bool
-	// TestLanes declares custom lane names that are explicitly designated as test
-	// lanes, exempting them from the test-immunity gate.
-	TestLanes []string
-	// ExemptLanes is an alias for TestLanes.
-	ExemptLanes []string
-	// Lane specifies the ambient/default lane for the policy if not provided in
-	// ToolCall.Meta.
+	// Lane specifies the active execution lane for test immunity checks.
 	Lane string
+	// TestLanes lists lanes designated as test/QA lanes exempt from test immunity.
+	TestLanes []string
+	// ExemptLanes lists lanes explicitly exempt from test immunity.
+	ExemptLanes []string
+	// DisableTestImmunity turns off the test-immunity gate.
+	DisableTestImmunity bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -474,9 +470,8 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 	}
 
-	// TEST_IMMUNITY (#10923): refuse write/edit/delete proposals targeting gating
-	// test suites (*_test.go, testdata/**, testing fixtures/configs) while running
-	// under an implementation lane (or non-test lane).
+	// TEST_IMMUNITY: refuses write, edit, or delete proposals targeting gating test suites
+	// under an implementation lane (#10923).
 	if v, ok := a.testImmunityVerdict(ctx, p, c, lowerTool, args); ok {
 		return v
 	}

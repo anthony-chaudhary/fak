@@ -1,6 +1,5 @@
 {
   "version": "fak-policy/v1",
-
   "allow": [
     "Bash",
     "BashOutput",
@@ -20,7 +19,6 @@
     "ExitPlanMode",
     "Skill",
     "SlashCommand",
-
     "Agent",
     "AskUserQuestion",
     "DeferredToolPlaceholder",
@@ -72,7 +70,6 @@
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
     "ReadMcpResourceDirTool",
-
     "Workflow",
     "EnterWorktree",
     "ExitWorktree",
@@ -87,7 +84,6 @@
     "wait",
     "wait_agent",
     "close_agent",
-
     "mcp__dos__dos_verify",
     "mcp__dos__dos_arbitrate",
     "mcp__dos__dos_recall",
@@ -189,7 +185,6 @@
     "fak_context_spans",
     "fak_context_restore",
     "fak_resume_history",
-
     "mcp__playwright__browser_snapshot",
     "mcp__playwright__browser_navigate",
     "mcp__playwright__browser_take_screenshot",
@@ -200,7 +195,6 @@
     "mcp__playwright__browser_select_option",
     "mcp__playwright__browser_file_upload",
     "mcp__playwright__browser_press_key",
-
     "bash",
     "read",
     "write",
@@ -220,12 +214,10 @@
     "skill",
     "question",
     "lsp",
-
     "execute_code",
     "write_file",
     "edit_file"
   ],
-
   "allow_prefix": [
     "read_",
     "get_",
@@ -236,208 +228,665 @@
     "web_",
     "file_"
   ],
-
   "deny": {
     "delete_file": "POLICY_BLOCK",
     "mcp__atlassian__confluence_delete_page": "POLICY_BLOCK",
     "mcp__atlassian__confluence_delete_attachment": "POLICY_BLOCK"
   },
-
   "arg_rules": [
-    { "tool": "execute_code", "arg": "code", "deny_regex": "rm\\s+-rf|sudo|os\\.system\\(|subprocess\\.|:(){:|:&};:", "reason": "POLICY_BLOCK",
-      "fix": "run the programmatic step without a shell escape: this arg is for pure computation, so recursive forced deletes, local privilege escalation, the process-spawning standard-library entry points and fork-bomb shapes are all refused here whatever the intent. Use the file/edit tools for writes and the shell tools — which carry their own argument rules, including the MENTION carve-outs this rule does not have — for real commands. Worded without the literal tokens so that quoting this refusal does not re-trip the rule that produced it" },
-
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
-      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) — cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work — that last one is operator-only" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
-      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK",
-      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too — describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator — a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "(?i)\\b(?:Select-Object|Get-ChildItem|Get-Content|Get-Item|Get-ItemProperty|Get-Process|Get-Command|Where-Object|ForEach-Object|Measure-Object|Sort-Object|Group-Object|Format-Table|Format-List|Out-File|Set-Content|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item|Rename-Item|Test-Path|Set-Location|Get-Location|Select-String|Write-Output|Write-Host|Invoke-WebRequest|Invoke-RestMethod)\\b", "reason": "SHELL_DIALECT", "advisory": true,
-      "fix": "PowerShell cmdlet submitted to the Bash tool — it fails `command not found` (exit 127). Use the PowerShell tool for cmdlet pipelines, or the POSIX equivalent in Bash (Select-Object->head/sed, Where-Object->grep, Measure-Object->wc, Get-Content->cat, Get-ChildItem->ls). This rule is on LOGGED TRIAL (advisory): the call proceeds and fails in-shell, and the would-deny is recorded on the admitted verdict instead of ending the turn. It is a dialect LINT, not a danger class — by its own account the whole consequence of allowing it is exit 127, so it prevents nothing that the shell does not prevent one millisecond later." },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\bfind\\s+(?:/|~|\\$HOME|/mnt|/proc)(?:\\s|$)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or home hangs the session on Windows and network mounts; scope find to a directory inside the repository (e.g. find ./internal) or use git ls-files / the harness glob tool" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "Bash", "arg": "command", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK",
-      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included — cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work — that last one is operator-only" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b", "reason": "POLICY_BLOCK",
-      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bClear-Content\\b", "reason": "POLICY_BLOCK",
-      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one — it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too — describe it in words, or use the harness's own file tools, when you only need to TALK about it" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern — a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
-      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool" },
-
-    { "tool": "shell_command", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
-      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) — cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work — that last one is operator-only" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
-      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK",
-      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too — describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator — a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK",
-      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included — cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work — that last one is operator-only" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b", "reason": "POLICY_BLOCK",
-      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bClear-Content\\b", "reason": "POLICY_BLOCK",
-      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one — it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too — describe it in words, or use the harness's own file tools, when you only need to TALK about it" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern — a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
-      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
-      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) — cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work — that last one is operator-only" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
-      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK",
-      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too — describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator — a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK",
-      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included — cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work — that last one is operator-only" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b", "reason": "POLICY_BLOCK",
-      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bClear-Content\\b", "reason": "POLICY_BLOCK",
-      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one — it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too — describe it in words, or use the harness's own file tools, when you only need to TALK about it" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern — a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
-      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool" },
-
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
-      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) — cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work — that last one is operator-only" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
-      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK",
-      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too — describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator — a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK",
-      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included — cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work — that last one is operator-only" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b", "reason": "POLICY_BLOCK",
-      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bClear-Content\\b", "reason": "POLICY_BLOCK",
-      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one — it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too — describe it in words, or use the harness's own file tools, when you only need to TALK about it" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern — a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
-      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool" },
-
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK",
-      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) — cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work — that last one is operator-only" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])", "reason": "POLICY_BLOCK",
-      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK",
-      "fix": "run the command without sudo — only a LOCAL escalation is refused (a remote one like `ssh host 'sudo …'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK",
-      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK",
-      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too — describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator — a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK",
-      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK",
-      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included — cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work — that last one is operator-only" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b", "reason": "POLICY_BLOCK",
-      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bClear-Content\\b", "reason": "POLICY_BLOCK",
-      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one — it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too — describe it in words, or use the harness's own file tools, when you only need to TALK about it" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK",
-      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern — a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK",
-      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell — printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK",
-      "fix": "produce the destroy plan for review instead: terraform plan -destroy — that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only" },
-    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)", "reason": "POLICY_BLOCK",
-      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool" },
-
-    { "tool": "mcp__fak__fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
-      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" },
-    { "tool": "mcp__fak_guard__fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
-      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" },
-    { "tool": "fak_fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
-      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" }
+    {
+      "tool": "execute_code",
+      "arg": "code",
+      "deny_regex": "rm\\s+-rf|sudo|os\\.system\\(|subprocess\\.|:(){:|:&};:",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the programmatic step without a shell escape: this arg is for pure computation, so recursive forced deletes, local privilege escalation, the process-spawning standard-library entry points and fork-bomb shapes are all refused here whatever the intent. Use the file/edit tools for writes and the shell tools \u2014 which carry their own argument rules, including the MENTION carve-outs this rule does not have \u2014 for real commands. Worded without the literal tokens so that quoting this refusal does not re-trip the rule that produced it"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK",
+      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) \u2014 cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the command without sudo \u2014 only a LOCAL escalation is refused (a remote one like `ssh host 'sudo \u2026'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd",
+      "reason": "POLICY_BLOCK",
+      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK",
+      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too \u2014 describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator \u2014 a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(?:Select-Object|Get-ChildItem|Get-Content|Get-Item|Get-ItemProperty|Get-Process|Get-Command|Where-Object|ForEach-Object|Measure-Object|Sort-Object|Group-Object|Format-Table|Format-List|Out-File|Set-Content|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item|Rename-Item|Test-Path|Set-Location|Get-Location|Select-String|Write-Output|Write-Host|Invoke-WebRequest|Invoke-RestMethod)\\b",
+      "reason": "SHELL_DIALECT",
+      "advisory": true,
+      "fix": "PowerShell cmdlet submitted to the Bash tool \u2014 it fails `command not found` (exit 127). Use the PowerShell tool for cmdlet pipelines, or the POSIX equivalent in Bash (Select-Object->head/sed, Where-Object->grep, Measure-Object->wc, Get-Content->cat, Get-ChildItem->ls). This rule is on LOGGED TRIAL (advisory): the call proceeds and fails in-shell, and the would-deny is recorded on the admitted verdict instead of ending the turn. It is a dialect LINT, not a danger class \u2014 by its own account the whole consequence of allowing it is exit 127, so it prevents nothing that the shell does not prevent one millisecond later."
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bfind\\s+(?:/|~|\\$HOME|/mnt|/proc)(?:\\s|$)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or home hangs the session on Windows and network mounts; scope find to a directory inside the repository (e.g. find ./internal) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": ">>?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included \u2014 cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bClear-Content\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one \u2014 it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too \u2014 describe it in words, or use the harness's own file tools, when you only need to TALK about it"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern \u2014 a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell \u2014 printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "PowerShell",
+      "arg": "command",
+      "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK",
+      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) \u2014 cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the command without sudo \u2014 only a LOCAL escalation is refused (a remote one like `ssh host 'sudo \u2026'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd",
+      "reason": "POLICY_BLOCK",
+      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK",
+      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too \u2014 describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator \u2014 a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": ">>?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included \u2014 cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bClear-Content\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one \u2014 it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too \u2014 describe it in words, or use the harness's own file tools, when you only need to TALK about it"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern \u2014 a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell \u2014 printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK",
+      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) \u2014 cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the command without sudo \u2014 only a LOCAL escalation is refused (a remote one like `ssh host 'sudo \u2026'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd",
+      "reason": "POLICY_BLOCK",
+      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK",
+      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too \u2014 describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator \u2014 a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": ">>?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included \u2014 cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bClear-Content\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one \u2014 it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too \u2014 describe it in words, or use the harness's own file tools, when you only need to TALK about it"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern \u2014 a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell \u2014 printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "functions.shell_command",
+      "arg": "command",
+      "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK",
+      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) \u2014 cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the command without sudo \u2014 only a LOCAL escalation is refused (a remote one like `ssh host 'sudo \u2026'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd",
+      "reason": "POLICY_BLOCK",
+      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK",
+      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too \u2014 describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator \u2014 a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": ">>?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included \u2014 cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bClear-Content\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one \u2014 it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too \u2014 describe it in words, or use the harness's own file tools, when you only need to TALK about it"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern \u2014 a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell \u2014 printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK",
+      "fix": "delete exact files without -r/-f (rm <file>), or move them aside (mv <path> <trash-dir>). Two routes are ALREADY admitted with no operator: (1) a recursive delete whose targets all sit strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS) \u2014 cleaning up your own session scratch is routine work, not a fatal action; (2) a force-only delete (no -r) of ONE explicit literal path, which falls through to the reversibility preview-confirm gate. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a glob, a $VAR or command-substitution target, several paths at once, and any recursive delete of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
+      "reason": "POLICY_BLOCK",
+      "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "run the command without sudo \u2014 only a LOCAL escalation is refused (a remote one like `ssh host 'sudo \u2026'` is allowed; the floor governs this host only); if local elevation is genuinely required, print the exact command and ask the operator to run it"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd",
+      "reason": "POLICY_BLOCK",
+      "fix": "writing to a raw block device, or laying a new filesystem over one, is refused: it destroys every byte on the target and nothing is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these verbs anywhere on a shell command line trips it, including inside a quoted grep pattern, a commit message or a here-doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these verbs, use the harness's own file and search tools instead of a shell command line; when you genuinely need the device operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK",
+      "fix": "a fork-bomb shaped function definition is refused: it forks until the host stops responding, and nothing running on it is recoverable afterwards. There is no sanctioned way to RUN one. Unlike the download-pipe and delete rules this one has no inert-MENTION carve-out yet, so quoting the literal in a commit message, a grep pattern or a doc trips it too \u2014 describe the shape in words, or break up the token, when you only need to TALK about it. This text deliberately omits the literal so that quoting the refusal does not re-trip the rule"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: curl -o <file> <url>; cat <file>; sh <file>. Only a real download piped into an interpreter at a command boundary is refused: an inert MENTION of the pattern is already admitted with no operator \u2014 a quoted argument (echo, a grep pattern, a commit message, a here-doc), a URL that is merely fetched to a file, and a pipe into a non-interpreter (jq, tee, grep) all pass"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "write inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": ">>?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "redirect to a path inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK",
+      "fix": "copy/move to a destination inside the working tree (or the harness scratchpad); out-of-tree writes are refused by policy"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "remove exact items without -Recurse/-Force (Remove-Item <file>), or move them aside. A recursive removal is ALREADY admitted when every target sits strictly BELOW a declared harness scratchpad root (FAK_GUARD_SCRATCHPAD_ROOTS), Windows backslash paths included \u2014 cleaning up your own session scratch is routine work, not a fatal action. Still refused because the blast radius is not provably bounded: the scratchpad root itself, a wildcard, a comma-separated -Path list, an unterminated quote, any target outside the declared roots, and any recursive/forced removal of real work \u2014 that last one is operator-only"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "formatting a volume, wiping a disk or initialising one is refused: it destroys the filesystem outright and nothing that was on it is recoverable, so it stays operator-only. This rule is a RAW pattern match with no structural decider, so unlike the delete, download-pipe, elevation and terraform rules it CANNOT tell a use from a MENTION: naming one of these cmdlets anywhere on a command line trips it, including inside a quoted -Pattern argument, a commit message or a doc. Echoing the command for an operator to read is refused for that same reason, so reaching for it just repeats the refusal. When you only need to READ or WRITE text that names these cmdlets, use the harness's own file and search tools instead of a shell command line; when you genuinely need the volume operation itself, describe it in words, or write it into a file with those tools and point the operator at that file"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bClear-Content\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "emptying a file in place is refused: the previous contents are gone with no preview and no undo. This is a FILE operation, not a disk/volume one \u2014 it used to be bundled with Format-Volume, so the refusal told you to fetch an operator for something no operator needs to approve. Three routes are ALREADY admitted with no operator: rewrite the file with the content you want (Set-Content -Path <file> -Value ''), write it with the harness's own file tools, or move the old file aside (Move-Item) and create a fresh one. Ask the operator only if you genuinely need the in-place truncation itself. Like the disk and fork-bomb rules this one is a RAW pattern match with no structural decider, so it cannot tell a use from a MENTION either: naming the cmdlet in a commit message, a grep pattern or a doc trips it too \u2014 describe it in words, or use the harness's own file tools, when you only need to TALK about it"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "download to a file first, inspect it, then run the inspected file: Invoke-WebRequest -OutFile <file> <url>; Get-Content <file>; & <file>. Fetching to a file and reading it back are both already admitted with no operator, and so is an inert MENTION of the pattern \u2014 a quoted argument, a grep pattern, a commit message. What is refused is only the single step that executes bytes nobody has read"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "elevation is operator-only BY DESIGN: the floor has no interactive-vs-headless seam to approve it in-band (internal/policy TestToolCallEnvelopeHasNoBypassSeam, #2921). Print the exact command and ask the operator to run it in an elevated shell \u2014 printing, grepping or documenting the command is admitted; only a real Start-Process invocation is refused (#2343)"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "produce the destroy plan for review instead: terraform plan -destroy \u2014 that plan is read-only and IS admitted, as are naming, grepping or documenting the command and every read-only subcommand (show/state/output/validate). Only a real teardown is refused: terraform destroy, or its exact equivalent terraform apply -destroy. Applying one is operator-only"
+    },
+    {
+      "tool": "functions.exec_command",
+      "arg": "cmd",
+      "deny_regex": "(?i)\\bGet-ChildItem\\b[^|;\\n]*(?:-Recurse\\b[^|;\\n]*(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)|(?:~|\\$HOME|\\$env:USERPROFILE|[A-Za-z]:[\\\\/]Users)[^|;\\n]*-Recurse\\b)",
+      "reason": "POLICY_BLOCK",
+      "fix": "unbounded recursive directory traversal from root or user profile hangs the session on Windows (OneDrive, AppData, deep cache hierarchies); scope Get-ChildItem to a directory inside the repository (e.g. Get-ChildItem -Path . -Recurse) or use git ls-files / the harness glob tool; this rule is a raw pattern match with no structural decider, so a quoted mention is also refused"
+    },
+    {
+      "tool": "mcp__fak__fak_memory_run",
+      "arg": "apply",
+      "deny_regex": "^(?i:true)$",
+      "reason": "POLICY_BLOCK",
+      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL \u2014 the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent"
+    },
+    {
+      "tool": "mcp__fak_guard__fak_memory_run",
+      "arg": "apply",
+      "deny_regex": "^(?i:true)$",
+      "reason": "POLICY_BLOCK",
+      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL \u2014 the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent"
+    },
+    {
+      "tool": "fak_fak_memory_run",
+      "arg": "apply",
+      "deny_regex": "^(?i:true)$",
+      "reason": "POLICY_BLOCK",
+      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL \u2014 the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent"
+    }
   ],
-
   "egress": {
     "research_allow_hosts": [
       "github.com",
@@ -445,7 +894,6 @@
       "api.github.com"
     ]
   },
-
   "self_modify_globs": [
     ".git/",
     ".fak/guard/",
@@ -471,7 +919,6 @@
     ".kube/config",
     ".terraformrc"
   ],
-
   "redact_fields": [
     "password",
     "secret",

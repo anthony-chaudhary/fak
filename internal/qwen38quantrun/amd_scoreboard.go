@@ -3,8 +3,11 @@ package qwen38quantrun
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 const (
@@ -22,33 +25,39 @@ type AMDScoreboardInput struct {
 }
 
 type AMDArmReceipt struct {
-	Name               string               `json:"name"`
-	Engine             string               `json:"engine"`
-	Backend            string               `json:"backend"`
-	Runtime            string               `json:"runtime"`
-	ComparatorOnly     bool                 `json:"comparator_only"`
-	FallbackActive     bool                 `json:"fallback_active"`
-	ArtifactSHA256     string               `json:"artifact_sha256"`
-	PromptSHA256       string               `json:"prompt_sha256"`
-	PromptTokenIDs     []int                `json:"prompt_token_ids"`
-	ContextTokens      int                  `json:"context_tokens"`
-	ContextBudgetBytes uint64               `json:"context_budget_bytes"`
-	KVTypeK            string               `json:"kv_type_k"`
-	KVTypeV            string               `json:"kv_type_v"`
-	KVOffload          string               `json:"kv_offload"`
-	FlashAttention     bool                 `json:"flash_attention"`
-	GPUMemoryBudget    uint64               `json:"gpu_memory_budget_bytes"`
-	HostSpillPolicy    string               `json:"host_spill_policy"`
-	Temperature        float64              `json:"temperature"`
-	PrefillTokens      int                  `json:"prefill_tokens"`
-	DecodeTokens       int                  `json:"decode_tokens"`
-	Hardware           string               `json:"hardware"`
-	SoftwareRevision   string               `json:"software_revision"`
-	BuildFlags         []string             `json:"build_flags"`
-	PeakRSSBytes       uint64               `json:"peak_rss_bytes"`
-	PeakVRAMBytes      uint64               `json:"peak_vram_bytes"`
-	ResidentModelBytes uint64               `json:"resident_model_bytes"`
-	Trials             []AMDScoreboardTrial `json:"trials"`
+	Name                string               `json:"name"`
+	Engine              string               `json:"engine"`
+	Backend             string               `json:"backend"`
+	Runtime             string               `json:"runtime"`
+	ComparatorOnly      bool                 `json:"comparator_only"`
+	FallbackActive      bool                 `json:"fallback_active"`
+	ArtifactSHA256      string               `json:"artifact_sha256"`
+	PromptSHA256        string               `json:"prompt_sha256"`
+	PromptTokenIDs      []int                `json:"prompt_token_ids"`
+	ContextTokens       int                  `json:"context_tokens"`
+	ContextBudgetBytes  uint64               `json:"context_budget_bytes"`
+	KVTypeK             string               `json:"kv_type_k"`
+	KVTypeV             string               `json:"kv_type_v"`
+	KVOffload           string               `json:"kv_offload"`
+	FlashAttention      bool                 `json:"flash_attention"`
+	GPUMemoryBudget     uint64               `json:"gpu_memory_budget_bytes"`
+	HostSpillPolicy     string               `json:"host_spill_policy"`
+	Temperature         float64              `json:"temperature"`
+	TopP                float64              `json:"top_p"`
+	PrefillTokens       int                  `json:"prefill_tokens"`
+	DecodeTokens        int                  `json:"decode_tokens"`
+	Hardware            string               `json:"hardware"`
+	SoftwareRevision    string               `json:"software_revision"`
+	BuildFlags          []string             `json:"build_flags"`
+	PeakRSSBytes        uint64               `json:"peak_rss_bytes"`
+	PeakVRAMBytes       uint64               `json:"peak_vram_bytes"`
+	ResidentModelBytes  uint64               `json:"resident_model_bytes"`
+	PromptPacketDigest  string               `json:"prompt_packet_digest,omitempty"`
+	TokenizerDigest     string               `json:"tokenizer_digest,omitempty"`
+	PromptPacket        *PromptTokenPacket   `json:"prompt_packet,omitempty"`
+	DeterministicTokens bool                 `json:"deterministic_tokens,omitempty"`
+	SelectedTokenLogits bool                 `json:"selected_token_logits,omitempty"`
+	Trials              []AMDScoreboardTrial `json:"trials"`
 }
 
 type AMDScoreboardTrial struct {
@@ -60,6 +69,8 @@ type AMDScoreboardTrial struct {
 	WarmDecodeTokensPerSecond float64   `json:"warm_decode_tokens_per_second"`
 	OutputTokenIDs            []int     `json:"output_token_ids"`
 	Logits                    []float64 `json:"logits"`
+	SelectedTokenIDs          []int     `json:"selected_token_ids,omitempty"`
+	SelectedTokenLogits       []float64 `json:"selected_token_logits,omitempty"`
 	H2DBytes                  uint64    `json:"h2d_bytes"`
 	D2HBytes                  uint64    `json:"d2h_bytes"`
 	D2DBytes                  uint64    `json:"d2d_bytes"`
@@ -134,6 +145,19 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if in.Candidate.ArtifactSHA256 != in.Reference.ArtifactSHA256 {
 		add("artifact-mismatch")
 	}
+	if in.Candidate.TokenizerDigest != in.Reference.TokenizerDigest {
+		add("tokenizer-digest-mismatch")
+	}
+	if in.Candidate.PromptPacketDigest != in.Reference.PromptPacketDigest {
+		add("prompt-packet-mismatch")
+	}
+	if in.Candidate.PromptPacket != nil && in.Reference.PromptPacket != nil {
+		if err := ValidatePromptPacketAttestation(*in.Candidate.PromptPacket, *in.Reference.PromptPacket); err != nil {
+			add("prompt-packet-mismatch")
+		}
+	} else if (in.Candidate.PromptPacket != nil) != (in.Reference.PromptPacket != nil) {
+		add("prompt-packet-mismatch")
+	}
 	if in.Candidate.PromptSHA256 != in.Reference.PromptSHA256 || !slices.Equal(in.Candidate.PromptTokenIDs, in.Reference.PromptTokenIDs) {
 		add("prompt-or-tokenization-mismatch")
 	}
@@ -164,16 +188,30 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if len(in.Candidate.Trials) == len(in.Reference.Trials) {
 		for i := range in.Candidate.Trials {
 			c, r := in.Candidate.Trials[i], in.Reference.Trials[i]
-			if c.Repetition != r.Repetition || !slices.Equal(c.OutputTokenIDs, r.OutputTokenIDs) {
+			cTokens, rTokens := c.OutputTokenIDs, r.OutputTokenIDs
+			if len(cTokens) == 0 && len(c.SelectedTokenIDs) > 0 {
+				cTokens = c.SelectedTokenIDs
+			}
+			if len(rTokens) == 0 && len(r.SelectedTokenIDs) > 0 {
+				rTokens = r.SelectedTokenIDs
+			}
+			if c.Repetition != r.Repetition || !slices.Equal(cTokens, rTokens) {
 				add("output-token-mismatch")
 				continue
 			}
-			if len(c.Logits) != len(r.Logits) {
+			cLogits, rLogits := c.Logits, r.Logits
+			if len(cLogits) == 0 && len(c.SelectedTokenLogits) > 0 {
+				cLogits = c.SelectedTokenLogits
+			}
+			if len(rLogits) == 0 && len(r.SelectedTokenLogits) > 0 {
+				rLogits = r.SelectedTokenLogits
+			}
+			if len(cLogits) != len(rLogits) {
 				add("logit-shape-mismatch")
 				continue
 			}
-			for j := range c.Logits {
-				if math.Abs(c.Logits[j]-r.Logits[j]) > in.LogitTolerance {
+			for j := range cLogits {
+				if math.Abs(cLogits[j]-rLogits[j]) > in.LogitTolerance {
 					add("logit-tolerance-exceeded")
 					break
 				}
@@ -209,13 +247,21 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 			add(prefix + "trial-index-invalid")
 		}
 		seen[t.Repetition] = true
-		if !finitePositive(t.ColdSetupSeconds) || !finitePositive(t.PrefillSeconds) || !finitePositive(t.PrefillTokensPerSecond) || !finitePositive(t.WarmDecodeSeconds) || !finitePositive(t.WarmDecodeTokensPerSecond) || len(t.OutputTokenIDs) != arm.DecodeTokens || len(t.Logits) == 0 {
+		tokens := t.OutputTokenIDs
+		if len(tokens) == 0 && len(t.SelectedTokenIDs) > 0 {
+			tokens = t.SelectedTokenIDs
+		}
+		logits := t.Logits
+		if len(logits) == 0 && len(t.SelectedTokenLogits) > 0 {
+			logits = t.SelectedTokenLogits
+		}
+		if !finitePositive(t.ColdSetupSeconds) || !finitePositive(t.PrefillSeconds) || !finitePositive(t.PrefillTokensPerSecond) || !finitePositive(t.WarmDecodeSeconds) || !finitePositive(t.WarmDecodeTokensPerSecond) || len(tokens) != arm.DecodeTokens || len(logits) == 0 {
 			add(prefix + "trial-evidence-incomplete")
 		}
 		if t.H2DBytes == 0 || t.D2HBytes == 0 || t.QueueSubmissions == 0 {
 			add(prefix + "transfer-or-submission-accounting-missing")
 		}
-		for _, v := range t.Logits {
+		for _, v := range logits {
 			if math.IsNaN(v) || math.IsInf(v, 0) {
 				add(prefix + "non-finite-logit")
 			}
@@ -258,6 +304,88 @@ func ValidateAMDScoreboardReport(report AMDScoreboardReport) error {
 	}
 	if !report.Comparable && (report.Verdict != "not-comparable" || len(report.Reasons) == 0 || report.ReferenceOverCandidate != nil) {
 		return errors.New("not-comparable scoreboard must carry reasons and suppress ratios")
+	}
+	return nil
+}
+
+// CaptureAMDScoreboardTrial captures one benchmark trial from a native inference receipt.
+func CaptureAMDScoreboardTrial(rep int, receipt *model.NativeInferenceReceipt, coldSetup, prefillTokPerSec, decodeTokPerSec float64, h2d, d2h, d2d, queueSubmissions uint64) (AMDScoreboardTrial, error) {
+	if receipt == nil {
+		return AMDScoreboardTrial{}, errors.New("receipt cannot be nil")
+	}
+	return AMDScoreboardTrial{
+		Repetition:                rep,
+		ColdSetupSeconds:          coldSetup,
+		PrefillSeconds:            receipt.PrefillSeconds,
+		PrefillTokensPerSecond:    prefillTokPerSec,
+		WarmDecodeSeconds:         receipt.DecodeSeconds,
+		WarmDecodeTokensPerSecond: decodeTokPerSec,
+		OutputTokenIDs:            slices.Clone(receipt.TokenIDs),
+		Logits:                    slices.Clone(receipt.TokenLogprobs),
+		SelectedTokenIDs:          slices.Clone(receipt.TokenIDs),
+		SelectedTokenLogits:       slices.Clone(receipt.TokenLogprobs),
+		H2DBytes:                  h2d,
+		D2HBytes:                  d2h,
+		D2DBytes:                  d2d,
+		QueueSubmissions:          queueSubmissions,
+	}, nil
+}
+
+// ValidateTrialTokensAndLogits verifies that trial c and r have matching OutputTokenIDs and matching Logits within tolerance.
+func ValidateTrialTokensAndLogits(c, r AMDScoreboardTrial, tolerance float64) error {
+	if !slices.Equal(c.OutputTokenIDs, r.OutputTokenIDs) {
+		return errors.New("trial output token IDs mismatch")
+	}
+	if len(c.Logits) != len(r.Logits) {
+		return errors.New("trial logits length mismatch")
+	}
+	for j := range c.Logits {
+		if math.Abs(c.Logits[j]-r.Logits[j]) > tolerance {
+			return fmt.Errorf("logit delta %f exceeds tolerance %f at index %d", math.Abs(c.Logits[j]-r.Logits[j]), tolerance, j)
+		}
+	}
+	return nil
+}
+
+// ValidateAMDScoreboardDivergence verifies that a scoreboard report correctly reflects a diverged or non-comparable run.
+func ValidateAMDScoreboardDivergence(report AMDScoreboardReport) error {
+	if report.Comparable {
+		return errors.New("expected report to not be comparable")
+	}
+	if report.Verdict != "diverged" && report.Verdict != "not-comparable" {
+		return fmt.Errorf("expected verdict 'diverged' or 'not-comparable', got %q", report.Verdict)
+	}
+	if len(report.Reasons) == 0 {
+		return errors.New("diverged scoreboard report must carry reasons")
+	}
+	if report.ReferenceOverCandidate != nil {
+		return errors.New("diverged scoreboard report must suppress comparison ratios")
+	}
+	return nil
+}
+
+// ValidateTokenEquivalence verifies that two token ID slices match exactly.
+func ValidateTokenEquivalence(a, b []int) error {
+	if len(a) != len(b) {
+		return fmt.Errorf("token length mismatch: %d != %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return fmt.Errorf("token ID mismatch at index %d: %d != %d", i, a[i], b[i])
+		}
+	}
+	return nil
+}
+
+// ValidateLogitsTolerance verifies that two float64 logit slices match within tolerance.
+func ValidateLogitsTolerance(a, b []float64, tol float64) error {
+	if len(a) != len(b) {
+		return fmt.Errorf("logit shape mismatch: %d != %d", len(a), len(b))
+	}
+	for i := range a {
+		if math.Abs(a[i]-b[i]) > tol {
+			return fmt.Errorf("logit tolerance exceeded at index %d: %f vs %f (diff %f > %f)", i, a[i], b[i], math.Abs(a[i]-b[i]), tol)
+		}
 	}
 	return nil
 }

@@ -30,6 +30,8 @@ helpers:
   release_publish: tools/release_publish.py
   # /release operator status — read-only release readiness + stable lag fold.
   release_status: tools/release_status.py
+  # /release next — inspect and sync in-flight WIP in docs/releases/NEXT.md.
+  release_next: tools/release_next.py
   # /release --from-manifest — validate producer manifest + derive explicit pathspec.
   release_manifest: tools/release_manifest.py
   # /release Step 0.5 + guard — the single-writer release lock. acquire serializes

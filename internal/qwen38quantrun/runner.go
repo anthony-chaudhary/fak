@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
 )
 
@@ -24,8 +25,10 @@ type Config struct {
 	// NativeDecodeTrace requests the buffered fak-native token-commit receipt.
 	// It never enables streaming or infers tokens from response fragments.
 	NativeDecodeTrace bool
-	BeforeTrial       func(context.Context, qwen38quant.Fixture, int) error
-	Sample            func(context.Context) (ResourceSample, error)
+	// NativeInferenceReceipt requests the model.NativeInferenceReceipt debug payload.
+	NativeInferenceReceipt bool
+	BeforeTrial            func(context.Context, qwen38quant.Fixture, int) error
+	Sample                 func(context.Context) (ResourceSample, error)
 }
 
 const LongDecodeWorkload = "long_output_decode"
@@ -36,21 +39,22 @@ type ResourceSample struct {
 }
 
 type Result struct {
-	FixtureID         string              `json:"fixture_id"`
-	Workload          string              `json:"workload"`
-	Repeat            int                 `json:"repeat"`
-	LatencyMS         float64             `json:"latency_ms"`
-	Usage             map[string]int      `json:"usage,omitempty"`
-	Quality           string              `json:"quality"`
-	Failure           string              `json:"failure,omitempty"`
-	Output            string              `json:"output,omitempty"`
-	ToolName          string              `json:"tool_name,omitempty"`
-	ToolArgs          map[string]any      `json:"tool_args,omitempty"`
-	Phase             string              `json:"phase,omitempty"`
-	CachedInputTokens int                 `json:"cached_input_tokens,omitempty"`
-	Resource          ResourceSample      `json:"resource,omitempty"`
-	DecodeTrace       *DecodeTrace        `json:"decode_trace,omitempty"`
-	DecodeWindows     *DecodeWindowReport `json:"decode_windows,omitempty"`
+	FixtureID              string                        `json:"fixture_id"`
+	Workload               string                        `json:"workload"`
+	Repeat                 int                           `json:"repeat"`
+	LatencyMS              float64                       `json:"latency_ms"`
+	Usage                  map[string]int                `json:"usage,omitempty"`
+	Quality                string                        `json:"quality"`
+	Failure                string                        `json:"failure,omitempty"`
+	Output                 string                        `json:"output,omitempty"`
+	ToolName               string                        `json:"tool_name,omitempty"`
+	ToolArgs               map[string]any                `json:"tool_args,omitempty"`
+	Phase                  string                        `json:"phase,omitempty"`
+	CachedInputTokens      int                           `json:"cached_input_tokens,omitempty"`
+	Resource               ResourceSample                `json:"resource,omitempty"`
+	DecodeTrace            *DecodeTrace                  `json:"decode_trace,omitempty"`
+	DecodeWindows          *DecodeWindowReport           `json:"decode_windows,omitempty"`
+	NativeInferenceReceipt *model.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
 }
 
 type Runner struct{ Client *http.Client }
@@ -70,7 +74,8 @@ type chatResponse struct {
 		CachedTokens int
 	}
 	Fak *struct {
-		DecodeTrace *DecodeTrace `json:"decode_trace,omitempty"`
+		DecodeTrace            *DecodeTrace                  `json:"decode_trace,omitempty"`
+		NativeInferenceReceipt *model.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
 	} `json:"fak,omitempty"`
 	DecodeWindows *DecodeWindowReport `json:"-"`
 }
@@ -203,6 +208,10 @@ func (r Runner) runFixtures(ctx context.Context, client *http.Client, cfg Config
 				report.Windows = append([]DecodeWindow(nil), report.Windows...)
 				res.DecodeTrace, res.DecodeWindows = &trace, &report
 			}
+			if cfg.NativeInferenceReceipt && resp.Fak != nil && resp.Fak.NativeInferenceReceipt != nil {
+				receipt := *resp.Fak.NativeInferenceReceipt
+				res.NativeInferenceReceipt = &receipt
+			}
 			if cfg.Sample != nil {
 				if sample, sampleErr := cfg.Sample(ctx); sampleErr == nil {
 					res.Resource = sample
@@ -291,6 +300,9 @@ func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.
 	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens, "chat_template_kwargs": map[string]bool{"enable_thinking": false}}
 	if cfg.NativeDecodeTrace {
 		body["fak_decode_trace"] = true
+	}
+	if cfg.NativeInferenceReceipt {
+		body["fak"] = map[string]any{"native_inference_receipt": true}
 	}
 	if f.Workload == "json_schema" {
 		body["response_format"] = map[string]any{
