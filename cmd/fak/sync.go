@@ -26,16 +26,17 @@ const (
 var syncAheadAudit = defaultSyncAheadAudit
 var syncWorktree = defaultSyncWorktree
 var (
-	syncAssess        = safesync.Assess
-	syncSafePush      = safesync.SafePush
-	syncCaptureSource = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
+	syncAssess              = safesync.Assess
+	syncSafePush            = safesync.SafePush
+	syncRouteReconciliation = safesync.RouteReconciliation
+	syncCaptureSource       = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push", "drain":
+		case "check", "apply", "push", "drain", "reconcile":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -43,7 +44,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, or drain)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, or reconcile)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -73,6 +74,8 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	quarantineScratch := fs.Bool("quarantine-scratch", true, "shift-left untracked artifact isolation: safely isolate and restore untracked files colliding with incoming fast-forward additions (#10913)")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
+	goal := fs.String("goal", "publish", "reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)")
+	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
 	var recheckPaths pathList
 	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
@@ -156,6 +159,41 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			asJSON:    *asJSON,
 			budget:    *budget,
 		})
+	}
+
+	if command == "reconcile" {
+		repoPath := pathutil.ExpandTilde(*repo)
+		opts := safesync.ReconcileOptions{
+			Repo:   repoPath,
+			Remote: *remote,
+			Branch: *branch,
+			Goal:   *goal,
+			Apply:  *applyFlag,
+			Fetch:  *fetch,
+		}
+		assessment, err := syncRouteReconciliation(context.Background(), opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sync reconcile: %v\n", err)
+			return syncExitInternal
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, assessment); err != nil {
+				fmt.Fprintf(stderr, "fak sync: %v\n", err)
+				return syncExitInternal
+			}
+		} else {
+			renderSyncReconcile(stdout, assessment)
+		}
+		if *applyFlag {
+			if assessment.Route == safesync.RouteNoop || assessment.Applied {
+				return syncExitOK
+			}
+			return syncExitRefused
+		}
+		if assessment.OK {
+			return syncExitOK
+		}
+		return syncExitRefused
 	}
 
 	opts := safesync.Options{
@@ -261,11 +299,12 @@ func syncTargetRef(branch string) string {
 
 func syncUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fak sync [check] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+  fak sync [check]   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                         [--recheck-path PATH ...] [--resume-token TOKEN]
-  fak sync apply   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-  fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
-  fak sync drain   [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
+  fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+  fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
+  fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
+  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
@@ -282,9 +321,90 @@ apply uses only git merge --ff-only
 a last-moment worktree change is a refusal, never pre-cleaned. drain is the release valve for commits stranded by
 a red-trunk push refusal: it queues the ahead commits, polls the trunk-green quiescent
 window (reusing the pre-push build witness), flushes in one push when green, and backs
-off — not blind-retries — while red. None of these run git pull, stash, reset --hard,
+off — not blind-retries — while red. reconcile is the typed shared-trunk reconciliation
+router that inspects repo state and routes to a safe primitive (ROUTE_NOOP, ROUTE_PUSH,
+ROUTE_APPLY, ROUTE_HOLD_DIRTY_COLLISION, ROUTE_SUPERSET_MERGE, ROUTE_DISJOINT_INTEGRATE,
+ROUTE_RECONCILE_PACKET, ROUTE_HOLD_MERGE_ACTIVE, ROUTE_DRAIN). None of these run git pull, stash, reset --hard,
 clean, add, a non-fast-forward merge, or --force.
 `)
+}
+
+func renderSyncReconcile(w io.Writer, info safesync.ReconcileAssessment) {
+	switch info.Route {
+	case safesync.RouteNoop:
+		fmt.Fprintf(w, "[%s] in sync: %s\n", info.Route, info.Reason)
+	case safesync.RoutePush:
+		fmt.Fprintf(w, "[%s] ahead: %s\n", info.Route, info.Reason)
+		if info.Primitive != "" {
+			fmt.Fprintf(w, "  primitive: %s\n", info.Primitive)
+		}
+	case safesync.RouteApply:
+		fmt.Fprintf(w, "[%s] behind: %s\n", info.Route, info.Reason)
+		if info.Primitive != "" {
+			fmt.Fprintf(w, "  primitive: %s\n", info.Primitive)
+		}
+	case safesync.RouteHoldDirtyCollision:
+		fmt.Fprintf(w, "[%s] behind: %s\n", info.Route, info.Detail)
+		if info.Reason != "" {
+			fmt.Fprintf(w, "  reason: %s\n", info.Reason)
+		}
+		if len(info.CollidingPaths) > 0 {
+			fmt.Fprintf(w, "  colliding: %s\n", pathPreview(info.CollidingPaths, 5))
+		}
+	case safesync.RouteSupersetMerge:
+		fmt.Fprintf(w, "[%s] diverged: %s\n", info.Route, info.Reason)
+		if info.Primitive != "" {
+			fmt.Fprintf(w, "  primitive: %s\n", info.Primitive)
+		}
+	case safesync.RouteDisjointIntegrate:
+		fmt.Fprintf(w, "[%s] diverged: %s\n", info.Route, info.Detail)
+		if info.Primitive != "" {
+			fmt.Fprintf(w, "  primitive: %s\n", info.Primitive)
+		}
+	case safesync.RouteReconcilePacket:
+		fmt.Fprintf(w, "[%s] diverged: %s\n", info.Route, info.Detail)
+		if info.Reason != "" {
+			fmt.Fprintf(w, "  reason: %s\n", info.Reason)
+		}
+		if len(info.CollidingPaths) > 0 {
+			fmt.Fprintf(w, "  conflicts: %s\n", pathPreview(info.CollidingPaths, 5))
+		}
+	case safesync.RouteHoldMergeActive:
+		fmt.Fprintf(w, "[%s] merge active: %s\n", info.Route, info.Detail)
+		if info.Reason != "" {
+			fmt.Fprintf(w, "  reason: %s\n", info.Reason)
+		}
+	case safesync.RouteDrain:
+		fmt.Fprintf(w, "[%s] contention: %s\n", info.Route, info.Detail)
+		if info.Reason != "" {
+			fmt.Fprintf(w, "  reason: %s\n", info.Reason)
+		}
+		if info.Primitive != "" {
+			fmt.Fprintf(w, "  primitive: %s\n", info.Primitive)
+		}
+	default:
+		fmt.Fprintf(w, "[%s] %s: %s\n", info.Route, info.State, info.Reason)
+	}
+
+	if info.Head != "" && info.Target != "" {
+		fmt.Fprintf(w, "  HEAD: %s  Target: %s (%s)\n", short(info.Head), short(info.Target), info.TargetRef)
+	}
+	if info.Execution != nil {
+		status := "FAILED"
+		if info.Execution.Success {
+			status = "SUCCESS"
+		}
+		fmt.Fprintf(w, "  execution: [%s] primitive %q\n", status, info.Execution.Primitive)
+		if info.Execution.NewHead != "" {
+			fmt.Fprintf(w, "    new HEAD: %s\n", short(info.Execution.NewHead))
+		}
+		if info.Execution.Detail != "" {
+			fmt.Fprintf(w, "    detail: %s\n", info.Execution.Detail)
+		}
+		if info.Execution.Error != "" {
+			fmt.Fprintf(w, "    error: %s\n", info.Execution.Error)
+		}
+	}
 }
 
 // renderSyncPush is the human view of a SafePush outcome.
