@@ -5,8 +5,11 @@ import (
 	"fmt"
 )
 
+// Invariant: UltraCode dogfood lifecycle sessions are fail-closed and deterministic.
+// Guard: Ambiguous boundary evidence, missing provider cache receipts, or mismatched outcome digests force an ABSTAIN verdict or validation failure.
 const LifecycleSessionSchema = "fak-ultracode-lifecycle-session/1"
 
+// LifecycleSession records an end-to-end task execution across multiple lifecycle boundaries.
 type LifecycleSession struct {
 	Schema                 string          `json:"schema"`
 	Model                  string          `json:"model"`
@@ -17,6 +20,7 @@ type LifecycleSession struct {
 	Cells                  []LifecycleCell `json:"cells"`
 }
 
+// LifecycleCell records the execution boundary evidence and token metrics for a single lifecycle stage.
 type LifecycleCell struct {
 	Boundary                 string                     `json:"boundary"`
 	BoundaryEvidence         *LifecycleBoundaryEvidence `json:"boundary_evidence"`
@@ -27,11 +31,13 @@ type LifecycleCell struct {
 	ProviderCacheEvidence    string                     `json:"provider_cache_evidence"`
 }
 
+// LifecycleBoundaryEvidence stores authoritative proof and receipts confirming the boundary transition.
 type LifecycleBoundaryEvidence struct {
 	Kind    string `json:"kind"`
 	Receipt string `json:"receipt"`
 }
 
+// LifecycleReport encapsulates the evaluation verdict and token accounting across all lifecycle cells.
 type LifecycleReport struct {
 	Schema             string                `json:"schema"`
 	Verdict            string                `json:"verdict"`
@@ -40,6 +46,7 @@ type LifecycleReport struct {
 	Cells              []LifecycleReportCell `json:"cells"`
 }
 
+// LifecycleReportCell summarizes the verified outcome and avoided token delta for a specific boundary cell.
 type LifecycleReportCell struct {
 	Boundary                string `json:"boundary"`
 	Status                  string `json:"status"`
