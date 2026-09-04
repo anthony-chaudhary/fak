@@ -118,6 +118,34 @@ class ReleaseNextTest(unittest.TestCase):
         content = draft_file.read_text(encoding="utf-8")
         self.assertIn("Work in Progress", content)
 
+    def test_commits_since_ignores_next_sync_commits(self) -> None:
+        self.assertIsNotNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("docs(release): sync NEXT.md draft targeting v0.49.0 (fak release)"))
+        self.assertIsNotNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("docs(release): sync NEXT.md draft"))
+        self.assertIsNotNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("sync NEXT.md"))
+        self.assertIsNotNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("sync NEXT.md draft"))
+        self.assertIsNotNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("docs(release): sync NEXT.md"))
+        self.assertIsNone(self.mod.NEXT_SYNC_SUBJECT_RE.match("feat(release): restore living release draft tracking"))
+
+        fake_log = (
+            "111111111\x1ffix(core): real fix\x1fbody\x1e"
+            "222222222\x1fdocs(release): sync NEXT.md draft targeting v0.49.0 (fak release)\x1fbody\x1e"
+            "333333333\x1fsync NEXT.md\x1fbody\x1e"
+            "444444444\x1fdocs(release): sync NEXT.md\x1fbody\x1e"
+            "555555555\x1fv0.49.0: release cut\x1fbody\x1e"
+            "666666666\x1ffeat(core): real feature\x1fbody\x1e"
+        )
+        old_run = getattr(self.mod, "run")
+        try:
+            setattr(self.mod, "run", lambda cmd, **kwargs: (0, fake_log))
+            commits = self.mod.commits_since(self.tmp, "v0.48.0")
+            subjects = [c["subject"] for c in commits]
+            self.assertEqual(subjects, [
+                "fix(core): real fix",
+                "feat(core): real feature",
+            ])
+        finally:
+            setattr(self.mod, "run", old_run)
+
 
 if __name__ == "__main__":
     unittest.main()

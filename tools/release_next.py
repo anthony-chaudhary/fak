@@ -33,6 +33,7 @@ SCHEMA = "fak-release-next/1"
 DEFAULT_DRAFT_PATH = "docs/releases/NEXT.md"
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 VERSION_SUBJECT_RE = re.compile(r"^v\d+\.\d+\.\d+:")
+NEXT_SYNC_SUBJECT_RE = re.compile(r"^(?:docs\(release\):\s*)?sync\s+NEXT\.md", re.IGNORECASE)
 CC_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?:")
 BREAKING_RE = re.compile(r"\bBREAKING[ -]CHANGE\b")
 
@@ -112,7 +113,7 @@ def commits_since(root: Path, tag: str | None, limit: int = 300) -> list[dict]:
         sha = parts[0].strip() if len(parts) > 0 else ""
         subject = parts[1].strip() if len(parts) > 1 else ""
         body = parts[2].strip() if len(parts) > 2 else ""
-        if not sha or not subject or VERSION_SUBJECT_RE.match(subject):
+        if not sha or not subject or VERSION_SUBJECT_RE.match(subject) or NEXT_SYNC_SUBJECT_RE.match(subject):
             continue
         commits.append({
             "sha": sha,
