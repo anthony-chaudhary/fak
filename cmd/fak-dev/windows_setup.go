@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 var windowsSetupGOOS = runtime.GOOS
@@ -22,6 +23,7 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 	repo := fs.String("repo", ".", "fak repository root")
 	tunePower := fs.Bool("tune-power", true, "configure high performance power plan and Modern Standby background execution")
 	longPaths := fs.Bool("long-paths", true, "enable win32 long filesystem paths")
+	throttleMin := fs.Int("throttle-min", DefaultProcThrottleMin, "minimum processor state percentage (default: 5% for laptop thermal safety)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -36,6 +38,10 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 	}
 	plan.TunePower = *tunePower
 	plan.LongPaths = *longPaths
+	plan.ProcThrottleMin = *throttleMin
+	for _, w := range plan.Warnings {
+		fmt.Fprintf(stderr, "fak-dev windows-setup: warning: %s\n", w)
+	}
 	if !*apply {
 		b, _ := plan.JSON()
 		if *jsonOut {
@@ -45,7 +51,11 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 			if plan.TunePower {
 				powerDesc = ", high performance power plan"
 			}
-			fmt.Fprintf(stdout, "Windows developer allow-list plan: %d paths, %d processes, fleet spine %s:%d%s\nRun with --apply to request UAC once and install it.\n", len(plan.Paths), len(plan.Processes), plan.Group, plan.Port, powerDesc)
+			staleDesc := ""
+			if len(plan.StaleTempDirs) > 0 {
+				staleDesc = fmt.Sprintf(", %d stale temp dirs to reap", len(plan.StaleTempDirs))
+			}
+			fmt.Fprintf(stdout, "Windows developer allow-list plan: %d paths, %d processes, fleet spine %s:%d%s%s\nRun with --apply to request UAC once and install it.\n", len(plan.Paths), len(plan.Processes), plan.Group, plan.Port, powerDesc, staleDesc)
 		}
 		return 0
 	}
@@ -90,6 +100,9 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 	}
 	if plan.LongPaths {
 		fmt.Fprintln(stdout, "READY: Win32 long paths enabled.")
+	}
+	if reaped, _ := reapStaleTempDirs(windowsSetupTempDir(), DefaultStaleTempAge, time.Now()); len(reaped) > 0 {
+		fmt.Fprintf(stdout, "READY: Reaped %d stale fak-* temporary directory(ies) in %%TEMP%% older than 48h.\n", len(reaped))
 	}
 	return 0
 }
