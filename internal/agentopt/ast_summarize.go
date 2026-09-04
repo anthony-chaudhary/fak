@@ -244,139 +244,9 @@ func (s *ASTSummarizer) summarizeGo(filePath, sourceCode string, origTokens int)
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
-			if d.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range d.Specs {
-				ts, ok := spec.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-
-				name := ts.Name.Name
-				recordExported(name)
-
-				doc := ""
-				if d.Doc != nil {
-					doc = strings.TrimSpace(d.Doc.Text())
-				}
-				if ts.Doc != nil {
-					tDoc := strings.TrimSpace(ts.Doc.Text())
-					if doc == "" {
-						doc = tDoc
-					} else if tDoc != "" {
-						doc = doc + "\n" + tDoc
-					}
-				}
-
-				kind := "type"
-				var methods []FuncOutline
-				var fields []string
-
-				switch t := ts.Type.(type) {
-				case *ast.InterfaceType:
-					kind = "interface"
-					totalInterfaces++
-					if t.Methods != nil {
-						for _, m := range t.Methods.List {
-							mDoc := ""
-							if m.Doc != nil {
-								mDoc = strings.TrimSpace(m.Doc.Text())
-							}
-							if len(m.Names) > 0 {
-								mName := m.Names[0].Name
-								recordExported(mName)
-								totalMethods++
-								mSig := mName
-								if ft, ok := m.Type.(*ast.FuncType); ok {
-									mSig = mName + nodeString(fset, ft.Params)
-									if ft.Results != nil {
-										mSig += " " + nodeString(fset, ft.Results)
-									}
-								}
-								methods = append(methods, FuncOutline{
-									Name:       mName,
-									Signature:  mSig,
-									Doc:        mDoc,
-									Exported:   ast.IsExported(mName),
-									IsMethod:   true,
-									ParamTypes: extractFieldTypes(fset, m.Type),
-								})
-							} else {
-								// Embedded interface
-								embName := nodeString(fset, m.Type)
-								fields = append(fields, embName)
-							}
-						}
-					}
-				case *ast.StructType:
-					kind = "struct"
-					if t.Fields != nil {
-						for _, f := range t.Fields.List {
-							fieldType := nodeString(fset, f.Type)
-							if len(f.Names) > 0 {
-								for _, fn := range f.Names {
-									recordExported(fn.Name)
-									fields = append(fields, fn.Name+" "+fieldType)
-								}
-							} else {
-								fields = append(fields, fieldType)
-							}
-						}
-					}
-				default:
-					if ts.Assign.IsValid() {
-						kind = "alias"
-					}
-				}
-
-				sig := fmt.Sprintf("type %s %s", name, nodeString(fset, ts.Type))
-				types = append(types, TypeOutline{
-					Name:      name,
-					Doc:       doc,
-					Kind:      kind,
-					Signature: sig,
-					Exported:  ast.IsExported(name),
-					Methods:   methods,
-					Fields:    fields,
-				})
-			}
-
+			types = append(types, extractGoGenDecl(fset, d, recordExported, &totalInterfaces, &totalMethods)...)
 		case *ast.FuncDecl:
-			funcName := d.Name.Name
-			recordExported(funcName)
-
-			isMethod := d.Recv != nil
-			receiver := ""
-			if isMethod {
-				receiver = nodeString(fset, d.Recv)
-				totalMethods++
-			}
-
-			doc := ""
-			if d.Doc != nil {
-				doc = strings.TrimSpace(d.Doc.Text())
-			}
-
-			// Capture signature prior to pruning body
-			var sigBuf bytes.Buffer
-			dCopy := *d
-			dCopy.Body = nil
-			if err := printer.Fprint(&sigBuf, fset, &dCopy); err != nil {
-				sigBuf.WriteString("func " + funcName)
-			}
-			sig := strings.TrimSpace(sigBuf.String())
-
-			funcs = append(funcs, FuncOutline{
-				Name:       funcName,
-				Receiver:   receiver,
-				Signature:  sig,
-				Doc:        doc,
-				Exported:   ast.IsExported(funcName),
-				IsMethod:   isMethod,
-				ParamTypes: extractParams(fset, d.Type.Params),
-				RetTypes:   extractResults(fset, d.Type.Results),
-			})
+			funcs = append(funcs, extractGoFuncDecl(fset, d, recordExported, &totalMethods))
 		}
 	}
 
@@ -415,6 +285,145 @@ func (s *ASTSummarizer) summarizeGo(filePath, sourceCode string, origTokens int)
 		OriginalTokens:   origTokens,
 		CompressedTokens: compTokens,
 		CompressionRatio: compRatio,
+	}
+}
+
+func extractGoGenDecl(fset *token.FileSet, d *ast.GenDecl, recordExported func(string), totalInterfaces *int, totalMethods *int) []TypeOutline {
+	if d.Tok != token.TYPE {
+		return nil
+	}
+	var types []TypeOutline
+	for _, spec := range d.Specs {
+		ts, ok := spec.(*ast.TypeSpec)
+		if !ok {
+			continue
+		}
+
+		name := ts.Name.Name
+		recordExported(name)
+
+		doc := ""
+		if d.Doc != nil {
+			doc = strings.TrimSpace(d.Doc.Text())
+		}
+		if ts.Doc != nil {
+			tDoc := strings.TrimSpace(ts.Doc.Text())
+			if doc == "" {
+				doc = tDoc
+			} else if tDoc != "" {
+				doc = doc + "\n" + tDoc
+			}
+		}
+
+		kind := "type"
+		var methods []FuncOutline
+		var fields []string
+
+		switch t := ts.Type.(type) {
+		case *ast.InterfaceType:
+			kind = "interface"
+			*totalInterfaces++
+			if t.Methods != nil {
+				for _, m := range t.Methods.List {
+					mDoc := ""
+					if m.Doc != nil {
+						mDoc = strings.TrimSpace(m.Doc.Text())
+					}
+					if len(m.Names) > 0 {
+						mName := m.Names[0].Name
+						recordExported(mName)
+						*totalMethods++
+						mSig := mName
+						if ft, ok := m.Type.(*ast.FuncType); ok {
+							mSig = mName + nodeString(fset, ft.Params)
+							if ft.Results != nil {
+								mSig += " " + nodeString(fset, ft.Results)
+							}
+						}
+						methods = append(methods, FuncOutline{
+							Name:       mName,
+							Signature:  mSig,
+							Doc:        mDoc,
+							Exported:   ast.IsExported(mName),
+							IsMethod:   true,
+							ParamTypes: extractFieldTypes(fset, m.Type),
+						})
+					} else {
+						// Embedded interface
+						embName := nodeString(fset, m.Type)
+						fields = append(fields, embName)
+					}
+				}
+			}
+		case *ast.StructType:
+			kind = "struct"
+			if t.Fields != nil {
+				for _, f := range t.Fields.List {
+					fieldType := nodeString(fset, f.Type)
+					if len(f.Names) > 0 {
+						for _, fn := range f.Names {
+							recordExported(fn.Name)
+							fields = append(fields, fn.Name+" "+fieldType)
+						}
+					} else {
+						fields = append(fields, fieldType)
+					}
+				}
+			}
+		default:
+			if ts.Assign.IsValid() {
+				kind = "alias"
+			}
+		}
+
+		sig := fmt.Sprintf("type %s %s", name, nodeString(fset, ts.Type))
+		types = append(types, TypeOutline{
+			Name:      name,
+			Doc:       doc,
+			Kind:      kind,
+			Signature: sig,
+			Exported:  ast.IsExported(name),
+			Methods:   methods,
+			Fields:    fields,
+		})
+	}
+	return types
+}
+
+func extractGoFuncDecl(fset *token.FileSet, d *ast.FuncDecl, recordExported func(string), totalMethods *int) FuncOutline {
+	funcName := d.Name.Name
+	recordExported(funcName)
+
+	isMethod := d.Recv != nil
+	receiver := ""
+	if isMethod {
+		receiver = nodeString(fset, d.Recv)
+		*totalMethods++
+	}
+
+	doc := ""
+	if d.Doc != nil {
+		doc = strings.TrimSpace(d.Doc.Text())
+	}
+
+	// Capture signature prior to pruning body
+	var sigBuf bytes.Buffer
+	dCopy := *d
+	dCopy.Body = nil
+	if err := printer.Fprint(&sigBuf, fset, &dCopy); err != nil {
+		sigBuf.WriteString("func " + funcName)
+	}
+	sig := strings.TrimSpace(sigBuf.String())
+
+	return FuncOutline{
+		Name:       funcName,
+		Receiver:   receiver,
+		Signature:  sig,
+		Doc:        doc,
+		Exported:   ast.IsExported(funcName),
+		IsMethod:   isMethod,
+		ParamTypes: extractParams(fset, d.Type.Params),
+		RetTypes:   extractResults(fset, d.Type.Results),
 	}
 }
 
