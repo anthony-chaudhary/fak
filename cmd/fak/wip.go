@@ -90,6 +90,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipAdmit(stdout, stderr, argv[1:])
 	case "latency":
 		return runWipLatency(stdout, stderr, argv[1:])
+	case "drill":
+		return runWipDrill(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -275,6 +277,11 @@ func wipUsage(w io.Writer) {
   fak wip latency [--repo .] [--json] [--budget 1h]
       Measure source-work protection latency intervals across working tree, checkpoints,
       and git history, and verify SLO compliance against budget (default 1h).
+
+  fak wip drill [--repo .] [--json] [--limit 5] [--session <id>]
+      Drill checkpoint recovery in detached isolation. Verifies that checkpointed
+      trees restore byte-for-byte in a throwaway scratch directory without mutating
+      the main checkout or index.
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta
