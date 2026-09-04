@@ -1,6 +1,9 @@
 // Package fleetmemory is the cross-agent lessons ledger (#2141) and its
 // write-time duplicate guard (#2142).
 //
+// Invariant: fleet memory injection is fail-closed and deterministic across all session queries.
+// Guard: empty candidate facts fail closed and are refused immediately without mutating the ledger.
+//
 // Auto-memory is per-agent-store: when one agent learns a workaround ("Bash
 // `git` hangs here -> use PowerShell"), every OTHER agent re-discovers it the
 // hard way. The repo's own memory files (bash_git_gh_hang_use_powershell,
