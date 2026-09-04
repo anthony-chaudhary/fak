@@ -4,9 +4,13 @@ package memgate
 type Pressure string
 
 const (
-	PressureUnknown  Pressure = "unknown"
-	PressureNormal   Pressure = "normal"
-	PressureWarning  Pressure = "warning"
+	// PressureUnknown indicates that host memory capacity or availability could not be determined.
+	PressureUnknown Pressure = "unknown"
+	// PressureNormal indicates sufficient available host memory with nominal compressor and wired usage.
+	PressureNormal Pressure = "normal"
+	// PressureWarning indicates constrained available memory or moderate memory compressor activity.
+	PressureWarning Pressure = "warning"
+	// PressureCritical indicates severe memory exhaustion, high wired GPU usage, or heavy paging compression.
 	PressureCritical Pressure = "critical"
 )
 
