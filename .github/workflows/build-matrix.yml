@@ -1,0 +1,90 @@
+# build-matrix.yml — automated compile-check matrix for declared build variants (#3712, epic #3708).
+#
+# WHY THIS EXISTS:
+#   fak maintains a strict taxonomy of build variants (docs/build-variants.json):
+#   - Pure-Go / GPU-free variants (default, OS/arch splits, wip_<feature> fences)
+#   - cgo / toolchain-linked variants (cuda, cuda-nccl, vulkan, metal)
+#
+#   This workflow proves that all declared pure-Go / GPU-free variants compile cleanly
+#   across all supported release targets (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
+#   windows/amd64) with CGO_ENABLED=0. Trunk-gating variants fail the build on compile error;
+#   advisory variants (wip_ fences) run with continue-on-error to provide visibility without
+#   blocking trunk when in-flight WIP drifts.
+name: build-matrix
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: plan build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - id: set-matrix
+        name: generate matrix from build-variants.json
+        run: |
+          matrix=$(go run ./cmd/fak-dev build-matrix --emit-gha-matrix)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
+  compile-matrix:
+    name: compile · ${{ matrix.variant }} (${{ matrix.target }})
+    needs: plan
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.advisory }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: compile variant
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          tags_arg=""
+          if [ -n "${{ matrix.tags }}" ]; then
+            tags_arg="-tags ${{ matrix.tags }}"
+          fi
+          go build $tags_arg -o /dev/null ./cmd/fak
+
+  tool-verification:
+    name: verify fak-dev build-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: run build-matrix dry-run
+        run: go run ./cmd/fak-dev build-matrix --dry-run
+
+      - name: run build-matrix json check
+        run: go run ./cmd/fak-dev build-matrix --dry-run --json
