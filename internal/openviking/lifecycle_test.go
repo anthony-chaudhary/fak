@@ -11,7 +11,7 @@ func TestOpenVikingLifecycle(t *testing.T) {
 	t.Parallel()
 
 	cfg := Config{
-		BaseURL: "http://127.0.0.1:8080",
+		BaseURL: "http://127.0.0.1:0",
 		APIKey:  "test-api-key",
 		Account: "test-account",
 		User:    "test-user",
