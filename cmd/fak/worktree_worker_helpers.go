@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -113,6 +114,8 @@ type worktreeWorkerLifecycleOut struct {
 	Paths     []string                        `json:"paths"`
 	Inventory []worktreeWorkerLifecycleRow    `json:"inventory"`
 	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
+	Partial   bool                            `json:"partial,omitempty"`
+	Timeout   bool                            `json:"timeout,omitempty"`
 }
 
 type worktreeWorkerRevisionEvidence struct {
@@ -123,10 +126,11 @@ type worktreeWorkerRevisionEvidence struct {
 }
 
 type worktreeWorkerLifecycleProbes struct {
-	ReadOwner    func(path string) (workerworktree.OwnerStamp, error)
-	ProcessAlive func(pid int) (bool, error)
-	LeaseLive    func(leaseID string) (bool, error)
-	Inspect      func(repoRoot, path string) (worktreeWorkerRevisionEvidence, error)
+	ReadOwner      func(path string) (workerworktree.OwnerStamp, error)
+	ProcessAlive   func(pid int) (bool, error)
+	LeaseLive      func(leaseID string) (bool, error)
+	Inspect        func(repoRoot, path string) (worktreeWorkerRevisionEvidence, error)
+	InspectContext func(ctx context.Context, repoRoot, path string) (worktreeWorkerRevisionEvidence, error)
 }
 
 func readWorktreeWorkerOwner(path string) (workerworktree.OwnerStamp, error) {
@@ -147,8 +151,12 @@ func readWorktreeWorkerOwner(path string) (workerworktree.OwnerStamp, error) {
 }
 
 func worktreeWorkerGitOutput(dir string, args ...string) (string, error) {
+	return worktreeWorkerGitOutputContext(context.Background(), dir, args...)
+}
+
+func worktreeWorkerGitOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", dir}, args...)
-	cmd := windowgate.Command("git", cmdArgs...)
+	cmd := windowgate.CommandContext(ctx, "git", cmdArgs...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -182,11 +190,15 @@ func worktreeWorkerDirtyPaths(status string) []string {
 }
 
 func inspectWorktreeWorker(repoRoot, path string) (worktreeWorkerRevisionEvidence, error) {
+	return inspectWorktreeWorkerContext(context.Background(), repoRoot, path)
+}
+
+func inspectWorktreeWorkerContext(ctx context.Context, repoRoot, path string) (worktreeWorkerRevisionEvidence, error) {
 	evidence := worktreeWorkerRevisionEvidence{
 		Cleanliness: worktreeEvidenceUnknown,
 		DirtyPaths:  []string{},
 	}
-	head, err := worktreeWorkerGitOutput(path, "rev-parse", "--verify", "HEAD")
+	head, err := worktreeWorkerGitOutputContext(ctx, path, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return evidence, fmt.Errorf("read worktree HEAD: %w", err)
 	}
@@ -194,14 +206,14 @@ func inspectWorktreeWorker(repoRoot, path string) (worktreeWorkerRevisionEvidenc
 		return evidence, fmt.Errorf("read worktree HEAD: empty result")
 	}
 	evidence.HeadSHA = head
-	trunkHead, err := worktreeWorkerGitOutput(repoRoot, "rev-parse", "--verify", "HEAD")
+	trunkHead, err := worktreeWorkerGitOutputContext(ctx, repoRoot, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return evidence, fmt.Errorf("read trunk HEAD: %w", err)
 	}
 	if trunkHead == "" {
 		return evidence, fmt.Errorf("read trunk HEAD: empty result")
 	}
-	base, err := worktreeWorkerGitOutput(repoRoot, "merge-base", trunkHead, head)
+	base, err := worktreeWorkerGitOutputContext(ctx, repoRoot, "merge-base", trunkHead, head)
 	if err != nil {
 		return evidence, fmt.Errorf("derive worktree base: %w", err)
 	}
@@ -209,7 +221,7 @@ func inspectWorktreeWorker(repoRoot, path string) (worktreeWorkerRevisionEvidenc
 		return evidence, fmt.Errorf("derive worktree base: empty result")
 	}
 	evidence.BaseSHA = base
-	status, err := worktreeWorkerGitOutput(path, "status", "--porcelain=v1", "--untracked-files=all")
+	status, err := worktreeWorkerGitOutputContext(ctx, path, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return evidence, fmt.Errorf("inspect worktree status: %w", err)
 	}
@@ -254,6 +266,11 @@ func worktreeWorkerLeaseProbe(root string, now time.Time) func(string) (bool, er
 }
 
 func worktreeWorkerLifecycleInventory(repoRoot string, paths []string, probes worktreeWorkerLifecycleProbes) []worktreeWorkerLifecycleRow {
+	rows, _ := worktreeWorkerLifecycleInventoryContext(context.Background(), repoRoot, paths, probes)
+	return rows
+}
+
+func worktreeWorkerLifecycleInventoryContext(ctx context.Context, repoRoot string, paths []string, probes worktreeWorkerLifecycleProbes) ([]worktreeWorkerLifecycleRow, bool) {
 	if probes.ReadOwner == nil {
 		probes.ReadOwner = readWorktreeWorkerOwner
 	}
@@ -263,8 +280,8 @@ func worktreeWorkerLifecycleInventory(repoRoot string, paths []string, probes wo
 	if probes.LeaseLive == nil {
 		probes.LeaseLive = worktreeWorkerLeaseProbe(repoRoot, time.Now())
 	}
-	if probes.Inspect == nil {
-		probes.Inspect = inspectWorktreeWorker
+	if probes.Inspect == nil && probes.InspectContext == nil {
+		probes.InspectContext = inspectWorktreeWorkerContext
 	}
 
 	sortedPaths := append([]string(nil), paths...)
@@ -276,35 +293,112 @@ func worktreeWorkerLifecycleInventory(repoRoot string, paths []string, probes wo
 		}
 		return left < right
 	})
-	rows := make([]worktreeWorkerLifecycleRow, len(sortedPaths))
 	if len(sortedPaths) == 0 {
-		return rows
+		return []worktreeWorkerLifecycleRow{}, false
 	}
 
-	// Each worker owns one row index at a time. The fixed ceiling bounds git
-	// subprocess and file-descriptor pressure, while index-addressed writes make
-	// probe completion order irrelevant to the stable sorted output.
+	if ctx != nil && ctx.Err() != nil {
+		return []worktreeWorkerLifecycleRow{}, true
+	}
+
+	type probeResult struct {
+		index int
+		row   worktreeWorkerLifecycleRow
+		err   error
+	}
+
 	workers := min(worktreeWorkerLifecycleConcurrency, len(sortedPaths))
 	jobs := make(chan int)
+	results := make(chan probeResult, len(sortedPaths))
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				rows[i] = worktreeWorkerLifecycleRowForPath(repoRoot, sortedPaths[i], probes)
+				if ctx != nil && ctx.Err() != nil {
+					results <- probeResult{index: i, err: ctx.Err()}
+					continue
+				}
+				row, err := worktreeWorkerLifecycleRowForPathContext(ctx, repoRoot, sortedPaths[i], probes)
+				results <- probeResult{index: i, row: row, err: err}
 			}
 		}()
 	}
-	for i := range sortedPaths {
-		jobs <- i
+
+	go func() {
+		for i := range sortedPaths {
+			if ctx != nil && ctx.Err() != nil {
+				break
+			}
+			select {
+			case jobs <- i:
+			case <-ctxDone(ctx):
+				close(jobs)
+				return
+			}
+		}
+		close(jobs)
+	}()
+
+	completedRows := make([]worktreeWorkerLifecycleRow, len(sortedPaths))
+	completed := make([]bool, len(sortedPaths))
+	var timedOut bool
+	totalJobs := len(sortedPaths)
+	receivedCount := 0
+
+collectLoop:
+	for receivedCount < totalJobs {
+		select {
+		case res := <-results:
+			receivedCount++
+			if res.err != nil {
+				if errors.Is(res.err, context.DeadlineExceeded) || errors.Is(res.err, context.Canceled) || (ctx != nil && ctx.Err() != nil) || strings.Contains(strings.ToLower(res.err.Error()), "timeout") {
+					timedOut = true
+				} else {
+					completed[res.index] = true
+					completedRows[res.index] = res.row
+				}
+			} else {
+				completed[res.index] = true
+				completedRows[res.index] = res.row
+			}
+		case <-ctxDone(ctx):
+			timedOut = true
+			break collectLoop
+		}
 	}
-	close(jobs)
-	wg.Wait()
-	return rows
+
+	if ctx != nil && ctx.Err() != nil {
+		timedOut = true
+	}
+
+	if !timedOut {
+		return completedRows, false
+	}
+
+	out := make([]worktreeWorkerLifecycleRow, 0, len(sortedPaths))
+	for i, ok := range completed {
+		if ok {
+			out = append(out, completedRows[i])
+		}
+	}
+	return out, true
+}
+
+func ctxDone(ctx context.Context) <-chan struct{} {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Done()
 }
 
 func worktreeWorkerLifecycleRowForPath(repoRoot, path string, probes worktreeWorkerLifecycleProbes) worktreeWorkerLifecycleRow {
+	row, _ := worktreeWorkerLifecycleRowForPathContext(context.Background(), repoRoot, path, probes)
+	return row
+}
+
+func worktreeWorkerLifecycleRowForPathContext(ctx context.Context, repoRoot, path string, probes worktreeWorkerLifecycleProbes) (worktreeWorkerLifecycleRow, error) {
 	row := worktreeWorkerLifecycleRow{
 		Path: path,
 		Association: worktreeWorkerAssociation{
@@ -360,7 +454,16 @@ func worktreeWorkerLifecycleRowForPath(repoRoot, path string, probes worktreeWor
 		}
 	}
 
-	evidence, _ := probes.Inspect(repoRoot, path)
+	var evidence worktreeWorkerRevisionEvidence
+	var inspectErr error
+	if probes.InspectContext != nil {
+		evidence, inspectErr = probes.InspectContext(ctx, repoRoot, path)
+	} else if probes.Inspect != nil {
+		evidence, inspectErr = probes.Inspect(repoRoot, path)
+	} else {
+		evidence, inspectErr = inspectWorktreeWorkerContext(ctx, repoRoot, path)
+	}
+
 	row.HeadSHA = strings.TrimSpace(evidence.HeadSHA)
 	row.BaseSHA = strings.TrimSpace(evidence.BaseSHA)
 	switch evidence.Cleanliness {
@@ -373,7 +476,7 @@ func worktreeWorkerLifecycleRowForPath(repoRoot, path string, probes worktreeWor
 		sort.Strings(row.Cleanliness.DirtyPaths)
 	}
 	row.Lifecycle, row.ReapReadiness = lifecycleVerdict(row)
-	return row
+	return row, inspectErr
 }
 
 func lifecycleVerdict(row worktreeWorkerLifecycleRow) (worktreeWorkerLifecycleState, worktreeWorkerReapReadiness) {
