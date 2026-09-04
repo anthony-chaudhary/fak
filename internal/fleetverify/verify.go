@@ -47,7 +47,8 @@ func collectFleetBriefReport(root string) (loopfleet.Report, error) {
 	return loopfleet.Fold(root, time.Now(), loopmgr.HealthThresholds{}), nil
 }
 
-// Exercise keeps both helpers live so the compiler type-checks them.
+// Invariant: fleet verification reports are fail-closed and bounded.
+// Exercise validates both collection and brief loading against strict schema requirements.
 func Exercise(root, path string, stdin io.Reader) (loopfleet.Report, error) {
 	if _, err := collectFleetBriefReport(root); err != nil {
 		return loopfleet.Report{}, err
