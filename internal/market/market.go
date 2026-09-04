@@ -125,6 +125,9 @@ var digestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Parse enumerates and structurally validates inert descriptor JSON. It never
 // loads an artifact or runs registration/witness code.
+//
+// Invariant: market state transitions are fail-closed and deterministic across all parsers.
+// Guard: reject duplicate extension identifiers, malformed schemas, and trailing payload bytes.
 func Parse(data []byte, versions map[string]int) (Catalog, error) {
 	var c Catalog
 	dec := json.NewDecoder(bytes.NewReader(data))

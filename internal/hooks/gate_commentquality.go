@@ -1,11 +1,13 @@
 package hooks
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 const commentQualityGate = "COMMENT_QUALITY"
@@ -55,6 +57,9 @@ func gateCommentQuality(d *StagedDiff) ([]Finding, error) {
 			if lineCount >= 6 && len(text) >= 420 {
 				findings = append(findings, Finding{Gate: commentQualityGate, File: path, Line: fset.Position(group.Pos()).Line, Detail: "long implementation comment; tighten it or move durable explanation to documentation"})
 			}
+		}
+		for _, decl := range file.Decls {
+			checkDocTautology(decl, fset, addedLines, path, &findings)
 		}
 	}
 	d.NoteCandidates(commentQualityGate, candidates, "changed implementation comment blocks")
@@ -142,4 +147,126 @@ func narrationComment(text string) bool {
 		}
 	}
 	return false
+}
+
+func checkDocTautology(decl ast.Decl, fset *token.FileSet, addedLines map[int]bool, path string, findings *[]Finding) {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		if ast.IsExported(d.Name.Name) && d.Doc != nil && commentGroupTouches(d.Doc, fset, addedLines) {
+			if isTautologicalDoc(d.Name.Name, d.Doc.Text()) {
+				*findings = append(*findings, Finding{
+					Gate:   commentQualityGate,
+					File:   path,
+					Line:   fset.Position(d.Doc.Pos()).Line,
+					Detail: fmt.Sprintf("doc comment on %s is tautological; explain semantics or non-obvious invariants rather than restating the identifier", d.Name.Name),
+				})
+			}
+		}
+	case *ast.GenDecl:
+		for _, spec := range d.Specs {
+			switch s := spec.(type) {
+			case *ast.TypeSpec:
+				if ast.IsExported(s.Name.Name) {
+					doc := s.Doc
+					if doc == nil {
+						doc = d.Doc
+					}
+					if doc != nil && commentGroupTouches(doc, fset, addedLines) {
+						if isTautologicalDoc(s.Name.Name, doc.Text()) {
+							*findings = append(*findings, Finding{
+								Gate:   commentQualityGate,
+								File:   path,
+								Line:   fset.Position(doc.Pos()).Line,
+								Detail: fmt.Sprintf("doc comment on %s is tautological; explain semantics or non-obvious invariants rather than restating the identifier", s.Name.Name),
+							})
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				for _, name := range s.Names {
+					if ast.IsExported(name.Name) {
+						doc := s.Doc
+						if doc == nil {
+							doc = d.Doc
+						}
+						if doc != nil && commentGroupTouches(doc, fset, addedLines) {
+							if isTautologicalDoc(name.Name, doc.Text()) {
+								*findings = append(*findings, Finding{
+									Gate:   commentQualityGate,
+									File:   path,
+									Line:   fset.Position(doc.Pos()).Line,
+									Detail: fmt.Sprintf("doc comment on %s is tautological; explain semantics or non-obvious invariants rather than restating the identifier", name.Name),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func splitIdentifierWords(name string) map[string]bool {
+	set := make(map[string]bool)
+	set[strings.ToLower(name)] = true
+	var curr strings.Builder
+	for i, r := range name {
+		if r == '_' || r == '-' {
+			if curr.Len() > 0 {
+				set[strings.ToLower(curr.String())] = true
+				curr.Reset()
+			}
+			continue
+		}
+		if unicode.IsUpper(r) && i > 0 && curr.Len() > 0 {
+			set[strings.ToLower(curr.String())] = true
+			curr.Reset()
+		}
+		curr.WriteRune(r)
+	}
+	if curr.Len() > 0 {
+		set[strings.ToLower(curr.String())] = true
+	}
+	return set
+}
+
+func isTautologicalDoc(name string, text string) bool {
+	nameLower := strings.ToLower(name)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return true
+	}
+	firstWord := strings.Trim(strings.ToLower(fields[0]), ":,.-()")
+	if firstWord != nameLower && !strings.HasPrefix(strings.ToLower(text), nameLower) {
+		return false
+	}
+	remainder := strings.TrimSpace(text[len(firstWord):])
+	words := strings.FieldsFunc(remainder, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	})
+
+	fillers := map[string]bool{
+		"is": true, "are": true, "does": true, "do": true, "returns": true, "return": true,
+		"represents": true, "represent": true, "holds": true, "hold": true, "the": true,
+		"a": true, "an": true, "of": true, "for": true, "to": true, "that": true, "which": true,
+		"will": true, "can": true, "provides": true, "provide": true, "specifies": true,
+		"specify": true, "defines": true, "define": true, "indicates": true, "indicate": true,
+		"details": true, "detail": true, "records": true, "record": true, "encapsulates": true,
+		"encapsulate": true, "captures": true, "capture": true, "contains": true, "contain": true,
+	}
+
+	nameParts := splitIdentifierWords(name)
+	meaningfulWords := 0
+	for _, w := range words {
+		wl := strings.ToLower(w)
+		if fillers[wl] || nameParts[wl] {
+			continue
+		}
+		meaningfulWords++
+	}
+	return meaningfulWords < 2
 }
