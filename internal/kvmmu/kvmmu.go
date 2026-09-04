@@ -616,6 +616,29 @@ func (c *Context) invalidateReferences(kv cachemeta.EntryID) {
 	c.meta = live
 }
 
+// SegmentByID returns the recorded segment with the given id, or (nil, false)
+// if not found.
+func (c *Context) SegmentByID(id string) (*Segment, bool) {
+	for _, s := range c.segs {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+// LivePositions returns the total number of live (un-evicted) positions across
+// all recorded segments in the ledger.
+func (c *Context) LivePositions() int {
+	total := 0
+	for _, s := range c.segs {
+		if !s.Held {
+			total += s.Len
+		}
+	}
+	return total
+}
+
 // Segments returns the current ledger (a copy of the slice header is fine; the
 // caller should treat the entries as read-only).
 func (c *Context) Segments() []*Segment { return c.segs }

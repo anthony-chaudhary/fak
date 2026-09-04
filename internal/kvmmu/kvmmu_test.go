@@ -90,12 +90,8 @@ func (g turnClassGate) Admit(_ context.Context, _ *abi.ToolCall, _ *abi.Result) 
 // findSeg returns the recorded segment with the given id, or nil.
 func findSeg(t *testing.T, c *kvmmu.Context, id string) *kvmmu.Segment {
 	t.Helper()
-	for _, s := range c.Segments() {
-		if s.ID == id {
-			return s
-		}
-	}
-	return nil
+	seg, _ := c.SegmentByID(id)
+	return seg
 }
 
 // TestTurnClassExpiryEqualsNeverSaw is the S7 rung-3 witness (issue #80), modeled on the
@@ -545,5 +541,129 @@ func TestEmitReport(t *testing.T) {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(report); err != nil {
 		t.Skipf("cannot encode report (non-fatal): %v", err)
+	}
+}
+
+// TestRuntimeMemoryPagingMultiTurnLifecycle exercises a real multi-turn session
+// lifecycle with dynamic segment allocation, write-time quarantine, TTL expiry,
+// middle segment eviction with span renumbering, pin protection, and live position accounting.
+func TestRuntimeMemoryPagingMultiTurnLifecycle(t *testing.T) {
+	ctx := context.Background()
+	m := model.NewSynthetic(synthCfg())
+	s := m.NewSession()
+	c := kvmmu.NewWithGate(s, ctxmmu.New())
+
+	// Turn 0: System prompt (pinned by default via "system" tool label).
+	sysTokens := []int{1, 2, 3, 4}
+	c.Append("sys-prompt", "system", sysTokens)
+
+	sysSeg, ok := c.SegmentByID("sys-prompt")
+	if !ok || sysSeg == nil {
+		t.Fatalf("SegmentByID(sys-prompt) not found")
+	}
+	if !sysSeg.Pinned {
+		t.Fatalf("sys-prompt should be default pinned")
+	}
+	if c.LivePositions() != len(sysTokens) {
+		t.Fatalf("LivePositions() = %d, want %d", c.LivePositions(), len(sysTokens))
+	}
+
+	// Turn 1: User query and benign tool result.
+	u1Tokens := []int{10, 11}
+	c.Append("user-1", "user", u1Tokens)
+
+	t1Tokens := []int{20, 21, 22}
+	v, evicted, logits := c.AdmitResult(ctx, "tool-1", "search_kb", t1Tokens, []byte(benignBody))
+	if v.Kind != abi.VerdictAllow || evicted || len(logits) == 0 {
+		t.Fatalf("tool-1 should be admitted without eviction; got v=%v, evicted=%v", v.Kind, evicted)
+	}
+
+	expectedLen := len(sysTokens) + len(u1Tokens) + len(t1Tokens)
+	if c.CacheLen() != expectedLen || c.LivePositions() != expectedLen {
+		t.Fatalf("cache len = %d, live = %d, want %d", c.CacheLen(), c.LivePositions(), expectedLen)
+	}
+
+	// Set TTL on tool-1 to expire at turn 2 boundary.
+	const turn2Boundary = 1_000
+	if !c.SetTTL("tool-1", turn2Boundary) {
+		t.Fatalf("SetTTL(tool-1) failed")
+	}
+
+	// Turn 2: Untrusted tool returns injection payload -> write-time eviction.
+	poisonTokens := []int{30, 31, 32, 33}
+	vPoison, evictedPoison, logitsPoison := c.AdmitResult(ctx, "tool-poison", "read_refund_policy", poisonTokens, []byte(poisonBody))
+	if vPoison.Kind != abi.VerdictQuarantine || !evictedPoison || logitsPoison != nil {
+		t.Fatalf("tool-poison must be quarantined and evicted write-time; got v=%v, evicted=%v, logits=%v", vPoison.Kind, evictedPoison, logitsPoison)
+	}
+
+	// Poison segment should be held, 0 length in ledger, and evicted count incremented.
+	poisonSeg, ok := c.SegmentByID("tool-poison")
+	if !ok || !poisonSeg.Held || poisonSeg.Len != 0 {
+		t.Fatalf("poisonSeg state bad: ok=%v, seg=%+v", ok, poisonSeg)
+	}
+	if poisonSeg.Disposition != kvmmu.DispositionNeverSaw {
+		t.Fatalf("poisonSeg disposition = %v, want DispositionNeverSaw", poisonSeg.Disposition)
+	}
+	if c.Evicted() != 1 {
+		t.Fatalf("Evicted() = %d, want 1", c.Evicted())
+	}
+	if c.CacheLen() != expectedLen || c.LivePositions() != expectedLen {
+		t.Fatalf("after write-time poison evict, cache len = %d, want %d", c.CacheLen(), expectedLen)
+	}
+
+	// Turn 3: Add another user turn, then trigger TTL expiry of tool-1.
+	u2Tokens := []int{40, 41}
+	c.Append("user-2", "user", u2Tokens)
+	expectedLen += len(u2Tokens)
+
+	u2Seg, ok := c.SegmentByID("user-2")
+	if !ok || u2Seg.From != expectedLen-len(u2Tokens) {
+		t.Fatalf("user-2 From = %d, want %d", u2Seg.From, expectedLen-len(u2Tokens))
+	}
+
+	// Expire tool-1 (mid-context, so its disposition should be Compacted, not NeverSaw).
+	nExpired := c.Expire(turn2Boundary)
+	if nExpired != 1 {
+		t.Fatalf("Expire() returned %d, want 1", nExpired)
+	}
+
+	t1Seg, ok := c.SegmentByID("tool-1")
+	if !ok || !t1Seg.Held || t1Seg.Len != 0 {
+		t.Fatalf("tool-1 should be held after expiry, got %+v", t1Seg)
+	}
+	if t1Seg.Disposition != kvmmu.DispositionCompacted {
+		t.Fatalf("tool-1 disposition = %v, want DispositionCompacted (cross-attended by user-2)", t1Seg.Disposition)
+	}
+
+	// user-2 segment From must have been renumbered downwards by len(t1Tokens).
+	expectedRenumberedFrom := len(sysTokens) + len(u1Tokens)
+	if u2Seg.From != expectedRenumberedFrom {
+		t.Fatalf("user-2 From after expiry = %d, want renumbered %d", u2Seg.From, expectedRenumberedFrom)
+	}
+
+	expectedLen -= len(t1Tokens)
+	if c.CacheLen() != expectedLen || c.LivePositions() != expectedLen {
+		t.Fatalf("after expiry, cache len = %d, live = %d, want %d", c.CacheLen(), c.LivePositions(), expectedLen)
+	}
+
+	// Explicit post-hoc Quarantine on user-1.
+	evictedU1, okQuarantine := c.Quarantine("user-1")
+	if !okQuarantine || evictedU1 != len(u1Tokens) {
+		t.Fatalf("Quarantine(user-1) = (%d, %v), want (%d, true)", evictedU1, okQuarantine, len(u1Tokens))
+	}
+
+	// user-2 segment From must have renumbered down again to right after sys-prompt.
+	if u2Seg.From != len(sysTokens) {
+		t.Fatalf("user-2 From after user-1 quarantine = %d, want %d", u2Seg.From, len(sysTokens))
+	}
+
+	expectedLen -= len(u1Tokens)
+	if c.CacheLen() != expectedLen || c.LivePositions() != expectedLen {
+		t.Fatalf("final cache len = %d, live = %d, want %d", c.CacheLen(), c.LivePositions(), expectedLen)
+	}
+
+	// Lookup non-existent segment.
+	if _, ok := c.SegmentByID("does-not-exist"); ok {
+		t.Fatalf("SegmentByID should return false for unknown id")
 	}
 }
