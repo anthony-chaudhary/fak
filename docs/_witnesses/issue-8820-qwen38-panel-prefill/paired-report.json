@@ -1,0 +1,19 @@
+{
+  "schema": "fak.armbench.paired-report/1",
+  "tuned_baseline": "serial-cuda-baseline",
+  "arms": {
+    "cuda-panel-prefill": {
+      "treatment_arm": "cuda-panel-prefill",
+      "baseline_arm": "serial-cuda-baseline",
+      "apples_to_apples": true,
+      "honesty_note": "TRUE APPLES-TO-APPLES: exact Qwen3.8-27B Q4_K_M GGUF on NVIDIA A100-SXM4-40GB, prompt=22tok",
+      "treatment_prefill_ms": 241.9,
+      "baseline_prefill_ms": 11830.0,
+      "treatment_prefill_tps": 90.9466721785862,
+      "baseline_prefill_tps": 1.8596787827557058,
+      "speedup_prefill": 48.904506,
+      "fallback_count": 0,
+      "quality_exact": true
+    }
+  }
+}

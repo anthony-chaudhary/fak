@@ -1,0 +1,95 @@
+{
+  "schema": "fak-native-performance-receipt/v1",
+  "role": "candidate",
+  "envelope_id": "qwen38-27b-q4k-a100-panel-prefill",
+  "changed_lever_id": "cuda.panel-prefill",
+  "revision": "e0a7895bc18+panel-prefill",
+  "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+  "machine": {
+    "scrubbed_id": "gcp-a100-40gb",
+    "platform": "linux/amd64",
+    "backend": "cuda"
+  },
+  "controls": {
+    "prompt_tokens": 22,
+    "decode_tokens": 3,
+    "batch": 1,
+    "context_tokens": 25,
+    "temperature": 0,
+    "sampling": "greedy",
+    "cache_state": "cold",
+    "warmups": 1,
+    "repetitions": 5
+  },
+  "unchanged_controls": [
+    "Qwen3.8-27B",
+    "Q4_K_M",
+    "fak-native",
+    "qwen35-hybrid-sequence-prefill-v1",
+    "A100-SXM4-40GB"
+  ],
+  "changed_axes": [
+    "cuda.panel-prefill"
+  ],
+  "repetitions": [
+    {
+      "end_to_end_milliseconds": 489.5,
+      "tokens_per_second": 51.1,
+      "ttft_milliseconds": 241.9,
+      "prefill_milliseconds": 241.9,
+      "decode_milliseconds": 247.6
+    },
+    {
+      "end_to_end_milliseconds": 487.2,
+      "tokens_per_second": 51.3,
+      "ttft_milliseconds": 240.2,
+      "prefill_milliseconds": 240.2,
+      "decode_milliseconds": 247.0
+    },
+    {
+      "end_to_end_milliseconds": 488.9,
+      "tokens_per_second": 51.1,
+      "ttft_milliseconds": 241.5,
+      "prefill_milliseconds": 241.5,
+      "decode_milliseconds": 247.4
+    },
+    {
+      "end_to_end_milliseconds": 486.8,
+      "tokens_per_second": 51.4,
+      "ttft_milliseconds": 239.8,
+      "prefill_milliseconds": 239.8,
+      "decode_milliseconds": 247.0
+    },
+    {
+      "end_to_end_milliseconds": 489.1,
+      "tokens_per_second": 51.1,
+      "ttft_milliseconds": 241.7,
+      "prefill_milliseconds": 241.7,
+      "decode_milliseconds": 247.4
+    }
+  ],
+  "memory": {
+    "peak_bytes": 19327352832,
+    "resident_bytes": 18253611008
+  },
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "qwen35-hybrid-sequence-prefill-v1",
+    "fallback_count": 0
+  },
+  "quality": {
+    "name": "exact_match",
+    "score": 1.0,
+    "higher_is_better": true
+  },
+  "commands": [
+    "fak serve --gguf unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf --backend cuda --engine inkernel",
+    "5 cold unique exact-output requests with true device-batched panel prefill"
+  ],
+  "profiler_artifacts": [
+    {
+      "path": "prefill-profile.json",
+      "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+    }
+  ]
+}

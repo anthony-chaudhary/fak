@@ -33,14 +33,14 @@ than reusing the mutable tag.
 From the repository root:
 
 ```bash
-bash -n docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh
-python3 -m json.tool docs/_witnesses/issue-9827-amd-vllm-sglang/mi300x-packet.json >/dev/null
-python3 -m json.tool docs/_witnesses/issue-9827-amd-vllm-sglang/receipt.json >/dev/null
-bash docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh --dry-run
-git diff --check -- docs/_witnesses/issue-9827-amd-vllm-sglang/README.md \
-  docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh \
-  docs/_witnesses/issue-9827-amd-vllm-sglang/mi300x-packet.json \
-  docs/_witnesses/issue-9827-amd-vllm-sglang/receipt.json
+bash -n docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh
+python3 -m json.tool docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/mi300x-packet.json >/dev/null
+python3 -m json.tool docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/receipt.json >/dev/null
+bash docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh --dry-run
+git diff --check -- docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/README.md \
+  docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh \
+  docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/mi300x-packet.json \
+  docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/receipt.json
 ```
 
 `--dry-run` is intentionally declarative: it does not inspect a GPU, invoke Docker,
@@ -53,7 +53,7 @@ local storage, and exclusive access to an MI300X. From the repository root:
 
 ```bash
 MI300X_PACKET_OUT="$PWD/mi300x-results" \
-  bash docs/_witnesses/issue-9827-amd-vllm-sglang/run-mi300x-baselines.sh
+  bash docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh
 ```
 
 The runner stops on the first violated condition. Host admission requires character

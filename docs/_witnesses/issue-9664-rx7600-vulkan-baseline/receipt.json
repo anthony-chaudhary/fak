@@ -1,0 +1,58 @@
+{
+  "schema": "fak.benchmark-vulkan-baseline-receipt/1",
+  "issue": 9664,
+  "verdict": "VERIFIED_BASELINE",
+  "timestamp": "2026-09-03T12:25:00Z",
+  "hardware": {
+    "device_name": "AMD Radeon RX 7600",
+    "architecture": "RDNA3 / Navi 33 / gfx1102",
+    "driver_version": "32.0.31041.1004",
+    "vram_physical_bytes": 8589934592,
+    "vram_physical_gib": 8.0,
+    "adapter_ram_wmi_bytes": 4293918720,
+    "compute_units": 32,
+    "wavefront_size": 32,
+    "vulkan_loader_version": "1.4.350.0",
+    "host_cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "host_ram_bytes": 292065804288,
+    "host_os": "Windows 11 Pro 64-bit Build 26200"
+  },
+  "engine": {
+    "name": "fak-native",
+    "backend": "vulkan",
+    "runtime": "native-windows-cgo",
+    "compiler": "MinGW-w64 GCC 16.1.0 / Clang++ 22.1.8 / glslc (Vulkan SDK 1.4.350.0)",
+    "spirv_module_count": 28,
+    "spirv_dir": "internal/compute/spirv",
+    "fallback_allowed": false,
+    "fallback_engaged": false
+  },
+  "baseline_witness": {
+    "smoke_target": "SmolLM2-135M-Instruct-Q8_0.gguf",
+    "smoke_status": "SMOKE_OK",
+    "load_time_ms": 397.37,
+    "execution_path": "internal/compute/vulkan.go (Approx class registration)",
+    "numerical_parity": {
+      "argmax_exact": true,
+      "prefill_logit_cosine": 1.0,
+      "approx_op_count_passed": 7
+    },
+    "throughput_characterization": {
+      "smollm2_135m_f32_ms_per_tok": 394.0,
+      "smollm2_135m_f32_tok_per_s": 2.5,
+      "smollm2_135m_q8_tok_per_s": 24.6,
+      "bottleneck_diagnosis": "per-dispatch CPU/driver submission overhead (~300 vkQueueSubmit+fence per token without graph reuse)",
+      "lever_action": "implemented reusable layer command graphs (internal/compute/vulkan_graph.go #9834) and Wave32 rowtile optimization (#9677)"
+    }
+  },
+  "production_capacity_check": {
+    "model_target": "Qwen3.8-27B",
+    "raw_q4k_size_gib": 16.54,
+    "unquantized_est_load_gib": 100.20,
+    "vram_capacity_gib": 8.0,
+    "verdict": "TYPED_CAPACITY_REFUSAL_EVIDENCE",
+    "fit_state": "FIT_TOO_BIG_UNBOUNDED_VRAM",
+    "out_of_core_strategy": "Bounded host spill and double-buffered layer staging pool (#9835)",
+    "substitution_policy": "No substitution of Qwen3.6 allowed; capacity refusal preserved as authentic evidence"
+  }
+}
