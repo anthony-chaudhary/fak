@@ -1,3 +1,6 @@
+// Package reflexagent implements lightweight, fast-spawning reflex micro-agent execution.
+// Invariant: reflex profile executes atomic tasks under disjoint lane leases without multi-agent coordination.
+// Invariant: leaf tasks operate strictly within bounded concurrency classes and fail closed on collision.
 package reflexagent
 
 import (
@@ -10,7 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
 )
 
-// ReflexTask represents a bounded, leaf-level task assigned to a reflex micro-agent.
+// ReflexTask specifies a bounded, leaf-level unit of work assigned to a reflex micro-agent worker.
 type ReflexTask struct {
 	ID           string   `json:"id"`
 	Description  string   `json:"description"`
@@ -20,7 +23,7 @@ type ReflexTask struct {
 	ExecuteFn    func(ctx context.Context) (any, error)
 }
 
-// TaskResult captures the execution outcome and metrics for a reflex task.
+// TaskResult captures the execution outcome, output payload, error details, and timing metrics for a completed reflex task.
 type TaskResult struct {
 	TaskID    string        `json:"task_id"`
 	LaneName  string        `json:"lane_name"`
@@ -31,16 +34,15 @@ type TaskResult struct {
 	RunTime   time.Duration `json:"run_time"`
 }
 
-// ReflexMicroAgentProfile represents the fast-spawn execution profile.
-// It bypasses heavy session initialization and multi-agent coordination,
-// executing atomic tasks concurrently under tree-disjoint lane leases.
+// ReflexMicroAgentProfile coordinates fast-spawning micro-agent worker execution without heavyweight multi-agent coordination.
+// Invariant: worker spawning acquires concurrency leases before task execution and guarantees lease release upon completion.
 type ReflexMicroAgentProfile struct {
 	mu           sync.RWMutex
 	arbiter      *agentopt.ConcurrencyClassArbiter
 	spawnCounter int64
 }
 
-// NewReflexMicroAgentProfile creates a reflex micro-agent profile backed by a concurrency arbiter.
+// NewReflexMicroAgentProfile initializes a reflex micro-agent profile configured with the provided concurrency arbiter.
 func NewReflexMicroAgentProfile(arbiter *agentopt.ConcurrencyClassArbiter) *ReflexMicroAgentProfile {
 	if arbiter == nil {
 		arbiter = agentopt.NewConcurrencyClassArbiter(map[string]int{
@@ -54,8 +56,7 @@ func NewReflexMicroAgentProfile(arbiter *agentopt.ConcurrencyClassArbiter) *Refl
 	}
 }
 
-// SpawnAndExecute launches a micro-agent worker for a task, acquiring a tree-disjoint lease,
-// running the leaf task with sub-millisecond setup overhead, and releasing the lease.
+// SpawnAndExecute launches an ephemeral micro-agent worker, obtains a tree-disjoint lease, runs the task, and guarantees lease cleanup.
 func (p *ReflexMicroAgentProfile) SpawnAndExecute(ctx context.Context, task ReflexTask) (*TaskResult, error) {
 	spawnStart := time.Now()
 	workerID := fmt.Sprintf("reflex-worker-%d", atomic.AddInt64(&p.spawnCounter, 1))
@@ -116,7 +117,7 @@ func (p *ReflexMicroAgentProfile) SpawnAndExecute(ctx context.Context, task Refl
 	return res, runErr
 }
 
-// RunParallel runs a slice of reflex tasks in parallel, respecting lane tree-disjointness.
+// RunParallel executes a batch of reflex tasks concurrently across worker goroutines while respecting tree-disjoint lane boundaries.
 func (p *ReflexMicroAgentProfile) RunParallel(ctx context.Context, tasks []ReflexTask) ([]*TaskResult, error) {
 	results := make([]*TaskResult, len(tasks))
 	var wg sync.WaitGroup
