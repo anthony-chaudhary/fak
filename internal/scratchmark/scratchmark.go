@@ -1,5 +1,11 @@
 // Package scratchmark detects source files whose leading comments declare the
 // file disposable. It does not decide what a caller should do with a match.
+//
+// Invariant: scratchmark detection is fail-closed and deterministic. Unreadable
+// files fail closed with an error, and non-comment or trailing prose is never
+// treated as disposable.
+// Guard: inspection is strictly bounded by MaxHeaderBytes to isolate classification
+// strictly to the file's leading comment block.
 package scratchmark
 
 import (
