@@ -94,75 +94,6 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 	}
 	task.ID = taskID
 
-	if s.depth <= 0 {
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			return nil, errors.New("scheduler closed")
-		}
-		if ctx.Err() != nil {
-			s.mu.Unlock()
-			return nil, ctx.Err()
-		}
-
-		var waitChans []<-chan struct{}
-		for _, depID := range task.DependsOn {
-			if dep, ok := s.tasks[depID]; ok && !dep.committed {
-				waitChans = append(waitChans, dep.done)
-			}
-		}
-
-		rec := &taskRecord[T]{
-			id:   taskID,
-			done: make(chan struct{}),
-		}
-		s.tasks[taskID] = rec
-		s.mu.Unlock()
-
-		abortTask := func() {
-			s.mu.Lock()
-			delete(s.tasks, taskID)
-			close(rec.done)
-			s.mu.Unlock()
-		}
-
-		for _, ch := range waitChans {
-			select {
-			case <-ch:
-			case <-ctx.Done():
-				abortTask()
-				return nil, ctx.Err()
-			case <-s.closeCh:
-				abortTask()
-				return nil, errors.New("scheduler closed")
-			}
-		}
-
-		s.inFlight.Add(1)
-		start := time.Now()
-		val, execErr := task.Execute(ctx)
-		dur := time.Since(start)
-		s.inFlight.Add(-1)
-
-		res := &OverlapResult[T]{
-			ID:        taskID,
-			Value:     val,
-			Err:       execErr,
-			Duration:  dur,
-			Committed: true,
-		}
-
-		s.mu.Lock()
-		rec.committed = true
-		rec.result = res
-		close(rec.done)
-		s.results = append(s.results, res)
-		s.yielded[taskID] = true
-		s.mu.Unlock()
-
-		return res, execErr
-	}
-
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -206,6 +137,14 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 		}
 	}
 
+	if s.depth <= 0 {
+		s.inFlight.Add(1)
+		res := executeInFlightTask(ctx, task, taskID)
+		s.inFlight.Add(-1)
+		s.commitTaskResult(rec, res, false)
+		return res, res.Err
+	}
+
 	select {
 	case s.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -222,43 +161,20 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.mu.Lock()
-				rec.committed = true
 				res := &OverlapResult[T]{
 					ID:        taskID,
 					Err:       fmt.Errorf("task panicked: %v", r),
 					Committed: true,
 				}
-				rec.result = res
-				close(rec.done)
-				s.results = append(s.results, res)
-				s.buffered = append(s.buffered, res)
-				s.mu.Unlock()
+				s.commitTaskResult(rec, res, true)
 			}
 			s.inFlight.Add(-1)
 			<-s.sem
 			s.wg.Done()
 		}()
 
-		start := time.Now()
-		val, execErr := task.Execute(ctx)
-		dur := time.Since(start)
-
-		res := &OverlapResult[T]{
-			ID:        taskID,
-			Value:     val,
-			Err:       execErr,
-			Duration:  dur,
-			Committed: true,
-		}
-
-		s.mu.Lock()
-		rec.committed = true
-		rec.result = res
-		close(rec.done)
-		s.results = append(s.results, res)
-		s.buffered = append(s.buffered, res)
-		s.mu.Unlock()
+		res := executeInFlightTask(ctx, task, taskID)
+		s.commitTaskResult(rec, res, true)
 	}()
 
 	s.mu.Lock()
@@ -321,4 +237,31 @@ func (s *OverlapRunner[T]) Close() {
 	}
 	s.closed = true
 	close(s.closeCh)
+}
+
+func executeInFlightTask[T any](ctx context.Context, task InFlightTask[T], taskID string) *OverlapResult[T] {
+	start := time.Now()
+	val, execErr := task.Execute(ctx)
+	dur := time.Since(start)
+	return &OverlapResult[T]{
+		ID:        taskID,
+		Value:     val,
+		Err:       execErr,
+		Duration:  dur,
+		Committed: true,
+	}
+}
+
+func (s *OverlapRunner[T]) commitTaskResult(rec *taskRecord[T], res *OverlapResult[T], buffer bool) {
+	s.mu.Lock()
+	rec.committed = true
+	rec.result = res
+	close(rec.done)
+	s.results = append(s.results, res)
+	if buffer {
+		s.buffered = append(s.buffered, res)
+	} else {
+		s.yielded[res.ID] = true
+	}
+	s.mu.Unlock()
 }
