@@ -103,26 +103,7 @@ func Run(argv []string) {
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
 	beginSelfUpdateOutput(*jsonMode)
-	if *applyBuildGC && !*buildGC {
-		fmt.Fprintln(os.Stderr, "self-update: --apply requires --build-gc")
-		return
-	}
-	if *buildGC {
-		if *check {
-			fmt.Fprintln(os.Stderr, "self-update: --build-gc and --check are mutually exclusive")
-			return
-		}
-		repoRoot := strings.TrimSpace(*root)
-		if repoRoot == "" {
-			repoRoot = discoverRepoRoot()
-		}
-		if repoRoot == "" {
-			fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
-			return
-		}
-		if err := runBuildWorktreeGC(context.Background(), os.Stdout, repoRoot, *applyBuildGC, time.Now()); err != nil {
-			fmt.Fprintln(os.Stderr, "self-update: build-worktree GC:", err)
-		}
+	if handleBuildGC(*root, *buildGC, *applyBuildGC, *check) {
 		return
 	}
 	if handled, err := runSelfUpdateMSIX(selfUpdateMSIXOptions{
@@ -164,32 +145,9 @@ func Run(argv []string) {
 
 	// Conditional selection is intentionally before any git fetch/build/install. With no
 	// manifest URL configured this block is skipped, preserving the legacy path byte-for-byte.
-	var manifestSelection selfUpdateManifestSelection
-	if strings.TrimSpace(*manifestURL) != "" {
-		installed := selfUpdateInstalledIdentity(strings.TrimSpace(*target))
-		installedState, err := selfinstall.ReadInstallIdentity(selfinstall.IdentityStatePath(installTargetOr(*target)))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "self-update: installed identity refused:", err)
-			return
-		}
-		installedVersion := installedState.AppVersion
-		if strings.TrimSpace(installedVersion) == "" {
-			installedVersion = selfUpdateBinaryVersion(installTargetOr(*target))
-		}
-		manifestSelection, err = selfUpdateManifestSelect(context.Background(), selfUpdateManifestRequest{
-			URL: *manifestURL, ManifestID: *manifestID, CachePath: *manifestStatePath, Channel: *manifestChannel,
-			Cohort: *manifestCohort, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
-			InstalledIdentity: installed, InstalledVersion: installedVersion,
-			InstalledGeneration: installedState.SignedMetadataGeneration, Offline: *offline, Force: *force,
-		})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "self-update: signed manifest refused:", err)
-			return
-		}
-		if manifestSelection.Disposition != "update" {
-			fmt.Fprintln(os.Stderr, "self-update:", manifestSelection.Disposition)
-			return
-		}
+	manifestSelection, ok := selectSelfUpdateManifest(*manifestURL, *manifestID, *manifestStatePath, *manifestChannel, *manifestCohort, *target, *offline, *force)
+	if !ok {
+		return
 	}
 
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
@@ -251,15 +209,7 @@ func Run(argv []string) {
 		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
 
 	if *check {
-		// Observability: also report the swap-aside footprint next to the target binary, so a
-		// leak of "<binary>.old.<pid>.<i>" files (the 9 GB class this reaper exists to prevent)
-		// is a one-line signal here instead of an invisible pile only `ls` would reveal.
-		reportAsideFootprint(installTargetOr(*target))
-		// The whole role table, not just this one binary: a host is converged only when EVERY
-		// declared hot copy holds origin/main, and --check is where an operator asks that.
-		audit := selfUpdateAudit(repoRoot, headRev)
-		printHotCopyAudit(audit)
-		emitSelfUpdateCheckOutcome(installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Partition())
+		runSelfUpdateCheck(repoRoot, headRev, *target, verdict, skew)
 		return
 	}
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
@@ -275,23 +225,91 @@ func Run(argv []string) {
 	manifestSelectedUpdate := strings.TrimSpace(*manifestURL) != "" && manifestSelection.Disposition == "update"
 	proceed := manifestSelectedUpdate || selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
 	if !proceed {
-		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
-		switch {
-		case fleetTarget:
-			fmt.Fprintln(selfUpdateProgress, "self-update: target already current — nothing to do.")
-		case skew.Verdict == versionskew.Ahead:
-			fmt.Fprintln(selfUpdateProgress, "self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
-		case skew.Verdict == versionskew.Fresh:
-			fmt.Fprintln(selfUpdateProgress, "self-update: already current — nothing to do.")
-		case skew.Verdict == versionskew.Dirty, skew.Verdict == versionskew.Unstamped, skew.Verdict == versionskew.Diverged:
-			fmt.Fprintf(selfUpdateProgress, "self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skew.Verdict)
-		default:
-			fmt.Fprintln(selfUpdateProgress, "self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
-		}
+		reportSelfUpdateSkipped(fleetTarget, skew.Verdict, *target)
 		return
 	}
 
 	performSelfUpdate(repoRoot, headRev, target, companionPaths, selectedArtifact, manifestSelection.MetadataGeneration, manifestSelection.TargetVersion, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+}
+
+func handleBuildGC(rootFlag string, buildGC, applyBuildGC, check bool) bool {
+	if applyBuildGC && !buildGC {
+		fmt.Fprintln(os.Stderr, "self-update: --apply requires --build-gc")
+		return true
+	}
+	if !buildGC {
+		return false
+	}
+	if check {
+		fmt.Fprintln(os.Stderr, "self-update: --build-gc and --check are mutually exclusive")
+		return true
+	}
+	repoRoot := strings.TrimSpace(rootFlag)
+	if repoRoot == "" {
+		repoRoot = discoverRepoRoot()
+	}
+	if repoRoot == "" {
+		fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
+		return true
+	}
+	if err := runBuildWorktreeGC(context.Background(), os.Stdout, repoRoot, applyBuildGC, time.Now()); err != nil {
+		fmt.Fprintln(os.Stderr, "self-update: build-worktree GC:", err)
+	}
+	return true
+}
+
+func selectSelfUpdateManifest(manifestURL, manifestID, manifestStatePath, manifestChannel, manifestCohort, target string, offline, force bool) (selfUpdateManifestSelection, bool) {
+	if strings.TrimSpace(manifestURL) == "" {
+		return selfUpdateManifestSelection{}, true
+	}
+	installed := selfUpdateInstalledIdentity(strings.TrimSpace(target))
+	installedState, err := selfinstall.ReadInstallIdentity(selfinstall.IdentityStatePath(installTargetOr(target)))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "self-update: installed identity refused:", err)
+		return selfUpdateManifestSelection{}, false
+	}
+	installedVersion := installedState.AppVersion
+	if strings.TrimSpace(installedVersion) == "" {
+		installedVersion = selfUpdateBinaryVersion(installTargetOr(target))
+	}
+	manifestSelection, err := selfUpdateManifestSelect(context.Background(), selfUpdateManifestRequest{
+		URL: manifestURL, ManifestID: manifestID, CachePath: manifestStatePath, Channel: manifestChannel,
+		Cohort: manifestCohort, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+		InstalledIdentity: installed, InstalledVersion: installedVersion,
+		InstalledGeneration: installedState.SignedMetadataGeneration, Offline: offline, Force: force,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "self-update: signed manifest refused:", err)
+		return selfUpdateManifestSelection{}, false
+	}
+	if manifestSelection.Disposition != "update" {
+		fmt.Fprintln(os.Stderr, "self-update:", manifestSelection.Disposition)
+		return manifestSelection, false
+	}
+	return manifestSelection, true
+}
+
+func runSelfUpdateCheck(repoRoot, headRev, target string, verdict binstamp.Freshness, skew versionskew.Assessment) {
+	reportAsideFootprint(installTargetOr(target))
+	audit := selfUpdateAudit(repoRoot, headRev)
+	printHotCopyAudit(audit)
+	emitSelfUpdateCheckOutcome(installTargetOr(target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Partition())
+}
+
+func reportSelfUpdateSkipped(fleetTarget bool, skewVerdict versionskew.Verdict, target string) {
+	emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skewVerdict), installTargetOr(target), fmt.Sprintf("%s", skewVerdict))
+	switch {
+	case fleetTarget:
+		fmt.Fprintln(selfUpdateProgress, "self-update: target already current — nothing to do.")
+	case skewVerdict == versionskew.Ahead:
+		fmt.Fprintln(selfUpdateProgress, "self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
+	case skewVerdict == versionskew.Fresh:
+		fmt.Fprintln(selfUpdateProgress, "self-update: already current — nothing to do.")
+	case skewVerdict == versionskew.Dirty, skewVerdict == versionskew.Unstamped, skewVerdict == versionskew.Diverged:
+		fmt.Fprintf(selfUpdateProgress, "self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skewVerdict)
+	default:
+		fmt.Fprintln(selfUpdateProgress, "self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
+	}
 }
 
 func usableSelfUpdateArtifact(selection selfUpdateManifestSelection, companionPaths []string) *selfUpdateArtifactTarget {
