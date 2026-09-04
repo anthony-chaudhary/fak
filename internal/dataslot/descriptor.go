@@ -89,6 +89,10 @@ func (d DataSlotDescriptor) IsActive() bool {
 }
 
 // Validate checks that required descriptor fields are present and valid.
+//
+// Invariant: data slot detection and validation is fail-closed and deterministic.
+// Descriptors with missing identifiers, unmapped database families, or invalid
+// lifecycle statuses are strictly rejected before any runtime admission.
 func (d DataSlotDescriptor) Validate() error {
 	if strings.TrimSpace(d.ID) == "" {
 		return errors.New("dataslot: descriptor ID is required")
