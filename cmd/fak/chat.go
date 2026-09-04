@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
 
 // cmdChat is the minimal native TUI/REPL on the internal/agent seam (#1320, child
@@ -27,9 +26,9 @@ import (
 // default, matching `fak agent`). --base-url swaps in a live provider planner.
 func cmdChat(argv []string) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
-	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
-	baseURL := fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
-	model := fs.String("model", "gemini-3.8-flash", "model id")
+	provider := fs.String("provider", "", "provider transcript wire: openai, anthropic, gemini, or xai")
+	baseURL := fs.String("base-url", "", "provider base URL (empty => auto-detect or offline mock planner)")
+	model := fs.String("model", "", "model id")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the API key (default: provider-specific, e.g. GEMINI_API_KEY)")
 	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
 	offline := fs.Bool("offline", false, "force the deterministic mock planner (no network)")
@@ -41,60 +40,6 @@ func cmdChat(argv []string) {
 	codeWorkspace := fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
-
-	providerExplicit := false
-	apiKeyExplicit := false
-	baseURLExplicit := false
-	modelExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "provider":
-			providerExplicit = true
-		case "api-key-env":
-			apiKeyExplicit = true
-		case "base-url":
-			baseURLExplicit = true
-		case "model":
-			modelExplicit = true
-		}
-	})
-
-	effectiveProvider := *provider
-	effectiveModel := *model
-	effectiveBaseURL := *baseURL
-	effectiveAPIKeyEnv := *apiKeyEnv
-
-	if !*offline && !baseURLExplicit {
-		if providerExplicit {
-			effectiveBaseURL = dropin.DefaultBaseURL(effectiveProvider)
-		} else if detected := autoDetectInference(); detected != nil {
-			effectiveProvider = detected.provider
-			effectiveBaseURL = detected.baseURL
-			if !modelExplicit {
-				effectiveModel = detected.model
-			}
-			if !apiKeyExplicit {
-				effectiveAPIKeyEnv = detected.apiKeyEnv
-			}
-		}
-	}
-
-	if !apiKeyExplicit && effectiveAPIKeyEnv == "" {
-		switch effectiveProvider {
-		case "gemini":
-			effectiveAPIKeyEnv = "GEMINI_API_KEY"
-		case "anthropic":
-			effectiveAPIKeyEnv = "ANTHROPIC_API_KEY"
-		case "xai":
-			effectiveAPIKeyEnv = "XAI_API_KEY"
-		default:
-			if strings.HasPrefix(effectiveModel, "gemini") && os.Getenv("GEMINI_API_KEY") != "" {
-				effectiveAPIKeyEnv = "GEMINI_API_KEY"
-			} else {
-				effectiveAPIKeyEnv = "OPENAI_API_KEY"
-			}
-		}
-	}
 
 	var runOpts []agent.RunOption
 	useCodeTools := *codeTools && *tools != "demo" && *tools != "none"
@@ -113,7 +58,7 @@ func cmdChat(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(nil))
 	}
 
-	planner := chatPlanner(*offline, effectiveBaseURL, effectiveProvider, effectiveModel, effectiveAPIKeyEnv, *anthropicAuth)
+	planner := chatPlanner(*offline, *baseURL, *provider, *model, *apiKeyEnv, *anthropicAuth)
 	if *task != "" {
 		if err := runChatHeadless(os.Stdout, planner, *task, *maxTurns, runOpts...); err != nil {
 			os.Exit(1)
@@ -122,6 +67,11 @@ func cmdChat(argv []string) {
 	}
 	runChat(os.Stdin, os.Stdout, planner, *maxTurns, runOpts...)
 }
+
+var (
+	localDaemonProbeURL = "http://127.0.0.1:8080/readyz"
+	localDaemonBaseURL  = "http://127.0.0.1:8080/v1"
+)
 
 type detectedInference struct {
 	provider  string
@@ -134,7 +84,7 @@ func autoDetectInference() *detectedInference {
 	if probeLocalDaemon() {
 		return &detectedInference{
 			provider:  "openai",
-			baseURL:   "http://127.0.0.1:8080/v1",
+			baseURL:   localDaemonBaseURL,
 			model:     "default",
 			apiKeyEnv: "OPENAI_API_KEY",
 		}
@@ -142,30 +92,30 @@ func autoDetectInference() *detectedInference {
 	if os.Getenv("GEMINI_API_KEY") != "" {
 		return &detectedInference{
 			provider:  "gemini",
-			baseURL:   dropin.DefaultBaseURL("gemini"),
-			model:     "gemini-3.8-flash",
+			baseURL:   "https://generativelanguage.googleapis.com/v1beta",
+			model:     "gemini-2.5-flash",
 			apiKeyEnv: "GEMINI_API_KEY",
 		}
 	}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return &detectedInference{
 			provider:  "anthropic",
-			baseURL:   dropin.DefaultBaseURL("anthropic"),
-			model:     "claude-3-5-sonnet-20241022",
+			baseURL:   "https://api.anthropic.com",
+			model:     "claude-3-7-sonnet-20250219",
 			apiKeyEnv: "ANTHROPIC_API_KEY",
 		}
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return &detectedInference{
 			provider:  "openai",
-			baseURL:   dropin.DefaultBaseURL("openai"),
-			model:     "gpt-4o-mini",
+			baseURL:   "https://api.openai.com/v1",
+			model:     "gpt-4o",
 			apiKeyEnv: "OPENAI_API_KEY",
 		}
 	}
 	if os.Getenv("XAI_API_KEY") != "" {
 		return &detectedInference{
-			provider:  "xai",
+			provider:  "openai",
 			baseURL:   "https://api.x.ai/v1",
 			model:     "grok-beta",
 			apiKeyEnv: "XAI_API_KEY",
@@ -175,8 +125,8 @@ func autoDetectInference() *detectedInference {
 }
 
 func probeLocalDaemon() bool {
-	client := http.Client{Timeout: 50 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:8080/readyz")
+	client := http.Client{Timeout: 100 * time.Millisecond}
+	resp, err := client.Get(localDaemonProbeURL)
 	if err != nil {
 		return false
 	}
@@ -184,21 +134,89 @@ func probeLocalDaemon() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+func defaultProviderConfig(p string) (baseURL, defaultModel, defaultAPIKeyEnv string) {
+	switch strings.ToLower(p) {
+	case "gemini", "google":
+		return "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash", "GEMINI_API_KEY"
+	case "anthropic":
+		return "https://api.anthropic.com", "claude-3-7-sonnet-20250219", "ANTHROPIC_API_KEY"
+	case "openai":
+		return "https://api.openai.com/v1", "gpt-4o", "OPENAI_API_KEY"
+	case "xai":
+		return "https://api.x.ai/v1", "grok-beta", "XAI_API_KEY"
+	case "local", "fak":
+		return localDaemonBaseURL, "default", "OPENAI_API_KEY"
+	default:
+		return "", "", ""
+	}
+}
+
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
-// unless a --base-url is given, mirroring `fak agent` exactly so `fak chat`
-// runs with zero network by default.
+// unless a --base-url is given, or inference endpoint auto-detection resolves a
+// local daemon or provider API key in the environment.
 func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string) agent.Planner {
-	if offline || baseURL == "" {
-		if !offline {
-			fmt.Fprintln(os.Stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
+	if offline {
+		return agent.NewSyntheticPlanner(model)
+	}
+
+	effectiveBaseURL := baseURL
+	effectiveProvider := provider
+	effectiveModel := model
+	effectiveAPIKeyEnv := apiKeyEnv
+
+	if effectiveProvider != "" && effectiveBaseURL == "" {
+		canonURL, canonModel, canonEnv := defaultProviderConfig(effectiveProvider)
+		if canonURL != "" && (canonEnv == "" || os.Getenv(canonEnv) != "") {
+			effectiveBaseURL = canonURL
+			if effectiveModel == "" {
+				effectiveModel = canonModel
+			}
+			if effectiveAPIKeyEnv == "" {
+				effectiveAPIKeyEnv = canonEnv
+			}
 		}
-		return agent.NewMockPlanner(model)
+	} else if effectiveBaseURL == "" {
+		if detected := autoDetectInference(); detected != nil {
+			effectiveBaseURL = detected.baseURL
+			effectiveProvider = detected.provider
+			if effectiveModel == "" {
+				effectiveModel = detected.model
+			}
+			if effectiveAPIKeyEnv == "" {
+				effectiveAPIKeyEnv = detected.apiKeyEnv
+			}
+		}
 	}
-	key := os.Getenv(apiKeyEnv)
+
+	if effectiveBaseURL == "" {
+		fmt.Fprintln(os.Stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
+		return agent.NewSyntheticPlanner(effectiveModel)
+	}
+
+	if effectiveProvider == "" {
+		effectiveProvider = "openai"
+	}
+	if effectiveModel == "" {
+		effectiveModel = "default"
+	}
+	if effectiveAPIKeyEnv == "" {
+		switch effectiveProvider {
+		case "gemini":
+			effectiveAPIKeyEnv = "GEMINI_API_KEY"
+		case "anthropic":
+			effectiveAPIKeyEnv = "ANTHROPIC_API_KEY"
+		case "xai":
+			effectiveAPIKeyEnv = "XAI_API_KEY"
+		default:
+			effectiveAPIKeyEnv = "OPENAI_API_KEY"
+		}
+	}
+
+	key := os.Getenv(effectiveAPIKeyEnv)
 	if key == "" {
-		fmt.Fprintf(os.Stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", apiKeyEnv)
+		fmt.Fprintf(os.Stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", effectiveAPIKeyEnv)
 	}
-	p, err := agent.NewProviderHTTPPlanner(provider, baseURL, model, key)
+	p, err := agent.NewProviderHTTPPlanner(effectiveProvider, effectiveBaseURL, effectiveModel, key)
 	must(err)
 	scheme, ok := agent.ParseAnthropicAuthScheme(anthropicAuth)
 	if !ok {
