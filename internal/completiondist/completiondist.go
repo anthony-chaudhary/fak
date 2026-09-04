@@ -27,6 +27,9 @@
 // Everything here is deterministic (no time.Now), stdlib + internal/fleetmetrics
 // + internal/fleetcap only, and off the hot path. An empty sample set folds to a
 // zero-valued Distribution.
+//
+// Invariant: completion distribution analysis is fail-closed and deterministic across all executions.
+// Guard: empty sample sets yield an explicit zero-value distribution, and negative durations fail closed with an error.
 package completiondist
 
 import (
