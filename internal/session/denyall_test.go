@@ -273,6 +273,18 @@ func TestDenyAllBreakerProgressResetsTheRun(t *testing.T) {
 	if !v.Continue || v.Consecutive != 1 {
 		t.Fatalf("post-reset stuck turn: Consecutive = %d, want 1 (re-seeded, not continued)", v.Consecutive)
 	}
+
+	// Also verify todowrite progress resets the streak.
+	b.Observe(defaultDenyPlan())
+	v = b.Observe(DenyAllObservation{
+		Tool:        "todowrite",
+		Reason:      "DEFAULT_DENY",
+		Progress:    true,
+		Disposition: DenyAllHostPlumbing,
+	})
+	if !v.Continue || v.Consecutive != 0 {
+		t.Fatalf("todowrite progress turn: verdict = {Continue:%v Consecutive:%d}, want continue/0 (reset)", v.Continue, v.Consecutive)
+	}
 }
 
 // TestDenyAllBreakerCleanTurnResetsTheRun proves a pure-text / no-refused-call
@@ -381,6 +393,7 @@ func TestDenyAllBreakerNeverAutoAllows(t *testing.T) {
 		{"effectful under threshold", DenyAllObservation{Tool: "shell_command", Reason: "DEFAULT_DENY", Disposition: DenyAllEffectful}},
 		{"clean turn", DenyAllObservation{Tool: "", Reason: ""}},
 		{"progress turn", DenyAllObservation{Tool: "update_plan", Reason: "DEFAULT_DENY", Progress: true}},
+		{"progress turn todowrite", DenyAllObservation{Tool: "todowrite", Reason: "DEFAULT_DENY", Progress: true, Disposition: DenyAllHostPlumbing}},
 	}
 	for _, tc := range cases {
 		var b DenyAllBreaker

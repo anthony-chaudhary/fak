@@ -64,7 +64,7 @@ type DenyAllDisposition int
 
 const (
 	// DenyAllHostPlumbing marks an orchestration / read-only host tool
-	// (update_plan, tool_search, MCP list/read, planning/state helpers). A
+	// (update_plan, todowrite, tool_search, MCP list/read, planning/state helpers). A
 	// DEFAULT_DENY here is a harness-dialect COVERAGE problem — the tool's schema
 	// is plan-state / read-only, so the recovery is to admit it on the floor, not
 	// to weaken the guard.

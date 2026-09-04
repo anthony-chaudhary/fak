@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 func TestTodoStateValidation(t *testing.T) {
@@ -446,5 +447,97 @@ func TestRunArmDeduplicateTodoTools(t *testing.T) {
 	}
 	if metrics.EngineCalls+metrics.VDSOHits < 1 {
 		t.Errorf("expected engine call or vDSO hit, got EngineCalls=%d, VDSOHits=%d", metrics.EngineCalls, metrics.VDSOHits)
+	}
+}
+
+func TestTodoWritePlanObserverAndEventSink(t *testing.T) {
+	_, err := ArmTodoTools()
+	if err != nil {
+		t.Fatalf("ArmTodoTools: %v", err)
+	}
+	t.Cleanup(DisarmTodoTools)
+
+	var observedPayload *harnesskit.PlanPayload
+	var observedEnvelope *harnesskit.Envelope
+
+	SetPlanObserver(func(payload harnesskit.PlanPayload) {
+		observedPayload = &payload
+	})
+	SetPlanEventSink(func(env harnesskit.Envelope) {
+		observedEnvelope = &env
+	})
+
+	ctx := context.Background()
+	todosJSON := `{"todos":[{"id":"custom-1","content":"Step 1","status":"in_progress","priority":"high"},{"content":"Step 2","status":"pending","priority":"medium"}]}`
+	writeCall := &abi.ToolCall{
+		Tool: ToolTodoWrite,
+		Args: putBytes(ctx, []byte(todosJSON)),
+	}
+
+	res, err := activeTodoEngine.Complete(ctx, writeCall)
+	if err != nil {
+		t.Fatalf("todowrite Complete failed: %v", err)
+	}
+	if res.Status != abi.StatusOK {
+		t.Fatalf("todowrite status = %v, want OK", res.Status)
+	}
+
+	if observedPayload == nil {
+		t.Fatalf("expected PlanObserver to be called, got nil")
+	}
+	if len(observedPayload.Steps) != 2 {
+		t.Fatalf("expected 2 steps in observed PlanPayload, got %d", len(observedPayload.Steps))
+	}
+	if observedPayload.Steps[0].ID != "custom-1" || observedPayload.Steps[0].Text != "Step 1" || observedPayload.Steps[0].Status != "in_progress" {
+		t.Errorf("unexpected step 0: %+v", observedPayload.Steps[0])
+	}
+	if observedPayload.Steps[1].ID != "task-2" || observedPayload.Steps[1].Text != "Step 2" || observedPayload.Steps[1].Status != "pending" {
+		t.Errorf("unexpected step 1: %+v", observedPayload.Steps[1])
+	}
+
+	if observedEnvelope == nil {
+		t.Fatalf("expected PlanEventSink to be called, got nil")
+	}
+	if observedEnvelope.Type != harnesskit.EventPlanUpdated {
+		t.Errorf("envelope type = %v, want %v", observedEnvelope.Type, harnesskit.EventPlanUpdated)
+	}
+	var decodedPayload harnesskit.PlanPayload
+	if err := observedEnvelope.DecodePayload(&decodedPayload); err != nil {
+		t.Fatalf("failed to decode envelope payload: %v", err)
+	}
+	if len(decodedPayload.Steps) != 2 || decodedPayload.Steps[0].Text != "Step 1" {
+		t.Errorf("unexpected decoded envelope payload: %+v", decodedPayload)
+	}
+}
+
+func TestRunArmWithPlanObserver(t *testing.T) {
+	_, err := ArmTodoTools()
+	if err != nil {
+		t.Fatalf("ArmTodoTools: %v", err)
+	}
+	t.Cleanup(DisarmTodoTools)
+
+	var observedPayload *harnesskit.PlanPayload
+	turns := []*Completion{
+		toolCallTurn(ToolTodoWrite, `{"todos":[{"content":"Run step 1","status":"in_progress","priority":"high"}]}`),
+		{Message: Message{Content: "Done."}},
+	}
+	planner := &recordingSysPlanner{turns: turns}
+	var log []traceEvent
+
+	_, err = RunArm(context.Background(), planner, "plan task", true, 3, &log,
+		WithTodoTools(),
+		WithPlanObserver(func(p harnesskit.PlanPayload) {
+			observedPayload = &p
+		}),
+	)
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+	if observedPayload == nil {
+		t.Fatalf("expected PlanObserver to be invoked during RunArm, got nil")
+	}
+	if len(observedPayload.Steps) != 1 || observedPayload.Steps[0].Text != "Run step 1" {
+		t.Errorf("unexpected steps in observed plan: %+v", observedPayload.Steps)
 	}
 }

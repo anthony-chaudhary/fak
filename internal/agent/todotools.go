@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // todotools.go — kernel-mediated planning and todo list tools (todowrite / todoread)
@@ -72,16 +73,78 @@ type TodoReadResponse struct {
 	InProgress *TodoItem  `json:"in_progress,omitempty"`
 }
 
+// PlanObserver receives plan update events when todowrite updates the plan.
+type PlanObserver func(harnesskit.PlanPayload)
+
+// PlanEventSink receives raw harnesskit.Envelope events for plan updates.
+type PlanEventSink func(harnesskit.Envelope)
+
 // TodoState holds the thread-safe active todo items for a session.
 type TodoState struct {
-	mu    sync.RWMutex
-	todos []TodoItem
+	mu            sync.RWMutex
+	todos         []TodoItem
+	planObserver  PlanObserver
+	planEventSink PlanEventSink
 }
 
 // NewTodoState returns an empty initialized TodoState.
 func NewTodoState() *TodoState {
 	return &TodoState{
 		todos: make([]TodoItem, 0),
+	}
+}
+
+// SetPlanObserver attaches a plan observer callback to the TodoState.
+func (s *TodoState) SetPlanObserver(obs PlanObserver) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planObserver = obs
+}
+
+// SetPlanEventSink attaches a plan event sink callback to the TodoState.
+func (s *TodoState) SetPlanEventSink(sink PlanEventSink) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planEventSink = sink
+}
+
+// WithPlanObserver configures a PlanObserver on the active todo tools during an agent run.
+func WithPlanObserver(obs PlanObserver) RunOption {
+	return func(c *runConfig) {
+		SetPlanObserver(obs)
+	}
+}
+
+// WithPlanEventSink configures a PlanEventSink on the active todo tools during an agent run.
+func WithPlanEventSink(sink PlanEventSink) RunOption {
+	return func(c *runConfig) {
+		SetPlanEventSink(sink)
+	}
+}
+
+// SetPlanObserver sets the plan observer on the active TodoState (if armed) and active engine.
+func SetPlanObserver(obs PlanObserver) {
+	if activeTodoEngine != nil {
+		activeTodoEngine.SetPlanObserver(obs)
+	}
+	if st := armedTodoTools.Load(); st != nil {
+		st.SetPlanObserver(obs)
+	}
+}
+
+// SetPlanEventSink sets the plan event sink on the active TodoState (if armed) and active engine.
+func SetPlanEventSink(sink PlanEventSink) {
+	if activeTodoEngine != nil {
+		activeTodoEngine.SetPlanEventSink(sink)
+	}
+	if st := armedTodoTools.Load(); st != nil {
+		st.SetPlanEventSink(sink)
 	}
 }
 
@@ -176,14 +239,85 @@ func (s *TodoState) SetTodos(todos []TodoItem) (TodoReceipt, error) {
 
 	s.mu.Lock()
 	s.todos = sanitized
+	obs := s.planObserver
+	sink := s.planEventSink
 	s.mu.Unlock()
+
+	if obs != nil || sink != nil {
+		steps := make([]harnesskit.PlanStep, len(sanitized))
+		for idx, it := range sanitized {
+			steps[idx] = harnesskit.PlanStep{
+				ID:     it.ID,
+				Text:   it.Content,
+				Status: it.Status,
+			}
+		}
+		payload := harnesskit.PlanPayload{Steps: steps}
+		if obs != nil {
+			obs(payload)
+		}
+		if sink != nil {
+			raw, _ := json.Marshal(payload)
+			sink(harnesskit.Envelope{
+				Version:     harnesskit.ProtocolVersion,
+				Type:        harnesskit.EventPlanUpdated,
+				Sensitivity: harnesskit.SensitivityPublic,
+				Payload:     raw,
+			})
+		}
+	}
 
 	return receipt, nil
 }
 
 // todoEngine implements abi.Engine for todowrite and todoread.
 type todoEngine struct {
-	state *TodoState
+	state         *TodoState
+	planObserver  PlanObserver
+	planEventSink PlanEventSink
+	mu            sync.RWMutex
+}
+
+func (e *todoEngine) SetPlanObserver(obs PlanObserver) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.planObserver = obs
+	if e.state != nil {
+		e.state.SetPlanObserver(obs)
+	}
+}
+
+func (e *todoEngine) getPlanObserver() PlanObserver {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.planObserver
+}
+
+func (e *todoEngine) SetPlanEventSink(sink PlanEventSink) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.planEventSink = sink
+	if e.state != nil {
+		e.state.SetPlanEventSink(sink)
+	}
+}
+
+func (e *todoEngine) getPlanEventSink() PlanEventSink {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.planEventSink
 }
 
 func (e *todoEngine) Caps() []abi.Capability { return nil }
@@ -212,6 +346,12 @@ func (e *todoEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result
 				errResp, _ := json.Marshal(TodoReceipt{Status: "error", Error: fmt.Sprintf("invalid arguments JSON: %v", err)})
 				return engineResult(ctx, c, body, errResp, true, EngineTodoWrite), nil
 			}
+		}
+		if engObs := e.getPlanObserver(); engObs != nil && st.planObserver == nil {
+			st.SetPlanObserver(engObs)
+		}
+		if engSink := e.getPlanEventSink(); engSink != nil && st.planEventSink == nil {
+			st.SetPlanEventSink(engSink)
 		}
 		receipt, err := st.SetTodos(list.Todos)
 		respBytes, _ := json.Marshal(receipt)
@@ -294,6 +434,10 @@ func ArmTodoTools() ([]ToolDef, error) {
 // DisarmTodoTools unarms the todo tools, restoring the inactive state.
 func DisarmTodoTools() {
 	armedTodoTools.Store(nil)
+	if activeTodoEngine != nil {
+		activeTodoEngine.SetPlanObserver(nil)
+		activeTodoEngine.SetPlanEventSink(nil)
+	}
 }
 
 // GetActiveTodoState returns the active TodoState, or nil if unarmed.
