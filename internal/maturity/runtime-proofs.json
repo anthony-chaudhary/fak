@@ -1,285 +1,785 @@
 {
-  "schema": "fak-maturity-runtime-proofs/2",
-  "witnesses": [
-    {
-      "lane": "policy",
-      "command": "fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args {}",
-      "output_contains": "policy.json"
-    },
-    {
-      "lane": "ablate",
-      "command": "fak ablate --sweep vdso --baseline all-off",
-      "output_contains": "fak ablate"
-    },
-    {
-      "output_contains": "news - slackenv",
-      "lane": "slackenv",
-      "command": "fak news post --title slackenv --notes runtime-proof --dry-run"
-    },
-    {
-      "output_contains": "slackmeta",
-      "lane": "slackmeta",
-      "command": "fak blockers post --severity status --title slackmeta --detail runtime-dogfood-witness --source maturity --dry-run"
-    },
-    {
-      "output_contains": "slackwire",
-      "lane": "slackwire",
-      "command": "fak slack send --channel runtime-proof --text slackwire --dry-run"
-    },
-    {
-      "output_contains": "usage: fak guard",
-      "lane": "guard",
-      "command": "fak guard --help"
-    },
-    {
-      "output_contains": "fak macfit",
-      "lane": "macfit",
-      "command": "fak macfit"
-    },
-    {
-      "output_contains": "macbench",
-      "lane": "macbench",
-      "command": "fak macbench watch-status --result non-existent.json"
-    },
-    {
-      "lane": "metalgemm",
-      "command": "fak sota internal/metalgemm/decode.m",
-      "output_contains": "internal/metalgemm"
-    },
-    {
-      "lane": "a2achan",
-      "command": "fak serve-wiring --md",
-      "output_contains": "a2achan"
-    },
-    {
-      "lane": "abi",
-      "command": "fak version modules",
-      "output_contains": "internal/abi"
-    },
-    {
-      "lane": "accountobs",
-      "command": "fak version modules",
-      "output_contains": "internal/accountobs"
-    },
-    {
-      "lane": "accountprobe",
-      "command": "fak version modules",
-      "output_contains": "internal/accountprobe"
-    },
-    {
-      "lane": "accounts",
-      "command": "fak accounts status",
-      "output_contains": "fak.accounts"
-    },
-    {
-      "lane": "adjudicator",
-      "command": "fak preflight --tool refund_payment --args {} --explain",
-      "output_contains": "adjudicator.Adjudicator"
-    },
-    {
-      "lane": "advmodel",
-      "command": "fak version modules",
-      "output_contains": "internal/advmodel"
-    },
-    {
-      "lane": "affectedtests",
-      "command": "fak version modules",
-      "output_contains": "internal/affectedtests"
-    },
-    {
-      "lane": "agent",
-      "command": "fak agent --offline",
-      "output_contains": "fak agent"
-    },
-    {
-      "lane": "agentdemo",
-      "command": "fak version modules",
-      "output_contains": "internal/agentdemo"
-    },
-    {
-      "lane": "agentdescriptor",
-      "command": "fak version modules",
-      "output_contains": "internal/agentdescriptor"
-    },
-    {
-      "lane": "agentdojo",
-      "command": "fak version modules",
-      "output_contains": "internal/agentdojo"
-    },
-    {
-      "lane": "agentic",
-      "command": "fak version modules",
-      "output_contains": "internal/agentic"
-    },
-    {
-      "lane": "agenticbench",
-      "command": "fak version modules",
-      "output_contains": "internal/agenticbench"
-    },
-    {
-      "lane": "agentopt",
-      "command": "fak version modules",
-      "output_contains": "internal/agentopt"
-    },
-    {
-      "lane": "agentquery",
-      "command": "fak version modules",
-      "output_contains": "internal/agentquery"
-    },
-    {
-      "lane": "agentqueue",
-      "command": "fak version modules",
-      "output_contains": "internal/agentqueue"
-    },
-    {
-      "lane": "agentreadinessscore",
-      "command": "fak version modules",
-      "output_contains": "internal/agentreadinessscore"
-    },
-    {
-      "lane": "agentsindex",
-      "command": "fak version modules",
-      "output_contains": "internal/agentsindex"
-    },
-    {
-      "lane": "agenttest",
-      "command": "fak version modules",
-      "output_contains": "internal/agenttest"
-    },
-    {
-      "lane": "agenttopo",
-      "command": "fak version modules",
-      "output_contains": "internal/agenttopo"
-    },
-    {
-      "lane": "ailuminate",
-      "command": "fak version modules",
-      "output_contains": "internal/ailuminate"
-    },
-    {
-      "lane": "amdgpu",
-      "command": "fak version modules",
-      "output_contains": "internal/amdgpu"
-    },
-    {
-      "lane": "amoprofpub",
-      "command": "fak version modules",
-      "output_contains": "internal/amoprofpub"
-    },
-    {
-      "lane": "answershape",
-      "command": "fak version modules",
-      "output_contains": "internal/answershape"
-    },
-    {
-      "lane": "antipattern",
-      "command": "fak version modules",
-      "output_contains": "internal/antipattern"
-    },
-    {
-      "lane": "apihostprobe",
-      "command": "fak version modules",
-      "output_contains": "internal/apihostprobe"
-    },
-    {
-      "lane": "appversion",
-      "command": "fak version modules",
-      "output_contains": "internal/appversion"
-    },
-    {
-      "lane": "archcheck",
-      "command": "fak version modules",
-      "output_contains": "internal/archcheck"
-    },
-    {
-      "lane": "archfitness",
-      "command": "fak version modules",
-      "output_contains": "internal/archfitness"
-    },
-    {
-      "lane": "architest",
-      "command": "fak version modules",
-      "output_contains": "internal/architest"
-    },
-    {
-      "lane": "archrank",
-      "command": "fak version modules",
-      "output_contains": "internal/archrank"
-    },
-    {
-      "lane": "archreport",
-      "command": "fak version modules",
-      "output_contains": "internal/archreport"
-    },
-    {
-      "lane": "armbench",
-      "command": "fak version modules",
-      "output_contains": "internal/armbench"
-    },
-    {
-      "lane": "assumecheck",
-      "command": "fak version modules",
-      "output_contains": "internal/assumecheck"
-    },
-    {
-      "lane": "astquery",
-      "command": "fak version modules",
-      "output_contains": "internal/astquery"
-    },
-    {
-      "lane": "atif",
-      "command": "fak version modules",
-      "output_contains": "internal/atif"
-    },
-    {
-      "lane": "attemptbudget",
-      "command": "fak version modules",
-      "output_contains": "internal/attemptbudget"
-    },
-    {
-      "lane": "auditpane",
-      "command": "fak version modules",
-      "output_contains": "internal/auditpane"
-    },
-    {
-      "lane": "auditreason",
-      "command": "fak version modules",
-      "output_contains": "internal/auditreason"
-    },
-    {
-      "lane": "auditreceipt",
-      "command": "fak version modules",
-      "output_contains": "internal/auditreceipt"
-    },
-    {
-      "lane": "auditusage",
-      "command": "fak version modules",
-      "output_contains": "internal/auditusage"
-    },
-    {
-      "lane": "balance",
-      "command": "fak version modules",
-      "output_contains": "internal/balance"
-    },
-    {
-      "lane": "bench",
-      "command": "fak version modules",
-      "output_contains": "internal/bench"
-    },
-    {
-      "lane": "benchauthority",
-      "command": "fak version modules",
-      "output_contains": "internal/benchauthority"
-    },
-    {
-      "lane": "benchcatalog",
-      "command": "fak version modules",
-      "output_contains": "internal/benchcatalog"
-    },
-    {
-      "lane": "benchckpt",
-      "command": "fak version modules",
-      "output_contains": "internal/benchckpt"
-    }
-  ]
+    "schema":  "fak-maturity-runtime-proofs/2",
+    "witnesses":  [
+                      {
+                          "command":  "fak serve-wiring --md",
+                          "output_contains":  "a2achan",
+                          "lane":  "a2achan"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/abi",
+                          "lane":  "abi"
+                      },
+                      {
+                          "command":  "fak ablate --sweep vdso --baseline all-off",
+                          "output_contains":  "fak ablate",
+                          "lane":  "ablate"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/accountobs",
+                          "lane":  "accountobs"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/accountprobe",
+                          "lane":  "accountprobe"
+                      },
+                      {
+                          "command":  "fak accounts status",
+                          "output_contains":  "fak.accounts",
+                          "lane":  "accounts"
+                      },
+                      {
+                          "command":  "fak preflight --tool refund_payment --args {} --explain",
+                          "output_contains":  "adjudicator.Adjudicator",
+                          "lane":  "adjudicator"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/advmodel",
+                          "lane":  "advmodel"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/affectedtests",
+                          "lane":  "affectedtests"
+                      },
+                      {
+                          "command":  "fak agent --offline",
+                          "output_contains":  "fak agent",
+                          "lane":  "agent"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentdemo",
+                          "lane":  "agentdemo"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentdescriptor",
+                          "lane":  "agentdescriptor"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentdojo",
+                          "lane":  "agentdojo"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentic",
+                          "lane":  "agentic"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agenticbench",
+                          "lane":  "agenticbench"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentopt",
+                          "lane":  "agentopt"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentquery",
+                          "lane":  "agentquery"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentqueue",
+                          "lane":  "agentqueue"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentreadinessscore",
+                          "lane":  "agentreadinessscore"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agentsindex",
+                          "lane":  "agentsindex"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agenttest",
+                          "lane":  "agenttest"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/agenttopo",
+                          "lane":  "agenttopo"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/ailuminate",
+                          "lane":  "ailuminate"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/amdgpu",
+                          "lane":  "amdgpu"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/amoprofpub",
+                          "lane":  "amoprofpub"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/answershape",
+                          "lane":  "answershape"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/antipattern",
+                          "lane":  "antipattern"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/apihostprobe",
+                          "lane":  "apihostprobe"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/appversion",
+                          "lane":  "appversion"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/archcheck",
+                          "lane":  "archcheck"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/archfitness",
+                          "lane":  "archfitness"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/architest",
+                          "lane":  "architest"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/archrank",
+                          "lane":  "archrank"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/archreport",
+                          "lane":  "archreport"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/armbench",
+                          "lane":  "armbench"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/assumecheck",
+                          "lane":  "assumecheck"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/astquery",
+                          "lane":  "astquery"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/atif",
+                          "lane":  "atif"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/attemptbudget",
+                          "lane":  "attemptbudget"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/auditpane",
+                          "lane":  "auditpane"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/auditreason",
+                          "lane":  "auditreason"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/auditreceipt",
+                          "lane":  "auditreceipt"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/auditusage",
+                          "lane":  "auditusage"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/balance",
+                          "lane":  "balance"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/bench",
+                          "lane":  "bench"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/benchauthority",
+                          "lane":  "benchauthority"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/benchcatalog",
+                          "lane":  "benchcatalog"
+                      },
+                      {
+                          "command":  "fak version modules",
+                          "output_contains":  "internal/benchckpt",
+                          "lane":  "benchckpt"
+                      },
+                      {
+                          "command":  "fak guard --help",
+                          "output_contains":  "usage: fak guard",
+                          "lane":  "guard"
+                      },
+                      {
+                          "command":  "fak macbench watch-status --result non-existent.json",
+                          "output_contains":  "macbench",
+                          "lane":  "macbench"
+                      },
+                      {
+                          "command":  "fak macfit",
+                          "output_contains":  "fak macfit",
+                          "lane":  "macfit"
+                      },
+                      {
+                          "command":  "fak maturity anatomy",
+                          "output_contains":  "maturity",
+                          "lane":  "maturity"
+                      },
+                      {
+                          "command":  "fak sota internal/metalgemm/decode.m",
+                          "output_contains":  "internal/metalgemm",
+                          "lane":  "metalgemm"
+                      },
+                      {
+                          "command":  "fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args {}",
+                          "output_contains":  "policy.json",
+                          "lane":  "policy"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf relay",
+                          "output_contains":  "relay",
+                          "lane":  "relay"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf releasestale",
+                          "output_contains":  "releasestale",
+                          "lane":  "releasestale"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf releasestatus",
+                          "output_contains":  "releasestatus",
+                          "lane":  "releasestatus"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf renameconcept",
+                          "output_contains":  "renameconcept",
+                          "lane":  "renameconcept"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf repoguard",
+                          "output_contains":  "repoguard",
+                          "lane":  "repoguard"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf residency",
+                          "output_contains":  "residency",
+                          "lane":  "residency"
+                      },
+                      {
+                          "command":  "fak help resume",
+                          "output_contains":  "fak resume",
+                          "lane":  "resume"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf resumebackoff",
+                          "output_contains":  "resumebackoff",
+                          "lane":  "resumebackoff"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf resumemetrics",
+                          "output_contains":  "resumemetrics",
+                          "lane":  "resumemetrics"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf roofline",
+                          "output_contains":  "roofline",
+                          "lane":  "roofline"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf rsiloop",
+                          "output_contains":  "rsiloop",
+                          "lane":  "rsiloop"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf rsl",
+                          "output_contains":  "rsl",
+                          "lane":  "rsl"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf rulesynth",
+                          "output_contains":  "rulesynth",
+                          "lane":  "rulesynth"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf rungobs",
+                          "output_contains":  "rungobs",
+                          "lane":  "rungobs"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf safecommit",
+                          "output_contains":  "safecommit",
+                          "lane":  "safecommit"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf safesync",
+                          "output_contains":  "safesync",
+                          "lane":  "safesync"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf savingsvector",
+                          "output_contains":  "savingsvector",
+                          "lane":  "savingsvector"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf scdiff",
+                          "output_contains":  "scdiff",
+                          "lane":  "scdiff"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf scmbridge",
+                          "output_contains":  "scmbridge",
+                          "lane":  "scmbridge"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf scoreboard",
+                          "output_contains":  "scoreboard",
+                          "lane":  "scoreboard"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf scorecardpane",
+                          "output_contains":  "scorecardpane",
+                          "lane":  "scorecardpane"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf seatpark",
+                          "output_contains":  "seatpark",
+                          "lane":  "seatpark"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf secretgate",
+                          "output_contains":  "secretgate",
+                          "lane":  "secretgate"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf secretload",
+                          "output_contains":  "secretload",
+                          "lane":  "secretload"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf selfinstall",
+                          "output_contains":  "selfinstall",
+                          "lane":  "selfinstall"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf selfquery",
+                          "output_contains":  "selfquery",
+                          "lane":  "selfquery"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sensecheck",
+                          "output_contains":  "sensecheck",
+                          "lane":  "sensecheck"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf seoaeoscore",
+                          "output_contains":  "seoaeoscore",
+                          "lane":  "seoaeoscore"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf servicespec",
+                          "output_contains":  "servicespec",
+                          "lane":  "servicespec"
+                      },
+                      {
+                          "command":  "fak help session",
+                          "output_contains":  "fak session",
+                          "lane":  "session"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionaudit",
+                          "output_contains":  "sessionaudit",
+                          "lane":  "sessionaudit"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionctl",
+                          "output_contains":  "sessionctl",
+                          "lane":  "sessionctl"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessiondesc",
+                          "output_contains":  "sessiondesc",
+                          "lane":  "sessiondesc"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionimage",
+                          "output_contains":  "sessionimage",
+                          "lane":  "sessionimage"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionjournal",
+                          "output_contains":  "sessionjournal",
+                          "lane":  "sessionjournal"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionledger",
+                          "output_contains":  "sessionledger",
+                          "lane":  "sessionledger"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionobs",
+                          "output_contains":  "sessionobs",
+                          "lane":  "sessionobs"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionread",
+                          "output_contains":  "sessionread",
+                          "lane":  "sessionread"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionreplay",
+                          "output_contains":  "sessionreplay",
+                          "lane":  "sessionreplay"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionreset",
+                          "output_contains":  "sessionreset",
+                          "lane":  "sessionreset"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionsearch",
+                          "output_contains":  "sessionsearch",
+                          "lane":  "sessionsearch"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionsignals",
+                          "output_contains":  "sessionsignals",
+                          "lane":  "sessionsignals"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sessionsteer",
+                          "output_contains":  "sessionsteer",
+                          "lane":  "sessionsteer"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf shadowgit",
+                          "output_contains":  "shadowgit",
+                          "lane":  "shadowgit"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sharedtask",
+                          "output_contains":  "sharedtask",
+                          "lane":  "sharedtask"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf shipgate",
+                          "output_contains":  "shipgate",
+                          "lane":  "shipgate"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sidecar",
+                          "output_contains":  "sidecar",
+                          "lane":  "sidecar"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf signals",
+                          "output_contains":  "signals",
+                          "lane":  "signals"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf simhash",
+                          "output_contains":  "simhash",
+                          "lane":  "simhash"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf skilleffectiveness",
+                          "output_contains":  "skilleffectiveness",
+                          "lane":  "skilleffectiveness"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf skillenv",
+                          "output_contains":  "skillenv",
+                          "lane":  "skillenv"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf skillfootprint",
+                          "output_contains":  "skillfootprint",
+                          "lane":  "skillfootprint"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf skillvalue",
+                          "output_contains":  "skillvalue",
+                          "lane":  "skillvalue"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf skipledger",
+                          "output_contains":  "skipledger",
+                          "lane":  "skipledger"
+                      },
+                      {
+                          "command":  "fak news post --title slackenv --notes runtime-proof --dry-run",
+                          "output_contains":  "news - slackenv",
+                          "lane":  "slackenv"
+                      },
+                      {
+                          "command":  "fak blockers post --severity status --title slackmeta --detail runtime-dogfood-witness --source maturity --dry-run",
+                          "output_contains":  "slackmeta",
+                          "lane":  "slackmeta"
+                      },
+                      {
+                          "command":  "fak slack send --channel runtime-proof --text slackwire --dry-run",
+                          "output_contains":  "slackwire",
+                          "lane":  "slackwire"
+                      },
+                      {
+                          "command":  "fak snapshot kinds",
+                          "output_contains":  "snapshot",
+                          "lane":  "snapshot"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sotacoverage",
+                          "output_contains":  "sotacoverage",
+                          "lane":  "sotacoverage"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sotamatrix",
+                          "output_contains":  "sotamatrix",
+                          "lane":  "sotamatrix"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf spendrollup",
+                          "output_contains":  "spendrollup",
+                          "lane":  "spendrollup"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf stallpage",
+                          "output_contains":  "stallpage",
+                          "lane":  "stallpage"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf stallscan",
+                          "output_contains":  "stallscan",
+                          "lane":  "stallscan"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf steerpr",
+                          "output_contains":  "steerpr",
+                          "lane":  "steerpr"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf stepbaton",
+                          "output_contains":  "stepbaton",
+                          "lane":  "stepbaton"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf stepbatoncapture",
+                          "output_contains":  "stepbatoncapture",
+                          "lane":  "stepbatoncapture"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf steward",
+                          "output_contains":  "steward",
+                          "lane":  "steward"
+                      },
+                      {
+                          "command":  "fak stopfailure plan",
+                          "output_contains":  "stopfailure",
+                          "lane":  "stopfailure"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf storedrv",
+                          "output_contains":  "storedrv",
+                          "lane":  "storedrv"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf streamrules",
+                          "output_contains":  "streamrules",
+                          "lane":  "streamrules"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf stripeload",
+                          "output_contains":  "stripeload",
+                          "lane":  "stripeload"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf strmatch",
+                          "output_contains":  "strmatch",
+                          "lane":  "strmatch"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf superloop",
+                          "output_contains":  "superloop",
+                          "lane":  "superloop"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf supervisoragent",
+                          "output_contains":  "supervisoragent",
+                          "lane":  "supervisoragent"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf supportmaturity",
+                          "output_contains":  "supportmaturity",
+                          "lane":  "supportmaturity"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf supportmaturityscore",
+                          "output_contains":  "supportmaturityscore",
+                          "lane":  "supportmaturityscore"
+                      },
+                      {
+                          "command":  "fak swebench describe",
+                          "output_contains":  "swebench",
+                          "lane":  "swebench"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf swebenchsota",
+                          "output_contains":  "swebenchsota",
+                          "lane":  "swebenchsota"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf sweepconfig",
+                          "output_contains":  "sweepconfig",
+                          "lane":  "sweepconfig"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf syspromptmmu",
+                          "output_contains":  "syspromptmmu",
+                          "lane":  "syspromptmmu"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf systemservice",
+                          "output_contains":  "systemservice",
+                          "lane":  "systemservice"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf taskdecision",
+                          "output_contains":  "taskdecision",
+                          "lane":  "taskdecision"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf taskgraph",
+                          "output_contains":  "taskgraph",
+                          "lane":  "taskgraph"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf taskidentity",
+                          "output_contains":  "taskidentity",
+                          "lane":  "taskidentity"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf taskmgr",
+                          "output_contains":  "taskmgr",
+                          "lane":  "taskmgr"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf taskvc",
+                          "output_contains":  "taskvc",
+                          "lane":  "taskvc"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf terminalbench",
+                          "output_contains":  "terminalbench",
+                          "lane":  "terminalbench"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf terminalrisk",
+                          "output_contains":  "terminalrisk",
+                          "lane":  "terminalrisk"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf testroute",
+                          "output_contains":  "testroute",
+                          "lane":  "testroute"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf timeoutphase",
+                          "output_contains":  "timeoutphase",
+                          "lane":  "timeoutphase"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf tokencache",
+                          "output_contains":  "tokencache",
+                          "lane":  "tokencache"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf tokenizer",
+                          "output_contains":  "tokenizer",
+                          "lane":  "tokenizer"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf tokenprofile",
+                          "output_contains":  "tokenprofile",
+                          "lane":  "tokenprofile"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toolcatalog",
+                          "output_contains":  "toolcatalog",
+                          "lane":  "toolcatalog"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toolcoverage",
+                          "output_contains":  "toolcoverage",
+                          "lane":  "toolcoverage"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toollint",
+                          "output_contains":  "toollint",
+                          "lane":  "toollint"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toolproc",
+                          "output_contains":  "toolproc",
+                          "lane":  "toolproc"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toolprocgate",
+                          "output_contains":  "toolprocgate",
+                          "lane":  "toolprocgate"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf toolrollup",
+                          "output_contains":  "toolrollup",
+                          "lane":  "toolrollup"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf vllmcompile",
+                          "output_contains":  "vllmcompile",
+                          "lane":  "vllmcompile"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf xenginekv",
+                          "output_contains":  "xenginekv",
+                          "lane":  "xenginekv"
+                      },
+                      {
+                          "command":  "fak dev devindex leaf zaitask",
+                          "output_contains":  "zaitask",
+                          "lane":  "zaitask"
+                      }
+                  ]
 }
