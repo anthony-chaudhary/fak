@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -138,12 +140,61 @@ func TestServeDeferToolsFlag(t *testing.T) {
 	if !*sf.deferTools {
 		t.Fatal("--defer-tools must default to true")
 	}
+	if *sf.toolCeiling != gateway.DefaultMCPToolAdvertisementCeiling {
+		t.Fatalf("--tool-ceiling must default to %d, got %d", gateway.DefaultMCPToolAdvertisementCeiling, *sf.toolCeiling)
+	}
 
+	// Default --defer-tools=true configures 4 core tools
+	srv, err := gateway.New(gateway.Config{
+		EngineID:        "mock",
+		DisableMCPDefer: !*sf.deferTools,
+		MCPToolCeiling:  *sf.toolCeiling,
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv.Close()
+	tools, status := srv.MCPToolListSnapshot(false)
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 core tools with --defer-tools=true, got %d", len(tools))
+	}
+	if status.Mode != "active" {
+		t.Fatalf("expected status mode active, got %s", status.Mode)
+	}
+
+	// --defer-tools=false emits startup warning and wires --tool-ceiling
 	fs2, sf2 := newServeFlagSet()
-	if err := fs2.Parse([]string{"--defer-tools=false"}); err != nil {
+	if err := fs2.Parse([]string{"--defer-tools=false", "--tool-ceiling=10"}); err != nil {
 		t.Fatalf("parse --defer-tools=false: %v", err)
 	}
 	if *sf2.deferTools {
 		t.Fatal("--defer-tools=false must set flag to false")
+	}
+	if *sf2.toolCeiling != 10 {
+		t.Fatalf("--tool-ceiling must be 10, got %d", *sf2.toolCeiling)
+	}
+
+	var stderr bytes.Buffer
+	warnIfDeferToolsDisabled(&stderr, *sf2.deferTools)
+	if !strings.Contains(stderr.String(), "WARNING: --defer-tools=false is set") {
+		t.Fatalf("expected stderr warning, got: %s", stderr.String())
+	}
+
+	// When --defer-tools=false (DisableMCPDefer=true), MCPToolCeiling clamps tools
+	srv2, err := gateway.New(gateway.Config{
+		EngineID:        "mock",
+		DisableMCPDefer: !*sf2.deferTools,
+		MCPToolCeiling:  *sf2.toolCeiling,
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv2.Close()
+	tools2, status2 := srv2.MCPToolListSnapshot(true)
+	if len(tools2) > 10 {
+		t.Fatalf("expected at most 10 tools with ceiling 10, got %d", len(tools2))
+	}
+	if status2.Mode != "ceiling" || status2.Reason != "advertisement_ceiling" {
+		t.Fatalf("expected status ceiling/advertisement_ceiling, got %+v", status2)
 	}
 }

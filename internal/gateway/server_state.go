@@ -914,6 +914,7 @@ type Server struct {
 	// the full registry regardless.
 	deferMCPTools   bool
 	disableMCPDefer bool
+	mcpToolCeiling  int
 	modelVision     bool
 
 	// capabilitiesReuse is the bounded, success-only reuse entry for the MCP

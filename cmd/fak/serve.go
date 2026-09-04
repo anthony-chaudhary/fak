@@ -151,6 +151,7 @@ type serveFlags struct {
 	vcacheAnchor                 *bool
 	deferColdTools               *bool
 	deferTools                   *bool
+	toolCeiling                  *int
 	assumeSessionTurns           *int
 	elideResultBytes             *int
 	elideStaleReads              *bool
@@ -260,6 +261,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.vcacheAnchor = fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough (an upstream --base-url anthropic), APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. No effect on non-passthrough wires.")
 	sf.deferColdTools = fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core into context and faults a cold schema in on demand. Deterministic + cache-safe (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity; every deferred def stays byte-complete in tools[], so a first real use still resolves. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B and #3200 fault-in gates reported PASS). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	sf.deferTools = fs.Bool("defer-tools", true, "defer cold MCP tools on tools/list (default true); pass --defer-tools=false to advertise the full tool registry on tools/list (required for harnesses like OpenCode that do not support dynamic runtime tool paging)")
+	sf.toolCeiling = fs.Int("tool-ceiling", gateway.DefaultMCPToolAdvertisementCeiling, "ceiling on advertised MCP tools on tools/list when deferral is disabled (default 10); clamps the advertised set to a curated active set to limit token overhead; 0 for unbounded")
 	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
 	sf.sessionRegistry = fs.String("session-registry", "", "SCOPE THE SESSIONS THIS SERVE CAN REACH (#5825). The session table is hydrated from this registry, and that table is what a fanned lifecycle op writes through — so this path, not --fleet-bus-dir, is what decides whose sessions `fak fleet control send --op pause --all` touches. --fleet-bus-dir scopes only the BUS; a serve pointed at a private bus directory still adopts every session in this registry, which is how a rehearsal once paused 12 sessions belonging to other workers. Empty keeps today's behaviour: the shared per-user default (FAK_SESSION_REGISTRY, else <UserConfigDir>/fak/session-registry.json), the correct reach for a real fleet. Name a path to adopt and persist only your own sessions — the safe way to rehearse on a shared host. Use 'off' for a pure in-memory table that adopts nothing and persists nothing.")
@@ -424,6 +426,7 @@ func cmdServe(argv []string) {
 	// value. Emit a loud, one-line advisory when no dos.toml is found upward from cwd, but
 	// fail OPEN — serve anyway (an operator may deliberately run outside a fak workspace).
 	warnIfNotFakWorkspace(os.Stderr)
+	warnIfDeferToolsDisabled(os.Stderr, *sf.deferTools)
 
 	// Bind-safety default (#5373, a child of #3279): refuse to boot a listener that is
 	// reachable from off this host while no inbound token door is configured. Placed
@@ -528,6 +531,14 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 		// you run a second command to learn the remedy is one you scroll past.
 		Check: "git rev-parse --show-toplevel   # the repo this cwd actually resolves to\n          launch fak serve from a fak checkout, or set the MCP server entry's \"cwd\" to your fak workspace root",
 	})
+}
+
+const deferToolsDisabledWarning = "fak serve: WARNING: --defer-tools=false is set; advertising the full tool registry carries significant token overhead (~5,500+ tokens / ~22KB per turn) and increases per-turn latency. Consider keeping --defer-tools=true (the default) with progressive disclosure."
+
+func warnIfDeferToolsDisabled(stderr io.Writer, deferTools bool) {
+	if !deferTools {
+		fmt.Fprintln(stderr, deferToolsDisabledWarning)
+	}
 }
 
 // serveKeyPrincipals resolves the repeated `--key-principal PRINCIPAL=ENV_VAR` specs into
@@ -701,6 +712,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		// also ORs in FAK_DEFER_COLD_TOOLS. Deterministic, cache-safe, fail-safe identity.
 		DeferColdTools:  *sf.deferColdTools,
 		DisableMCPDefer: !*sf.deferTools,
+		MCPToolCeiling:  *sf.toolCeiling,
 		DebugStatsf:     debugStatsSink(*sf.debugStats),
 		// MCP tool-exposure allowlist (--expose). Empty (default) leaves ExposeTools nil
 		// so gateway.New exposes the full tool surface byte-for-byte; a non-empty set

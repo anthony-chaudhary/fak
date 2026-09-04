@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -54,11 +55,11 @@ func jsonProto(v string) []byte {
 
 // TestMCPToolSchemasConformToOpenAPIAndGemini witnesses that all registered MCP tools
 // provide parameter schemas that satisfy OpenAPI 3.0 and Gemini API validation rules:
-// - Parameters schema must have type "object".
-// - Any "required" field must only appear on type "object".
-// - Every entry in "required" must be defined in "properties" of that object.
-// - No partial draft-07 "anyOf": [{"required": [...]}] constructs that Gemini rejects with:
-//   "parameters.any_of[i].required: only allowed for OBJECT type" / "property is not defined".
+//   - Parameters schema must have type "object".
+//   - Any "required" field must only appear on type "object".
+//   - Every entry in "required" must be defined in "properties" of that object.
+//   - No partial draft-07 "anyOf": [{"required": [...]}] constructs that Gemini rejects with:
+//     "parameters.any_of[i].required: only allowed for OBJECT type" / "property is not defined".
 func TestMCPToolSchemasConformToOpenAPIAndGemini(t *testing.T) {
 	tools := toolDescriptors()
 	if len(tools) == 0 {
@@ -147,5 +148,67 @@ func TestValidateOpenAPISchemaNodeCatchesBareRequiredAnyOf(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "only allowed for type object") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
+	// With --defer-tools=true (bootstrap active / disableMCPDefer=false)
+	srv := newTestServer(t)
+	res, rerr := srv.handleMethod(context.Background(), "tools/list", nil)
+	if rerr != nil {
+		t.Fatalf("tools/list error: %v", rerr)
+	}
+	respMap, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list response not a map: %T", res)
+	}
+	rawTools, ok := respMap["tools"].([]map[string]any)
+	if !ok {
+		t.Fatalf("tools not []map[string]any: %T", respMap["tools"])
+	}
+
+	// Assert exactly 4 tools: fak_adjudicate, fak_syscall, fak_read, fak_tools_search
+	if len(rawTools) != 4 {
+		t.Fatalf("expected 4 bootstrap tools, got %d", len(rawTools))
+	}
+	expectedTools := []string{"fak_adjudicate", "fak_syscall", "fak_read", "fak_tools_search"}
+	for i, exp := range expectedTools {
+		name, _ := rawTools[i]["name"].(string)
+		if name != exp {
+			t.Errorf("tool[%d] = %q, want %q", i, name, exp)
+		}
+	}
+
+	// Assert total serialized descriptor schema size <= 4500 bytes (4.5 KB)
+	serialized, err := json.Marshal(rawTools)
+	if err != nil {
+		t.Fatalf("json.Marshal(tools): %v", err)
+	}
+	if len(serialized) > 4500 {
+		t.Fatalf("serialized schema size = %d bytes, want <= 4500 bytes", len(serialized))
+	}
+
+	// Also test that with mcpToolCeiling = 10 and disableMCPDefer = true, it clamps to at most 10 tools
+	srvCeiling := newTestServerWithConfig(t, Config{
+		EngineID:        "test",
+		DisableMCPDefer: true,
+		MCPToolCeiling:  10,
+	})
+	resCeiling, rerrCeiling := srvCeiling.handleMethod(context.Background(), "tools/list", nil)
+	if rerrCeiling != nil {
+		t.Fatalf("tools/list error with ceiling: %v", rerrCeiling)
+	}
+	respMapCeiling := resCeiling.(map[string]any)
+	ceilingTools := respMapCeiling["tools"].([]map[string]any)
+	if len(ceilingTools) > 10 {
+		t.Fatalf("expected at most 10 tools with mcpToolCeiling=10, got %d", len(ceilingTools))
+	}
+	if len(ceilingTools) != 10 {
+		t.Fatalf("expected exactly 10 tools clamped by ceiling, got %d", len(ceilingTools))
+	}
+	meta := respMapCeiling["_meta"].(map[string]any)
+	filterStatus := meta["fak/tool_filter"].(MCPToolFilterStatus)
+	if filterStatus.Mode != "ceiling" || filterStatus.Reason != "advertisement_ceiling" {
+		t.Fatalf("filterStatus=%+v, want mode=ceiling, reason=advertisement_ceiling", filterStatus)
 	}
 }
