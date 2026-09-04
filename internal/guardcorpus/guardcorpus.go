@@ -3,6 +3,10 @@
 // session plus the replayable, redacted Example rows a training/regression
 // consumer needs (docs/GUARD-SESSION-DATASET-PLAN.md).
 //
+// Invariant: Fold operates as a pure, deterministic transformation over input journal rows without disk I/O or RNG.
+// Contract: Output Example and SessionRecord structures only retain bounded, scrubbed fields from upstream journal producers.
+// Precondition: Input journal rows must maintain monotonic sequence ordering within each session stream.
+//
 // WHY IT EXISTS. The raw journal (internal/journal) is host-local, gitignored,
 // and reaped (internal/guardaudit); guardrsi scores it and auditusage rolls it
 // up, but nothing turns it into a committed, schema-versioned, per-session
