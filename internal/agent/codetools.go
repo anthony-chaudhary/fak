@@ -56,6 +56,13 @@ func (codeToolGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict
 	if ts == nil {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: codetools.RungName}
 	}
+	if c.Tool == ToolSkill {
+		if armedSkills.Load() == nil {
+			return abi.Verdict{Kind: abi.VerdictDefer, By: codetools.RungName}
+		}
+		c.Engine = SkillDriverID
+		return abi.Verdict{Kind: abi.VerdictAllow, By: codetools.RungName}
+	}
 	return ts.Adjudicate(ctx, c)
 }
 
@@ -75,20 +82,63 @@ func ArmFocusedCodeTools(root string) ([]ToolDef, error) {
 	return armCodeTools(root, true)
 }
 
+// ArmCodeToolsWithSkills arms coding tools and discovers skills in root plus extraDirs.
+func ArmCodeToolsWithSkills(root string, focused bool, extraDirs ...string) ([]ToolDef, error) {
+	return armCodeToolsFull(root, focused, true, extraDirs...)
+}
+
 func armCodeTools(root string, focused bool) ([]ToolDef, error) {
+	return armCodeToolsFull(root, focused, true)
+}
+
+// CodeToolsOptions configures coding tools and skills arming.
+type CodeToolsOptions struct {
+	Root         string
+	Focused      bool
+	EnableSkills bool
+	SkillsDir    string
+	ExtraDirs    []string
+}
+
+// ArmCodeToolsWithOptions arms coding tools with optional fine-grained skills control.
+func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
+	var extraDirs []string
+	if opts.SkillsDir != "" {
+		extraDirs = append(extraDirs, opts.SkillsDir)
+	}
+	extraDirs = append(extraDirs, opts.ExtraDirs...)
+	return armCodeToolsFull(opts.Root, opts.Focused, opts.EnableSkills, extraDirs...)
+}
+
+func armCodeToolsFull(root string, focused bool, enableSkills bool, extraDirs ...string) ([]ToolDef, error) {
 	ts, err := codetools.New(codetools.Config{Root: root, FocusedCommands: focused})
 	if err != nil {
 		return nil, err
 	}
 	ts.RegisterEngines()
+	RegisterSkillDriver()
 	armedCodeTools.Store(ts)
+
+	if enableSkills {
+		reg, err := DiscoverSkills(root, extraDirs...)
+		if err != nil {
+			reg = NewSkillRegistry()
+		}
+		armedSkills.Store(reg)
+	} else {
+		armedSkills.Store(nil)
+	}
+
 	codeToolGateOnce.Do(func() { abi.RegisterAdjudicator(codeToolRank, codeToolGate{}) })
 	return CodeToolCatalog(), nil
 }
 
 // DisarmCodeTools drops the armed toolset, restoring the historical loop. The gate stays
 // registered but defers, so nothing has to be unregistered from a frozen registry.
-func DisarmCodeTools() { armedCodeTools.Store(nil) }
+func DisarmCodeTools() {
+	armedCodeTools.Store(nil)
+	armedSkills.Store(nil)
+}
 
 // CodeToolCatalog renders the coding tools as loop ToolDefs. Empty when unarmed, so
 // a caller can splice it into a catalog unconditionally.
@@ -97,13 +147,16 @@ func CodeToolCatalog() []ToolDef {
 		return nil
 	}
 	defs := codetools.Catalog()
-	out := make([]ToolDef, 0, len(defs))
+	out := make([]ToolDef, 0, len(defs)+1)
 	for _, d := range defs {
 		out = append(out, ToolDef{Type: "function", Function: ToolDefFunction{
 			Name:        d.Name,
 			Description: d.Description,
 			Parameters:  d.Parameters,
 		}})
+	}
+	if reg := armedSkills.Load(); reg != nil {
+		out = append(out, reg.ToolDef())
 	}
 	return out
 }
@@ -115,6 +168,12 @@ func CodeToolCatalog() []ToolDef {
 func codeToolMeta(tool string) map[string]string {
 	if armedCodeTools.Load() == nil {
 		return nil
+	}
+	if tool == ToolSkill {
+		return map[string]string{
+			"readOnlyHint":   "true",
+			"idempotentHint": "true",
+		}
 	}
 	for _, d := range codetools.Catalog() {
 		if d.Name == tool {
@@ -130,9 +189,12 @@ func codeToolAllow() []string {
 	if armedCodeTools.Load() == nil {
 		return nil
 	}
-	names := make([]string, 0, len(codetools.Catalog()))
+	names := make([]string, 0, len(codetools.Catalog())+1)
 	for _, d := range codetools.Catalog() {
 		names = append(names, d.Name)
+	}
+	if armedSkills.Load() != nil {
+		names = append(names, ToolSkill)
 	}
 	return names
 }

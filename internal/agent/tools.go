@@ -141,6 +141,20 @@ func execTool(tool string, args map[string]any) (result []byte, isError bool) {
 		// Reaches here only on the baseline arm (the kernel DENIES it pre-dispatch).
 		id, _ := getStr("user_id")
 		return ok(map[string]any{"deleted": true, "user_id": id, "_warning": "destructive op executed"})
+	case ToolSkill:
+		name, _ := getStr("name")
+		if strings.TrimSpace(name) == "" {
+			return errf("missing required field: name")
+		}
+		reg := ActiveSkills()
+		if reg == nil {
+			return errf("no skill registry active")
+		}
+		res, err := reg.Execute(name)
+		if err != nil {
+			return errf("%s", err.Error())
+		}
+		return []byte(res), false
 	default:
 		return errf("unknown tool: %s", tool)
 	}

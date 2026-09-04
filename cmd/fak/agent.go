@@ -32,6 +32,8 @@ type agentFlags struct {
 	routeManifest *string
 	routeAccounts *string
 	keepAwake     *string
+	skills        *bool
+	skillsDir     *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -58,6 +60,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.routeManifest = fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	af.routeAccounts = fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	af.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
+	af.skills = fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
+	af.skillsDir = fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
 	return fs, af
 }
 
@@ -142,7 +146,16 @@ func cmdAgent(argv []string) {
 			root, err = os.Getwd()
 			must(err)
 		}
-		catalog, armErr := agent.ArmFocusedCodeTools(root)
+		var extraDirs []string
+		if *af.skillsDir != "" {
+			extraDirs = append(extraDirs, *af.skillsDir)
+		}
+		catalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
+			Root:         root,
+			Focused:      true,
+			EnableSkills: *af.skills,
+			ExtraDirs:    extraDirs,
+		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
