@@ -9,9 +9,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// ObservationSchema is the schema identifier for harness runtime observations.
 const ObservationSchema = "fak-harness-runtime-observation/1"
+
+// ReportSchema is the schema identifier for harness runtime verification reports.
 const ReportSchema = "fak-harness-runtime-verification/1"
 
+// Observation captures the runtime capabilities and execution events recorded for a harness run.
 type Observation struct {
 	Schema       string       `json:"schema"`
 	LockID       string       `json:"lock_id"`
@@ -20,6 +24,7 @@ type Observation struct {
 	Events       []Event      `json:"events,omitempty"`
 }
 
+// Capability represents an individual runtime capability declaration and its active bindings.
 type Capability struct {
 	Capability string   `json:"capability"`
 	Source     string   `json:"source"`
@@ -30,6 +35,7 @@ type Capability struct {
 	Denies     []string `json:"denies,omitempty"`
 }
 
+// Event records a runtime invocation or policy gate outcome for a capability.
 type Event struct {
 	Kind       string `json:"kind"`
 	Capability string `json:"capability"`
@@ -37,6 +43,7 @@ type Event struct {
 	Outcome    string `json:"outcome"`
 }
 
+// Finding describes a capability-level match, difference, omission, or addition.
 type Finding struct {
 	Status         string `json:"status"`
 	Capability     string `json:"capability"`
@@ -45,6 +52,7 @@ type Finding struct {
 	Difference     string `json:"difference,omitempty"`
 }
 
+// Report aggregates verification findings, counts, and final verdict for a run against a lock.
 type Report struct {
 	Schema   string    `json:"schema"`
 	Verdict  string    `json:"verdict"`
@@ -58,6 +66,7 @@ type Report struct {
 	Omitted  int       `json:"omitted"`
 }
 
+// Verify checks observed runtime capabilities against a resolved lock, detecting additions, omissions, or changes.
 func Verify(lock harnessresolve.Lock, observation Observation) (Report, error) {
 	if observation.Schema != ObservationSchema {
 		return Report{}, fmt.Errorf("observation schema must be %q", ObservationSchema)
@@ -149,6 +158,7 @@ func difference(want harnesscompose.EffectiveAsset, got Capability) string {
 	return strings.Join(fields, ",")
 }
 
+// Render formats a verification report into a plain-text audit summary.
 func Render(report Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HARNESS VERIFY RUN | %s\nlock: %s\nrun: %s\ncapabilities: matched=%d changed=%d added=%d omitted=%d\n", strings.ToUpper(report.Verdict), report.LockID, report.RunID, report.Matched, report.Changed, report.Added, report.Omitted)

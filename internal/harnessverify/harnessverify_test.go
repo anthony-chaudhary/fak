@@ -34,3 +34,49 @@ func TestVerifyRejectsAmbiguousObservation(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyDeviationsAndRender(t *testing.T) {
+	lock := harnessresolve.Lock{
+		ID: "sha256:lock-dev",
+		Assets: []harnesscompose.EffectiveAsset{
+			{Kind: "tool", ID: "search", Source: "repo", Value: "kb"},
+			{Kind: "tool", ID: "bash", Source: "repo", Value: "safe", Boundary: "sandbox", Grants: []string{"read"}, Denies: []string{"net"}},
+			{Kind: "workflow", ID: "lint", Source: "repo"},
+		},
+	}
+	obs := Observation{
+		Schema: ObservationSchema,
+		LockID: lock.ID,
+		RunID:  "run-dev",
+		Capabilities: []Capability{
+			{Capability: "tool:search", Source: "repo", Value: "kb"},
+			{Capability: "tool:bash", Source: "override", Value: "unsafe", Boundary: "host", Grants: []string{"write"}, Denies: []string{"none"}},
+			{Capability: "tool:extra", Source: "agent"},
+		},
+		Events: []Event{
+			{Kind: "gate", Capability: "tool:extra", Source: "agent", Outcome: "deny"},
+		},
+	}
+
+	report, err := Verify(lock, obs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Verdict != "deviation" {
+		t.Fatalf("expected deviation verdict, got %s", report.Verdict)
+	}
+	if report.Matched != 1 || report.Changed != 1 || report.Added != 1 || report.Omitted != 1 {
+		t.Fatalf("unexpected counts: %+v", report)
+	}
+
+	rendered := Render(report)
+	if !strings.Contains(rendered, "HARNESS VERIFY RUN | DEVIATION") {
+		t.Fatalf("expected header in rendered output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "changed source,value,boundary,grants,denies") {
+		t.Fatalf("expected diff string in rendered output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "runtime decisions:") {
+		t.Fatalf("expected runtime decisions in rendered output:\n%s", rendered)
+	}
+}
