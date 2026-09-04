@@ -228,7 +228,7 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	lanes := parseLaneTrees(dosPath)
 
 	// Build dependency graph and reachability.
-	graph, internalPkgs := buildInternalImportGraph(root)
+	graph, internalPkgs := BuildInternalImportGraph(root)
 	reachable := scanReachableFromCmd(root, graph)
 
 	// Read benchmarks authority mentions.
@@ -512,7 +512,8 @@ func parseLaneTrees(path string) []string {
 	return lanes
 }
 
-func buildInternalImportGraph(root string) (map[string]map[string]struct{}, map[string]struct{}) {
+// BuildInternalImportGraph parses Go files in internal/ to construct a package import dependency graph.
+func BuildInternalImportGraph(root string) (map[string]map[string]struct{}, map[string]struct{}) {
 	graph := make(map[string]map[string]struct{})
 	internalPkgs := make(map[string]struct{})
 
