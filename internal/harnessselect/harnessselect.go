@@ -8,13 +8,16 @@ import (
 	"strings"
 )
 
+// Schema identifies the canonical manifest format for harness selection.
 const Schema = "fak.harness-selection/v1alpha1"
 
+// Manifest defines the layered hierarchy used to resolve active harness capabilities.
 type Manifest struct {
 	Schema string  `json:"schema"`
 	Layers []Layer `json:"layers"`
 }
 
+// Layer specifies capability additions, removals, and immutable locks scoped to a level in the hierarchy.
 type Layer struct {
 	ID           string   `json:"id"`
 	Scope        string   `json:"scope"`
@@ -25,22 +28,26 @@ type Layer struct {
 	Lock         []string `json:"lock,omitempty"`
 }
 
+// Match declares path and tag conditions that determine whether a layer applies to a given context.
 type Match struct {
 	PathPrefixes []string `json:"path_prefixes,omitempty"`
 	Tags         []string `json:"tags,omitempty"`
 }
 
+// Context represents runtime invocation attributes evaluated against layer match rules.
 type Context struct {
 	Path string   `json:"path,omitempty"`
 	Tags []string `json:"tags,omitempty"`
 }
 
+// Capability represents an effective capability granted and audited by the selection process.
 type Capability struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
 	Locked bool   `json:"locked,omitempty"`
 }
 
+// Trace captures a single decision step made during layer filtering and capability resolution.
 type Trace struct {
 	Layer  string `json:"layer"`
 	Action string `json:"action"`
@@ -48,6 +55,7 @@ type Trace struct {
 	Reason string `json:"reason"`
 }
 
+// Result contains the final active capabilities, applied layers, and decision trace for a context.
 type Result struct {
 	Schema       string       `json:"schema"`
 	Context      Context      `json:"context"`
@@ -66,6 +74,8 @@ var scopeRank = map[string]int{
 	"task":    70,
 }
 
+// Parse deserializes and validates a harness selection manifest from JSON.
+// It enforces the expected schema version, unique layer IDs, valid scopes, and non-empty capability names.
 func Parse(raw []byte) (Manifest, error) {
 	var m Manifest
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
@@ -97,6 +107,8 @@ func Parse(raw []byte) (Manifest, error) {
 	return m, nil
 }
 
+// Resolve evaluates manifest layers against ctx in deterministic scope and priority order.
+// It computes effective capabilities, respects locked capabilities, and records an audit trace.
 func Resolve(m Manifest, ctx Context) (Result, error) {
 	ctx.Path = cleanPath(ctx.Path)
 	ctx.Tags = cleanSet(ctx.Tags)
