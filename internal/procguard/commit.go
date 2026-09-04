@@ -25,13 +25,15 @@ const SystemCommitHeadroomReason = "SYSTEM_COMMIT_HEADROOM"
 // SystemCommitHeadroom is the side-effect-free admission result shared by the
 // launch-time check and the running child guard.
 type SystemCommitHeadroom struct {
-	Supported     bool
-	Refuse        bool
-	Reason        string
-	ObservedBytes uint64
-	RequiredBytes uint64
-	SystemBytes   uint64
-	SystemLimit   uint64
+	Supported              bool
+	Refuse                 bool
+	Reason                 string
+	ObservedBytes          uint64
+	RequiredBytes          uint64
+	SystemBytes            uint64
+	SystemLimit            uint64
+	PhysicalAvailableBytes uint64
+	PhysicalTotalBytes     uint64
 }
 
 // RequiredSystemCommitHeadroom reads the guard's positive-megabyte override.
@@ -52,10 +54,12 @@ func RequiredSystemCommitHeadroom(getenv func(string) string) uint64 {
 // refuses so a child cannot consume the reserve itself.
 func EvaluateSystemCommitHeadroom(snapshot MemorySnapshot, required uint64) SystemCommitHeadroom {
 	result := SystemCommitHeadroom{
-		Supported:     snapshot.Metric == MemoryMetricCommit && snapshot.SystemLimit > 0,
-		RequiredBytes: required,
-		SystemBytes:   snapshot.SystemBytes,
-		SystemLimit:   snapshot.SystemLimit,
+		Supported:              snapshot.Metric == MemoryMetricCommit && snapshot.SystemLimit > 0,
+		RequiredBytes:          required,
+		SystemBytes:            snapshot.SystemBytes,
+		SystemLimit:            snapshot.SystemLimit,
+		PhysicalAvailableBytes: snapshot.HostPhysicalAvailableBytes,
+		PhysicalTotalBytes:     snapshot.HostPhysicalBytes,
 	}
 	if snapshot.SystemLimit >= snapshot.SystemBytes {
 		result.ObservedBytes = snapshot.SystemLimit - snapshot.SystemBytes
@@ -73,13 +77,14 @@ func EvaluateSystemCommitHeadroom(snapshot MemorySnapshot, required uint64) Syst
 // system scope (Windows commit charge); HostPhysicalBytes is informational and
 // is not treated as current RSS usage.
 type MemorySnapshot struct {
-	Metric            MemoryMetric
-	RootPID           int
-	TreeBytes         uint64
-	SystemBytes       uint64
-	SystemLimit       uint64
-	HostPhysicalBytes uint64
-	Processes         []MemoryProcess
+	Metric                     MemoryMetric
+	RootPID                    int
+	TreeBytes                  uint64
+	SystemBytes                uint64
+	SystemLimit                uint64
+	HostPhysicalBytes          uint64
+	HostPhysicalAvailableBytes uint64
+	Processes                  []MemoryProcess
 }
 
 type MemoryProcess struct {

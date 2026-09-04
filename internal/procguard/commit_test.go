@@ -39,3 +39,20 @@ func TestRequiredSystemCommitHeadroom(t *testing.T) {
 		t.Fatalf("override=%d", got)
 	}
 }
+
+func TestEvaluateSystemCommitHeadroomPreservesPhysicalFields(t *testing.T) {
+	snapshot := MemorySnapshot{
+		Metric:                     MemoryMetricCommit,
+		SystemBytes:                50,
+		SystemLimit:                100,
+		HostPhysicalBytes:          16 << 30,
+		HostPhysicalAvailableBytes: 8 << 30,
+	}
+	headroom := EvaluateSystemCommitHeadroom(snapshot, 10)
+	if headroom.PhysicalTotalBytes != 16<<30 {
+		t.Fatalf("PhysicalTotalBytes got %d, want %d", headroom.PhysicalTotalBytes, uint64(16<<30))
+	}
+	if headroom.PhysicalAvailableBytes != 8<<30 {
+		t.Fatalf("PhysicalAvailableBytes got %d, want %d", headroom.PhysicalAvailableBytes, uint64(8<<30))
+	}
+}

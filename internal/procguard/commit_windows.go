@@ -82,6 +82,8 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	}
 	s.SystemBytes = uint64(perf.CommitTotal) * uint64(perf.PageSize)
 	s.SystemLimit = uint64(perf.CommitLimit) * uint64(perf.PageSize)
+	s.HostPhysicalBytes = uint64(perf.PhysicalTotal) * uint64(perf.PageSize)
+	s.HostPhysicalAvailableBytes = uint64(perf.PhysicalAvailable) * uint64(perf.PageSize)
 	return s, true, ""
 }
 

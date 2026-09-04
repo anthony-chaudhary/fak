@@ -40,6 +40,25 @@ func TestCollectCommitSnapshotOwnProcess(t *testing.T) {
 	}
 }
 
+func TestCollectMemorySnapshotOwnProcessPhysicalMemory(t *testing.T) {
+	s, supported, detail := CollectMemorySnapshot(os.Getpid())
+	if !supported {
+		t.Fatal("Windows memory accounting must be supported")
+	}
+	if detail != "" {
+		t.Fatalf("detail=%q", detail)
+	}
+	if s.HostPhysicalBytes == 0 {
+		t.Fatal("HostPhysicalBytes must be > 0")
+	}
+	if s.HostPhysicalAvailableBytes == 0 {
+		t.Fatal("HostPhysicalAvailableBytes must be > 0")
+	}
+	if s.HostPhysicalAvailableBytes > s.HostPhysicalBytes {
+		t.Fatalf("HostPhysicalAvailableBytes (%d) > HostPhysicalBytes (%d)", s.HostPhysicalAvailableBytes, s.HostPhysicalBytes)
+	}
+}
+
 func TestWindowsCommitOwnedPIDsRejectsStalePPIDEdges(t *testing.T) {
 	parentPID := func(pid int) *int { return &pid }
 	rows := []Proc{
