@@ -39,7 +39,17 @@ func cmdChat(argv []string) {
 	codeWorkspace := fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
 	skills := fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
 	skillsDir := fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
+	workflow := fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
+	workflowStep := fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
+	workflowCheckpointDir := fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
 	_ = fs.Parse(argv)
+
+	if *workflow != "" {
+		if err := runWorkflowCLI(*workflow, *workflowStep, *workflowCheckpointDir); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 
 	applyPolicy(*policyPath)
 

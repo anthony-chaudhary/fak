@@ -13,28 +13,31 @@ import (
 )
 
 type agentFlags struct {
-	task          *string
-	outputStyle   *string
-	consoleConfig *string
-	workProfile   *string
-	provider      *string
-	baseURL       *string
-	model         *string
-	apiKeyEnv     *string
-	anthropicAuth *string
-	offline       *bool
-	native        *bool
-	maxTurns      *int
-	out           *string
-	logOut        *string
-	policyPath    *string
-	codeTools     *bool
-	codeWorkspace *string
-	routeManifest *string
-	routeAccounts *string
-	keepAwake     *string
-	skills        *bool
-	skillsDir     *string
+	task                  *string
+	outputStyle           *string
+	consoleConfig         *string
+	workProfile           *string
+	provider              *string
+	baseURL               *string
+	model                 *string
+	apiKeyEnv             *string
+	anthropicAuth         *string
+	offline               *bool
+	native                *bool
+	maxTurns              *int
+	out                   *string
+	logOut                *string
+	policyPath            *string
+	codeTools             *bool
+	codeWorkspace         *string
+	routeManifest         *string
+	routeAccounts         *string
+	keepAwake             *string
+	skills                *bool
+	skillsDir             *string
+	workflow              *string
+	workflowStep          *bool
+	workflowCheckpointDir *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -63,6 +66,9 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
 	af.skills = fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
 	af.skillsDir = fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
+	af.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
+	af.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
+	af.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
 	return fs, af
 }
 
@@ -82,6 +88,13 @@ func cmdAgent(argv []string) {
 	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
+
+	if *af.workflow != "" {
+		if err := runWorkflowCLI(*af.workflow, *af.workflowStep, *af.workflowCheckpointDir); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 
 	keepAwakeMode, err := validateKeepAwake(*af.keepAwake)
 	if err != nil {
