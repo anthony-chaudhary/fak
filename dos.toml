@@ -2526,6 +2526,13 @@ summary  = "A run's DECLARED checker/test file changed bytes between declare-tim
 fix      = "Restore the checker to its declared bytes and re-grade, or -- if the checker change was intentional -- re-declare the run so its baseline is re-pinned against the new checker before grading. Producer: safecommit.GuardCheckerPin(root, baseline); an unchanged checker passes through untouched. Floor: go test ./internal/safecommit (checkerpin_test.go: changed->refused, unchanged->pass-through)."
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
 
+[reasons.TEST_TAMPER_REFUSED]
+category = "INTEGRITY_GATE"
+refusal  = true
+summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
+fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
+see_also = ["internal/adjudicator", "internal/witness"]
+
 # #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
 # issue fanout planner's own contract rejections (internal/issuefanout.Refusal,
 # e.g. a missing spine_ref, a cap below MinFanout, an unknown area filter, or --
