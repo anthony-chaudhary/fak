@@ -43,6 +43,8 @@ type ReconcileOptions struct {
 	Now            func() time.Time `json:"-"`
 	WriterLeaseTTL time.Duration    `json:"-"`
 	Contention     bool             `json:"-"` // test or override seam for active contention
+	SuspendPaths   []string         `json:"suspend_paths,omitempty"`
+	Session        string           `json:"session,omitempty"`
 }
 
 // GoalInfo represents the parsed reconciliation goal.
@@ -86,6 +88,7 @@ type ReconcileAssessment struct {
 	Contention     bool                `json:"contention,omitempty"`
 	Applied        bool                `json:"applied,omitempty"`
 	Execution      *ReconcileExecution `json:"execution,omitempty"`
+	Park           *ParkReceipt        `json:"park,omitempty"`
 }
 
 // ParseGoal decomposes a goal string into structured GoalInfo.
@@ -386,6 +389,67 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 		}
 
 		if len(divergent) > 0 {
+			if len(r.opts.SuspendPaths) > 0 {
+				suspendSet := make(map[string]bool, len(r.opts.SuspendPaths))
+				for _, sp := range r.opts.SuspendPaths {
+					suspendSet[filepath.Clean(filepath.ToSlash(sp))] = true
+				}
+				allCovered := true
+				for _, c := range colliding {
+					if !suspendSet[filepath.Clean(filepath.ToSlash(c))] {
+						allCovered = false
+						break
+					}
+				}
+				if allCovered {
+					session := strings.TrimSpace(r.opts.Session)
+					if session == "" {
+						session = "reconcile"
+					}
+					parkOpts := ParkOptions{
+						Repo:           repo,
+						Session:        session,
+						Paths:          r.opts.SuspendPaths,
+						TargetRef:      targetRef,
+						Apply:          r.opts.Apply,
+						Runner:         run,
+						Now:            r.opts.Now,
+						WriterLeaseTTL: r.opts.WriterLeaseTTL,
+					}
+					parkRec, parkErr := Park(ctx, parkOpts)
+					assessment.Park = &parkRec
+					if parkErr != nil || !parkRec.OK || parkRec.Status == ParkStatusConflict {
+						assessment.Route = RouteHoldDirtyCollision
+						assessment.OK = false
+						assessment.Reason = parkRec.Reason
+						if assessment.Reason == "" {
+							assessment.Reason = ReasonDirtyWriteOverlap
+						}
+						assessment.Detail = "park suspension conflicted or failed"
+						return assessment, nil
+					}
+					primitive := fmt.Sprintf("fak wip park %s --path %s", session, strings.Join(r.opts.SuspendPaths, " --path "))
+					if r.opts.Apply {
+						primitive += " --apply"
+					}
+					assessment.Route = RouteDisjointIntegrate
+					assessment.Primitive = primitive
+					assessment.OK = true
+					assessment.Reason = "colliding dirty paths suspended, integrated, and reapplied"
+					if r.opts.Apply {
+						assessment.Applied = parkRec.OK
+						assessment.Execution = &ReconcileExecution{
+							Primitive: primitive,
+							Applied:   parkRec.OK,
+							Success:   parkRec.OK,
+							NewHead:   parkRec.NewHEAD,
+							Detail:    parkRec.Reason,
+						}
+					}
+					return assessment, nil
+				}
+			}
+
 			assessment.Route = RouteHoldDirtyCollision
 			assessment.OK = false
 			assessment.Reason = ReasonDirtyWriteOverlap
@@ -624,26 +688,39 @@ func workingTreeDirtyPaths(ctx context.Context, run Runner, repo string) ([]stri
 	if res.Err != nil || res.Code != 0 {
 		return nil, fmt.Errorf("status: code=%d err=%v", res.Code, res.Err)
 	}
-	fields := splitNUL(res.Stdout)
+	return parsePorcelainStatusZ(res.Stdout), nil
+}
+
+func parsePorcelainStatusZ(b []byte) []string {
 	var paths []string
-	for i := 0; i < len(fields); i++ {
-		field := fields[i]
-		if len(field) < 3 {
+	raw := b
+	for len(raw) > 0 {
+		idx := bytes.IndexByte(raw, 0)
+		if idx == -1 {
+			break
+		}
+		entry := raw[:idx]
+		raw = raw[idx+1:]
+		if len(entry) < 3 {
 			continue
 		}
-		code := field[:2]
-		path := field[3:]
-		if code[0] == 'R' || code[0] == 'C' {
-			paths = append(paths, path)
-			if i+1 < len(fields) {
-				i++
-				paths = append(paths, fields[i])
+		code := entry[:2]
+		path := strings.TrimSpace(string(entry[3:]))
+		if path != "" {
+			paths = append(paths, filepath.Clean(filepath.ToSlash(path)))
+		}
+		if (code[0] == 'R' || code[0] == 'C') && len(raw) > 0 {
+			nextIdx := bytes.IndexByte(raw, 0)
+			if nextIdx != -1 {
+				nextPath := strings.TrimSpace(string(raw[:nextIdx]))
+				if nextPath != "" {
+					paths = append(paths, filepath.Clean(filepath.ToSlash(nextPath)))
+				}
+				raw = raw[nextIdx+1:]
 			}
-			continue
 		}
-		paths = append(paths, path)
 	}
-	return uniqueSorted(paths), nil
+	return uniqueSorted(paths)
 }
 
 func uniqueSorted(s []string) []string {

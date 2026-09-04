@@ -1,5 +1,9 @@
 // Package quantroute filters ordered runtime candidates by declared quantization
 // compatibility without changing provider preference or hiding conversions.
+//
+// Invariant: quant routing is fail-closed and preserves fallback order.
+// Guard: empty candidate lists or unrecognized descriptors refuse explicitly
+// without silently falling back to lossy on-the-fly conversion paths.
 package quantroute
 
 import "github.com/anthony-chaudhary/fak/internal/quantcompat"
@@ -8,9 +12,13 @@ import "github.com/anthony-chaudhary/fak/internal/quantcompat"
 type Code string
 
 const (
-	CodeSelected           Code = "selected"
-	CodeEmptyInput         Code = "no-candidates"
-	CodeConversionOnly     Code = "conversion-only"
+	// CodeSelected indicates a compatible runtime candidate was successfully matched.
+	CodeSelected Code = "selected"
+	// CodeEmptyInput indicates no candidate options were provided to the selector.
+	CodeEmptyInput Code = "no-candidates"
+	// CodeConversionOnly indicates matching runtimes require weight conversion first.
+	CodeConversionOnly Code = "conversion-only"
+	// CodeNoCompatibleTarget indicates none of the evaluated candidates support this quant format.
 	CodeNoCompatibleTarget Code = "no-compatible-target"
 )
 
@@ -32,6 +40,8 @@ type Result struct {
 
 // Select returns the first directly supported or externally delegated candidate.
 // Conversion-required and rejected candidates remain evidence, never silent fallback.
+// Invariant: candidate evaluation stops at the first directly compatible target while preserving evaluation audit trail.
+// Guard: conversion-required targets are never auto-promoted to active routes.
 func Select(artifact quantcompat.Request, candidates []Candidate) Result {
 	if len(candidates) == 0 {
 		return Result{Code: CodeEmptyInput, Index: -1}

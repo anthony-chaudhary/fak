@@ -451,4 +451,9 @@ func TestVerifyOpenCodeSnapshot(t *testing.T) {
 	if err := VerifyOpenCodeSnapshot(strSnap); err == nil {
 		t.Fatal("expected error for non-boolean snapshot, got nil")
 	}
+
+	// Test repo root opencode.json directly
+	if err := VerifyOpenCodeSnapshot("../.."); err != nil {
+		t.Fatalf("repo root opencode.json failed verification: %v", err)
+	}
 }

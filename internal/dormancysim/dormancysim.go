@@ -35,6 +35,9 @@
 //   - Drives, never fakes. Advance moves the real Clock and calls the real Gate.Admit at
 //     the real dormancy.Horizon — the admission it returns is the same verdict the
 //     production composition produces, only at a simulated instant.
+//
+// Invariant: dormancy simulation is fail-closed and monotonic. A longer gap never runs fewer rungs than a shorter one, and uninitialized sessions default conservatively to Ancient.
+// Guard: non-positive advance durations are ignored to guarantee virtual time never regresses.
 package dormancysim
 
 import (

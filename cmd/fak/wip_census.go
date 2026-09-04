@@ -117,12 +117,47 @@ func wipCensus(ctx context.Context, repo string) (wipref.CensusReport, error) {
 }
 
 // wipPayloadReading measures every payload file with checked Git plumbing. The
-// path list comes from the checkpoint metadata, never from obj^, so parentless refs are
-// measured rather than mistaken for empty. The two-dot tree diff works for both
+// path list comes from the checkpoint metadata or is derived from the commit's
+// delta / tree when unscoped, so parentless and descendant refs are both measured
+// rather than mistaken for empty. The two-dot tree diff works for both
 // parentless and descendant checkpoints.
 func wipPayloadReading(ctx context.Context, repo string, rec wipref.RefRecord) wipref.PayloadReading {
-	if len(rec.Stamp.Scope) == 0 {
-		return wipref.PayloadReading{Read: true}
+	paths := rec.Stamp.Scope
+	if len(paths) == 0 {
+		_, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--verify", "-q", rec.Object+"^")
+		if err != nil {
+			return wipref.Unread("verify parent: %v", err)
+		}
+		var out string
+		if code == 0 {
+			o, errStr, dcode, derr := gitWip(ctx, repo, nil, "diff", "--name-only", "-z", rec.Object+"^", rec.Object)
+			if derr != nil {
+				return wipref.Unread("git diff --name-only: %v", derr)
+			}
+			if dcode != 0 {
+				return wipref.Unread("git diff --name-only exited %d: %s", dcode, strings.TrimSpace(errStr))
+			}
+			out = o
+		} else {
+			o, errStr, lcode, lerr := gitWip(ctx, repo, nil, "ls-tree", "-r", "--name-only", "-z", rec.Object)
+			if lerr != nil {
+				return wipref.Unread("git ls-tree: %v", lerr)
+			}
+			if lcode != 0 {
+				return wipref.Unread("git ls-tree exited %d: %s", lcode, strings.TrimSpace(errStr))
+			}
+			out = o
+		}
+		var derivedPaths []string
+		for _, p := range strings.Split(out, "\x00") {
+			if p != "" {
+				derivedPaths = append(derivedPaths, p)
+			}
+		}
+		if len(derivedPaths) == 0 {
+			return wipref.PayloadReading{Read: true}
+		}
+		paths = derivedPaths
 	}
 	base := "HEAD"
 	if _, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--verify", "HEAD^{tree}"); err != nil {
@@ -141,7 +176,7 @@ func wipPayloadReading(ctx context.Context, repo string, rec wipref.RefRecord) w
 		base = strings.TrimSpace(empty)
 	}
 	args := []string{"diff", "--name-status", "--no-renames", "-z", base, rec.Object, "--"}
-	args = append(args, rec.Stamp.Scope...)
+	args = append(args, paths...)
 	out, errStr, code, err := gitWip(ctx, repo, nil, args...)
 	if err != nil {
 		return wipref.Unread("git diff --name-status: %v", err)
@@ -149,7 +184,7 @@ func wipPayloadReading(ctx context.Context, repo string, rec wipref.RefRecord) w
 	if code != 0 {
 		return wipref.Unread("git diff --name-status exited %d: %s", code, strings.TrimSpace(errStr))
 	}
-	return wipref.PayloadReading{Read: true, Paths: rec.Stamp.Scope, NameStatus: out}
+	return wipref.PayloadReading{Read: true, Paths: paths, NameStatus: out}
 }
 
 // wipCensusWorkers sizes the census worker pool. The work is git-subprocess-bound, not

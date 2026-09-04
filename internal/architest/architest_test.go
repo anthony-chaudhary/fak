@@ -46,6 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 
 	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
+	"reflexagent":        3, // fast-dispatch micro-agent reflex loop (#11189).
 	"workspaceslot":      5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
 	"harnessbench":       5, // high-churn soak and thundering-herd saturation witness suite (#11183).
 	"effortbench":        5, // intra-model effort modulation and thinking budget benchmark (#11185).
@@ -54,6 +55,8 @@ var tier = map[string]int{
 	"bgloop":             2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
 	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
 	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
+	"observability":      2,
+	"studyreceipt":       1,
 	"abi":                0,
 	"launchguard":        1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
 	"servingsupervision": 3, // serving failure-domain isolation and supervision; mechanism leaf, off the hot path.

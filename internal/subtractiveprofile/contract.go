@@ -7,13 +7,17 @@ import (
 	"strings"
 )
 
+// Removal designates the enforcement tier applied when dropping a capability.
 type Removal string
 
 const (
+	// RemovalRuntime purges execution access while retaining static metadata representations.
 	RemovalRuntime Removal = "runtime"
-	RemovalStatic  Removal = "static"
+	// RemovalStatic eliminates a capability completely across compile and runtime tiers.
+	RemovalStatic Removal = "static"
 )
 
+// Capability defines a discrete unit of agent functionality with dependency constraints and visibility masks.
 type Capability struct {
 	ID                              string
 	Aliases                         []string
@@ -21,6 +25,7 @@ type Capability struct {
 	Help, Schema, Runtime, Artifact bool
 }
 
+// Profile declares layered capability inclusions, configurations, replacements, and sticky removals.
 type Profile struct {
 	Include   []Capability
 	Configure map[string]map[string]string
@@ -28,9 +33,16 @@ type Profile struct {
 	Remove    map[string]Removal
 }
 
+// Provenance records an audit trail entry tracking which profile operation mutated a capability.
 type Provenance struct{ Capability, Operation, Source string }
+
+// Delta quantifies resource impacts across binary size, startup latency, memory footprint, and tokens.
 type Delta struct{ BinaryBytes, StartupMillis, IdleMemoryBytes, ContextTokens, SchemaBytes int64 }
+
+// Report aggregates resource delta metrics between minimal and full capability deployments.
 type Report struct{ Minimal, Full Delta }
+
+// Effective represents the final immutable capability resolution state across all applied profiles.
 type Effective struct {
 	Capabilities map[string]Capability
 	Config       map[string]map[string]string
@@ -39,6 +51,11 @@ type Effective struct {
 	Report       Report
 }
 
+// Invariant: subtractive profile resolution is fail-closed and sticky.
+// Guard: once a capability is marked removed, subsequent profile layers,
+// alias remappings, or replacement directives cannot resurrect it on any surface.
+// Guard: all dependency prerequisites must resolve against active capabilities;
+// references to removed or absent capabilities fail closed with an explicit error.
 // Resolve applies profiles in order. Removal is sticky: aliases, replacement,
 // inclusion, and dependencies cannot resurrect a removed capability.
 func Resolve(profiles []Profile, report Report) (Effective, error) {
@@ -104,6 +121,7 @@ func Resolve(profiles []Profile, report Report) (Effective, error) {
 	return out, nil
 }
 
+// Surface returns the sorted capability identifiers visible on a specific interface surface.
 func (e Effective) Surface(surface string) []string {
 	ids := []string{}
 	for id, c := range e.Capabilities {
@@ -117,6 +135,8 @@ func (e Effective) Surface(surface string) []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// ProbeAbsent verifies that a designated capability identifier has been thoroughly purged and remains unreachable.
 func (e Effective) ProbeAbsent(id string) error {
 	canonical := strings.ToLower(strings.TrimSpace(id))
 	if _, ok := e.Capabilities[canonical]; ok {

@@ -487,3 +487,83 @@ func TestActiveWriterLease(t *testing.T) {
 		t.Fatalf("expected no active lease after release")
 	}
 }
+
+func TestRouteReconciliationSuspendPaths(t *testing.T) {
+	origin, clone := setupTestOriginAndClone(t)
+
+	// Set base in origin and clone to have top/middle/bottom
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nmiddle\nbottom\n")
+	git(t, origin, "add", "a.txt")
+	git(t, origin, "commit", "-m", "base a")
+	git(t, clone, "pull", "origin", "work")
+
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nincoming\nmiddle\nbottom\n")
+	git(t, origin, "add", "a.txt")
+	git(t, origin, "commit", "-m", "remote update a")
+	git(t, clone, "fetch", "origin")
+
+	writeFile(t, filepath.Join(clone, "a.txt"), "top\nincoming\nmiddle\nbottom\nunique\n")
+
+	// 1. Without suspend paths: should hold collision
+	optsNoSuspend := ReconcileOptions{
+		Repo:   clone,
+		Remote: "origin",
+		Branch: "work",
+		Goal:   "integrate",
+		Apply:  false,
+	}
+	resNoSuspend, err := RouteReconciliation(context.Background(), optsNoSuspend)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resNoSuspend.Route != RouteHoldDirtyCollision {
+		t.Fatalf("route = %q, want %q", resNoSuspend.Route, RouteHoldDirtyCollision)
+	}
+
+	// 2. With suspend paths preview (Apply: false)
+	optsPreview := ReconcileOptions{
+		Repo:         clone,
+		Remote:       "origin",
+		Branch:       "work",
+		Goal:         "integrate",
+		Apply:        false,
+		SuspendPaths: []string{"a.txt"},
+		Session:      "recon-test-sess",
+	}
+	resPreview, err := RouteReconciliation(context.Background(), optsPreview)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resPreview.Route != RouteDisjointIntegrate || !resPreview.OK {
+		t.Fatalf("preview = %+v, want RouteDisjointIntegrate and OK", resPreview)
+	}
+	if resPreview.Park == nil || resPreview.Park.Status != ParkStatusDryRun {
+		t.Fatalf("park receipt = %+v, want DRY_RUN", resPreview.Park)
+	}
+
+	// 3. With suspend paths apply (Apply: true)
+	optsApply := ReconcileOptions{
+		Repo:         clone,
+		Remote:       "origin",
+		Branch:       "work",
+		Goal:         "integrate",
+		Apply:        true,
+		SuspendPaths: []string{"a.txt"},
+		Session:      "recon-test-sess",
+	}
+	resApply, err := RouteReconciliation(context.Background(), optsApply)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resApply.Route != RouteDisjointIntegrate || !resApply.OK || !resApply.Applied {
+		t.Fatalf("apply = %+v, want RouteDisjointIntegrate, OK, Applied", resApply)
+	}
+	if resApply.Park == nil || resApply.Park.Status != ParkStatusRestored {
+		t.Fatalf("park receipt = %+v, want RESTORED", resApply.Park)
+	}
+
+	wantA := "top\nincoming\nmiddle\nbottom\nunique\n"
+	if gotA := readFile(t, filepath.Join(clone, "a.txt")); gotA != wantA {
+		t.Fatalf("a.txt = %q, want %q", gotA, wantA)
+	}
+}

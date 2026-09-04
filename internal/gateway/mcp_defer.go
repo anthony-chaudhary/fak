@@ -34,6 +34,10 @@ import (
 // when deferral is disabled, clamping the schema footprint to a curated active set.
 const DefaultMCPToolAdvertisementCeiling = 10
 
+// MaxMCPToolAdvertisementCeiling is the maximum ceiling enforced on tools/list
+// to prevent clients from being flooded with 40+ full tool schemas unless explicitly requested.
+const MaxMCPToolAdvertisementCeiling = 40
+
 // curatedPriorityToolNames defines the ordered precedence for selecting the active
 // top-K tool set when an advertisement ceiling is in effect.
 var curatedPriorityToolNames = []string{
@@ -109,6 +113,10 @@ func (s *Server) toolsListViewWithAblation(ablate bool) ([]map[string]any, MCPTo
 		}
 		status.Mode = "ceiling"
 		status.Reason = "advertisement_ceiling"
+	} else if s != nil && s.mcpToolCeiling == 0 && len(full) > MaxMCPToolAdvertisementCeiling {
+		resident = s.curatedCeilingToolDescriptors(full, MaxMCPToolAdvertisementCeiling)
+		status.Mode = "ceiling"
+		status.Reason = "advertisement_ceiling_capped"
 	}
 
 	before, _ := json.Marshal(full)

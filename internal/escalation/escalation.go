@@ -153,6 +153,11 @@ var (
 	ErrNotEscalate   = errors.New("escalation: refusal disposition is not ESCALATE — no packet")
 )
 
+// Invariant: escalation packets are fail-closed and validate schema strictly.
+// Every vocabulary field must conform to closed tokens, at least one routing
+// identifier must be present, actions must contain the safe default, and timestamps
+// must maintain strictly forward temporal progression without prose.
+//
 // Validate is the fail-closed schema gate: a packet that does not pass never
 // reaches the ledger. It enforces closed-token shape on every vocabulary
 // field — the "no prose" law — plus routability, the bounded-menu/safe-default

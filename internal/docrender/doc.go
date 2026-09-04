@@ -105,4 +105,14 @@
 // of the output. Callers that want a provenance line pass Bundle.Stamp explicitly,
 // and a Stamp carrying a timestamp defeats the lock by design — it makes every run
 // a fresh input. Bundle.Write writes nothing at all when the input hash is unchanged.
+//
+// # Invariants
+//
+// Invariant: doc rendering is fail-closed and deterministic.
+// Guard condition: Any unsupported Markdown construct is rejected with an explicit
+// UnsupportedError naming line and construct; unparsed constructs never pass through
+// as unformatted literal text.
+// Guard condition: Document Kind is never guessed via content heuristics; classification
+// strictly adheres to the precedence chain: explicit override > metadata marker >
+// path rule > corpus default.
 package docrender

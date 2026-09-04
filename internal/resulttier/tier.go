@@ -12,11 +12,17 @@ import (
 type StandardTier int
 
 const (
-	Tier1           StandardTier = 1
-	Tier3           StandardTier = 3
-	Tier5           StandardTier = 5
-	Tier10          StandardTier = 10
-	DefaultTier     StandardTier = Tier5
+	// Tier1 bounds the result set window to at most one item.
+	Tier1 StandardTier = 1
+	// Tier3 bounds the result set window to at most three items.
+	Tier3 StandardTier = 3
+	// Tier5 bounds the result set window to at most five items.
+	Tier5 StandardTier = 5
+	// Tier10 bounds the result set window to at most ten items.
+	Tier10 StandardTier = 10
+	// DefaultTier specifies the default five-item pagination window.
+	DefaultTier StandardTier = Tier5
+	// MaxStandardTier specifies the ceiling of ten items before widening approval is needed.
 	MaxStandardTier StandardTier = Tier10
 )
 
@@ -48,6 +54,9 @@ type ContinuationResponse struct {
 }
 
 // ResolvePagination resolves limit, offset, and continuation metadata against the total item count.
+//
+// Invariant: result tier assignment is fail-closed and deterministic across all request parameters.
+// Guard: limit values exceeding MaxStandardTier without an explicit widening reason fail closed with ErrTierWideningRefused.
 //
 // Rules:
 //   - If req.Limit <= 0: defaults to DefaultTier (5).

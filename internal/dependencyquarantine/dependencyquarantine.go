@@ -1,3 +1,9 @@
+// Package dependencyquarantine enforces the repository dependency budget and ensures
+// external dependencies remain quarantined in isolated tools submodules.
+//
+// Invariant: dependency quarantine enforcement is fail-closed and bounded. Any unreviewed
+// root go.mod require entry, root go.sum checksum line, or nested tool facade import of
+// non-stdlib packages immediately yields structured violations and blocks repository verification.
 package dependencyquarantine
 
 import (
@@ -25,10 +31,15 @@ var allowedRootSum = map[string]bool{
 	"golang.org/x/term v0.44.0/go.mod h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=": true,
 }
 
+// Violation describes an unreviewed dependency or facade policy violation.
 type Violation struct{ Path, Reason string }
 
 func (v Violation) Error() string { return v.Path + ": " + v.Reason }
 
+// Check scans the repository root for root dependency drift and unreviewed nested tool facades.
+//
+// Contract: Check executes fail-closed; if any file cannot be read or parsed, it returns
+// a non-nil error, and if any dependency policy invariant is broken, it returns non-empty violations.
 func Check(root string) ([]Violation, error) {
 	var out []Violation
 	req, err := rootRequires(filepath.Join(root, "go.mod"))
@@ -79,6 +90,10 @@ func Check(root string) ([]Violation, error) {
 	return out, nil
 }
 
+// NestedModules discovers all nested modules under root by searching for nested go.mod files.
+//
+// Key invariant: NestedModules ignores hidden directories, scratch spaces, and repo root itself,
+// guaranteeing bounded traversal across legitimate nested modules.
 func NestedModules(root string) ([]string, error) { return nestedModules(root) }
 
 func nestedModules(root string) ([]string, error) {

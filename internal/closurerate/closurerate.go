@@ -10,6 +10,9 @@
 // The core Fold is pure and deterministic: it takes the window length as a
 // parameter and never reads the clock, so the same ledger always yields the
 // same Report. It is stdlib-only and off the hot path.
+//
+// Invariant: closure rate calculation is fail-closed and deterministic across all executions.
+// Guard: unclosed records (Closed == false) and unverified claims never contribute to witness tallies, ensuring zero divide-by-zero risk on empty inputs.
 package closurerate
 
 import (

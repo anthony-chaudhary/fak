@@ -159,6 +159,8 @@ type CompletenessCritic struct {
 	Verdict              string   `json:"verdict"`
 }
 
+// Invariant: UltraCode borrowing verification is fail-closed and provenance-verified.
+// Trailing JSON bytes, unknown fields, or missing schema identities cause immediate rejection.
 func Parse(raw []byte) (Artifact, error) {
 	var artifact Artifact
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -178,6 +180,8 @@ func Parse(raw []byte) (Artifact, error) {
 	return artifact, nil
 }
 
+// Guard: Candidate mechanisms, immutable source anchors, benchmark falsifiers, and deduplicated
+// existing owners must all pass fail-closed verification before adoption.
 func Validate(a Artifact) error {
 	if a.Schema != Schema || a.Issue != 8484 {
 		return fmt.Errorf("identity: schema=%q issue=%d", a.Schema, a.Issue)
@@ -426,6 +430,7 @@ var privateTextPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}`),
 }
 
+// Invariant: Public documentation and companion JSON must contain no credentials, private paths, or token secrets.
 func CheckPublicText(label string, raw []byte) error {
 	for _, pattern := range privateTextPatterns {
 		if match := pattern.Find(raw); match != nil {

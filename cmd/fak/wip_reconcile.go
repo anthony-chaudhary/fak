@@ -326,7 +326,7 @@ func wipReconcileAt(ctx context.Context, repo string, now time.Time) (wipReconci
 			if len(d.ReviewCommands) > 0 {
 				d.NextCommand = "run review_commands; salvage absent paths directly and merge divergent paths before a normal commit"
 			} else {
-				d.NextCommand = "fak wip census --json"
+				d.NextCommand = "fak wip reap --census --json"
 			}
 			d.Reason += "; retained because automatic landing could overwrite newer HEAD content"
 		}

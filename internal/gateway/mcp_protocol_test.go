@@ -211,4 +211,17 @@ func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
 	if filterStatus.Mode != "ceiling" || filterStatus.Reason != "advertisement_ceiling" {
 		t.Fatalf("filterStatus=%+v, want mode=ceiling, reason=advertisement_ceiling", filterStatus)
 	}
+
+	// Test that curatedCeilingToolDescriptors clamps a list of 45 tools to MaxMCPToolAdvertisementCeiling (40)
+	var syntheticTools []map[string]any
+	for i := 0; i < 45; i++ {
+		syntheticTools = append(syntheticTools, map[string]any{
+			"name":        "tool_" + string(rune('a'+i%26)) + "_" + string(rune('0'+i)),
+			"description": "synthetic tool",
+		})
+	}
+	capped := srvCeiling.curatedCeilingToolDescriptors(syntheticTools, MaxMCPToolAdvertisementCeiling)
+	if len(capped) != MaxMCPToolAdvertisementCeiling {
+		t.Fatalf("expected exactly %d capped tools, got %d", MaxMCPToolAdvertisementCeiling, len(capped))
+	}
 }

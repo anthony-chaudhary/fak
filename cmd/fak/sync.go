@@ -76,6 +76,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	goal := fs.String("goal", "publish", "reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)")
 	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
+	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
+	var suspendPaths pathList
+	fs.Var(&suspendPaths, "suspend-paths", "reconcile: paths to suspend and reapply across integration (repeatable)")
 	var recheckPaths pathList
 	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
@@ -163,13 +166,19 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 
 	if command == "reconcile" {
 		repoPath := pathutil.ExpandTilde(*repo)
+		sess := strings.TrimSpace(*sessionFlag)
+		if sess == "" {
+			sess = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"), "sync-reconcile")
+		}
 		opts := safesync.ReconcileOptions{
-			Repo:   repoPath,
-			Remote: *remote,
-			Branch: *branch,
-			Goal:   *goal,
-			Apply:  *applyFlag,
-			Fetch:  *fetch,
+			Repo:         repoPath,
+			Remote:       *remote,
+			Branch:       *branch,
+			Goal:         *goal,
+			Apply:        *applyFlag,
+			Fetch:        *fetch,
+			SuspendPaths: suspendPaths,
+			Session:      sess,
 		}
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
@@ -404,6 +413,9 @@ func renderSyncReconcile(w io.Writer, info safesync.ReconcileAssessment) {
 		if info.Execution.Error != "" {
 			fmt.Fprintf(w, "    error: %s\n", info.Execution.Error)
 		}
+	}
+	if info.Park != nil {
+		fmt.Fprintf(w, "  park: session=%s status=%s (%d selected paths, %d effects)\n", info.Park.Session, info.Park.Status, len(info.Park.SelectedPaths), len(info.Park.Effects))
 	}
 }
 
