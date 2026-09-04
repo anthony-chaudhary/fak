@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
 // Recommendation is one doctor finding: a check, its severity, what it found, and
@@ -88,6 +90,9 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	}
 	if len(argv) > 0 && argv[0] == "trust" {
 		return runDoctorTrust(stdout, stderr, argv[1:])
+	}
+	if len(argv) > 0 && (argv[0] == "telemetry" || argv[0] == "health") {
+		return runDoctorTelemetry(stdout, stderr, argv[1:])
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -550,6 +555,106 @@ func writeDoctorHuman(w io.Writer, rep doctorReport) {
 		fmt.Fprintf(w, "[%s] %-12s %s\n", tag, r.Check, r.Finding)
 		if r.Recommend != "" {
 			fmt.Fprintf(w, "       recommend: %s\n", r.Recommend)
+		}
+	}
+	if rep.Findings == 0 {
+		fmt.Fprintln(w, "doctor: healthy (0 findings)")
+	} else {
+		fmt.Fprintf(w, "doctor: %d finding(s)\n", rep.Findings)
+	}
+}
+
+type float64SliceFlag []float64
+
+func (f *float64SliceFlag) String() string {
+	if f == nil || len(*f) == 0 {
+		return ""
+	}
+	parts := make([]string, len(*f))
+	for i, v := range *f {
+		parts[i] = fmt.Sprintf("%g", v)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (f *float64SliceFlag) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		val, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			return fmt.Errorf("invalid float value: %w", err)
+		}
+		*f = append(*f, val)
+	}
+	return nil
+}
+
+func runDoctorTelemetry(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak doctor telemetry", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbFlag := fs.String("db", "", "path to SQLite DB (default: auto-discover opencode.db)")
+	promptTokens := fs.Int("prompt-tokens", 0, "observed prompt tokens in turn")
+	baselineTokens := fs.Int("baseline-tokens", 0, "baseline prompt tokens")
+	var latencies float64SliceFlag
+	fs.Var(&latencies, "latency", "turn latency in seconds (repeatable or comma-separated)")
+	asJSON := fs.Bool("json", false, "emit JSON output")
+
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak doctor telemetry: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		dbPath = discoverOpencodeDB()
+	}
+
+	report := trajectory.EvaluateTelemetryHealth(*promptTokens, *baselineTokens, latencies, dbPath)
+
+	return renderJSONOrHuman(stdout, *asJSON, report, writeDoctorTelemetryHuman, report.Findings > 0)
+}
+
+func discoverOpencodeDB() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		p := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+		p := filepath.Join(userProfile, ".local", "share", "opencode", "opencode.db")
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func writeDoctorTelemetryHuman(w io.Writer, rep trajectory.TelemetryHealthReport) {
+	fmt.Fprintln(w, "== fak doctor: telemetry health ==")
+	if rep.PromptTokens > 0 || rep.BaselinePrompt > 0 {
+		fmt.Fprintf(w, "prompt tokens: %d (baseline: %d)\n", rep.PromptTokens, rep.BaselinePrompt)
+	}
+	if rep.CurrentLatency > 0 || rep.MedianLatency > 0 {
+		fmt.Fprintf(w, "latency: current=%.2fs median=%.2fs\n", rep.CurrentLatency, rep.MedianLatency)
+	}
+	if rep.DBPath != "" {
+		fmt.Fprintf(w, "database: %s (size=%d bytes, pages=%d, freelist=%d)\n", rep.DBPath, rep.DBBytes, rep.PageCount, rep.FreelistPages)
+	}
+	for _, alarm := range rep.Alarms {
+		tag := "OK  "
+		if alarm.Severity == trajectory.SeverityWarn {
+			tag = "WARN"
+		}
+		fmt.Fprintf(w, "[%s] %-18s %s\n", tag, alarm.Type, alarm.Message)
+		if alarm.Detail != "" {
+			fmt.Fprintf(w, "       detail: %s\n", alarm.Detail)
 		}
 	}
 	if rep.Findings == 0 {
