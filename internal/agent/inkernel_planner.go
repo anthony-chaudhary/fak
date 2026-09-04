@@ -504,14 +504,26 @@ func (e *InKernelCapacityError) Error() string {
 
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
 // unit-testable without a GPU (the panic payload is an ordinary Go value). It converts a
-// recovered in-kernel device-allocation panic into a typed, actionable error and reports
-// handled=true; for ANY other recovered value it reports handled=false so the caller
-// re-panics — the recover stays surgical and never swallows a genuine bug (a nil deref, a
-// validation panic, a poisoned-context launch failure).
+// recovered in-kernel device failure (allocation OOM, typed CUDA backend error, or device fault)
+// into a typed, actionable error and reports handled=true; for ANY other recovered value it
+// reports handled=false so the caller re-panics — the recover stays surgical and never swallows
+// a genuine bug (a nil deref, a non-device validation panic).
 func recoverDevicePanic(r any) (err error, handled bool) {
 	var dae *compute.DeviceAllocError
 	if e, ok := r.(error); ok && errors.As(e, &dae) {
 		return &InKernelOOMError{Bytes: dae.Bytes, Class: dae.DemandClass(), Site: dae.Site}, true
+	}
+	var cudaLaunchErr *compute.CUDALaunchError
+	if e, ok := r.(error); ok && errors.As(e, &cudaLaunchErr) {
+		return e, true
+	}
+	var cudaOpErr *compute.CUDAOpError
+	if e, ok := r.(error); ok && errors.As(e, &cudaOpErr) {
+		return e, true
+	}
+	var faultErr *compute.DeviceFaultError
+	if e, ok := r.(error); ok && errors.As(e, &faultErr) {
+		return e, true
 	}
 	return nil, false
 }

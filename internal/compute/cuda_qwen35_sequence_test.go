@@ -405,7 +405,14 @@ func TestCUDASigmoidMulInPlace(t *testing.T) {
 	short := uploadCUDAGDN(t, be, []int{1}, []float32{1}, MemoryActivation, "sigmoid-short-test")
 	defer func() {
 		r := recover()
-		if r == nil || !strings.Contains(r.(string), "shape mismatch") {
+		var msg string
+		switch v := r.(type) {
+		case string:
+			msg = v
+		case error:
+			msg = v.Error()
+		}
+		if r == nil || !strings.Contains(msg, "shape mismatch") {
 			t.Fatalf("shape mismatch panic = %v", r)
 		}
 	}()
