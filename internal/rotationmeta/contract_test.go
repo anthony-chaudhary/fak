@@ -2,11 +2,16 @@ package rotationmeta
 
 import "testing"
 
-func fixture(t *testing.T, recipe Recipe, version string, transforms ...Transform) Descriptor {
-	t.Helper()
+func fixture(tb testing.TB, recipe Recipe, version string, transforms ...Transform) Descriptor {
+	if tb != nil {
+		tb.Helper()
+	}
 	p, ok := PinnedProvenance(recipe, version)
 	if !ok {
-		t.Fatalf("missing test provenance for %s %s", recipe, version)
+		if tb != nil {
+			tb.Fatalf("missing test provenance for %s %s", recipe, version)
+		}
+		panic("missing test provenance")
 	}
 	return Descriptor{ContractVersion: ContractVersion, Recipe: recipe, RecipeVersion: version, Provenance: p, ArtifactFormat: "safetensors", Transforms: transforms}
 }
