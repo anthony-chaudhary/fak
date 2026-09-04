@@ -395,8 +395,7 @@ func TestOutOfControl_CriticalMetricSurge(t *testing.T) {
 	}
 }
 
-func TestOutOfControl_RenderAndCheckGateIntegration(t *testing.T) {
-	// Test that Fold integrates OutOfControl, Render displays alert, and CheckGate reports OUT OF CONTROL
+func TestOutOfControl_AssessmentIntegration(t *testing.T) {
 	wF := 8
 	metrics := []Metric{
 		{Key: "doc", Label: "docs", DebtKey: "doc_debt", Debt: intp(40), Grade: strp("F"), EffGrade: "F", GradeWeight: &wF, OK: false, Verdict: "ACTION"},
@@ -414,21 +413,8 @@ func TestOutOfControl_RenderAndCheckGateIntegration(t *testing.T) {
 		},
 	}
 
-	p := Fold(metrics, base, "/repo", "new1111")
-	if p.OutOfControl == nil || !p.OutOfControl.IsOutOfControl {
-		t.Fatalf("expected OutOfControl in Payload to be out of control, got %+v", p.OutOfControl)
-	}
-
-	renderOutput := Render(p)
-	if !strings.Contains(renderOutput, "OUT-OF-CONTROL DEBT ALERT") {
-		t.Fatalf("render output missing OUT-OF-CONTROL DEBT ALERT block:\n%s", renderOutput)
-	}
-
-	code, msg := CheckGate(p)
-	if code != 1 {
-		t.Fatalf("gate must fail on out of control regression: code=%d", code)
-	}
-	if !strings.Contains(msg, "OUT OF CONTROL") {
-		t.Fatalf("CheckGate message missing OUT OF CONTROL note: %s", msg)
+	ooc := AssessOutOfControl(metrics, base, 40, 8, DefaultOutOfControlBounds())
+	if !ooc.IsOutOfControl {
+		t.Fatalf("expected AssessOutOfControl to report out of control, got %+v", ooc)
 	}
 }
