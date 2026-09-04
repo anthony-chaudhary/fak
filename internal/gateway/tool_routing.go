@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -338,6 +339,95 @@ func memberCall(base *abi.ToolCall, model string) *abi.ToolCall {
 	}, fusedturn.ClassWeight)
 }
 
+// canonicalToolName normalizes incoming tool namespace wrappers across diverse
+// harness dialects (OpenAI/Codex "functions.<tool>", Claude Code "mcp__<server>__<tool>",
+// and OpenCode "<server>_<server>_<tool>" or "<server>_<tool>") to the canonical tool name.
+// When policy is non-nil, a prefix is stripped if the candidate exists in policy's allowed
+// tools, prefixes, or arg rules.
+func canonicalToolName(tool string, pol *policy.Runtime) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return ""
+	}
+
+	// If the tool is already recognized as-is by the active policy, no normalization is needed.
+	if pol != nil && isToolRecognized(tool, pol) {
+		return tool
+	}
+
+	// 1. OpenAI / Codex prefix: "functions."
+	if strings.HasPrefix(tool, "functions.") {
+		candidate := strings.TrimPrefix(tool, "functions.")
+		if isToolRecognized(candidate, pol) {
+			return candidate
+		}
+	}
+
+	// 2. Claude Code MCP prefix: "mcp__<server>__<tool>"
+	if strings.HasPrefix(tool, "mcp__") {
+		rest := strings.TrimPrefix(tool, "mcp__")
+		if idx := strings.Index(rest, "__"); idx > 0 && idx+2 < len(rest) {
+			candidate := rest[idx+2:]
+			if isToolRecognized(candidate, pol) {
+				return candidate
+			}
+		}
+	}
+
+	// 3. OpenCode double prefix: "<server>_<server>_<tool>"
+	// e.g. "fak_fak_read" -> "fak_read" (or "read")
+	if idx1 := strings.Index(tool, "_"); idx1 > 0 {
+		server := tool[:idx1]
+		rest := tool[idx1+1:]
+		if strings.HasPrefix(rest, server+"_") {
+			// Stripping one <server>_ yields "<server>_<tool>"
+			if isToolRecognized(rest, pol) {
+				return rest
+			}
+			// Stripping second <server>_ yields "<tool>"
+			subTool := strings.TrimPrefix(rest, server+"_")
+			if isToolRecognized(subTool, pol) {
+				return subTool
+			}
+		}
+	}
+
+	// 4. OpenCode single prefix: "<server>_<tool>"
+	if idx := strings.Index(tool, "_"); idx > 0 && idx+1 < len(tool) {
+		candidate := tool[idx+1:]
+		if pol != nil && isToolRecognized(candidate, pol) {
+			return candidate
+		}
+	}
+
+	return tool
+}
+
+func isToolRecognized(candidate string, pol *policy.Runtime) bool {
+	if pol == nil {
+		return true
+	}
+	if pol.Adjudicator.Allow != nil && pol.Adjudicator.Allow[candidate] {
+		return true
+	}
+	if pol.Adjudicator.Deny != nil {
+		if _, ok := pol.Adjudicator.Deny[candidate]; ok {
+			return true
+		}
+	}
+	for _, pre := range pol.Adjudicator.AllowPrefix {
+		if strings.HasPrefix(candidate, pre) {
+			return true
+		}
+	}
+	for _, pred := range pol.Adjudicator.ArgPredicates {
+		if pred.Tool == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 // buildCall converts untrusted wire input into an abi.ToolCall. The raw argument
 // bytes are Put into a tainted, agent-scoped Ref (the fail-closed default the IFC
 // sink-gate relies on) — the wire NEVER carries a Ref. Empty args normalize to
@@ -354,7 +444,12 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	if err != nil {
 		return nil, fmt.Errorf("resolver: %w", err)
 	}
-	meta := metaFor(tool, readOnly)
+	canonical := canonicalToolName(tool, s.policyRuntime)
+	meta := metaFor(canonical, readOnly)
+	if canonical != tool {
+		meta["wire_tool"] = tool
+		meta["canonical_tool"] = canonical
+	}
 	if label := journal.ArgsLabelForBytes(args); label != "" {
 		meta[journal.MetaArgsLabel] = label
 	}
@@ -378,7 +473,7 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// cross-call correlation; absent, we mint a fresh non-empty id rather than fall
 	// back to the empty shared-default trace (which would pool every served session
 	// onto one taint high-water mark).
-	tc := fusedturn.Tag(&abi.ToolCall{Tool: tool, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, fusedturn.ClassClassical)
+	tc := fusedturn.Tag(&abi.ToolCall{Tool: canonical, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, fusedturn.ClassClassical)
 	// Per-call model routing (opt-in): classify this tool call into a routing Subject
 	// and, for a single-model PICK, bind the chosen model to Engine HERE — before the
 	// caller hands tc to k.Syscall. That is the load-bearing residency contract: the
@@ -389,7 +484,7 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// (#2528) the routed model id is BOUND through the roster to its account-resolved
 	// EngineRoute here, and an unresolvable id (unknown account, no binding + no default)
 	// fails LOUD — the call never dispatches on a silent default.
-	route, rerr := s.routeEngine(tool, readOnly, meta)
+	route, rerr := s.routeEngine(canonical, readOnly, meta)
 	if rerr != nil {
 		return nil, rerr
 	}

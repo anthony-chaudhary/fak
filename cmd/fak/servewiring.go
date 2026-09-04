@@ -215,7 +215,7 @@ var plumbingField = map[string]bool{
 	"PinUpstreamCredential": true, "EngineCacheBaseURL": true, "EngineCacheAdminKey": true,
 	"EngineCacheIdleTimeout": true, "EngineCacheRequireExactSpan": true, "Tokenizer": true,
 	"InKernelQ4K": true, "RequireKey": true, "Invalidation": true, "Version": true,
-	"ReloadPolicy": true, "ResetTrace": true, "ObserveTrace": true, "ObserveSession": true,
+	"ReloadPolicy": true, "PolicyRuntime": true, "ResetTrace": true, "ObserveTrace": true, "ObserveSession": true,
 	"ControlSession": true, "ListSessions": true, "OnBudgetExhausted": true,
 	"DefaultTraceID": true, "Logf": true, "StartTime": true, "StartupPhases": true,
 }
