@@ -11,24 +11,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 )
 
-func guardInfoLegend() string {
-	var b strings.Builder
-	fmt.Fprintln(&b, "what this means:")
-	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
-	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
-	fmt.Fprintln(&b, "  floor  = the capability floor those safety counts come from: every tool call the agent proposes is adjudicated against it BEFORE it runs, so \"nothing blocked\" means the floor admitted every call so far — never that it is off. The counts are session running totals from 0: blocked = refused outright, fixed = rewritten to a safe form and then allowed, set aside = the result quarantined instead of being fed back to the model.")
-	fmt.Fprintln(&b, "  why    = the reason code(s) behind those blocks — the same breakdown fak prints when the session ends, now live — plus anything held for a witness or deferred.")
-	fmt.Fprintln(&b, "  saved  = \"turns saved\": engine calls fak avoided for you (served from its own cache or handled in-kernel) so the agent never had to make them — shown only once at least one was avoided.")
-	fmt.Fprintln(&b, "  replies = model answers completed this session, read from inference.turns — \"turns\" is this same count's name in the JSON and in the exit summary. A whole number counting up from 0 that never decreases while the gateway is up.")
-	fmt.Fprintln(&b, "  busy with = requests in flight through the gateway at this instant, read from gateway.inflight_requests. It is a gauge, not a total: it rises when a call starts and drops back to 0 when the call returns, so 0 between turns is normal and one agent usually reads 0 or 1. Staying above 0 while \"replies\" stops moving is the stuck-call tell.")
-	fmt.Fprintln(&b, "  running = how long THIS gateway process has been up, read from gateway.uptime_seconds and shown as whole seconds (Ns), minutes (NmNs) or hours (NhNm). It counts up from 0 at gateway start, so a value that suddenly drops means the gateway restarted — not that the pane stalled.")
-	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
-	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")
-	fmt.Fprintln(&b, "  watchdog = health of the layer that resumes stranded agents and restarts a dead monitor: the rollup verdict (healthy / healing / down / gave up), how many times it has ticked (alive proof), how many resumes it has proven, and whether any monitor needs attention. Absent when no watchdog is running here.")
-	fmt.Fprintln(&b, "  \"nothing yet\" = no re-use has happened.")
-	return b.String()
-}
-
 func guardInfoAssumptionsText(rows []gateway.SessionAssumption) string {
 	rows = cleanGuardInfoAssumptions(rows)
 	if len(rows) == 0 {

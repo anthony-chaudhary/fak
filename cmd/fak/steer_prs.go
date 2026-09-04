@@ -263,20 +263,37 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak steer prs: --selfcheck requires --demo")
 		return 2
 	}
+	var view map[string]any
 	if strings.TrimSpace(*demo) != "" {
-		view, err := buildSteerPRsDemoView(*demo)
+		v, err := buildSteerPRsDemoView(*demo)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak steer prs: demo: %v\n", err)
 			return 1
 		}
-		if *asJSON {
-			if err := writeIndentedJSON(stdout, view); err != nil {
-				fmt.Fprintf(stderr, "fak steer prs: encode json: %v\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprintln(stdout, writeSteerPRs(view, *maxFiles))
+		view = v
+	} else {
+		// The wave bindings are read ONCE, here, and handed to the fold as data: an
+		// unreadable or wave-less plan is a hard error rather than a silent fall back
+		// to leaf grouping, because an operator who asked to watch waves must not be
+		// shown a leaf view that looks the same.
+		waves, err := steerPRsCohortWaves(*cohort)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
+			return 2
 		}
+
+		v, err := buildSteerPRsViewWaves(steerRoot(), *base, *head, waves)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
+			return 1
+		}
+		view = v
+	}
+
+	if code := renderSteerPRsView(stdout, stderr, view, *asJSON, *maxFiles); code != 0 {
+		return code
+	}
+	if strings.TrimSpace(*demo) != "" {
 		if *selfcheck {
 			if err := checkSteerPRsDemo(view); err != nil {
 				fmt.Fprintf(stderr, "fak steer prs: selfcheck FAILED: %v\n", err)
@@ -286,34 +303,22 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
-
-	// The wave bindings are read ONCE, here, and handed to the fold as data: an
-	// unreadable or wave-less plan is a hard error rather than a silent fall back
-	// to leaf grouping, because an operator who asked to watch waves must not be
-	// shown a leaf view that looks the same.
-	waves, err := steerPRsCohortWaves(*cohort)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
-		return 2
-	}
-
-	view, err := buildSteerPRsViewWaves(steerRoot(), *base, *head, waves)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer prs: %v\n", err)
+	if *check && releaseStatusInt(view["residual_count"]) > 0 {
+		fmt.Fprintf(stderr, "fak steer prs: %d unit(s) in %s are RESIDUAL — a claim the kernel could not witness; a human look buys something here\n",
+			releaseStatusInt(view["residual_count"]), releaseStatusString(view["range"]))
 		return 1
 	}
-	if *asJSON {
+	return 0
+}
+
+func renderSteerPRsView(stdout, stderr io.Writer, view map[string]any, asJSON bool, maxFiles int) int {
+	if asJSON {
 		if err := writeIndentedJSON(stdout, view); err != nil {
 			fmt.Fprintf(stderr, "fak steer prs: encode json: %v\n", err)
 			return 1
 		}
 	} else {
-		fmt.Fprintln(stdout, writeSteerPRs(view, *maxFiles))
-	}
-	if *check && releaseStatusInt(view["residual_count"]) > 0 {
-		fmt.Fprintf(stderr, "fak steer prs: %d unit(s) in %s are RESIDUAL — a claim the kernel could not witness; a human look buys something here\n",
-			releaseStatusInt(view["residual_count"]), releaseStatusString(view["range"]))
-		return 1
+		fmt.Fprintln(stdout, writeSteerPRs(view, maxFiles))
 	}
 	return 0
 }

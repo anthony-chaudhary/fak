@@ -351,6 +351,9 @@ const (
 // normal no-op test in the parent process; the re-exec selects only this test.
 func TestGardenWatchdogHangingChildHelper(t *testing.T) {
 	t.Helper()
+	if os.Getenv(gardenWatchdogHelperEnv) == "" {
+		t.Skip("helper process only")
+	}
 	switch os.Getenv(gardenWatchdogHelperEnv) {
 	case gardenWatchdogGrandchildMode:
 		path := os.Getenv(gardenWatchdogHeartbeatEnv)

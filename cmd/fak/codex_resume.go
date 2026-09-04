@@ -83,38 +83,9 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	threadIDs := append(codexResumeThreads(nil), threadFlags...)
-	if len(threadIDs) == 0 && fs.NArg() >= 1 {
-		threadIDs = append(threadIDs, fs.Arg(0))
-	}
-	if len(threadIDs) == 0 {
-		fmt.Fprintln(stderr, "usage: fak codex-resume [--rollout FILE] [--prompt-file FILE] SESSION_ID [PROMPT]")
-		fmt.Fprintln(stderr, "       fak codex-resume --thread ID [--thread ID...] --prompt-file FILE")
-		return 2
-	}
-	if len(threadFlags) > 0 && fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak codex-resume: positional arguments cannot be combined with --thread")
-		return 2
-	}
-	if *account != "" && len(threadIDs) != 1 {
-		fmt.Fprintln(stderr, "fak codex-resume: --account supports exactly one candidate")
-		return 2
-	}
-	if *account != "" && *rollout != "" {
-		fmt.Fprintln(stderr, "fak codex-resume: --rollout cannot be combined with --account")
-		return 2
-	}
-	if *account != "" && *codexHome != "" {
-		fmt.Fprintln(stderr, "fak codex-resume: --codex-home cannot be combined with --account")
-		return 2
-	}
-	if *rollout != "" && len(threadIDs) != 1 {
-		fmt.Fprintln(stderr, "fak codex-resume: --rollout is valid only for one candidate")
-		return 2
-	}
-	if !*checkOnly && *promptFile == "" && (len(threadFlags) > 0 || fs.NArg() < 2) {
-		fmt.Fprintln(stderr, "fak codex-resume: a prompt or --prompt-file is required for launch")
-		return 2
+	threadIDs, code := validateCodexResumeArgs(stderr, fs, threadFlags, *account, *rollout, *codexHome, *promptFile, *checkOnly)
+	if code != 0 {
+		return code
 	}
 	dir := *cwd
 	if dir == "" {
@@ -252,32 +223,73 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(output)
 	} else {
-		for _, result := range results {
-			preflightVerdict := codexresume.PreflightVerdict("")
-			codexHome, sessionRoot, lookup, recoveryAction := "", "", codexresume.LookupState(""), ""
-			if result.Preflight != nil {
-				preflightVerdict = result.Preflight.Verdict
-				codexHome = result.Preflight.CodexHome
-				sessionRoot = result.Preflight.SessionRoot
-				lookup = result.Preflight.LookupState
-				recoveryAction = result.Preflight.RecoveryAction
-			}
-			launch := "launch state unknown"
-			switch result.LaunchState {
-			case codexresume.LaunchNotAttempted:
-				launch = fmt.Sprintf("launch not attempted (verdict=%s recovery_action=%q)", preflightVerdict, recoveryAction)
-			case codexresume.LaunchStartFailed:
-				launch = "fresh Codex process start_failed"
-			case codexresume.LaunchStarted:
-				launch = fmt.Sprintf("fresh Codex process started (pid=%d)", result.LaunchPID)
-			case codexresume.LaunchCompleted:
-				launch = fmt.Sprintf("fresh Codex process completed (pid=%d)", result.LaunchPID)
-			}
-			fmt.Fprintf(stdout, "%s codex_home=%q session_root=%q lookup=%s launch=%q preflight=%s outcome=%s turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
-				result.ThreadID, codexHome, sessionRoot, lookup, launch, preflightVerdict, result.Outcome, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
-		}
+		printCodexResumeResults(stdout, results)
 	}
 	return exitCode
+}
+
+func validateCodexResumeArgs(stderr io.Writer, fs *flag.FlagSet, threadFlags codexResumeThreads, account, rollout, codexHome, promptFile string, checkOnly bool) ([]string, int) {
+	threadIDs := append(codexResumeThreads(nil), threadFlags...)
+	if len(threadIDs) == 0 && fs.NArg() >= 1 {
+		threadIDs = append(threadIDs, fs.Arg(0))
+	}
+	if len(threadIDs) == 0 {
+		fmt.Fprintln(stderr, "usage: fak codex-resume [--rollout FILE] [--prompt-file FILE] SESSION_ID [PROMPT]")
+		fmt.Fprintln(stderr, "       fak codex-resume --thread ID [--thread ID...] --prompt-file FILE")
+		return nil, 2
+	}
+	if len(threadFlags) > 0 && fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak codex-resume: positional arguments cannot be combined with --thread")
+		return nil, 2
+	}
+	if account != "" && len(threadIDs) != 1 {
+		fmt.Fprintln(stderr, "fak codex-resume: --account supports exactly one candidate")
+		return nil, 2
+	}
+	if account != "" && rollout != "" {
+		fmt.Fprintln(stderr, "fak codex-resume: --rollout cannot be combined with --account")
+		return nil, 2
+	}
+	if account != "" && codexHome != "" {
+		fmt.Fprintln(stderr, "fak codex-resume: --codex-home cannot be combined with --account")
+		return nil, 2
+	}
+	if rollout != "" && len(threadIDs) != 1 {
+		fmt.Fprintln(stderr, "fak codex-resume: --rollout is valid only for one candidate")
+		return nil, 2
+	}
+	if !checkOnly && promptFile == "" && (len(threadFlags) > 0 || fs.NArg() < 2) {
+		fmt.Fprintln(stderr, "fak codex-resume: a prompt or --prompt-file is required for launch")
+		return nil, 2
+	}
+	return threadIDs, 0
+}
+
+func printCodexResumeResults(stdout io.Writer, results []codexresume.Result) {
+	for _, result := range results {
+		preflightVerdict := codexresume.PreflightVerdict("")
+		codexHome, sessionRoot, lookup, recoveryAction := "", "", codexresume.LookupState(""), ""
+		if result.Preflight != nil {
+			preflightVerdict = result.Preflight.Verdict
+			codexHome = result.Preflight.CodexHome
+			sessionRoot = result.Preflight.SessionRoot
+			lookup = result.Preflight.LookupState
+			recoveryAction = result.Preflight.RecoveryAction
+		}
+		launch := "launch state unknown"
+		switch result.LaunchState {
+		case codexresume.LaunchNotAttempted:
+			launch = fmt.Sprintf("launch not attempted (verdict=%s recovery_action=%q)", preflightVerdict, recoveryAction)
+		case codexresume.LaunchStartFailed:
+			launch = "fresh Codex process start_failed"
+		case codexresume.LaunchStarted:
+			launch = fmt.Sprintf("fresh Codex process started (pid=%d)", result.LaunchPID)
+		case codexresume.LaunchCompleted:
+			launch = fmt.Sprintf("fresh Codex process completed (pid=%d)", result.LaunchPID)
+		}
+		fmt.Fprintf(stdout, "%s codex_home=%q session_root=%q lookup=%s launch=%q preflight=%s outcome=%s turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
+			result.ThreadID, codexHome, sessionRoot, lookup, launch, preflightVerdict, result.Outcome, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
+	}
 }
 
 func buildCodexResumeLaunch(codexExe, threadID, prompt string, baseEnv []string, targetHome string) ([]string, []string) {

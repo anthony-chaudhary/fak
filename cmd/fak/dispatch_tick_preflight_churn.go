@@ -41,17 +41,7 @@ const dispatchChurnDefaultFreshness = 90 * time.Second
 // FAK_CHURN_FRESHNESS (a Go duration; "0"/"off" disables the freshness gate and trusts the
 // last reading regardless of age), falling back to the default on empty/unparseable input.
 func dispatchChurnFreshness() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("FAK_CHURN_FRESHNESS"))
-	switch {
-	case raw == "":
-		return dispatchChurnDefaultFreshness
-	case raw == "0" || strings.EqualFold(raw, "off"):
-		return 0
-	}
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-		return d
-	}
-	return dispatchChurnDefaultFreshness
+	return parseDurationEnv("FAK_CHURN_FRESHNESS", dispatchChurnDefaultFreshness)
 }
 
 // dispatchChurnThreshold resolves the spawn-burst arming threshold from

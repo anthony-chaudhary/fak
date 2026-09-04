@@ -1081,6 +1081,9 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		// plan/question rung on a different posture than the prose sensor sets
 		// FAK_GUARD_OPERATOR_QUESTION_MODE / --operator-question on the child.
 		{guardStopHookOperatorQuestionEnvMode, guardOperatorQuestionNormalizedOrWarn(operatorDirectedMode)},
+		// Pin the witnessed-done mode: default enforce unless overridden by FAK_GUARD_WITNESSED_DONE_MODE.
+		// Stop hook requires narrated completion to name an independently witnessed stamped commit.
+		{guardWitnessedDoneModeEnv, envOrDefault(guardWitnessedDoneModeEnv, guardPreCompactModeEnforce)},
 	}
 	// #2539: wire the trajctl ledger into the hook children so the Stop hook's turn-end
 	// scorers and the PreCompact boundary twin have a curve to append to. Unresolvable repo

@@ -112,9 +112,7 @@ func (c *guardChildStderrCapture) String() string {
 	if c == nil {
 		return ""
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return string(c.data)
+	return lockAndString(&c.mu, c.data)
 }
 
 func guardCaptureChildStderr(child *exec.Cmd, agentName string) *guardChildStderrCapture {
@@ -168,9 +166,13 @@ func (c *guardChildStdoutCapture) String() string {
 	if c == nil {
 		return ""
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return string(c.data)
+	return lockAndString(&c.mu, c.data)
+}
+
+func lockAndString(mu *sync.Mutex, data []byte) string {
+	mu.Lock()
+	defer mu.Unlock()
+	return string(data)
 }
 
 // guardIsCodexExecJSONCommand keys capture off semantic argv, not the executable name alone.

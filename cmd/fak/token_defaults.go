@@ -206,13 +206,12 @@ var headroomVariantEvidence = map[string]string{
 	"none": "internal/headroom/compare.go", "noop": "internal/headroom/noop.go",
 }
 
-func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSources, registered []string, selected string) map[string]any {
+func checkTokenDefaultsRegressions(sources tokenDefaultSources, registered []string) ([]string, int, []string) {
 	serve, guard, gateway, tui := sources.serve, sources.guard, sources.gateway, sources.tui
-	messages, agentSeam := sources.messages, sources.agentSeam
-	read, exists, bothWire := sources.read, sources.exists, sources.bothWire
+	agentSeam := sources.agentSeam
+	bothWire := sources.bothWire
 
-	// ---- the regression locks: each failing check is one unit of token_defaults_debt ----
-	defects := []string{}
+	var defects []string
 	require := func(ok bool, msg string) {
 		if !ok {
 			defects = append(defects, msg)
@@ -229,25 +228,11 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 	require(strings.Contains(serve, `fs.Bool("vdso", true`), "serve.go must default vDSO on")
 	require(reVDSOTrue.MatchString(guard), "guard.go must set VDSO true")
 	require(bothWire("ToolFloorDenies:"), "both front doors must wire ToolFloorDenies")
-	// The per-turn debug-stats line is the observable cache/token-value debug layer. It is ON
-	// by default on the flagship `fak guard` Claude-OAuth path (the cache + token-value economy
-	// of every turn is visible with no flag; --debug-stats=false or --quiet silences it) and in
-	// the console-agent launcher (fak console agent / fak c) overlay. `fak serve` keeps it off:
-	// that daemon's observability is /metrics + /debug/vars + the access log, not a per-turn
-	// stderr line. Lock both on-by-default front doors so the visible layer cannot silently regress.
 	require(strings.Contains(guard, `fs.Bool("debug-stats", true`), "guard.go must default --debug-stats ON so the observable cache/token-value debug layer is visible by default on the Claude-OAuth path")
 	require(strings.Contains(tui, `fs.Bool("debug-stats", true`), "console agent source must default --debug-stats to true (native per-turn token-usage overlay)")
 	require(strings.Contains(tui, `"--debug-stats"`), "console agent source must wire --debug-stats into the guard command for the launcher overlay")
 	require(strings.Contains(tui, "gateway.DefaultCompactHistoryBudget") && strings.Contains(tui, "gateway.DefaultElideResultBytes"), "console agent source must pass the active token-saving guard defaults explicitly so they appear in dry-run output")
 
-	// ---- effective-context envelope provenance (#2947) ----
-	// Budget SIZE is governed by the long-context defaults doctrine (docs/long-context-defaults.md):
-	// the advertised hard cap is never the target resident budget. Report the ctxplan default
-	// envelopes' hard cap / min-evidence floor / target / effective ceiling / provenance, and raise
-	// one unit of token-defaults-debt for any default that treats the raw provider window as the
-	// resident target without a same-task WITNESS. The envelope rows are consumed from
-	// internal/ctxplan (the real default-budget seam), never a roster claim a doc could drift from.
-	envelopes := ctxplanEnvelopeRows()
 	rawWindowTargetDebt := 0
 	for _, e := range ctxplan.DefaultEnvelopes() {
 		if e.RawWindowTarget() {
@@ -256,7 +241,7 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 	}
 	require(rawWindowTargetDebt == 0, fmt.Sprintf("%d default context envelope(s) derive the resident target from the raw provider window with no same-task witness (see docs/long-context-defaults.md)", rawWindowTargetDebt))
 
-	unboundVariants := []string{}
+	var unboundVariants []string
 	for _, name := range registered {
 		path, ok := headroomVariantEvidence[name]
 		if !ok || !sources.registeredCompressorProof(path, name) {
@@ -264,8 +249,14 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 			require(false, fmt.Sprintf("registered headroom compressor %q has no source-bound token-defaults evidence binding", name))
 		}
 	}
+	return defects, rawWindowTargetDebt, unboundVariants
+}
 
-	// ---- derive each lever's REAL default + state from the entrypoint source ----
+func buildTokenDefaultsLevers(sources tokenDefaultSources, registered []string, selected string) []lever {
+	serve, guard, gateway := sources.serve, sources.guard, sources.gateway
+	messages, agentSeam := sources.messages, sources.agentSeam
+	read, exists, bothWire := sources.read, sources.exists, sources.bothWire
+
 	elideWitnessed := exists("experiments/agent-live/elide-oversized-prevalence-2026-06-26.json")
 	elideStaleWitnessed := exists("experiments/agent-live/elide-stale-read-prevalence-2026-07-09.json")
 	levers := []lever{
@@ -352,6 +343,18 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 			l.blocker = blockerIf(!l.witnessed, "executable effect/control sentinel missing or vacuous")
 		}
 	}
+	return levers
+}
+
+func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSources, registered []string, selected string) map[string]any {
+	defects, rawWindowTargetDebt, unboundVariants := checkTokenDefaultsRegressions(sources, registered)
+	require := func(ok bool, msg string) {
+		if !ok {
+			defects = append(defects, msg)
+		}
+	}
+	envelopes := ctxplanEnvelopeRows()
+	levers := buildTokenDefaultsLevers(sources, registered, selected)
 
 	for _, l := range levers {
 		if l.on && !l.locked {

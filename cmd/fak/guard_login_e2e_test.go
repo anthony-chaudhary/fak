@@ -29,6 +29,9 @@ import (
 const guardE2EHelperEnv = "FAK_GUARD_E2E_HELPER"
 
 func TestMain(m *testing.M) {
+	if rc, handled := runDesktopConsoleSelfcheckChild(os.Stdout, os.Stderr); handled {
+		os.Exit(rc)
+	}
 	// #4686 process witness: a guard-launched copy of this test binary is the child
 	// harness, not another test runner. This must precede guardE2EHelperEnv because the
 	// child inherits the parent guard helper environment.

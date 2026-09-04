@@ -304,107 +304,8 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	if doLive {
-		pending := make(map[int]time.Time)
-		requestByResult := make(map[int]int)
-		for i := range requests {
-			if requests[i].Status != "candidate" {
-				continue
-			}
-			resultIndex := recoveryResultIndex(summary.Results, requests[i].ThreadID)
-			if resultIndex < 0 {
-				continue
-			}
-			wrote, err := sessionrecovery.WriteReceipt(requests[i], recoveryNow())
-			if err != nil {
-				requests[i].Status = "receipt_failed"
-				requests[i].Reason = err.Error()
-				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
-					return 1
-				}
-				continue
-			}
-			if !wrote {
-				requests[i].Status = "already_receipted"
-				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
-					return 1
-				}
-				continue
-			}
-			if err := sessionrecovery.StagePrompt(requests[i]); err != nil {
-				requests[i].Status = "prompt_failed"
-				requests[i].Reason = err.Error()
-				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
-				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
-					return 1
-				}
-				continue
-			}
-			intent := sessionRecoveryResult(requests[i])
-			intent.Status = "launch_intent"
-			intent.Reason = "receipt persisted before visible launch"
-			if !persistRecoveryResult(stderr, &summary, resultIndex, intent) {
-				return 1
-			}
-			launchedAt := recoveryNow()
-			handle, launchErr := recoveryLaunch.Launch(requests[i])
-			if launchErr != nil {
-				requests[i].Status = "launch_failed"
-				requests[i].Reason = launchErr.Error()
-				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
-				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
-					return 1
-				}
-				continue
-			}
-			requests[i].Status = "launched_unproven"
-			result := sessionRecoveryResult(requests[i])
-			result.LaunchIdentity = handle.Identity()
-			result.LaunchedAt = launchedAt.UTC().Format(time.RFC3339Nano)
-			result.BaselineCursor = summary.Results[resultIndex].BaselineCursor
-			result.BaselineAt = summary.Results[resultIndex].BaselineAt
-			summary.Results[resultIndex] = result
-			pending[resultIndex] = launchedAt.Add(*verifyTimeout)
-			requestByResult[resultIndex] = i
-			if err := persistRecoverySummary(&summary); err != nil {
-				fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
-				return 1
-			}
-		}
-		if *settle > 0 && len(pending) > 0 {
-			recoverySleep(*settle)
-		}
-		for len(pending) > 0 {
-			after, inventoryErr := recoveryInventory(*since)
-			observedAt := recoveryNow()
-			for resultIndex, deadline := range pending {
-				result := summary.Results[resultIndex]
-				if inventoryErr != nil {
-					result.Status = "verification_failed"
-					result.Reason = inventoryErr.Error()
-					result.Remediation = sessionrecovery.Remediation(result)
-				} else {
-					result = sessionrecovery.Observe(before, after, result)
-				}
-				requestIndex := requestByResult[resultIndex]
-				requests[requestIndex].Status, requests[requestIndex].Reason = result.Status, result.Reason
-				deadlineReached := !observedAt.Before(deadline) || *verifyTimeout == 0
-				if (sessionrecovery.TerminalStatus(result.Status) && result.Status != "verification_failed") || deadlineReached {
-					if finalizeErr := sessionrecovery.FinalizeReceipt(requests[requestIndex], result.Status, result.Reason, recoveryNow()); finalizeErr != nil {
-						result.Status = "receipt_failed"
-						result.Reason = finalizeErr.Error()
-						result.Remediation = sessionrecovery.Remediation(result)
-					}
-					delete(pending, resultIndex)
-				}
-				summary.Results[resultIndex] = result
-				if err := persistRecoverySummary(&summary); err != nil {
-					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
-					return 1
-				}
-			}
-			if len(pending) > 0 {
-				recoverySleep(*pollInterval)
-			}
+		if code := executeSessionRecoverLive(stderr, &summary, requests, before, *since, *settle, *verifyTimeout, *pollInterval); code != 0 {
+			return code
 		}
 	}
 	summary.FinishedAt = recoveryNow().UTC().Format(time.RFC3339Nano)
@@ -424,6 +325,112 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	}
 	if summary.Counts.Failed > 0 || summary.Counts.LaunchedUnproven > 0 {
 		return 1
+	}
+	return 0
+}
+
+func executeSessionRecoverLive(stderr io.Writer, summary *sessionrecovery.Summary, requests []sessionrecovery.Request, before sessionrecovery.InventoryReport, since, settle, verifyTimeout, pollInterval time.Duration) int {
+	pending := make(map[int]time.Time)
+	requestByResult := make(map[int]int)
+	for i := range requests {
+		if requests[i].Status != "candidate" {
+			continue
+		}
+		resultIndex := recoveryResultIndex(summary.Results, requests[i].ThreadID)
+		if resultIndex < 0 {
+			continue
+		}
+		wrote, err := sessionrecovery.WriteReceipt(requests[i], recoveryNow())
+		if err != nil {
+			requests[i].Status = "receipt_failed"
+			requests[i].Reason = err.Error()
+			if !persistRecoveryResult(stderr, summary, resultIndex, sessionRecoveryResult(requests[i])) {
+				return 1
+			}
+			continue
+		}
+		if !wrote {
+			requests[i].Status = "already_receipted"
+			if !persistRecoveryResult(stderr, summary, resultIndex, sessionRecoveryResult(requests[i])) {
+				return 1
+			}
+			continue
+		}
+		if err := sessionrecovery.StagePrompt(requests[i]); err != nil {
+			requests[i].Status = "prompt_failed"
+			requests[i].Reason = err.Error()
+			_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
+			if !persistRecoveryResult(stderr, summary, resultIndex, sessionRecoveryResult(requests[i])) {
+				return 1
+			}
+			continue
+		}
+		intent := sessionRecoveryResult(requests[i])
+		intent.Status = "launch_intent"
+		intent.Reason = "receipt persisted before visible launch"
+		if !persistRecoveryResult(stderr, summary, resultIndex, intent) {
+			return 1
+		}
+		launchedAt := recoveryNow()
+		handle, launchErr := recoveryLaunch.Launch(requests[i])
+		if launchErr != nil {
+			requests[i].Status = "launch_failed"
+			requests[i].Reason = launchErr.Error()
+			_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
+			if !persistRecoveryResult(stderr, summary, resultIndex, sessionRecoveryResult(requests[i])) {
+				return 1
+			}
+			continue
+		}
+		requests[i].Status = "launched_unproven"
+		result := sessionRecoveryResult(requests[i])
+		result.LaunchIdentity = handle.Identity()
+		result.LaunchedAt = launchedAt.UTC().Format(time.RFC3339Nano)
+		result.BaselineCursor = summary.Results[resultIndex].BaselineCursor
+		result.BaselineAt = summary.Results[resultIndex].BaselineAt
+		summary.Results[resultIndex] = result
+		pending[resultIndex] = launchedAt.Add(verifyTimeout)
+		requestByResult[resultIndex] = i
+		if err := persistRecoverySummary(summary); err != nil {
+			fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+			return 1
+		}
+	}
+	if settle > 0 && len(pending) > 0 {
+		recoverySleep(settle)
+	}
+	for len(pending) > 0 {
+		after, inventoryErr := recoveryInventory(since)
+		observedAt := recoveryNow()
+		for resultIndex, deadline := range pending {
+			result := summary.Results[resultIndex]
+			if inventoryErr != nil {
+				result.Status = "verification_failed"
+				result.Reason = inventoryErr.Error()
+				result.Remediation = sessionrecovery.Remediation(result)
+			} else {
+				result = sessionrecovery.Observe(before, after, result)
+			}
+			requestIndex := requestByResult[resultIndex]
+			requests[requestIndex].Status, requests[requestIndex].Reason = result.Status, result.Reason
+			deadlineReached := !observedAt.Before(deadline) || verifyTimeout == 0
+			if (sessionrecovery.TerminalStatus(result.Status) && result.Status != "verification_failed") || deadlineReached {
+				if finalizeErr := sessionrecovery.FinalizeReceipt(requests[requestIndex], result.Status, result.Reason, recoveryNow()); finalizeErr != nil {
+					result.Status = "receipt_failed"
+					result.Reason = finalizeErr.Error()
+					result.Remediation = sessionrecovery.Remediation(result)
+				}
+				delete(pending, resultIndex)
+			}
+			summary.Results[resultIndex] = result
+			if err := persistRecoverySummary(summary); err != nil {
+				fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				return 1
+			}
+		}
+		if len(pending) > 0 {
+			recoverySleep(pollInterval)
+		}
 	}
 	return 0
 }

@@ -29,6 +29,21 @@ func TestInspectGuardWitnessedDoneRequiresStampedNamedCommit(t *testing.T) {
 	if !got.Claimed || got.Witnessed || got.Reason != guardClaimUnwitnessedReason {
 		t.Fatalf("unstamped commit accepted: %+v", got)
 	}
+
+	receiptFormats := []string{
+		"Done.\n- Commit SHA: " + good,
+		"Implemented fix.\n- Commit SHA: `" + good + "`",
+		"Completed task; committed as " + good,
+		"Fixed issue; commit: `" + good + "`",
+		"Shipped in commit " + good + "; tests pass.",
+	}
+	for _, text := range receiptFormats {
+		writeGuardWitnessTranscript(t, path, text)
+		got = inspectGuardWitnessedDone(context.Background(), path, repo, nil)
+		if !got.Claimed || !got.Witnessed || got.Commit != good {
+			t.Errorf("receipt text %q failed to resolve witnessed commit %s: %+v", text, good, got)
+		}
+	}
 }
 
 func TestRunGuardWitnessedDoneGateShadowEnforceAndBound(t *testing.T) {

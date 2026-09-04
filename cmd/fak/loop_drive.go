@@ -874,15 +874,13 @@ func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Crite
 		}
 		return parsedGateCriterion(c)
 	case "verify":
-		if err := requireCriterionFields(fields, 3, "%[1]sverify witness must be: %[1]sverify PLAN PHASE", msgPrefix); err != nil {
-			return loopgate.Criterion{}, true, err
-		}
-		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]})
+		return parseBinaryCriterion(fields, "%[1]sverify witness must be: %[1]sverify PLAN PHASE", msgPrefix, func(plan, phase string) loopgate.Criterion {
+			return loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: plan, Phase: phase}
+		})
 	case "test-witness":
-		if err := requireCriterionFields(fields, 3, "%stest-witness criterion requires baseline and candidate outcomes", msgPrefix); err != nil {
-			return loopgate.Criterion{}, true, err
-		}
-		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]})
+		return parseBinaryCriterion(fields, "%stest-witness criterion requires baseline and candidate outcomes", msgPrefix, func(base, cand string) loopgate.Criterion {
+			return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: base, Candidate: cand}
+		})
 	case "citation-resolve":
 		if len(fields) < 2 {
 			return loopgate.Criterion{}, true, fmt.Errorf("%scitation-resolve criterion requires a subject citation", msgPrefix)
@@ -900,6 +898,13 @@ func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Crite
 
 func parsedGateCriterion(criterion loopgate.Criterion) (loopgate.Criterion, bool, error) {
 	return criterion, true, nil
+}
+
+func parseBinaryCriterion(fields []string, format, prefix string, build func(a, b string) loopgate.Criterion) (loopgate.Criterion, bool, error) {
+	if err := requireCriterionFields(fields, 3, format, prefix); err != nil {
+		return loopgate.Criterion{}, true, err
+	}
+	return parsedGateCriterion(build(fields[1], fields[2]))
 }
 
 func requireCriterionFields(fields []string, count int, format, prefix string) error {

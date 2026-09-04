@@ -22,6 +22,7 @@ func runPerformanceRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "versioned performance RSI evidence JSON")
 	prior := fs.String("prior", "", "prior scorecard JSON to compare")
+	compare := fs.String("compare", "", "prior scorecard JSON to compare")
 	asJSON := fs.Bool("json", false, "render JSON")
 	markdown := fs.Bool("markdown", false, "render Markdown")
 	if !parseFlags(fs, argv) || fs.NArg() != 0 {
@@ -41,8 +42,12 @@ func runPerformanceRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	r := perfrsiscore.Score(e)
-	if *prior != "" {
-		f, e := os.Open(*prior)
+	compareFile := *compare
+	if compareFile == "" {
+		compareFile = *prior
+	}
+	if compareFile != "" {
+		f, e := os.Open(compareFile)
 		if e != nil {
 			fmt.Fprintf(stderr, "fak performance-rsi-scorecard: prior: %v\n", e)
 			return 2

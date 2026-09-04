@@ -196,75 +196,154 @@ func writeModelObserveJSON(output string, pretty bool, value any) error {
 	}
 	return enc.Encode(value)
 }
-func runModelObserveBandwidthCollect(args []string) error {
+
+type bandwidthCollectFlags struct {
+	count                      *int
+	interval                   *time.Duration
+	phase                      *string
+	shape                      *string
+	theoretical                *float64
+	measured                   *float64
+	deviceRoofline             *float64
+	latency                    *float64
+	promptTokens               *int64
+	completionTokens           *int64
+	logicalBytes               *uint64
+	physicalReadBytes          *uint64
+	physicalWriteBytes         *uint64
+	nvidiaDevice               *string
+	amdDevice                  *string
+	nvidiaNCUCSV               *string
+	hostCounterImport          *string
+	hostCounterFormat          *string
+	hostCounterProvider        *string
+	hostCounterScope           *string
+	hostCounterScopeID         *string
+	hostCounterBytesPerEvent   *uint64
+	appleMemoryImport          *string
+	appleMemoryFormat          *string
+	appleMemoryProvider        *string
+	appleMemoryProviderVersion *string
+	appleMemoryScope           *string
+	appleMemoryInterval        *time.Duration
+	profileDevice              *string
+	captureStart               *string
+	captureEnd                 *string
+	measureRoofline            *bool
+	rooflineBytes              *uint64
+	rooflineTrials             *int
+	rooflineDuration           *time.Duration
+	rooflineThreads            *int
+	rooflineSweep              *bool
+	rooflineKneeThreshold      *float64
+	output                     *string
+	pretty                     *bool
+	visited                    map[string]bool
+	o                          modelperfobs.CollectionOptions
+}
+
+func parseBandwidthCollectFlags(args []string) (*bandwidthCollectFlags, error) {
 	fs := flag.NewFlagSet("model-observe bandwidth collect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	count := fs.Int("count", 1, "number of host samples")
-	interval := fs.Duration("interval", 100*time.Millisecond, "interval between host samples")
-	phase := fs.String("phase", "other", "request phase")
-	shape := fs.String("shape", "small", "request shape")
-	theoretical := fs.Float64("theoretical-gb-s", 0, "theoretical memory roofline in GB/s")
-	measured := fs.Float64("measured-gb-s", 0, "measured sustainable memory roofline in GB/s")
-	deviceRoofline := fs.Float64("device-roofline-gb-s", 0, "measured sustainable roofline for the profiled NVIDIA device")
-	latency := fs.Float64("latency-ms", 0, "request latency in milliseconds")
-	promptTokens := fs.Int64("prompt-tokens", 0, "request prompt tokens")
-	completionTokens := fs.Int64("completion-tokens", 0, "request completion tokens")
-	logicalBytes := fs.Uint64("logical-bytes", 0, "logical software bytes")
-	physicalReadBytes := fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter")
-	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
-	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
-	amdDevice := fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA")
-	nvidiaNCUCSV := fs.String("nvidia-ncu-csv", "", "import Nsight Compute raw CSV instead of sampling the host")
-	hostCounterImport := fs.String("host-counter-import", "", "import host DRAM controller counters instead of live sampling")
-	hostCounterFormat := fs.String("host-counter-format", "auto", "host counter format: auto, generic-json, perf-json, or perf-csv")
-	hostCounterProvider := fs.String("host-counter-provider", "", "provider that produced the host controller counters")
-	hostCounterScope := fs.String("host-counter-scope", "", "host counter scope: system, socket, or controller")
-	hostCounterScopeID := fs.String("host-counter-scope-id", "", "socket/controller scope identifier")
-	hostCounterBytesPerEvent := fs.Uint64("host-counter-bytes-per-event", 0, "explicit byte conversion for perf event counters")
-	appleMemoryImport := fs.String("apple-memory-import", "", "import normalized Apple unified-memory counters instead of live sampling")
-	appleMemoryFormat := fs.String("apple-memory-format", "auto", "Apple memory counter format: auto or generic-json")
-	appleMemoryProvider := fs.String("apple-memory-provider", "", "provider that produced the normalized Apple memory counters")
-	appleMemoryProviderVersion := fs.String("apple-memory-provider-version", "", "exact Apple memory counter provider/tool version")
-	appleMemoryScope := fs.String("apple-memory-scope", "", "Apple memory counter scope: system or package")
-	appleMemoryInterval := fs.Duration("apple-memory-interval", 0, "explicit Apple counter capture interval; must match the artifact")
-	profileDevice := fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)")
-	captureStart := fs.String("capture-start", "", "import capture start time in RFC3339")
-	captureEnd := fs.String("capture-end", "", "import capture end time in RFC3339")
-	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
-	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
-	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
-	rooflineDuration := fs.Duration("roofline-duration", 100*time.Millisecond, "target duration per host roofline trial")
-	rooflineThreads := fs.Int("roofline-threads", 0, "parallel host roofline workers (default: GOMAXPROCS)")
-	rooflineSweep := fs.Bool("roofline-sweep", false, "measure a geometric host roofline worker-count curve through --roofline-threads")
-	rooflineKneeThreshold := fs.Float64("roofline-knee-threshold", modelperfobs.DefaultRooflineKneeThreshold, "saturation knee fraction of the peak point median")
-	output := fs.String("output", "", "write collection JSON to this path")
-	pretty := fs.Bool("pretty", true, "indent JSON output")
-	if err := fs.Parse(args); err != nil {
-		return err
+	f := &bandwidthCollectFlags{
+		count:                      fs.Int("count", 1, "number of host samples"),
+		interval:                   fs.Duration("interval", 100*time.Millisecond, "interval between host samples"),
+		phase:                      fs.String("phase", "other", "request phase"),
+		shape:                      fs.String("shape", "small", "request shape"),
+		theoretical:                fs.Float64("theoretical-gb-s", 0, "theoretical memory roofline in GB/s"),
+		measured:                   fs.Float64("measured-gb-s", 0, "measured sustainable memory roofline in GB/s"),
+		deviceRoofline:             fs.Float64("device-roofline-gb-s", 0, "measured sustainable roofline for the profiled NVIDIA device"),
+		latency:                    fs.Float64("latency-ms", 0, "request latency in milliseconds"),
+		promptTokens:               fs.Int64("prompt-tokens", 0, "request prompt tokens"),
+		completionTokens:           fs.Int64("completion-tokens", 0, "request completion tokens"),
+		logicalBytes:               fs.Uint64("logical-bytes", 0, "logical software bytes"),
+		physicalReadBytes:          fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter"),
+		physicalWriteBytes:         fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter"),
+		nvidiaDevice:               fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0"),
+		amdDevice:                  fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA"),
+		nvidiaNCUCSV:               fs.String("nvidia-ncu-csv", "", "import Nsight Compute raw CSV instead of sampling the host"),
+		hostCounterImport:          fs.String("host-counter-import", "", "import host DRAM controller counters instead of live sampling"),
+		hostCounterFormat:          fs.String("host-counter-format", "auto", "host counter format: auto, generic-json, perf-json, or perf-csv"),
+		hostCounterProvider:        fs.String("host-counter-provider", "", "provider that produced the host controller counters"),
+		hostCounterScope:           fs.String("host-counter-scope", "", "host counter scope: system, socket, or controller"),
+		hostCounterScopeID:         fs.String("host-counter-scope-id", "", "socket/controller scope identifier"),
+		hostCounterBytesPerEvent:   fs.Uint64("host-counter-bytes-per-event", 0, "explicit byte conversion for perf event counters"),
+		appleMemoryImport:          fs.String("apple-memory-import", "", "import normalized Apple unified-memory counters instead of live sampling"),
+		appleMemoryFormat:          fs.String("apple-memory-format", "auto", "Apple memory counter format: auto or generic-json"),
+		appleMemoryProvider:        fs.String("apple-memory-provider", "", "provider that produced the normalized Apple memory counters"),
+		appleMemoryProviderVersion: fs.String("apple-memory-provider-version", "", "exact Apple memory counter provider/tool version"),
+		appleMemoryScope:           fs.String("apple-memory-scope", "", "Apple memory counter scope: system or package"),
+		appleMemoryInterval:        fs.Duration("apple-memory-interval", 0, "explicit Apple counter capture interval; must match the artifact"),
+		profileDevice:              fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)"),
+		captureStart:               fs.String("capture-start", "", "import capture start time in RFC3339"),
+		captureEnd:                 fs.String("capture-end", "", "import capture end time in RFC3339"),
+		measureRoofline:            fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth"),
+		rooflineBytes:              fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set"),
+		rooflineTrials:             fs.Int("roofline-trials", 5, "host roofline benchmark trial count"),
+		rooflineDuration:           fs.Duration("roofline-duration", 100*time.Millisecond, "target duration per host roofline trial"),
+		rooflineThreads:            fs.Int("roofline-threads", 0, "parallel host roofline workers (default: GOMAXPROCS)"),
+		rooflineSweep:              fs.Bool("roofline-sweep", false, "measure a geometric host roofline worker-count curve through --roofline-threads"),
+		rooflineKneeThreshold:      fs.Float64("roofline-knee-threshold", modelperfobs.DefaultRooflineKneeThreshold, "saturation knee fraction of the peak point median"),
+		output:                     fs.String("output", "", "write collection JSON to this path"),
+		pretty:                     fs.Bool("pretty", true, "indent JSON output"),
 	}
-	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice), AMDDevice: modelperfobs.AMDDeviceSelector(*amdDevice)}
-	visited := make(map[string]bool)
-	fs.Visit(func(f *flag.Flag) {
-		visited[f.Name] = true
-		switch f.Name {
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	f.o = modelperfobs.CollectionOptions{
+		Count:        *f.count,
+		Interval:     *f.interval,
+		Phase:        modelperfobs.RequestPhase(*f.phase),
+		Shape:        modelperfobs.RequestShape(*f.shape),
+		NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*f.nvidiaDevice),
+		AMDDevice:    modelperfobs.AMDDeviceSelector(*f.amdDevice),
+	}
+	f.visited = make(map[string]bool)
+	fs.Visit(func(flag *flag.Flag) {
+		f.visited[flag.Name] = true
+		switch flag.Name {
 		case "theoretical-gb-s":
-			o.TheoreticalGBS = theoretical
+			f.o.TheoreticalGBS = f.theoretical
 		case "measured-gb-s":
-			o.MeasuredSustainableGBS = measured
+			f.o.MeasuredSustainableGBS = f.measured
 		case "latency-ms":
-			o.LatencyMS = latency
+			f.o.LatencyMS = f.latency
 		case "prompt-tokens":
-			o.PromptTokens = promptTokens
+			f.o.PromptTokens = f.promptTokens
 		case "completion-tokens":
-			o.CompletionTokens = completionTokens
+			f.o.CompletionTokens = f.completionTokens
 		case "logical-bytes":
-			o.LogicalBytes = logicalBytes
+			f.o.LogicalBytes = f.logicalBytes
 		case "physical-read-bytes":
-			o.PhysicalSoftwareRead = physicalReadBytes
+			f.o.PhysicalSoftwareRead = f.physicalReadBytes
 		case "physical-write-bytes":
-			o.PhysicalSoftwareWrite = physicalWriteBytes
+			f.o.PhysicalSoftwareWrite = f.physicalWriteBytes
 		}
 	})
+	return f, nil
+}
+
+func runModelObserveBandwidthCollect(args []string) error {
+	bcf, parseErr := parseBandwidthCollectFlags(args)
+	if parseErr != nil {
+		return parseErr
+	}
+	deviceRoofline := bcf.deviceRoofline
+	nvidiaNCUCSV := bcf.nvidiaNCUCSV
+	hostCounterImport, hostCounterFormat := bcf.hostCounterImport, bcf.hostCounterFormat
+	hostCounterProvider, hostCounterScope := bcf.hostCounterProvider, bcf.hostCounterScope
+	hostCounterScopeID, hostCounterBytesPerEvent := bcf.hostCounterScopeID, bcf.hostCounterBytesPerEvent
+	appleMemoryImport, appleMemoryFormat := bcf.appleMemoryImport, bcf.appleMemoryFormat
+	appleMemoryProvider, appleMemoryProviderVersion := bcf.appleMemoryProvider, bcf.appleMemoryProviderVersion
+	appleMemoryScope, appleMemoryInterval := bcf.appleMemoryScope, bcf.appleMemoryInterval
+	profileDevice := bcf.profileDevice
+	captureStart, captureEnd := bcf.captureStart, bcf.captureEnd
+	measureRoofline := bcf.measureRoofline
+	rooflineBytes, rooflineTrials := bcf.rooflineBytes, bcf.rooflineTrials
+	rooflineDuration, rooflineThreads := bcf.rooflineDuration, bcf.rooflineThreads
+	rooflineSweep, rooflineKneeThreshold := bcf.rooflineSweep, bcf.rooflineKneeThreshold
+	output, pretty := bcf.output, bcf.pretty
+	visited, o := bcf.visited, bcf.o
 	if *nvidiaNCUCSV != "" {
 		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event", "apple-memory-import", "apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
 			if visited[incompatible] {
@@ -272,59 +351,12 @@ func runModelObserveBandwidthCollect(args []string) error {
 			}
 		}
 	}
-	if *hostCounterImport != "" {
-		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "apple-memory-import", "apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
-			if visited[incompatible] {
-				return fmt.Errorf("--%s cannot be combined with --host-counter-import", incompatible)
-			}
-		}
-		if strings.TrimSpace(*hostCounterProvider) == "" {
-			return fmt.Errorf("--host-counter-provider is required with --host-counter-import")
-		}
-		if strings.TrimSpace(*hostCounterScope) == "" {
-			return fmt.Errorf("--host-counter-scope is required with --host-counter-import")
-		}
-	}
-	if *hostCounterImport == "" {
-		for _, importOnly := range []string{"host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"} {
-			if visited[importOnly] {
-				return fmt.Errorf("--%s requires --host-counter-import", importOnly)
-			}
-		}
-	}
-	if *appleMemoryImport != "" {
-		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
-			if visited[incompatible] {
-				return fmt.Errorf("--%s cannot be combined with --apple-memory-import", incompatible)
-			}
-		}
-		if strings.TrimSpace(*appleMemoryProvider) == "" {
-			return fmt.Errorf("--apple-memory-provider is required with --apple-memory-import")
-		}
-		if strings.TrimSpace(*appleMemoryProviderVersion) == "" {
-			return fmt.Errorf("--apple-memory-provider-version is required with --apple-memory-import")
-		}
-		if strings.TrimSpace(*appleMemoryScope) == "" {
-			return fmt.Errorf("--apple-memory-scope is required with --apple-memory-import")
-		}
-		if visited["apple-memory-interval"] && *appleMemoryInterval <= 0 {
-			return fmt.Errorf("--apple-memory-interval must be positive")
-		}
-	}
-	if *appleMemoryImport == "" {
-		for _, importOnly := range []string{"apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
-			if visited[importOnly] {
-				return fmt.Errorf("--%s requires --apple-memory-import", importOnly)
-			}
-		}
+	if err := validateImportFlags(visited, *hostCounterImport, *hostCounterProvider, *hostCounterScope, *appleMemoryImport, *appleMemoryProvider, *appleMemoryProviderVersion, *appleMemoryScope, *appleMemoryInterval); err != nil {
+		return err
 	}
 	rooflineFlags := []string{"roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"}
-	if !*measureRoofline {
-		for _, name := range rooflineFlags {
-			if visited[name] {
-				return fmt.Errorf("--%s requires --measure-host-roofline", name)
-			}
-		}
+	if err := requireDependentFlags(visited, *measureRoofline, "measure-host-roofline", rooflineFlags); err != nil {
+		return err
 	}
 	if visited["roofline-knee-threshold"] && !*rooflineSweep {
 		return fmt.Errorf("--roofline-knee-threshold requires --roofline-sweep")
@@ -332,41 +364,11 @@ func runModelObserveBandwidthCollect(args []string) error {
 	if *measureRoofline && visited["measured-gb-s"] {
 		return fmt.Errorf("--measured-gb-s cannot be combined with --measure-host-roofline")
 	}
-	var rooflineOptions *modelperfobs.RooflineBenchmarkOptions
-	if *measureRoofline {
-		threads := *rooflineThreads
-		if threads == 0 {
-			threads = runtime.GOMAXPROCS(0)
-		}
-		rooflineOptions = &modelperfobs.RooflineBenchmarkOptions{
-			WorkingSetBytes: *rooflineBytes,
-			Trials:          *rooflineTrials,
-			TargetDuration:  *rooflineDuration,
-			Threads:         threads,
-			Sweep:           *rooflineSweep,
-			KneeThreshold:   *rooflineKneeThreshold,
-		}
-	}
+	rooflineOptions := buildRooflineOptions(*measureRoofline, *rooflineSweep, *rooflineBytes, *rooflineTrials, *rooflineDuration, *rooflineThreads, *rooflineKneeThreshold)
 	var collection modelperfobs.BandwidthCollection
 	var err error
 	if *appleMemoryImport != "" {
-		var started, ended time.Time
-		if *captureStart != "" {
-			started, err = time.Parse(time.RFC3339, *captureStart)
-			if err != nil {
-				return fmt.Errorf("--capture-start must be RFC3339: %w", err)
-			}
-		}
-		if *captureEnd != "" {
-			ended, err = time.Parse(time.RFC3339, *captureEnd)
-			if err != nil {
-				return fmt.Errorf("--capture-end must be RFC3339: %w", err)
-			}
-		}
-		if (*captureStart == "") != (*captureEnd == "") {
-			return fmt.Errorf("--capture-start and --capture-end must be supplied together")
-		}
-		in, openErr := os.Open(*appleMemoryImport)
+		in, started, ended, openErr := openCaptureFile(*captureStart, *captureEnd, *appleMemoryImport)
 		if openErr != nil {
 			return openErr
 		}
@@ -382,23 +384,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 			return err
 		}
 	} else if *hostCounterImport != "" {
-		var started, ended time.Time
-		if *captureStart != "" {
-			started, err = time.Parse(time.RFC3339, *captureStart)
-			if err != nil {
-				return fmt.Errorf("--capture-start must be RFC3339: %w", err)
-			}
-		}
-		if *captureEnd != "" {
-			ended, err = time.Parse(time.RFC3339, *captureEnd)
-			if err != nil {
-				return fmt.Errorf("--capture-end must be RFC3339: %w", err)
-			}
-		}
-		if (*captureStart == "") != (*captureEnd == "") {
-			return fmt.Errorf("--capture-start and --capture-end must be supplied together")
-		}
-		in, openErr := os.Open(*hostCounterImport)
+		in, started, ended, openErr := openCaptureFile(*captureStart, *captureEnd, *hostCounterImport)
 		if openErr != nil {
 			return openErr
 		}
@@ -524,6 +510,70 @@ func modelObserveRooflineCollectBudget(o modelperfobs.CollectionOptions, rooflin
 	return total, nil
 }
 
+func validateImportFlags(visited map[string]bool, hostCounterImport, hostCounterProvider, hostCounterScope, appleMemoryImport, appleMemoryProvider, appleMemoryProviderVersion, appleMemoryScope string, appleMemoryInterval time.Duration) error {
+	if hostCounterImport != "" {
+		if err := checkIncompatibleFlags(visited, "host-counter-import", []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "apple-memory-import", "apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"}); err != nil {
+			return err
+		}
+		if strings.TrimSpace(hostCounterProvider) == "" {
+			return fmt.Errorf("--host-counter-provider is required with --host-counter-import")
+		}
+		if strings.TrimSpace(hostCounterScope) == "" {
+			return fmt.Errorf("--host-counter-scope is required with --host-counter-import")
+		}
+	}
+	if err := requireDependentFlags(visited, hostCounterImport != "", "host-counter-import", []string{"host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"}); err != nil {
+		return err
+	}
+	if appleMemoryImport != "" {
+		if err := checkIncompatibleFlags(visited, "apple-memory-import", []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"}); err != nil {
+			return err
+		}
+		if strings.TrimSpace(appleMemoryProvider) == "" {
+			return fmt.Errorf("--apple-memory-provider is required with --apple-memory-import")
+		}
+		if strings.TrimSpace(appleMemoryProviderVersion) == "" {
+			return fmt.Errorf("--apple-memory-provider-version is required with --apple-memory-import")
+		}
+		if strings.TrimSpace(appleMemoryScope) == "" {
+			return fmt.Errorf("--apple-memory-scope is required with --apple-memory-import")
+		}
+		if visited["apple-memory-interval"] && appleMemoryInterval <= 0 {
+			return fmt.Errorf("--apple-memory-interval must be positive")
+		}
+	}
+	return requireDependentFlags(visited, appleMemoryImport != "", "apple-memory-import", []string{"apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"})
+}
+
+func buildRooflineOptions(measureRoofline, sweep bool, bytes uint64, trials int, duration time.Duration, threads int, knee float64) *modelperfobs.RooflineBenchmarkOptions {
+	if !measureRoofline {
+		return nil
+	}
+	if threads == 0 {
+		threads = runtime.GOMAXPROCS(0)
+	}
+	return &modelperfobs.RooflineBenchmarkOptions{
+		WorkingSetBytes: bytes,
+		Trials:          trials,
+		TargetDuration:  duration,
+		Threads:         threads,
+		Sweep:           sweep,
+		KneeThreshold:   knee,
+	}
+}
+
+func openCaptureFile(start, end, path string) (*os.File, time.Time, time.Time, error) {
+	started, ended, err := parseCaptureWindow(start, end)
+	if err != nil {
+		return nil, time.Time{}, time.Time{}, err
+	}
+	in, openErr := os.Open(path)
+	if openErr != nil {
+		return nil, time.Time{}, time.Time{}, openErr
+	}
+	return in, started, ended, nil
+}
+
 func runModelObserveStateBench(args []string) error {
 	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -581,4 +631,45 @@ func modelObserveUsage() string {
 		"       fak model-observe bandwidth collect --apple-memory-import FILE --apple-memory-provider PROVIDER --apple-memory-provider-version VERSION --apple-memory-scope system|package [--apple-memory-format generic-json --apple-memory-interval DURATION --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
+}
+
+func checkIncompatibleFlags(visited map[string]bool, primary string, incompatibles []string) error {
+	for _, inc := range incompatibles {
+		if visited[inc] {
+			return fmt.Errorf("--%s cannot be combined with --%s", inc, primary)
+		}
+	}
+	return nil
+}
+
+func requireDependentFlags(visited map[string]bool, condition bool, parentFlag string, dependentFlags []string) error {
+	if !condition {
+		for _, flag := range dependentFlags {
+			if visited[flag] {
+				return fmt.Errorf("--%s requires --%s", flag, parentFlag)
+			}
+		}
+	}
+	return nil
+}
+
+func parseCaptureWindow(start, end string) (time.Time, time.Time, error) {
+	if (start == "") != (end == "") {
+		return time.Time{}, time.Time{}, fmt.Errorf("--capture-start and --capture-end must be supplied together")
+	}
+	var started, ended time.Time
+	var err error
+	if start != "" {
+		started, err = time.Parse(time.RFC3339, start)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("--capture-start must be RFC3339: %w", err)
+		}
+	}
+	if end != "" {
+		ended, err = time.Parse(time.RFC3339, end)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("--capture-end must be RFC3339: %w", err)
+		}
+	}
+	return started, ended, nil
 }

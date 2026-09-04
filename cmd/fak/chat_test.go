@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
 
 // chatScript is a deterministic offline planner for the fak chat e2e: it returns a
@@ -251,5 +252,75 @@ func TestChatClearCommandResetsContext(t *testing.T) {
 		if strings.Contains(m.Content, "message before clear") {
 			t.Fatalf("cleared message leaked into turn 2 context:\n%+v", turn2Msgs)
 		}
+	}
+}
+
+func TestChatPlannerOfflineDefault(t *testing.T) {
+	p := chatPlanner(false, "", "openai", "gemini-3.8-flash", "OPENAI_API_KEY", "auto")
+	if p.Model() != "gemini-3.8-flash" {
+		t.Fatalf("expected model gemini-3.8-flash, got %s", p.Model())
+	}
+	if _, ok := p.(*agent.MockPlanner); !ok {
+		t.Fatalf("expected *agent.MockPlanner when baseURL is empty, got %T", p)
+	}
+}
+
+func TestChatPlannerGeminiWire(t *testing.T) {
+	baseURL := dropin.DefaultBaseURL("gemini")
+	p := chatPlanner(false, baseURL, "gemini", "gemini-3.8-flash", "GEMINI_API_KEY", "auto")
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("expected *agent.HTTPPlanner for gemini wire, got %T", p)
+	}
+	if hp.Provider != agent.ProviderGemini {
+		t.Fatalf("expected ProviderGemini, got %v", hp.Provider)
+	}
+	if hp.BaseURL != baseURL {
+		t.Fatalf("expected BaseURL %q, got %q", baseURL, hp.BaseURL)
+	}
+}
+
+func TestChatLiveGeminiDogfood(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: skipping live Gemini dogfood witness")
+	}
+	key := os.Getenv("GEMINI_API_KEY")
+	if key == "" {
+		t.Skip("GEMINI_API_KEY unset; skipping live Gemini dogfood witness")
+	}
+
+	baseURL := dropin.DefaultBaseURL("gemini")
+	planner := chatPlanner(false, baseURL, "gemini", "gemini-3.8-flash", "GEMINI_API_KEY", "auto")
+
+	var out strings.Builder
+	err := runChatHeadless(&out, planner, "Say 'GEMINI_DOGFOOD_OK' and nothing else.", 3)
+	if err != nil {
+		t.Fatalf("live gemini dogfood headless run failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "GEMINI_DOGFOOD_OK") {
+		t.Fatalf("expected GEMINI_DOGFOOD_OK in response, got:\n%s", got)
+	}
+}
+
+func TestAutoDetectInferenceWithGeminiKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "dummy-gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+
+	detected := autoDetectInference()
+	if detected == nil {
+		t.Fatal("expected non-nil detectedInference when GEMINI_API_KEY is set")
+	}
+	if detected.provider != "gemini" {
+		t.Fatalf("expected provider gemini, got %s", detected.provider)
+	}
+	if detected.model != "gemini-3.8-flash" {
+		t.Fatalf("expected model gemini-3.8-flash, got %s", detected.model)
+	}
+	if detected.apiKeyEnv != "GEMINI_API_KEY" {
+		t.Fatalf("expected apiKeyEnv GEMINI_API_KEY, got %s", detected.apiKeyEnv)
 	}
 }

@@ -21,7 +21,7 @@ import (
 const (
 	guardCommitGateModeEnv  = "FAK_GUARD_COMMIT_GATE_MODE"
 	guardCommitGateGradeEnv = "FAK_GUARD_COMMIT_GATE_MIN_GRADE"
-	guardCommitGateDefault  = guardPreCompactModeShadow
+	guardCommitGateDefault  = guardPreCompactModeEnforce
 )
 
 type guardCommitHookInput struct {

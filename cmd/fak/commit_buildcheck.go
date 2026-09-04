@@ -96,14 +96,23 @@ func extractUndefinedSymbol(buildOutput string) string {
 	return strings.TrimSpace(sym)
 }
 
+var (
+	lastBuildCheckCompileEvidence safecommit.EvidenceOutcome
+	lastBuildCheckTestEvidence    safecommit.EvidenceOutcome
+)
+
 // commitBuildCheckGate runs the gate and reports WHAT IT DID as a safecommit.BuildCheckOutcome
 // plus the diagnostic detail (the compiler transcript, or the error that stopped it). It does
 // not decide the commit's fate: safecommit.DecideBuildCheck owns that, so "the check could not
 // run" is a first-class state on the wire instead of a stderr line the caller never sees
 // (#6006).
 var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
+	lastBuildCheckCompileEvidence = ""
+	lastBuildCheckTestEvidence = ""
 	pkgs := commitBuildCheckPackages(paths)
 	if len(pkgs) == 0 {
+		lastBuildCheckCompileEvidence = safecommit.EvidenceNotRequired
+		lastBuildCheckTestEvidence = safecommit.EvidenceNotRequired
 		return safecommit.BuildCheckNotApplicable, "" // non-Go commit: nothing to gate
 	}
 	// couldNotRun names the skip on stderr AND hands it back typed. Classification is
@@ -112,6 +121,8 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	couldNotRun := func(err error) (safecommit.BuildCheckOutcome, string) {
 		outcome := safecommit.ClassifyBuildCheckError(err)
 		fmt.Fprintf(stderr, "fak commit: build-check %s: %v\n", outcome, err)
+		lastBuildCheckCompileEvidence = safecommit.EvidenceSkipped
+		lastBuildCheckTestEvidence = safecommit.EvidenceUnrun
 		return outcome, err.Error()
 	}
 	if _, err := exec.LookPath("go"); err != nil {
@@ -132,6 +143,8 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	if prospectiveTree == headTree {
 		// No effective change: this commit cannot introduce a red, so there is nothing to
 		// compile — not a skipped check.
+		lastBuildCheckCompileEvidence = safecommit.EvidenceNotRequired
+		lastBuildCheckTestEvidence = safecommit.EvidenceNotRequired
 		return safecommit.BuildCheckNotApplicable, "prospective tree is identical to HEAD"
 	}
 
@@ -143,6 +156,8 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	propPkgs := commitBuildCheckExistingPackages(propDir, pkgs)
 	if len(propPkgs) == 0 {
 		// e.g. the commit deletes the package outright: nothing left to compile.
+		lastBuildCheckCompileEvidence = safecommit.EvidenceNotRequired
+		lastBuildCheckTestEvidence = safecommit.EvidenceNotRequired
 		return safecommit.BuildCheckNotApplicable, "no buildable package remains in the prospective tree"
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
@@ -166,6 +181,8 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 			// the commit is already admitted; recording never changes that.
 			w := emitTrunkRedWitness(stderr, root, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
 			fmt.Fprint(stderr, trunkRedWitnessNote(w))
+			lastBuildCheckCompileEvidence = safecommit.EvidenceFailed
+			lastBuildCheckTestEvidence = safecommit.EvidenceUnrun
 			return safecommit.BuildCheckHeadRed, headDetail
 		}
 	}
@@ -173,6 +190,8 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 		buildDetail = "undefined: " + sym + "\n" + buildDetail
 	}
 	buildDetail += "\n" + commitValidateCommand(paths)
+	lastBuildCheckCompileEvidence = safecommit.EvidenceFailed
+	lastBuildCheckTestEvidence = safecommit.EvidenceUnrun
 	return safecommit.BuildCheckFailed, buildDetail
 }
 
@@ -195,8 +214,13 @@ func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string) (sa
 			detail = fmt.Sprintf("decode prospective validation result: %v", err)
 		}
 		fmt.Fprintf(stderr, "fak commit: prospective validation could not run: %s\n", detail)
+		lastBuildCheckCompileEvidence = safecommit.EvidenceSkipped
+		lastBuildCheckTestEvidence = safecommit.EvidenceUnrun
 		return safecommit.BuildCheckSkippedInfra, detail
 	}
+	compileEv, testEv := deriveValidateEvidence(res)
+	lastBuildCheckCompileEvidence = compileEv
+	lastBuildCheckTestEvidence = testEv
 	if code == 0 && res.OK {
 		return safecommit.BuildCheckPassed, ""
 	}
@@ -211,6 +235,41 @@ func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string) (sa
 		detail += "\nvalidator: " + diag
 	}
 	return safecommit.BuildCheckSkippedInfra, detail
+}
+
+func deriveValidateEvidence(res validateResult) (compileEv, testEv safecommit.EvidenceOutcome) {
+	compileEv = safecommit.EvidenceUnrun
+	testEv = safecommit.EvidenceUnrun
+
+	for _, p := range res.Phases {
+		switch p.Name {
+		case "build", "vet":
+			if p.Status == "ok" {
+				if compileEv != safecommit.EvidenceFailed {
+					compileEv = safecommit.EvidencePassed
+				}
+			} else if p.Status == "failed" {
+				compileEv = safecommit.EvidenceFailed
+			} else if p.Status == "timeout" {
+				if compileEv != safecommit.EvidenceFailed {
+					compileEv = safecommit.EvidenceSkipped
+				}
+			}
+		case "test":
+			if p.Status == "ok" {
+				testEv = safecommit.EvidencePassed
+			} else if p.Status == "failed" {
+				testEv = safecommit.EvidenceFailed
+			} else if p.Status == "timeout" {
+				testEv = safecommit.EvidenceSkipped
+			}
+		}
+	}
+
+	if compileEv != safecommit.EvidenceFailed && len(res.Tested) == 0 && testEv == safecommit.EvidenceUnrun {
+		testEv = safecommit.EvidenceNotRequired
+	}
+	return compileEv, testEv
 }
 
 func formatCommitValidationFailure(res validateResult, paths []string) string {

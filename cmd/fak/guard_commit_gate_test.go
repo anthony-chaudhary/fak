@@ -26,6 +26,19 @@ func TestGuardCommitGateEnforceRefusesUnbindableAndAllowsBound(t *testing.T) {
 	}
 }
 
+func TestGuardCommitGateDefaultsToEnforce(t *testing.T) {
+	root := guardCommitGateFixture(t)
+	bad := `{"tool_name":"Bash","tool_input":{"command":"git commit -m 'fix(gateway): claim code #3303 (fak gateway)' -- README.md"}}`
+	var stdout, stderr strings.Builder
+	// Omit --mode flag; must default to enforce mode and refuse with exit 2.
+	if got := runGuardCommitGate(&stdout, &stderr, strings.NewReader(bad), []string{"--root", root}); got != 2 {
+		t.Fatalf("bad commit with default mode exit=%d want 2; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "CLAIM_UNWITNESSED") {
+		t.Fatalf("missing typed reason: %q", stderr.String())
+	}
+}
+
 func TestGuardCommitGateShadowAndUnreadableTaxonomyFailOpen(t *testing.T) {
 	root := guardCommitGateFixture(t)
 	payload := `{"tool_name":"functions.shell_command","tool_input":{"command":"git commit -m 'misc update' -- internal/gateway/gate.go"}}`

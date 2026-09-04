@@ -13,8 +13,8 @@ func TestDoctorCodexLogHelperSuppressesBackgroundWindow(t *testing.T) {
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
 		t.Fatalf("Codex log helper is not window-suppressed: %#v", cmd.SysProcAttr)
 	}
-	const detachedProcess = uint32(0x00000008)
-	if cmd.SysProcAttr.CreationFlags&detachedProcess == 0 {
-		t.Fatalf("Codex log helper creation flags %#x omit DETACHED_PROCESS", cmd.SysProcAttr.CreationFlags)
+	const createNoWindow = uint32(0x08000000)
+	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
+		t.Fatalf("Codex log helper creation flags %#x omit CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
 	}
 }

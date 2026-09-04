@@ -189,6 +189,12 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 
 func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 	originTrunk := "origin/" + trunk
+	gitTrunkMergeSteps := func(mergeSummary string) []recoveryStep {
+		return []recoveryStep{
+			{Argv: []string{"git", "fetch", "origin", trunk}, Summary: "fetch the latest trunk from origin", Safe: true},
+			{Argv: []string{"git", "merge", "--no-edit", originTrunk}, Summary: mergeSummary, Safe: true},
+		}
+	}
 	return map[string]recoveryPlan{
 		"REQUIRE_WITNESS": {Reason: "REQUIRE_WITNESS", Summary: "the claimed effect has no independently inspectable witness", Notes: []string{"capture the failure-class witness (test, render, live read-back, or dos verify) and retry with that artifact; do not self-certify the effect"}},
 		"SYSTEM_COMMIT_HEADROOM": {Reason: "SYSTEM_COMMIT_HEADROOM", Summary: "the host's operating-system commit reserve is at or below the managed-worker safety floor", Notes: []string{
@@ -201,6 +207,19 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 		"LOCK_BUSY":         {Reason: "LOCK_BUSY", Summary: "another committer owns the serialized commit lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-commit-lock"}, Summary: "probe only the commit lock and reclaim only when its recorded owner is proven stale"}}, Notes: []string{"the actuator is a dry-run unless you explicitly add --apply; if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true},
 		"CONCEPT_ADMISSION": {Reason: "CONCEPT_ADMISSION", Summary: "a new concept-family identifier is absent from the staged concept corpus", Notes: []string{"add or reuse the concept-corpus row named by the refusal, then stage that evidence in the same commit as the identifier"}},
 		"CONCEPT_FRESHNESS": {Reason: "CONCEPT_FRESHNESS", Summary: "the staged concept corpus is stale relative to the staged source tree", Steps: []recoveryStep{{Argv: []string{"fak", "concept", "generate-staged"}, Summary: "regenerate against the exact staged tree"}}, Notes: []string{"stage the generated corpus paths in the same commit; the gate intentionally evaluates the staged tree"}, Executable: true},
+		"TIER_DECLARED": {
+			Reason:     "TIER_DECLARED",
+			Summary:    "architest tier table drift would red the trunk: a package lacks a declared support tier",
+			Executable: true,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "hygiene", "--gates", "TIER_DECLARED"}, Summary: "inspect the undeclared package findings across the tree"},
+			},
+			Notes: []string{
+				"add the missing leaf to internal/architest/architest_test.go in the tier map before the // new-leaf:tier marker",
+				"or run `fak new-leaf <leaf> --tier <tier>` for newly created leaves",
+				"commit the tier declaration before pushing",
+			},
+		},
 		"DISAMBIGUATION_TIMEOUT": {
 			Reason:     "DISAMBIGUATION_TIMEOUT",
 			Summary:    "the exact whole-tree disambiguation oracle exceeded its bounded pre-CAS deadline",
@@ -218,6 +237,24 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 		},
 		"ISSUE_NOT_DISPATCH_LEAF": {Reason: "ISSUE_NOT_DISPATCH_LEAF", Summary: "the selected issue is a parent, research item, or other non-leaf unit", Notes: []string{"decompose it into independently shippable child issues with done conditions, then dispatch one child leaf"}},
 		"ISSUE_UNROUTED":          {Reason: "ISSUE_UNROUTED", Summary: "the issue lacks enough lane, path, or scope evidence for safe dispatch", Notes: []string{"add an explicit owned path/lane and bounded done condition to the issue, then rerun issue contract/dispatch planning"}},
+		"BEHIND": {
+			Reason:     "BEHIND",
+			Summary:    "local trunk checkout is behind origin; fast-forward or merge origin/" + trunk + " in place",
+			Executable: true,
+			Steps:      gitTrunkMergeSteps("merge origin/" + trunk + " in place"),
+			Notes: []string{
+				"always reconcile divergence in place on the trunk; never force-push, create feature branches, or stash across worktrees",
+			},
+		},
+		"DIVERGED": {
+			Reason:     "DIVERGED",
+			Summary:    "local trunk has diverged from origin; merge origin/" + trunk + " in place",
+			Executable: true,
+			Steps:      gitTrunkMergeSteps("merge origin/" + trunk + " in place without rebasing"),
+			Notes: []string{
+				"merge origin/" + trunk + " in place; do not rebase shared commits or force-push",
+			},
+		},
 		"OFF_TRUNK": {
 			Reason:     "OFF_TRUNK",
 			Summary:    "reconcile the configured trunk in place; do not open a branch or worktree",

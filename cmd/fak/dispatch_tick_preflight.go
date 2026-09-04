@@ -374,21 +374,25 @@ func dispatchPreflightGate(root string) dispatchtick.GateCheck {
 // regression age out so the gate can recover -- the property the all-time fold lacked.
 const dispatchGateDefaultWindow = 2 * time.Hour
 
-// dispatchGateWindow resolves the gate's observation lookback from FAK_GATE_WINDOW: a
-// Go duration (e.g. "90m") windows the fold; "0" or "off" folds the whole stream; an
-// empty or unparseable value falls back to dispatchGateDefaultWindow.
-func dispatchGateWindow() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("FAK_GATE_WINDOW"))
+func parseDurationEnv(env string, defaultVal time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(env))
 	switch {
 	case raw == "":
-		return dispatchGateDefaultWindow
+		return defaultVal
 	case raw == "0" || strings.EqualFold(raw, "off"):
 		return 0
 	}
 	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
 		return d
 	}
-	return dispatchGateDefaultWindow
+	return defaultVal
+}
+
+// dispatchGateWindow resolves the gate's observation lookback from FAK_GATE_WINDOW: a
+// Go duration (e.g. "90m") windows the fold; "0" or "off" folds the whole stream; an
+// empty or unparseable value falls back to dispatchGateDefaultWindow.
+func dispatchGateWindow() time.Duration {
+	return parseDurationEnv("FAK_GATE_WINDOW", dispatchGateDefaultWindow)
 }
 
 // dispatchGateMinWorkers resolves the gate cold-start floor from FAK_GATE_MIN_WORKERS,
@@ -417,17 +421,7 @@ const dispatchRateLimitDefaultWindow = 15 * time.Minute
 // Go duration (e.g. "20m") windows the count; "0" or "off" DISABLES the term (zero-value
 // fold, a no-op); an empty or unparseable value falls back to the default.
 func dispatchRateLimitWindow() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("FAK_RATELIMIT_WINDOW"))
-	switch {
-	case raw == "":
-		return dispatchRateLimitDefaultWindow
-	case raw == "0" || strings.EqualFold(raw, "off"):
-		return 0
-	}
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-		return d
-	}
-	return dispatchRateLimitDefaultWindow
+	return parseDurationEnv("FAK_RATELIMIT_WINDOW", dispatchRateLimitDefaultWindow)
 }
 
 // dispatchRateLimitThreshold resolves the burst arming threshold from

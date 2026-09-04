@@ -745,7 +745,7 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 	if stopInstall.WarnAt != 3 || stopInstall.FinalAt != 7 || stopInstall.Max != 9 || stopInstall.SameStop != 6 {
 		t.Fatalf("ladder = warn %d final %d max %d same-stop %d, want 3/7/9/6", stopInstall.WarnAt, stopInstall.FinalAt, stopInstall.Max, stopInstall.SameStop)
 	}
-	var sawMode, sawWarn, sawFinal, sawMax, sawSame bool
+	var sawMode, sawWarn, sawFinal, sawMax, sawSame, sawWitnessedDone bool
 	for _, kv := range env {
 		switch {
 		case kv[0] == guardStopHookEnvMode && kv[1] == guardPreCompactModeEnforce:
@@ -758,10 +758,12 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 			sawMax = true
 		case kv[0] == guardStopHookEnvSameStop && kv[1] == "6":
 			sawSame = true
+		case kv[0] == guardWitnessedDoneModeEnv && kv[1] == guardPreCompactModeEnforce:
+			sawWitnessedDone = true
 		}
 	}
-	if !sawMode || !sawWarn || !sawFinal || !sawMax || !sawSame {
-		t.Fatalf("missing stop-hook env: mode=%v warn=%v final=%v max=%v same-stop=%v from %v", sawMode, sawWarn, sawFinal, sawMax, sawSame, env)
+	if !sawMode || !sawWarn || !sawFinal || !sawMax || !sawSame || !sawWitnessedDone {
+		t.Fatalf("missing stop-hook env: mode=%v warn=%v final=%v max=%v same-stop=%v witnessed-done=%v from %v", sawMode, sawWarn, sawFinal, sawMax, sawSame, sawWitnessedDone, env)
 	}
 
 	// The single settings file now carries BOTH hooks.

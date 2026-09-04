@@ -1313,3 +1313,49 @@ func TestCommitDrainMayMarkDoneUsesDeliveryContract(t *testing.T) {
 		t.Fatal("delivery/pathset closure gate is inconsistent")
 	}
 }
+
+func TestFinalizeCommitEvidence_DOSWitness(t *testing.T) {
+	oldWitness := dosWitnessFn
+	defer func() { dosWitnessFn = oldWitness }()
+
+	called := false
+	dosWitnessFn = func(root, sha, message string) *safecommit.DOSWitnessResult {
+		called = true
+		return &safecommit.DOSWitnessResult{
+			Ran:          true,
+			Verdict:      "OK",
+			Witness:      "diff-witnessed",
+			ClaimKind:    "code_effect",
+			Reason:       "code-effect claim witnessed",
+			VerifyState:  "SHIPPED",
+			VerifySource: "grep-subject",
+			Leaf:         "gateway",
+		}
+	}
+
+	base := safecommit.Result{
+		Committed: true,
+		SHA:       "abcdef123456",
+		Paths:     []string{"internal/gateway/gate.go"},
+		Verified:  true,
+	}
+	buildCheck := safecommit.BuildCheckResult{
+		Outcome:         safecommit.BuildCheckPassed,
+		Compiled:        true,
+		CompileEvidence: safecommit.EvidencePassed,
+		TestEvidence:    safecommit.EvidencePassed,
+	}
+
+	var stderr bytes.Buffer
+	res := finalizeCommitEvidence(&stderr, t.TempDir(), base, buildCheck, safecommit.BuildCheckPassed, false, false, "feat(gateway): add gate (fak gateway)")
+
+	if !called {
+		t.Fatal("expected dosWitnessFn to be called on committed SHA")
+	}
+	if res.DOSWitness == nil || !res.DOSWitness.Ran || res.DOSWitness.Verdict != "OK" || res.DOSWitness.VerifyState != "SHIPPED" {
+		t.Fatalf("DOSWitness not attached correctly: %+v", res.DOSWitness)
+	}
+	if res.Evidence == nil || res.Evidence.DiffWitnessed.Outcome != safecommit.EvidencePassed {
+		t.Fatalf("DiffWitnessed not passed: %+v", res.Evidence)
+	}
+}

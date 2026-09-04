@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -230,41 +231,62 @@ func codexMCPAncestorPID(pid int) int {
 	return 0
 }
 
-func codexMCPVisibleConsoleWindows() map[uintptr]bool {
-	out := map[uintptr]bool{}
-	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		visible, _, _ := codexMCPWindowIsWindowVisible.Call(hwnd)
-		if visible == 0 {
-			return 1
-		}
-		name := make([]uint16, 128)
-		n, _, _ := codexMCPWindowGetClassName.Call(hwnd, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
-		class := strings.ToLower(syscall.UTF16ToString(name[:n]))
-		if strings.Contains(class, "console") || strings.Contains(class, "cascadia") {
-			out[hwnd] = true
-		}
+var (
+	codexMCPWindowMu        sync.Mutex
+	codexMCPVisibleOut      map[uintptr]bool
+	codexMCPVisibleCallback = syscall.NewCallback(codexMCPEnumVisibleCallback)
+	codexMCPDirectTargetPID int
+	codexMCPDirectFoundHWND uintptr
+	codexMCPDirectCallback  = syscall.NewCallback(codexMCPEnumDirectCallback)
+)
+
+func codexMCPEnumVisibleCallback(hwnd, _ uintptr) uintptr {
+	visible, _, _ := codexMCPWindowIsWindowVisible.Call(hwnd)
+	if visible == 0 {
 		return 1
-	})
-	codexMCPWindowEnumWindows.Call(callback, 0)
+	}
+	name := make([]uint16, 128)
+	n, _, _ := codexMCPWindowGetClassName.Call(hwnd, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
+	class := strings.ToLower(syscall.UTF16ToString(name[:n]))
+	if strings.Contains(class, "console") || strings.Contains(class, "cascadia") {
+		if codexMCPVisibleOut != nil {
+			codexMCPVisibleOut[hwnd] = true
+		}
+	}
+	return 1
+}
+
+func codexMCPEnumDirectCallback(hwnd, _ uintptr) uintptr {
+	visible, _, _ := codexMCPWindowIsWindowVisible.Call(hwnd)
+	if visible == 0 {
+		return 1
+	}
+	var owner uint32
+	codexMCPWindowGetWindowProcessID.Call(hwnd, uintptr(unsafe.Pointer(&owner)))
+	if int(owner) == codexMCPDirectTargetPID {
+		codexMCPDirectFoundHWND = hwnd
+		return 0
+	}
+	return 1
+}
+
+func codexMCPVisibleConsoleWindows() map[uintptr]bool {
+	codexMCPWindowMu.Lock()
+	defer codexMCPWindowMu.Unlock()
+	out := map[uintptr]bool{}
+	codexMCPVisibleOut = out
+	codexMCPWindowEnumWindows.Call(codexMCPVisibleCallback, 0)
+	codexMCPVisibleOut = nil
 	return out
 }
 
 func codexMCPNewVisibleWindow(before map[uintptr]bool, pid int) uintptr {
-	var direct uintptr
-	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		visible, _, _ := codexMCPWindowIsWindowVisible.Call(hwnd)
-		if visible == 0 {
-			return 1
-		}
-		var owner uint32
-		codexMCPWindowGetWindowProcessID.Call(hwnd, uintptr(unsafe.Pointer(&owner)))
-		if int(owner) == pid {
-			direct = hwnd
-			return 0
-		}
-		return 1
-	})
-	codexMCPWindowEnumWindows.Call(callback, 0)
+	codexMCPWindowMu.Lock()
+	codexMCPDirectTargetPID = pid
+	codexMCPDirectFoundHWND = 0
+	codexMCPWindowEnumWindows.Call(codexMCPDirectCallback, 0)
+	direct := codexMCPDirectFoundHWND
+	codexMCPWindowMu.Unlock()
 	if direct != 0 {
 		return direct
 	}
