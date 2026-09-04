@@ -34,6 +34,16 @@
 // The channel id is NEVER hard-coded in tracked source (a real id is a gitignored
 // value, per the scrubbing convention) — ResolveChannel returns "" when unset so the
 // caller skips the post rather than posting to a wrong default.
+//
+// Invariant: dispatch posting is fail-closed and deterministic. Missing tokens,
+// missing channels, or unparseable git revisions fail safely without posting corrupted
+// or speculative status to the channel.
+//
+// Guard conditions:
+//  1. A green process exit (exit code 0) without a verified git HEAD delta or commit log
+//     is never reported as shipped code; it is rendered as "passed; no code shipped" (fail-closed).
+//  2. An empty or unset destination channel halts dispatch posting immediately without error.
+//  3. Git witness failures default to empty commit records, preventing phantom ship claims.
 package dispatchpost
 
 import (
