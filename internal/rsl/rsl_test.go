@@ -1,6 +1,8 @@
 package rsl
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -165,5 +167,216 @@ func TestAppendSigned_AttributesAndStillVerifies(t *testing.T) {
 	// still verifies with the attribution chained in.
 	if _, err := VerifyFile(path); err != nil {
 		t.Fatalf("a signed log must still verify its hash chain, got %v", err)
+	}
+}
+
+func makeLinearChain(n int) []Row {
+	content := make([]Row, n)
+	for i := 0; i < n; i++ {
+		content[i] = Row{
+			Ref:    "refs/heads/main",
+			OldSHA: fmt.Sprintf("sha%04d", i),
+			NewSHA: fmt.Sprintf("sha%04d", i+1),
+		}
+	}
+	return mintChain(content)
+}
+
+// BenchmarkChainHash measures SHA-256 hash chaining of a single row.
+func BenchmarkChainHash(b *testing.B) {
+	row := Row{
+		Seq:    42,
+		Ref:    "refs/heads/main",
+		OldSHA: "0123456789abcdef0123456789abcdef01234567",
+		NewSHA: "abcdef0123456789abcdef0123456789abcdef01",
+		Signer: "operator@example.com",
+	}
+	prev := "fedcba9876543210fedcba9876543210fedcba98"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = chainHash(prev, row)
+	}
+}
+
+// BenchmarkVerify measures in-memory verification across chain lengths.
+func BenchmarkVerify(b *testing.B) {
+	for _, size := range []int{10, 100, 1000} {
+		rows := makeLinearChain(size)
+		b.Run(fmt.Sprintf("%d_rows", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				n, err := Verify(rows)
+				if err != nil || n != size {
+					b.Fatalf("Verify failed: n=%d err=%v", n, err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkVerify_MultiRef measures in-memory verification of interleaved refs.
+func BenchmarkVerify_MultiRef(b *testing.B) {
+	const totalRows = 100
+	refs := []string{"refs/heads/main", "refs/heads/release", "refs/heads/dev", "refs/heads/feature"}
+	content := make([]Row, totalRows)
+	head := make([]int, len(refs))
+	for i := 0; i < totalRows; i++ {
+		refIdx := i % len(refs)
+		r := refs[refIdx]
+		oldS := fmt.Sprintf("%s-%04d", r, head[refIdx])
+		head[refIdx]++
+		newS := fmt.Sprintf("%s-%04d", r, head[refIdx])
+		content[i] = Row{Ref: r, OldSHA: oldS, NewSHA: newS}
+	}
+	rows := mintChain(content)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		n, err := Verify(rows)
+		if err != nil || n != totalRows {
+			b.Fatalf("Verify multi-ref: n=%d err=%v", n, err)
+		}
+	}
+}
+
+// BenchmarkVerifyFile measures file-backed read and verification end-to-end.
+func BenchmarkVerifyFile(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "bench_verify.jsonl")
+	rows := makeLinearChain(100)
+	for _, r := range rows {
+		if _, err := Append(path, r); err != nil {
+			b.Fatalf("setup Append: %v", err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		n, err := VerifyFile(path)
+		if err != nil || n != 100 {
+			b.Fatalf("VerifyFile failed: n=%d err=%v", n, err)
+		}
+	}
+}
+
+// BenchmarkReadRows measures disk scanning and JSON unmarshaling.
+func BenchmarkReadRows(b *testing.B) {
+	for _, size := range []int{10, 100} {
+		path := filepath.Join(b.TempDir(), fmt.Sprintf("read_%d.jsonl", size))
+		rows := makeLinearChain(size)
+		for _, r := range rows {
+			if _, err := Append(path, r); err != nil {
+				b.Fatalf("setup Append: %v", err)
+			}
+		}
+
+		b.Run(fmt.Sprintf("%d_rows", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				read, err := ReadRows(path)
+				if err != nil || len(read) != size {
+					b.Fatalf("ReadRows failed: len=%d err=%v", len(read), err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkRecoverHead measures chain head discovery over existing logs.
+func BenchmarkRecoverHead(b *testing.B) {
+	for _, size := range []int{10, 100, 1000} {
+		path := filepath.Join(b.TempDir(), fmt.Sprintf("recover_%d.jsonl", size))
+		rows := makeLinearChain(size)
+		for _, r := range rows {
+			if _, err := Append(path, r); err != nil {
+				b.Fatalf("setup Append: %v", err)
+			}
+		}
+
+		b.Run(fmt.Sprintf("%d_rows", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				seq, hash, err := recoverHead(path)
+				if err != nil || seq != uint64(size) || hash == "" {
+					b.Fatalf("recoverHead failed: seq=%d err=%v", seq, err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkAppend measures appending an observed ref transition to disk.
+func BenchmarkAppend(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "bench_append.jsonl")
+	for i := 0; i < 5; i++ {
+		if _, err := Append(path, Row{
+			Ref:    "refs/heads/main",
+			OldSHA: fmt.Sprintf("sha%04d", i),
+			NewSHA: fmt.Sprintf("sha%04d", i+1),
+		}); err != nil {
+			b.Fatalf("seed Append: %v", err)
+		}
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		b.Fatalf("stat: %v", err)
+	}
+	baseSize := fi.Size()
+	nextRow := Row{
+		Ref:    "refs/heads/main",
+		OldSHA: "sha0005",
+		NewSHA: "sha0006",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Append(path, nextRow); err != nil {
+			b.Fatalf("Append failed: %v", err)
+		}
+		if err := os.Truncate(path, baseSize); err != nil {
+			b.Fatalf("truncate failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkAppendSigned measures appending an attributed, signed transition.
+func BenchmarkAppendSigned(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "bench_append_signed.jsonl")
+	signer := stubSigner{id: "signer-key-1"}
+	for i := 0; i < 5; i++ {
+		if _, err := AppendSigned(path, Row{
+			Ref:    "refs/heads/main",
+			OldSHA: fmt.Sprintf("sha%04d", i),
+			NewSHA: fmt.Sprintf("sha%04d", i+1),
+		}, signer); err != nil {
+			b.Fatalf("seed AppendSigned: %v", err)
+		}
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		b.Fatalf("stat: %v", err)
+	}
+	baseSize := fi.Size()
+	nextRow := Row{
+		Ref:    "refs/heads/main",
+		OldSHA: "sha0005",
+		NewSHA: "sha0006",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := AppendSigned(path, nextRow, signer); err != nil {
+			b.Fatalf("AppendSigned failed: %v", err)
+		}
+		if err := os.Truncate(path, baseSize); err != nil {
+			b.Fatalf("truncate failed: %v", err)
+		}
 	}
 }

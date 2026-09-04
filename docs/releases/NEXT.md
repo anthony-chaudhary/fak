@@ -5,7 +5,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 48
+- **Commits in flight:** 63
 
 ## What changed
 
@@ -47,6 +47,21 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Add test hygiene scanner against hardcoded ports and brittle sleeps (#11307).
+- Replace timing sleeps with os.Chtimes for mtime invalidation (#11307).
+- Replace hardcoded ports and drain sleeps (#11307).
+- Replace brittle sleep polling with bounded pollUntil helper (#11307).
+- Use dynamic port for mock base URL (#11307).
+- Replace sleep polling with reader onActive callback notification (#11307).
+- Replace sleep with deterministic watermark stats polling (#11307).
+- Replace timing sleeps with barrier channels and wait hooks (#11307).
+- Replace static port bindings with dynamic ephemeral ports (#11307).
+- Use dynamic port in gateway plan resolution test (#11307).
+- Use dynamic port allocation in benchmark options (#11307).
+- Eliminate hardcoded redis port and replace sleep with pollUntil (#11307).
+- Replace time.Sleep with runtime.Gosched in concurrency test (#11307).
+- Replace time.Sleep with channel and waitgroup synchronization (#11307).
+- Use cancellable wait loop and dynamic port in opencode test (#11307).
 - Isolate Windows fault domain job object binding in subprocess.
 - Make headroom debounce test synchronization deterministic.
 - Verify conflict templates, conflict markers, and silent drop merges (#11306).

@@ -119,6 +119,32 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertIn("Add generation preview [gen/now].", text)
         self.assertIn("Preserve horizon [gen/next].", text)
 
+    def test_render_notes_consolidates_repeated_cleaned_subjects(self) -> None:
+        rc = load()
+        commits = [
+            {"subject": "fix(foo): add contract benchmarks (fak foo)"},
+            {"subject": "fix(bar): add contract benchmarks (fak bar)"},
+            {"subject": "fix(single): unique single item (fak single)"},
+            {"subject": "fix: repeated no scope"},
+            {"subject": "fix: repeated no scope"},
+            {"subject": "merge: sync trunk with origin/main"},
+            {"subject": "Merge remote-tracking branch 'origin/main'"},
+        ] + [
+            {"subject": f"fix(pkg{i}): wide coverage change (fak pkg{i})"}
+            for i in range(8)
+        ]
+        text = rc.render_notes(
+            "0.23.0", date="2026-06-18", level="minor", themes=["tools"],
+            headline="Consolidated release", commits=commits)
+        self.assertIn("- Add contract benchmarks (foo, bar).", text)
+        self.assertEqual(text.count("- Add contract benchmarks (foo, bar)."), 1)
+        self.assertNotIn("- Add contract benchmarks.\n", text)
+        self.assertIn("- Unique single item.", text)
+        self.assertIn("- Repeated no scope (2 occurrences).", text)
+        self.assertIn("- Wide coverage change across 8 packages (pkg0, pkg1, pkg2, pkg3, pkg4, pkg5, ...).", text)
+        self.assertNotIn("sync trunk with origin/main", text.lower())
+        self.assertNotIn("remote-tracking", text.lower())
+
     def test_notes_quality_gate_rejects_public_leaks(self) -> None:
         rc = load()
         errors = rc.notes_quality_errors(

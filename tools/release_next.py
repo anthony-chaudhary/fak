@@ -36,6 +36,38 @@ VERSION_SUBJECT_RE = re.compile(r"^v\d+\.\d+\.\d+:")
 NEXT_SYNC_SUBJECT_RE = re.compile(r"^(?:docs\(release\):\s*)?sync\s+NEXT\.md", re.IGNORECASE)
 CC_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?:")
 BREAKING_RE = re.compile(r"\bBREAKING[ -]CHANGE\b")
+MERGE_COMMIT_RE = re.compile(r"^(?:sync trunk with origin/main|merge (?:branch|remote-tracking|origin/main))", re.IGNORECASE)
+
+
+def extract_commit_scope(subject: str) -> str:
+    cleaned_prefix = re.sub(r"^@\s*", "", subject.strip())
+    m = CC_RE.match(cleaned_prefix)
+    if m and m.group("scope"):
+        return m.group("scope").strip()
+    return ""
+
+
+def is_pure_merge_commit(subject: str, scope: str = "", clean: str = "") -> bool:
+    if scope:
+        return False
+    raw = re.sub(r"^@?\s*[a-zA-Z]+(?:\([^)]*\))?!?: *", "", subject.strip())
+    return bool(
+        MERGE_COMMIT_RE.search(subject.strip())
+        or MERGE_COMMIT_RE.search(raw)
+        or (clean and MERGE_COMMIT_RE.search(clean.strip()))
+    )
+
+
+def format_consolidated_bullet(clean: str, count: int, scopes: list[str]) -> str:
+    if count == 1:
+        return f"- {clean}."
+    if scopes:
+        if len(scopes) <= 6:
+            return f"- {clean} ({', '.join(scopes)})."
+        else:
+            return f"- {clean} across {len(scopes)} packages ({', '.join(scopes[:6])}, ...)."
+    else:
+        return f"- {clean} ({count} occurrences)."
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 120) -> tuple[int, str]:
@@ -194,11 +226,17 @@ def inspect_next_state(root: Path, draft_rel: str = DEFAULT_DRAFT_PATH, limit: i
     tracked_commits = []
 
     for c in commits:
-        clean = clean_public_subject(c.get("subject", ""))
+        subj = c.get("subject", "")
+        clean = clean_public_subject(subj)
         short_sha = c.get("short_sha", "")
+        scope = extract_commit_scope(subj)
+
+        if is_pure_merge_commit(subj, scope, clean.rstrip(".")):
+            tracked_commits.append(c)
+            continue
 
         if draft_exists:
-            if (clean and clean.rstrip(".") in draft_text) or (c.get("subject", "") in draft_text):
+            if (clean and clean.rstrip(".") in draft_text) or (subj in draft_text):
                 tracked_commits.append(c)
                 continue
             if short_sha and short_sha in draft_text:
@@ -252,42 +290,80 @@ def parse_existing_draft(text: str) -> dict[str, list[str]]:
     return sections
 
 
+def _process_section_commits(section_commits: list[dict]) -> tuple[list[str], set[str]]:
+    groups: dict[str, dict] = {}
+    for c in section_commits:
+        subj = str(c.get("subject", ""))
+        scope = extract_commit_scope(subj)
+        clean = clean_public_subject(subj).rstrip(".")
+        if not clean:
+            continue
+        if is_pure_merge_commit(subj, scope, clean):
+            continue
+        if clean not in groups:
+            groups[clean] = {"count": 0, "scopes": []}
+        groups[clean]["count"] += 1
+        if scope and scope not in groups[clean]["scopes"]:
+            groups[clean]["scopes"].append(scope)
+
+    bullets: list[str] = []
+    seen: set[str] = set()
+    for clean, data in groups.items():
+        bullet = format_consolidated_bullet(clean, data["count"], data["scopes"])
+        if bullet not in seen:
+            seen.add(bullet)
+            bullets.append(bullet)
+    return bullets, set(groups.keys())
+
+
 def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | None = None) -> str:
     version = state["projected_version"]
     level = state["projected_level"]
     base_tag = state.get("base_tag") or "initial"
     commits = state.get("commits") or []
 
-    feat_items = []
-    fix_items = []
-    other_items = []
+    feat_commits = []
+    fix_commits = []
+    other_commits = []
 
     for c in commits:
         subj = c.get("subject", "")
-        clean = clean_public_subject(subj)
-        if not clean:
-            continue
         k = classify_commit(subj, c.get("body", ""))
         if k == "feat":
-            if clean not in feat_items:
-                feat_items.append(clean)
+            feat_commits.append(c)
         elif k == "fix":
-            if clean not in fix_items:
-                fix_items.append(clean)
+            fix_commits.append(c)
         else:
-            if clean not in other_items:
-                other_items.append(clean)
+            other_commits.append(c)
+
+    feat_items, feat_cleans = _process_section_commits(feat_commits)
+    fix_items, fix_cleans = _process_section_commits(fix_commits)
+    other_items, other_cleans = _process_section_commits(other_commits)
+
+    def merge_existing(bullets: list[str], cleans: set[str], existing: list[str]) -> list[str]:
+        out = list(bullets)
+        seen = {b.lstrip("- ").strip() for b in bullets}
+        for raw_item in existing:
+            item = raw_item.strip()
+            if not item or item.startswith("*(No "):
+                continue
+            item_text = item[2:].strip() if item.startswith("- ") else item
+            base = re.sub(r"\s+\([^)]*\)\.?$", "", item_text)
+            base = re.sub(r"\s+across \d+ packages \([^)]*\)\.?$", "", base).strip()
+            base_clean = base.rstrip(".")
+            if base_clean in cleans or item_text.rstrip(".") in cleans:
+                continue
+            if is_pure_merge_commit(item_text, "", base_clean):
+                continue
+            if item_text not in seen:
+                seen.add(item_text)
+                out.append(f"- {item_text}")
+        return out
 
     if existing_sections:
-        for item in existing_sections.get("What changed", []):
-            if item not in feat_items:
-                feat_items.append(item)
-        for item in existing_sections.get("Reliability and correctness", []):
-            if item not in fix_items:
-                fix_items.append(item)
-        for item in existing_sections.get("Engineering quality and evidence", []):
-            if item not in other_items:
-                other_items.append(item)
+        feat_items = merge_existing(feat_items, feat_cleans, existing_sections.get("What changed", []))
+        fix_items = merge_existing(fix_items, fix_cleans, existing_sections.get("Reliability and correctness", []))
+        other_items = merge_existing(other_items, other_cleans, existing_sections.get("Engineering quality and evidence", []))
 
     lines = [
         f"# fak vNext (targeting v{version}): Work in Progress",
@@ -304,7 +380,7 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
     ]
     if feat_items:
         for item in feat_items:
-            lines.append(f"- {item}")
+            lines.append(item if item.startswith("- ") else f"- {item}")
     else:
         lines.append("- *(No new user-visible features landed yet)*")
     lines.append("")
@@ -312,7 +388,7 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
     lines.extend(["## Reliability and correctness", ""])
     if fix_items:
         for item in fix_items:
-            lines.append(f"- {item}")
+            lines.append(item if item.startswith("- ") else f"- {item}")
     else:
         lines.append("- *(No bug fixes landed yet)*")
     lines.append("")
@@ -320,7 +396,7 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
     lines.extend(["## Engineering quality and evidence", ""])
     if other_items:
         for item in other_items:
-            lines.append(f"- {item}")
+            lines.append(item if item.startswith("- ") else f"- {item}")
     else:
         lines.append("- *(No maintenance/quality commits landed yet)*")
     lines.append("")
@@ -329,7 +405,7 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
     lines.extend(["## Upgrade and breaking changes", ""])
     if upgrade_items:
         for item in upgrade_items:
-            lines.append(f"- {item}")
+            lines.append(item if item.startswith("- ") else f"- {item}")
     else:
         lines.append("- No manual migration required unless specified above.")
     lines.append("")

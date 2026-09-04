@@ -259,6 +259,69 @@ def _public_kind(subject: str) -> str:
     return match.group(1) if match else "other"
 
 
+MERGE_COMMIT_RE = re.compile(r"^(?:sync trunk with origin/main|merge (?:branch|remote-tracking|origin/main))", re.IGNORECASE)
+
+
+def extract_commit_scope(subject: str) -> str:
+    cleaned_prefix = re.sub(r"^@\s*", "", subject.strip())
+    m = CC_RE.match(cleaned_prefix)
+    if m and m.group("scope"):
+        return m.group("scope").strip()
+    return ""
+
+
+def is_pure_merge_commit(subject: str, scope: str = "", clean: str = "") -> bool:
+    if scope:
+        return False
+    raw = re.sub(r"^@?\s*[a-zA-Z]+(?:\([^)]*\))?!?: *", "", subject.strip())
+    return bool(
+        MERGE_COMMIT_RE.search(subject.strip())
+        or MERGE_COMMIT_RE.search(raw)
+        or (clean and MERGE_COMMIT_RE.search(clean.strip()))
+    )
+
+
+def format_consolidated_bullet(clean: str, count: int, scopes: list[str]) -> str:
+    if count == 1:
+        return f"- {clean}."
+    if scopes:
+        if len(scopes) <= 6:
+            return f"- {clean} ({', '.join(scopes)})."
+        else:
+            return f"- {clean} across {len(scopes)} packages ({', '.join(scopes[:6])}, ...)."
+    else:
+        return f"- {clean} ({count} occurrences)."
+
+
+def _process_section_commits(section_commits: list[dict]) -> list[str]:
+    groups: dict[str, dict] = {}
+    for c in section_commits:
+        subj = str(c.get("subject", ""))
+        scope = extract_commit_scope(subj)
+        subj_gen = subject_with_generation(c)
+        raw_clean = _clean_public_subject(subj_gen)
+        clean = (raw_clean[0].upper() + raw_clean[1:]) if raw_clean else ""
+        clean = clean.rstrip(".")
+        if not clean:
+            continue
+        if is_pure_merge_commit(subj, scope, clean):
+            continue
+        if clean not in groups:
+            groups[clean] = {"count": 0, "scopes": []}
+        groups[clean]["count"] += 1
+        if scope and scope not in groups[clean]["scopes"]:
+            groups[clean]["scopes"].append(scope)
+
+    bullets: list[str] = []
+    seen: set[str] = set()
+    for clean, data in groups.items():
+        bullet = format_consolidated_bullet(clean, data["count"], data["scopes"])
+        if bullet not in seen:
+            seen.add(bullet)
+            bullets.append(bullet)
+    return bullets
+
+
 def extract_upgrade_notes(text: str) -> list[str]:
     items = []
     in_upgrade = False
@@ -280,12 +343,14 @@ def extract_upgrade_notes(text: str) -> list[str]:
 def render_notes(version: str, *, date: str, level: str, themes: list[str],
                  headline: str, commits: list[dict], next_content: str | None = None) -> str:
     del date, level, themes
-    rows = [(subject_with_generation(commit), _public_kind(str(commit.get("subject", ""))))
-            for commit in commits]
+    feat_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) == "feat"]
+    fix_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) == "fix"]
+    other_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) not in {"feat", "fix"}]
+
     sections = [
-        ("What changed", [row for row, kind in rows if kind == "feat"]),
-        ("Reliability and correctness", [row for row, kind in rows if kind == "fix"]),
-        ("Engineering quality and evidence", [row for row, kind in rows if kind not in {"feat", "fix"}]),
+        ("What changed", _process_section_commits(feat_commits)),
+        ("Reliability and correctness", _process_section_commits(fix_commits)),
+        ("Engineering quality and evidence", _process_section_commits(other_commits)),
     ]
     summary = ", ".join(
         f"{len(items)} {heading.lower()} change{'s' if len(items) != 1 else ''}"
@@ -300,8 +365,7 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
             continue
         lines.extend([f"## {heading}", ""])
         for item in items:
-            clean = _clean_public_subject(item)
-            lines.append(f"- {clean[0].upper() + clean[1:] if clean else clean}.")
+            lines.append(item)
         lines.append("")
     custom_upgrades = extract_upgrade_notes(next_content) if next_content else []
     lines.extend(["## Upgrade", ""])
