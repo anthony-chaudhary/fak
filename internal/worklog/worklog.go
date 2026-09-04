@@ -79,6 +79,10 @@ func (c WorkChange) key() string {
 // idempotency by change key, and bounded retention (a consumer that falls behind
 // the retained window sees a Seq gap and re-syncs to head). The zero value is not
 // usable; construct with NewFeed.
+//
+// Invariant: worklog appending is fail-closed and monotonic; sequence cursors advance strictly.
+// Contract: replaying an existing change key dedupes deterministically without publishing duplicate events.
+// Guard: tenant-scoped drain strictly prevents cross-tenant visibility leaks across isolated principals.
 type Feed struct {
 	mu   sync.Mutex
 	seq  uint64            // highest Seq ever assigned (monotonic, survives ring eviction)
