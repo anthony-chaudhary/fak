@@ -5,7 +5,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 75
+- **Commits in flight:** 76
 
 ## What changed
 
@@ -54,6 +54,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Retry rsync on vanished files and exclude git worktrees.
 - Add 13-feature-island wiring audit test (#11309).
 - Add production benchmarks for cryptographic hash chain and row verification.
 - Add benchmark suite and prune comment density.
