@@ -102,6 +102,10 @@ func LoadFixture(path string) (Fixture, error) {
 	return f, nil
 }
 
+// Invariant: OpenSWE-Harder evaluations are fail-closed and preserve baseline bounds.
+// Guard: Discrepancy between baseline pass and reversal pass triggers immediate rejection.
+// Contract: Fixtures must contain verified tasks with valid schema versions and non-zero difficulty.
+
 // Run evaluates baseline, candidate, and reversal against the same accepted-task denominator.
 func Run(f Fixture) (Report, error) {
 	if len(f.Tasks) == 0 {
