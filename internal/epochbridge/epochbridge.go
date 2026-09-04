@@ -25,6 +25,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
+// Invariant: epoch bridge lineage mapping is fail-closed and monotonic.
+// Contract: SpecContextFor maps session state continuation lineage onto ABI speculation contexts.
+// Guard: unparseable trace identifiers or generation-0 session traces safely default to root epoch 0
+// with Speculative set to false, guaranteeing durable committed execution without panic.
+//
 // SpecContextFor projects a session generation onto the shared abi epoch lineage.
 // Epoch is this generation's lineage point (the uint64 its continuation id encodes,
 // or 0 for an original generation-0 trace); ParentEpoch is the generation it was
