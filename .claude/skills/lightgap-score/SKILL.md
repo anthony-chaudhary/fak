@@ -1,6 +1,6 @@
 ---
 name: lightgap-score
-description: One repeatable pass that answers "is fak actually worth adopting, for whom, and what does it cost you to find out?" on an UNBOUNDED scale anchored at two ends — the next-best option a given buyer would really use, and the best that is physically possible. Runs the Go-backed `fak score lightgap` over a modular data directory (tools/lightgap_scorecard.data/): 8 facets x 7 buyer segments, each cell scored w_net = artanh(beta) - artanh(load), where beta is the fraction of the alternative-to-ceiling. Use when this named workflow matches the task.
+description: "One repeatable pass that answers \"is fak actually worth adopting, for whom, and what does it cost you to find out?\" on an UNBOUNDED scale anchored at two ends — the next-best option a given buyer would really use, and the best that is physically possible. Runs the Go-backed `fak score lightgap` over a modular data directory (tools/lightgap_scorecard.data/): 8 facets x 7 buyer segments, each cell scored w_net = artanh(beta) - artanh(load), where beta is the fraction of the alternative-to-ceiling. Use when this named workflow matches the task."
 ---
 
 # lightgap-score — how good is fak really, for whom, and against what

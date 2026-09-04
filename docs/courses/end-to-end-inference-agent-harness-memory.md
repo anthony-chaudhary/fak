@@ -5,7 +5,7 @@ description: "A bounded course following one fak request through native inferenc
 
 # End-to-End Inference, Agent Harness, and Memory
 
-> **Flagship bounded course.** Follow one fak request from runtime admission through fak-native model execution, agent tool use, policy, local fast paths, context admission, memory recall, and durable verification. This page is a syllabus and lab guide; the linked canonical documents remain authoritative.
+> **Flagship bounded course.** Follow one fak request end to end. Trace runtime admission, fak-native model execution, and agent tool use. Inspect policy checks and local fast paths. Then examine context admission, memory recall, and durable verification. This page is a syllabus and lab guide; the linked canonical documents remain authoritative.
 
 ## Course contract
 
@@ -19,11 +19,11 @@ It is not an introduction to transformers, Go syntax, Git, or shell basics. It a
 
 Before starting, you should be able to:
 
-- build and test a Go module;
-- read JSON receipts and distinguish a claim from an observed artifact;
-- explain prompts, tokens, model weights, prefill, decode, and a KV cache at a basic level;
-- explain why untrusted tool output must not automatically become trusted model context;
-- use explicit paths in a peer-dirty checkout.
+- Build and test a Go module.
+- Read JSON receipts and distinguish a claim from an observed artifact.
+- Explain prompts, tokens, and model weights at a basic level. Also understand prefill, decode, and a KV cache.
+- Explain why untrusted tool output must not automatically become trusted model context.
+- Use explicit paths in a peer-dirty checkout.
 
 Start with [Getting Started](../../GETTING-STARTED.md), the [reproduction packet](../repro-packet.md), and the [architecture overview](../../ARCHITECTURE.md). Keep the [CLI reference](../cli-reference.md) open throughout the course.
 
@@ -33,7 +33,7 @@ Every lab carries one of these markers:
 
 - **LOCAL / OFFLINE** — no API key, model, or GPU is required.
 - **LOCAL MODEL (ENVELOPE-DEPENDENT)** — a supported local fak-native backend and compatible model artifact are required. Inspect admission before loading a payload.
-- **FLEET GPU / PRIVATE LAB** — accelerator evidence must run on a sanctioned compute node. The workstation is the control point, not the compute boundary. Follow the public [fleet compute node map](../fleet-compute-nodes.md) and enter private infrastructure only through the [private communications channel](../private-comms-channel.md). Never copy credentials, private hostnames, private paths, or raw internal logs into public course work.
+- **FLEET GPU / PRIVATE LAB** — accelerator evidence must run on a sanctioned compute node. The workstation serves as the control point rather than the compute boundary. Follow the public [fleet compute node map](../fleet-compute-nodes.md) and enter private infrastructure only through the [private communications channel](../private-comms-channel.md). Never copy credentials, private hostnames, private paths, or raw internal logs into public course work.
 
 Absence of local GPU hardware is not a terminal result. Dispatch the GPU lab or record the exact sanctioned handoff; do not substitute llama.cpp and call the result fak-native.
 
@@ -41,15 +41,15 @@ Absence of local GPU hardware is not a terminal result. Dispatch the GPU lab or 
 
 By the end, you will be able to:
 
-1. distinguish executable, control-plane, and model-execution readiness from a `fak-runtime-capabilities/1` or execution-mode receipt;
-2. prove that native/performance evidence names `engine: "fak-native"`, a current Qwen3.8 model, a backend, and an explicit operating envelope;
-3. trace a typed tool call through harness, syscall, adjudication, dispatch or vDSO, result admission, and model context;
-4. explain policy precedence, structural denial, and why policy success does not prove model execution;
-5. distinguish provider prompt cache, radix-prefix reuse, model KV cache, vCache, and tool-result vDSO reuse;
-6. describe the context-MMU write-time lifecycle: admit, quarantine/page out, restore under a witness, and evict stale or poisoned state;
-7. construct and explain a bounded `memq` recall/render/compact plan, including trust gates and proposal-only mutation defaults;
-8. produce a compact evidence packet that separates delivery, quality, performance, security, and operating-envelope claims;
-9. run the scope-correct local verification workflow without mixing peer WIP into the result.
+1. Distinguish executable, control-plane, and model-execution readiness from a `fak-runtime-capabilities/1` or execution-mode receipt.
+2. Prove that native/performance evidence names `engine: "fak-native"`, a current Qwen3.8 model, a backend, and an explicit operating envelope.
+3. Trace a typed tool call through the harness and syscall layer. Follow adjudication, dispatch or vDSO, result admission, and model context.
+4. Explain policy precedence, structural denial, and why policy success does not prove model execution.
+5. Distinguish provider prompt cache, radix-prefix reuse, and model KV cache. Compare those with vCache and tool-result vDSO reuse.
+6. Describe the context-MMU write-time lifecycle: admit, quarantine/page out, restore under a witness, and evict stale or poisoned state.
+7. Construct and explain a bounded `memq` recall/render/compact plan. Include trust gates and proposal-only mutation defaults.
+8. Produce a compact evidence packet. Separate delivery, quality, and performance claims from security and operating-envelope claims.
+9. Run the scope-correct local verification workflow without mixing peer WIP into the result.
 
 ## Conceptual system map
 
@@ -100,7 +100,7 @@ Three distinctions govern the whole course:
 - [The 60-second reproduction packet](../repro-packet.md)
 - [`runtime-capabilities` in the CLI reference](../cli-reference.md#runtime-capabilities-inspect-the-deployable-runtime-before-payload-load)
 
-The first objective is deliberately model-free: establish that the binary runs, policy can structurally deny one tool and allow another, and the offline agent still completes useful work. Then inspect runtime capability without confusing that inspection with payload execution.
+The first objective is deliberately model-free. Establish that the binary runs and that policy can structurally deny one tool while allowing another. Confirm that the offline agent completes useful work. Then inspect runtime capability without confusing that inspection with payload execution.
 
 ### Lab — LOCAL / OFFLINE
 
@@ -114,7 +114,7 @@ go build -o "$env:TEMP/fak-course.exe" ./cmd/fak
 & "$env:TEMP/fak-course.exe" runtime-capabilities
 ```
 
-Capture the commands, exit status, and machine-readable output. Label each observation as **binary**, **control plane**, or **model execution** evidence.
+Capture the commands, exit status, and machine-readable output. Label each observation as binary, control plane, or model execution evidence.
 
 ### Checkpoint
 
@@ -136,7 +136,7 @@ Proceed only if you do not claim model execution from the offline proof.
 - [Native performance observability contract](../observability/native-performance-contract.md)
 - [Native performance artifact guide](../observability/native-performance-artifacts.md)
 
-Modern native/performance work prefers Qwen3.8. llama.cpp is an explicit benchmark, parity, reference, migration, interoperability, or borrowing choice only; it is never an automatic recovery or convenience engine. A valid native receipt names fak ownership, the exact model/backend, quality constraint, workload, resource boundary, and all setup, recovery, and verification overhead included in the claim.
+Modern native/performance work prefers Qwen3.8. llama.cpp is used only for explicit benchmarks, reference comparisons, or borrowing. It is never an automatic recovery or convenience engine. A valid native receipt names fak ownership and the exact model/backend. It records the quality constraint, workload, and resource boundary. It also includes all setup, recovery, and verification overhead.
 
 ### Lab — LOCAL MODEL (ENVELOPE-DEPENDENT), then FLEET GPU / PRIVATE LAB when required
 
@@ -148,50 +148,50 @@ Modern native/performance work prefers Qwen3.8. llama.cpp is an explicit benchma
 
 2. If the task names a backend, inspect it exactly with `--backend NAME`; do not accept substitution.
 3. For a native/performance run, use the canonical command and receipt named by the relevant Qwen3.8 plan or benchmark runbook. Dispatch accelerator work through the [fleet compute node map](../fleet-compute-nodes.md).
-4. Record the exact engine, Qwen3.8 model/artifact, backend/device, prompt/workload, concurrency, context length, quality gate, memory limit, warm/cold state, and overhead accounting.
-5. If the envelope cannot be admitted, preserve the structured refusal or handoff. Do not silently run llama.cpp, Ollama, another provider, `cpu-ref`, or a different model and relabel it native.
+4. Record the exact engine, Qwen3.8 model/artifact, and backend/device. Also note the prompt/workload, concurrency, and context length. Include the quality gate, memory limit, warm/cold state, and overhead accounting.
+5. If the envelope cannot be admitted, preserve the structured refusal or handoff. Do not silently run llama.cpp, Ollama, or another provider. Do not run `cpu-ref` or another model and relabel it native.
 
 ### Checkpoint
 
-A reviewer must be able to answer **yes** to all of these from your receipt alone:
+A reviewer must be able to answer yes to all of these from your receipt alone:
 
 - Does `engine` equal `fak-native`?
 - Is the Qwen3.8 model and artifact identity explicit?
 - Is the backend/device explicit rather than inferred?
 - Is quality constrained and measured beside performance?
-- Are context, batch/concurrency, memory, setup, recovery, and verification costs in the envelope?
+- Are context and batch/concurrency in the envelope? Are memory, setup, recovery, and verification costs included?
 - Is any degraded or remote placement explicit and authorized?
 
-Otherwise mark the execution or performance claim **not yet witnessed**.
+Otherwise mark the execution or performance claim as not yet witnessed.
 
 ## Module 3 — Follow the agent harness and syscall path
 
 ### Read
 
-- [Architecture and extension model](../../ARCHITECTURE.md)
-- [MCP integration](../integrations/mcp.md)
-- [Harness composition](../integrations/harness-composition.md)
-- [Harness verification runs](../integrations/harness-verify-run.md)
-- [MCP stdio example and verifier](../../examples/mcp/README.md) — proves schema-light bootstrap discovery, deferred `fak_admit` discovery, benign result admission, and allow/deny adjudication over the real editor transport.
+- [Architecture and extension model](../../ARCHITECTURE.md).
+- [MCP integration](../integrations/mcp.md).
+- [Harness composition](../integrations/harness-composition.md).
+- [Harness verification runs](../integrations/harness-verify-run.md).
+- [MCP stdio example and verifier](../../examples/mcp/README.md). This demonstrates schema-light bootstrap discovery, deferred `fak_admit` discovery, benign result admission, and allow/deny adjudication over the real editor transport.
 
-The harness owns the model loop and exposes tools. fak owns the typed call boundary: synchronous `Syscall` is defined over asynchronous `Submit`/`Reap`; registries provide adjudicators, fast paths, engines, result admitters, and observers without making every new feature part of the hot path.
+The harness owns the model loop and exposes tools. fak owns the typed call boundary. Synchronous `Syscall` is defined over asynchronous `Submit`/`Reap`. Registries provide adjudicators, fast paths, and engines. They also supply result admitters and observers without making every new feature part of the hot path.
 
 ### Lab — LOCAL / OFFLINE
 
 1. Run the offline harness from Module 1.
-2. Read the `ToolCall`, syscall, and result structures named in the architecture document and locate their current definitions under `internal/abi`, `internal/gateway`, and `internal/agent`.
-3. Draw a sequence diagram for one allowed call and one denied call. Include caller, harness, syscall boundary, adjudicator fold, vDSO lookup, dispatch, result admitter, context-MMU, observer, and model loop.
-4. Run `python examples/mcp/verify.py --no-color`. Confirm all six checks pass: handshake, schema-light `tools/list`, deferred `fak_admit` discovery through `fak_tools_search`, benign result admission with a typed DEFER/OK envelope, `git_push` denial, and `git_status` allowance.
+2. Read the `ToolCall`, syscall, and result structures named in the architecture document. Locate their current definitions under `internal/abi`, `internal/gateway`, and `internal/agent`.
+3. Draw a sequence diagram for one allowed call and one denied call. Include the caller, harness, syscall boundary, and adjudicator fold. Show the vDSO lookup and dispatch engine. Also include the result admitter, context-MMU, observer, and model loop.
+4. Run `python examples/mcp/verify.py --no-color`. Confirm all six checks pass. These include the handshake, schema-light `tools/list`, and deferred `fak_admit` discovery through `fak_tools_search`. They also cover benign result admission with a typed DEFER/OK envelope, `git_push` denial, and `git_status` allowance.
 
 ### Checkpoint
 
 Explain, without implementation narration:
 
-- where a tool call becomes typed kernel input;
-- where a denial stops side effects;
-- why `Syscall` over `Submit`/`Reap` preserves one policy path;
-- where result bytes can be stopped even after a tool was allowed;
-- which components are harness responsibilities and which are kernel responsibilities.
+- Where a tool call becomes typed kernel input.
+- Where a denial stops side effects.
+- Why `Syscall` over `Submit`/`Reap` preserves one policy path.
+- Where result bytes can be stopped even after a tool was allowed.
+- Which components are harness responsibilities and which are kernel responsibilities.
 
 ## Module 4 — Policy, grammar, and adjudication
 
@@ -201,11 +201,11 @@ Explain, without implementation narration:
 - [Customer-support policy example](../../examples/customer-support-readonly-policy.json)
 - [Architecture: adjudicator registration and fold](../../ARCHITECTURE.md#how-a-new-idea-bakes-in-the-only-mechanism)
 
-Policy is a deployable capability floor, not a prompt suggestion. The preflight ladder combines tool registration, argument grammar, capability and policy checks, and ordered adjudicators. Provable refusals deny; an adjudicator that cannot prove its case defers rather than inventing authority.
+Policy serves as a deployable capability floor rather than a prompt suggestion. The preflight ladder combines tool registration, argument grammar, capability checks, and ordered adjudicators. Provable refusals deny. An adjudicator that cannot prove its case defers rather than inventing authority.
 
 ### Lab — LOCAL / OFFLINE
 
-Repeat the two preflight calls from Module 1, then add one malformed or unregistered call of your own using only flags documented under `fak preflight` in the CLI reference. Preserve each typed reason and identify the rung that decided it.
+Repeat the two preflight calls from Module 1. Then add one malformed or unregistered call of your own using only flags documented under `fak preflight` in the CLI reference. Preserve each typed reason and identify the deciding rung.
 
 Do not execute a real destructive tool for this exercise. Preflight exists to prove the refusal before dispatch.
 
@@ -213,11 +213,11 @@ Do not execute a real destructive tool for this exercise. Preflight exists to pr
 
 For each case, provide:
 
-- normalized tool and arguments;
-- deciding rung and structured reason;
-- `ALLOW`, `DENY`, or defer behavior;
-- whether a side effect could have occurred;
-- the distinction between a policy verdict and context admission of a later result.
+- The normalized tool and arguments.
+- The deciding rung and structured reason.
+- The `ALLOW`, `DENY`, or defer behavior.
+- An assessment of whether a side effect could have occurred.
+- The distinction between a policy verdict and context admission of a later result.
 
 ## Module 5 — Shared prefix, vDSO, and the cache stack
 
@@ -235,13 +235,13 @@ Shared prefixes reduce repeated provider or prefill work only when byte identity
 
 Build a cache ledger for one hypothetical two-turn agent session. For each reusable item, name:
 
-- its cache identity;
-- its owner and trust boundary;
-- its key or prefix identity;
-- hit eligibility;
-- invalidation or revocation condition;
-- what is saved: network/tool work, provider input processing, prefill compute, or decode state;
-- the evidence that would prove a hit rather than infer one.
+- Its cache identity.
+- Its owner and trust boundary.
+- Its key or prefix identity.
+- Its hit eligibility.
+- Its invalidation or revocation condition.
+- What is saved: network/tool work, provider input processing, prefill compute, or decode state.
+- The evidence that would prove a hit rather than infer one.
 
 Then inspect `internal/vdso` tests and run:
 
@@ -251,7 +251,7 @@ go test ./internal/vdso
 
 ### Checkpoint
 
-Given five observations—provider cached-input tokens, a radix-prefix match, a model KV page, a vCache entry, and a local tool-result hit—classify each without using the generic word “cache” alone. Reject any savings claim that lacks the corresponding hit evidence and denominator.
+You are given five observations: provider cached-input tokens, a radix-prefix match, and a model KV page. You also observe a vCache entry and a local tool-result hit. Classify each observation without using the generic word “cache” alone. Reject any savings claim that lacks the corresponding hit evidence and denominator.
 
 ## Module 6 — Context-MMU lifecycle and trust-preserving context control
 
@@ -262,7 +262,7 @@ Given five observations—provider cached-input tokens, a radix-prefix match, a 
 - [Context shedding](../explainers/context-shedding.md)
 - [Context and ctx disambiguation](../concepts/disambiguation-context-ctx.md)
 
-The context-MMU screens results before they enter model-visible context. Safe bytes may be admitted; secret-, injection-, poison-, or repeat-shaped bytes can be quarantined and replaced by a small content-addressed pointer. Restore is witness- and trust-gated. Revocation must evict causally dependent state rather than leaving poisoned reuse behind.
+The context-MMU screens results before they enter model-visible context. Safe bytes may be admitted. Harmful patterns like secrets, injections, poison, or repeats can be quarantined and replaced by a small content-addressed pointer. Restore is witness- and trust-gated. Revocation must evict causally dependent state rather than leaving poisoned reuse behind.
 
 ### Lab — LOCAL / OFFLINE
 
@@ -272,18 +272,18 @@ The context-MMU screens results before they enter model-visible context. Safe by
    go test ./internal/ctxmmu
    ```
 
-2. For a safe result and a poison-shaped result, trace these states: produced, screened, admitted or quarantined, paged out, pointer rendered, restore attempted, restored or refused, and revoked/evicted.
+2. Trace these states for both a safe result and a poison-shaped result. Follow produced, screened, and admitted or quarantined stages. Then follow paged out, pointer rendered, and restore attempted. Finally trace restored or refused, followed by revoked or evicted.
 3. Explain what remains durable when content leaves the active context and what does not automatically become memory.
 
 ### Checkpoint
 
 Your state diagram must show:
 
-- a write-time trust decision before model visibility;
-- a bounded pointer replacing quarantined bytes;
-- a witness requirement for page-in;
-- a refusal path for sealed, tombstoned, stale, or revoked content;
-- separation between context pressure management and durable memory selection.
+- A write-time trust decision before model visibility.
+- A bounded pointer replacing quarantined bytes.
+- A witness requirement for page-in.
+- A refusal path for sealed, tombstoned, stale, or revoked content.
+- Separation between context pressure management and durable memory selection.
 
 ## Module 7 — memq recall, render, and compact under trust gates
 
@@ -294,7 +294,7 @@ Your state diagram must show:
 - [Context Is Not Memory](../CONTEXT-IS-NOT-MEMORY.md)
 - Current implementation and tests under `internal/memq` and `internal/recall`
 
-`memq` is a composable query algebra, not a magical memory oracle. A plan can scan, filter, rank, limit, budget, deduplicate, render, tombstone, consolidate, reclassify, or prune. Recall and render are bounded projections through provenance and trust gates. Mutating operations are proposal-only by default; sealed spans are never rendered, and negative-only/storage mutations require explicit application.
+`memq` is a composable query algebra rather than a magical memory oracle. A plan can scan, filter, rank, and limit. It can also budget, deduplicate, and render items. Operators can tombstone, consolidate, reclassify, or prune records. Recall and render are bounded projections through provenance and trust gates. Mutating operations are proposal-only by default. Sealed spans are never rendered, and negative-only/storage mutations require explicit application.
 
 ### Lab — LOCAL / OFFLINE
 
@@ -307,7 +307,7 @@ Your state diagram must show:
 2. Using the current memory driver/tool schema documented in [Agent memory integration](../integrations/agent-memory.md), explain a built-in `recall` plan before running it.
 3. Run a bounded recall against the demo corpus with a concrete intent, small `k`, and byte budget.
 4. Explain a `compact` plan with `apply=false`. Identify every effect step and why it does or does not mutate durable state.
-5. Do not set `apply=true` for the course. The learning objective is to reason about the proposed effects and trust refusals, not to mutate a learner’s memory store.
+5. Do not set `apply=true` for the course. The learning objective focuses on proposed effects and trust refusals without altering a learner's memory store.
 
 ### Checkpoint
 
@@ -330,19 +330,19 @@ Submit the plan trace and rendered set, then answer:
 - [Benchmark authority](../../BENCHMARK-AUTHORITY.md)
 - [Claims registry](../../CLAIMS.md) and [status matrix](../../STATUS.md)
 
-Observability is useful only when its records survive the run and preserve provenance. A trace helps diagnose; a receipt binds a claim to an operating envelope; a captured witness lets an independent reviewer reproduce or reject it. “Tests pass,” “fast,” and “native” are separate claims requiring different evidence.
+Observability is useful only when its records survive the run and preserve provenance. A trace helps diagnose issues. A receipt binds a claim to an operating envelope. A captured witness lets an independent reviewer reproduce or reject the claim. “Tests pass,” “fast,” and “native” are separate claims requiring different evidence.
 
 ### Lab — LOCAL / OFFLINE
 
 Create an evidence matrix for Modules 1–7 with these columns:
 
-- claim;
-- controlling subsystem;
-- artifact or command;
-- observed versus self-reported;
-- environment and envelope;
-- expected failure/refusal state;
-- independent verification step.
+- Claim.
+- Controlling subsystem.
+- Artifact or command.
+- Observed versus self-reported status.
+- Environment and envelope.
+- Expected failure or refusal state.
+- Independent verification step.
 
 Run scope-correct checks for course-relevant code or docs without treating the peer-dirty working tree as your change:
 
@@ -355,9 +355,11 @@ If `fak validate --mine` is unavailable in the current bootstrap state, record t
 
 ### Operations lesson — update without trusting the binary being replaced
 
-The shipped `cmd/fak-selfupdate` surface is a recovery-sized executable over the same implementation as `fak self-update`. Use the ordinary verb when the installed `fak` is healthy; keep the standalone entry point available when the main command is stale or is the target of replacement. Both emit the versioned `fak.self-update.receipt/v1` JSON contract.
+The shipped `cmd/fak-selfupdate` surface is a recovery-sized executable over the same implementation as `fak self-update`. Use the ordinary verb when the installed `fak` is healthy. Keep the standalone entry point available when the main command is stale or is being replaced. Both emit the versioned `fak.self-update.receipt/v1` JSON contract.
 
-The default native path builds from a repository, runs the green gate, and only then installs. `--check` is the non-mutating inspection path, and even `--force` does not bypass the green gate. Optional signed-manifest selection adds channel/cohort and authenticated-cache controls; `--offline` refuses network access and can use only a valid authenticated cache. On Windows, the explicit MSIX path verifies signed package provenance and requires an explicit opt-in for downgrade; differential delivery may fall back only to the declared full package. These are bounded alternatives, not permission to accept an unsigned artifact or silently skip verification. A scheduled updater can also pin the executable path and must refuse provenance drift.
+The default native path builds from a repository, runs the green gate, and installs only after passing. `--check` provides a non-mutating inspection path, and even `--force` does not bypass the green gate. Optional signed-manifest selection adds channel, cohort, and authenticated-cache controls. In addition, `--offline` refuses network access and accepts only a valid authenticated cache.
+
+On Windows, the explicit MSIX path verifies signed package provenance and requires an explicit opt-in for downgrade. Differential delivery falls back only to the declared full package. These bounded alternatives provide safety without accepting unsigned artifacts or skipping verification. A scheduled updater can also pin the executable path and must refuse provenance drift.
 
 From the repository root, prove the recovery surface is present without replacing anything:
 
@@ -366,11 +368,11 @@ go run ./cmd/fak-selfupdate --help
 go run ./cmd/fak-selfupdate --check --target (Get-Command fak).Source --json
 ```
 
-The first command exposes the standalone surface; the second inspects the installed target's embedded Go build metadata without executing that target. Read the exact flags and receipt fields in the [CLI reference](../cli-reference.md), then use the [self-update fast-path design note](../notes/CONCEPT-SELF-UPDATE-FAST-PATHS-2026-08-29.md) when reasoning about manifest, delta/full-fallback, MSIX, or handoff boundaries.
+The first command exposes the standalone surface. The second inspects the installed target's embedded Go build metadata without executing that target. Read the exact flags and receipt fields in the [CLI reference](../cli-reference.md). Then consult the [self-update fast-path design note](../notes/CONCEPT-SELF-UPDATE-FAST-PATHS-2026-08-29.md) when reasoning about manifest, delta/full-fallback, MSIX, or handoff boundaries.
 
 ### Checkpoint
 
-A peer should be able to reconstruct what ran, where, with which engine/model/policy, inside which envelope, and with what result—without trusting your prose. Any missing dimension becomes an explicit limitation, not an inferred success.
+A peer should be able to reconstruct what ran and where it ran. They should identify the engine, model, and policy. They should also verify the envelope boundaries and the observed result—all without trusting your prose. Treat any missing dimension as an explicit limitation instead of an inferred success.
 
 ## Capstone — One governed Qwen3.8 agent turn, end to end
 
@@ -381,30 +383,30 @@ Design and execute, or dispatch, one bounded agent task that reads from an allow
 ### Required path
 
 1. **Admit the runtime.** Capture `runtime-capabilities`; distinguish control-only readiness from model execution.
-2. **Pin native execution.** Use Qwen3.8 on a fak-native backend. If acceleration is required, dispatch to the sanctioned fleet/private-lab path. Keep native/performance execution fak-native: select llama.cpp only explicitly for benchmark, parity/reference diagnosis, interoperability/migration, study, or borrowing, and never as silent recovery; likewise, do not silently substitute a provider, CPU path, or different model.
-3. **Declare the envelope.** Record model/artifact, backend/device, context length, concurrency, memory, workload, quality criterion, and overhead accounting.
+2. **Pin native execution.** Use Qwen3.8 on a fak-native backend. If acceleration is required, dispatch to the sanctioned fleet/private-lab path. Keep native/performance execution fak-native. Select llama.cpp only explicitly for benchmarks, parity/reference diagnosis, study, or borrowing. Never use it as a silent recovery path. Likewise, never silently substitute an external provider, a CPU path, or a different model.
+3. **Declare the envelope.** Record the model/artifact, backend/device, and context length. Note the concurrency, memory budget, and workload. Finally, record the quality criterion and overhead accounting.
 4. **Compose the harness.** Show the model loop, exposed tool schema, and typed syscall boundary.
 5. **Prove policy.** Preflight the allowed read and the denied sensitive action; retain typed verdicts.
-6. **Account for reuse.** Identify the shared stable prefix and any vDSO, provider, radix, vCache, or model-KV evidence without conflating them.
+6. **Account for reuse.** Identify the shared stable prefix. Distinguish vDSO, provider, and radix reuse. Also separate vCache and model-KV evidence without conflating them.
 7. **Admit results.** Show the context-MMU decision for the returned data, including a quarantine case if the fixture contains poison-shaped text.
 8. **Use memory safely.** Run a bounded `memq` recall/render plan and a proposal-only compact plan; preserve trust refusals.
-9. **Capture evidence.** Produce a manifest that points to commands, receipts, traces, quality results, policy verdicts, context decisions, memory plan traces, and verification output.
+9. **Capture evidence.** Produce a manifest that points to commands, receipts, and traces. Include quality results, policy verdicts, and context decisions. Link memory plan traces and verification output as well.
 10. **Verify independently.** Have a reviewer reproduce the local control-plane slice and inspect the native receipt and private-lab/public evidence boundary.
 
 ### Capstone acceptance rubric
 
-The capstone passes only when all are true:
+The capstone passes only when all conditions are met:
 
-- the task completes or reaches a typed refusal without bypassing policy;
-- native model evidence explicitly names fak-native Qwen3.8 and the backend;
-- quality and performance are reported in the same declared envelope;
-- the harness-to-syscall path and result-admission path are both evidenced;
-- every claimed cache hit names its cache identity and witness;
-- quarantined content does not appear in model-visible context;
-- memory output is bounded, provenance-bearing, and trust-gated;
-- private infrastructure details remain private while the public receipt remains reproducible;
-- local verification uses isolated, scope-correct commands;
-- limitations are stated as limitations, not converted into success.
+- The task completes or reaches a typed refusal without bypassing policy.
+- Native model evidence explicitly names fak-native Qwen3.8 and the backend.
+- Quality and performance are reported in the same declared envelope.
+- The harness-to-syscall path and result-admission path are both evidenced.
+- Every claimed cache hit names its cache identity and witness.
+- Quarantined content does not appear in model-visible context.
+- Memory output is bounded, provenance-bearing, and trust-gated.
+- Private infrastructure details remain private while the public receipt remains reproducible.
+- Local verification uses isolated, scope-correct commands.
+- Limitations are stated as limitations rather than converted into success.
 
 A control-only demonstration is a valid partial artifact but not a completed native-inference capstone. A llama.cpp reference run may be attached as an explicitly labeled comparison, but it cannot satisfy the fak-native execution requirement.
 
@@ -422,14 +424,14 @@ Choose the route that matches the next responsibility:
 
 ## Completion record
 
-A learner’s final record should contain:
+A learner's final record should contain:
 
-- the eight module checkpoints;
-- the capstone manifest and acceptance review;
-- an explicit list of labs completed locally, with a local model, or on a fleet/private-lab node;
-- all refusals and missing witnesses preserved verbatim;
-- no copied canonical documentation beyond the minimum command snippets needed to perform the labs.
+- The eight module checkpoints.
+- The capstone manifest and acceptance review.
+- An explicit list of labs completed locally, with a local model, or on a fleet/private-lab node.
+- All refusals and missing witnesses preserved verbatim.
+- No copied canonical documentation beyond the minimum command snippets needed to perform the labs.
 
-The course is complete when another engineer can follow the evidence from operator intent to verified outcome and can identify exactly where fak controlled, accelerated, refused, quarantined, recalled, or merely observed the run.
+The course is complete when another engineer can follow the evidence from operator intent to verified outcome. They must be able to identify where fak controlled, accelerated, or refused the run. They must also see where it quarantined, recalled, or merely observed behavior.
 
 

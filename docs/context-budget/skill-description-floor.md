@@ -36,9 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 66 skill(s); resident floor = 31717 bytes (~7929 tokens);
-  description floor = 31717 B; name-only floor = 894 B; at-rest card floor = 15677 bytes
-  at-rest intent slice (#5560): 11566 B (~2891 tokens) across 66 skill(s)
+skill footprint [interactive]: 72 skill(s); resident floor = 34155 bytes (~8538 tokens);
+  description floor = 34155 B; name-only floor = 973 B; at-rest card floor = 16744 bytes
+  at-rest intent slice (#5560): 12266 B (~3066 tokens) across 72 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -54,16 +54,16 @@ Heaviest resident descriptions — the trim targets:
 | 7 | 647 | modularize |
 | 8 | 640 | token-defaults-score |
 
-The full 66-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 72-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 894 B` is the size of the headroom: **30.8 kB of the 31.7 kB
+`name-only floor = 973 B` is the size of the headroom: **33.2 kB of the 34.2 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 47234 → 31717 B (-15517, 66 skills)** — the live `SkillResolver`
-measurement proves the description reduction while retaining two additional skills. The
-gate banks that measured corpus reduction; future growth retains the same narrow ratchet
+**Last re-pin: 31717 → 34155 B (+2438, 72 skills)** — the live `SkillResolver`
+measurement records the current catalog footprint across 72 skills. The
+gate banks that measured baseline; future growth retains the same narrow ratchet
 band.
 
 ## Provenance (Law A2 — every value carries its provenance)
@@ -94,7 +94,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **31717**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **34155**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |

@@ -1,6 +1,6 @@
 ---
 name: trajectory-control
-description: The operator on-ramp to trajectory control (`trajctl`) — fak's live, forward-progress control plane over a DECLARED objective. Teaches the one primitive that carries the family (anything you want to progress gets a named, witnessed score, and every move is either improve-the-score or improve-the-scorer), then the four operator loops: declare an objective + plan + budget, read the CURVE (never a point) for the closed signal vocabulary (HEALTHY / STALL / DRIFT / DETOUR_OVERRUN), apply the when-to-nudge doctrine (the REGIME GATE. Use when this named workflow matches the task.
+description: "The operator on-ramp to trajectory control (`trajctl`) — fak's live, forward-progress control plane over a DECLARED objective. Teaches the one primitive that carries the family (anything you want to progress gets a named, witnessed score, and every move is either improve-the-score or improve-the-scorer), then the four operator loops: declare an objective + plan + budget, read the CURVE (never a point) for the closed signal vocabulary (HEALTHY / STALL / DRIFT / DETOUR_OVERRUN), apply the when-to-nudge doctrine (the REGIME GATE. Use when this named workflow matches the task."
 ---
 
 # trajectory-control — declare an objective, steer by curve, nudge only by regime

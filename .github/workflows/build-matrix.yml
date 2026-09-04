@@ -14,7 +14,7 @@ name: build-matrix
 
 on:
   push:
-    branches: [main, master, fak-v0.1]
+    branches: [main]
   pull_request:
 
 permissions:

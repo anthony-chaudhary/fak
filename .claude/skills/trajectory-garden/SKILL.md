@@ -1,6 +1,6 @@
 ---
 name: trajectory-garden
-description: One repeatable gardening pass over a trajectory corpus — the JSONL of per-turn Turn rows a fak trajectory.Recorder exports. Uses the `fak traj` toolkit (the data plane + the simhash reference vector-similarity primitive + the pluggable scorer seam) to find the trajectories worth a human's attention — near-duplicate queries the lexical ranker misses, cost outliers, and traces the kernel kept refusing — then PROPOSES prune candidates (it never deletes). The reference application of fak's trajectory observability primitives: proof that a. Use when this named workflow matches the task.
+description: "One repeatable gardening pass over a trajectory corpus — the JSONL of per-turn Turn rows a fak trajectory.Recorder exports. Uses the `fak traj` toolkit (the data plane + the simhash reference vector-similarity primitive + the pluggable scorer seam) to find the trajectories worth a human's attention — near-duplicate queries the lexical ranker misses, cost outliers, and traces the kernel kept refusing — then PROPOSES prune candidates (it never deletes). The reference application of fak's trajectory observability primitives: proof that a. Use when this named workflow matches the task."
 ---
 
 # trajectory-garden — find the bad/redundant trajectories, propose the prune, never delete

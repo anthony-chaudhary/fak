@@ -84,7 +84,7 @@ fak_gateway_startup_unaccounted_seconds 0.0005368
 # HELP fak_gateway_inflight_requests HTTP requests currently executing in the fak gateway.
 fak_gateway_inflight_requests 1
 # HELP fak_gateway_build_info Static fak gateway build and runtime labels.
-fak_gateway_build_info{version="0.45.0",engine="inkernel",model="smollm2-inkernel",vdso="true"} 1
+fak_gateway_build_info{version="0.47.0",engine="inkernel",model="smollm2-inkernel",vdso="true"} 1
 # HELP fak_gateway_http_requests_total HTTP requests served by route, method, and status.
 fak_gateway_http_requests_total{route="/healthz",method="GET",status="200"} 1
 fak_gateway_http_requests_total{route="/v1/fak/adjudicate",method="POST",status="200"} 1

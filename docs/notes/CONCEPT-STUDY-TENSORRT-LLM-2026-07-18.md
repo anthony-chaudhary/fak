@@ -7,7 +7,7 @@ pinned_sha: f4c5c935aa891b0826f73936c4831236cb6ff836
 license: Apache-2.0 (LICENSE read — INSPIRE default; no bytes vendored)
 family_key: fak-tensorrt-llm-study
 prior_art_epics: ["#2236", "#50", "#637", "#3983", "#3900", "#3366", "#4352", "#4207", "#5243", "#3365", "#3352", "#3569", "#3809", "#3080"]
-Companions: [field-borrow (per-capability witness+file), sota-check (kernel-adjacent autotune-cache route), epic #5256]
+Companions: ["field-borrow (per-capability witness+file)", "sota-check (kernel-adjacent autotune-cache route)", "epic #5256"]
 ---
 
 # Study: NVIDIA TensorRT-LLM `@f4c5c935`

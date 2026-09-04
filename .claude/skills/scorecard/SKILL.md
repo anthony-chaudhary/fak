@@ -1,6 +1,6 @@
 ---
 name: scorecard
-description: The generic scoring doctrine the whole fak scorecard family instantiates — how to BUILD a new deterministic, tree-cross-checked, debt-driving scorecard and how to RUN any of them as a repeatable RSI pass. Every sibling (code-quality, docs, doc-appeal, seo, demo-quality, repo-hygiene, observability, learning, industry, agent-readiness, product, persona) is the same machine pointed at a different surface: pure KPIs over a data-dir or the git-tracked tree, cross-checked against reality so the score can't be gamed by editing data, folded into one *-debt. Use when this named workflow matches the task.
+description: "The generic scoring doctrine the whole fak scorecard family instantiates — how to BUILD a new deterministic, tree-cross-checked, debt-driving scorecard and how to RUN any of them as a repeatable RSI pass. Every sibling (code-quality, docs, doc-appeal, seo, demo-quality, repo-hygiene, observability, learning, industry, agent-readiness, product, persona) is the same machine pointed at a different surface: pure KPIs over a data-dir or the git-tracked tree, cross-checked against reality so the score can't be gamed by editing data, folded into one *-debt. Use when this named workflow matches the task."
 metadata:
   opencode: claude-only
 ---

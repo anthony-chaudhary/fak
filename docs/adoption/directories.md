@@ -114,7 +114,7 @@ table is the status roll-up, not a duplicate of the payloads.
 | Venue | Why it fits | Submission note | Status |
 |---|---|---|---|
 | [Glama](https://glama.ai) `verify` | MCP-server directory; auto-indexes from a committed manifest | Wired via [`glama.json`](https://github.com/anthony-chaudhary/fak/blob/main/glama.json); approves in minutes | wired |
-| [Official MCP Registry](https://github.com/modelcontextprotocol/registry) | The canonical MCP registry | Wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) (@0.45.0) + ghcr image; one interactive `mcp-publisher publish` step is owner-only | not yet (owner publish) |
+| [Official MCP Registry](https://github.com/modelcontextprotocol/registry) | The canonical MCP registry | Wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) (@0.47.0) + ghcr image; one interactive `mcp-publisher publish` step is owner-only | not yet (owner publish) |
 | [Smithery](https://smithery.ai) | MCP-server marketplace | Wired via [`smithery.yaml`](https://github.com/anthony-chaudhary/fak/blob/main/smithery.yaml); GitHub-connect + Deploy (owner). Richest listing wants a hosted HTTPS endpoint | not yet (owner deploy) |
 | [mcpservers.org](https://mcpservers.org/submit) | wong2's MCP list | Web form (payload in launch doc); **do not open a PR — the repo refuses them** | not yet |
 | [mcp.so](https://github.com/chatmcp/mcpso) | High-traffic MCP directory | GitHub issue (payload in launch doc); `gh`-doable but posts to a third-party tracker → owner go-ahead | not yet |

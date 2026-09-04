@@ -1,6 +1,6 @@
 ---
 name: scout-loop
-description: The super-loop that closes the research→backlog loop — it chains the outward CRAWLERS (the daily `idea-scout` arXiv/GitHub feed, the industry scans, the RESEARCH/CONCEPT corpus) into the STUDY pipeline (`/study-repo` → `/field-borrow`) and runs the whole thing on a cadence. The crawler surfaces repo-shaped leads into a needs-triage queue and stops; turning any one into scoped, witnessed, license-clean backlog is still a manual pass someone has to remember to run. This skill is that seam, automated: once per pass it CRAWLS. Use when this named workflow matches the task.
+description: "The super-loop that closes the research→backlog loop — it chains the outward CRAWLERS (the daily `idea-scout` arXiv/GitHub feed, the industry scans, the RESEARCH/CONCEPT corpus) into the STUDY pipeline (`/study-repo` → `/field-borrow`) and runs the whole thing on a cadence. The crawler surfaces repo-shaped leads into a needs-triage queue and stops; turning any one into scoped, witnessed, license-clean backlog is still a manual pass someone has to remember to run. This skill is that seam, automated: once per pass it CRAWLS. Use when this named workflow matches the task."
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, no-monolith, and scratch-only-clone discipline are load-bearing and not portable per-skill

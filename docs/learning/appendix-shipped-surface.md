@@ -480,7 +480,6 @@ boundary and should follow their preview/status path first.
 
 | Command | Artifact or boundary it owns |
 | --- | --- |
-| `cmd/amoprofpub` | Converts an AMOProf directory or archive into Confluence storage XHTML plus an attachment manifest. |
 | `cmd/caveman-pairwise-judge` | Judges paired caveman benchmark outputs against an immutable source manifest and versioned receipt protocol. |
 | `cmd/fak-dev` | Hosts contributor-only, shared-trunk-safe diagnostics and project-maintenance helpers outside the product CLI. |
 | `cmd/fak-dos` | Applies journaled DOS decision changes through the writable host adapter; inspect/list before add or remove. |

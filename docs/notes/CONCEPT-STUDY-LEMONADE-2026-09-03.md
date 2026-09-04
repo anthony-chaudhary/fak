@@ -88,7 +88,7 @@ Lemonade is an open-source, local multi-model AI inference and routing runtime d
 
 ## Companions
 
-- [`field-borrow`](../skills/field-borrow/SKILL.md)
+- [`field-borrow`](../../.claude/skills/field-borrow/SKILL.md)
 - [`docs/notes/CONCEPT-STUDY-OPENCODE-2026-09-02.md`](CONCEPT-STUDY-OPENCODE-2026-09-02.md)
 - [`docs/notes/CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md`](CONCEPT-STUDY-PORTKEY-AI-GATEWAY-2026-09-02.md)
 - [`docs/research/monitored-repositories.json`](../research/monitored-repositories.json)

@@ -2125,15 +2125,6 @@
       ]
     },
     {
-      "path": "cmd/amoprofpub/main.go",
-      "content_sha256": "sha256:492e9a4d66c5d86f8acbdcf9d49738808f1feb5419f51163c46a5db177fd9f9d",
-      "bytes": 959,
-      "classification": "runtime_source",
-      "source_classes": [
-        "runtime_source"
-      ]
-    },
-    {
       "path": "cmd/archreportdemo/README.md",
       "content_sha256": "sha256:8b30a04aac9b6dfe98893d43ca2f876ab500bfa7eb74fc47e88763c84e306105",
       "bytes": 1652,
@@ -45292,15 +45283,6 @@
       ]
     },
     {
-      "path": "docs/notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md",
-      "content_sha256": "sha256:a0d0c4dae94f7e767fd018023c02a652b48cf3089bc812c525811f6babfcd07b",
-      "bytes": 13044,
-      "classification": "documentation",
-      "source_classes": [
-        "readme_docs"
-      ]
-    },
-    {
       "path": "docs/notes/CONNECTOR-CONCEPTS-SURVEY-2026-07-03.md",
       "content_sha256": "sha256:76b47732fcff487597775bf7c64210a1295b01aee54efccd92171aa4c76bb0ec",
       "bytes": 20902,
@@ -70964,33 +70946,6 @@
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
-      ]
-    },
-    {
-      "path": "internal/amoprofpub/amoprofpub.go",
-      "content_sha256": "sha256:bea9bbf700115c6b30b9d09b6221d336660897af86ae5d588a0abdf996415c8a",
-      "bytes": 14133,
-      "classification": "runtime_source",
-      "source_classes": [
-        "runtime_source"
-      ]
-    },
-    {
-      "path": "internal/amoprofpub/amoprofpub_test.go",
-      "content_sha256": "sha256:9f56355eac282adaac79eccb10e613464ba75dce172fa725dfbcf06f20651c3f",
-      "bytes": 1928,
-      "classification": "test_fixture",
-      "source_classes": [
-        "tests_fixtures"
-      ]
-    },
-    {
-      "path": "internal/amoprofpub/analysis.go",
-      "content_sha256": "sha256:a7fe1333839c877daf873c0697e767dae6019062b603d2d7666950bc8c7cb373",
-      "bytes": 3621,
-      "classification": "runtime_source",
-      "source_classes": [
-        "runtime_source"
       ]
     },
     {

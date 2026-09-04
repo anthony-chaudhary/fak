@@ -1,6 +1,6 @@
 ---
 name: stability-score
-description: One repeatable pass that keeps fak trustworthy while it iterates fast — the question no other scorecard asks: as we add items quickly, how do we KNOW a regression / tail-wag / confusion landed, and how do we REVERT to a stable version? Runs the stability scorecard (tools/stability_scorecard.py) over the git-tracked tree across four groups — sentinel (a regression turns a gate RED), invariant (the core assumptions are encoded as tests), revert (we can roll back: keep/revert ladder, version pin. Use when this named workflow matches the task.
+description: "One repeatable pass that keeps fak trustworthy while it iterates fast — the question no other scorecard asks: as we add items quickly, how do we KNOW a regression / tail-wag / confusion landed, and how do we REVERT to a stable version? Runs the stability scorecard (tools/stability_scorecard.py) over the git-tracked tree across four groups — sentinel (a regression turns a gate RED), invariant (the core assumptions are encoded as tests), revert (we can roll back: keep/revert ladder, version pin. Use when this named workflow matches the task."
 metadata:
   opencode: claude-only
 ---

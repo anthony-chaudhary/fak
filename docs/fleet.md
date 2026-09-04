@@ -236,7 +236,7 @@ Example summary:
 REACHABLE  98/100
 STATE      live=86 idle=10 down=2 unknown=2
 CLASS      a100x8=64 h100x8=36
-VERSION    0.45.1  (6 reachable box(es) on other/none)
+VERSION    0.47.1  (6 reachable box(es) on other/none)
 INFERENCE useful=72/100 reported=80 ready=68 degraded=4 warming=3 blocked=2 unknown=3
 
 ATTENTION
@@ -244,8 +244,8 @@ ATTENTION
         box-031, box-047, box-068, box-091
   [CRIT] 2 box(es) blocked for inference
         box-014(blocked/needs-operator), box-062(blocked/no-model)
-  [WARN] 4 box(es) off the fleet version 0.45.1
-        box-005@0.45.0, box-018@0.45.0, box-052@0.45.0, box-077@0.45.0
+  [WARN] 4 box(es) off the fleet version 0.47.1
+        box-005@0.47.0, box-018@0.47.0, box-052@0.47.0, box-077@0.47.0
 ```
 
 ## The readiness score

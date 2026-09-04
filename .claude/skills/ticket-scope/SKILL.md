@@ -1,6 +1,6 @@
 ---
 name: ticket-scope
-description: One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit (`fak issue contract` for structure/size/routing, `fak dispatch issue-smallness-lint` for atomicity, `fak issue cohort` for batch/wave placement) and reads back one verdict per issue: DISPATCHABLE, or TRIAGE (add the missing section), DECOMPOSE (S2+ epic → leaves), or SPLIT (two deliverables / not. Use when this named workflow matches the task.
+description: "One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit (`fak issue contract` for structure/size/routing, `fak dispatch issue-smallness-lint` for atomicity, `fak issue cohort` for batch/wave placement) and reads back one verdict per issue: DISPATCHABLE, or TRIAGE (add the missing section), DECOMPOSE (S2+ epic → leaves), or SPLIT (two deliverables / not. Use when this named workflow matches the task."
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob

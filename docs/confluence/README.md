@@ -49,12 +49,6 @@ author here  ──(git)──►  fak repo (docs/confluence/*.xhtml)
   place. `--dry-run` shows the resolved target without writing.
 - `confluence pull <id|title>` / `confluence status <file>` read back for verification.
 
-## Benchmark artifact publication reruns
-
-For the witnessed archive → analysis → attachments → page → independent-read-back workflow, including
-binary-transfer failures, collision-safe attachment manifests, AMOProf evidence boundaries, and the
-narrow scrubber-unavailable exception protocol, see
-[`CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md`](../notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md).
 ## Runbook: publish a page
 
 Run these **on the bridge machine** (the internal bridge), which has `$CONFLUENCE_TOKEN` available and network

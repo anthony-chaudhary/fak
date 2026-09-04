@@ -1,6 +1,6 @@
 ---
 name: disambiguate-section
-description: Apply the concept-disambiguation pass to ANOTHER section of fak - an under-covered watched family (gateway-engine, guard-gate, ...) or a newly-discovered overloaded root (evict, decision, render, plan, pool, layout) - and, when a section is bigger than one sitting, file a GitHub ticket that scopes it with real context. Two modes over the same scorecard (tools/concept_disambiguation_scorecard.py): APPLY picks the worst-covered section from --gaps, surfaces its genuinely-DISTINCT confusable concepts (filtering inflections), adds grounded + glossary-anchored rows, draws the distinctions, re-measures to PROVE. Use when this named workflow matches the task.
+description: "Apply the concept-disambiguation pass to ANOTHER section of fak - an under-covered watched family (gateway-engine, guard-gate, ...) or a newly-discovered overloaded root (evict, decision, render, plan, pool, layout) - and, when a section is bigger than one sitting, file a GitHub ticket that scopes it with real context. Two modes over the same scorecard (tools/concept_disambiguation_scorecard.py): APPLY picks the worst-covered section from --gaps, surfaces its genuinely-DISTINCT confusable concepts (filtering inflections), adds grounded + glossary-anchored rows, draws the distinctions, re-measures to PROVE. Use when this named workflow matches the task."
 ---
 
 # disambiguate-section - extend crystal clarity to the next section (or file the ticket)

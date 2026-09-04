@@ -97,7 +97,7 @@
 
 ## Companions
 
-- [`field-borrow`](../skills/field-borrow/SKILL.md)
+- [`field-borrow`](../../.claude/skills/field-borrow/SKILL.md)
 - [`docs/native-inference-goal.md`](../native-inference-goal.md)
 - [`docs/notes/CONCEPT-STUDY-LEMONADE-2026-09-03.md`](CONCEPT-STUDY-LEMONADE-2026-09-03.md)
 - [`docs/research/monitored-repositories.json`](../research/monitored-repositories.json)

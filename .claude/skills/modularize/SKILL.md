@@ -1,6 +1,6 @@
 ---
 name: modularize
-description: One focused, repeatable pass that retires the code-quality scorecard's `architecture` debt — the god-files (>1500 lines) and god-functions (>200 lines) that /quality-score flags as RISKY and explicitly defers to "a focused pass". Splits a monolith along REAL concern seams via behavior-preserving code motion (the goimports recipe: hazard-check → plan boundaries with tools/godsplit_plan.py → sed-extract → goimports -w → gofmt → prove-no-decl-dropped with tools/refactor_verify.py → verify → prove → commit by explicit path), and extracts long functions into named helpers (linear. Use when this named workflow matches the task.
+description: "One focused, repeatable pass that retires the code-quality scorecard's `architecture` debt — the god-files (>1500 lines) and god-functions (>200 lines) that /quality-score flags as RISKY and explicitly defers to \"a focused pass\". Splits a monolith along REAL concern seams via behavior-preserving code motion (the goimports recipe: hazard-check → plan boundaries with tools/godsplit_plan.py → sed-extract → goimports -w → gofmt → prove-no-decl-dropped with tools/refactor_verify.py → verify → prove → commit by explicit path), and extracts long functions into named helpers (linear. Use when this named workflow matches the task."
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob

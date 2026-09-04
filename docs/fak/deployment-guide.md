@@ -153,7 +153,7 @@ Clear every item before a network-facing deploy. Sources for each are in
   metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
 - [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
   tag for containers) rather than tracking `latest`. This guide tracks
-  **v0.45.0**.
+  **v0.47.0**.
 
 ---
 
@@ -174,7 +174,7 @@ shell, no package manager, runs as `nonroot`, exposes `8080`.
 ### Pull (recommended)
 
 ```bash
-docker pull ghcr.io/anthony-chaudhary/fak:0.45.0
+docker pull ghcr.io/anthony-chaudhary/fak:0.47.0
 # or track the moving tag:
 docker pull ghcr.io/anthony-chaudhary/fak:latest
 ```
@@ -183,13 +183,13 @@ docker pull ghcr.io/anthony-chaudhary/fak:latest
 
 ```bash
 # From a clone (repo root, where the Dockerfile lives):
-docker build -t fak:0.45.0 .
+docker build -t fak:0.47.0 .
 
 # Stamp a specific version into the binary:
-docker build --build-arg APP_VERSION=0.45.0 -t fak:0.45.0 .
+docker build --build-arg APP_VERSION=0.47.0 -t fak:0.47.0 .
 
 # Without cloning — build straight from the Git remote:
-docker build -t fak:0.45.0 https://github.com/anthony-chaudhary/fak.git
+docker build -t fak:0.47.0 https://github.com/anthony-chaudhary/fak.git
 ```
 
 The default `CMD` is `serve --addr 0.0.0.0:8080` (containers must bind `0.0.0.0`,
@@ -200,7 +200,7 @@ not loopback). The `ENTRYPOINT` is the `fak` binary, so override the command to 
 
 ```bash
 # Reach a model server running on the host (Ollama here) from the container:
-docker run --rm -p 8080:8080 fak:0.45.0 serve --addr 0.0.0.0:8080 \
+docker run --rm -p 8080:8080 fak:0.47.0 serve --addr 0.0.0.0:8080 \
   --base-url http://host.docker.internal:11434/v1 \
   --model qwen2.5:1.5b
 ```
@@ -221,7 +221,7 @@ docker run --rm -p 8080:8080 \
   -e FAK_AUDIT_JOURNAL=/var/lib/fak/audit.jsonl \
   -v "$PWD/policy.json:/etc/fak/policy.json:ro" \
   -v fak-audit:/var/lib/fak \
-  fak:0.45.0 serve --addr 0.0.0.0:8080 \
+  fak:0.47.0 serve --addr 0.0.0.0:8080 \
     --provider openai --base-url https://api.openai.com/v1 \
     --model gpt-4o --api-key-env OPENAI_API_KEY \
     --policy /etc/fak/policy.json \
@@ -246,7 +246,7 @@ the default image as the `-cuda` tag:
 
 ```bash
 # Pull (a tagged release publishes both):
-docker pull ghcr.io/anthony-chaudhary/fak:0.45.0-cuda
+docker pull ghcr.io/anthony-chaudhary/fak:0.47.0-cuda
 
 # Or build locally, picking the arch that matches the rented card
 # (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
@@ -255,7 +255,7 @@ docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
 # Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
 docker run --rm --gpus all -p 8080:8080 \
   -v /models:/models:ro \
-  ghcr.io/anthony-chaudhary/fak:0.45.0-cuda \
+  ghcr.io/anthony-chaudhary/fak:0.47.0-cuda \
   serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
   --engine inkernel --backend cuda
 ```
@@ -277,7 +277,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: ghcr.io/anthony-chaudhary/fak:0.45.0   # published image; swap for your own to build from source
+    image: ghcr.io/anthony-chaudhary/fak:0.47.0   # published image; swap for your own to build from source
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -375,7 +375,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: ghcr.io/anthony-chaudhary/fak:0.45.0   # or REGISTRY/fak:0.45.0 if you build from source
+          image: ghcr.io/anthony-chaudhary/fak:0.47.0   # or REGISTRY/fak:0.47.0 if you build from source
           args:
             - serve
             - --addr=0.0.0.0:8080
@@ -471,12 +471,12 @@ SHA-256, installs to PATH — no Go, no clone):
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
-Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.45.0`;
+Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.47.0`;
 default latest release), `FAK_INSTALL_DIR` sets the target (default
 `/usr/local/bin` if writable, else `~/.local/bin`).
 
 ```bash
-FAK_VERSION=0.45.0 FAK_INSTALL_DIR=/usr/local/bin \
+FAK_VERSION=0.47.0 FAK_INSTALL_DIR=/usr/local/bin \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh)"
 fak version
 ```

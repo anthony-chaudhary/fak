@@ -1,6 +1,6 @@
 ---
 name: wave-harvest
-description: The honest closing half of a super loop — after a detached bulk wave (`/super-loop`) has run, HARVEST it: witness what each headless worker actually shipped (not what its log claims), re-queue the leaves that were claimed-done-but-not-shipped, stop workers that are spinning without net gain, and surface any lane a worker stranded dirty. A launch is not a ship, so a bulk loop is only durable if something reconciles its output against git ground truth. Read-mostly — it audits and. Use when this named workflow matches the task.
+description: "The honest closing half of a super loop — after a detached bulk wave (`/super-loop`) has run, HARVEST it: witness what each headless worker actually shipped (not what its log claims), re-queue the leaves that were claimed-done-but-not-shipped, stop workers that are spinning without net gain, and surface any lane a worker stranded dirty. A launch is not a ship, so a bulk loop is only durable if something reconciles its output against git ground truth. Read-mostly — it audits and. Use when this named workflow matches the task."
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the witness-over-self-report and no-narration-close discipline is load-bearing and not portable per-skill

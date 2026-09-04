@@ -22,9 +22,6 @@
         ".venv-test/Lib/site-packages/numpy/ma/README.rst",
         ".venv-test/Lib/site-packages/pip/_vendor/README.rst",
         "README.md",
-        "amo_prof-amoprof-kv$/README.md",
-        "amo_prof-amoprof-kv$/kvssd_trace_tool/README.md",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/README.md",
         "campaign_presets/README.md",
         "docs/_audits/bench_debug_wsl_smoke_2026-05-27.zip",
         "docs/_audits/bundle-wsl-debug-launch.py",
@@ -59,8 +56,6 @@
         ".cama-complete-install-dgx3.json",
         ".claude/settings.local.json",
         ".claude/skills/actually-test/judge.py",
-        ".claude/skills/actually-test/manifests/amoprof-charts.yaml",
-        ".claude/skills/actually-test/manifests/amoprof-kvb.yaml",
         ".claude/skills/actually-test/manifests/blktrace-e2e.yaml",
         ".claude/skills/actually-test/manifests/blktrace-smoke.yaml",
         ".claude/skills/actually-test/manifests/dgx-static-shims.yaml",
@@ -505,8 +500,7 @@
         ".claude/skills/actually-test/SKILL.md",
         ".claude/skills/actually-test/judge.py",
         ".claude/skills/actually-test/manifests/README.md",
-        ".claude/skills/actually-test/manifests/_deferred-ai-ops-report.md",
-        ".claude/skills/actually-test/manifests/amoprof-charts.yaml"
+        ".claude/skills/actually-test/manifests/_deferred-ai-ops-report.md"
       ],
       "source_classes": [
         "history_changelog_releases",
@@ -652,59 +646,9 @@
         }
       ],
       "example_paths": [
-        "publish/__init__.py",
-        "publish/_amoprof_blkio_cards.py",
-        "publish/_amoprof_bottleneck.py",
-        "publish/_amoprof_formula_table.py",
-        "publish/_amoprof_kvb_events.py",
-        "publish/_amoprof_methodology.py"
+        "publish/__init__.py"
       ],
       "source_classes": [
-        "runtime_source"
-      ]
-    },
-    {
-      "path": "amo_prof-amoprof",
-      "files": 41,
-      "directories": 4,
-      "bytes": 2497080,
-      "runtime_files": 37,
-      "test_files": 0,
-      "docs_files": 3,
-      "text_lines": 48959,
-      "languages": [
-        {
-          "language": "Python",
-          "files": 30
-        },
-        {
-          "language": "Config",
-          "files": 4
-        },
-        {
-          "language": "Docs",
-          "files": 3
-        },
-        {
-          "language": "Shell",
-          "files": 2
-        },
-        {
-          "language": "JavaScript",
-          "files": 1
-        }
-      ],
-      "example_paths": [
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/.gitlab-ci.yml",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/INSTALL.md",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/README.md",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/__init__.py",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/_agent.py",
-        "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/aggregator.py"
-      ],
-      "source_classes": [
-        "license_provenance",
-        "readme_docs",
         "runtime_source"
       ]
     },
@@ -932,46 +876,6 @@
         "outputexample/sweep_charts/confluence_xhtml_snippet.xml"
       ],
       "source_classes": [
-        "runtime_source"
-      ]
-    },
-    {
-      "path": "amo_prof-amoprof-kv$",
-      "files": 13,
-      "directories": 2,
-      "bytes": 830038,
-      "runtime_files": 9,
-      "test_files": 0,
-      "docs_files": 3,
-      "text_lines": 15845,
-      "languages": [
-        {
-          "language": "Shell",
-          "files": 5
-        },
-        {
-          "language": "Docs",
-          "files": 3
-        },
-        {
-          "language": "Python",
-          "files": 3
-        },
-        {
-          "language": "Config",
-          "files": 1
-        }
-      ],
-      "example_paths": [
-        "amo_prof-amoprof-kv$/.gitlab-ci.yml",
-        "amo_prof-amoprof-kv$/README.md",
-        "amo_prof-amoprof-kv$/amoprof/ai_metrics_dict.py",
-        "amo_prof-amoprof-kv$/amoprof/amoprof.py",
-        "amo_prof-amoprof-kv$/amoprof/install.sh",
-        "amo_prof-amoprof-kv$/amoprof/report_gen.sh"
-      ],
-      "source_classes": [
-        "readme_docs",
         "runtime_source"
       ]
     },
@@ -1430,8 +1334,6 @@
     ".venv-test/Lib/site-packages/hypothesis/vendor",
     ".venv-test/Lib/site-packages/invoke/vendor",
     "__pycache__",
-    "amo_prof-amoprof-kv$/amoprof/__pycache__",
-    "amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/report/__pycache__",
     "campaign_presets/__pycache__",
     "charts/__pycache__",
     "commands/__pycache__",
@@ -1453,5 +1355,5 @@
     "tests/smoke/__pycache__",
     "vendor"
   ],
-  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .claude/skills/actually-test/__pycache__, .git, .pytest_cache, .venv, .venv-test/Lib/site-packages/hypothesis/vendor, .venv-test/Lib/site-packages/invoke/vendor, __pycache__, amo_prof-amoprof-kv$/amoprof/__pycache__, amo_prof-amoprof/amo_prof-amoprof-kv$/amoprof/report/__pycache__, campaign_presets/__pycache__, charts/__pycache__, commands/__pycache__, dataset_scripts/__pycache__, engine/__pycache__, export/__pycache__, health/__pycache__, loader/__pycache__, models/__pycache__, monitoring/__pycache__, presets/__pycache__, publish/__pycache__, scripts/__pycache__, server/__pycache__, sinks/__pycache__, tests/__pycache__, tests/e2e/__pycache__, tests/factories/__pycache__, tests/smoke/__pycache__, vendor; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking"
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .claude/skills/actually-test/__pycache__, .git, .pytest_cache, .venv, .venv-test/Lib/site-packages/hypothesis/vendor, .venv-test/Lib/site-packages/invoke/vendor, __pycache__, campaign_presets/__pycache__, charts/__pycache__, commands/__pycache__, dataset_scripts/__pycache__, engine/__pycache__, export/__pycache__, health/__pycache__, loader/__pycache__, models/__pycache__, monitoring/__pycache__, presets/__pycache__, publish/__pycache__, scripts/__pycache__, server/__pycache__, sinks/__pycache__, tests/__pycache__, tests/e2e/__pycache__, tests/factories/__pycache__, tests/smoke/__pycache__, vendor; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking"
 }

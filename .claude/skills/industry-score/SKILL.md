@@ -1,6 +1,6 @@
 ---
 name: industry-score
-description: One repeatable pass that keeps fak's competitive story honest AND complete — graded industry-first, not from what fak happened to measure. Runs the industry scorecard (tools/industry_scorecard.py) over a modular data directory (tools/industry_scorecard.data/): a researched taxonomy of the dimensions the LLM-serving / agent-infra field competes on (vLLM/SGLang/TensorRT-LLM/llama.cpp), the current SOTA bar on each with a dated source, and fak's honest position — mostly named gaps. It drives two numbers, coverage (of the field) and parity-debt (honesty of the rows), and updates. Use when this named workflow matches the task.
+description: "One repeatable pass that keeps fak's competitive story honest AND complete — graded industry-first, not from what fak happened to measure. Runs the industry scorecard (tools/industry_scorecard.py) over a modular data directory (tools/industry_scorecard.data/): a researched taxonomy of the dimensions the LLM-serving / agent-infra field competes on (vLLM/SGLang/TensorRT-LLM/llama.cpp), the current SOTA bar on each with a dated source, and fak's honest position — mostly named gaps. It drives two numbers, coverage (of the field) and parity-debt (honesty of the rows), and updates. Use when this named workflow matches the task."
 ---
 
 # industry-score — keep the competitive map complete and honest, and prove it
