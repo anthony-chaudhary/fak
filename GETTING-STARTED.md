@@ -114,6 +114,8 @@ Verify structural refusal independent of any model:
 # -> verdict=ALLOW
 ```
 
+> **Windows shell note:** The single-quoted `--args '{...}'` works unchanged in git-bash and PowerShell 7. Windows PowerShell 5.1 strips the inner JSON quotes at the native-process boundary; use `--args '{\"_positional\":[\"alice\"]}'` there. On cmd.exe, use `--args "{""_positional"":[""alice""]}"`.
+
 Inspect and validate the policy manifest:
 
 ```bash

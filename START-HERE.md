@@ -1,117 +1,89 @@
-# Start here
+# Start here: human navigator and task router
 
-*This page owns one job: taking a task you already have — operate, integrate, deploy, contribute — and naming the single current authority for it plus one next action. It is for a reader who has already decided to use fak and needs a destination, not an explanation.* If you have not decided yet, the [README](README.md) is the front door; to install and run, use [Getting started](GETTING-STARTED.md); to look a document up by name, use [INDEX.md](INDEX.md); to learn the concepts in order, use [LEARNING-PATH.md](LEARNING-PATH.md).
+*`README.md` is the single canonical front door for product overview, value proposition, and quick proof. This page owns one job: human task routing. It takes a goal you have right now and routes you to the single authoritative document without circular loops.*
 
-This page routes; it does not re-explain. The repository's configured homepage is the published copy of [`docs/showcase.html`](docs/showcase.html), which the README audit keeps in step with the README.
+> **TL;DR:** Newcomers should focus on the 16 core pages in the Newcomer Tier below. For immediate tasks, use the Task Router table to jump directly to the right guide.
 
-FAK coordinates the whole agent path, not isolated components. It turns observations about context, policy, and execution options into a constrained route, then brings tool actions and results back through typed checks. This coordination is broader than worker orchestration.
+The documentation repository contains over 1,200 pages spanning specifications, historical research notes, and benchmarks. To prevent navigation confusion, documentation is split into two distinct tiers: the **Newcomer Tier** (the essential 16 core pages) and the **Operator/Maintainer Tier**.
 
-For the current product focus—fewer tokens, fewer turns, better model routing, and controllable long sessions—start with [Spend fewer tokens and turns](docs/CAPABILITIES.md).
+---
 
-For the durable product thesis—“don’t make me think,” without surrendering control—read
-[The problems fak exists to solve](docs/problems-we-solve.md). It defines four checks applied
-to every change—managed context, net-true efficiency, bounded adaptation, and integrated
-operations—and a separate centrality signal for deciding which work is closest to those
-connected user problems.
+## The Newcomer Tier (Essential 16 pages)
 
-For the current investment boundary and capability classification, read [Project orientation: the agent-kernel center](docs/project-orientation.md).
+If you are new to fak, focus exclusively on these core documents. They cover everything required to understand, install, configure, and operate the runtime:
 
-## See one verdict in one command — no key, model, or GPU
+| Document | Purpose |
+|---|---|
+| [`README.md`](README.md) | Canonical front door, product overview, and 60-second proof. |
+| [`GETTING-STARTED.md`](GETTING-STARTED.md) | Concrete setup sequence: offline verification, gateway setup, and local serve. |
+| [`docs/fak/tutorial.md`](docs/fak/tutorial.md) | Step-by-step guided first session with captured command outputs. |
+| [`docs/repro-packet.md`](docs/repro-packet.md) | Deterministic offline reproducibility packet and policy checks. |
+| [`docs/fak/governed-agent-quickstart.md`](docs/fak/governed-agent-quickstart.md) | 10-minute quickstart to launch a governed agent offline. |
+| [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md) | Stand up a shared OpenAI, Anthropic, or MCP gateway (`fak serve`). |
+| [`docs/integrations/README.md`](docs/integrations/README.md) | Integration chooser for Claude Code, Codex, Cursor, and other harnesses. |
+| [`docs/integrations/claude.md`](docs/integrations/claude.md) | Default one-command proxy recipe (`fak guard -- claude`). |
+| [`POLICY.md`](POLICY.md) | Schema and reference for authoring default-deny capability floors. |
+| [`docs/showcase.html`](docs/showcase.html) | Interactive browser tour of tool call adjudication and caching. |
+| [`docs/adoption/troubleshooting-first-run.md`](docs/adoption/troubleshooting-first-run.md) | Symptoms, causes, and one-line fixes for common first-run issues. |
+| [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) | Performance map for token savings, turn elimination, and context reuse. |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture boundary and whole-path agent coordination target. |
+| [`docs/glossary.md`](docs/glossary.md) | Precise definitions for core runtime terms. |
+| [`docs/FAQ.md`](docs/FAQ.md) | Frequently asked questions on setup, protocols, and security. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Guidelines for contributing code or documentation. |
 
-If you are evaluating fak for the first time, the shortest proof that it manages a
-tool-using agent is a single copy-pasteable command:
+### Quick verification: try it (30 seconds)
+
+Test tool-call adjudication locally without a model or GPU:
 
 ```bash
-fak agent --offline
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 ```
 
-It runs a deterministic end-to-end check against a mock planner and prints three
-adjudicated results — `task completed (booked) YES / YES`, `poisoned result blocked YES`,
-and `destructive op prevented YES` — so you see the managed-agent path and the policy
-boundary decide, with no key, model download, or GPU.
+**Expected output:**
+```
+verdict=DENY reason=POLICY_BLOCK by=monitor
+```
 
-**Expected output:** this page deliberately does not reprint it. The verbatim block lives
-in one place, [Getting started § Tier 0](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min),
-and the complete unabridged capture is in the [tutorial](docs/fak/tutorial.md). For the
-expanded policy, routing, and benchmark sequence, use the
-[one-minute offline proof](docs/repro-packet.md).
+---
 
-Everything below is the route map — choose the job you have now.
+## Task Router: what do you want to do today?
 
-## If you already have an AI assistant
+Select the task you need to accomplish to find its primary guide and immediate next action:
 
-Treat onboarding as a capability decision, not just a proxy setting:
-
-- Route the assistant through one managed interface: `fak agent`, `fak manage`, `fak serve`, or a documented adapter.
-- Inventory every tool, credential, direct provider call, shell, network path, and MCP server it can reach.
-- Start with least authority, prove one allowed action and one structural denial, and retain the verdict/result evidence.
-- Expand one capability at a time; keep bypass paths out of reach or isolate them separately.
-
-**Blast radius:** FAK mediates only traffic crossing the selected interface. It does not sandbox the host or govern side channels and credentials that bypass FAK. The [architecture boundary](docs/architecture.md) shows what is inside and outside that claim.
-
-## Choose your route
-
-| If you want to… | Go here |
-|---|---|
-| Discover token, turn, cache, routing, and session-control capabilities | [Performance-first capability map](docs/CAPABILITIES.md) |
-
-
-| You want to… | Current route | Next action |
+| You want to… | Authoritative route | Next action |
 |---|---|---|
-| Understand what fak manages | [README](README.md) | Choose `fak guard`, `fak serve`, or the offline proof from the first-screen table. |
-| Stand up a governed agent, offline, in ~10 min | [Governed-agent quickstart](docs/fak/governed-agent-quickstart.md) | Run the one-command governed session, then the server-side floor + audit + DENY path. |
-| Evaluate the kernel locally | [Reproducibility packet](docs/repro-packet.md) | Run its copy-paste proof and compare the three expected results. |
-| Add fak beside one agent | [`fak guard` quickstart](README.md#manage-one-local-agent-fak-guard) | Launch the agent you already use through `fak guard`. |
-| Run a shared or durable endpoint | [Server quickstart](docs/fak/server-quickstart.md) | Start `fak serve`, then call its health and model endpoints. |
-| Integrate a client or agent | [Integration guides](docs/integrations/) | Select the guide for your client and follow its smallest working path. |
-| Fix a first command that did not work | [First-run troubleshooting](docs/adoption/troubleshooting-first-run.md) | Match your symptom — binary not found, canned replies, an upstream `401`, a refused tool call, or a taken port — to its cause and one-line fix. |
-| Operate or deploy fak | [Deployment chooser](docs/deployment.md) | Choose local, fleet, cloud, or air-gapped operation by requirements, then follow its health check. |
-| Contribute code or docs | [Contributing guide](CONTRIBUTING.md) | No write access? Follow [fork and open a pull request](CONTRIBUTING.md#fork-and-open-a-pull-request). Maintainers: read the shared-checkout workflow, then choose a scoped issue. |
-| Look a document up by name, component, or artifact | [Documentation index](INDEX.md) | Search the exhaustive map for the page you already know the name of, or its versioned/historical route. |
+| Understand what fak is and read the pitch | [`README.md`](README.md) | Read the front door and inspect the hardware benchmark table. |
+| Verify the tool-call boundary offline | [`docs/repro-packet.md`](docs/repro-packet.md) | Run the deterministic offline proof with zero downloads (no key, model, or GPU). |
+| Install fak on your local machine | [`GETTING-STARTED.md`](GETTING-STARTED.md) | Download a prebuilt binary or run `go install`, then verify your install. |
+| Protect an agent you already use | [`docs/integrations/README.md`](docs/integrations/README.md) | Pick your agent harness and launch it behind `fak guard`. |
+| Run a shared model gateway | [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md) | Launch `fak serve` pointing to an upstream provider or Ollama. |
+| Author custom tool allow/deny rules | [`POLICY.md`](POLICY.md) | Dump the built-in policy with `fak policy --dump` and customize it. |
+| Fix a command that failed or misbehaved | [`docs/adoption/troubleshooting-first-run.md`](docs/adoption/troubleshooting-first-run.md) | Match your symptom to its cause and apply the one-line fix. |
+| Understand how fak coordinates execution | [`docs/architecture.md`](docs/architecture.md) | Review the five-layer observation to typed-effect architecture. |
+| Contribute code or documentation | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Check prerequisites, sign the DCO, and follow the contribution workflow. |
 
-## Builder routes
+---
 
-Choose the route that matches the next builder decision; each destination owns its prerequisites and support boundary.
+## Operator and Maintainer Tier
 
-| You want to… | Current route | Next action |
-|---|---|---|
-| Connect an agent, client, or protocol | [Integration path chooser](docs/integrations/README.md) | Select the row for the agent you run and follow its smallest supported path. |
-| Choose a cloud or deployment target | [Supported clouds](docs/supported/clouds.md) | Match the target to its stated support and evidence before deploying. |
-| Exercise a runnable outcome | [Demo chooser](docs/run-the-demos.md) | Pick a demo by outcome, time, hardware, and proof, then run its self-check. |
-| Resolve a setup or usage question | [FAQ](docs/FAQ.md) | Choose the task question and follow its linked authority. |
+Use these resources when deploying to production, running fleet infrastructure, or working on the kernel codebase:
 
-## Operator routes
+### Production and deployment
+- Cloud deployment: [`docs/deployment.md`](docs/deployment.md) covers local, fleet, and air-gapped deployment patterns.
+- Supported providers: [`docs/supported/clouds.md`](docs/supported/clouds.md) details hosted model provider support.
+- Reference architecture: [`docs/vendor/neo-cloud-reference-architecture.md`](docs/vendor/neo-cloud-reference-architecture.md) documents production cloud topologies.
+- Rollback procedures: [`docs/ROLLBACK.md`](docs/ROLLBACK.md) details safe recovery steps for bad deployments.
+- Security policy: [`SECURITY.md`](SECURITY.md) defines capability security guarantees and private vulnerability disclosure.
 
-Use these routes after choosing to operate or deploy fak; they expose current boundaries, recovery, hardware evidence, and one production architecture.
+### Benchmarks and hardware
+- Hardware matrix: [`docs/HARDWARE-MATRIX.md`](docs/HARDWARE-MATRIX.md) lists supported acceleration targets (Apple Silicon, AMD, NVIDIA).
+- Benchmark authority: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) provides canonical benchmarks and claim boundaries.
+- Claims register: [`CLAIMS.md`](CLAIMS.md) records shipped, simulated, and stub status for all claims.
+- Product status: [`STATUS.md`](STATUS.md) tracks subsystem implementation maturity.
 
-| You want to… | Current route | Next action |
-|---|---|---|
-| Check current maturity and boundaries | [Product status](docs/PRODUCT-STATUS.md) | Verify the capability state and evidence before relying on it. |
-| Recover from a bad upgrade or release | [Rollback procedure](docs/ROLLBACK.md) | Select the affected deployment and follow the bounded recovery sequence. |
-| Match a workload to supported hardware | [Hardware matrix](docs/HARDWARE-MATRIX.md) | Choose the backend whose evidence satisfies the workload requirement. |
-| Review a production vendor-cloud shape | [Neo Cloud reference architecture](docs/vendor/neo-cloud-reference-architecture.md) | Compare its assumptions with the target environment before adopting it. |
-
-## Current product paths
-
-The routes above describe the current generation of fak unless a page marks itself historical, experimental, simulated, or superseded.
-
-- **`fak guard`** manages one existing local agent and is the default integration path.
-- **`fak serve`** runs the same kernel as a shared or durable OpenAI, Anthropic, or MCP endpoint.
-- **Offline proof** demonstrates adjudication and agent behavior without external compute.
-
-Deployment support depends on the selected backend and environment. Each quickstart names its own prerequisites and supported boundary; the [README](README.md#one-managed-agent-two-ways-to-run-the-kernel) is authoritative for choosing a mode.
-
-## FAK or DOS?
-
-Use **FAK** for the agent execution path (tool calls, context, tokens, models, cache, policy, and serving). Use **DOS** for the work decision/proof path (admission, leases, verification, witnesses, liveness, and operator decisions). FAK's repository workflows compose DOS; they do not make the two kernels interchangeable. See [FAK and DOS: which layer owns what](docs/fak-vs-dos.md).
-## Deeper maps
-
-- **Words this project coined or overloaded:** [`docs/glossary.md`](docs/glossary.md) pins down kernel, context, adjudicator, vDSO, context-MMU, and the capability floor / result admission pair.
-- **Machines and coding agents:** [`llms.txt`](llms.txt) maps tasks to authoritative files.
-- **All documentation:** [`INDEX.md`](INDEX.md) is the exhaustive repository-wide index — use it when you already know a document, component, or artifact name.
-- **Repository agents:** [`AGENTS.md`](AGENTS.md) contains build, proof, commit, and shared-tree rules. It is written for automated contributors working inside the maintainers' shared checkout; human contributors want [`CONTRIBUTING.md`](CONTRIBUTING.md) instead.
-- **Claims:** [`CLAIMS.md`](CLAIMS.md) records shipped, simulated, and stub status.
-- **Project evolution:** [`docs/notes/`](docs/notes/) preserves dated research, decisions, and historical context.
-- **Participation:** the [Code of Conduct](.github/CODE_OF_CONDUCT.md) governs issues, pull requests, and reviews, and names the route for reporting a problem.
-
-If you are still deciding, use the default: [run the one-minute offline proof](docs/repro-packet.md).
+### Kernel internals and repository workflows
+- Extending the kernel: [`EXTENDING.md`](EXTENDING.md) explains how to register new leaves without editing core files.
+- Internal architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md) details kernel subsystem contracts.
+- Automated coding agents: [`AGENTS.md`](AGENTS.md) contains operational rules for autonomous workers on the shared trunk.
+- Exhaustive documentation index: [`INDEX.md`](INDEX.md) catalogs the full 1,200+ page corpus for name-based lookups and archival research notes.
+- Kernel boundary separation: [`docs/fak-vs-dos.md`](docs/fak-vs-dos.md) distinguishes the agent execution path (FAK) from the work decision path (DOS).
