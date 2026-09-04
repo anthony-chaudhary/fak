@@ -267,3 +267,52 @@ func assertSameF32(t *testing.T, label string, got, want []float32) {
 		}
 	}
 }
+
+type batchRecordingBackend struct {
+	compute.Backend
+	began   int
+	flushed int
+}
+
+func (b *batchRecordingBackend) BeginBatch() {
+	b.began++
+}
+
+func (b *batchRecordingBackend) FlushBatch() {
+	b.flushed++
+}
+
+func TestHALBatchedPrefillGroupsTokensAcrossBatchBackend(t *testing.T) {
+	cfg := Config{
+		HiddenSize:        16,
+		NumLayers:         2,
+		NumHeads:          4,
+		NumKVHeads:        2,
+		HeadDim:           4,
+		IntermediateSize:  32,
+		VocabSize:         64,
+		RMSNormEps:        1e-5,
+		RopeTheta:         10000,
+		TieWordEmbeddings: true,
+		EOSTokenID:        63,
+	}
+	m := NewSynthetic(cfg)
+	be := &batchRecordingBackend{Backend: compute.Pick("cpu-ref")}
+	s := m.NewBackendSession(be)
+
+	prompt := []int{3, 7, 11, 19, 23}
+	legacy := m.NewSession()
+	wantLogits := legacy.Prefill(prompt)
+	gotLogits := s.Prefill(prompt)
+	assertSameF32(t, "batched prefill logits", gotLogits, wantLogits)
+
+	if be.began == 0 {
+		t.Fatalf("batchRecordingBackend BeginBatch was never called during prompt prefill")
+	}
+	if be.began != be.flushed {
+		t.Fatalf("batchRecordingBackend BeginBatch/FlushBatch mismatched: began=%d flushed=%d", be.began, be.flushed)
+	}
+	if s.halKV.Len() != len(prompt) {
+		t.Fatalf("batched prefill KV store len=%d, want %d", s.halKV.Len(), len(prompt))
+	}
+}
