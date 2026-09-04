@@ -257,7 +257,7 @@ func Verify(c Certificate, jv JournalVerifier) Result {
 	return r
 }
 
-// MarshalIndent renders a certificate as pretty JSON (the on-disk / on-wire form).
+// Marshal renders a certificate as pretty JSON (the on-disk / on-wire form).
 func (c Certificate) Marshal() ([]byte, error) { return json.MarshalIndent(c, "", "  ") }
 
 // Parse decodes a certificate from its JSON form.
