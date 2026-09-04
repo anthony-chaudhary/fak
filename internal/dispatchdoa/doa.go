@@ -1,6 +1,8 @@
 // Package dispatchdoa detects DOA (dead-on-arrival) dispatch spawns: a worker that
 // the dispatcher DID spawn but that died before it ever began work.
 //
+// Invariant: dispatch DOA classification is fail-closed and deterministic.
+//
 // # Why this exists (#5868)
 //
 // Between 2026-07-28 and 2026-08-03 the dispatcher spawned every worker with an
@@ -199,6 +201,13 @@ type Verdict struct {
 	Signature string
 }
 
+// Invariant: dispatch DOA classification is fail-closed and deterministic.
+// Any malformed log, unstat-able file, missing spawn header, or observed
+// launch marker yields a non-DOA verdict to prevent false positive attributions.
+//
+// Guard: files lacking the required SpawnHeaderPrefix or exceeding StubMaxBytes
+// are rejected early fail-closed to avoid unnecessary scans of healthy runs.
+//
 // Classify grades one worker log into a DOA verdict from its HEAD (the first
 // HeadBytes; a DOA log is a stub so that is all of it) and its total size in bytes.
 // size < 0 means the log could not be stat'd.
