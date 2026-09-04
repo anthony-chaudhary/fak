@@ -387,6 +387,7 @@ concurrent = [
   "toolcatalog",
   "toolcallcontrol",
   "projectassets",
+  "power",
   "sessionintent",
   "serverproduct",
   "serveradapter",
@@ -637,6 +638,7 @@ autopick = [
   "tempartifact",
   "valuechain",
   "hostdiag",
+  "power", # internal/power leaf (cross-platform OS power assertion and wake-lock management)
   "ultracodenegcontrol",
   "systembaseline",
   "studyclass",
@@ -1279,6 +1281,7 @@ toolcatalog = ["internal/toolcatalog/**"]
 toolcallcontrol = ["internal/toolcallcontrol/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
 projectassets = ["internal/projectassets/**"]
+power = ["internal/power/**"]
 sessionintent = ["internal/sessionintent/**"]
 serverproduct = ["internal/serverproduct/**"]
 serveradapter = ["internal/serveradapter/**"]
@@ -1295,6 +1298,7 @@ cloudroute = ["internal/cloudroute/**"]
 tempartifact = ["internal/tempartifact/**"]
 valuechain = ["internal/valuechain/**"]
 hostdiag = ["internal/hostdiag/**"]
+power = ["internal/power/**"]
 ultracodenegcontrol = ["internal/ultracodenegcontrol/**"]
 systembaseline = ["internal/systembaseline/**"]
 studyclass = ["internal/studyclass/**"]
