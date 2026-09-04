@@ -99,6 +99,12 @@ func CalculateInterest(c Criticality, bounds BoundsAndLimits, e Evidence, gap fl
 		drivers = append(drivers, "integrated_untested_hazard")
 	}
 
+	// Excess comments penalty: formulaic noise or comment bloat is bad debt.
+	if e.ExcessComments {
+		rate += 0.05
+		drivers = append(drivers, fmt.Sprintf("excess_comment_bloat (%.1f%% comments)", e.CommentRatio*100))
+	}
+
 	// Pacing urgency adjustments.
 	switch bounds.Pacing {
 	case PacingUrgent:

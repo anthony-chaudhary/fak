@@ -214,6 +214,12 @@ func recomputeLane(l *DebtLane) {
 		gap = 0
 	}
 	l.MaturityGap = math.Round(gap*10) / 10
+	if l.Evidence.CodeLines > 0 && l.Evidence.CommentRatio == 0 && l.Evidence.CommentLines > 0 {
+		l.Evidence.CommentRatio = math.Round((float64(l.Evidence.CommentLines)/float64(l.Evidence.CodeLines))*1000) / 1000
+	}
+	if l.Evidence.CodeLines > 30 && l.Evidence.CommentRatio > 0.35 {
+		l.Evidence.ExcessComments = true
+	}
 	l.Interest = CalculateInterest(l.Criticality, l.Bounds, l.Evidence, l.MaturityGap)
 	l.DebtPrincipal, l.CarryingCost, l.TotalDebt = CalculateDebt(l.Maturity, l.TargetMaturity, l.Weight, l.Interest, l.Bounds)
 	l.DenominatorContribution = math.Round(l.TargetMaturity*l.Weight*10) / 10
@@ -368,6 +374,9 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		return ev
 	}
 
+	formulaicCount := 0
+	hasFormulaicFiller := false
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
 			continue
@@ -411,7 +420,7 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		ev.FilesCount++
 		ev.HasCode = true
 
-		// Parse non-test files for exported symbols and contract comments.
+		// Parse non-test files for exported symbols and comment metrics.
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			continue
@@ -421,6 +430,19 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		node, err := parser.ParseFile(fset, fullPath, content, parser.ParseComments)
 		if err != nil {
 			continue
+		}
+
+		for _, cg := range node.Comments {
+			for _, c := range cg.List {
+				ev.CommentLines += strings.Count(c.Text, "\n") + 1
+			}
+			isForm, isFiller := isFormulaicGamingComment(cg)
+			if isForm {
+				formulaicCount++
+			}
+			if isFiller {
+				hasFormulaicFiller = true
+			}
 		}
 
 		for _, decl := range node.Decls {
@@ -463,15 +485,13 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 				}
 			}
 		}
+	}
 
-		if !ev.HasContractComments {
-			for _, cg := range node.Comments {
-				if isSubstantiveContractComment(cg) {
-					ev.HasContractComments = true
-					break
-				}
-			}
-		}
+	if ev.CodeLines > 0 {
+		ev.CommentRatio = math.Round((float64(ev.CommentLines)/float64(ev.CodeLines))*1000) / 1000
+	}
+	if (ev.CodeLines > 30 && ev.CommentRatio > 0.35) || (hasFormulaicFiller && formulaicCount >= 2) || formulaicCount >= 3 {
+		ev.ExcessComments = true
 	}
 
 	if ev.ExportedSymbols > 0 && float64(ev.DocumentedExports)/float64(ev.ExportedSymbols) >= 0.75 {
@@ -714,34 +734,33 @@ func referencesName(expr ast.Expr, name string) bool {
 	return found
 }
 
-func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
+// isFormulaicGamingComment detects formulaic comments like "Contract:", "Invariant:", "Fail-closed:"
+// that are used as filler (keyword stuffing, short stubs) or formulaic bloat.
+func isFormulaicGamingComment(cg *ast.CommentGroup) (isFormulaic bool, isFiller bool) {
 	if cg == nil {
-		return false
+		return false, false
 	}
 	text := strings.TrimSpace(cg.Text())
-	if len(text) < 35 {
-		return false
-	}
 	lower := strings.ToLower(text)
 
-	hasContractMarker := strings.Contains(lower, "invariant:") ||
+	hasMarker := strings.Contains(lower, "invariant:") ||
 		strings.Contains(lower, "invariants:") ||
 		strings.Contains(lower, "key invariant:") ||
 		strings.Contains(lower, "contract:") ||
-		strings.Contains(lower, "assumption:") ||
-		strings.Contains(lower, "assumptions:") ||
 		strings.Contains(lower, "fail-closed:") ||
 		strings.Contains(lower, "fail-closed guard:") ||
-		strings.Contains(lower, "precondition:") ||
-		strings.Contains(lower, "postcondition:") ||
-		strings.Contains(lower, "guard:")
-	if !hasContractMarker {
-		return false
+		strings.HasPrefix(lower, "invariant") ||
+		strings.HasPrefix(lower, "guard") ||
+		strings.HasPrefix(lower, "contract") ||
+		strings.HasPrefix(lower, "fail-closed")
+
+	if !hasMarker {
+		return false, false
 	}
 
 	words := strings.Fields(lower)
-	if len(words) < 6 {
-		return false
+	if len(words) <= 3 {
+		return true, true
 	}
 
 	keywordCount := 0
@@ -753,10 +772,11 @@ func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
 			keywordCount++
 		}
 	}
-	if float64(keywordCount)/float64(len(words)) > 0.4 {
-		return false
+	if float64(keywordCount)/float64(len(words)) > 0.25 || keywordCount >= 3 {
+		return true, true
 	}
-	return true
+
+	return true, false
 }
 
 func readBenchmarkAuthorityLanes(path string) map[string]bool {

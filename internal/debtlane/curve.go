@@ -23,8 +23,11 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 		if e.CodeLines > 100 {
 			score += 0.5
 		}
-		if e.ExportedSymbols > 0 && e.DocumentedExports == e.ExportedSymbols {
-			score += 0.5
+		if e.ExcessComments {
+			score -= 0.5
+		}
+		if score < 0 {
+			score = 0
 		}
 		return score, "prototyped"
 	}
@@ -50,17 +53,22 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 		score += 1.0
 	}
 
-	// Hardened: documentation coverage and contract comments.
-	if e.ExportedSymbols > 0 && float64(e.DocumentedExports)/float64(e.ExportedSymbols) >= 0.8 {
+	// Engineering rigor: clean self-documenting structure and bounded blast radius constraints.
+	if !e.ExcessComments && e.CodeLines > 0 {
 		score += 0.5
 	}
-	if e.HasContractComments {
+	if e.DependentsCount <= 25 {
 		score += 0.5
 	}
 
 	// Production grade bonus: clean comprehensive surface.
-	if e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests {
+	if e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments {
 		score += 1.0
+	}
+
+	// Excess comments penalty: formulaic noise or comment bloat is bad debt.
+	if e.ExcessComments {
+		score -= 0.5
 	}
 
 	// An unintegrated unit of work cannot advance past the tested ceiling (5.0).
@@ -68,16 +76,19 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 		score = 5.0
 	}
 
-	// Clamp to 10.0 maximum.
+	// Clamp to [0.0, 10.0].
+	if score < 0 {
+		score = 0
+	}
 	if score > 10.0 {
 		score = 10.0
 	}
 	score = math.Round(score*10) / 10
 
 	switch {
-	case score >= 9.5 && e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests:
+	case score >= 9.5 && e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments:
 		rung = "production_grade"
-	case score >= 8.5 && e.Integrated && e.Dogfooded && e.Benchmarked:
+	case score >= 8.5 && e.Integrated && e.Dogfooded && e.Benchmarked && !e.ExcessComments:
 		rung = "hardened"
 	case score >= 7.5 && e.Integrated && e.Dogfooded && e.Benchmarked:
 		rung = "benchmarked"
@@ -112,8 +123,8 @@ func NextActionForGap(lane, unit string, score, target float64, e Evidence) stri
 		return fmt.Sprintf("dogfood %s: execute real runtime path and capture passing proof", lane)
 	case !e.Benchmarked:
 		return fmt.Sprintf("benchmark %s: add substantive Benchmark* functions measuring production operations with b.N loops, or register authoritative benchmark", lane)
-	case e.ExportedSymbols > e.DocumentedExports:
-		return fmt.Sprintf("harden %s: add substantive, non-tautological documentation for remaining %d exported symbol(s) in %s", lane, e.ExportedSymbols-e.DocumentedExports, unit)
+	case e.ExcessComments:
+		return fmt.Sprintf("clean %s: prune excess comment bloat and formulaic noise (%.1f%% comment ratio); make code self-documenting and verify invariants in tests", lane, e.CommentRatio*100)
 	default:
 		return fmt.Sprintf("advance %s: complete production contracts and verified defaults to reach %.1f", lane, target)
 	}

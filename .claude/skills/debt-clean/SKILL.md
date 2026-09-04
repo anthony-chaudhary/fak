@@ -1,6 +1,6 @@
 ---
 name: debt-clean
-description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Inspects `fak debt-lanes`, targets the highest-carrying-cost hotspots (or compounding-interest core lanes), advances maturity rungs with genuine tests/contracts/docs, re-measures with `--compare` to prove the denominator was level-set and total debt dropped, and commits by explicit path with `(fak <leaf>)`. Use when cleaning or retiring maturity debt across units of work.
+description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Inspects `fak debt-lanes`, targets the highest-carrying-cost hotspots (or compounding-interest core lanes), advances maturity rungs with genuine tests, integration, and benchmarks, re-measures with `--compare` to prove the denominator was level-set and total debt dropped, and commits by explicit path with `(fak <leaf>)`. Use when cleaning or retiring maturity debt across units of work.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
@@ -20,7 +20,7 @@ argument-hint: "[--lane <name>] [--top N] [--critical-only]  (no args = baseline
 > `--compare`, and commit by explicit path.
 
 The shape: **baseline debt lanes → pick bounded batch (1–3 units) → execute next action
-(tests/contracts/docs) → verify package → prove debt drop with `--compare` → commit by
+(tests/integration/benchmarks/clean bloat) → verify package → prove debt drop with `--compare` → commit by
 explicit path.**
 
 ---
@@ -33,8 +33,12 @@ not be rushed in a single turn). Enforce strict scoping:
 1. **Max 1–3 units of work per batch**: Focus on 1–3 closely related leaves or a single
    critical hotspot.
 2. **Shift-left proof**: Every maturity climb requires genuine disk evidence (passing
-   `*_test.go`, exported doc comments, real runtime wiring), never synthetic markers or mock-only claims.
-3. **Denominator honesty**: Advancing maturity increases realized points without shrinking
+   `*_test.go`, benchmarks, real runtime wiring), never synthetic markers or mock-only claims.
+3. **No comment gaming; excess comments is BAD debt**: Comments are NOT tracked as positive
+   debt retirement. Do not add formulaic "Contract:", "Invariant:", or "Fail-closed:" comment headers
+   or restate syntax. In fact, excess comments and comment bloat (>35% comment ratio or formulaic
+   keyword clutter) are penalized as BAD debt with interest rate penalties.
+4. **Denominator honesty**: Advancing maturity increases realized points without shrinking
    the denominator, genuinely raising the production-grade percentage.
 
 ---
@@ -102,12 +106,19 @@ The subagent executes the concrete work needed:
   Implements core functions, types, and logic in `internal/<lane>/`. Adheres to existing
   patterns and keeps the package focused.
 
-- **If undocumented exports (`ExportedSymbols > DocumentedExports`)**:
-  Adds high-value doc comments explaining invariants and behavior on all exported functions,
-  types, and constants.
+- **If unintegrated (`Integrated == false`)**:
+  Connects the package into production commands or registration graph.
 
-- **If missing contract comments**:
-  Adds explicit contract, invariant, and fail-closed comments where assumptions are made.
+- **If undogfooded (`Dogfooded == false`)**:
+  Executes real runtime path and captures passing proof in `internal/maturity/runtime-proofs.json`.
+
+- **If unbenchmarked (`Benchmarked == false`)**:
+  Adds substantive `Benchmark*` functions with `b.N` loops measuring production operations.
+
+- **If carrying excess comments (`ExcessComments == true`)**:
+  Prunes formulaic comment bloat, redundant syntax explanations, and keyword clutter. Code
+  must be clean and self-documenting; invariants belong in tests and code assertions. NEVER
+  add formulaic "Contract:", "Invariant:", "Fail-closed:" comments.
 
 ---
 

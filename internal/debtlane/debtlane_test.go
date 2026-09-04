@@ -692,43 +692,135 @@ func BenchmarkValidRun(b *testing.B) {
 	}
 }
 
-func TestAntiGamingContractComments(t *testing.T) {
+func TestExcessCommentsDetectedAndPenalized(t *testing.T) {
+	// 1. High comment ratio (> 0.35) on substantive code (> 30 lines) is flagged as excess comments.
+	evHighRatio := Evidence{
+		HasCode:         true,
+		CodeLines:       100,
+		CommentLines:    45,
+		CommentRatio:    0.45,
+		ExcessComments:  true,
+		HasTests:        true,
+		TestFilesCount:  2,
+		Integrated:      true,
+		Dogfooded:       true,
+		Benchmarked:     true,
+		DependentsCount: 1,
+	}
+
+	bounds := DefaultBoundsAndLimits(CriticalityCore)
+	interest := CalculateInterest(CriticalityCore, bounds, evHighRatio, 2.0)
+
+	// Interest should include excess_comment_bloat driver and penalty.
+	foundDriver := false
+	for _, d := range interest.Drivers {
+		if strings.Contains(d, "excess_comment_bloat") && strings.Contains(d, "45.0% comments") {
+			foundDriver = true
+			break
+		}
+	}
+	if !foundDriver {
+		t.Fatalf("expected excess_comment_bloat driver in interest, got: %v", interest.Drivers)
+	}
+
+	// 2. EvaluateMaturityCurve applies penalty and blocks advancing to hardened or production_grade.
+	score, rung := EvaluateMaturityCurve(evHighRatio)
+	if rung == "production_grade" || rung == "hardened" {
+		t.Fatalf("excess comments must prevent reaching hardened/production_grade rungs, got rung %q with score %.1f", rung, score)
+	}
+
+	// Compare with identical clean evidence without excess comments.
+	evClean := evHighRatio
+	evClean.CommentLines = 10
+	evClean.CommentRatio = 0.10
+	evClean.ExcessComments = false
+
+	cleanScore, cleanRung := EvaluateMaturityCurve(evClean)
+	if score >= cleanScore {
+		t.Fatalf("score with excess comments (%.1f) should be lower than clean score (%.1f)", score, cleanScore)
+	}
+	if cleanRung != "production_grade" {
+		t.Fatalf("clean fully-verified evidence should reach production_grade, got %q", cleanRung)
+	}
+
+	// 3. NextActionForGap suggests cleaning comment bloat and formulaic noise.
+	action := NextActionForGap("mycore", "internal/mycore", score, 10.0, evHighRatio)
+	if !strings.Contains(action, "clean mycore: prune excess comment bloat and formulaic noise") {
+		t.Fatalf("expected comment bloat cleanup action, got: %s", action)
+	}
+	if !strings.Contains(action, "45.0% comment ratio") {
+		t.Fatalf("expected action to cite 45.0%% comment ratio, got: %s", action)
+	}
+}
+
+func TestCommentsDoNotAwardMaturityPoints(t *testing.T) {
+	// Adding comments or formulaic doc headers must NOT award maturity points.
+	base := Evidence{
+		HasCode:           true,
+		CodeLines:         100,
+		HasTests:          true,
+		TestFilesCount:    2,
+		Integrated:        true,
+		Dogfooded:         true,
+		Benchmarked:       true,
+		ExportedSymbols:   10,
+		DocumentedExports: 0,
+		DependentsCount:   1,
+	}
+
+	scoreBase, rungBase := EvaluateMaturityCurve(base)
+
+	// Even if someone claims 100% documented exports or contract comments,
+	// no artificial bonus is awarded.
+	withComments := base
+	withComments.DocumentedExports = 10
+	withComments.Documented = true
+	withComments.HasContractComments = true
+
+	scoreCommented, rungCommented := EvaluateMaturityCurve(withComments)
+	if scoreCommented != scoreBase {
+		t.Fatalf("comments/docs must NOT increase maturity score: base=%.1f commented=%.1f", scoreBase, scoreCommented)
+	}
+	if rungCommented != rungBase {
+		t.Fatalf("comments/docs must NOT alter maturity rung: base=%q commented=%q", rungBase, rungCommented)
+	}
+}
+
+func TestFormulaicCommentsDetectedAsExcess(t *testing.T) {
 	fset := token.NewFileSet()
 	src := `package test
 
-// invariant
+// Invariant: invariant assumption guard fail-closed
 var a = 1
 
-// guard
+// Contract: callers must acquire the lock before mutating state partitions.
 var b = 2
 
-// Invariant: invariant assumption guard fail-closed
+// Fail-closed: returns error if context is cancelled
 var c = 3
-
-// Invariant: callers must acquire the shard lease lock before mutating table partitions.
-var d = 4
 `
 	node, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(node.Comments) != 4 {
-		t.Fatalf("expected 4 comments, got %d", len(node.Comments))
+	formulaicCount := 0
+	hasFiller := false
+	for _, cg := range node.Comments {
+		isForm, isFill := isFormulaicGamingComment(cg)
+		if isForm {
+			formulaicCount++
+		}
+		if isFill {
+			hasFiller = true
+		}
 	}
-	// The first 3 should be rejected as non-substantive or keyword-stuffed
-	if isSubstantiveContractComment(node.Comments[0]) {
-		t.Errorf("comment 0 (single word) should be rejected")
+
+	if formulaicCount < 3 {
+		t.Fatalf("expected all 3 formulaic comments to be detected, got %d", formulaicCount)
 	}
-	if isSubstantiveContractComment(node.Comments[1]) {
-		t.Errorf("comment 1 (single word) should be rejected")
-	}
-	if isSubstantiveContractComment(node.Comments[2]) {
-		t.Errorf("comment 2 (keyword soup) should be rejected")
-	}
-	// The 4th is genuine invariant explanation
-	if !isSubstantiveContractComment(node.Comments[3]) {
-		t.Errorf("comment 3 (real invariant) should be accepted")
+	if !hasFiller {
+		t.Fatalf("expected keyword-stuffed comment to be detected as filler")
 	}
 }
 

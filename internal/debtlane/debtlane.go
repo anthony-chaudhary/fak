@@ -55,20 +55,23 @@ type Interest struct {
 
 // Evidence captures verified facts discovered from disk for a unit of work.
 type Evidence struct {
-	FilesCount             int  `json:"files_count"`
-	TestFilesCount         int  `json:"test_files_count"`
-	CodeLines              int  `json:"code_lines"`
-	HasCode                bool `json:"has_code"`
-	HasTests               bool `json:"has_tests"`
-	Integrated             bool `json:"integrated"`
-	Dogfooded              bool `json:"dogfooded"`
-	Benchmarked            bool `json:"benchmarked"`
-	Documented             bool `json:"documented"`
-	ExportedSymbols        int  `json:"exported_symbols"`
-	DocumentedExports      int  `json:"documented_exports"`
-	DependentsCount        int  `json:"dependents_count"` // Inbound internal imports (blast radius).
-	TransitiveDependencies int  `json:"transitive_dependencies"`
-	HasContractComments    bool `json:"has_contract_comments"`
+	FilesCount             int     `json:"files_count"`
+	TestFilesCount         int     `json:"test_files_count"`
+	CodeLines              int     `json:"code_lines"`
+	CommentLines           int     `json:"comment_lines"`
+	CommentRatio           float64 `json:"comment_ratio"`
+	ExcessComments         bool    `json:"excess_comments"`
+	HasCode                bool    `json:"has_code"`
+	HasTests               bool    `json:"has_tests"`
+	Integrated             bool    `json:"integrated"`
+	Dogfooded              bool    `json:"dogfooded"`
+	Benchmarked            bool    `json:"benchmarked"`
+	Documented             bool    `json:"documented"`
+	ExportedSymbols        int     `json:"exported_symbols"`
+	DocumentedExports      int     `json:"documented_exports"`
+	DependentsCount        int     `json:"dependents_count"` // Inbound internal imports (blast radius).
+	TransitiveDependencies int     `json:"transitive_dependencies"`
+	HasContractComments    bool    `json:"has_contract_comments,omitempty"` // Deprecated: formulaic comments do not award maturity points.
 }
 
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.
