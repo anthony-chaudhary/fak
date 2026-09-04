@@ -223,6 +223,12 @@ func (s *Session) useHALF16Weights() bool {
 	return s.F16 && s.M != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
+// useHALKQuantWeights reports whether this session stages its resident dense k-quant weights
+// (Q5_K/Q6_K in m.kqw) directly onto a device backend that consumes quantized uploads (#9352).
+func (s *Session) useHALKQuantWeights() bool {
+	return s.M != nil && s.M.kqw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
+}
+
 var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
 
 // weightHALStaged caches one resident quantized weight on the backend under key,
@@ -458,6 +464,11 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 			return s.weightHALQ4K(name, qt)
 		}
 	}
+	if s.useHALKQuantWeights() {
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && (qt.kind == kindQ5K || qt.kind == kindQ6K) {
+			return s.weightHALKQuant(name, qt)
+		}
+	}
 
 	if s.useHALF16Weights() {
 		return s.weightHALF16(name)
@@ -483,6 +494,15 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		name := s.M.q4kHeadName()
 		if qt, ok := s.M.q4kw[name]; ok {
 			return s.weightHALQ4K(name, qt)
+		}
+	}
+	if s.useHALKQuantWeights() {
+		name := "lm_head.weight"
+		if _, ok := s.M.kqw[name]; !ok {
+			name = "model.embed_tokens.weight"
+		}
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && (qt.kind == kindQ5K || qt.kind == kindQ6K) {
+			return s.weightHALKQuant(name, qt)
 		}
 	}
 	if s.useHALF16Weights() {

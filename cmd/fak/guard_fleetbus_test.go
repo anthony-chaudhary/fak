@@ -555,3 +555,46 @@ func TestStartGuardFleetBusQuietSuppressesSuccessfulArming(t *testing.T) {
 		t.Fatalf("quiet mode must still arm fleet bus: %v", err)
 	}
 }
+
+func TestGuardResumeDirectiveWakesPausedSessions(t *testing.T) {
+	tbl := &session.Table{}
+	tbl.Transition("sess-1", session.Paused, "paused for test")
+	tbl.Transition("sess-2", session.Paused, "paused for test")
+	tbl.Transition("sess-running", session.Running, "")
+
+	ap := guardTestApplier(t, tbl, guardSeatRefresher{})
+
+	// 1. Resume all: transitions paused sessions to running, returns affected=2
+	out := ap.Apply(fleetBusDirective("resume", fleetbus.Selector{All: true}))
+	if out.Status != fleetbus.AckApplied || out.Affected != 2 {
+		t.Fatalf("outcome = %+v, want AckApplied with affected=2", out)
+	}
+	if !strings.Contains(out.Witness, "resumed 2 session(s)") {
+		t.Fatalf("witness = %q, want it to contain 'resumed 2 session(s)'", out.Witness)
+	}
+	if cur := tbl.Get("sess-1"); cur.Run != session.Running {
+		t.Errorf("sess-1 run state = %v, want Running", cur.Run)
+	}
+	if cur := tbl.Get("sess-2"); cur.Run != session.Running {
+		t.Errorf("sess-2 run state = %v, want Running", cur.Run)
+	}
+	if cur := tbl.Get("sess-running"); cur.Run != session.Running {
+		t.Errorf("sess-running run state = %v, want Running", cur.Run)
+	}
+
+	// 2. Second resume when no sessions are paused returns applied with affected=0
+	second := ap.Apply(fleetBusDirective("resume", fleetbus.Selector{All: true}))
+	if second.Status != fleetbus.AckApplied || second.Affected != 0 {
+		t.Fatalf("second outcome = %+v, want AckApplied with affected=0", second)
+	}
+	if !strings.Contains(second.Witness, "resumed 0 session(s)") {
+		t.Fatalf("witness = %q, want 'resumed 0 session(s)'", second.Witness)
+	}
+
+	// 3. Idle daemon with empty table returns applied with affected=0, never refuses
+	emptyAp := guardTestApplier(t, &session.Table{}, guardSeatRefresher{})
+	emptyOut := emptyAp.Apply(fleetBusDirective("resume", fleetbus.Selector{All: true}))
+	if emptyOut.Status != fleetbus.AckApplied || emptyOut.Affected != 0 {
+		t.Fatalf("empty daemon outcome = %+v, want AckApplied with affected=0", emptyOut)
+	}
+}

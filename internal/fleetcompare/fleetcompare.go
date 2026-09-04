@@ -1,20 +1,27 @@
+// Package fleetcompare provides utilities for slicing and comparing multi-node fleet metrics.
+//
+// Invariants: fleet comparison ensures consistent multi-node metric comparisons without drift.
+// Assumptions: columns map contains matching slice lengths for referenced keys.
+// Fail-closed guard: unaligned or missing metric columns produce empty slices rather than corrupt comparisons.
 package fleetcompare
 
 import "sort"
 
-// Slice contains decomposed metrics swept across a fixed parameter.
-// Invariant: Isolated = Shared - Cross for each corresponding index point.
-// Assumption: Input columns have aligned lengths and valid mean metrics.
+// Slice represents fixed-parameter metric columns extracted from fleet comparison data,
+// aligning independent variable steps with shared, isolated, and cross-uplift metrics.
 type Slice struct {
-	Xs       []float64
-	Shared   []float64
+	// Xs contains the variable sweep values for the unfixed dimension (e.g. turns or agents).
+	Xs []float64
+	// Shared contains the mean shared savings across fleet runs.
+	Shared []float64
+	// Isolated contains net isolated savings (Shared minus Cross).
 	Isolated []float64
-	Cross    []float64
+	// Cross contains cross-workload uplift means.
+	Cross []float64
 }
 
-// SliceFixed slices multidimensional simulation columns by a fixed parameter key
-// (e.g. "agents" or "turns") at value val, ordering results along the orthogonal axis.
-// Guard: Decomposes shared_saved_mean and cross_uplift_mean into isolated cache savings.
+// SliceFixed slices metric columns by fixing one key dimension (e.g. "agents" or "turns")
+// to a given value, sorting by the remaining dimension and computing isolated savings.
 func SliceFixed(cols map[string][]float64, key string, val float64) Slice {
 	other := "turns"
 	if key == "turns" {

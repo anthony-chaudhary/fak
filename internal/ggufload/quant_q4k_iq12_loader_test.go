@@ -36,10 +36,10 @@ func iq12MixedLoaderGGUF(t *testing.T, truncateLast bool) ([]byte, map[string][]
 	t.Helper()
 	const (
 		dim    = 256
-		layers = 5
+		layers = 6
 		align  = 32
 	)
-	types := []TensorType{TensorIQ2_XXS, TensorIQ2_XS, TensorIQ1_S, TensorIQ2_S, TensorIQ1_M}
+	types := []TensorType{TensorIQ2_XXS, TensorIQ2_XS, TensorIQ1_S, TensorIQ2_S, TensorIQ1_M, TensorQ2_K}
 	tensors := make([]iq12LoaderFixtureTensor, 0, len(types)+1)
 	wantRaw := make(map[string][]byte, len(types))
 	for layer, typ := range types {
@@ -54,7 +54,7 @@ func iq12MixedLoaderGGUF(t *testing.T, truncateLast bool) ([]byte, map[string][]
 	}
 	// A normalize-sensitive attention tensor follows the established Q8 route and lets Build
 	// finish while the five XL-recipe constituents remain raw resident.
-	qName := "blk.4.attn_q.weight"
+	qName := "blk.5.attn_q.weight"
 	tensors = append(tensors, iq12LoaderFixtureTensor{
 		name: qName, dims: []uint64{dim, 2 * dim}, typ: TensorQ4_K,
 		payload: iq12LoaderPayload(t, qName, []uint64{dim, 2 * dim}, TensorQ4_K, 0x7f),
@@ -121,7 +121,7 @@ func TestLoadQ2XLConstituentsStayResidentVerbatim(t *testing.T) {
 			t.Errorf("%s resident payload changed during load", name)
 		}
 	}
-	if !m.HasQ8("model.layers.4.self_attn.q_proj.weight") {
+	if !m.HasQ8("model.layers.5.self_attn.q_proj.weight") {
 		t.Fatal("normalize-sensitive Q4_K attention tensor did not follow the established Q8 route")
 	}
 }
@@ -136,6 +136,7 @@ func TestQ2XLResidentGeometryCoversAllIQ12Constituents(t *testing.T) {
 		{TensorIQ1_S, blockIQ1SBytes},
 		{TensorIQ2_S, blockIQ2SBytes},
 		{TensorIQ1_M, blockIQ1MBytes},
+		{TensorQ2_K, blockQ2KBytes},
 	} {
 		t.Run(tc.typ.String(), func(t *testing.T) {
 			weights, blockBytes, ok := residentExpertBlockGeometry(tc.typ)
@@ -152,7 +153,7 @@ func TestLoadQ2XLTruncatedPayloadFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadModelQ4K accepted a truncated GGUF payload")
 	}
-	if got := err.Error(); !strings.Contains(got, "blk.4.attn_q.weight") {
+	if got := err.Error(); !strings.Contains(got, "blk.5.attn_q.weight") {
 		t.Fatalf("error %q does not name the malformed tensor", got)
 	}
 }

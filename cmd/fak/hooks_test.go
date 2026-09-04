@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -329,5 +330,33 @@ func TestEmitFindingsJSONOrdersBlockingBeforeAdvisory(t *testing.T) {
 	}
 	if report.Findings[1].Gate != "PUBLIC_LEAK" || !report.Findings[1].Advisory {
 		t.Fatalf("findings[1] = %#v, want advisory PUBLIC_LEAK", report.Findings[1])
+	}
+}
+
+// TestHooksCommitMsg_rejectsSingleParentPseudoMerge proves issue #10882:
+// `fak hooks commit-msg` rejects a single-parent commit with subject `Merge ...` with COMMIT_MSG / MERGE_WITNESS_FAIL.
+func TestHooksCommitMsg_rejectsSingleParentPseudoMerge(t *testing.T) {
+	repo := t.TempDir()
+	gitHook(t, repo, "init", "-q")
+	gitHook(t, repo, "config", "user.name", "Test")
+	gitHook(t, repo, "config", "user.email", "test@example.com")
+	gitHook(t, repo, "config", "commit.gpgsign", "false")
+	gitHook(t, repo, "commit", "--allow-empty", "-m", "initial commit")
+
+	msgFile := filepath.Join(t.TempDir(), "msg.txt")
+	if err := os.WriteFile(msgFile, []byte("Merge branch 'main' into dev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"commit-msg", "--root", repo, msgFile})
+	if code != 1 {
+		t.Fatalf("runHooks commit-msg for pseudo-merge want exit 1, got %d; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "COMMIT_MSG") {
+		t.Errorf("stderr %q does not contain COMMIT_MSG", errb.String())
+	}
+	if !strings.Contains(errb.String(), "MERGE_WITNESS_FAIL") {
+		t.Errorf("stderr %q does not contain MERGE_WITNESS_FAIL", errb.String())
 	}
 }
