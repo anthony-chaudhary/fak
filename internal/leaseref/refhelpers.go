@@ -1,11 +1,11 @@
 package leaseref
 
-// refhelpers.go holds the small generic helpers shared by the three parallel ref kinds
-// (lock lease Record, intent lease IntentRecord, session descriptor SessionDescriptor)
-// that ride the SAME refs/fak/locks/* scan-and-partition shape: List/ListIntents/
-// ListSessions all walk `for-each-ref`, keep one kind, and read each blob; Live/
-// LiveIntents/LiveSessions all then partition a List* result into live-vs-expired.
-// Factoring the shape here keeps the three readers behaviorally identical BY
+// refhelpers.go holds the small generic helpers shared by the parallel ref kinds
+// (lock lease Record, intent lease IntentRecord, session descriptor SessionDescriptor,
+// contract lease ContractRecord) that ride the SAME refs/fak/locks/* scan-and-partition shape:
+// List/ListIntents/ListSessions/ListContracts all walk `for-each-ref`, keep one kind, and read each blob;
+// Live/LiveIntents/LiveSessions/LiveContracts all then partition a List* result into live-vs-expired.
+// Factoring the shape here keeps the readers behaviorally identical BY
 // CONSTRUCTION instead of by hand-copied code that can drift.
 
 import (

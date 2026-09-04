@@ -60,10 +60,11 @@ import (
 // refPrefix is the dedicated ref namespace every fak side ref lives under. Unlike
 // notes (confined to refs/notes/*), an ordinary ref can be named directly, so the
 // on-disk ref is EXACTLY refs/fak/locks/<id> — the namespace the issue asked for and
-// the one git fetch/push converges across clones. THREE ref kinds share this prefix: a
+// the one git fetch/push converges across clones. FOUR ref kinds share this prefix: a
 // lock lease at refs/fak/locks/<id> (this file), a live guard-session descriptor at
-// refs/fak/locks/session-<id> (session.go), and a work-target intent lease at
-// refs/fak/locks/intent-<key> (intent.go, #2155); the readers on each side filter by
+// refs/fak/locks/session-<id> (session.go), a work-target intent lease at
+// refs/fak/locks/intent-<key> (intent.go, #2155), and a ticket execution contract at
+// refs/fak/locks/contract-<ticket_id> (contract.go, #11165); the readers on each side filter by
 // the basename marker so the views stay distinct.
 const refPrefix = "refs/fak/locks/"
 
@@ -313,24 +314,31 @@ func (s *Store) Get(ctx context.Context, id string) (Record, bool, error) {
 	return rec, true, nil
 }
 
+// isLeaseRef reports whether a full ref under refs/fak/locks/ is a LOCK lease (not a
+// session descriptor, intent lease, or contract record).
+func isLeaseRef(ref string) bool {
+	if !strings.HasPrefix(ref, refPrefix) {
+		return false
+	}
+	if isSessionRef(ref) {
+		return false // session descriptors (refs/fak/locks/session-*) are a DISTINCT kind, not lock leases
+	}
+	if isIntentRef(ref) {
+		return false // intent leases (refs/fak/locks/intent-*) are work-target claims, not tree leases (#2155)
+	}
+	if isContractRef(ref) {
+		return false // contract records (refs/fak/locks/contract-*) are ticket execution contracts, not tree leases (#11165)
+	}
+	return true
+}
+
 // List reads every lease record under refs/fak/locks/*, sorted by id for a stable view.
 // This is the source a cross-machine arbiter folds into its live_leases: after an
 // ordinary fetch, a peer's pushed lease appears here. A record whose blob does not parse
 // is SKIPPED (a forward-compatible or corrupt entry must not blind the whole view), not
 // surfaced as an error.
 func (s *Store) List(ctx context.Context) ([]Record, error) {
-	recs, err := listRefs(ctx, s, func(ref string) bool {
-		if !strings.HasPrefix(ref, refPrefix) {
-			return false
-		}
-		if isSessionRef(ref) {
-			return false // session descriptors (refs/fak/locks/session-*) are a DISTINCT kind, not lock leases
-		}
-		if isIntentRef(ref) {
-			return false // intent leases (refs/fak/locks/intent-*) are work-target claims, not tree leases (#2155)
-		}
-		return true
-	}, s.readRef)
+	recs, err := listRefs(ctx, s, isLeaseRef, s.readRef)
 	if err != nil {
 		return nil, err
 	}
