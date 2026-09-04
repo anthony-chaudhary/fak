@@ -1314,7 +1314,6 @@ cloudroute = ["internal/cloudroute/**"]
 tempartifact = ["internal/tempartifact/**"]
 valuechain = ["internal/valuechain/**"]
 hostdiag = ["internal/hostdiag/**"]
-power = ["internal/power/**"]
 ultracodenegcontrol = ["internal/ultracodenegcontrol/**"]
 systembaseline = ["internal/systembaseline/**"]
 studyclass = ["internal/studyclass/**"]
@@ -2533,7 +2532,7 @@ fix      = "Restore the checker to its declared bytes and re-grade, or -- if the
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
 
 [reasons.TEST_TAMPER_REFUSED]
-category = "INTEGRITY_GATE"
+category = "OPERATOR_GATE"
 refusal  = true
 summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
 fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
