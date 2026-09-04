@@ -192,16 +192,7 @@ func launchRegistered(command []string, cwd string, env map[string]string, runne
 			env = registeredChildEnv(env, registration.Record)
 		}
 		result := runner(command, cwd, env)
-		if registration != nil {
-			state, reason := sessionregistry.StateCompleted, ""
-			if result.ReturnCode != 0 {
-				state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", result.ReturnCode)
-			}
-			if _, err := registration.Store.Terminal(registration.Record.RegistrationID, state, reason, env["FAK_WITNESS_REF"], time.Now().UTC()); err != nil {
-				result.ReturnCode = 2
-				result.Error = "terminal registration update failed: " + err.Error()
-			}
-		}
+		updateTerminalRegistration(registration, &result, env["FAK_WITNESS_REF"])
 		return result
 	}
 	resolved := append([]string(nil), command...)
@@ -244,16 +235,7 @@ func launchRegistered(command []string, cwd string, env map[string]string, runne
 			result = launchResult{ReturnCode: cmd.ProcessState.ExitCode()}
 		}
 	}
-	if registration != nil {
-		state, reason := sessionregistry.StateCompleted, ""
-		if result.ReturnCode != 0 {
-			state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", result.ReturnCode)
-		}
-		if _, regErr := registration.Store.Terminal(registration.Record.RegistrationID, state, reason, env["FAK_WITNESS_REF"], time.Now().UTC()); regErr != nil {
-			result.ReturnCode = 2
-			result.Error = "terminal registration update failed: " + regErr.Error()
-		}
-	}
+	updateTerminalRegistration(registration, &result, env["FAK_WITNESS_REF"])
 	return result
 }
 
@@ -395,4 +377,18 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func updateTerminalRegistration(reg *launchRegistration, res *launchResult, witnessRef string) {
+	if reg == nil {
+		return
+	}
+	state, reason := sessionregistry.StateCompleted, ""
+	if res.ReturnCode != 0 {
+		state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", res.ReturnCode)
+	}
+	if _, err := reg.Store.Terminal(reg.Record.RegistrationID, state, reason, witnessRef, time.Now().UTC()); err != nil {
+		res.ReturnCode = 2
+		res.Error = "terminal registration update failed: " + err.Error()
+	}
 }
