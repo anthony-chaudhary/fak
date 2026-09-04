@@ -245,6 +245,9 @@ func ParseAndNegotiate(requestJSON, matrixJSON []byte) (Result, error) {
 
 // Negotiate matches an artifact only when its serialization, runtime version,
 // GPU architecture, and accumulator semantics all exactly match one profile.
+//
+// Invariant: FP4 runtime evaluations are fail-closed and deterministic across all artifact profiles.
+// Guard: Incompatible matrix definitions, unverified evidence, or mismatched formats force explicit refusal.
 func Negotiate(request Request, matrix Matrix) Result {
 	result := baseResult(request)
 	if matrix.Schema != MatrixSchemaV1 {

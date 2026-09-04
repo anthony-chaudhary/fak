@@ -43,16 +43,25 @@ const (
 	MaxRenderedCommentBytes = 60 * 1024
 )
 
+// Closed evidence status tokens accepted by ValidateReview.
 const (
+	// EvidenceSupported indicates that the assessment is fully backed by references.
 	EvidenceSupported = "supported"
-	EvidencePartial   = "partial"
-	EvidenceGap       = "gap"
+	// EvidencePartial indicates that some evidence exists but an explicit gap remains.
+	EvidencePartial = "partial"
+	// EvidenceGap indicates that no supporting evidence exists and names the missing proof.
+	EvidenceGap = "gap"
 )
 
+// Managed comment plan action tokens returned by ChooseCommentAction.
 const (
+	// ActionCreate instructs the caller to create a new managed comment.
 	ActionCreate = "create"
+	// ActionUpdate instructs the caller to update an existing managed comment.
 	ActionUpdate = "update"
-	ActionNoop   = "noop"
+	// ActionNoop indicates that the existing managed comment is already up to date.
+	ActionNoop = "noop"
+	// ActionRefuse indicates that comment modification is refused due to ambiguity.
 	ActionRefuse = "refuse"
 )
 
@@ -155,10 +164,15 @@ type CommentVerification struct {
 // ManagedCommentState classifies the first-line production marker and its payload.
 type ManagedCommentState string
 
+// Managed comment classification states returned by InspectManagedComment.
 const (
+	// ManagedCommentUnmanaged indicates no managed marker was present.
 	ManagedCommentUnmanaged ManagedCommentState = "unmanaged"
-	ManagedCommentCurrent   ManagedCommentState = "current"
-	ManagedCommentStale     ManagedCommentState = "stale"
+	// ManagedCommentCurrent indicates the comment matches the current issue digest and schema.
+	ManagedCommentCurrent ManagedCommentState = "current"
+	// ManagedCommentStale indicates the review was valid for a prior projection of the issue.
+	ManagedCommentStale ManagedCommentState = "stale"
+	// ManagedCommentMalformed indicates the comment payload is corrupt or tampered.
 	ManagedCommentMalformed ManagedCommentState = "malformed"
 )
 
@@ -223,6 +237,10 @@ func digestBytes(value []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// Invariant: issue check reviews are fail-closed and deterministic; any drift,
+// schema divergence, stale issue digest, or unauthenticated comment payload is
+// rejected immediately.
+//
 // ValidateReview verifies the closed response and binds it to the current issue.
 func ValidateReview(issue Issue, review Review) error {
 	wantDigest, err := IssueDigest(issue)

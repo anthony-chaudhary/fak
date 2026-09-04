@@ -5,6 +5,11 @@
 // The package deliberately separates semantic controls (redirect, verify,
 // undo) from delivery controls (send now, queue, inject) and execution policy.
 //
+// Invariant: human control directives are fail-closed and bounded.
+// Terminal controls (stop, pause, end_turn) cannot be composed before other
+// instructions; unacknowledged controls cannot report admission decisions;
+// and unobserved effects reject missing witnesses.
+//
 // Invariant: human control semantics remain decoupled from transport delivery mechanisms.
 // Guard: non-compliant upward imports violate the architectural tier constraint (tier <= 1).
 //

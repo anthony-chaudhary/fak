@@ -143,6 +143,9 @@ func EvaluateJSON(raw []byte) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
+// Invariant: INT2 KV rotation evaluations are fail-closed and tamper-evident.
+// Guard: Modeled projection records must be dispatched to execution before being accepted as empirical proof.
+// Precondition: Provenance pins and witness digests must match ground truth hardware observations exactly.
 func Evaluate(req Request) Result {
 	result := Result{ContractVersion: ContractVersion, Evidence: req.Evidence, Artifact: req.Artifact, RecipeArtifact: req.RecipeArtifact, Model: req.Model, Runtime: req.Runtime, Hardware: req.Hardware, Recipe: req.Recipe}
 	decide := func(out Disposition, reason VerdictCode, detail string) Result {

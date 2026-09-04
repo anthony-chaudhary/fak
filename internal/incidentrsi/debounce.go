@@ -23,6 +23,10 @@ const (
 	BurstCooldownSuppressed BurstStatus = "cooldown_suppressed"
 )
 
+// Invariant: incident debounce is fail-closed and bounded.
+// Guard: state persistence or load failures return the product failure unchanged
+// while setting a non-nil MaintenanceError to prevent silent failure suppression.
+//
 // DebounceConfig keeps burst collection, liveness, cooldown, and retention
 // independent. MaxWait is measured from FirstSeen and may extend past the
 // collection window; observations after WindowEnd do not join that burst.
