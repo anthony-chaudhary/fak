@@ -20,8 +20,10 @@ import (
 	"time"
 )
 
+// Schema identifies the clean-room release witness receipt specification.
 const Schema = "fak.harness-release-witness/v1alpha1"
 
+// Options configures a clean-room harness release verification execution.
 type Options struct {
 	Archive         string
 	Checksum        string
@@ -32,6 +34,8 @@ type Options struct {
 	RollbackCommand string
 }
 
+// CommandReceipt records the execution outcome and timing of a single command
+// invoked during the clean-room verification workflow.
 type CommandReceipt struct {
 	Command        []string `json:"command"`
 	ExitCode       int      `json:"exit_code"`
@@ -39,6 +43,8 @@ type CommandReceipt struct {
 	Output         string   `json:"output,omitempty"`
 }
 
+// Receipt contains the complete verification outcome, cryptographic hashes,
+// metadata, and command history for a released harness archive.
 type Receipt struct {
 	Schema              string           `json:"schema"`
 	Outcome             string           `json:"outcome"`
@@ -68,6 +74,9 @@ type lockFile struct {
 	Upgrade         string `json:"upgrade"`
 }
 
+// Run executes the clean-room release witness flow: validating checksums,
+// unpacking the archive, generating a product harness, verifying config preservation,
+// and recording all executed commands into a persistent receipt.
 func Run(ctx context.Context, opts Options) (Receipt, error) {
 	started := time.Now()
 	r := Receipt{Schema: Schema, Outcome: "failure", Target: opts.Target, Archive: opts.Archive, ProductDir: opts.ProductDir, Module: opts.Module, RollbackCommand: opts.RollbackCommand}
@@ -210,6 +219,8 @@ func writeReceipt(path string, r Receipt) error {
 	return os.WriteFile(path, body, 0o644)
 }
 
+// VerifyChecksum validates that the SHA-256 hash of archive matches the expected
+// digest recorded in the sidecar file, returning the verified lowercase hexadecimal hash.
 func VerifyChecksum(archive, sidecar string) (string, error) {
 	got, err := fileSHA256(archive)
 	if err != nil {
@@ -246,6 +257,8 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// Extract unpacks a supported release archive (.zip, .tar.gz, .tgz) into dir,
+// enforcing strict path bounds to prevent directory traversal escapes.
 func Extract(archive, dir string) error {
 	lower := strings.ToLower(archive)
 	switch {
