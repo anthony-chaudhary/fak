@@ -660,7 +660,7 @@
       "consumer_domains": [
         "internal"
       ],
-      "status": "used",
+      "status": "prospective",
       "pin": "host_provided",
       "digest": "",
       "license_record": "none",

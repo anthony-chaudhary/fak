@@ -17,13 +17,13 @@ This dossier establishes the conceptual foundation (R0) of the superset claim: *
 ### Honesty Fence (docs/benchmarks/BENCHMARK-GOVERNANCE.md)
 1. **External numbers are the claimants' published results**, cited for comparative ranking only. They are not direct head-to-head fak comparisons.
 2. **Every fak benchmark cell is `TBD`** until an empirical run lands on committed hardware receipts (`docs/benchmarks/VLLM-HEADTOHEAD-RESULTS.md`).
-3. **No performance boasts**: On single-instance raw decode throughput, fak is not vLLM's or SGLang's peer and does not claim to be. The superset claim concerns the **concept set**, auditability, and memory efficiency under agentic multi-tenant execution.
+3. **No performance exaggeration**: On single-instance raw decode throughput, fak is not vLLM's or SGLang's peer and does not claim to be. The superset claim concerns the **concept set**, auditability, and memory efficiency under agentic multi-tenant execution.
 
 ---
 
 ## 2. Master Comparative Ranking Matrix
 
-| # | Memory Concept | Best-in-Class (Ranked) | fak Today (Evidence) | Rung | Verdict & Target |
+| # | Memory Concept | Prior Art (Ranked) | fak Today (Evidence) | Rung | Verdict & Target |
 |---|---|---|---|---|---|
 | **M1** | Paged/Block KV Allocator | 1. vLLM (PagedAttention, O(1) LRU block pool)<br>2. SGLang (Paged radix slabs)<br>3. TRT-LLM | `model.PagedKVPool` (`internal/model/paged_kv.go:28`), `KVCacheToPaged`/`SwapToHost` (`internal/modelengine/nativesched_preempt.go:523`) | R1 | **Adopt (Default-On)**: Wire paged KV into live decode loop (#1533) |
 | **M2** | Prefix-Reuse Index | 1. SGLang (RadixAttention trie, 75–95% hit rate)<br>2. vLLM (Automatic Prefix Caching)<br>3. llama.cpp (reference baseline `seq_cp` interop) | `internal/radixkv/radixkv.go:1-356` (longest-prefix trie, mid-edge split, policy eviction) | R2 | **Already Lead**: Native radix tree + quarantine eviction no external engine has |
@@ -57,7 +57,7 @@ This dossier establishes the conceptual foundation (R0) of the superset claim: *
 ### M2: Prefix-Reuse Index
 - **Definition:** Maintains an in-memory index of previously computed KV states keyed by token sequences, enabling instant prompt-cache hits for repeated system prompts, few-shot examples, and multi-turn agent histories.
 - **Per-Engine Evidence:**
-  - *SGLang:* RadixAttention (`sglang/srt/mem_cache/radix_cache.py`). Token-level radix tree with longest-prefix match, mid-edge splitting, and LRU eviction. Claims 75–95% cache hit rates in agentic workflows.
+  - *SGLang:* RadixAttention (`sglang/srt/mem_cache/radix_cache.py`). Token-level radix tree with longest-prefix match, mid-edge splitting, and LRU eviction. Claims 75–95% cache hit rates in agentic workflows (OBSERVED external-engine provenance).
   - *vLLM:* Automatic Prefix Caching (APC) using block hash matching (`vllm/v1/core/kv_cache_utils.py`). Coarser granularity than SGLang (page-level vs token-level).
   - *llama.cpp (reference baseline):* Sequence copy (`seq_cp`) and slot allocation for interop / historical comparisons. Manual / coarse session saving.
 - **Ranking:** 1. SGLang · 2. vLLM · 3. llama.cpp (reference baseline).

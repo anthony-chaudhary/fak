@@ -1,3 +1,8 @@
+---
+title: "Comprehensive OSS Performance Deep Inventory: Qwen 3.8 Flash & GLM 5.3 Flash"
+description: "Empirical performance, micro-architectural optimizations, failure forensics, and systems traps across 23 open-source repositories deploying frontier hybrid architectures."
+---
+
 # Comprehensive OSS Performance Deep Inventory: Qwen 3.8 Flash & GLM 5.3 Flash
 
 **Date of Record:** September 3, 2026  

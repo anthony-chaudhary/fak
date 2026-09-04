@@ -114,7 +114,7 @@ engineering work cannot be overridden onto a restricted tier-3 OpenCode seat.
 
 ## Skill portability: importing skills into OpenCode (#10689, #10690, #10691)
 
-OpenCode natively supports the portable [Agent Skills](https://agentskills.io) standard, enabling seamless skill reuse across Claude Code, OpenAI Codex, and OpenCode:
+OpenCode natively supports the portable [Agent Skills](https://agentskills.io) standard, enabling direct skill reuse across Claude Code, OpenAI Codex, and OpenCode:
 
 ### 1. Skill locations and formats
 
