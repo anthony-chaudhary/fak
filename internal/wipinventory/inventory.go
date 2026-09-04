@@ -50,6 +50,11 @@ type StdinRunner interface {
 	RunWithStdin(dir string, in []byte, args ...string) ([]byte, error)
 }
 
+type EnvRunner interface {
+	Runner
+	RunWithEnv(dir string, env []string, in []byte, args ...string) ([]byte, error)
+}
+
 type GitRunner struct{}
 
 func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
@@ -69,6 +74,25 @@ func (GitRunner) RunWithStdin(dir string, in []byte, args ...string) ([]byte, er
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(in)
+	configureDispatchHelperCommand(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+func (GitRunner) RunWithEnv(dir string, env []string, in []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	if len(in) > 0 {
+		cmd.Stdin = bytes.NewReader(in)
+	}
 	configureDispatchHelperCommand(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
