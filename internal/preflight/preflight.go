@@ -26,10 +26,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
+// Invariant: FieldType must identify a valid JSON primitive or composite type contract.
 // FieldType defines the canonical scalar or composite JSON-Schema type identifier
 // recognized by the preflight rung-ladder validation engine.
 type FieldType string
 
+// Invariant: Type string constants map directly to expected JSON scalar and container wire types.
 const (
 	// TypeString identifies JSON string scalar payload values.
 	TypeString FieldType = "string"
@@ -45,12 +47,15 @@ const (
 	TypeAny FieldType = ""
 )
 
+// Invariant: Required argument specifications map field names to their expected validation types.
+// Precondition: Keys in Required must correspond to valid parameter names expected in the payload.
 // Schema specifies a lightweight JSON Schema contract defining required argument
 // keys along with their expected field types for rung-1 validation.
 type Schema struct {
 	Required map[string]FieldType
 }
 
+// Invariant: DefaultMaxNegatives provides a strict upper bound preventing unbounded ledger memory growth.
 // DefaultMaxNegatives bounds the hard-negative ledger so a long-lived ladder
 // driven by sustained malformed/adversarial traffic — precisely the workload
 // preflight exists to catch — cannot grow negatives without bound. Every
@@ -63,6 +68,8 @@ type Schema struct {
 // (the unit-50 harvest), so eviction shortens the harvest, never a verdict.
 const DefaultMaxNegatives = 8192
 
+// Invariant: Thread-safe state synchronization across concurrent calls is guarded by the internal mutex.
+// Invariant: Resident negative entries count never exceeds maxNeg after eviction cycles complete.
 // Ladder implements the multi-rung pre-flight validation pipeline, evaluating tool
 // invocations cheapest-first to intercept invalid arguments before model turns fire.
 type Ladder struct {
@@ -76,12 +83,14 @@ type Ladder struct {
 	evicted   int64    // negatives dropped by the maxNeg bound (observability)
 }
 
+// Postcondition: Returns an initialized Ladder bounded by DefaultMaxNegatives with empty schema registry.
 // New constructs a preflight rung Ladder configured with the default maximum resident
 // hard-negative capacity (DefaultMaxNegatives) to prevent unbounded memory growth.
 func New() *Ladder { return NewWithLimit(DefaultMaxNegatives) }
 
 // Invariant: Resident capacity limit maxNeg must be strictly positive; non-positive parameters fall back to DefaultMaxNegatives.
 // Contract: The allocated ladder instance must initialize an empty schemas map and retain its configured capacity bound.
+// Postcondition: Returns a fully initialized Ladder with valid capacity bounds and allocated schema mappings.
 // NewWithLimit constructs a preflight Ladder enforcing an explicit resident capacity
 // bound on the hard-negative ledger, falling back to DefaultMaxNegatives if non-positive.
 // This is the seam the leak-regression test uses to exercise eviction with a small bound.
@@ -94,6 +103,8 @@ func NewWithLimit(maxNeg int) *Ladder {
 
 // Contract: Updating tool schemas requires acquiring the ladder write lock to prevent concurrent adjudication race conditions.
 // Expectation: Registered schemas must only declare supported FieldType definitions to ensure deterministic rung-1 validation.
+// Precondition: Tool name must identify the target tool call to match during rung-1 validation.
+// Postcondition: Registers the schema contract enforced on subsequent tool invocations matching the name.
 // SetSchema registers the expected argument validation schema for a specific named tool,
 // establishing the rung-1 schema validation contract for subsequent calls.
 func (l *Ladder) SetSchema(tool string, s Schema) {
@@ -103,6 +114,8 @@ func (l *Ladder) SetSchema(tool string, s Schema) {
 }
 
 // Contract: Schema retrieval must return deep copies of registered schemas to guarantee caller isolation from internal state.
+// Invariant: Internal schema registrations remain completely immutable against caller modification of returned structures.
+// Postcondition: Returns a defensive deep copy of all registered tool schema specifications.
 // Schemas returns a deep defensive copy of all currently installed tool schemas,
 // ensuring caller inspection or mutation cannot alter the internal adjudication state.
 // The static tool linter (internal/toollint) reads these to check what contract the kernel
@@ -124,6 +137,8 @@ func (l *Ladder) Schemas() map[string]Schema {
 	return out
 }
 
+// Contract: Preflight adjudication acts as a structural filter without requiring extra capabilities.
+// Postcondition: Always returns nil to indicate that no supplemental capability tokens are advertised.
 // Caps returns the slice of capabilities advertised by this adjudicator; the preflight
 // ladder operates as a pure structural filter and advertises no extra capabilities.
 func (l *Ladder) Caps() []abi.Capability { return nil }
@@ -132,6 +147,7 @@ func (l *Ladder) Caps() []abi.Capability { return nil }
 // Invariant: Short-circuiting on any failed rung guarantees that a malformed payload never escalates to later rungs or burns compute.
 // Fail-closed guard: Unparseable non-empty payload arguments must trigger an immediate VerdictDeny with ReasonMalformed.
 // Precondition: Invocations must provide a non-nil ToolCall reference; empty arguments are treated as valid nil-body payloads.
+// Postcondition: Returns VerdictDefer when all validation rungs pass, or VerdictDeny with ReasonMalformed on validation failure.
 // Adjudicate evaluates tool invocation arguments through ascending rungs (syntax parse
 // followed by schema conformance) to intercept malformed calls before monitor execution.
 func (l *Ladder) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
@@ -225,6 +241,8 @@ func (l *Ladder) evictExcessLocked() {
 	}
 }
 
+// Invariant: Catch rate ratio is normalized to [0.0, 1.0] when total is positive, and 0.0 otherwise.
+// Postcondition: Returns lifetime caught count, total count, and the computed catch rate floating point ratio.
 // CatchRate calculates and returns the lifetime telemetry metrics: total calls evaluated,
 // malformed calls caught by rungs, and the computed catch-rate ratio (unit 51).
 func (l *Ladder) CatchRate() (caught, total int64, rate float64) {
@@ -236,6 +254,9 @@ func (l *Ladder) CatchRate() (caught, total int64, rate float64) {
 	return l.caught, l.total, rate
 }
 
+// Contract: Returns a defensive slice copy preserving FIFO insertion order of hard-negative JSONL records.
+// Invariant: Resident count of returned rows never exceeds the configured maxNeg capacity limit.
+// Postcondition: Returns a copy of active resident hard-negative rows without exposing internal slices.
 // Negatives retrieves a defensive copy of resident labeled hard-negative JSONL rows,
 // preserving FIFO insertion order up to the configured resident ledger capacity limit.
 func (l *Ladder) Negatives() [][]byte {
@@ -244,6 +265,8 @@ func (l *Ladder) Negatives() [][]byte {
 	return append([][]byte(nil), l.negatives[l.negHead:]...)
 }
 
+// Invariant: Resident negative count is strictly non-negative and never exceeds maxNeg capacity.
+// Postcondition: Returns the instantaneous count of resident hard-negative rows held in memory.
 // NegativesLen returns the count of resident hard-negative rows currently held in
 // the bounded memory buffer (always bounded by maxNeg). Evicted reports how many
 // were dropped by the bound over the ladder's lifetime.
@@ -253,6 +276,8 @@ func (l *Ladder) NegativesLen() int {
 	return len(l.negatives) - l.negHead
 }
 
+// Invariant: Cumulative eviction count is monotonically non-decreasing over the lifetime of the ladder.
+// Postcondition: Returns total count of hard-negative rows discarded to satisfy the resident ledger cap.
 // Evicted reports the cumulative lifetime count of hard-negative sample rows dropped
 // when ledger occupancy exceeded the resident maximum capacity threshold.
 func (l *Ladder) Evicted() int64 {
@@ -288,6 +313,7 @@ func callHash(c *abi.ToolCall) string {
 	return c.Tool + ":" + c.Args.Digest
 }
 
+// Invariant: Default instance is registered as a rank-10 adjudicator before kernel monitor evaluation.
 // Default provides the globally registered preflight Ladder instance wired into the
 // kernel adjudication sequence at priority rank 10.
 var Default = New()
