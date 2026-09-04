@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -157,4 +158,107 @@ func testInput(requestID, runID string) Input {
 func digest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// BenchmarkCorrelationMatrix measures throughput and allocations across varying index
+// capacities for fundamental operations: fresh admission, idempotent re-insertion,
+// cache lookups, order snapshots, and streaming artifact verification.
+func BenchmarkCorrelationMatrix(b *testing.B) {
+	capacities := []int{10, 100, 1000}
+	for _, cap := range capacities {
+		b.Run(fmt.Sprintf("Add_Fresh/Cap%d", cap), func(b *testing.B) {
+			index, err := NewIndex(cap)
+			if err != nil {
+				b.Fatal(err)
+			}
+			inputs := make([]Input, b.N)
+			for i := 0; i < b.N; i++ {
+				inputs[i] = testInput(fmt.Sprintf("req-%d", i), fmt.Sprintf("run-%d", i))
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := index.Add(inputs[i]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("Add_Idempotent/Cap%d", cap), func(b *testing.B) {
+			index, err := NewIndex(cap)
+			if err != nil {
+				b.Fatal(err)
+			}
+			input := testInput("req-const", "run-const")
+			if _, err := index.Add(input); err != nil {
+				b.Fatal(err)
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := index.Add(input); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("Lookup_Hit/Cap%d", cap), func(b *testing.B) {
+			index, err := NewIndex(cap)
+			if err != nil {
+				b.Fatal(err)
+			}
+			rec, err := index.Add(testInput("req-lookup", "run-lookup"))
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := index.Lookup(rec.Key); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("Snapshot/Cap%d", cap), func(b *testing.B) {
+			index, err := NewIndex(cap)
+			if err != nil {
+				b.Fatal(err)
+			}
+			for i := 0; i < cap; i++ {
+				if _, err := index.Add(testInput(fmt.Sprintf("req-%d", i), fmt.Sprintf("run-%d", i))); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				s := index.Snapshot()
+				if len(s) != cap {
+					b.Fatalf("snapshot length = %d, want %d", len(s), cap)
+				}
+			}
+		})
+	}
+
+	b.Run("VerifyArtifact_Receipt", func(b *testing.B) {
+		index, err := NewIndex(10)
+		if err != nil {
+			b.Fatal(err)
+		}
+		rec, err := index.Add(testInput("req-verify", "run-verify"))
+		if err != nil {
+			b.Fatal(err)
+		}
+		files := fstest.MapFS{
+			"artifacts/receipt.json": &fstest.MapFile{Data: []byte("receipt")},
+		}
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if err := index.VerifyArtifact(rec.Key, ArtifactReceipt, files, 1024); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
