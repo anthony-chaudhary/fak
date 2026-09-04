@@ -13,36 +13,58 @@ import (
 )
 
 // Mode designates the compute execution policy mode for the host application.
+//
+// Contract: Mode must be one of ModeAutomatic, ModePreferLocal, ModeLocalOnly, or ModePaused.
 type Mode string
 
 // Host-app compute execution modes.
 const (
-	ModeAutomatic   Mode = "automatic"
+	// ModeAutomatic dynamically routes tasks based on device pressure, battery, and capability.
+	ModeAutomatic Mode = "automatic"
+	// ModePreferLocal attempts on-device compute first and prompts before cloud handoff.
 	ModePreferLocal Mode = "prefer_local"
-	ModeLocalOnly   Mode = "local_only"
-	ModePaused      Mode = "paused"
+	// ModeLocalOnly forbids cloud fallback and keeps all execution strictly on the local machine.
+	ModeLocalOnly Mode = "local_only"
+	// ModePaused suspends local execution to preserve system resources.
+	ModePaused Mode = "paused"
 )
 
 // State designates the local compute readiness lifecycle state.
+//
+// Invariant: Lifecycle states resolve deterministically to user-visible status and actionable copy.
 type State string
 
 // Lifecycle readiness states.
 const (
-	StateFirstRun      State = "first_run"
-	StatePartial       State = "partial_readiness"
-	StateNoSpace       State = "no_space"
-	StateNoNetwork     State = "no_network"
-	StatePressure      State = "pressure"
-	StateBattery       State = "battery"
-	StateThermal       State = "thermal"
+	// StateFirstRun indicates local assets need initial download and verification.
+	StateFirstRun State = "first_run"
+	// StatePartial indicates some local features are downloaded while others are pending.
+	StatePartial State = "partial_readiness"
+	// StateNoSpace indicates disk space is insufficient for the asset download.
+	StateNoSpace State = "no_space"
+	// StateNoNetwork indicates download or verification is paused awaiting network connectivity.
+	StateNoNetwork State = "no_network"
+	// StatePressure indicates local inference is suspended due to system memory or resource pressure.
+	StatePressure State = "pressure"
+	// StateBattery indicates conservative execution while the host device runs on battery power.
+	StateBattery State = "battery"
+	// StateThermal indicates execution throttling to allow the host hardware to cool down.
+	StateThermal State = "thermal"
+	// StateHelperRestart indicates the helper process exited and is reconnecting safely.
 	StateHelperRestart State = "helper_restart"
-	StateHandoffAsk    State = "handoff_ask"
+	// StateHandoffAsk requests user consent before transmitting task context to cloud compute.
+	StateHandoffAsk State = "handoff_ask"
+	// StateHandoffDenied reflects user refusal of cloud handoff, falling back locally.
 	StateHandoffDenied State = "handoff_denied"
-	StateRollback      State = "corrupt_update_rollback"
-	StateReady         State = "ready"
+	// StateRollback indicates a corrupted update was safely rolled back to the last known-good asset.
+	StateRollback State = "corrupt_update_rollback"
+	// StateReady indicates local compute assets are verified and ready for on-device inference.
+	StateReady State = "ready"
 )
 
 // View represents the current display state of the local compute features.
+//
+// Invariant: State and Mode fields determine user-facing copy deterministically without side effects.
 type View struct {
 	State                            State
 	Mode                             Mode
@@ -54,7 +76,10 @@ type View struct {
 }
 
 // Render returns the user-facing status title, detail message, and action text.
+//
 // Invariant: UX rendering is deterministic and fail-closed.
+// Precondition: Caller passes a View instance; unknown states fallback safely to ready default copy.
+// Postcondition: Returns a formatted multi-line status string containing title, detail, Mode, and Action.
 func Render(v View) string {
 	title, detail, action := "Local features are ready", "Your tasks run on this Mac.", ""
 	switch v.State {
@@ -137,6 +162,8 @@ func labelMode(m Mode) string {
 }
 
 // Diagnostic contains local application state and telemetry for issue reports.
+//
+// Invariant: Diagnostic fields represent host state snapshots prior to privacy screening.
 type Diagnostic struct {
 	AppVersion string   `json:"app_version"`
 	State      State    `json:"state"`
@@ -151,7 +178,10 @@ type Diagnostic struct {
 var sensitive = regexp.MustCompile(`(?i)(token|secret|password|prompt|path|user)`)
 
 // PreviewDiagnostic generates a consent-safe JSON report with sensitive data scrubbed.
+//
 // Guard: Any key containing sensitive strings (tokens, secrets, passwords, prompts, paths, users) is stripped.
+// Precondition: Caller passes Diagnostic telemetry data for serialization.
+// Postcondition: Returns indented JSON payload conforming to schema fak.local-app-diagnostic/1 with sensitive keys deleted.
 func PreviewDiagnostic(d Diagnostic) ([]byte, error) {
 	raw := map[string]any{"schema": "fak.local-app-diagnostic/1", "app_version": d.AppVersion, "state": d.State, "mode": d.Mode, "engine": d.Engine, "error_code": d.ErrorCode}
 	for k := range raw {

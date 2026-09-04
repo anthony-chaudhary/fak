@@ -520,3 +520,23 @@ func ExampleMatrix_Text() {
 	fmt.Println("Run: go test ./internal/nativeperfcoverage -run TestFullMatrix -v")
 	// Output: Run: go test ./internal/nativeperfcoverage -run TestFullMatrix -v
 }
+
+func BenchmarkNormalizePromQL(b *testing.B) {
+	expr := `sum(rate(fak_gateway_inference_requests_total{engine="$engine",model="$model"}[$__rate_interval]))`
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := NormalizePromQL(expr); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParseFixture(b *testing.B) {
+	raw := []byte("fak_native_receipt_requests_total{backend=\"cuda\",engine=\"fak-native\"} 42 1700000000000\n")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseFixture(raw); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

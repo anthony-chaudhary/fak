@@ -5,6 +5,10 @@
 // typed hard-negative (passed cheap rung k, failed expensive rung k+1) — the
 // self-labeling signal that trains the syscall-tuned model (unit 50).
 //
+// Invariant: ladder rungs execute cheapest-first and fail-closed on any validation error.
+// Guard: malformed tool invocations or schema mismatches produce immediate structured denials.
+// Fail-closed: any parse failure or schema violation rejects the tool call before invocation.
+//
 // Rungs in v0.1:
 //
 //	rung 0  static parse  — are the args even valid JSON? (unit 47)

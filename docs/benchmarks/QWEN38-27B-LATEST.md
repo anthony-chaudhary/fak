@@ -80,6 +80,9 @@ The main delta is implementation maturity, not a demonstrated architectural wind
 - The Qwen3.8-27B Metal serving curve sweep (#11138) runs via `fak macbench all --gateway http://127.0.0.1:8080 --model qwen38:27b --json`,
   capturing decode length (16, 32, 64, 128 tokens), long generation (256, 512 tokens), prefill sweep (128, 512, 2048, 4096 prompt tokens),
   and 2-stream concurrency in the standard `fak.macbench.result.v1` schema with sanitized endpoints and zero secret leakage.
+- The 3-way Apple Silicon Metal head-to-head comparison on M3 Pro ([`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md), issue #2723) evaluated `Qwen3.8-27B Q4_K_M` against `llama.cpp` and `MLX`:
+  - **fak-native**: Decode p50 = **7.61 tok/s** (ITL 131.17 ms, +3.1% vs llama.cpp 7.38 tok/s); Prefill p50 = **48.54 tok/s** (TTFT 2652 ms); RadixAttention shared-prefill TTFT = **12.60 ms** (>190× faster).
+  - Validated by the `internal/macbench` comparison contract and executable via `make mac-perf`.
 
 ## August 27–28 update
 

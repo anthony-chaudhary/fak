@@ -125,6 +125,7 @@ dependencies means no `go.sum`.
 go build ./cmd/fak        # build ./fak (fak.exe on Windows)
 make build                # debuggable binary
 make test-fast            # build + vet + short tests
+make mac-perf             # Mac shift-left: Metal tok/s and prefill bench
 make test-race            # WSL race gate
 make test                 # full suite, including model witnesses
 make ci                   # build + vet + test + claims lint

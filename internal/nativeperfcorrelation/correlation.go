@@ -1,6 +1,9 @@
 // Package nativeperfcorrelation provides a bounded, scrubbed index that joins
 // native-performance evidence without exporting high-cardinality identifiers as
 // metric labels.
+//
+// Invariant: all indexed records scrub raw client identifiers into one-way sha256
+// digests and store bounded relative locators so public metrics never leak trace data.
 package nativeperfcorrelation
 
 import (

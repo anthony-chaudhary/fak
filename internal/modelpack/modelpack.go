@@ -159,6 +159,7 @@ func Open(root string) (*Manager, error) {
 	}
 	return m, nil
 }
+
 func (m *Manager) persist() error {
 	b, e := json.MarshalIndent(m.s, "", "  ")
 	if e != nil {
@@ -170,7 +171,9 @@ func (m *Manager) persist() error {
 	}
 	return os.Rename(tmp, filepath.Join(m.root, "state.json"))
 }
+
 func key(id, rev string) string { return id + "@" + rev }
+
 func (m *Manager) emit(man Manifest, stateName, detail string) (Receipt, error) {
 	e := Event{Sequence: uint64(len(m.s.Events) + 1), At: m.now(), State: stateName, PackID: man.PackID, Revision: man.Revision, Detail: detail}
 	m.s.Events = append(m.s.Events, e)

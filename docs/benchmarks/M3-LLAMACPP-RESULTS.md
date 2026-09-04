@@ -131,3 +131,9 @@ local model + kernel matching the frontier on safety + cost while capability cli
 size ladder — see `../docs/explainers/local-vs-frontier-parity.md`: the honest read there is that
 fak is the in-kernel *reference* runner and `llama-server` remains the speed-tuned serving engine
 for the 7-9B ramp.
+
+## 7. Cross-References & Latest Metal Benchmarks
+
+- Apple Silicon Metal 3-Way head-to-head (fak-native vs llama.cpp vs MLX): [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
+- Shift-Left Mac Dev Gate (`make mac-perf`): [`docs/dev-tooling.md`](../dev-tooling.md) & [`AGENTS.md`](../../AGENTS.md)
+- Canonical Benchmark Authority: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)

@@ -30,3 +30,26 @@ func TestCalculateRejectsImpossibleBudget(t *testing.T) {
 		t.Fatal("expected impossible budget refusal")
 	}
 }
+
+func BenchmarkCalculate(b *testing.B) {
+	const gib = uint64(1 << 30)
+	in := Input{
+		MemoryBytes:        36 * gib,
+		ReserveBytes:       6 * gib,
+		WeightBytes:        9 * gib / 2,
+		ContextTokens:      32768,
+		Layers:             28,
+		KVHeads:            4,
+		HeadDim:            128,
+		KVBytesPerElement:  2,
+		SharedPrefixTokens: 8192,
+		TailCapTokens:      8192,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := Calculate(in)
+		if err != nil || res.OnAgentsThatFit == 0 {
+			b.Fatalf("Calculate failed: %v", err)
+		}
+	}
+}

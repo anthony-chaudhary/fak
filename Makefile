@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -177,6 +177,17 @@ test-race:
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json
+
+# mac-perf: on-device shift-left performance gate for Apple Silicon Metal & Mac inference.
+# Benchmarks tok/s decode and prefill throughput on the native Metal engine and validates
+# the 3-way Mac comparison packet.
+mac-perf: build
+	@echo "== Mac Shift-Left Performance Verification =="
+	@go test -v ./internal/macbench -run '^TestValidateComparisonPacketNodeMacOSA$$'
+	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
+	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
+	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
+	@echo "mac-perf OK (Apple Silicon Metal tok/s and prefill performance verified)"
 
 # status: the cross-domain "where do we stand right now?" rollup — folds git +
 # benchmarks + work + industry into ONE control-pane view (the sibling of

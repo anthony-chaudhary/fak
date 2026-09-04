@@ -681,3 +681,25 @@ func nodeMacOSAComparisonPacket() ComparisonPacket {
 	}
 	return packet
 }
+
+func BenchmarkSummarizeComparisonSamples(b *testing.B) {
+	packet := nodeMacOSAComparisonPacket()
+	samples := packet.Arms[0].Samples
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		metrics := SummarizeComparisonSamples(samples)
+		if metrics.Prefill.TokPerS.P50 <= 0 {
+			b.Fatalf("invalid prefill p50: %v", metrics.Prefill.TokPerS.P50)
+		}
+	}
+}
+
+func BenchmarkValidateComparisonPacket(b *testing.B) {
+	packet := nodeMacOSAComparisonPacket()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := ValidateComparisonPacket(packet); err != nil {
+			b.Fatalf("ValidateComparisonPacket failed: %v", err)
+		}
+	}
+}
