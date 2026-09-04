@@ -49,5 +49,9 @@
 // a Hugging Face quantization_config and a vLLM build actually carry (bits,
 // group_size, sym, methods, a dotted compute_capability like "8.0").
 //
+// Invariant: vLLM quantization kernel selection is fail-closed and deterministic.
+// Guard: undeclared configurations, unknown quantization methods, and contradictory
+// descriptor parameters refuse admission rather than guessing fallback runtime kernels.
+//
 // Tier: foundation (1) - see internal/architest. Stdlib-only.
 package vllmquant
