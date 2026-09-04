@@ -31,6 +31,7 @@ package modelengine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -74,6 +75,7 @@ type Engine struct {
 	m                   *model.Model
 	isSynthetic         bool
 	modelName           string
+	loadErr             error
 	cfg                 model.Config
 	q4k                 bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
 	q4kGateUpOutputSlab bool
@@ -111,18 +113,21 @@ func SyntheticConfig() model.Config {
 }
 
 // model builds (once) and returns the backing model. If FAK_MODEL_DIR names a real
-// export it is loaded; otherwise the synthetic checkpoint is used. A load failure
-// falls back to synthetic rather than wedging the engine (the dispatch path is the
-// same; only the weights differ).
+// export it is loaded; if FAK_MODEL_DIR is unset, the synthetic checkpoint is used.
+// If an explicit FAK_MODEL_DIR fails to load, the load error is recorded and nil is
+// returned so execution fails closed instead of silently substituting synthetic weights (#10663).
 func (e *Engine) model() *model.Model {
 	e.once.Do(func() {
 		if dir := os.Getenv("FAK_MODEL_DIR"); dir != "" {
-			if m, err := model.Load(dir); err == nil {
-				e.m, e.cfg = m, m.Cfg
-				e.modelName = "smollm2-inkernel"
-				e.isSynthetic = false
+			m, err := model.Load(dir)
+			if err != nil {
+				e.loadErr = fmt.Errorf("modelengine: failed to load explicit FAK_MODEL_DIR %q: %w", dir, err)
 				return
 			}
+			e.m, e.cfg = m, m.Cfg
+			e.modelName = "smollm2-inkernel"
+			e.isSynthetic = false
+			return
 		}
 		e.m = model.NewSynthetic(e.cfg)
 		e.modelName = "smollm2-synthetic"
@@ -139,6 +144,9 @@ func (e *Engine) ModelName() string {
 		return "smollm2-synthetic"
 	}
 	e.model()
+	if e.loadErr != nil {
+		return "smollm2-failed"
+	}
 	if e.isSynthetic {
 		return "smollm2-synthetic"
 	}
@@ -256,7 +264,11 @@ func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, er
 // boot-selected tokenizer and resident-Q4_K mode without widening the public ABI.
 func (e *Engine) nativeScheduler() *NativeScheduler {
 	e.schedOnce.Do(func() {
-		sched := newNativeScheduler(e.model(), func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
+		m := e.model()
+		if m == nil {
+			return
+		}
+		sched := newNativeScheduler(m, func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
 			args := refutil.Bytes(ctx, c.Args)
 			return schedPrepare{
 				prompt: e.buildPrompt(c.Tool, args, m.Cfg.VocabSize),
@@ -293,7 +305,11 @@ func (e *Engine) WorkerCoupler() *WorkerCoupler {
 	if e == nil {
 		return nil
 	}
-	return e.nativeScheduler().WorkerCoupler()
+	sched := e.nativeScheduler()
+	if sched == nil {
+		return nil
+	}
+	return sched.WorkerCoupler()
 }
 
 // WorkerCouplingStats reads this engine's live worker coupling state.

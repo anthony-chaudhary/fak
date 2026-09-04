@@ -3,6 +3,8 @@ package modelengine
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -210,5 +212,37 @@ func TestModelNameReportsSyntheticVsPreloadedHonestly(t *testing.T) {
 	ePre.Preload(model.NewSynthetic(SyntheticConfig()))
 	if got := ePre.ModelName(); got != "smollm2-inkernel" {
 		t.Fatalf("preloaded ModelName = %q, want \"smollm2-inkernel\"", got)
+	}
+}
+
+// TestExplicitModelDirFailsClosedWhenUnloadable pins #10663: setting FAK_MODEL_DIR
+// to an invalid or unreadable path must fail closed with an explicit error,
+// never silently falling back to synthetic weights.
+func TestExplicitModelDirFailsClosedWhenUnloadable(t *testing.T) {
+	t.Setenv("FAK_MODEL_DIR", filepath.Join(t.TempDir(), "nonexistent-model-dir"))
+	e := New()
+	ctx := context.Background()
+
+	// 1. ModelName reflects failure
+	if name := e.ModelName(); name != "smollm2-failed" {
+		t.Fatalf("ModelName = %q, want \"smollm2-failed\"", name)
+	}
+
+	// 2. Complete fails with typed error
+	res, err := e.Complete(ctx, inlineCall("test_tool", `{}`))
+	if err == nil {
+		t.Fatalf("Complete succeeded unexpectedly: got %v, want load failure", res)
+	}
+	if !strings.Contains(err.Error(), "failed to load explicit FAK_MODEL_DIR") {
+		t.Fatalf("expected FAK_MODEL_DIR failure message, got: %v", err)
+	}
+
+	// 3. Admit fails with typed error
+	req, err := e.Admit(ctx, inlineCall("test_tool", `{}`))
+	if err == nil {
+		t.Fatalf("Admit succeeded unexpectedly: got %v, want load failure", req)
+	}
+	if !strings.Contains(err.Error(), "failed to load explicit FAK_MODEL_DIR") {
+		t.Fatalf("expected FAK_MODEL_DIR failure message from Admit, got: %v", err)
 	}
 }

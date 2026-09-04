@@ -14,6 +14,7 @@ package modelengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -23,7 +24,23 @@ import (
 // scheduler. The scheduler streams tokens one at a time, observes ctx / Cancel between
 // steps, and reclaims the lane's KV-bearing Session when the request reaches terminal.
 func (e *Engine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
-	return e.nativeScheduler().Admit(ctx, c)
+	if e == nil {
+		return nil, errors.New("modelengine: nil engine")
+	}
+	if e.model() == nil {
+		if e.loadErr != nil {
+			return nil, e.loadErr
+		}
+		return nil, errors.New("modelengine: model not loaded")
+	}
+	sched := e.nativeScheduler()
+	if sched == nil {
+		if e.loadErr != nil {
+			return nil, e.loadErr
+		}
+		return nil, errors.New("modelengine: scheduler not initialized")
+	}
+	return sched.Admit(ctx, c)
 }
 
 // assembleResult builds the SAME payload + Meta the one-shot Complete produced, so
