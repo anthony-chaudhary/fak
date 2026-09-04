@@ -214,7 +214,11 @@ func (s *Subscription) Close() error {
 		return nil
 	}
 	if s.bus != nil {
-		return s.bus.Unsubscribe(s.id)
+		err := s.bus.Unsubscribe(s.id)
+		if errors.Is(err, ErrSubscriberNotFound) {
+			return nil
+		}
+		return err
 	}
 	s.closeChannel()
 	return nil
@@ -267,6 +271,11 @@ func (s *Subscription) deliver(f *Frame, timeout time.Duration, ctx context.Cont
 	switch s.policy {
 	case DropPolicyFailClosed:
 		select {
+		case <-s.closeCh:
+			return ErrBusClosed
+		case <-ctx.Done():
+			s.dropped.Add(1)
+			return ctx.Err()
 		case s.ch <- f:
 			return nil
 		default:
@@ -276,6 +285,11 @@ func (s *Subscription) deliver(f *Frame, timeout time.Duration, ctx context.Cont
 
 	case DropPolicyDropNewest:
 		select {
+		case <-s.closeCh:
+			return ErrBusClosed
+		case <-ctx.Done():
+			s.dropped.Add(1)
+			return ctx.Err()
 		case s.ch <- f:
 			return nil
 		default:
@@ -286,10 +300,20 @@ func (s *Subscription) deliver(f *Frame, timeout time.Duration, ctx context.Cont
 	case DropPolicyDropOldest:
 		for {
 			select {
+			case <-s.closeCh:
+				return ErrBusClosed
+			case <-ctx.Done():
+				s.dropped.Add(1)
+				return ctx.Err()
 			case s.ch <- f:
 				return nil
 			default:
 				select {
+				case <-s.closeCh:
+					return ErrBusClosed
+				case <-ctx.Done():
+					s.dropped.Add(1)
+					return ctx.Err()
 				case <-s.ch:
 					s.dropped.Add(1)
 				default:
@@ -326,6 +350,11 @@ func (s *Subscription) deliver(f *Frame, timeout time.Duration, ctx context.Cont
 
 	default:
 		select {
+		case <-s.closeCh:
+			return ErrBusClosed
+		case <-ctx.Done():
+			s.dropped.Add(1)
+			return ctx.Err()
 		case s.ch <- f:
 			return nil
 		default:
@@ -474,9 +503,18 @@ func (b *Bus) PublishSync(ctx context.Context, f *Frame) error {
 
 	var lastErr error
 	for _, sub := range matched {
+		if b.closed.Load() {
+			return ErrBusClosed
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := sub.deliver(f, b.cfg.PublishTimeout, ctx); err != nil {
 			lastErr = err
 		}
+	}
+	if b.closed.Load() {
+		return ErrBusClosed
 	}
 	return lastErr
 }

@@ -1,6 +1,7 @@
 package framebus
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -188,5 +189,53 @@ func TestConcurrentCloseDuringPublish(t *testing.T) {
 
 	if !bus.IsClosed() {
 		t.Fatal("expected bus to be closed")
+	}
+}
+
+func TestConcurrentSubCloseIdempotent(t *testing.T) {
+	bus := NewBus(DefaultConfig())
+	defer bus.Close()
+
+	sub, err := bus.Subscribe("concurrent.close")
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	const numClosers = 16
+	var wg sync.WaitGroup
+	errCh := make(chan error, numClosers)
+
+	for i := 0; i < numClosers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := sub.Close(); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Fatalf("sub.Close() returned error: %v", err)
+	}
+}
+
+func TestPublishSyncContextCancelledDuringMultiDelivery(t *testing.T) {
+	bus := NewBus(DefaultConfig())
+	defer bus.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sub, _ := bus.Subscribe("ctx.test")
+	defer sub.Close()
+
+	f, _ := NewFrame(FrameTypeEvent, "ctx.test", []byte("data"))
+	err := bus.PublishSync(ctx, f)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
