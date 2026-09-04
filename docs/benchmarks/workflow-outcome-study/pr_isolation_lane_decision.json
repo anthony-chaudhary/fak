@@ -1,0 +1,84 @@
+{
+  "schema": "fak-wip-pr-cohort/1",
+  "timestamp": "2026-09-04T00:00:00Z",
+  "cohort_size": 12,
+  "issue_classes": [
+    "bugfix",
+    "feature",
+    "refactor"
+  ],
+  "metrics": [
+    {
+      "name": "time-to-protection",
+      "unit": "seconds",
+      "detached_worker_value": 11.842,
+      "pr_lane_value": 186.75,
+      "threshold": 30,
+      "passed": false
+    },
+    {
+      "name": "collision_rework_rate",
+      "unit": "rate",
+      "detached_worker_value": 0.014,
+      "pr_lane_value": 0.148,
+      "threshold": 0.05,
+      "passed": false
+    },
+    {
+      "name": "review_latency",
+      "unit": "seconds",
+      "detached_worker_value": 61.333,
+      "pr_lane_value": 1468.333,
+      "threshold": 300,
+      "passed": false
+    },
+    {
+      "name": "green_to_land_latency",
+      "unit": "seconds",
+      "detached_worker_value": 41,
+      "pr_lane_value": 1885,
+      "threshold": 120,
+      "passed": false
+    },
+    {
+      "name": "operator_touches",
+      "unit": "touches",
+      "detached_worker_value": 1,
+      "pr_lane_value": 3.858,
+      "threshold": 1.5,
+      "passed": false
+    },
+    {
+      "name": "abandonment_recovery",
+      "unit": "rate",
+      "detached_worker_value": 0.96,
+      "pr_lane_value": 0.482,
+      "threshold": 0.85,
+      "passed": false
+    }
+  ],
+  "decision": "REJECT_PR_LANE",
+  "rationale": "PR isolation lane introduces higher WIP exposure (time-to-protection 186.8s vs 11.8s) and excessive landing latency (1885.0s vs 41.0s) without offsetting defect reduction (defect rate 0.022 vs 0.022, reduction 0.000); rejected in favor of trunk detached worker isolation.",
+  "arms": {
+    "detached_worker": {
+      "issue_count": 12,
+      "time_to_protection": 11.842,
+      "collision_rework_rate": 0.014,
+      "review_latency": 61.333,
+      "green_to_land_latency": 41,
+      "operator_touches": 1,
+      "abandonment_recovery": 0.96,
+      "defect_rate": 0.022
+    },
+    "pr_lane": {
+      "issue_count": 12,
+      "time_to_protection": 186.75,
+      "collision_rework_rate": 0.148,
+      "review_latency": 1468.333,
+      "green_to_land_latency": 1885,
+      "operator_touches": 3.858,
+      "abandonment_recovery": 0.482,
+      "defect_rate": 0.022
+    }
+  }
+}
