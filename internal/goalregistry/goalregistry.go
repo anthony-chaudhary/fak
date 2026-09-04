@@ -18,41 +18,58 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
+// Schema identifies the canonical JSON persistence format for goal registry storage.
 const Schema = "fak-goal-registry/1"
 
+// DefaultEvidencePolicy enforces third-party verification for terminal state transitions.
 const DefaultEvidencePolicy = "independent_witness_required"
 
+// Lifecycle represents the current operational disposition of a tracked goal.
 type Lifecycle string
 
 const (
-	Active     Lifecycle = "active"
-	Achieved   Lifecycle = "achieved"
-	Abandoned  Lifecycle = "abandoned"
+	// Active indicates a goal is actively pursued by agents or operators.
+	Active Lifecycle = "active"
+	// Achieved indicates a goal reached successful completion with witness evidence.
+	Achieved Lifecycle = "achieved"
+	// Abandoned indicates a goal was intentionally discontinued prior to completion.
+	Abandoned Lifecycle = "abandoned"
+	// Superseded indicates a goal was replaced by a subsequent or refined objective.
 	Superseded Lifecycle = "superseded"
-	Blocked    Lifecycle = "blocked"
-	Paused     Lifecycle = "paused"
+	// Blocked indicates progress is halted by an external dependency or obstacle.
+	Blocked Lifecycle = "blocked"
+	// Paused indicates active execution is temporarily suspended without termination.
+	Paused Lifecycle = "paused"
 )
 
+// Provenance records origin metadata including initiating actor, authority source, and audit witness.
 type Provenance struct {
 	Actor     string `json:"actor"`
 	Authority string `json:"authority"`
 	Witness   string `json:"witness,omitempty"`
 }
 
+// Relation expresses a structural lineage or replacement link between registered goals.
 type Relation struct {
 	Kind   string `json:"kind"`
 	GoalID string `json:"goal_id"`
 }
 
+// EvidenceClass categorizes the trust level and verification origin of an outcome assertion.
 type EvidenceClass string
 
 const (
-	HarnessAssertion    EvidenceClass = "harness_assertion"
-	AgentAssertion      EvidenceClass = "agent_assertion"
+	// HarnessAssertion designates an outcome claimed directly by an execution harness.
+	HarnessAssertion EvidenceClass = "harness_assertion"
+	// AgentAssertion designates an outcome reported by an autonomous model worker.
+	AgentAssertion EvidenceClass = "agent_assertion"
+	// OperatorDeclaration designates an outcome explicitly asserted by a human operator.
 	OperatorDeclaration EvidenceClass = "operator_declaration"
-	IndependentWitness  EvidenceClass = "independent_witness"
+	// IndependentWitness designates an outcome corroborated by independent verification artifacts.
+	IndependentWitness EvidenceClass = "independent_witness"
 )
 
+// OutcomeEvidence captures auditable witness records associated with lifecycle changes.
 type OutcomeEvidence struct {
 	GoalID     string        `json:"goal_id"`
 	Lifecycle  Lifecycle     `json:"lifecycle"`
@@ -62,6 +79,7 @@ type OutcomeEvidence struct {
 	RecordedAt time.Time     `json:"recorded_at"`
 }
 
+// Goal holds durable intent, lifecycle state, provenance, and lineage links.
 type Goal struct {
 	GoalID         string     `json:"goal_id"`
 	Title          string     `json:"title"`
@@ -74,6 +92,7 @@ type Goal struct {
 	Relations      []Relation `json:"relations,omitempty"`
 }
 
+// Binding maps an external harness or tracker identifier into a canonical goal.
 type Binding struct {
 	GoalID         string     `json:"goal_id"`
 	Namespace      string     `json:"namespace"`
@@ -84,6 +103,7 @@ type Binding struct {
 	EvidencePolicy string     `json:"evidence_policy,omitempty"`
 }
 
+// Registry encapsulates persisted goals, external bindings, and historical outcome evidence.
 type Registry struct {
 	Schema          string            `json:"schema"`
 	Goals           []Goal            `json:"goals"`
@@ -91,6 +111,7 @@ type Registry struct {
 	OutcomeEvidence []OutcomeEvidence `json:"outcome_evidence,omitempty"`
 }
 
+// Store manages thread-safe read and write operations against the goal registry backing file.
 type Store struct {
 	Path string
 	Now  func() time.Time
@@ -119,6 +140,7 @@ func (s Store) withWriteLock(fn func() error) error {
 	}
 }
 
+// DefaultPath returns the resolved file path for goal persistence, honoring environment overrides.
 func DefaultPath() string {
 	if p := strings.TrimSpace(os.Getenv("FAK_GOAL_REGISTRY")); p != "" {
 		return p
@@ -130,6 +152,7 @@ func DefaultPath() string {
 	return filepath.Join(home, ".fak", "goals.json")
 }
 
+// Load reads and decodes the registry contents from disk, initializing an empty state if nonexistent.
 func (s Store) Load() (Registry, error) {
 	r := Registry{Schema: Schema, Goals: []Goal{}, Bindings: []Binding{}, OutcomeEvidence: []OutcomeEvidence{}}
 	b, err := os.ReadFile(s.Path)
@@ -148,6 +171,7 @@ func (s Store) Load() (Registry, error) {
 	return r, nil
 }
 
+// Create allocates an opaque goal identifier and persists a new active goal entry.
 func (s Store) Create(title, summary string, provenance Provenance, relations []Relation) (Goal, error) {
 	var out Goal
 	err := s.withWriteLock(func() error {
@@ -219,6 +243,7 @@ func (s Store) Resolve(namespace, externalID, revision string) (Goal, Binding, e
 	return Goal{}, Binding{}, fmt.Errorf("binding references missing goal %q", matches[0].GoalID)
 }
 
+// Show retrieves a goal along with all registered external bindings linked to its identifier.
 func (s Store) Show(id string) (Goal, []Binding, error) {
 	r, err := s.Load()
 	if err != nil {
@@ -238,6 +263,7 @@ func (s Store) Show(id string) (Goal, []Binding, error) {
 	return Goal{}, nil, fmt.Errorf("goal %q not found", id)
 }
 
+// List returns all registered goals sorted chronologically by creation timestamp.
 func (s Store) List() ([]Goal, error) {
 	r, err := s.Load()
 	if err != nil {
@@ -247,6 +273,7 @@ func (s Store) List() ([]Goal, error) {
 	return r.Goals, nil
 }
 
+// Update modifies title, summary, and non-terminal operational state without requiring witness proofs.
 func (s Store) Update(id, title, summary string, lifecycle Lifecycle) (Goal, error) {
 	var out Goal
 	err := s.withWriteLock(func() error {
@@ -321,6 +348,7 @@ func (s Store) Transition(goalID string, lifecycle Lifecycle, evidence OutcomeEv
 	return out, err
 }
 
+// Reopen transitions a terminated goal back to active status backed by operator declaration.
 func (s Store) Reopen(goalID, author, reference string) (Goal, error) {
 	if strings.TrimSpace(author) == "" || strings.TrimSpace(reference) == "" {
 		return Goal{}, errors.New("reopen author and reference are required")
@@ -344,6 +372,7 @@ func (s Store) Reopen(goalID, author, reference string) (Goal, error) {
 	return out, err
 }
 
+// OutcomeEvidence returns historical outcome verification records associated with the specified goal.
 func (s Store) OutcomeEvidence(goalID string) ([]OutcomeEvidence, error) {
 	r, err := s.Load()
 	if err != nil {
@@ -376,6 +405,7 @@ func (s Store) RequireGoal(goalID string) (Goal, error) {
 	return Goal{}, fmt.Errorf("goal %q not found", goalID)
 }
 
+// Bind associates an external namespace identifier and optional revision with a canonical goal.
 func (s Store) Bind(goalID, namespace, externalID, revision string, provenance Provenance) (Binding, error) {
 	var out Binding
 	err := s.withWriteLock(func() error {
@@ -421,6 +451,7 @@ func (s Store) bind(goalID, namespace, externalID, revision string, provenance P
 	return b, s.save(r)
 }
 
+// Unbind removes a specific namespace and external identifier association from the registry.
 func (s Store) Unbind(goalID, namespace, externalID, revision string) error {
 	return s.withWriteLock(func() error { return s.unbind(goalID, namespace, externalID, revision) })
 }
