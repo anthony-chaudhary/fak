@@ -832,6 +832,13 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdCleanBins(args)
 	case "self-update":
 		cmdSelfUpdate(args)
+	case "self":
+		if len(args) > 0 && args[0] == "update" {
+			*verb = "self-update"
+			cmdSelfUpdate(args[1:])
+		} else {
+			cmdSelf(args)
+		}
 	case "preflight":
 		cmdPreflight(args)
 	case "validate":

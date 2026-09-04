@@ -1022,3 +1022,103 @@ func TestSelfUpdateBuildGCModeReturnsBeforeUpdatePipeline(t *testing.T) {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 }
+
+func TestDiscoverRepoRoot(t *testing.T) {
+	// 1. Current repo root has cmd/fak/main.go
+	root := discoverRepoRoot()
+	if root == "" {
+		t.Fatal("discoverRepoRoot returned empty string")
+	}
+	if !isFakRepoRoot(root) {
+		t.Fatalf("discoverRepoRoot returned %q which is not a valid fak repo root", root)
+	}
+
+	// 2. Test parseGoWorkUseDirs
+	tmp := t.TempDir()
+	goWorkContent := `go 1.24.0
+
+use (
+	.
+	../fak
+	"sub/path"
+)
+
+use standalone/dir
+`
+	workFile := filepath.Join(tmp, "go.work")
+	if err := os.WriteFile(workFile, []byte(goWorkContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parsed := parseGoWorkUseDirs(workFile)
+	wantSub := filepath.Clean(filepath.Join(tmp, "sub", "path"))
+	foundSub := false
+	for _, p := range parsed {
+		if p == wantSub {
+			foundSub = true
+			break
+		}
+	}
+	if !foundSub {
+		t.Fatalf("parseGoWorkUseDirs did not find %s in %v", wantSub, parsed)
+	}
+
+	// 3. Test FAK_ROOT override when set
+	fakeRoot := filepath.Join(t.TempDir(), "fakeroot")
+	if err := os.MkdirAll(filepath.Join(fakeRoot, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeRoot, "cmd", "fak", "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isFakRepoRoot(fakeRoot) {
+		t.Fatalf("expected %s to be recognized as fak repo root", fakeRoot)
+	}
+}
+
+func TestStampOfBinaryFallbackProbe(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "main.go")
+	bin := filepath.Join(tmp, "fak"+exeSuffix())
+	code := `package main
+import (
+	"fmt"
+	"os"
+)
+func main() {
+	if len(os.Args) > 2 && os.Args[1] == "version" && os.Args[2] == "--json" {
+		fmt.Print(` + "`" + `{"commit": "abcdef1234567890abcdef1234567890abcdef12", "dirty": false, "stamped": true}` + "`" + `)
+		return
+	}
+	os.Exit(1)
+}
+`
+	if err := os.WriteFile(src, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, src)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build test binary: %v\n%s", err, out)
+	}
+
+	// Verify buildinfo has !HasVCS
+	bi, err := buildinfo.ReadFile(bin)
+	if err != nil {
+		t.Fatalf("buildinfo: %v", err)
+	}
+	initialStamp := binstamp.FromBuildInfo(bi)
+	if initialStamp.HasVCS {
+		t.Fatalf("expected initialStamp.HasVCS to be false, got true")
+	}
+
+	// stampOfBinary should run the fallback probe and extract commit/stamped
+	stamp, ok := stampOfBinary(bin)
+	if !ok || !stamp.HasVCS {
+		t.Fatalf("stampOfBinary failed fallback: ok=%v, stamp=%+v", ok, stamp)
+	}
+	if stamp.Revision != "abcdef1234567890abcdef1234567890abcdef12" {
+		t.Fatalf("stamp.Revision = %q, want abcdef1234567890abcdef1234567890abcdef12", stamp.Revision)
+	}
+	if stamp.Dirty {
+		t.Fatalf("stamp.Dirty = true, want false")
+	}
+}
