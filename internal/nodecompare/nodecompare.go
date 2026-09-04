@@ -12,23 +12,27 @@ import (
 	"strings"
 )
 
+// Q8Kernel captures microbenchmark results for 8-bit quantized kernel operations.
 type Q8Kernel struct {
 	GOMAXPROCS *int                   `json:"gomaxprocs"`
 	Rows       map[string]Q8KernelRow `json:"rows"`
 }
 
+// Q8KernelRow records execution time, memory bandwidth, and relative speedup for a kernel variant.
 type Q8KernelRow struct {
 	MS   float64 `json:"ms"`
 	GBS  float64 `json:"gbs"`
 	XF32 float64 `json:"xf32"`
 }
 
+// Batchbench summarizes continuous-batching decode throughput across batch sizes.
 type Batchbench struct {
 	B1TokS   *float64 `json:"b1_tok_s"`
 	BMax     *int     `json:"bmax"`
 	BMaxTokS *float64 `json:"bmax_tok_s"`
 }
 
+// Node holds hardware metadata and benchmark observations collected for a single host.
 type Node map[string]any
 
 var (
@@ -37,6 +41,7 @@ var (
 	batchRE = regexp.MustCompile(`B=(\d+)\s+step=.*?agg=\s*([\d.]+)\s*tok/s`)
 )
 
+// ParseQ8Kernel reads a q8kernel log file and parses GOMAXPROCS alongside per-kernel benchmark rows.
 func ParseQ8Kernel(path string) Q8Kernel {
 	out := Q8Kernel{Rows: map[string]Q8KernelRow{}}
 	b, err := os.ReadFile(path)
@@ -58,6 +63,7 @@ func ParseQ8Kernel(path string) Q8Kernel {
 	return out
 }
 
+// ParseBatchbench reads batch benchmark results from adjacent JSON or raw text log files.
 func ParseBatchbench(path string) Batchbench {
 	jsonPath := filepath.Join(filepath.Dir(path), "batchbench-q8.json")
 	if b, err := os.ReadFile(jsonPath); err == nil {
@@ -113,6 +119,7 @@ func ParseBatchbench(path string) Batchbench {
 	return out
 }
 
+// LoadNodes reads per-node subdirectories under nodesDir, parsing host metadata and benchmark outputs.
 func LoadNodes(nodesDir string) ([]Node, error) {
 	entries, err := os.ReadDir(nodesDir)
 	if err != nil {
@@ -148,6 +155,7 @@ func LoadNodes(nodesDir string) ([]Node, error) {
 	return nodes, nil
 }
 
+// Render formats loaded node benchmark metrics into an aligned cross-hardware comparison table.
 func Render(nodes []Node) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "==== fak cross-node kernel comparison (%d node(s)) ====\n", len(nodes))
