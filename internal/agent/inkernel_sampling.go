@@ -225,16 +225,105 @@ func maskKept(probs []float64, kept map[int]bool) float64 {
 	return newSum
 }
 
+const topKSmallKThreshold = 64
+
+// topKHeapLess returns true if heap index a is worse than heap index b.
+// An element is worse if it has lower probability, or equal probability and higher index.
+func topKHeapLess(heap []int, probs []float64, a, b int) bool {
+	ia, ib := heap[a], heap[b]
+	pa, pb := probs[ia], probs[ib]
+	if pa != pb {
+		return pa < pb
+	}
+	return ia > ib
+}
+
+func topKSiftDown(heap []int, probs []float64, root, n int) {
+	for {
+		child := 2*root + 1
+		if child >= n {
+			break
+		}
+		if right := child + 1; right < n && topKHeapLess(heap, probs, right, child) {
+			child = right
+		}
+		if !topKHeapLess(heap, probs, child, root) {
+			break
+		}
+		heap[root], heap[child] = heap[child], heap[root]
+		root = child
+	}
+}
+
+// topKTruncateSmallK implements sort-free bounded selection for k <= 64 via a
+// bounded min-heap in O(V log k) time with zero heap allocations on the hot path.
+func topKTruncateSmallK(probs []float64, k int) float64 {
+	var heapBuf [topKSmallKThreshold]int
+	heap := heapBuf[:k]
+	for i := 0; i < k; i++ {
+		heap[i] = i
+	}
+	for i := k/2 - 1; i >= 0; i-- {
+		topKSiftDown(heap, probs, i, k)
+	}
+
+	rootProb := probs[heap[0]]
+	for i := k; i < len(probs); i++ {
+		p := probs[i]
+		if p > rootProb {
+			heap[0] = i
+			topKSiftDown(heap, probs, 0, k)
+			rootProb = probs[heap[0]]
+		}
+	}
+
+	// Sort kept indices in ascending order (insertion sort over <= 64 elements,
+	// zero allocations, ensures deterministic summation order matching maskKept).
+	for i := 1; i < k; i++ {
+		key := heap[i]
+		j := i - 1
+		for j >= 0 && heap[j] > key {
+			heap[j+1] = heap[j]
+			j--
+		}
+		heap[j+1] = key
+	}
+
+	var topVals [topKSmallKThreshold]float64
+	var newSum float64
+	for j := 0; j < k; j++ {
+		idx := heap[j]
+		val := probs[idx]
+		topVals[j] = val
+		newSum += val
+	}
+	clear(probs)
+	for j := 0; j < k; j++ {
+		probs[heap[j]] = topVals[j]
+	}
+	return newSum
+}
+
 // topKTruncate zeroes every probability outside the top-k highest-probability
 // tokens in place and returns the surviving mass (the new normalization sum). Ties
-// at the k-th rank are broken by index order (the sort is stable on equal probs via
-// the index comparator), so the kept set is deterministic. probs is unsorted on
-// entry and stays index-aligned to the caller's logits. The caller guarantees
-// 0 < k < len(probs); k>=len(probs) is a no-op handled before the call so the full
-// distribution stays byte-for-byte the pre-seam draw.
+// at the k-th rank are broken by index order (equal probability breaks by lower index),
+// so the kept set is deterministic. probs is unsorted on entry and stays index-aligned
+// to the caller's logits. The caller guarantees 0 < k < len(probs); k>=len(probs) is
+// a no-op handled before the call so the full distribution stays byte-for-byte the
+// pre-seam draw.
 func topKTruncate(probs []float64, sum float64, k int) float64 {
-	// Highest probability first; ties resolve to the lower index so the kept set is
-	// stable and reproducible across runs.
+	if k <= 0 || len(probs) == 0 {
+		clear(probs)
+		return 0
+	}
+	if k >= len(probs) {
+		return sum
+	}
+	if k <= topKSmallKThreshold {
+		return topKTruncateSmallK(probs, k)
+	}
+
+	// Fall back to full sort for larger k (> 64).
 	order := descProbOrder(probs, func(i, j int) bool {
 		if probs[i] != probs[j] {
 			return probs[i] > probs[j]

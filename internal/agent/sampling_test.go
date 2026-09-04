@@ -9,7 +9,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -235,4 +238,187 @@ func TestSampleLogitsWithPenaltyPresenceIsBinary(t *testing.T) {
 func jsonInt(v any) int {
 	f, _ := v.(float64)
 	return int(f)
+}
+
+// referenceFullSortTopKTruncate is the golden reference implementing top-k truncation
+// via full vocabulary sorting and a map-based mask.
+func referenceFullSortTopKTruncate(probs []float64, sum float64, k int) float64 {
+	order := descProbOrder(probs, func(i, j int) bool {
+		if probs[i] != probs[j] {
+			return probs[i] > probs[j]
+		}
+		return i < j
+	})
+	kept := make(map[int]bool, k)
+	for rank := 0; rank < k; rank++ {
+		kept[order[rank]] = true
+	}
+	return maskKept(probs, kept)
+}
+
+func TestTopKTruncateEquivalence(t *testing.T) {
+	vocabs := []int{32768, 248000}
+	kValues := []int{1, 2, 8, 32, 50, 64, 100}
+
+	for _, vocabSize := range vocabs {
+		// 1. Realistic softmax-like logit distribution
+		rng := rand.New(rand.NewSource(42))
+		logits := make([]float32, vocabSize)
+		for i := range logits {
+			logits[i] = float32(rng.NormFloat64() * 3.0)
+		}
+		maxL := float32(-math.MaxFloat32)
+		for _, x := range logits {
+			if x > maxL {
+				maxL = x
+			}
+		}
+		var baseSum float64
+		baseProbs := make([]float64, vocabSize)
+		for i, x := range logits {
+			p := math.Exp(float64(x - maxL))
+			baseProbs[i] = p
+			baseSum += p
+		}
+
+		for _, k := range kValues {
+			t.Run(fmt.Sprintf("softmax_vocab_%d_k_%d", vocabSize, k), func(t *testing.T) {
+				fastProbs := append([]float64(nil), baseProbs...)
+				refProbs := append([]float64(nil), baseProbs...)
+
+				fastSum := topKTruncate(fastProbs, baseSum, k)
+				refSum := referenceFullSortTopKTruncate(refProbs, baseSum, k)
+
+				if math.Abs(fastSum-refSum) > 1e-12 {
+					t.Fatalf("vocab %d k %d sum mismatch: got %v, want %v", vocabSize, k, fastSum, refSum)
+				}
+				for i := range fastProbs {
+					if fastProbs[i] != refProbs[i] {
+						t.Fatalf("vocab %d k %d prob mismatch at index %d: got %v, want %v", vocabSize, k, i, fastProbs[i], refProbs[i])
+					}
+				}
+			})
+		}
+
+		// 2. Heavy ties distribution (discrete values with extensive ties across the vocabulary)
+		var tieSum float64
+		tieProbs := make([]float64, vocabSize)
+		for i := range tieProbs {
+			tieProbs[i] = float64(i%7) / 10.0
+			tieSum += tieProbs[i]
+		}
+		for _, k := range []int{1, 8, 50, 64} {
+			t.Run(fmt.Sprintf("ties_vocab_%d_k_%d", vocabSize, k), func(t *testing.T) {
+				fastProbs := append([]float64(nil), tieProbs...)
+				refProbs := append([]float64(nil), tieProbs...)
+
+				fastSum := topKTruncate(fastProbs, tieSum, k)
+				refSum := referenceFullSortTopKTruncate(refProbs, tieSum, k)
+
+				if math.Abs(fastSum-refSum) > 1e-12 {
+					t.Fatalf("tie vocab %d k %d sum mismatch: got %v, want %v", vocabSize, k, fastSum, refSum)
+				}
+				for i := range fastProbs {
+					if fastProbs[i] != refProbs[i] {
+						t.Fatalf("tie vocab %d k %d prob mismatch at index %d: got %v, want %v", vocabSize, k, i, fastProbs[i], refProbs[i])
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestTopKDeterministicTieBreak(t *testing.T) {
+	// Test 1: all identical probabilities
+	probs1 := []float64{0.2, 0.2, 0.2, 0.2, 0.2}
+	fast1 := append([]float64(nil), probs1...)
+	ref1 := append([]float64(nil), probs1...)
+	topKTruncate(fast1, 1.0, 3)
+	referenceFullSortTopKTruncate(ref1, 1.0, 3)
+	for i := range fast1 {
+		if fast1[i] != ref1[i] {
+			t.Fatalf("all-ties mismatch at %d: got %v want %v", i, fast1[i], ref1[i])
+		}
+	}
+	// Exactly indices 0, 1, 2 should be preserved (lower index breaks ties)
+	if fast1[0] != 0.2 || fast1[1] != 0.2 || fast1[2] != 0.2 || fast1[3] != 0 || fast1[4] != 0 {
+		t.Fatalf("unexpected kept set: %v", fast1)
+	}
+
+	// Test 2: tie right at the k boundary
+	probs2 := []float64{0.5, 0.4, 0.3, 0.3, 0.3, 0.1}
+	fast2 := append([]float64(nil), probs2...)
+	ref2 := append([]float64(nil), probs2...)
+	topKTruncate(fast2, 1.9, 3)
+	referenceFullSortTopKTruncate(ref2, 1.9, 3)
+	for i := range fast2 {
+		if fast2[i] != ref2[i] {
+			t.Fatalf("boundary-tie mismatch at %d: got %v want %v", i, fast2[i], ref2[i])
+		}
+	}
+	// Indices 0 (0.5), 1 (0.4), and 2 (0.3) should be kept; indices 3, 4 (0.3) and 5 (0.1) zeroed
+	if fast2[0] != 0.5 || fast2[1] != 0.4 || fast2[2] != 0.3 || fast2[3] != 0 || fast2[4] != 0 || fast2[5] != 0 {
+		t.Fatalf("unexpected boundary kept set: %v", fast2)
+	}
+}
+
+func TestTopKEdgeCases(t *testing.T) {
+	probs := []float64{0.1, 0.2, 0.3}
+	if sum := topKTruncate(probs, 0.6, 0); sum != 0 {
+		t.Fatalf("k=0 should zero all, got sum %v", sum)
+	}
+	for i, p := range probs {
+		if p != 0 {
+			t.Fatalf("probs[%d] = %v, want 0", i, p)
+		}
+	}
+
+	probs2 := []float64{0.1, 0.2, 0.3}
+	if sum := topKTruncate(probs2, 0.6, 5); sum != 0.6 {
+		t.Fatalf("k >= len should be no-op, got sum %v", sum)
+	}
+}
+
+func BenchmarkTopKTruncate_SmallK_248k(b *testing.B) {
+	const vocabSize = 248000
+	const k = 50
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		topKTruncate(work, sum, k)
+	}
+}
+
+func BenchmarkTopKTruncate_FullSort_248k(b *testing.B) {
+	const vocabSize = 248000
+	const k = 50
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		referenceFullSortTopKTruncate(work, sum, k)
+	}
 }
