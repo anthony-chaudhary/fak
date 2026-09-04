@@ -10,7 +10,7 @@ import "strings"
 // destructive-overwrite family (`dd`/`truncate`): it overwrites then unlinks the
 // named file and has NO read mode, so a substring match cannot block a read.
 var shellWriteVerbs = []string{
-	"sed -i", "tee ", "dd ", "truncate ", "shred ",
+	"sed -i", "sed --in-place", "tee ", "dd ", "truncate ", "shred ",
 	"git apply", "git checkout", "git restore", "git stash",
 	"cp ", "mv ", "install ", "patch ", "chmod ", "chown ", "ln ", "rm ",
 	// In-place interpreter edits — the sed -i family across other interpreters
@@ -362,12 +362,22 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 		for _, target := range operandsAfterFirst(args) {
 			add(target)
 		}
-	case "sed":
-		addLastPlainOperandWhen(strings.Contains(lc, "sed -i"), args, add)
+	case "sed", "awk", "gawk":
+		if muts, err := ExtractSedAwkMutations(segment); err == nil && len(muts) > 0 {
+			for _, m := range muts {
+				if m.InPlace && m.TargetPath != "" {
+					add(m.TargetPath)
+				}
+			}
+		} else {
+			if head == "sed" {
+				addLastPlainOperandWhen(strings.Contains(lc, "sed -i"), args, add)
+			} else {
+				addLastPlainOperandWhen(strings.Contains(lc, "-i inplace"), args, add)
+			}
+		}
 	case "perl", "ruby":
 		addLastPlainOperandWhen(hasInPlaceFlag(args), args, add)
-	case "awk", "gawk":
-		addLastPlainOperandWhen(strings.Contains(lc, "-i inplace"), args, add)
 	case "ed", "ex":
 		addLastPlainOperand(args, add)
 	case "git":
