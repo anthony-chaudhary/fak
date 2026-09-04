@@ -31,7 +31,11 @@ func (c Controller) Tick(ctx context.Context) (TickReceipt, error) {
 	if err != nil {
 		return TickReceipt{}, err
 	}
-	launches, err := Actuate(ctx, c.FakPath, reserved, plan.Start, c.Runner)
+	runner := c.Runner
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	launches, err := Actuate(ctx, c.FakPath, reserved, plan.Start, runner)
 	if err != nil {
 		return TickReceipt{Generation: reserved.Generation, Plan: plan, Launches: launches}, err
 	}
@@ -43,6 +47,12 @@ func (c Controller) Tick(ctx context.Context) (TickReceipt, error) {
 func (c Controller) Run(ctx context.Context, observe func(TickReceipt)) error {
 	if c.Interval <= 0 {
 		return errors.New("agentqueue: controller interval must be positive")
+	}
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
 	}
 	for {
 		receipt, err := c.Tick(ctx)

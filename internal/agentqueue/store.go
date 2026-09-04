@@ -22,6 +22,16 @@ type Store struct {
 	Path string
 }
 
+// FileStore returns a Store backed by path.
+func FileStore(path string) Store {
+	return Store{Path: path}
+}
+
+// NewFileStore returns a Store backed by path.
+func NewFileStore(path string) Store {
+	return Store{Path: path}
+}
+
 var ErrGenerationConflict = errors.New("agentqueue: generation conflict")
 
 // Reserve serializes the read-plan-write transition across processes. The
