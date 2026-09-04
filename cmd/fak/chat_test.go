@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,6 +258,15 @@ func TestChatClearCommandResetsContext(t *testing.T) {
 }
 
 func TestChatPlannerOfflineDefault(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = "http://127.0.0.1:0/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
 	p := chatPlanner(false, "", "openai", "gemini-3.8-flash", "OPENAI_API_KEY", "auto")
 	if p.Model() != "gemini-3.8-flash" {
 		t.Fatalf("expected model gemini-3.8-flash, got %s", p.Model())
@@ -310,6 +321,10 @@ func TestAutoDetectInferenceWithGeminiKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
 
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = "http://127.0.0.1:0/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
 	detected := autoDetectInference()
 	if detected == nil {
 		t.Fatal("expected non-nil detectedInference when GEMINI_API_KEY is set")
@@ -317,10 +332,219 @@ func TestAutoDetectInferenceWithGeminiKey(t *testing.T) {
 	if detected.provider != "gemini" {
 		t.Fatalf("expected provider gemini, got %s", detected.provider)
 	}
-	if detected.model != "gemini-3.8-flash" {
-		t.Fatalf("expected model gemini-3.8-flash, got %s", detected.model)
+	if detected.model != "gemini-2.5-flash" {
+		t.Fatalf("expected model gemini-2.5-flash, got %s", detected.model)
 	}
 	if detected.apiKeyEnv != "GEMINI_API_KEY" {
 		t.Fatalf("expected apiKeyEnv GEMINI_API_KEY, got %s", detected.apiKeyEnv)
+	}
+}
+
+func TestChatAutoDetectLocalDaemon(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/readyz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	oldProbeURL := localDaemonProbeURL
+	oldBaseURL := localDaemonBaseURL
+	localDaemonProbeURL = ts.URL + "/readyz"
+	localDaemonBaseURL = ts.URL + "/v1"
+	defer func() {
+		localDaemonProbeURL = oldProbeURL
+		localDaemonBaseURL = oldBaseURL
+	}()
+
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+
+	p := chatPlanner(false, "", "", "", "", "auto")
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("expected *agent.HTTPPlanner from local daemon probe, got %T", p)
+	}
+	if hp.BaseURL != ts.URL+"/v1" {
+		t.Fatalf("expected baseURL %s, got %s", ts.URL+"/v1", hp.BaseURL)
+	}
+	if hp.Provider != agent.ProviderOpenAI {
+		t.Fatalf("expected provider %v, got %v", agent.ProviderOpenAI, hp.Provider)
+	}
+	if p.Model() != "default" {
+		t.Fatalf("expected model default, got %s", p.Model())
+	}
+
+	pCustom := chatPlanner(false, "", "", "custom-model", "", "auto")
+	if pCustom.Model() != "custom-model" {
+		t.Fatalf("expected model custom-model when explicitly passed, got %s", pCustom.Model())
+	}
+}
+
+func TestChatAutoDetectEnvKeys(t *testing.T) {
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = "http://127.0.0.1:0/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
+	tests := []struct {
+		name         string
+		setKey       string
+		wantProvider agent.Provider
+		wantBaseURL  string
+		wantModel    string
+	}{
+		{
+			name:         "gemini",
+			setKey:       "GEMINI_API_KEY",
+			wantProvider: agent.ProviderGemini,
+			wantBaseURL:  "https://generativelanguage.googleapis.com/v1beta",
+			wantModel:    "gemini-2.5-flash",
+		},
+		{
+			name:         "anthropic",
+			setKey:       "ANTHROPIC_API_KEY",
+			wantProvider: agent.ProviderAnthropic,
+			wantBaseURL:  "https://api.anthropic.com",
+			wantModel:    "claude-3-7-sonnet-20250219",
+		},
+		{
+			name:         "openai",
+			setKey:       "OPENAI_API_KEY",
+			wantProvider: agent.ProviderOpenAI,
+			wantBaseURL:  "https://api.openai.com/v1",
+			wantModel:    "gpt-4o",
+		},
+		{
+			name:         "xai",
+			setKey:       "XAI_API_KEY",
+			wantProvider: agent.ProviderOpenAI,
+			wantBaseURL:  "https://api.x.ai/v1",
+			wantModel:    "grok-beta",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GEMINI_API_KEY", "")
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("OPENAI_API_KEY", "")
+			t.Setenv("XAI_API_KEY", "")
+			t.Setenv(tt.setKey, "mock-api-key")
+
+			p := chatPlanner(false, "", "", "", "", "auto")
+			hp, ok := p.(*agent.HTTPPlanner)
+			if !ok {
+				t.Fatalf("expected *agent.HTTPPlanner when %s is set, got %T", tt.setKey, p)
+			}
+			if hp.Provider != tt.wantProvider {
+				t.Fatalf("expected provider %v, got %v", tt.wantProvider, hp.Provider)
+			}
+			if hp.BaseURL != tt.wantBaseURL {
+				t.Fatalf("expected baseURL %s, got %s", tt.wantBaseURL, hp.BaseURL)
+			}
+			if p.Model() != tt.wantModel {
+				t.Fatalf("expected model %s, got %s", tt.wantModel, p.Model())
+			}
+		})
+	}
+}
+
+func TestChatAutoDetectEnvPrecedenceAndExplicitModel(t *testing.T) {
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = "http://127.0.0.1:0/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+	t.Setenv("OPENAI_API_KEY", "openai-key")
+	t.Setenv("XAI_API_KEY", "xai-key")
+
+	p := chatPlanner(false, "", "", "", "", "auto")
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("expected *agent.HTTPPlanner, got %T", p)
+	}
+	if hp.Provider != agent.ProviderGemini {
+		t.Fatalf("expected ProviderGemini precedence, got %v", hp.Provider)
+	}
+	if p.Model() != "gemini-2.5-flash" {
+		t.Fatalf("expected model gemini-2.5-flash, got %s", p.Model())
+	}
+
+	pExplicitModel := chatPlanner(false, "", "", "custom-gemini", "", "auto")
+	if pExplicitModel.Model() != "custom-gemini" {
+		t.Fatalf("expected custom-gemini model, got %s", pExplicitModel.Model())
+	}
+}
+
+func TestChatAutoDetectOfflineForcesSynthetic(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = ts.URL + "/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
+	t.Setenv("GEMINI_API_KEY", "key")
+	t.Setenv("OPENAI_API_KEY", "key")
+
+	p := chatPlanner(true, "", "", "gemini-2.5-flash", "", "auto")
+	if _, ok := p.(*agent.SyntheticPlanner); !ok {
+		t.Fatalf("expected *agent.SyntheticPlanner when offline=true, got %T", p)
+	}
+	if p.Model() != "gemini-2.5-flash" {
+		t.Fatalf("expected model gemini-2.5-flash, got %s", p.Model())
+	}
+}
+
+func TestChatAutoDetectExplicitBaseURLOverrides(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	oldProbeURL := localDaemonProbeURL
+	localDaemonProbeURL = ts.URL + "/readyz"
+	defer func() { localDaemonProbeURL = oldProbeURL }()
+
+	t.Setenv("GEMINI_API_KEY", "key")
+
+	explicitURL := "https://explicit.provider.endpoint/v1"
+	p := chatPlanner(false, explicitURL, "openai", "custom-model", "OPENAI_API_KEY", "auto")
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("expected *agent.HTTPPlanner, got %T", p)
+	}
+	if hp.BaseURL != explicitURL {
+		t.Fatalf("expected baseURL %s, got %s", explicitURL, hp.BaseURL)
+	}
+	if p.Model() != "custom-model" {
+		t.Fatalf("expected model custom-model, got %s", p.Model())
+	}
+}
+
+func TestChatExplicitProviderOverridesAutoDetect(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "dummy-gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "dummy-anthropic-key")
+
+	p := chatPlanner(false, "", "anthropic", "", "", "auto")
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("expected *agent.HTTPPlanner, got %T", p)
+	}
+	if hp.Provider != agent.ProviderAnthropic {
+		t.Fatalf("expected ProviderAnthropic, got %v", hp.Provider)
+	}
+	if hp.BaseURL != "https://api.anthropic.com" {
+		t.Fatalf("expected Anthropic BaseURL, got %q", hp.BaseURL)
+	}
+	if p.Model() != "claude-3-7-sonnet-20250219" {
+		t.Fatalf("expected default Anthropic model, got %s", p.Model())
 	}
 }
