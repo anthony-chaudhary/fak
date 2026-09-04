@@ -45,8 +45,12 @@ type Adapter interface {
 	Search(query string, limit int) ([]Evidence, string, error)
 }
 
+// Plan coordinates discovery search execution across registered adapters.
 type Plan struct{ Adapters []Adapter }
 
+// Run executes discovery search across all configured adapters.
+// Invariant: discovery routing resolution is fail-closed and deterministic.
+// Guard: Plan.Run guards against partial failure and unbounded memory growth by clamping result limits, validating adapter responses, and marking coverage incomplete when adapters fail.
 func (p Plan) Run(query string, limit int, skip map[string]bool) Report {
 	q := strings.TrimSpace(query)
 	if limit < 1 {
