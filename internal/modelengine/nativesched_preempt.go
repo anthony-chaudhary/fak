@@ -38,6 +38,8 @@ const (
 	// NativePreemptRecompute drops the victim's KV and replays prompt+generated tokens on
 	// readmit to rebuild the same cache state.
 	NativePreemptRecompute
+	// NativePreemptGPUDirectSwap executes zero-copy GPU Direct NVMe swap.
+	NativePreemptGPUDirectSwap NativePreemptionMode = 2
 )
 
 // NativePreemptionVictimRule selects which running lane is swapped/recomputed when
@@ -76,34 +78,39 @@ type NativePreemptionPolicy struct {
 	RecomputeCostPerToken  float64
 	// UsageLedgerPath is the declared, reversible JSONL target for Qwen hybrid
 	// swap codec invocations. Empty disables the writer without a default path.
-	UsageLedgerPath string
+	UsageLedgerPath  string
+	GPUDirectSwapper *model.Qwen38GPUDirectSwapper
 }
 
 // NativePreemptionStats is the scheduler-local cumulative preemption witness.
 type NativePreemptionStats struct {
-	Running           int
-	UsedBlocks        int
-	SwappedOut        int
-	MaxBlocks         int
-	MaxPreemptRounds  int64
-	Preemptions       int64
-	SwapPreemptions   int64
-	RecomputeCount    int64
-	SwapBytes         int64
-	Readmitted        int64
-	SwapRestoredBytes int64
-	VictimReason      string
-	VictimRule        NativePreemptionVictimRule
-	CostAwareVictims  int64
-	PinnedSkipped     int64
-	ExpiredPins       int64
-	LastVictimCost    float64
-	LastVictimTokens  int
-	LastVictimBlocks  int
-	LastVictimHits    int
-	LastCandidates    int
-	LastPinned        int
-	LastExpiredPins   int
+	Running                int
+	UsedBlocks             int
+	SwappedOut             int
+	MaxBlocks              int
+	MaxPreemptRounds       int64
+	Preemptions            int64
+	SwapPreemptions        int64
+	RecomputeCount         int64
+	SwapBytes              int64
+	Readmitted             int64
+	SwapRestoredBytes      int64
+	GPUDirectSwaps         int64
+	GPUDirectBytes         int64
+	GPUDirectRestored      int64
+	GPUDirectStagingCopies int // strictly 0
+	VictimReason           string
+	VictimRule             NativePreemptionVictimRule
+	CostAwareVictims       int64
+	PinnedSkipped          int64
+	ExpiredPins            int64
+	LastVictimCost         float64
+	LastVictimTokens       int
+	LastVictimBlocks       int
+	LastVictimHits         int
+	LastCandidates         int
+	LastPinned             int
+	LastExpiredPins        int
 }
 
 // SetKVPreemptionPolicy configures the scheduler's opt-in paged-KV preemption path. It is
@@ -114,7 +121,7 @@ func (s *NativeScheduler) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
 		p.BlockTokens = 16
 	}
 	switch p.Mode {
-	case NativePreemptSwap, NativePreemptRecompute:
+	case NativePreemptSwap, NativePreemptRecompute, NativePreemptGPUDirectSwap:
 	default:
 		p.Mode = NativePreemptSwap
 	}
@@ -191,9 +198,14 @@ func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) 
 	writeNativeCounter(b, p+"pin_expired_total", "Pinned lanes whose KVBM pin TTL had expired when considered by the cost-aware victim picker.", st.ExpiredPins)
 	writeNativeCounter(b, p+"swap_total", "Preemptions taken via KV swap-to-host.", st.SwapPreemptions)
 	writeNativeCounter(b, p+"recompute_total", "Preemptions taken via drop-and-recompute.", st.RecomputeCount)
+	writeNativeCounter(b, p+"gpudirect_swap_total", "Preemptions taken via GPU Direct NVMe swap.", st.GPUDirectSwaps)
 	writeNativeCounter(b, p+"swap_bytes_total", "KV bytes swapped out to host DRAM.", st.SwapBytes)
+	writeNativeCounter(b, p+"gpudirect_bytes_total", "KV bytes swapped out via GPU Direct NVMe.", st.GPUDirectBytes)
 	writeNativeCounter(b, p+"readmitted_total", "Preempted sequences readmitted to the running set.", st.Readmitted)
 	writeNativeCounter(b, p+"swap_restored_bytes_total", "KV bytes restored from host DRAM on readmit.", st.SwapRestoredBytes)
+	writeNativeCounter(b, p+"gpudirect_restored_bytes_total", "KV bytes restored via GPU Direct NVMe on readmit.", st.GPUDirectRestored)
+	writeNativeHelpType(b, p+"gpudirect_staging_copies", "Host DRAM staging bounce copies incurred by GPU Direct (strictly 0).", "gauge")
+	fmt.Fprintf(b, "%sgpudirect_staging_copies %d\n", p, st.GPUDirectStagingCopies)
 }
 
 func writeNativeHelpType(b *strings.Builder, name, help, typ string) {
@@ -275,6 +287,10 @@ func (s *NativeScheduler) dropCanceledPreemptedLocked() {
 	kept := s.preempted[:0]
 	for _, ln := range s.preempted {
 		if ln.ctx.Err() != nil {
+			if ln.gpuDirectKV != nil && s.preemption.GPUDirectSwapper != nil {
+				s.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
+			}
+			ln.gpuDirectKV = nil
 			ln.hostKV = nil
 			ln.savedLogits = nil
 			ln.finish(nil, ln.ctx.Err())
@@ -314,6 +330,10 @@ func (s *NativeScheduler) readmitPreemptedLocked() {
 			continue
 		}
 		if err := s.restorePreemptedLaneLocked(ln); err != nil {
+			if ln.gpuDirectKV != nil && s.preemption.GPUDirectSwapper != nil {
+				s.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
+			}
+			ln.gpuDirectKV = nil
 			ln.hostKV = nil
 			ln.savedLogits = nil
 			ln.finish(nil, err)
@@ -326,6 +346,32 @@ func (s *NativeScheduler) readmitPreemptedLocked() {
 }
 
 func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
+	if ln.gpuDirectKV != nil || ln.preemptMode == NativePreemptGPUDirectSwap {
+		if s.preemption.GPUDirectSwapper == nil {
+			return fmt.Errorf("modelengine: cannot restore gpudirect swap without GPUDirectSwapper")
+		}
+		cache, err := s.preemption.GPUDirectSwapper.SwapInDirect(ln.gpuDirectKV)
+		if err != nil {
+			return err
+		}
+		candidate := s.sessionFromCache(cache, ln.q4k)
+		history := make([]int, 0, len(ln.prompt)+len(ln.gen))
+		history = append(history, ln.prompt...)
+		history = append(history, ln.gen...)
+		if _, err := candidate.RestoreTokenLineage(history); err != nil {
+			candidate.Close()
+			return fmt.Errorf("modelengine: restore gpudirect swap token lineage: %w", err)
+		}
+		ln.sess = candidate
+		ln.logits = copyF32(ln.savedLogits)
+		s.preemptStats.GPUDirectRestored += int64(ln.gpuDirectKV.TotalBytes())
+		s.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
+		ln.gpuDirectKV = nil
+		ln.savedLogits = nil
+		ln.hostKV = nil
+		return nil
+	}
+
 	switch ln.preemptMode {
 	case NativePreemptRecompute:
 		sess := s.newLaneSession(ln.q4k, NativeSessionRestored)
@@ -528,36 +574,63 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	switch mode {
 	case NativePreemptRecompute:
 		s.preemptStats.RecomputeCount++
+	case NativePreemptGPUDirectSwap:
+		if ln.sess == nil || ln.sess.Cache == nil {
+			return fmt.Errorf("modelengine: cannot gpudirect swap preempt lane without resident KV")
+		}
+		if s.preemption.GPUDirectSwapper != nil {
+			desc, err := s.preemption.GPUDirectSwapper.SwapOutDirect(ln.sess.Cache, fmt.Sprintf("lane-%d", ln.seqNo))
+			if err != nil {
+				return err
+			}
+			ln.gpuDirectKV = desc
+			ln.hostKV = nil
+			s.preemptStats.GPUDirectSwaps++
+			s.preemptStats.GPUDirectBytes += int64(desc.TotalBytes())
+		} else {
+			return fmt.Errorf("modelengine: gpudirect swapper is nil")
+		}
 	case NativePreemptSwap:
 		if ln.sess == nil || ln.sess.Cache == nil {
 			return fmt.Errorf("modelengine: cannot swap preempt lane without resident KV")
 		}
-		var blob []byte
-		var err error
-		qwenHybrid := s.m.Cfg.IsQwen35Hybrid()
-		if qwenHybrid {
-			blob, err = model.QwenHybridKVCacheToHost(ln.sess.Cache, s.blockTokensLocked())
+		if s.preemption.GPUDirectSwapper != nil {
+			desc, err := s.preemption.GPUDirectSwapper.SwapOutDirect(ln.sess.Cache, fmt.Sprintf("lane-%d", ln.seqNo))
+			if err != nil {
+				return err
+			}
+			ln.gpuDirectKV = desc
+			ln.hostKV = nil
+			s.preemptStats.GPUDirectSwaps++
+			s.preemptStats.GPUDirectBytes += int64(desc.TotalBytes())
 		} else {
-			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
-			seq, pageErr := model.KVCacheToPaged(pool, ln.sess.Cache)
-			if pageErr != nil {
-				return pageErr
-			}
-			blob, err = seq.SwapToHost()
-			seq.Free()
-		}
-		if err != nil {
+			var blob []byte
+			var err error
+			qwenHybrid := s.m.Cfg.IsQwen35Hybrid()
 			if qwenHybrid {
-				_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, 0)
+				blob, err = model.QwenHybridKVCacheToHost(ln.sess.Cache, s.blockTokensLocked())
+			} else {
+				pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
+				seq, pageErr := model.KVCacheToPaged(pool, ln.sess.Cache)
+				if pageErr != nil {
+					return pageErr
+				}
+				blob, err = seq.SwapToHost()
+				seq.Free()
 			}
-			return err
+			if err != nil {
+				if qwenHybrid {
+					_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, 0)
+				}
+				return err
+			}
+			ln.hostKV = blob
+			if qwenHybrid {
+				_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(blob))
+			}
+			s.preemptStats.SwapPreemptions++
+			s.preemptStats.SwapBytes += int64(len(blob))
 		}
-		ln.hostKV = blob
-		if qwenHybrid {
-			_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(blob))
-		}
-		s.preemptStats.SwapPreemptions++
-		s.preemptStats.SwapBytes += int64(len(blob))
 	default:
 		return fmt.Errorf("modelengine: unknown native preemption mode %d", s.preemption.Mode)
 	}

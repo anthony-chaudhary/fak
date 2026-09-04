@@ -228,8 +228,11 @@ func RunAMDGPUDirect(stdout, stderr io.Writer, argv []string) int {
 			nvmeCmd.ByteLength/1024, nvmeCmd.Completed, nvmeCmd.StagingCopyCount())
 		return 0
 
+	case "qwen38", "qwen38-bench", "qwen38-overflow":
+		return runQwen38OverflowBench(stdout, stderr, engine, *jsonOut)
+
 	default:
-		fmt.Fprintf(stderr, "fak amd-gpudirect: unknown mode %q (supported: inspect, audit, bench)\n", sub)
+		fmt.Fprintf(stderr, "fak amd-gpudirect: unknown mode %q (supported: inspect, audit, bench, qwen38)\n", sub)
 		return 2
 	}
 }

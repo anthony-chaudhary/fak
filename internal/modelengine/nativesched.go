@@ -1056,6 +1056,7 @@ type schedLane struct {
 	preemptMode  NativePreemptionMode
 	preemptRound int64
 	hostKV       []byte
+	gpuDirectKV  *model.Qwen38GPUDirectDescriptor
 	savedLogits  []float32
 
 	tokens chan abi.EngineToken
@@ -1102,6 +1103,12 @@ func (ln *schedLane) finish(res *abi.Result, err error) {
 	ln.closeRealSession(published, shell)
 	if inflight != published {
 		ln.closeRealSession(inflight, shell)
+	}
+	if ln.gpuDirectKV != nil {
+		if ln.sched != nil && ln.sched.preemption.GPUDirectSwapper != nil {
+			ln.sched.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
+		}
+		ln.gpuDirectKV = nil
 	}
 	ln.cancel() // release the derived context
 	close(ln.tokens)

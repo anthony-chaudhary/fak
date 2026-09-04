@@ -92,6 +92,7 @@ var kernelCounterFields = []string{
 var valueFlagTokens = []string{
 	"compact", "elide", "ctx-view", "context-budget", "amplif",
 	"vdso", "prune", "view-budget", "engine-cache", "cuda-graph",
+	"gpudirect",
 }
 
 // offWithReason is the allow-list of value-flags that may legitimately ship default-OFF,
@@ -163,6 +164,7 @@ var onWithReason = map[string]reviewedDefaultDecision{
 	"elide-result-bytes":     {reason: "result elision removes repeated payload bytes while preserving references needed for recall", reviewBy: "2026-11-01"},
 	"elide-stale-reads":      {reason: "stale-read elision suppresses superseded observations while preserving the latest value", reviewBy: "2026-11-01"},
 	"vdso":                   {reason: "the in-process fast path avoids redundant engine calls and retains the policy checkpoint", reviewBy: "2026-11-01"},
+	"gpudirect-overflow":     {reason: "direct P2P DMA NVMe/host overflow bypasses CPU bounce buffering on VRAM saturation", reviewBy: "2026-11-01"},
 }
 
 type valueFlag struct {
