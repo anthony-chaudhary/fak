@@ -415,9 +415,10 @@ func TestAMDGPUDirectHAL_MultiGigabyteSGEChunking(t *testing.T) {
 func TestAMDGPUDirectHAL_NVMeDirectStorageP2P(t *testing.T) {
 	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
 
-	cmd := &NVMeP2PCommand{
+	// Synchronous NVMe Read
+	cmdRead := &NVMeP2PCommand{
 		CommandID:      1,
-		Opcode:         0x02, // Read
+		Opcode:         NVMeOpcodeRead, // 0x02 = Read
 		NamespaceID:    1,
 		StartingLBA:    1024,
 		BlockCount:     8,
@@ -425,17 +426,64 @@ func TestAMDGPUDirectHAL_NVMeDirectStorageP2P(t *testing.T) {
 		ByteLength:     32 * 1024, // 32 KiB
 	}
 
-	err := engine.ExecuteNVMeP2PTransfer(cmd)
+	err := engine.ExecuteNVMeP2PTransfer(cmdRead)
 	if err != nil {
-		t.Fatalf("ExecuteNVMeP2PTransfer failed: %v", err)
+		t.Fatalf("ExecuteNVMeP2PTransfer read failed: %v", err)
 	}
 
-	if !cmd.Completed || cmd.Status != 0 {
-		t.Errorf("expected command completed with status 0, got completed=%v status=%d", cmd.Completed, cmd.Status)
+	if !cmdRead.Completed || cmdRead.Status != 0 {
+		t.Errorf("expected command completed with status 0, got completed=%v status=%d", cmdRead.Completed, cmdRead.Status)
+	}
+	if cmdRead.StagingCopyCount() != 0 {
+		t.Fatalf("expected zero staging copies, got %d", cmdRead.StagingCopyCount())
+	}
+
+	// Asynchronous NVMe Write
+	cmdWrite := &NVMeP2PCommand{
+		CommandID:      2,
+		Opcode:         NVMeOpcodeWrite, // 0x01 = Write
+		NamespaceID:    1,
+		StartingLBA:    2048,
+		BlockCount:     16,
+		TargetVRAMAddr: uintptr(0x7f8000010000),
+		ByteLength:     64 * 1024, // 64 KiB
+	}
+
+	done, err := engine.ExecuteNVMeP2PTransferAsync(cmdWrite)
+	if err != nil {
+		t.Fatalf("ExecuteNVMeP2PTransferAsync write failed: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("async write returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for async NVMe write transfer")
+	}
+
+	if !cmdWrite.Completed || cmdWrite.Status != 0 {
+		t.Errorf("expected async write completed with status 0, got completed=%v status=%d", cmdWrite.Completed, cmdWrite.Status)
+	}
+	if cmdWrite.StagingCopyCount() != 0 {
+		t.Fatalf("expected zero staging copies on async write, got %d", cmdWrite.StagingCopyCount())
+	}
+
+	// Invalid opcode test
+	cmdInvalid := &NVMeP2PCommand{
+		CommandID:      3,
+		Opcode:         0x99,
+		TargetVRAMAddr: uintptr(0x7f8000020000),
+		ByteLength:     4096,
+	}
+	err = engine.ExecuteNVMeP2PTransfer(cmdInvalid)
+	if err == nil {
+		t.Errorf("expected error for invalid opcode 0x99, got nil")
 	}
 
 	audit := engine.Audit()
-	if audit.TotalTransfers != 1 || audit.TotalBytesMoved != 32*1024 {
+	if audit.TotalTransfers != 2 || audit.TotalBytesMoved != 96*1024 {
 		t.Errorf("audit stats mismatch: transfers=%d bytes=%d", audit.TotalTransfers, audit.TotalBytesMoved)
 	}
 }

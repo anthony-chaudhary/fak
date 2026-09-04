@@ -107,6 +107,14 @@ func (r *RDMARegisteredRegion) StagingCopyCount() int {
 	return r.StagingCopy
 }
 
+// NVMeOpcode defines standard NVMe NVM command opcodes.
+const (
+	// NVMeOpcodeWrite represents NVMe NVM command Write (0x01).
+	NVMeOpcodeWrite uint8 = 0x01
+	// NVMeOpcodeRead represents NVMe NVM command Read (0x02).
+	NVMeOpcodeRead uint8 = 0x02
+)
+
 // NVMeP2PCommand represents a direct NVMe storage command (Read/Write) targeting AMD GPU VRAM.
 // Inspired by BaM (Big Accelerator Memory) and SPDK ROCm plugins, the NVMe submission queue entry (SQE)
 // contains physical PRP/SGL entries directly pointing to GPU BAR1 VRAM.
@@ -121,6 +129,12 @@ type NVMeP2PCommand struct {
 	Completed      bool    `json:"completed"`
 	Status         uint16  `json:"status"` // NVMe status code (0 = success)
 	DurationNanos  int64   `json:"duration_nanos"`
+}
+
+// StagingCopyCount returns the number of intermediate host DRAM staging copies for NVMe direct P2P DMA.
+// Under BaM / SPDK, this invariant is always 0.
+func (cmd *NVMeP2PCommand) StagingCopyCount() int {
+	return 0
 }
 
 // HSAMemorySignal models an aligned 64-bit atomic completion signal in GPU coherent memory (hsa_signal_t).
@@ -529,6 +543,9 @@ func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransfer(cmd *NVMeP2PCommand) error {
 	if cmd.TargetVRAMAddr == 0 {
 		return errors.New("amddirect: target VRAM address cannot be 0")
 	}
+	if cmd.Opcode != 0 && cmd.Opcode != NVMeOpcodeRead && cmd.Opcode != NVMeOpcodeWrite {
+		return fmt.Errorf("amddirect: unsupported NVMe opcode 0x%02x (must be 0x01 Write or 0x02 Read)", cmd.Opcode)
+	}
 
 	start := time.Now()
 	// Simulate controller direct DMA execution over PCIe P2P bus
@@ -539,6 +556,30 @@ func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransfer(cmd *NVMeP2PCommand) error {
 	atomic.AddInt64(&e.transfers, 1)
 	atomic.AddUint64(&e.bytesMoved, cmd.ByteLength)
 	return nil
+}
+
+// ExecuteNVMeP2PTransferAsync initiates an asynchronous direct NVMe-to-GPU peer-to-peer DMA transfer.
+// Returns a receive-only channel that receives the completion error (or nil on success) once the transfer finishes.
+func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransferAsync(cmd *NVMeP2PCommand) (<-chan error, error) {
+	if cmd == nil {
+		return nil, errors.New("amddirect: nil NVMe P2P command")
+	}
+	if cmd.ByteLength == 0 {
+		return nil, errors.New("amddirect: transfer byte length must be > 0")
+	}
+	if cmd.TargetVRAMAddr == 0 {
+		return nil, errors.New("amddirect: target VRAM address cannot be 0")
+	}
+	if cmd.Opcode != 0 && cmd.Opcode != NVMeOpcodeRead && cmd.Opcode != NVMeOpcodeWrite {
+		return nil, fmt.Errorf("amddirect: unsupported NVMe opcode 0x%02x (must be 0x01 Write or 0x02 Read)", cmd.Opcode)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		err := e.ExecuteNVMeP2PTransfer(cmd)
+		done <- err
+	}()
+	return done, nil
 }
 
 // TransferP2P performs a validated peer-to-peer data transfer between two AMD GPU nodes.
