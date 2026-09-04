@@ -3632,6 +3632,11 @@
           "category": "incidental",
           "reason": "sync.Once guard for systools registration",
           "token": "sysToolGateOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "turn pacing jitter and burst cooldown gate",
+          "token": "breathgate"
         }
       ],
       "exclude": [
@@ -3740,6 +3745,7 @@
         "baseAggregates",
         "beginGuardProviderBoundary",
         "bindGuardRegistration",
+        "breathgate",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
         "callGateProvider",

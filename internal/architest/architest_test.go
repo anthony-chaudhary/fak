@@ -826,6 +826,10 @@ var tier = map[string]int{
 	"faultlab":                   1,
 	"gcpgpu":                     1,
 	"kimik3page":                 1,
+	"breathgate":                 1,
+	"kv":                         1,
+	"mcpbroker":                  1,
+	"issueorchestrator":          3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
