@@ -89,6 +89,9 @@ type List struct {
 // the operator's allow_hosts is Allowed. A nil/empty list Decides None. The host is
 // normalized (lower-cased, de-ported, de-bracketed) before matching, so a caller may
 // pass a raw authority.
+//
+// Invariant: egress list matching is fail-closed and deterministic.
+// Guard: host evaluation normalizes authorities purely via string operations without network lookup.
 func (l *List) Decide(host string) Decision {
 	if l == nil {
 		return Decision{}
