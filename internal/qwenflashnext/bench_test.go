@@ -1,82 +1,108 @@
-package qwenflashnext_test
+package qwenflashnext
 
 import (
+	"fmt"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/qwenflashnext"
 )
 
 func BenchmarkRender(b *testing.B) {
-	messages := []qwenflashnext.Message{
-		{
-			Role:    "system",
-			Content: "You are a helpful coding assistant operating in a repository.",
-		},
-		{
-			Role:    "user",
-			Content: "Please refactor the database connector and implement retry logic.",
-		},
-		{
-			Role:             "assistant",
-			ReasoningContent: "We need to check the interface contract and wrap transient network errors.",
-			Content:          "I will examine the current database interface implementation.",
-			ToolCalls: []qwenflashnext.ToolCall{
-				{
-					Name: "read_file",
-					Arguments: map[string]any{
-						"path":  "internal/db/connector.go",
-						"limit": 50,
-					},
-				},
-			},
-		},
-		{
-			Role:    "tool",
-			Content: "package db\n\ntype Connector struct{}\n",
-		},
+	messages := []Message{
+		{Role: "system", Content: "You are a helpful coding assistant adhering strictly to instructions."},
+		{Role: "user", Content: "Optimize this algorithm for bounded memory consumption."},
+		{Role: "assistant", ReasoningContent: "Analyzing memory limits and computational bounds.", Content: "Here is the memory-bounded solution."},
 	}
-	opts := qwenflashnext.RenderOptions{
-		AddGenerationPrompt: true,
-		EnableThinking:      true,
-		ReasoningEffort:     "xhigh",
+	opts := RenderOptions{
+		PreserveThinking: true,
+		EnableThinking:   true,
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := qwenflashnext.Render(messages, opts)
+		_, err := Render(messages, opts)
 		if err != nil {
-			b.Fatalf("Render failed: %v", err)
+			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkParseResponse(b *testing.B) {
-	raw := `<|im_start|>assistant
-<think>
-Analyzing the issue requirements and verifying that retry logic handles timeout errors.
-Confirming parameter values before emitting the tool call.
-</think>
+func BenchmarkRenderSubtests(b *testing.B) {
+	b.Run("PlainConversation", func(b *testing.B) {
+		msgs := []Message{
+			{Role: "user", Content: "Hello world."},
+			{Role: "assistant", Content: "Hello! How can I assist you today?"},
+		}
+		opts := RenderOptions{}
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := Render(msgs, opts); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 
-I have updated the connector to support automatic retry backoff.
-<tool_call>
-<function=edit_file>
-<parameter=content>
-func (c *Connector) Connect() error { return nil }
-</parameter>
-<parameter=path>
-internal/db/connector.go
-</parameter>
-</function>
-</tool_call><|im_end|>
-`
+	b.Run("ToolInteractionFlow", func(b *testing.B) {
+		msgs := []Message{
+			{Role: "user", Content: "Check server status."},
+			{
+				Role: "assistant",
+				ToolCalls: []ToolCall{
+					{
+						Name: "query_metrics",
+						Arguments: map[string]any{
+							"service": "gateway",
+							"window":  "5m",
+						},
+					},
+				},
+			},
+			{Role: "tool", Content: `{"status":"ok","latency_ms":12}`},
+			{Role: "assistant", Content: "Server is healthy with 12ms latency."},
+		}
+		opts := RenderOptions{}
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := Render(msgs, opts); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkParseResponse(b *testing.B) {
+	raw := "<think>\nCarefully analyzing assumptions and evaluating execution bounds.\n</think>\n\nProceeding with implementation.<|im_end|>"
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := qwenflashnext.ParseResponse(raw)
+		parsed, err := ParseResponse(raw)
 		if err != nil {
-			b.Fatalf("ParseResponse failed: %v", err)
+			b.Fatal(err)
+		}
+		if !parsed.Stopped {
+			b.Fatal("expected stopped response")
+		}
+	}
+}
+
+func BenchmarkParseResponseWithToolCalls(b *testing.B) {
+	raw := fmt.Sprintf(
+		"%sassistant\n<think>\nEvaluating system state.\n</think>\n\nExecuting requested check.\n\n<tool_call>\n<function=inspect_node>\n<parameter=node_id>\nworker-42\n</parameter>\n<parameter=verbose>\ntrue\n</parameter>\n</function>\n</tool_call>%s",
+		IMStart,
+		IMEnd,
+	)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		parsed, err := ParseResponse(raw)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(parsed.ToolCalls) == 0 {
+			b.Fatal("expected tool calls")
 		}
 	}
 }

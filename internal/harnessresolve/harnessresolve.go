@@ -15,10 +15,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/stackresolve"
 )
 
+// Invariant: resolution produces deterministic, permutation-invariant locks whose SHA-256 digests uniquely seal content.
+
+// Schema specifies the canonical JSON schema URI for harness product specification manifests.
 const Schema = "fak.harness-product/v1alpha1"
+
+// LockSchema specifies the version 1alpha2 JSON schema URI for compiled harness product locks.
 const LockSchema = "fak.harness-product-lock/v1alpha2"
+
+// LegacyLockSchema specifies the backward-compatible version 1alpha1 schema URI for launchable product locks.
 const LegacyLockSchema = "fak.harness-product-lock/v1alpha1"
 
+// Manifest defines root components, environment constraints, and asset layers for a harness product.
 type Manifest struct {
 	Schema        string                  `json:"schema"`
 	Roots         []string                `json:"roots"`
@@ -28,6 +36,7 @@ type Manifest struct {
 	Assets        harnesscompose.Manifest `json:"assets"`
 }
 
+// Component describes a discrete capability provider or dependency within a harness manifest.
 type Component struct {
 	ID            string                `json:"id"`
 	Version       string                `json:"version"`
@@ -42,30 +51,35 @@ type Component struct {
 	Evidence      stackresolve.Evidence `json:"evidence"`
 }
 
+// Requirement defines a required or optional dependency capability along with an optional version range.
 type Requirement struct {
 	Capability string `json:"capability"`
 	Range      string `json:"range,omitempty"`
 	Optional   bool   `json:"optional,omitempty"`
 }
 
+// Compatibility restricts component admission by operating system, CPU architecture, and runtime contract.
 type Compatibility struct {
 	OS       []string `json:"os,omitempty"`
 	Arch     []string `json:"arch,omitempty"`
 	Contract string   `json:"contract,omitempty"`
 }
 
+// Budget specifies resource upper bounds on context token consumption, resident memory, and concurrent workers.
 type Budget struct {
 	ContextTokens int `json:"context_tokens,omitempty"`
 	MemoryMiB     int `json:"memory_mib,omitempty"`
 	Workers       int `json:"workers,omitempty"`
 }
 
+// Environment defines execution platform attributes including target operating system, architecture, and contract.
 type Environment struct {
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
 	Contract string `json:"contract"`
 }
 
+// LockedComponent represents an admitted component with frozen version, provenance reason, and budget costs.
 type LockedComponent struct {
 	ID            string        `json:"id"`
 	Version       string        `json:"version"`
@@ -81,6 +95,7 @@ type LockedComponent struct {
 	Adapters      []string      `json:"adapters,omitempty"`
 }
 
+// Lock provides a sealed, reproducible description of resolved components, effective assets, and decision traces.
 type Lock struct {
 	Schema      string                          `json:"schema"`
 	ID          string                          `json:"id"`
@@ -92,6 +107,7 @@ type Lock struct {
 	Decisions   []stackresolve.Decision         `json:"decisions"`
 }
 
+// Explanation accounts for why a specific dependency capability was bound to a selected provider component.
 type Explanation struct {
 	Capability string `json:"capability"`
 	Range      string `json:"range,omitempty"`
@@ -100,11 +116,15 @@ type Explanation struct {
 	Reason     string `json:"reason"`
 }
 
+// Result bundles the compiled product lock alongside human-readable dependency resolution explanations.
 type Result struct {
 	Lock    Lock          `json:"lock"`
 	Explain []Explanation `json:"explain"`
 }
 
+// Parse deserializes and validates raw JSON configuration bytes into a structured Manifest model.
+// Precondition: raw input must contain well-formed JSON bytes conforming to the product schema with non-empty roots.
+// Postcondition: returns a validated Manifest with verified semantic versioning and cryptographic digest formats, or a descriptive error.
 func Parse(raw []byte) (Manifest, error) {
 	var manifest Manifest
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
@@ -146,6 +166,9 @@ func Parse(raw []byte) (Manifest, error) {
 	return manifest, nil
 }
 
+// Resolve compiles asset layers and component dependencies into an immutable product lock against target environment rules.
+// Precondition: manifest must contain valid roots and component declarations matching the provided target environment.
+// Postcondition: returns an immutable product lock with resolved dependencies and budget guarantees, or an error if constraints fail.
 func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, env Environment) (Result, error) {
 	assets, err := harnesscompose.Compose(manifest.Assets, selectedLayers)
 	if err != nil {
@@ -206,6 +229,8 @@ func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, en
 	return Result{Lock: lock, Explain: explanations(components, receipt.Selected)}, nil
 }
 
+// Precondition: input component list must contain valid versions and non-empty requirement capability targets.
+// Postcondition: maps capability requirements to matching provider IDs and returns an error on missing or ambiguous matches.
 func bindRequirements(input []Component) ([]Component, error) {
 	components := append([]Component(nil), input...)
 	sort.Slice(components, func(i, j int) bool {
@@ -249,6 +274,8 @@ func bindRequirements(input []Component) ([]Component, error) {
 	return components, nil
 }
 
+// Precondition: components must have bound capability IDs with populated dependency edge requirements.
+// Postcondition: returns a descriptive error if any directed dependency cycle exists among components.
 func checkCycles(components []Component) error {
 	edges := map[string][]string{}
 	ids := map[string]bool{}
@@ -290,6 +317,8 @@ func checkCycles(components []Component) error {
 	return nil
 }
 
+// Precondition: target environment must declare non-empty OS, architecture, and runtime contract strings.
+// Postcondition: returns an error if component or product compatibility rules reject the target environment.
 func checkCompatibility(c Compatibility, env Environment, subject string) error {
 	if len(c.OS) > 0 && !contains(c.OS, env.OS) {
 		return fmt.Errorf("%s incompatible OS %q", subject, env.OS)
@@ -302,9 +331,15 @@ func checkCompatibility(c Compatibility, env Environment, subject string) error 
 	}
 	return nil
 }
+
+// Precondition: both budget allocations must specify non-negative token, memory, and worker values.
+// Postcondition: returns the summed resource demands across context tokens, memory, and worker pools.
 func addBudget(a, b Budget) Budget {
 	return Budget{ContextTokens: a.ContextTokens + b.ContextTokens, MemoryMiB: a.MemoryMiB + b.MemoryMiB, Workers: a.Workers + b.Workers}
 }
+
+// Precondition: used budget reflects actual aggregated consumption and limit specifies boundary caps.
+// Postcondition: returns a descriptive error if any individual resource dimension exceeds its limit.
 func withinBudget(used, limit Budget) error {
 	if limit.ContextTokens > 0 && used.ContextTokens > limit.ContextTokens {
 		return fmt.Errorf("context budget exceeded: %d > %d", used.ContextTokens, limit.ContextTokens)
@@ -523,6 +558,8 @@ func appendProvider(in []Component, component Component) []Component {
 // VerifyLock checks that a lock has the current schema and that its ID matches
 // the canonical contents. Callers must verify before treating an unchanged ID
 // as an admission decision.
+// Precondition: lock must declare a recognized schema identifier and non-empty content digest ID.
+// Postcondition: returns nil if and only if the recomputed SHA-256 payload digest matches the claimed lock ID.
 func VerifyLock(lock Lock) error {
 	if lock.Schema != LockSchema && lock.Schema != LegacyLockSchema {
 		return fmt.Errorf("lock schema must be %q or legacy %q", LockSchema, LegacyLockSchema)
@@ -544,6 +581,8 @@ func VerifyLock(lock Lock) error {
 // Mixable validates the evidence floor needed to combine a resolved lock with
 // independently produced locks. Legacy locks remain valid launch inputs but
 // cannot establish facts their schema never retained.
+// Precondition: lock must pass canonical digest verification and conform strictly to the latest lock schema version.
+// Postcondition: returns nil if all locked components preserve required reason provenance, contracts, and adapter evidence.
 func Mixable(lock Lock) error {
 	if err := VerifyLock(lock); err != nil {
 		return err
@@ -568,6 +607,8 @@ func Mixable(lock Lock) error {
 // ReidentifyLock recomputes the canonical identity after a trusted resolver or
 // derivation has changed represented lock contents. It does not validate those
 // changes; callers must enforce their operation-specific rules first.
+// Precondition: pointer to lock structure must be non-nil prior to recomputing canonical digest identity.
+// Postcondition: lock ID field is updated in-place with the fresh SHA-256 digest computed over all other fields.
 func ReidentifyLock(lock *Lock) error {
 	if lock == nil {
 		return fmt.Errorf("lock is required")

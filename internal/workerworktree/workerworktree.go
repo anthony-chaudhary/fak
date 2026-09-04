@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gitbroker"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -644,7 +645,7 @@ func cleanupPartialPrepare(root, path string, git GitRunner) {
 
 func isGitWorktreeBackend(backend IsolationBackend) bool {
 	switch backend.(type) {
-	case gitWorktree, *gitWorktree:
+	case gitWorktree, *gitWorktree, blockClone, *blockClone:
 		return true
 	default:
 		return false
@@ -948,13 +949,21 @@ func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 
 // ForceReap destroys one worker worktree even when the warm pool is enabled. Normal
 func safeRemoveAll(path string) error {
-	_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+	var err error
+	for i := 0; i < 6; i++ {
+		_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+			if err == nil {
+				_ = os.Chmod(p, 0o666)
+			}
+			return nil
+		})
+		err = os.RemoveAll(path)
 		if err == nil {
-			_ = os.Chmod(p, 0o666)
+			return nil
 		}
-		return nil
-	})
-	return os.RemoveAll(path)
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 // Reap preserves the pool's return-on-release behavior; owner-stamped GC uses this
@@ -966,15 +975,16 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 		return Result{OK: false, Path: wtPath, Removed: false,
 			Reason: "refusing to reap a non-worker worktree"}
 	}
+	_ = gitbroker.CloseAll()
+	_ = os.Remove(filepath.Join(wtPath, WorkerLeaseFileName))
+	_ = os.Remove(filepath.Join(wtPath, WorkerLeaseFileName+".tmp"))
 	rc, out := run(git, root, []string{"worktree", "remove", "--force", wtPath})
 	removed := rc == 0
 	if !removed {
+		_ = gitbroker.CloseAll()
 		// On Windows, git worktree remove can fail with Permission denied if files
 		// are marked read-only. Remove them directly and prune.
-		err := safeRemoveAll(wtPath)
-		if err != nil {
-			out += " | safeRemoveAll: " + err.Error()
-		}
+		_ = safeRemoveAll(wtPath)
 		if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
 			run(git, root, []string{"worktree", "prune", "--expire", "now"})
 			removed = true

@@ -73,6 +73,7 @@ type ValidationError struct {
 	Detail string
 }
 
+// Error formats the validation failure reason and details.
 func (e *ValidationError) Error() string { return string(e.Reason) + ": " + e.Detail }
 
 // Receipt records verified execution parameters and graph digests after validation.
@@ -87,11 +88,7 @@ type Handle struct{ snapshot *Snapshot }
 // Snapshot returns the underlying validated composition snapshot.
 func (h Handle) Snapshot() *Snapshot { return h.snapshot }
 
-// Resolve validates and digests a composition snapshot into an immutable handle.
-//
-// Invariant: composition resolution is fail-closed and bounded.
-// Precondition: caller supplies a fully populated Snapshot with an explicit policy identifier.
-// Guard: unsupported execution backends or undeclared resource capabilities fail closed before allocation.
+// Resolve verifies backend compatibility and declared capabilities to produce an immutable execution handle.
 func Resolve(s Snapshot) (Handle, Receipt, error) {
 	s.Schema = Schema
 	if s.Model.Engine != "fak-native" {

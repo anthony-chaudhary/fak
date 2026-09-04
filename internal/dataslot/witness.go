@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	VerdictOK      = "CLAIM_WITNESSED"
+	// VerdictOK indicates migration ground-truth assertions were verified cleanly.
+	VerdictOK = "CLAIM_WITNESSED"
+	// VerdictMissing indicates expected migration versions were not found or unverified.
 	VerdictMissing = "CLAIM_UNWITNESSED"
 )
 

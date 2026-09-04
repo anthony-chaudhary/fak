@@ -1,6 +1,7 @@
 package qwenflashnext
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ func TestPinnedFixtureProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	sum := sha256.Sum256(data)
 	if got, want := hex.EncodeToString(sum[:]), "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"; got != want {
 		t.Fatalf("template hash = %s, want %s", got, want)

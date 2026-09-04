@@ -1,4 +1,4 @@
-package qwenflashnext
+package cavemanpairwise
 
 import (
 	"go/ast"
@@ -11,19 +11,35 @@ import (
 	"unicode"
 )
 
-// Invariant: Qwen chat parsing must extract thinking analysis and final responses separated by canonical stop tokens.
-// Guard: ParseResponse extracts reasoning blocks without leaking thought tags into final outputs.
+// BenchmarkPairwiseScore measures throughput and allocations for parsing judgments and aggregating scores.
+func BenchmarkPairwiseScore(b *testing.B) {
+	rawJSON := `{"verdict":"A","scores":{"factual_correctness":{"A":4,"B":3},"required_constraints":{"A":4,"B":4},"instruction_adherence":{"A":3,"B":3},"safety":{"A":4,"B":4},"justified_answering":{"A":4,"B":3}},"evidence":["Candidate A provided direct factual derivation." ]}`
 
-func TestQwenFlashNextLifecycle(t *testing.T) {
-	t.Parallel()
-
-	resp := "<think>\nreasoning block\n</think>\n\nFinal answer.<|im_end|>"
-	parsed, err := ParseResponse(resp)
-	if err != nil {
-		t.Fatalf("ParseResponse failed: %v", err)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		j, err := ParseJudgment(rawJSON)
+		if err != nil {
+			b.Fatalf("unexpected parse failure: %v", err)
+		}
+		verdict := aggregateV2(j)
+		if verdict != "A" {
+			b.Fatalf("expected verdict A, got %s", verdict)
+		}
 	}
-	if parsed.Analysis != "reasoning block" || parsed.Final != "Final answer." || !parsed.Stopped {
-		t.Fatalf("unexpected parsed response: %+v", parsed)
+}
+
+// BenchmarkOrderAndBlinding measures presentation ordering and anonymized arm blinding performance.
+func BenchmarkOrderAndBlinding(b *testing.B) {
+	sourceHash := "bfac621e87dbfdb503d16d70eaef92e9905221c41f9eba8b6e0d21bb2fba9d68"
+	pairID := "prompt-42/trial-1/normal-vs-caveman"
+	arm := "normal"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Order(sourceHash, pairID)
+		_ = Blind(sourceHash, pairID, arm)
 	}
 }
 
@@ -70,6 +86,49 @@ func testIsSubstantiveContractComment(cg *ast.CommentGroup) bool {
 		return false
 	}
 	return true
+}
+
+func testIsFormulaicGamingComment(cg *ast.CommentGroup) (isFormulaic bool, isFiller bool) {
+	if cg == nil {
+		return false, false
+	}
+	text := strings.TrimSpace(cg.Text())
+	lower := strings.ToLower(text)
+
+	hasMarker := strings.Contains(lower, "invariant:") ||
+		strings.Contains(lower, "invariants:") ||
+		strings.Contains(lower, "key invariant:") ||
+		strings.Contains(lower, "contract:") ||
+		strings.Contains(lower, "fail-closed:") ||
+		strings.Contains(lower, "fail-closed guard:") ||
+		strings.HasPrefix(lower, "invariant") ||
+		strings.HasPrefix(lower, "guard") ||
+		strings.HasPrefix(lower, "contract") ||
+		strings.HasPrefix(lower, "fail-closed")
+
+	if !hasMarker {
+		return false, false
+	}
+
+	words := strings.Fields(lower)
+	if len(words) <= 3 {
+		return true, true
+	}
+
+	keywordCount := 0
+	for _, w := range words {
+		clean := strings.Trim(w, ":,.-*#")
+		if clean == "invariant" || clean == "invariants" || clean == "assumption" ||
+			clean == "assumptions" || clean == "guard" || clean == "fail-closed" ||
+			clean == "contract" || clean == "precondition" || clean == "postcondition" {
+			keywordCount++
+		}
+	}
+	if float64(keywordCount)/float64(len(words)) > 0.25 || keywordCount >= 3 {
+		return true, true
+	}
+
+	return true, false
 }
 
 func testSplitIdentifierWords(name string) map[string]bool {
@@ -148,12 +207,15 @@ func testIsSubstantiveDoc(name string, doc *ast.CommentGroup) bool {
 	return !testIsTautologicalDoc(name, text)
 }
 
-// TestQwenFlashNextMaturityDocumentationAndContracts verifies that internal/qwenflashnext
-// meets debtlane maturity requirements: substantive contract comments, at least 80% exported
-// symbol documentation coverage, and verified benchmark definitions.
-func TestQwenFlashNextMaturityDocumentationAndContracts(t *testing.T) {
-	files := []string{"chat.go"}
+func TestCavemanpairwiseMaturity(t *testing.T) {
+	files := []string{"judge.go", "v2.go"}
 	fset := token.NewFileSet()
+
+	totalExported := 0
+	totalDocumented := 0
+	totalContractComments := 0
+	totalFormulaic := 0
+	hasFiller := false
 
 	for _, filename := range files {
 		path := filepath.Join(".", filename)
@@ -167,31 +229,33 @@ func TestQwenFlashNextMaturityDocumentationAndContracts(t *testing.T) {
 			t.Fatalf("failed to parse %s: %v", path, err)
 		}
 
-		// Verify contract comments presence
-		contractCommentsCount := 0
+		fileContractComments := 0
 		for _, cg := range node.Comments {
 			if testIsSubstantiveContractComment(cg) {
-				contractCommentsCount++
+				fileContractComments++
+				totalContractComments++
+			}
+			isForm, isFill := testIsFormulaicGamingComment(cg)
+			if isForm {
+				totalFormulaic++
+			}
+			if isFill {
+				hasFiller = true
 			}
 		}
-		if contractCommentsCount == 0 {
+		if fileContractComments == 0 {
 			t.Errorf("%s: expected at least one substantive contract comment, got none", filename)
 		}
-
-		// Count exported symbols and documentation
-		exported := 0
-		documented := 0
-		var undocumented []string
 
 		for _, decl := range node.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
 				if ast.IsExported(d.Name.Name) {
-					exported++
+					totalExported++
 					if testIsSubstantiveDoc(d.Name.Name, d.Doc) {
-						documented++
+						totalDocumented++
 					} else {
-						undocumented = append(undocumented, d.Name.Name)
+						t.Errorf("%s: undocumented or tautological export func %s", filename, d.Name.Name)
 					}
 				}
 			case *ast.GenDecl:
@@ -199,29 +263,29 @@ func TestQwenFlashNextMaturityDocumentationAndContracts(t *testing.T) {
 					switch s := spec.(type) {
 					case *ast.TypeSpec:
 						if ast.IsExported(s.Name.Name) {
-							exported++
+							totalExported++
 							doc := s.Doc
 							if doc == nil {
 								doc = d.Doc
 							}
 							if testIsSubstantiveDoc(s.Name.Name, doc) {
-								documented++
+								totalDocumented++
 							} else {
-								undocumented = append(undocumented, s.Name.Name)
+								t.Errorf("%s: undocumented or tautological export type %s", filename, s.Name.Name)
 							}
 						}
 					case *ast.ValueSpec:
 						for _, name := range s.Names {
 							if ast.IsExported(name.Name) {
-								exported++
+								totalExported++
 								doc := s.Doc
 								if doc == nil {
 									doc = d.Doc
 								}
 								if testIsSubstantiveDoc(name.Name, doc) {
-									documented++
+									totalDocumented++
 								} else {
-									undocumented = append(undocumented, name.Name)
+									t.Errorf("%s: undocumented or tautological export value %s", filename, name.Name)
 								}
 							}
 						}
@@ -229,33 +293,20 @@ func TestQwenFlashNextMaturityDocumentationAndContracts(t *testing.T) {
 				}
 			}
 		}
+	}
 
-		if exported > 0 {
-			ratio := float64(documented) / float64(exported)
-			if ratio < 0.80 {
-				t.Errorf("%s: documented exports ratio %.2f < 0.80 (undocumented: %v)", filename, ratio, undocumented)
-			}
+	if totalContractComments < 2 {
+		t.Errorf("expected at least 2 contract comments across files, got %d", totalContractComments)
+	}
+
+	if totalExported > 0 {
+		ratio := float64(totalDocumented) / float64(totalExported)
+		if ratio < 1.0 {
+			t.Errorf("documented exports ratio %.2f < 1.0 (documented %d / exported %d)", ratio, totalDocumented, totalExported)
 		}
 	}
 
-	// Verify bench_test.go exists and defines BenchmarkRender
-	benchPath := filepath.Join(".", "bench_test.go")
-	benchContent, err := os.ReadFile(benchPath)
-	if err != nil {
-		t.Fatalf("failed to read bench_test.go: %v", err)
-	}
-	benchNode, err := parser.ParseFile(fset, benchPath, benchContent, 0)
-	if err != nil {
-		t.Fatalf("failed to parse bench_test.go: %v", err)
-	}
-
-	hasEvaluateBenchmark := false
-	for _, decl := range benchNode.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "BenchmarkRender" {
-			hasEvaluateBenchmark = true
-		}
-	}
-	if !hasEvaluateBenchmark {
-		t.Errorf("bench_test.go must define BenchmarkRender")
+	if totalFormulaic >= 3 || hasFiller {
+		t.Errorf("formulaic comments triggered excess comments penalty: count=%d filler=%v", totalFormulaic, hasFiller)
 	}
 }

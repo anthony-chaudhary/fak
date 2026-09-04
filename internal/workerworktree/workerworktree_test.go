@@ -1315,3 +1315,68 @@ func TestPrepare_WindowsIndexResetSelfRecoveringAndAtomic(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkerLandTypedTerminalResults(t *testing.T) {
+	t.Run("no-op", func(t *testing.T) {
+		g := newFakeGit().reply("diff", 0, "   \n")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", nil, nil, g.run)
+		if !res.OK || res.Code != LandResultNoOp {
+			t.Fatalf("want code %q and OK=true, got %+v", LandResultNoOp, res)
+		}
+	})
+
+	t.Run("conflict", func(t *testing.T) {
+		t.Setenv(IsolatedLandEnv, "0")
+		t.Setenv(LandReadbackEnv, "0")
+		g := newFakeGit().
+			reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+			reply("merge-base", 0, "").
+			reply("apply", 1, "error: patch does not apply")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", nil, nil, g.run)
+		if res.OK || res.Code != LandResultConflict {
+			t.Fatalf("want code %q and OK=false, got %+v", LandResultConflict, res)
+		}
+	})
+
+	t.Run("stale-base", func(t *testing.T) {
+		g := newFakeGit().
+			reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+			reply("merge-base", 1, "")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "stalebase123", "/tmp/msg.txt", nil, nil, g.run)
+		if res.OK || res.Code != LandResultStaleBase {
+			t.Fatalf("want code %q and OK=false, got %+v", LandResultStaleBase, res)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		t.Setenv(IsolatedLandEnv, "0")
+		t.Setenv(LandReadbackEnv, "0")
+		g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
+			reply("merge-base", 0, "").
+			reply("apply", 0, "").
+			reply("commit", 0, "[main abc] msg")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+		if !res.OK || !res.Committed || res.Code != LandResultSuccess {
+			t.Fatalf("want code %q and OK=true, got %+v", LandResultSuccess, res)
+		}
+	})
+}
+
+func TestLandDoesNotInheritUnrelatedCommitSubject(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
+	t.Setenv(LandReadbackEnv, "0")
+	// When HEAD == baseSHA (worker made no commit), Land must NOT run git log -1
+	// to borrow base commit message from shared trunk.
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
+		reply("merge-base", 0, "").
+		reply("rev-parse", 0, "base123\n").
+		reply("apply", 0, "").
+		reply("commit", 0, "[main abc] msg")
+	res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "", []string{"x"}, nil, g.run)
+	if !res.OK || !res.Committed {
+		t.Fatalf("land failed: %+v", res)
+	}
+	if len(g.callsWithPrefix("log")) != 0 {
+		t.Fatalf("must not call git log when HEAD == baseSHA (would inherit unrelated commit subject); calls=%v", g.calls)
+	}
+}

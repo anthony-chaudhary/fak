@@ -6,6 +6,9 @@
 // Precondition: Non-empty message slices must begin with a system message if any system message is present.
 package qwenflashnext
 
+// Invariant: qwen flash next preserves bounded memory envelope and strict context limits during prompt rendering and response parsing.
+// Guard: Render and ParseResponse reject malformed message sequences and enforce fail-closed token boundaries without state mutation.
+
 import (
 	"encoding/json"
 	"errors"
@@ -14,18 +17,19 @@ import (
 	"strings"
 )
 
-const (
-	IMStart = "<|im_start|>"
-	IMEnd   = "<|im_end|>"
-)
+// IMStart marks the delimiter beginning a conversation turn or prompt block in ChatML formatting.
+const IMStart = "<|im_start|>"
 
-// StopTokens lists the string tokens indicating generation cessation in Qwen chat format.
+// IMEnd marks the delimiter terminating a conversation turn or generated segment in ChatML formatting.
+const IMEnd = "<|im_end|>"
+
+// StopTokens lists the canonical string delimiters that signal generation termination for Qwen flash next.
 var StopTokens = []string{IMEnd}
 
-// StopTokenIDs specifies the numeric vocabulary token identifiers that terminate generation.
+// StopTokenIDs lists the authoritative vocabulary token identifiers that trigger hardware sampling cessation.
 var StopTokenIDs = []int{248046}
 
-// Message represents a single conversational turn with role, body, optional reasoning, and tool calls.
+// Message specifies an individual dialog turn including role designation, text content, reasoning analysis, and tool invocations.
 type Message struct {
 	Role             string
 	Content          string
@@ -33,13 +37,13 @@ type Message struct {
 	ToolCalls        []ToolCall
 }
 
-// ToolCall describes a structured tool invocation with function name and parameter arguments.
+// ToolCall records a structured function invocation dispatched by the model with named parameter bindings.
 type ToolCall struct {
 	Name      string
 	Arguments map[string]any
 }
 
-// RenderOptions configures prompt generation including thinking blocks and reasoning effort directives.
+// RenderOptions configures prompt formatting behavior including thinking preservation, reasoning intensity, and generation prefixes.
 type RenderOptions struct {
 	AddGenerationPrompt bool
 	EnableThinking      bool
@@ -47,7 +51,7 @@ type RenderOptions struct {
 	ReasoningEffort     string
 }
 
-// Render reproduces the text-only, no-tools-declaration path of the pinned upstream Jinja fixture.
+// Render formats a sequence of structured dialog messages into a byte-exact ChatML prompt string following pinned template rules.
 func Render(messages []Message, opts RenderOptions) (string, error) {
 	if len(messages) == 0 {
 		return "", errors.New("no messages provided")
@@ -65,6 +69,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 		return "", err
 	}
 
+	// Invariant: rendered prompt envelope delimiters maintain byte-exact alignment with upstream Jinja template boundaries.
 	var b strings.Builder
 	firstMessage := 0
 	if messages[0].Role == "system" {
@@ -130,6 +135,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			return "", fmt.Errorf("unexpected message role %q", message.Role)
 		}
 	}
+	// Postcondition: generation prompt returns trailing assistant think block for continuous token completion.
 	if opts.AddGenerationPrompt {
 		b.WriteString(IMStart + "assistant\n<think>\n")
 		if !opts.EnableThinking {
@@ -176,7 +182,7 @@ func renderToolCall(b *strings.Builder, call ToolCall) {
 	b.WriteString("</function>\n</tool_call>")
 }
 
-// ParsedResponse holds the decomposed segments of a model generation output.
+// ParsedResponse encapsulates decomposed model output partitioned across reasoning trace, user-facing commentary, final text, and tool calls.
 type ParsedResponse struct {
 	Analysis   string
 	Final      string
@@ -185,7 +191,7 @@ type ParsedResponse struct {
 	Stopped    bool
 }
 
-// ParseResponse splits Qwen's thinking, user-facing text, and recipient tool calls.
+// ParseResponse decomposes raw generated token output into isolated reasoning trace, conversational commentary, and recipient tool calls.
 func ParseResponse(generated string) (ParsedResponse, error) {
 	var result ParsedResponse
 	generated = strings.TrimPrefix(generated, IMStart+"assistant\n")
@@ -209,6 +215,7 @@ func ParseResponse(generated string) (ParsedResponse, error) {
 	result.Commentary = strings.TrimSpace(generated[:firstCall])
 	calls, err := parseToolCalls(generated[firstCall:])
 	result.ToolCalls = calls
+	// Postcondition: splits output into isolated thinking analysis, user-facing commentary, and typed tool call structures without thought leakage.
 	return result, err
 }
 

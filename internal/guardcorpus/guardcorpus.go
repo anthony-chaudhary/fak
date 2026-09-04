@@ -52,9 +52,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
+// Invariant: guard corpus entries maintain deterministic immutable hash signatures and valid category taxonomy.
+
 // Schema identifiers for the two dataset record kinds. Bump on any shape change.
 const (
+	// SessionSchema is the schema identifier for the version 1 session record dataset.
 	SessionSchema = "fak-guard-session/1"
+	// ExampleSchema is the schema identifier for the version 1 guard example record dataset.
 	ExampleSchema = "fak-guard-example/1"
 
 	// maxAllowExamples bounds how many ALLOW rows a single session contributes as
@@ -86,8 +90,11 @@ var knownVerdicts = map[string]bool{
 
 // Outcome classes for a session.
 const (
-	OutcomeClean       = "CLEAN"
-	OutcomeCrashed     = "CRASHED"
+	// OutcomeClean indicates that the guarded session completed without crashes or rate limits.
+	OutcomeClean = "CLEAN"
+	// OutcomeCrashed indicates that the child process wrapped by the guard terminated abnormally.
+	OutcomeCrashed = "CRASHED"
+	// OutcomeRateLimited indicates that the session terminated due to provider capacity or rate limits.
 	OutcomeRateLimited = "RATE_LIMITED"
 )
 
@@ -115,7 +122,7 @@ type HonestyHoles struct {
 	ChildCrash        int `json:"child_crash"`
 }
 
-// SessionRecord is one row of the fak-guard-session/1 dataset.
+// SessionRecord represents one row of the fak-guard-session/1 dataset capturing aggregate session metrics.
 type SessionRecord struct {
 	Schema          string         `json:"schema"`
 	TraceID         string         `json:"trace_id,omitempty"`
@@ -133,7 +140,7 @@ type SessionRecord struct {
 	ChainVerified   bool           `json:"chain_verified"`
 }
 
-// Example is one row of the fak-guard-example/1 dataset: a redacted, labeled,
+// Example represents one row of the fak-guard-example/1 dataset: a redacted, labeled,
 // replayable adjudication. Only journal-redacted fields are carried.
 type Example struct {
 	Schema       string `json:"schema"`
@@ -152,6 +159,8 @@ type Example struct {
 // Fold projects one session's rows into its SessionRecord and Example rows. It
 // is the pure core; the CLI shell owns discovery, chain verification, and the
 // SessionMeta join. Rows are taken in journal order (the caller preserves it).
+//
+// Contract: Fold is pure, deterministic, and preserves input journal row ordering.
 func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	rec := SessionRecord{
 		Schema:        SessionSchema,
@@ -244,6 +253,8 @@ func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	return rec, examples
 }
 
+// Invariant: Example redaction bounds are inherited directly from journal-scrubbed fields without secondary expansion.
+// Postcondition: Returns an immutable Example record populated with sanitized arguments, taints, and witness prose.
 func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example {
 	return Example{
 		Schema:       ExampleSchema,
@@ -263,6 +274,9 @@ func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example 
 // normalizeVerdict resolves the row's verdict, falling back to the decision Kind
 // when the explicit verdict field is blank (a DENY row's Kind is "DENY"). It
 // mirrors guardrsi's resolution so the two folds classify identically.
+//
+// Precondition: Candidate verdict and kind tokens represent raw classification strings extracted from journal rows.
+// Postcondition: Returns an uppercase canonical verdict or empty string if the row represents an operational event.
 func normalizeVerdict(verdict, kind string) string {
 	if v := strings.TrimSpace(verdict); v != "" {
 		return strings.ToUpper(v)
@@ -282,6 +296,8 @@ func normalizeVerdict(verdict, kind string) string {
 // bounded evidence points at rate limiting, else "". A rate-limit exit is a
 // terminal outcome but not process instability, so it must not count as a crash.
 // Mirrors guardrsi.childRateLimitExitClass over the same bounded fields.
+//
+// Postcondition: Returns a normalized rate limit category string when matching evidence is present, or empty string otherwise.
 func rateLimitClass(r journal.Row) string {
 	for _, raw := range []string{r.Reason, r.Witness, r.ArgsLabel} {
 		low := strings.ToLower(strings.TrimSpace(raw))

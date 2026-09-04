@@ -14,17 +14,25 @@ import (
 )
 
 const (
-	DefaultMaxRows  = 50
+	// DefaultMaxRows specifies the default row limit for query results.
+	DefaultMaxRows = 50
+	// AbsoluteMaxRows specifies the maximum permissible row limit cap.
 	AbsoluteMaxRows = 200
+	// DefaultMaxBytes specifies the default response payload size limit in bytes.
 	DefaultMaxBytes = 65536
-	DefaultTimeout  = 5 * time.Second
+	// DefaultTimeout specifies the default execution deadline for database queries.
+	DefaultTimeout = 5 * time.Second
 )
 
 var (
+	// ErrMutationRefused indicates a mutating or disallowed SQL statement was rejected.
 	ErrMutationRefused = errors.New("dataslot: mutating SQL statements are refused; only read-only queries are permitted")
-	ErrTargetNotFound  = errors.New("dataslot: target database file does not exist")
+	// ErrTargetNotFound indicates the requested target database file does not exist on disk.
+	ErrTargetNotFound = errors.New("dataslot: target database file does not exist")
+	// ErrExecutionFailed indicates query execution encountered an error from the runner.
 	ErrExecutionFailed = errors.New("dataslot: query execution failed")
-	ErrTimeout         = errors.New("dataslot: query execution deadline exceeded")
+	// ErrTimeout indicates query execution exceeded the configured context deadline.
+	ErrTimeout = errors.New("dataslot: query execution deadline exceeded")
 )
 
 // QueryOptions defines bounds and deadlines for read-only database queries.

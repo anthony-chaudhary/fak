@@ -119,3 +119,70 @@ func BenchmarkAttentionScore(b *testing.B) {
 		_, _ = c.ReScore(probe, candidateIDs)
 	}
 }
+
+// BenchmarkEvictColdest measures execution throughput and allocations when evaluating
+// attention scores and evicting coldest spans under budget constraints.
+func BenchmarkEvictColdest(b *testing.B) {
+	b.ReportAllocs()
+	spanTokens := make([]int, 16)
+	for j := 0; j < 16; j++ {
+		spanTokens[j] = j
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend := newBenchKVBackend()
+		c := NewBackendWithGate(backend, benchAllowGate{})
+		for s := 0; s < 8; s++ {
+			c.Append(fmt.Sprintf("span-%d", s), "tool", spanTokens)
+		}
+		keyPositions := make([]int, 128)
+		weights := make([]float32, 128)
+		for k := 0; k < 128; k++ {
+			keyPositions[k] = k
+			weights[k] = float32(k) / 128.0
+		}
+		_ = c.AttributeRow(keyPositions, weights)
+		c.CloseTurn(0.8)
+		_ = c.EvictColdest(32)
+		_ = c.LastRetainedMass()
+	}
+}
+
+// BenchmarkSessionAttentionReport measures performance when folding historical attention
+// trajectories and computing session-integrated signal-to-noise reports.
+func BenchmarkSessionAttentionReport(b *testing.B) {
+	b.ReportAllocs()
+	acc := NewAttentionAccumulator(0.9, 64)
+	spans := []string{"span-0", "span-1", "span-2", "span-3", "span-4"}
+	cost := map[string]int{
+		"span-0": 16,
+		"span-1": 32,
+		"span-2": 48,
+		"span-3": 64,
+		"span-4": 128,
+	}
+
+	for turn := 1; turn <= 10; turn++ {
+		m := make(map[string]float64, len(spans))
+		for idx, id := range spans {
+			m[id] = float64(turn * (idx + 1))
+		}
+		acc.Observe(m)
+	}
+
+	curve := make([]TurnSN, 10)
+	for t := 0; t < 10; t++ {
+		curve[t] = TurnSN{
+			Turn:     t + 1,
+			Ratio:    0.85 - float64(t)*0.02,
+			Cost:     288,
+			CacheHit: 0.60 + float64(t)*0.03,
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = BuildSessionAttentionReport(acc, curve, cost, 3, 50.0)
+	}
+}

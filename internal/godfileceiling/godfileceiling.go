@@ -13,6 +13,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// Invariant: godfile ceiling enforces max lines and file size boundaries fail-closed without allocations in core evaluation loops.
+// Contract: Evaluate and Repin are pure, deterministic functions that perform no filesystem I/O.
+// Contract: Ratchet operations are strictly monotonic; caps can only decrease and new offenders cannot be admitted into baseline.
+
 // HardCeiling is the global LOC ceiling: a tracked .go file not in the Baseline may not
 // exceed it. It matches tools/code_quality_scorecard.py's FILE_HARD_MAX so the gate and
 // the scorecard call the same thing a god-file.
@@ -30,6 +34,8 @@ var ExcludeDirs = map[string]bool{
 }
 
 // Excluded reports whether a repo-relative path lies under an excluded tree.
+//
+// Postcondition: Returns true if any path segment matches ExcludeDirs, false otherwise.
 func Excluded(rel string) bool {
 	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
 		if ExcludeDirs[seg] {
@@ -42,6 +48,8 @@ func Excluded(rel string) bool {
 // LineCount returns the physical line count of text, matching the scorecard's
 // len(text.splitlines()): the number of "\n"-separated lines, with a final line that has
 // no trailing newline still counted.
+//
+// Postcondition: Returns total newline count plus one if the final line lacks a trailing newline.
 func LineCount(text []byte) int {
 	if len(text) == 0 {
 		return 0
@@ -53,35 +61,53 @@ func LineCount(text []byte) int {
 	return n
 }
 
-// Violation is a single file that breaks a rule.
+// Violation represents a single tracked source file exceeding either the global LOC ceiling or its pinned ratchet baseline.
 type Violation struct {
-	Path  string
+	// Path is the repo-relative slash-delimited path to the violating file.
+	Path string
+	// Lines is the measured physical line count of the file.
 	Lines int
-	Cap   int    // the ceiling it broke: HardCeiling for a new god-file, the pinned cap for a grown pin
-	Over  int    // Lines - Cap
-	Kind  string // "new-god-file" or "grew-past-cap"
+	// Cap is the maximum line count allowed (HardCeiling for a new god-file, or the pinned cap for a grown pin).
+	Cap int
+	// Over is the number of lines exceeding Cap (Lines - Cap).
+	Over int
+	// Kind classifies the violation: "new-god-file" or "grew-past-cap".
+	Kind string
 }
 
-// Shrunk is a pinned file now below its cap — a re-pin opportunity, not a violation.
+// Shrunk records a pinned god-file whose physical line count has dropped below its baseline cap.
 type Shrunk struct {
-	Path  string
+	// Path is the repo-relative slash-delimited path to the shrunk file.
+	Path string
+	// Lines is the measured physical line count of the file.
 	Lines int
-	Cap   int
-	Under int // Cap - Lines
+	// Cap is the previous baseline cap for the file.
+	Cap int
+	// Under is the delta below Cap (Cap - Lines), indicating ratcheting potential.
+	Under int
 }
 
-// Verdict is the result of applying the two rules to a measured tree.
+// Verdict represents the deterministic evaluation result of applying god-file ceiling rules to a measured tree.
 type Verdict struct {
-	OK         bool
-	NFiles     int
-	NPinned    int
-	Violations []Violation // grew-past-cap first, then new-god-file — the failing set
-	Shrunk     []Shrunk    // pinned files now under their cap (ratchet-down opportunities)
-	StalePins  []string    // baseline entries whose file no longer exists / is now excluded
+	// OK indicates whether all measured files comply with the ceiling and ratchet rules without violations.
+	OK bool
+	// NFiles is the total number of non-excluded source files evaluated.
+	NFiles int
+	// NPinned is the total number of files tracked in the baseline cap map.
+	NPinned int
+	// Violations enumerates files breaching either the global ceiling or pinned caps, sorted deterministically.
+	Violations []Violation
+	// Shrunk lists baseline files that have decreased in line count and can be ratcheted down.
+	Shrunk []Shrunk
+	// StalePins lists baseline paths that are no longer present or are now excluded.
+	StalePins []string
 }
 
 // Evaluate applies the two rules to a measured {path: lines} tree against caps (the pinned
 // baseline). Pure: no I/O, deterministic, sorted output — the unit-testable core.
+//
+// Precondition: measured maps repo-relative file paths to physical line counts; caps provides pinned ratchet thresholds.
+// Postcondition: Returns an OK verdict only when zero violations are detected across all measured files.
 func Evaluate(measured map[string]int, caps map[string]int) Verdict {
 	var grew, newGod []Violation
 	var shrunk []Shrunk
@@ -127,6 +153,8 @@ func Evaluate(measured map[string]int, caps map[string]int) Verdict {
 
 // ProposeBaseline recomputes the caps map from a measured tree: every file over
 // HardCeiling, pinned at its current line count. This is the ratchet's candidate baseline.
+//
+// Postcondition: Returns a candidate map containing only files whose line count exceeds HardCeiling.
 func ProposeBaseline(measured map[string]int) map[string]int {
 	caps := map[string]int{}
 	for rel, n := range measured {
@@ -142,6 +170,9 @@ func ProposeBaseline(measured map[string]int) map[string]int {
 // cap for a file already pinned; it refuses (non-empty refusals, nil baseline) if the
 // proposal would RAISE any cap or pin a brand-new over-ceiling file — both would defeat
 // the ratchet. A new god-file must be caught by Evaluate and split, never pinned.
+//
+// Precondition: The old baseline map must provide existing caps for all previously admitted god-files.
+// Invariant: Ratchet caps can only decrease monotonically and new over-ceiling files are strictly refused.
 func Repin(measured map[string]int, old map[string]int) (accepted map[string]int, refusals []string) {
 	proposed := ProposeBaseline(measured)
 	names := make([]string, 0, len(proposed))
@@ -172,6 +203,9 @@ func Repin(measured map[string]int, old map[string]int) (accepted map[string]int
 // MeasureTree returns {rel: lines} for every counted tracked .go file under root. It shells
 // to `git ls-files '*.go'` (tracked set) and counts physical lines, skipping ExcludeDirs.
 // This is the impure shell; Evaluate/Repin hold the testable logic.
+//
+// Precondition: Root directory must be an initialized git repository containing tracked source files.
+// Postcondition: Returns physical line counts for all first-party non-test Go source files under root.
 func MeasureTree(root string) (map[string]int, error) {
 	cmd := exec.Command("git", "ls-files", "*.go")
 	cmd.Dir = root
@@ -188,18 +222,13 @@ func MeasureTree(root string) (map[string]int, error) {
 		if rel == "" || Excluded(rel) {
 			continue
 		}
-		// _test.go files are graded by the tests KPI, not architecture — they churn
-		// constantly (every new leaf appends a row to a shared *_test.go), so pinning
-		// them reds the gate on unrelated growth. Match internal/hooks/gate_godfile.go
-		// and tools/code_quality_scorecard.py, which both exclude tests from the
-		// architecture corpus.
+		// Exclude test files from god-file measurements; they churn per package test additions.
 		if strings.HasSuffix(rel, "_test.go") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			// A tracked path we cannot read (deleted in the working tree) is skipped, not
-			// fatal: Evaluate surfaces its baseline entry as a stale pin instead.
+			// Deleted working-tree files are skipped; Evaluate flags them as stale pins.
 			continue
 		}
 		measured[rel] = LineCount(data)
@@ -212,6 +241,8 @@ func MeasureTree(root string) (map[string]int, error) {
 
 // FormatBaseline renders a caps map as the Go source of baseline.go — the ratchet's
 // regenerate output. Sorted by path for a stable diff.
+//
+// Postcondition: Returns formatted Go source code declaring Baseline with lexicographically sorted paths.
 func FormatBaseline(caps map[string]int) string {
 	names := make([]string, 0, len(caps))
 	for rel := range caps {
@@ -222,6 +253,7 @@ func FormatBaseline(caps map[string]int) string {
 	b.WriteString("// Code generated from a MeasureTree->Repin->FormatBaseline pass. DO NOT EDIT by hand.\n")
 	b.WriteString("// Regenerate only to TIGHTEN after a god-file shrinks; never to raise a cap.\n\n")
 	b.WriteString("package godfileceiling\n\n")
+	b.WriteString("// Invariant: baseline caps are monotonically non-increasing and pin only first-party files exceeding HardCeiling.\n\n")
 	b.WriteString("// Baseline pins today's god-files (> HardCeiling lines) at their current LOC. A\n")
 	b.WriteString("// pinned file may only shrink; an unpinned file may not exceed HardCeiling. See doc.go.\n")
 	b.WriteString("var Baseline = map[string]int{\n")

@@ -21,3 +21,13 @@ func TestClassifyFailureCancellationAndMissing(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyEmptyNames(t *testing.T) {
+	r := Classify(nil, nil)
+	if r.Verdict != VerdictInsufficient {
+		t.Fatalf("expected VerdictInsufficient for empty names, got %s", r.Verdict)
+	}
+	if len(r.Servers) != 0 {
+		t.Fatalf("expected 0 servers, got %d", len(r.Servers))
+	}
+}

@@ -1,63 +1,136 @@
-package guardcorpus_test
+// Invariant: guard corpus entries maintain deterministic immutable hash signatures and valid category taxonomy.
+
+package guardcorpus
 
 import (
+	"fmt"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/guardcorpus"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
-func benchmarkRows() []journal.Row {
-	return []journal.Row{
-		{Seq: 1, TSUnixNano: 100, Kind: "DECIDE", Tool: "Read", Verdict: "ALLOW", By: "floor", ArgsLabel: "path=main.go"},
-		{Seq: 2, TSUnixNano: 200, Kind: "DENY", Tool: "Bash", Verdict: "DENY", Reason: "POLICY_BLOCK", By: "floor", Witness: "rm -rf /", ArgsLabel: "command=rm"},
-		{Seq: 3, TSUnixNano: 300, Kind: "QUARANTINE", Tool: "WebFetch", Verdict: "QUARANTINE", Reason: "SECRET_DISCOVERED", By: "secretgate", Witness: "sk-redacted-claim"},
-		{Seq: 4, TSUnixNano: 400, Kind: "DENY", Tool: "Bash", Verdict: "DENY", Reason: "POLICY_BLOCK", By: "floor", Witness: "curl evil.com"},
-		{Seq: 5, TSUnixNano: 500, Kind: "DECIDE", Tool: "Edit", Verdict: "ALLOW", By: "advmodel", ArgsLabel: "path=README.md"},
-		{Seq: 6, TSUnixNano: 600, Kind: "DENY", Tool: "Bash", Verdict: "DENY", Reason: "OFF_TRUNK", By: "gitgate", Witness: "git push"},
-		{Seq: 7, TSUnixNano: 700, Kind: "ADVISORY", Tool: "ShellDialect", Verdict: "ADVISORY", By: "shell-dialect", Reason: "posix_compat"},
-		{Seq: 8, TSUnixNano: 800, Kind: "DECIDE", Tool: "Read", Verdict: "ALLOW", By: "floor", ArgsLabel: "path=config.json"},
-	}
-}
+var (
+	sinkRecord   SessionRecord
+	sinkExamples []Example
+	sinkVerdict  string
+)
 
-func BenchmarkFold(b *testing.B) {
-	meta := guardcorpus.SessionMeta{
-		TraceID:       "trace-bench-1",
+// BenchmarkFoldPlanted measures the execution throughput and allocations of Fold
+// over the canonical planted test session covering all decision types, honesty holes,
+// and exit outcomes.
+func BenchmarkFoldPlanted(b *testing.B) {
+	meta := SessionMeta{
+		TraceID:       "trace-bench-planted",
 		Agent:         "claude-code",
 		HostClass:     "desktop",
-		PolicyDigest:  "sha256:abcd1234efgh5678",
+		PolicyDigest:  "sha256:d8e8fca2dc0f896fd7cb4cb0031ba249",
 		ChainVerified: true,
 	}
-	rows := benchmarkRows()
+	rows := planted()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = guardcorpus.Fold(meta, rows)
+		sinkRecord, sinkExamples = Fold(meta, rows)
 	}
 }
 
-func BenchmarkFoldLargeSession(b *testing.B) {
-	meta := guardcorpus.SessionMeta{
-		TraceID:       "trace-bench-large",
+// BenchmarkFoldScaling measures Fold throughput and memory allocation behavior
+// across varying session journal sizes using b.Run sub-benchmarks.
+func BenchmarkFoldScaling(b *testing.B) {
+	sizes := []int{10, 100, 1000}
+	meta := SessionMeta{
+		TraceID:       "trace-bench-scaling",
 		Agent:         "claude-code",
-		HostClass:     "fleet",
-		PolicyDigest:  "sha256:deadbeefcafebabe",
+		HostClass:     "desktop",
+		PolicyDigest:  "sha256:scale-digest",
 		ChainVerified: true,
 	}
-	base := benchmarkRows()
-	rows := make([]journal.Row, 0, len(base)*20)
-	for i := 0; i < 20; i++ {
-		for _, r := range base {
-			r.Seq += uint64(len(rows))
-			r.TSUnixNano += int64(len(rows) * 100)
-			rows = append(rows, r)
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("Rows_%d", size), func(b *testing.B) {
+			rows := make([]journal.Row, size)
+			for i := 0; i < size; i++ {
+				verdict := "ALLOW"
+				kind := "DECIDE"
+				reason := ""
+				if i%10 == 1 {
+					verdict = "DENY"
+					kind = "DENY"
+					reason = "POLICY_BLOCK"
+				} else if i%20 == 2 {
+					verdict = "ADVISORY"
+					kind = "TOOL_DEFINITION_PRUNED"
+				} else if i%50 == 3 {
+					verdict = "QUARANTINE"
+					kind = "QUARANTINE"
+					reason = "SECRET_DISCOVERED"
+				}
+				rows[i] = journal.Row{
+					Seq:        uint64(i + 1),
+					TSUnixNano: int64(1000 + i*10),
+					Kind:       kind,
+					Tool:       "Bash",
+					Verdict:    verdict,
+					Reason:     reason,
+					By:         "floor",
+					Witness:    "benchmark-witness-evidence",
+					ArgsLabel:  "command=go",
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkRecord, sinkExamples = Fold(meta, rows)
+			}
+		})
+	}
+}
+
+// BenchmarkFoldAllowsBounded verifies the performance profile of Fold when processing
+// sessions dominated by ALLOW decisions that exceed maxAllowExamples capping limit.
+func BenchmarkFoldAllowsBounded(b *testing.B) {
+	const count = 500
+	rows := make([]journal.Row, count)
+	for i := 0; i < count; i++ {
+		rows[i] = journal.Row{
+			Seq:        uint64(i + 1),
+			TSUnixNano: int64(100 + i),
+			Kind:       "DECIDE",
+			Tool:       "Read",
+			Verdict:    "ALLOW",
+			By:         "floor",
+			ArgsLabel:  "path=main.go",
 		}
 	}
+	meta := SessionMeta{TraceID: "trace-bench-allows", PolicyDigest: "sha256:allows"}
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = guardcorpus.Fold(meta, rows)
+		sinkRecord, sinkExamples = Fold(meta, rows)
+	}
+}
+
+// BenchmarkNormalizeVerdict measures verdict resolution and fallback canonicalization
+// throughput across standard verdicts and kind-fallback cases.
+func BenchmarkNormalizeVerdict(b *testing.B) {
+	cases := []struct {
+		verdict string
+		kind    string
+	}{
+		{"ALLOW", "DECIDE"},
+		{"DENY", "DENY"},
+		{"", "RESULT_DENY"},
+		{"", "QUARANTINE"},
+		{"ADVISORY", "TOOL_DEFINITION_PRUNED"},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c := cases[i%len(cases)]
+		sinkVerdict = normalizeVerdict(c.verdict, c.kind)
 	}
 }

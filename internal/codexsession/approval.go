@@ -14,12 +14,16 @@ import (
 // allow button until this check has allowed the exact proposed scope.
 type ApprovalPolicy func(ApprovalRequest) PolicyDecision
 
+// PolicyDecision represents the capability-floor evaluation outcome, indicating whether
+// an approval request may proceed along with reason classification and assessed risk level.
 type PolicyDecision struct {
 	Allow  bool
 	Reason string
 	Risk   string
 }
 
+// ApprovalRequest encapsulates contextual metadata for a pending action requiring authorization,
+// including target thread, turn, item, workspace bounds, proposed summary, and blast-radius consequences.
 type ApprovalRequest struct {
 	ApprovalID  string
 	Kind        string
@@ -34,6 +38,8 @@ type ApprovalRequest struct {
 	Consequence string
 }
 
+// ApprovalResolution conveys the authoritative decision for a pending approval request,
+// validated against an active input lease and bound to an execution epoch and principal.
 type ApprovalResolution struct {
 	InputID    string
 	ApprovalID string
@@ -44,6 +50,8 @@ type ApprovalResolution struct {
 	Epoch      uint64
 }
 
+// ApprovalJournalEntry records an immutable audit trail entry capturing approval identity,
+// kind, status, rationale, and underlying capability-floor decisions for compliance tracking.
 type ApprovalJournalEntry struct {
 	ApprovalID         string `json:"approval_id"`
 	Kind               string `json:"kind"`
@@ -66,12 +74,18 @@ type pendingApproval struct {
 	policy   PolicyDecision
 }
 
+// Approval error conditions returned during approval validation and resolution.
 var (
-	ErrApprovalUnknown      = errors.New("codexsession: unknown approval")
-	ErrApprovalDuplicate    = errors.New("codexsession: approval already resolved")
-	ErrApprovalStale        = errors.New("codexsession: stale approval response")
+	// ErrApprovalUnknown indicates that no pending or historical approval matches the requested ID.
+	ErrApprovalUnknown = errors.New("codexsession: unknown approval")
+	// ErrApprovalDuplicate indicates that the approval or input lease identifier was already consumed.
+	ErrApprovalDuplicate = errors.New("codexsession: approval already resolved")
+	// ErrApprovalStale indicates that the approval deadline elapsed or the execution epoch changed.
+	ErrApprovalStale = errors.New("codexsession: stale approval response")
+	// ErrApprovalUnauthorized indicates that caller lacks a valid principal identity or input lease.
 	ErrApprovalUnauthorized = errors.New("codexsession: approval requires a valid input lease and principal")
-	ErrApprovalScope        = errors.New("codexsession: approval scope exceeds proposed scope")
+	// ErrApprovalScope indicates that the resolved permission scope exceeds the originally proposed bounds.
+	ErrApprovalScope = errors.New("codexsession: approval scope exceeds proposed scope")
 )
 
 func approvalKind(method string) string {
@@ -158,6 +172,10 @@ func (a *Adapter) handleApprovalRequest(m rpcMessage) error {
 	return nil
 }
 
+// ResolveApproval evaluates and applies an external approval decision against pending requests,
+// enforcing input lease validity, non-replayability, epoch freshness, and scope confinement.
+// Precondition: resolution must specify non-empty input lease identifier, valid epoch, and principal identity.
+// Postcondition: matching approval is consumed, removed from pending queue, and marked resolved permanently.
 func (a *Adapter) ResolveApproval(r ApprovalResolution) error {
 	if r.InputID == "" {
 		return ErrApprovalUnauthorized
@@ -214,6 +232,10 @@ func (a *Adapter) ResolveApproval(r ApprovalResolution) error {
 	return nil
 }
 
+// ExpireApprovals scans all pending approval requests and automatically declines any that have
+// exceeded their configured deadline, transitioning their state to expired and emitting audit events.
+// Precondition: adapter mutex protects concurrent iteration and removal of expired pending records.
+// Postcondition: any approval whose deadline is before current timestamp is declined and recorded expired.
 func (a *Adapter) ExpireApprovals() {
 	now := a.now()
 	var expired []pendingApproval

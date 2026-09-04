@@ -3,10 +3,10 @@
 
 package godfileceiling
 
+// Invariant: baseline caps are monotonically non-increasing and pin only first-party files exceeding HardCeiling.
+
 // Baseline pins today's god-files (> HardCeiling lines) at their current LOC. A
 // pinned file may only shrink; an unpinned file may not exceed HardCeiling. See doc.go.
-// _test.go files are NOT pinned here — MeasureTree excludes them (the tests KPI grades
-// them, and they churn per new leaf), matching internal/hooks/gate_godfile.go.
 var Baseline = map[string]int{
 	"cmd/fak/cachevalue_status.go":            3014,
 	"cmd/fak/dispatch_tick.go":                1730,

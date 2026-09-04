@@ -249,3 +249,65 @@ func TestFoldSafety(t *testing.T) {
 		t.Errorf("advisory-only benign: got %s, want Deny (fail-closed default)", kindName(v.Kind))
 	}
 }
+
+func TestDescriptorAndResolve(t *testing.T) {
+	path := filepath.Join("testdata", "adjudicator.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("no trained artifact fixture: %v", err)
+	}
+
+	art, desc, err := Resolve(raw)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !desc.Valid() {
+		t.Fatalf("desc.Valid() = false, want true")
+	}
+	if desc.Schema != ArtifactSchema {
+		t.Errorf("desc.Schema = %q, want %q", desc.Schema, ArtifactSchema)
+	}
+	if desc.FeatureCount != len(art.Features) {
+		t.Errorf("desc.FeatureCount = %d, want %d", desc.FeatureCount, len(art.Features))
+	}
+	if desc.Precision != art.Meta.Precision || desc.F1 != art.Meta.F1 {
+		t.Errorf("desc metrics mismatch: got p=%.4f f1=%.4f, want p=%.4f f1=%.4f",
+			desc.Precision, desc.F1, art.Meta.Precision, art.Meta.F1)
+	}
+
+	art2, desc2, err := ResolveModel(raw)
+	if err != nil || art2 == nil || desc2 != desc {
+		t.Fatalf("ResolveModel failed or mismatched Resolve: %v", err)
+	}
+
+	art3, desc3, err := ResolvePath(path)
+	if err != nil || art3 == nil || desc3 != desc {
+		t.Fatalf("ResolvePath failed or mismatched: %v", err)
+	}
+
+	adj := NewAdjudicator(art)
+	if adj.Descriptor() != desc {
+		t.Errorf("adj.Descriptor() = %+v, want %+v", adj.Descriptor(), desc)
+	}
+	if adj.Model() != art {
+		t.Errorf("adj.Model() = %p, want %p", adj.Model(), art)
+	}
+
+	var nilArt *Artifact
+	if nilArt.Descriptor().Valid() {
+		t.Error("nilArt.Descriptor().Valid() = true, want false")
+	}
+	var nilAdj *Adjudicator
+	if nilAdj.Descriptor().Valid() || nilAdj.Model() != nil {
+		t.Error("nilAdj descriptor or model non-nil")
+	}
+	inertAdj := NewAdjudicator(nil)
+	if inertAdj.Descriptor().Valid() || inertAdj.Model() != nil {
+		t.Error("inertAdj descriptor or model non-nil")
+	}
+
+	badRaw := []byte(`{"schema":"fak-advmodel/v999","bias":0,"threshold":0,"features":{"x":1}}`)
+	if _, _, err := Resolve(badRaw); err == nil {
+		t.Error("Resolve(badRaw) expected error, got nil")
+	}
+}

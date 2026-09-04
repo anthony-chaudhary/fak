@@ -2,7 +2,8 @@ package archfitness
 
 import "testing"
 
-func BenchmarkArchFitness(b *testing.B) {
+// BenchmarkArchFitnessEvaluate measures architecture fitness evaluation and hard debt aggregation throughput.
+func BenchmarkArchFitnessEvaluate(b *testing.B) {
 	in := Input{
 		ForbiddenImports:           []Finding{f("a.go", "Import", "lateral import")},
 		FrozenSeamChurn:            []Finding{f("b.go", "Submit", "frozen seam bypass")},
@@ -22,6 +23,19 @@ func BenchmarkArchFitness(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		r := Analyze(in)
 		if r.HardDebt != 12 {
+			b.Fatalf("unexpected hard debt: %d", r.HardDebt)
+		}
+	}
+}
+
+// BenchmarkArchFitnessClean measures architecture fitness evaluation throughput with zero violations.
+func BenchmarkArchFitnessClean(b *testing.B) {
+	in := Input{}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r := Analyze(in)
+		if r.HardDebt != 0 {
 			b.Fatalf("unexpected hard debt: %d", r.HardDebt)
 		}
 	}
