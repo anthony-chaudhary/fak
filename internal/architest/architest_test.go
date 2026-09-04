@@ -814,6 +814,10 @@ var tier = map[string]int{
 	"childproc":                  1,
 	"ciyaml":                     1,
 	"kimik3page":                 1,
+	"decodemigrate":              1,
+	"dosadapter":                 1,
+	"framebus":                   1,
+	"interactivesession":         1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
