@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -102,5 +104,152 @@ func TestRenderChatTerminationUsesSharedSafeClassification(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "[rate_limited]") || !strings.Contains(got, "provider reported rate limiting") || strings.Contains(got, "secret") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestChatWithCodeToolsAllowed(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "sample.txt")
+	if err := os.WriteFile(filePath, []byte("kernel-gated workspace contents\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := agent.ArmFocusedCodeTools(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.DisarmCodeTools()
+
+	planner := &chatScript{turns: []*agent.Completion{
+		toolTurn("Read", `{"file_path":"`+filepath.ToSlash(filePath)+`"}`),
+		finalTurn("Found file with contents."),
+	}}
+
+	in := strings.NewReader("read sample.txt\n")
+	var out strings.Builder
+	runChat(in, &out, planner, 10, agent.WithToolCatalog(catalog))
+
+	got := out.String()
+	if !strings.Contains(got, "Found file with contents.") {
+		t.Fatalf("expected final answer in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[tool] Read") || !strings.Contains(got, "ALLOW") {
+		t.Fatalf("expected tool execution receipt in output, got:\n%s", got)
+	}
+}
+
+func TestChatHeadless(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(filePath, []byte("headless proof\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := agent.ArmFocusedCodeTools(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.DisarmCodeTools()
+
+	planner := &chatScript{turns: []*agent.Completion{
+		toolTurn("Read", `{"file_path":"`+filepath.ToSlash(filePath)+`"}`),
+		finalTurn("Headless read finished."),
+	}}
+
+	var out strings.Builder
+	err = runChatHeadless(&out, planner, "read note.txt", 10, agent.WithToolCatalog(catalog))
+	if err != nil {
+		t.Fatalf("runChatHeadless failed: %v", err)
+	}
+
+	got := out.String()
+	if strings.Contains(got, "fak chat — native REPL") || strings.Contains(got, "you> ") {
+		t.Fatalf("headless mode must not emit interactive REPL chrome:\n%s", got)
+	}
+	if !strings.Contains(got, "[tool] Read") || !strings.Contains(got, "ALLOW") {
+		t.Fatalf("expected tool execution receipt in headless output:\n%s", got)
+	}
+	if !strings.Contains(got, "Headless read finished.") {
+		t.Fatalf("expected final answer in headless output, got:\n%s", got)
+	}
+}
+
+type recordingChatPlanner struct {
+	recorded [][]agent.Message
+	answers  []string
+	idx      int
+}
+
+func (p *recordingChatPlanner) Complete(_ context.Context, msgs []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	cp := make([]agent.Message, len(msgs))
+	copy(cp, msgs)
+	p.recorded = append(p.recorded, cp)
+	ans := "default answer"
+	if p.idx < len(p.answers) {
+		ans = p.answers[p.idx]
+		p.idx++
+	}
+	return finalTurn(ans), nil
+}
+
+func (p *recordingChatPlanner) Model() string { return "recording-planner" }
+
+func TestChatMultiTurnContext(t *testing.T) {
+	planner := &recordingChatPlanner{
+		answers: []string{"Answer one", "Answer two"},
+	}
+
+	in := strings.NewReader("hello from turn 1\nwhat did I say earlier?\n")
+	var out strings.Builder
+	runChat(in, &out, planner, 10)
+
+	if len(planner.recorded) != 2 {
+		t.Fatalf("expected 2 turns recorded, got %d", len(planner.recorded))
+	}
+
+	turn2Msgs := planner.recorded[1]
+	// Should contain: system prompt, turn 1 user, turn 1 assistant, turn 2 user
+	foundUser1 := false
+	foundAsst1 := false
+	foundUser2 := false
+	for _, m := range turn2Msgs {
+		if m.Role == agent.RoleUser && strings.Contains(m.Content, "hello from turn 1") {
+			foundUser1 = true
+		}
+		if m.Role == agent.RoleAssistant && strings.Contains(m.Content, "Answer one") {
+			foundAsst1 = true
+		}
+		if m.Role == agent.RoleUser && strings.Contains(m.Content, "what did I say earlier?") {
+			foundUser2 = true
+		}
+	}
+
+	if !foundUser1 || !foundAsst1 || !foundUser2 {
+		t.Fatalf("turn 2 did not receive multi-turn context (user1=%v, asst1=%v, user2=%v):\n%+v",
+			foundUser1, foundAsst1, foundUser2, turn2Msgs)
+	}
+}
+
+func TestChatClearCommandResetsContext(t *testing.T) {
+	planner := &recordingChatPlanner{
+		answers: []string{"Answer one", "Answer two"},
+	}
+
+	in := strings.NewReader("message before clear\n/clear\nmessage after clear\n")
+	var out strings.Builder
+	runChat(in, &out, planner, 10)
+
+	got := out.String()
+	if !strings.Contains(got, "conversation cleared.") {
+		t.Fatalf("expected clear notification in output:\n%s", got)
+	}
+
+	if len(planner.recorded) != 2 {
+		t.Fatalf("expected 2 turns recorded, got %d", len(planner.recorded))
+	}
+
+	turn2Msgs := planner.recorded[1]
+	for _, m := range turn2Msgs {
+		if strings.Contains(m.Content, "message before clear") {
+			t.Fatalf("cleared message leaked into turn 2 context:\n%+v", turn2Msgs)
+		}
 	}
 }
