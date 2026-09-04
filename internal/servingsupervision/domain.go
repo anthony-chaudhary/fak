@@ -6,6 +6,8 @@ import (
 )
 
 // ServingTopology declares the complete component hierarchy and failure domain boundaries.
+// Invariant: Each component (controller, proxy, router, replicas, KV fabrics) occupies an isolated failure domain.
+// Guard: Validate enforces strict domain ID uniqueness and forbids cross-replica coupling.
 type ServingTopology struct {
 	DeploymentID string              `json:"deployment_id"`
 	Controller   ServingDomainSpec   `json:"controller"`
@@ -16,9 +18,11 @@ type ServingTopology struct {
 }
 
 // TopologyOption customizes optional topology parameters.
+// Invariant: Configures optional router and KV fabric domains on a ServingTopology.
 type TopologyOption func(*ServingTopology)
 
 // WithTopologyRouter configures an optional standalone router/scheduler domain.
+// Invariant: Sets spec role to RoleRouter and attaches it to the topology.
 func WithTopologyRouter(spec ServingDomainSpec) TopologyOption {
 	return func(t *ServingTopology) {
 		spec.Role = RoleRouter
@@ -27,6 +31,7 @@ func WithTopologyRouter(spec ServingDomainSpec) TopologyOption {
 }
 
 // WithTopologyKVFabric adds an explicitly coupled KV fabric failure domain.
+// Invariant: Sets spec role to RoleKVFabric and registers it in the topology.
 func WithTopologyKVFabric(spec ServingDomainSpec) TopologyOption {
 	return func(t *ServingTopology) {
 		spec.Role = RoleKVFabric
@@ -35,6 +40,8 @@ func WithTopologyKVFabric(spec ServingDomainSpec) TopologyOption {
 }
 
 // NewServingTopology creates and validates a topology ensuring separate failure domains.
+// Invariant: Roles are assigned to controller, proxy, and replica specifications.
+// Guard: Calls Validate immediately; returns error on duplicate domain IDs or invalid couplings.
 func NewServingTopology(
 	deploymentID string,
 	controllerSpec ServingDomainSpec,
@@ -68,6 +75,8 @@ func NewServingTopology(
 }
 
 // BuildDefaultTopology constructs a standard topology with separate failure domains for each component.
+// Invariant: Generates distinct domain IDs for controller, proxy, and each replica.
+// Guard: Rejects non-positive replicaCount; defaults non-positive timeout (5s) and budget (3).
 func BuildDefaultTopology(deploymentID string, replicaCount int, drainTimeout time.Duration, restartBudget int) (*ServingTopology, error) {
 	if replicaCount <= 0 {
 		return nil, fmt.Errorf("replica count must be greater than 0, got %d", replicaCount)
@@ -111,6 +120,8 @@ func BuildDefaultTopology(deploymentID string, replicaCount int, drainTimeout ti
 }
 
 // Validate verifies that controller, proxy, and each replica inhabit strictly separate failure domains.
+// Invariant: All domain IDs must be non-empty and globally unique within the deployment.
+// Guard: Forbids replica-to-sibling-replica coupling; ensures coupled domains exist.
 func (t *ServingTopology) Validate() error {
 	if t.DeploymentID == "" {
 		return fmt.Errorf("deployment id must not be empty")
@@ -206,6 +217,8 @@ func (t *ServingTopology) Validate() error {
 }
 
 // Domains lists all declared domain specifications in the topology.
+// Invariant: Returns flattened slice containing controller, proxy, router, KV fabrics, and replicas.
+// Guard: Preserves declared domain configuration.
 func (t *ServingTopology) Domains() []ServingDomainSpec {
 	specs := make([]ServingDomainSpec, 0, 2+len(t.Replicas)+len(t.KVFabrics)+1)
 	specs = append(specs, t.Controller, t.Proxy)
@@ -218,6 +231,8 @@ func (t *ServingTopology) Domains() []ServingDomainSpec {
 }
 
 // Domain finds a domain specification by its DomainID.
+// Invariant: Searches declared domains for matching DomainID.
+// Guard: Returns false if no domain matches the provided identifier.
 func (t *ServingTopology) Domain(domainID string) (ServingDomainSpec, bool) {
 	for _, spec := range t.Domains() {
 		if spec.DomainID == domainID {
