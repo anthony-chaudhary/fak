@@ -138,6 +138,7 @@ concurrent = [
   "mtpeval",
   "faultlab",
   "gcpgpu",
+  "superstream",
   "quantprov",
   "lightgapport",
   "kvquantmeta",
@@ -893,6 +894,7 @@ mtptune = ["internal/mtptune/**", "cmd/tunemtp/**"]
 mtpeval = ["internal/mtpeval/**"]
 faultlab = ["internal/faultlab/**"]
 gcpgpu = ["internal/gcpgpu/**"]
+superstream = ["internal/superstream/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
