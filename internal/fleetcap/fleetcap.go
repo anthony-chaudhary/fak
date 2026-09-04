@@ -22,6 +22,10 @@
 // observe any real worker. It answers the planning question "how many live
 // workers does this target imply?" so an operator can size the fleet before
 // dispatching. It is stdlib-only and imports nothing internal — off the hot path.
+//
+// Invariant: fleet capacity estimation is fail-closed and deterministic.
+// Guard: non-positive rates, durations, or non-finite magnitudes return zero required workers.
+// Guard: available concurrency limits clamp negative values to zero and resolve to the tightest bound.
 package fleetcap
 
 import (
