@@ -14,6 +14,8 @@ import (
 //go:embed tickets.json
 var ticketFS embed.FS
 
+// Ticket describes a concept-popularization work item, specifying its dimension,
+// concepts served, deliverable, rationale, acceptance criteria, and execution lane.
 type Ticket struct {
 	Dim         string   `json:"dim"`
 	Title       string   `json:"title"`
@@ -46,6 +48,7 @@ var concepts = map[string]string{
 	"binary":  "One static Go binary, drop-in",
 }
 
+// Load parses the embedded tickets.json corpus into a slice of 50 Ticket items.
 func Load() ([]Ticket, error) {
 	raw, err := ticketFS.ReadFile("tickets.json")
 	if err != nil {
@@ -61,10 +64,12 @@ func Load() ([]Ticket, error) {
 	return tickets, nil
 }
 
+// JSON encodes the given tickets slice as indented JSON.
 func JSON(tickets []Ticket) ([]byte, error) {
 	return json.MarshalIndent(tickets, "", "  ")
 }
 
+// List formats the tickets into a human-readable list with a per-dimension summary.
 func List(tickets []Ticket) string {
 	var b strings.Builder
 	byDim := map[string]int{}
@@ -88,6 +93,7 @@ func List(tickets []Ticket) string {
 	return b.String()
 }
 
+// LanesTSV formats the tickets as tab-separated values of title and lane.
 func LanesTSV(tickets []Ticket) string {
 	var b strings.Builder
 	for _, t := range tickets {
@@ -97,6 +103,7 @@ func LanesTSV(tickets []Ticket) string {
 	return b.String()
 }
 
+// EmitFiles writes markdown body and title files for all tickets into dir.
 func EmitFiles(dir, epicRef string, tickets []Ticket) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -113,6 +120,7 @@ func EmitFiles(dir, epicRef string, tickets []Ticket) error {
 	return nil
 }
 
+// RenderBody generates the complete markdown issue description for a ticket and parent epic.
 func RenderBody(t Ticket, epicRef string) string {
 	dimName := dims[t.Dim]
 	conceptNames := make([]string, 0, len(t.Concepts))
