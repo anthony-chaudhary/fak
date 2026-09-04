@@ -40,6 +40,7 @@ func main() {
 	selfcheck := flag.Bool("selfcheck", false, "run all checks and exit non-zero on any failure")
 	bench := flag.Bool("bench", false, "run the measured-numbers bench harness for #535 (E vs draft cost, decode-lane utilization, residency hit-rate) and print the report")
 	out := flag.String("out", "", "with -bench: write the report as JSON to this path (the reproducible artifact)")
+	tune := flag.Bool("tune", false, "run automated MTP parameter tuning sweep across K in {1,2,3,4} and print markdown performance matrix")
 	flag.Parse()
 	quiet := *selfcheck
 
@@ -59,6 +60,11 @@ func main() {
 	if !ok {
 		fmt.Fprintln(os.Stderr, "polymodelbench: FAIL")
 		os.Exit(1)
+	}
+	if *tune {
+		report := RunMTPSweep(quiet)
+		fmt.Print(RenderMTPSweepMarkdown(report))
+		return
 	}
 	if *bench {
 		if *out != "" {
