@@ -167,3 +167,65 @@ func TestCapacityRefusalDoesNotFetch(t *testing.T) {
 		t.Fatalf("err=%v fetch_called=%v", err, called)
 	}
 }
+
+func BenchmarkModelPack(b *testing.B) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		b.Fatal(err)
+	}
+	payload := []byte("benchmark-model-payload-data-for-modelpack-performance")
+	sum := sha256.Sum256(payload)
+	manifest := Manifest{
+		Schema:   Schema,
+		PackID:   "bench-model",
+		Revision: "v1",
+		Chunks: []Chunk{
+			{Digest: hex.EncodeToString(sum[:]), Size: int64(len(payload))},
+		},
+		Fixtures: []Fixture{
+			{Name: "smoke", Input: "prompt", Expected: "output"},
+		},
+	}
+	if err := Sign(&manifest, priv); err != nil {
+		b.Fatal(err)
+	}
+
+	b.Run("SignAndVerify", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m := manifest
+			m.Signature = ""
+			if err := Sign(&m, priv); err != nil {
+				b.Fatal(err)
+			}
+			if err := Verify(m, pub); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Forecast", func(b *testing.B) {
+		root := b.TempDir()
+		mgr, err := Open(root)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = mgr.Forecast(manifest)
+		}
+	})
+
+	b.Run("InstallAtomic", func(b *testing.B) {
+		fetcher := source(payload)
+		for i := 0; i < b.N; i++ {
+			root := b.TempDir()
+			mgr, err := Open(root)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := mgr.Install(manifest, pub, 1024, fetcher, nil); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
