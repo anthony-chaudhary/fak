@@ -78,7 +78,7 @@ through?"* before deploying.
 | Field | Meaning |
 |---|---|
 | `version` | Schema tag. Omit it (current is assumed) or set `fak-policy/v1`. A different **major** (e.g. `fak-policy/v2`) is refused; a newer v1 **minor** — written `fak-policy/v1.x`, e.g. `fak-policy/v1.3`, and matched by the `fak-policy/v1` prefix — is forward-accepted, so any binary that speaks v1 tolerates any v1-minor manifest (there is no per-minor support matrix). |
-| `posture` | Default-deny posture. Omit it or set `fail_closed` for the normal floor. Set `admit_and_log` only for unattended/batch runs that should admit low-risk read-shaped `DEFAULT_DENY` calls while logging `would_deny=DEFAULT_DENY`. |
+| `posture` | Adjudication posture: `default_open` (default for `fak guard`), `fail_closed` (strict default-deny; default for policy manifests), or `admit_and_log` (audit/telemetry mode). See [Posture modes](#posture-modes) below. |
 | `allow` | Tool names affirmatively permitted (exact match). |
 | `allow_prefix` | A call is permitted if its tool name **starts with** any of these — the read-only family (`read_`, `get_`, `search_`, …). |
 | `deny` | Explicit provable refusals: `tool → reason`. The reason **must** be a name from the closed refusal vocabulary (below), and it is a **static label** stamped on the refusal — never a runtime condition. A `deny` entry refuses *every* call to that tool name unconditionally; picking a detector-shaped code like `SECRET_EXFIL` does **not** make the deny fire only when a secret is present (that taint-conditional path is the live detector, not this static map). Prefer a structural code such as `POLICY_BLOCK` here so the label-not-condition reading is obvious. |
@@ -88,18 +88,82 @@ through?"* before deploying.
 | `arg_rules` | Per-tool **argument-value** denials: a list of `{ "tool", "arg", "deny_regex", "reason" }`. If an allow-listed `tool`'s decoded string `arg` matches `deny_regex` (RE2 — no backreferences), the call is refused with `reason` (a closed-vocabulary code). Regex-only and best-effort — it inspects one decoded string, not the resolved effect — but enough to deny `rm -rf`, `git push`, or a write whose path escapes the repo (`-o ../…`). See [`examples/dogfood-claude-policy.json`](examples/dogfood-claude-policy.json) and [`examples/repo-guard-policy.json`](examples/repo-guard-policy.json); the path-resolving structural complement is [`tools/repo_guard.py`](tools/repo_guard.py) (see [`docs/repo-guard.md`](docs/repo-guard.md)). |
 | `rate_limit` | Declarative throughput/cost cap (issue #699). An object `{ "max_calls", "max_cost", "key", "retry_after_ms" }` applied to the governor at boot and on `--policy` hot-reload. `max_calls` is a per-key admitted-call quota, `max_cost` a cumulative-cost budget (arg bytes ≈ tokens); set either or both (at least one is required). `key` is the bucketing dimension `trace` (default) / `tool` / `global`. An over-cap call is refused with `RATE_LIMITED`, whose disposition is `WAIT` carrying an advisory `retry_after` — back off like HTTP 429, not a reservation (this is a fixed-ceiling quota with no time window, so the hint is advisory; `retry_after_ms` overrides the default). Omit the block entirely to leave the limiter inert. The `FAK_RATELIMIT_*` env vars are the fallback when no `--policy` is given; a policy load is authoritative over them. |
 
-**Anything not in `allow` / `allow_prefix`, not admitted by
-`egress.research_allow_hosts`, and not explicitly denied resolves to the
-fail-closed `DEFAULT_DENY`.** An *empty* manifest (`{}`) is valid — it is the
-maximally paranoid floor where every call is denied. `fak policy --check` calls
-this out explicitly so you never deploy an empty floor by accident.
+<a id="posture-modes"></a>
+## Posture modes: `default_open`, `fail_closed`, and `admit_and_log`
 
-The one opt-in exception is `"posture": "admit_and_log"`: after explicit deny,
-self-modify, redaction, and arg-rule checks have passed, a read-shaped default
-deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, `calc`, or `calculate`) is
-admitted with verdict metadata `posture=admit_and_log` and
-`would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail
-closed.
+The policy adjudicator operates under one of three posture modes:
+
+| Posture | Behavior on unlisted tools | Default in |
+|---|---|---|
+| `default_open` | **Admitted** (`ALLOW` with `posture=default_open`). Explicit denies, arg rules, self-modification, egress restrictions, and the Dangerous Gotchas catalog remain fail-closed. | `fak guard` (when no explicit policy manifest is specified) |
+| `fail_closed` | **Refused** (`DEFAULT_DENY`). Only tools explicitly listed in `allow` or matching `allow_prefix` (or permitted by `egress.research_allow_hosts`) may execute. | Policy manifests (`fak policy`, `fak preflight`) |
+| `admit_and_log` | **Admitted for read-shaped queries** (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, `calc`, `calculate`) with metadata `would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail closed. | Opt-in via manifest or `--posture admit_and_log` |
+
+### `default_open`: Developer convenience bounded by the safety floor
+
+`fak guard` defaults to `default_open`. Under this posture, unlisted benign tools (custom scripts, CLI helpers like `gh` or `jq`, ad-hoc MCP server tools, and local utilities) are admitted automatically without requiring developers or operators to maintain an exhaustive allowlist of every command an agent might invoke.
+
+At the same time, `default_open` does **not** grant unrestricted execution. It strictly enforces:
+1. **The compiled-in FROZEN safety floor**: SSRF/cloud-metadata egress blocks (`169.254.169.254`, `fd00:ec2::254`), out-of-tree write escapes (`OUT_OF_TREE_WRITE`), and secret redactions cannot be weakened or bypassed by any posture.
+2. **Explicit deny rules and argument predicates**: Rules defined in `deny`, `arg_rules`, and `self_modify_globs` are enforced unconditionally.
+3. **The Dangerous Gotchas catalog**: Known catastrophic command patterns are blocked fail-closed before any allow verdict is minted.
+
+This design implements the doctrine of **positive workspace management**: construct an affirmative, productive environment bounded by an un-bypassable structural floor, rather than trapping agents in punitive default-deny doom-loops. See [`docs/positive-workspace-management.md`](docs/positive-workspace-management.md) for the foundational architecture.
+
+### The Dangerous Gotchas catalog
+
+Under `default_open`, before any command runs, `fak guard` inspects tool arguments (including shell command strings passed to `Bash` or `PowerShell`) against the fail-closed Dangerous Gotchas catalog (`internal/adjudicator/gotchas.go`). Matching calls are immediately denied with `POLICY_BLOCK` (`by: monitor/gotchas`):
+
+| Gotcha category | ID | Blocked patterns | Remedy / Alternative |
+|---|---|---|---|
+| **Destructive file deletions** | `destructive_deletion` | Recursive or forced deletion (`rm -rf`, `Remove-Item -Recurse -Force`, `shred`, `truncate`, `srm`) targeting workspace roots or project directories. | Delete individual files without `-r`/`-f`, move to trash, or delete inside declared scratchpad roots. |
+| **Raw disk/volume destruction** | `raw_disk` | Block device formatting or partition table manipulation (`mkfs.*`, `fdisk`, `dd` writing directly to `/dev/sd*` or raw disk devices). | Raw storage and block volume operations require human operator approval. |
+| **Host/shell evasion** | `host_shell_evasion` | Pipe-to-shell remote code execution (`curl ... \| sh`, `wget ... \| bash`), fork bombs (`:(){ :\|:& };:`), and subshell escape vectors. | Download scripts to disk and inspect before execution; avoid piping unverified network streams directly to interpreters. |
+| **Privilege escalation** | `privilege_escalation` | Local privilege escalation commands (`sudo`, `doas`, `su`, PowerShell `Start-Process -Verb RunAs`). | Execute without elevation or ask the operator to perform privileged setup steps out-of-band. |
+| **Cloud/infra teardown** | `infra_teardown` | Blanket cloud or cluster resource teardown (`terraform destroy` without read-only plan, `kubectl delete all`, `aws s3 rb --force`). | Preview infrastructure changes with `terraform plan -destroy` or `kubectl diff`/dry-run. |
+| **Critical system disruption** | `system_disruption` | Terminating system init (PID 1) or supervisor services (`kill -9 1`, `pkill systemd`, `killall systemd`). | Do not target core OS init or supervisor processes. |
+
+### Hard-won carveouts
+
+Blanket regexes on dangerous keywords cause painful false positives in normal software engineering tasks. The gotchas catalog includes specific, battle-tested carveouts that distinguish legitimate development work from catastrophic actions:
+
+- **Declared scratchpad roots (`FAK_GUARD_SCRATCHPAD_ROOTS`)**: A recursive deletion whose targets sit strictly below declared scratchpad roots (e.g. `FAK_GUARD_SCRATCHPAD_ROOTS=/tmp/claude` or `_scratch`) is admitted without operator intervention. Cleaning up temporary session scratch is routine engineering, not an existential threat.
+- **Remote SSH sudo (`ssh host 'sudo ...'`)**: While local privilege escalation is blocked, executing `sudo` inside a remote SSH session is permitted because it targets an explicitly designated remote machine rather than escalating privileges on the local host.
+- **Read-only terraform plan (`terraform plan -destroy`)**: While `terraform destroy` is blocked fail-closed, running `terraform plan -destroy` is recognized as a read-only speculative plan and permitted.
+- **Single literal file degradation / force-only delete**: A force-only delete (`rm -f <path>` without `-r`) of a single explicit, non-glob literal path is not treated as a blanket gotcha block; instead, it falls through to the reversibility preview gate (`REQUIRE_WITNESS`).
+
+### DOS verification and bytes-not-authored protection
+
+The adjudicator uses DOS (Decentralized Operations Substrate) evidence discipline to govern file deletions and mutations based on provenance:
+
+- **Self-authored untracked files (`trace-authored-git-untracked`)**: Untracked files that were authored during the current session carry cryptographic write receipts tracked by the kernel (`adj.ObserveResult`). When the agent deletes an untracked file it created during the current trace, the deletion is admitted with `witness: trace-authored-git-untracked` (`by: monitor/reversibility`). An agent is always allowed to clean up its own newly created files.
+- **Tracked files and bytes not authored by the agent**: If a file is tracked in Git, or is untracked but was not authored by the agent in this session, deleting it is an irreversible destruction of user state. The adjudicator refuses immediate execution and holds the call behind a preview confirmation token (`REQUIRE_WITNESS`, `by: monitor/reversibility`). The agent or operator must review the preview payload and supply the returned `_fak_confirm` token to proceed.
+
+### Strict default-deny for compliance and enterprise teams
+
+For security-sensitive deployments, compliance audits, or enterprise environments where every permitted tool must be strictly enumerated in an allowlist, you can enforce `fail_closed`:
+
+1. **Via CLI flag**:
+   ```bash
+   fak guard --posture fail_closed -- claude
+   ```
+2. **Via environment variable**:
+   ```bash
+   export FAK_GUARD_POSTURE=fail_closed
+   fak guard -- claude
+   ```
+3. **Via policy manifest**:
+   Set `"posture": "fail_closed"` in your policy JSON file, and pass `--policy <file>`:
+   ```bash
+   fak guard --policy my-policy.json -- claude
+   ```
+4. **Dump the strict policy manifest**:
+   To inspect or export the strict fail-closed capability floor directly:
+   ```bash
+   fak guard --dump-strict-policy > strict-policy.json
+   ```
+
+Under `fail_closed`, any tool not explicitly listed in `allow` or matched by `allow_prefix` is refused with `DEFAULT_DENY`. An empty manifest (`{}`) is valid and represents the maximally paranoid floor where all tools are refused. `fak policy --check` calls this out explicitly so you never deploy an empty floor by accident.
 
 ## The closed refusal vocabulary
 
@@ -177,3 +241,10 @@ Enforced by `internal/policy`'s `TestRoundTrip`, `TestLoadedPolicyIsLoadBearing`
 - SIGHUP and signed manifests for long-lived deployments. HTTP reload is already
   available through `POST /v1/fak/policy/reload` when `serve` starts with
   `--policy FILE`.
+
+## Related authorities
+
+- [`docs/positive-workspace-management.md`](docs/positive-workspace-management.md) — construction over punitive default-deny and the FROZEN safety floor doctrine
+- [`GETTING-STARTED.md`](GETTING-STARTED.md) — install, offline verification, and guard setup
+- [`docs/cli-reference.md`](docs/cli-reference.md) — comprehensive CLI flag reference for `fak guard`, `fak policy`, and `fak serve`
+
