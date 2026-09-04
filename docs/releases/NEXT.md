@@ -5,7 +5,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 63
+- **Commits in flight:** 68
 
 ## What changed
 
@@ -32,6 +32,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Reliability and correctness
 
+- Consolidate duplicate release notes items by scope.
 - Ignore NEXT.md sync commits in release_next filter.
 - Enforce conflict banner and silent drop merge gates (#11306).
 - Bound launcher and orgdebt subprocesses with context cancellation.
@@ -47,6 +48,10 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Add production benchmarks for cryptographic hash chain and row verification.
+- Add benchmark suite and prune comment density.
+- Add benchmark suite and clean comment bloat.
+- Add substantive benchmark suite for plan adjudication.
 - Add test hygiene scanner against hardcoded ports and brittle sleeps (#11307).
 - Replace timing sleeps with os.Chtimes for mtime invalidation (#11307).
 - Replace hardcoded ports and drain sleeps (#11307).
