@@ -14,20 +14,23 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-const (
-	Schema      = "fleet-commit-subject-coverage/1"
-	DefaultLast = 50
-)
+// Schema identifies the JSON envelope schema for fleet commit subject coverage reports.
+const Schema = "fleet-commit-subject-coverage/1"
+
+// DefaultLast specifies the default count of recent commits scanned for subject coverage.
+const DefaultLast = 50
 
 var versionRE = regexp.MustCompile(`^v\d+\.\d+\.\d+`)
 
 var exemptPrefixes = []string{"Merge ", "Revert ", "fixup! ", "squash! ", "amend! "}
 
+// AbstainSubject records a commit subject rejected by the conventional verb witness.
 type AbstainSubject struct {
 	Subject string `json:"subject"`
 	Reason  string `json:"reason"`
 }
 
+// Coverage represents aggregate gradeable, exempt, and abstaining commit statistics.
 type Coverage struct {
 	Total           int              `json:"total"`
 	Gradeable       int              `json:"gradeable"`
@@ -36,6 +39,7 @@ type Coverage struct {
 	AbstainSubjects []AbstainSubject `json:"abstain_subjects"`
 }
 
+// Payload represents the structured audit outcome emitted by the commit subject evaluator.
 type Payload struct {
 	Schema          string           `json:"schema"`
 	OK              bool             `json:"ok"`
@@ -72,6 +76,10 @@ func IsExempt(subject string) bool {
 	return versionRE.MatchString(subject)
 }
 
+// Invariant: commit subject folding is fail-closed and verb-checked.
+// All commit subjects lacking conventional structure or an approved imperative verb are rejected into abstain status.
+//
+// Fold processes a sequence of commit subjects and calculates witness gradeability coverage.
 func Fold(subjects []string) Coverage {
 	total, gradeable := 0, 0
 	var abstains []AbstainSubject
@@ -97,8 +105,10 @@ func Fold(subjects []string) Coverage {
 	}
 }
 
+// SubjectFetcher defines a function signature to retrieve raw commit subjects for a given repository root.
 type SubjectFetcher func(root string, last int) []string
 
+// RecentSubjects extracts non-merge commit subjects from git log within the specified count.
 func RecentSubjects(root string, last int) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -118,6 +128,7 @@ func RecentSubjects(root string, last int) []string {
 	return subjects
 }
 
+// BuildPayload formats raw coverage statistics into a validated audit payload with floor enforcement.
 func BuildPayload(root string, cov Coverage, minCoverage *float64) Payload {
 	var pct *float64
 	if cov.Coverage != nil {
@@ -154,6 +165,7 @@ func BuildPayload(root string, cov Coverage, minCoverage *float64) Payload {
 	}
 }
 
+// Collect evaluates commit subject coverage for a repository root against an optional minimum floor.
 func Collect(root string, last int, minCoverage *float64, fetcher SubjectFetcher) Payload {
 	if last < 1 {
 		last = 1
@@ -167,6 +179,7 @@ func Collect(root string, last int, minCoverage *float64, fetcher SubjectFetcher
 	return BuildPayload(root, Fold(fetcher(root, last)), minCoverage)
 }
 
+// Render formats a coverage payload into human-readable multi-line status output.
 func Render(p Payload) string {
 	lines := []string{
 		fmt.Sprintf("commit-subject coverage: %s (%s)", p.Verdict, boolWord(p.OK)),
