@@ -90,7 +90,7 @@ func guardCodexGatewayModel(command []string, model, provider string) string {
 
 func guardCodexGatewayModelForProfile(profile harnessprofile.HarnessProfile, model, provider string) string {
 	if strings.TrimSpace(model) != "" {
-		return strings.TrimSpace(model)
+		return configaccounts.NormalizeCodexModelSlug(strings.TrimSpace(model))
 	}
 	if profile.HasRepoint(harnessprofile.RepointCLIConfig) && strings.TrimSpace(provider) == "openai-responses" {
 		return guardCodexDefaultModelID
@@ -222,7 +222,7 @@ func codexConfigHasMCPServerFak(path string) bool {
 
 func guardCodexConfiguredModel(model string) string {
 	if model = strings.TrimSpace(model); model != "" {
-		return model
+		return configaccounts.NormalizeCodexModelSlug(model)
 	}
 	return guardCodexDefaultModelID
 }
@@ -259,11 +259,11 @@ func guardCodexResolveReasoningEffort(model string, getenv func(string) string) 
 }
 
 // guardCodexReasoningEffort is the no-opt-in effort for the model Codex is being pointed at:
-// the configured default for the managed GPT-5.6 models, and no pin at all for a custom or
+// the configured default for the managed GPT-5.6 and GPT-6 models, and no pin at all for a custom or
 // local model whose supported-effort set the guard cannot know.
 func guardCodexReasoningEffort(model string) string {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-5.6", "gpt-5.6-sol":
+	switch strings.ToLower(configaccounts.NormalizeCodexModelSlug(model)) {
+	case "gpt-5.6", "gpt-5.6-sol", strings.ToLower(configaccounts.GPT6AstraModel):
 		return guardCodexDefaultReasoningEffort
 	default:
 		return ""

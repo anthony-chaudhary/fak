@@ -169,3 +169,11 @@ func TestPrintGuardCodexNoteNamesEffortSource(t *testing.T) {
 		}
 	})
 }
+
+func TestGuardCodexReasoningEffortGPT6AstraAliases(t *testing.T) {
+	for _, m := range []string{"gpt-6-astra", "gpt 6 astra", "astra", "gpt-6", "gpt6astra", "openai/gpt-6-astra"} {
+		if got := guardCodexReasoningEffort(m); got != "high" {
+			t.Errorf("guardCodexReasoningEffort(%q) = %q, want high", m, got)
+		}
+	}
+}

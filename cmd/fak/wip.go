@@ -68,6 +68,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipUnfence(stdout, stderr, argv[1:])
 	case "reap":
 		return runWipReap(stdout, stderr, argv[1:])
+	case "evict":
+		return runWipEvict(stdout, stderr, argv[1:])
 	case "attribute", "attr":
 		return runWipAttribute(stdout, stderr, argv[1:])
 	case "owner", "own":
@@ -288,6 +290,10 @@ func wipUsage(w io.Writer) {
   fak wip pr-cohort [--input <arm-data.json>] [--json]
       Run the matched PR isolation cohort study (#7332) evaluating WIP safety and
       workflow outcome metrics between DetachedWorker and PRLane arms.
+
+  fak wip evict [-C <repo>] [--auto-archive] [--session <id>] [--dry-run] [--json] [<path>...]
+      Archive orphan working-tree residue into refs/fak/quarantine/* before removing
+      them from the working tree.
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta

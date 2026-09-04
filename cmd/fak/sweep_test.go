@@ -156,6 +156,36 @@ func TestCleanSweepJunkRefusesDirectoriesAndEscapes(t *testing.T) {
 	}
 }
 
+func TestCleanSweepJunkAutoArchive(t *testing.T) {
+	root := t.TempDir()
+	cmdInit := exec.Command("git", "init", "-q", "-b", "main")
+	cmdInit.Dir = root
+	if out, err := cmdInit.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	junkPath := filepath.Join(root, "junk.log")
+	junkBytes := []byte("temporary junk log data\n")
+	if err := os.WriteFile(junkPath, junkBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := sweepPlan{Junk: []sweepEntry{
+		{dirtyEntry: dirtyEntry{Path: "junk.log"}},
+	}}
+	got := cleanSweepJunk(root, plan, true)
+	if !got.OK {
+		t.Fatalf("cleanSweepJunk failed: %+v", got)
+	}
+	if got.QuarantineRef == "" || got.QuarantineSHA == "" {
+		t.Fatalf("expected quarantine ref and sha, got: %+v", got)
+	}
+	if got.ArchivedCount != 1 || got.ArchivedBytes != int64(len(junkBytes)) {
+		t.Fatalf("unexpected archived stats: count=%d, bytes=%d", got.ArchivedCount, got.ArchivedBytes)
+	}
+	if _, err := os.Stat(junkPath); !os.IsNotExist(err) {
+		t.Fatalf("junk.log should have been removed from working tree: %v", err)
+	}
+}
+
 func TestRenderSweepCleanJunkText(t *testing.T) {
 	var out bytes.Buffer
 	renderSweepCleanJunk(&out, sweepCleanJunkResult{

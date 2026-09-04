@@ -12,15 +12,18 @@ import (
 )
 
 const (
-	guardResourceRestartLimitEnv        = "FLEET_CLAUDE_GUARD_RESOURCE_RESTART_LIMIT"
-	guardResourceRestartDefaultLimit    = 3
-	guardResourceNoProgressLimitEnv     = "FLEET_CLAUDE_GUARD_RESOURCE_NO_PROGRESS_LIMIT"
-	guardResourceNoProgressDefaultLimit = 2
-	guardResourceRestartExhaustedReason = "CHILD_RESOURCE_RESTART_EXHAUSTED"
-	guardResourceReattachUnavailable    = "CHILD_RESOURCE_REATTACH_UNAVAILABLE"
-	guardResourceRestartCauseBudget     = "budget"
-	guardResourceRestartCauseNoProgress = "no_progress"
-	guardResourceRestartCauseNoReattach = "reattach_unavailable"
+	guardResourceRestartLimitEnv               = "FLEET_CLAUDE_GUARD_RESOURCE_RESTART_LIMIT"
+	guardResourceRestartDefaultLimit           = 3
+	guardResourceNoProgressLimitEnv            = "FLEET_CLAUDE_GUARD_RESOURCE_NO_PROGRESS_LIMIT"
+	guardResourceNoProgressDefaultLimit        = 2
+	guardResourceRestartExhaustedReason        = "CHILD_RESOURCE_RESTART_EXHAUSTED"
+	guardResourceReattachUnavailable           = "CHILD_RESOURCE_REATTACH_UNAVAILABLE"
+	guardResourceRestartCauseBudget            = "budget"
+	guardResourceRestartCauseNoProgress        = "no_progress"
+	guardResourceRestartCauseNoReattach        = "reattach_unavailable"
+	guardResourceRestartCauseHeadroomExhausted = "system_headroom_exhausted"
+	guardHeadroomRestartBaseDelay              = 5 * time.Second
+	guardHeadroomRestartMaxDelay               = 20 * time.Second
 )
 
 type guardResourceRetryAction uint8
@@ -29,6 +32,7 @@ const (
 	guardResourceRetryTerminal guardResourceRetryAction = iota
 	guardResourceRetryRelaunch
 	guardResourceRetryExhausted
+	guardResourceRetryYield
 )
 
 type guardResourceRetryVerdict struct {
@@ -83,9 +87,20 @@ func guardResourceNoProgressLimit(restartLimit int) int {
 	return limit
 }
 
+func guardHeadroomRestartDelay(attempt int) time.Duration {
+	if attempt <= 0 {
+		return 0
+	}
+	d := guardHeadroomRestartBaseDelay << (attempt - 1)
+	if d > guardHeadroomRestartMaxDelay || d <= 0 {
+		return guardHeadroomRestartMaxDelay
+	}
+	return d
+}
+
 func guardResourceContainmentReason(reason string) bool {
 	switch strings.TrimSpace(reason) {
-	case "CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT":
+	case "CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT", "SYSTEM_COMMIT_HEADROOM":
 		return true
 	default:
 		return false
@@ -108,27 +123,45 @@ func (s *guardResourceRetryState) decide(event guardChildWaitEvent, agentName, c
 		verdict.Cause = guardResourceRestartCauseNoReattach
 		return verdict
 	}
+	isHeadroom := verdict.ResourceType == "SYSTEM_COMMIT_HEADROOM"
 	if s.restarts >= s.limit {
+		if isHeadroom {
+			verdict.Action = guardResourceRetryYield
+			verdict.Attempt = s.restarts
+			verdict.Cause = guardResourceRestartCauseHeadroomExhausted
+			return verdict
+		}
 		verdict.Action = guardResourceRetryExhausted
 		verdict.Attempt = s.restarts
 		verdict.Cause = guardResourceRestartCauseBudget
 		return verdict
 	}
 
-	nextHead, nextNoProgress := guardNoProgressStep(s.progressHead, currentHead, s.noProgress)
-	s.progressHead, s.noProgress = nextHead, nextNoProgress
-	if s.noProgressLimit > 0 && s.noProgress >= s.noProgressLimit {
-		verdict.Action = guardResourceRetryExhausted
-		verdict.Attempt = s.restarts
-		verdict.Cause = guardResourceRestartCauseNoProgress
-		verdict.NoProgress = s.noProgress
-		return verdict
+	if isHeadroom {
+		if strings.TrimSpace(currentHead) != "" && currentHead != s.progressHead {
+			s.progressHead = currentHead
+			s.noProgress = 0
+		}
+	} else {
+		nextHead, nextNoProgress := guardNoProgressStep(s.progressHead, currentHead, s.noProgress)
+		s.progressHead, s.noProgress = nextHead, nextNoProgress
+		if s.noProgressLimit > 0 && s.noProgress >= s.noProgressLimit {
+			verdict.Action = guardResourceRetryExhausted
+			verdict.Attempt = s.restarts
+			verdict.Cause = guardResourceRestartCauseNoProgress
+			verdict.NoProgress = s.noProgress
+			return verdict
+		}
 	}
 
 	s.restarts++
 	verdict.Action = guardResourceRetryRelaunch
 	verdict.Attempt = s.restarts
-	verdict.Delay = guardCrashRestartDelay(s.restarts)
+	if isHeadroom {
+		verdict.Delay = guardHeadroomRestartDelay(s.restarts)
+	} else {
+		verdict.Delay = guardCrashRestartDelay(s.restarts)
+	}
 	verdict.NoProgress = s.noProgress
 	return verdict
 }
