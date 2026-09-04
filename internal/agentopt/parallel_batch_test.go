@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestParallelToolCallBatching(t *testing.T) {
@@ -18,22 +17,29 @@ func TestParallelToolCallBatching(t *testing.T) {
 			{ID: "read-3", Name: "Read", ReadPaths: []string{"c.go"}, ReadOnly: true},
 		}
 
-		start := time.Now()
+		var inFlight sync.WaitGroup
+		inFlight.Add(len(calls))
+		release := make(chan struct{})
+		go func() {
+			inFlight.Wait()
+			close(release)
+		}()
+
 		results, err := executor.Execute(ctx, calls, func(ctx context.Context, call BatchCall) (string, error) {
-			time.Sleep(30 * time.Millisecond)
+			inFlight.Done()
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
 			return "content:" + call.ID, nil
 		})
-		elapsed := time.Since(start)
 
 		if err != nil {
 			t.Fatalf("batch execution error: %v", err)
 		}
 		if len(results) != 3 {
 			t.Fatalf("expected 3 results, got %d", len(results))
-		}
-		// In parallel, 3 * 30ms calls should complete well under sequential 90ms.
-		if elapsed >= 80*time.Millisecond {
-			t.Fatalf("expected parallel speedup (<80ms), elapsed: %v", elapsed)
 		}
 		for _, r := range results {
 			if r.Stage != 0 {

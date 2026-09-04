@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestSpeculativeToolExecution(t *testing.T) {
@@ -15,7 +14,6 @@ func TestSpeculativeToolExecution(t *testing.T) {
 	var execCount atomic.Int32
 	mockExec := func(ctx context.Context) (string, error) {
 		execCount.Add(1)
-		time.Sleep(10 * time.Millisecond)
 		return "file contents of main.go", nil
 	}
 
