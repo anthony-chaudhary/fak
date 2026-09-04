@@ -2,6 +2,10 @@
 // capability metadata. It is format-neutral: callers name formats and evidence
 // they approve, and this package performs structural checks without selecting a
 // quantizer, converting an artifact, or inferring runtime or hardware support.
+//
+// Invariant: quant policy evaluation is fail-closed and structural across all predicates.
+// Guard: unknown schemas, unknown metadata, unsupported operations, and unapproved
+// formats or provenance immediately refuse or abstain without runtime side effects.
 package quantpolicy
 
 import (
