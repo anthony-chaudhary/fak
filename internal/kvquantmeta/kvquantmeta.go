@@ -9,11 +9,17 @@ import (
 type Precision string
 
 const (
+	// PrecisionFP16 stores 16-bit IEEE floating point values in cache buffers.
 	PrecisionFP16 Precision = "fp16"
+	// PrecisionBF16 stores 16-bit Brain floating point values with wide dynamic range.
 	PrecisionBF16 Precision = "bf16"
-	PrecisionFP8  Precision = "fp8"
+	// PrecisionFP8 stores 8-bit floating point values for compact tensor representations.
+	PrecisionFP8 Precision = "fp8"
+	// PrecisionINT8 stores 8-bit signed integer quantized representations.
 	PrecisionINT8 Precision = "int8"
+	// PrecisionINT4 stores 4-bit packed integer quantized representations.
 	PrecisionINT4 Precision = "int4"
+	// PrecisionINT2 stores 2-bit aggressive integer quantized representations.
 	PrecisionINT2 Precision = "int2"
 )
 
@@ -21,8 +27,11 @@ const (
 type Grouping string
 
 const (
-	GroupingPerToken        Grouping = "per-token"
-	GroupingPerChannel      Grouping = "per-channel"
+	// GroupingPerToken normalizes quantization parameters per sequence position.
+	GroupingPerToken Grouping = "per-token"
+	// GroupingPerChannel normalizes quantization parameters per feature channel.
+	GroupingPerChannel Grouping = "per-channel"
+	// GroupingPerTokenChannel normalizes quantization parameters across both tokens and channels.
 	GroupingPerTokenChannel Grouping = "per-token-channel"
 )
 
@@ -30,18 +39,25 @@ const (
 type Recoverability string
 
 const (
-	RecoverableExact       Recoverability = "exact"
+	// RecoverableExact guarantees lossless reconstruction back to the baseline tier.
+	RecoverableExact Recoverability = "exact"
+	// RecoverableApproximate permits bounded loss reconstruction back to the baseline tier.
 	RecoverableApproximate Recoverability = "approximate"
-	RecoverableNone        Recoverability = "none"
+	// RecoverableNone marks one-way irreversible quantization without an inversion path.
+	RecoverableNone Recoverability = "none"
 )
 
 // ReasonCode is stable machine-readable adjudication detail.
 type ReasonCode string
 
 const (
-	ReasonSupported             ReasonCode = "KVQUANT_SUPPORTED"
-	ReasonUnknownScheme         ReasonCode = "KVQUANT_UNKNOWN_SCHEME"
-	ReasonInvalidDescriptor     ReasonCode = "KVQUANT_INVALID_DESCRIPTOR"
+	// ReasonSupported marks valid descriptors and allowed tier transitions.
+	ReasonSupported ReasonCode = "KVQUANT_SUPPORTED"
+	// ReasonUnknownScheme marks unsupported schemes, precisions, groupings, or transforms.
+	ReasonUnknownScheme ReasonCode = "KVQUANT_UNKNOWN_SCHEME"
+	// ReasonInvalidDescriptor marks missing or inconsistent descriptor configuration fields.
+	ReasonInvalidDescriptor ReasonCode = "KVQUANT_INVALID_DESCRIPTOR"
+	// ReasonUnsupportedTransition marks disallowed directed tier movement edges.
 	ReasonUnsupportedTransition ReasonCode = "KVQUANT_UNSUPPORTED_TRANSITION"
 )
 
