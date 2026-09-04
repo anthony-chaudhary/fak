@@ -492,7 +492,7 @@ func inventoryEvidenceSatisfiesSourceClass(evidence []InventorySourceEvidence, c
 func isTraceableInventoryEvidence(value string) bool {
 	value = strings.TrimSpace(value)
 	lower := strings.ToLower(value)
-	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "gh:") {
+	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "gh:") || strings.HasPrefix(lower, "study_") {
 		return true
 	}
 	if strings.HasPrefix(value, "#") && len(value) > 1 {
@@ -503,10 +503,16 @@ func isTraceableInventoryEvidence(value string) bool {
 		}
 		return true
 	}
-	for _, prefix := range []string{"gh ", "go run ", "fak ", "dos ", "git ", "./"} {
+	for _, prefix := range []string{"gh ", "go run ", "fak ", "dos ", "git ", "./", "python "} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
+	}
+	if strings.Contains(value, "@") && !strings.ContainsAny(value, " \t\r\n") {
+		return true
+	}
+	if strings.HasPrefix(lower, "license") || strings.HasPrefix(lower, "notice") || strings.HasPrefix(lower, "readme") {
+		return true
 	}
 	return !strings.ContainsAny(value, " \t\r\n") && strings.Contains(value, "/")
 }
