@@ -9,13 +9,19 @@ import (
 )
 
 const (
+	// IMStart designates the opening delimiter token for ChatML envelope sections.
 	IMStart = "<|im_start|>"
-	IMEnd   = "<|im_end|>"
+	// IMEnd designates the terminating delimiter token closing ChatML message envelopes.
+	IMEnd = "<|im_end|>"
 )
 
+// StopTokens lists the string literals that instruct the engine to cease token generation.
 var StopTokens = []string{IMEnd}
+
+// StopTokenIDs enumerates the integer vocabulary identifiers mapped to stop generation boundaries.
 var StopTokenIDs = []int{248046}
 
+// Message structures an individual dialogue turn spanning role, textual payload, reasoning, and tool calls.
 type Message struct {
 	Role             string
 	Content          string
@@ -23,11 +29,13 @@ type Message struct {
 	ToolCalls        []ToolCall
 }
 
+// ToolCall describes an individual function invocation emitted by an assistant model turn.
 type ToolCall struct {
 	Name      string
 	Arguments map[string]any
 }
 
+// RenderOptions configures formatting controls including prompt generation suffixes and reasoning flags.
 type RenderOptions struct {
 	AddGenerationPrompt bool
 	EnableThinking      bool
@@ -36,6 +44,7 @@ type RenderOptions struct {
 }
 
 // Render reproduces the text-only, no-tools-declaration path of the pinned upstream Jinja fixture.
+// Precondition: messages slice must contain at least one dialogue turn with system roles preceding all others.
 func Render(messages []Message, opts RenderOptions) (string, error) {
 	if len(messages) == 0 {
 		return "", errors.New("no messages provided")
@@ -53,6 +62,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 		return "", err
 	}
 
+	// Invariant: rendered prompt envelope delimiters maintain byte-exact alignment with upstream Jinja template boundaries.
 	var b strings.Builder
 	firstMessage := 0
 	if messages[0].Role == "system" {
@@ -118,6 +128,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			return "", fmt.Errorf("unexpected message role %q", message.Role)
 		}
 	}
+	// Postcondition: generation prompt returns trailing assistant think block for continuous token completion.
 	if opts.AddGenerationPrompt {
 		b.WriteString(IMStart + "assistant\n<think>\n")
 		if !opts.EnableThinking {
@@ -164,6 +175,7 @@ func renderToolCall(b *strings.Builder, call ToolCall) {
 	b.WriteString("</function>\n</tool_call>")
 }
 
+// ParsedResponse holds the decomposed segments of model output across thinking traces, text, and calls.
 type ParsedResponse struct {
 	Analysis   string
 	Final      string
@@ -173,6 +185,7 @@ type ParsedResponse struct {
 }
 
 // ParseResponse splits Qwen's thinking, user-facing text, and recipient tool calls.
+// Precondition: generated input string must contain raw model output potentially enclosed within ChatML assistant tags.
 func ParseResponse(generated string) (ParsedResponse, error) {
 	var result ParsedResponse
 	generated = strings.TrimPrefix(generated, IMStart+"assistant\n")
@@ -196,6 +209,7 @@ func ParseResponse(generated string) (ParsedResponse, error) {
 	result.Commentary = strings.TrimSpace(generated[:firstCall])
 	calls, err := parseToolCalls(generated[firstCall:])
 	result.ToolCalls = calls
+	// Postcondition: splits output into isolated thinking analysis, user-facing commentary, and typed tool call structures without thought leakage.
 	return result, err
 }
 
