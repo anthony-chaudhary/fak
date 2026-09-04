@@ -112,6 +112,11 @@ const (
 	TokenAncient = "ancient"
 )
 
+// Invariant: dormancy band calculations are fail-closed and monotonic.
+// Unmeasured or zero stamps resolve strictly to Ancient to force full revalidation,
+// while boundary conditions are half-open on the cold side so exact threshold hits take
+// the colder band. Monotonic stamp refresh guards against backwards clock slew.
+//
 // Bucket is THE pure horizon bucketer: the band a dormancy gap falls in, with no clock
 // and no I/O. Boundaries are half-open on the cold side (gap < WarmMax is Warm, a gap
 // exactly at a threshold tips to the colder band), mirroring internal/resume's
