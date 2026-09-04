@@ -78,3 +78,68 @@ func TestSelectDueIsBoundedAndPriorityAware(t *testing.T) {
 		t.Fatalf("zero limit selected %d", len(got))
 	}
 }
+
+func BenchmarkStudyDrift(b *testing.B) {
+	oldBytes := []byte("module github.com/example/lib\n\ngo 1.26\n")
+	oldDigest := DigestSource(oldBytes)
+	pin := PinnedSource{
+		Repository:    "example/lib",
+		URL:           "https://github.com/example/lib",
+		Revision:      "v1.0.0",
+		Bytes:         oldBytes,
+		Digest:        oldDigest,
+		ObservationID: "obs-100",
+		DecisionID:    "dec-100",
+	}
+
+	newBytes := []byte("module github.com/example/lib\n\ngo 1.26\n\nrequire github.com/pkg/errors v0.9.1\n")
+	newDigest := DigestSource(newBytes)
+	obs := SourceObservation{
+		ObservedAt:    "2026-09-04T12:00:00Z",
+		URL:           "https://github.com/example/lib",
+		Revision:      "v1.1.0",
+		Bytes:         newBytes,
+		Digest:        newDigest,
+		ObservationID: "obs-101",
+		DecisionID:    "dec-101",
+	}
+
+	b.Run("RefreshSourceChanged", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			receipt := RefreshSource(pin, obs)
+			if receipt.Status != RefreshChanged {
+				b.Fatalf("unexpected status: %s", receipt.Status)
+			}
+		}
+	})
+
+	b.Run("DigestSource", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = DigestSource(newBytes)
+		}
+	})
+
+	registry := studymonitor.Registry{
+		Repositories: []studymonitor.Repository{
+			{Repository: "repo-a", Status: "active", Priority: 2, LastChecked: "2026-08-01"},
+			{Repository: "repo-b", Status: "active", Priority: 1, LastChecked: "2026-07-15"},
+			{Repository: "repo-c", Status: "active", Priority: 3, LastChecked: "2026-06-01"},
+			{Repository: "repo-d", Status: "paused", Priority: 1, LastChecked: "2026-05-01"},
+		},
+	}
+	now := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	b.Run("SelectDue", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			due := SelectDue(registry, now, 14, 2)
+			if len(due) != 2 {
+				b.Fatalf("unexpected count: %d", len(due))
+			}
+		}
+	})
+}
