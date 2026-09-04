@@ -731,6 +731,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdCluster(args)
 	case "leaseref":
 		cmdLeaseref(args)
+	case "contract":
+		cmdContract(args)
 	case "intent":
 		cmdIntent(args)
 	case "memgate":
