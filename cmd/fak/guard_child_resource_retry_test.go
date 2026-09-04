@@ -37,7 +37,7 @@ func TestGuardResourceRestartLimit(t *testing.T) {
 }
 
 func TestGuardResourceRetryAdmission(t *testing.T) {
-	for _, reason := range []string{"CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT", "SYSTEM_COMMIT_HEADROOM"} {
+	for _, reason := range []string{"CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT"} {
 		t.Run(reason, func(t *testing.T) {
 			state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
 			got := state.decide(resourceRetryEvent(reason), "claude", "sha-a")
@@ -46,6 +46,14 @@ func TestGuardResourceRetryAdmission(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("SYSTEM_COMMIT_HEADROOM", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
+		got := state.decide(resourceRetryEvent("SYSTEM_COMMIT_HEADROOM"), "claude", "sha-a")
+		if got.Action != guardResourceRetryTerminal || got.ResourceType != "SYSTEM_COMMIT_HEADROOM" || state.restarts != 0 {
+			t.Fatalf("SYSTEM_COMMIT_HEADROOM admitted retry or burned restarts: verdict=%+v state=%+v", got, state)
+		}
+	})
 
 	for _, reason := range []string{"CHILD_RESOURCE_MONITOR_ERROR", "CHILD_RESOURCE_MONITOR_UNAVAILABLE", "", "UNKNOWN"} {
 		t.Run("terminal_"+reason, func(t *testing.T) {
@@ -112,7 +120,7 @@ func TestGuardResourceRetryBackoffAndFiniteBudget(t *testing.T) {
 
 func TestGuardResourceRetryNoProgressExhaustsEarly(t *testing.T) {
 	state := guardResourceRetryState{limit: 5, noProgressLimit: 2}
-	event := resourceRetryEvent("SYSTEM_COMMIT_HEADROOM")
+	event := resourceRetryEvent("CHILD_TREE_COMMIT_LIMIT")
 	if got := state.decide(event, "claude", "sha-a"); got.Action != guardResourceRetryRelaunch || got.NoProgress != 0 {
 		t.Fatalf("first containment=%+v", got)
 	}
@@ -309,7 +317,7 @@ func TestGuardResourceRetryFailurePathsEdgeAndAdversarial(t *testing.T) {
 	})
 	t.Run("unchanged head exhausts early", func(t *testing.T) {
 		state := guardResourceRetryState{restarts: 1, limit: 3, progressHead: "sha-a", noProgress: 1, noProgressLimit: 2}
-		got := state.decide(resourceRetryEvent("SYSTEM_COMMIT_HEADROOM"), "claude", "sha-a")
+		got := state.decide(resourceRetryEvent("CHILD_TREE_COMMIT_LIMIT"), "claude", "sha-a")
 		if got.Action != guardResourceRetryExhausted || got.Cause != guardResourceRestartCauseNoProgress || got.NoProgress != 2 || state.restarts != 1 {
 			t.Fatalf("verdict=%+v state=%+v", got, state)
 		}
@@ -356,6 +364,14 @@ func TestGuardChildResourceRefusalsAndErrorsNameRecovery(t *testing.T) {
 		}
 		if !strings.Contains(status, "--child-max-memory-mb") {
 			t.Fatalf("status missing memory parameter recovery: %s", status)
+		}
+
+		headroomVerdict := guardResourceRetryVerdict{
+			ResourceType: "SYSTEM_COMMIT_HEADROOM",
+		}
+		headroomStatus := guardResourceRestartGiveUpStatus(headroomVerdict, "trace-headroom")
+		if !strings.Contains(headroomStatus, "host commit capacity reached the safety floor") || !strings.Contains(headroomStatus, "sanctioned fleet node") || !strings.Contains(headroomStatus, "fak recover SYSTEM_COMMIT_HEADROOM") {
+			t.Fatalf("SYSTEM_COMMIT_HEADROOM status missing host capacity guidance: %s", headroomStatus)
 		}
 	})
 

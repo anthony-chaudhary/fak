@@ -161,6 +161,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	if headroom.Refuse {
 		d.Stop = true
 		d.Reason = headroom.Reason
+		d.ThresholdBytes = p.MinSystemHeadroom
 	}
 	return d
 }

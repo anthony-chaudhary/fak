@@ -85,7 +85,7 @@ func guardResourceNoProgressLimit(restartLimit int) int {
 
 func guardResourceContainmentReason(reason string) bool {
 	switch strings.TrimSpace(reason) {
-	case "CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT", "SYSTEM_COMMIT_HEADROOM":
+	case "CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT":
 		return true
 	default:
 		return false
@@ -175,6 +175,10 @@ func guardReportResourceRestart(stderr io.Writer, agentName string, verdict guar
 }
 
 func guardResourceRestartGiveUpStatus(verdict guardResourceRetryVerdict, traceID string) string {
+	if verdict.ResourceType == "SYSTEM_COMMIT_HEADROOM" {
+		return fmt.Sprintf("fak guard: %s: host commit capacity reached the safety floor (trace %s); refusing another relaunch; recovery: let an in-flight managed worker finish and rerun dispatch preflight, or move work to another sanctioned fleet node; do not lower FAK_SYSTEM_COMMIT_HEADROOM_MB, kill unrelated processes, or retry-loop around the guard; see `fak recover SYSTEM_COMMIT_HEADROOM`",
+			"SYSTEM_COMMIT_HEADROOM", strings.TrimSpace(traceID))
+	}
 	detail := fmt.Sprintf("retry budget %d exhausted", verdict.Limit)
 	if verdict.Cause == guardResourceRestartCauseNoProgress {
 		detail = fmt.Sprintf("%d consecutive containment retries without HEAD progress", verdict.NoProgress)
