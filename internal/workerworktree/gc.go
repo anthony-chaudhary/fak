@@ -143,6 +143,11 @@ func HandoffOwner(wtPath string, pid int) error {
 	}
 	stamp.PID = pid
 	stamp.CreatedAt = time.Now().UTC()
+	if lease, lerr := ReadWorkerLease(wtPath); lerr == nil {
+		lease.PID = pid
+		lease.HeartbeatTS = time.Now().UTC()
+		_ = WriteWorkerLease(wtPath, lease)
+	}
 	return writeOwnerStamp(wtPath, stamp)
 }
 

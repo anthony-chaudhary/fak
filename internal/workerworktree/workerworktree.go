@@ -516,6 +516,7 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 }
 
 func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
+	sweepDeadWorktrees(root, wtRoot, git)
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
@@ -540,6 +541,26 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 		}
 	}
 	metadataErr := writeOwnerStamp(res.Path, owner)
+	if metadataErr == nil {
+		sessionID := owner.LeaseID
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(os.Getenv("FAK_SESSION_ID"))
+		}
+		if sessionID == "" {
+			sessionID = lane + "-" + key
+		}
+		lease := WorkerLease{
+			PID:         owner.PID,
+			SessionID:   sessionID,
+			CreatedAt:   owner.CreatedAt,
+			HeartbeatTS: time.Now().UTC(),
+		}
+		if leaseErr := WriteWorkerLease(res.Path, lease); leaseErr != nil {
+			metadataErr = leaseErr
+		} else {
+			ensureGitExclude(root, WorkerLeaseFileName)
+		}
+	}
 	if metadataErr == nil && PoolCap() > 0 && isGitWorktreeBackend(backend) {
 		metadataErr = recordPoolLease(res.Path, lane, owner)
 	}
@@ -680,8 +701,44 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 		return Result{OK: false, Path: wt, BaseSHA: base,
 			Reason: "could not create worktree root: " + err.Error() + " — fail open"}
 	}
-	rc, out := run(git, root, []string{"worktree", "add", "--detach", wt, base})
+	rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", wt, base})
 	if rc != 0 {
+		if isIndexFailure(out) {
+			ForceReap(root, wt, git)
+			_ = os.RemoveAll(wt)
+			rc2, out2 := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", "--no-checkout", wt, base})
+			if rc2 == 0 {
+				rc3, out3 := run(git, wt, []string{"-c", "core.longpaths=true", "checkout", "--force", base})
+				rc4, out4 := run(git, wt, []string{"-c", "core.longpaths=true", "reset", "--hard", base})
+				if rc3 == 0 && rc4 == 0 {
+					return Result{OK: true, Path: wt, BaseSHA: base, Reused: false}
+				}
+				ForceReap(root, wt, git)
+				_ = os.RemoveAll(wt)
+				code := ""
+				if rc3 == ReapTimeoutExitCode || rc4 == ReapTimeoutExitCode {
+					code = "PREPARE_TIMEOUT"
+				}
+				detail := out3
+				if out4 != "" {
+					if detail != "" {
+						detail += "\n"
+					}
+					detail += out4
+				}
+				return Result{OK: false, Code: code, Path: wt, BaseSHA: base,
+					Reason: "git checkout/reset failed after decoupled worktree add - fail open",
+					Detail: tail(detail, 500)}
+			}
+			ForceReap(root, wt, git)
+			_ = os.RemoveAll(wt)
+			code := ""
+			if rc2 == ReapTimeoutExitCode {
+				code = "PREPARE_TIMEOUT"
+			}
+			return Result{OK: false, Code: code, Path: wt, BaseSHA: base,
+				Reason: "git worktree add (--no-checkout) failed - fail open", Detail: tail(out2, 500)}
+		}
 		code := ""
 		if rc == ReapTimeoutExitCode {
 			code = "PREPARE_TIMEOUT"
@@ -690,6 +747,15 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 			Reason: "git worktree add failed - fail open", Detail: tail(out, 500)}
 	}
 	return Result{OK: true, Path: wt, BaseSHA: base, Reused: false}
+}
+
+func isIndexFailure(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(out, "Could not reset index file") ||
+		strings.Contains(lower, "could not reset index") ||
+		strings.Contains(lower, "index file") ||
+		strings.Contains(lower, "reset index") ||
+		strings.Contains(lower, "index.lock")
 }
 
 // Reap force-removes ONE worker's worktree after its change has LANDED (or it
@@ -704,6 +770,17 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 // reports OK with Removed=false; overflow and every failure path force-remove as above.
 func Reap(root, wtPath string, git GitRunner) Result {
 	return ReapWithBackend(root, wtPath, git, defaultIsolationBackend)
+}
+
+func cleanStatusWithoutLease(status string) string {
+	var clean []string
+	for _, line := range strings.Split(status, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasSuffix(trimmed, WorkerLeaseFileName) && !strings.HasSuffix(trimmed, WorkerLeaseFileName+".tmp") {
+			clean = append(clean, line)
+		}
+	}
+	return strings.Join(clean, "\n")
 }
 
 // ReapChecked is the path-local safety gate for the single-worktree CLI. A dirty
@@ -732,7 +809,7 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 	if rc != 0 {
 		return gitFailure("cannot inspect worktree status", rc, status)
 	}
-	if strings.TrimSpace(status) == "" {
+	if strings.TrimSpace(cleanStatusWithoutLease(status)) == "" {
 		res := Reap(root, wtPath, git)
 		if res.Code == "" {
 			switch {
@@ -870,6 +947,16 @@ func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 }
 
 // ForceReap destroys one worker worktree even when the warm pool is enabled. Normal
+func safeRemoveAll(path string) error {
+	_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+		if err == nil {
+			_ = os.Chmod(p, 0o666)
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
+}
+
 // Reap preserves the pool's return-on-release behavior; owner-stamped GC uses this
 // explicit destructive path because its selected member is old, owner-dead,
 // lease-released, and clean. It also clears pool/owner sidecars after a successful
@@ -881,7 +968,20 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 	}
 	rc, out := run(git, root, []string{"worktree", "remove", "--force", wtPath})
 	removed := rc == 0
-	run(git, root, []string{"worktree", "prune"})
+	if !removed {
+		// On Windows, git worktree remove can fail with Permission denied if files
+		// are marked read-only. Remove them directly and prune.
+		err := safeRemoveAll(wtPath)
+		if err != nil {
+			out += " | safeRemoveAll: " + err.Error()
+		}
+		if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
+			run(git, root, []string{"worktree", "prune", "--expire", "now"})
+			removed = true
+		}
+	} else {
+		run(git, root, []string{"worktree", "prune"})
+	}
 	res := Result{OK: removed, Path: wtPath, Removed: removed}
 	if !removed {
 		_, statErr := os.Stat(wtPath)

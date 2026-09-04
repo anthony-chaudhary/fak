@@ -159,6 +159,12 @@ func (s *soakRepo) land(i int) Result {
 	return Land(s.root, s.wts[i], s.base, "", []string{s.files[i]}, nil, s.peerGit)
 }
 
+// landParallel lands without holding the caller lease mutex, driving production
+// LandingQueue and CAS retry under high concurrency (#11235).
+func (s *soakRepo) landParallel(i int) Result {
+	return Land(s.root, s.wts[i], s.base, "", []string{s.files[i]}, nil, s.peerGit)
+}
+
 // runConcurrent spins N goroutines through land() and collects the per-worker
 // Results. The lease serializes the lands; the goroutines + `-race` prove the
 // land path carries no Go data race.
@@ -170,6 +176,23 @@ func (s *soakRepo) runConcurrent() []Result {
 		go func(i int) {
 			defer wg.Done()
 			res[i] = s.land(i)
+		}(i)
+	}
+	wg.Wait()
+	return res
+}
+
+// runHighVelocity runs lands concurrently without caller-side serialization,
+// verifying that LandingQueue and in-memory 3-way merge resolution complete
+// isolated lands without falling back to the racy shared index (#11235).
+func (s *soakRepo) runHighVelocity() []Result {
+	res := make([]Result, len(s.files))
+	var wg sync.WaitGroup
+	for i := range s.files {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			res[i] = s.landParallel(i)
 		}(i)
 	}
 	wg.Wait()
@@ -254,6 +277,50 @@ func TestConcurrentLandSoakIsolatedIsRaceFree(t *testing.T) {
 			t.Fatalf("worker %d file %s carried by %d commits, want exactly 1", i, f, carriedBy[f])
 		}
 		// (d) zero false-success: the content on HEAD is actually the worker's.
+		content, ok := s.headContent(f)
+		if !ok || content != fmt.Sprintf("worker %d\n", i) {
+			t.Fatalf("worker %d: HEAD %s = %q (ok=%v), want %q", i, f, content, ok, fmt.Sprintf("worker %d\n", i))
+		}
+	}
+}
+
+// TestConcurrentWorkerLandSoakUnderHighVelocity verifies that parallel workers landing
+// simultaneously complete their lands via landIsolated using LandingQueue and in-memory
+// 3-way merge tree resolution without falling back to racy shared index commits (#11235).
+func TestConcurrentWorkerLandSoakUnderHighVelocity(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "1")
+	t.Setenv(LandReadbackEnv, "1")
+	t.Setenv(IsolatedLandRetryEnv, "10")
+	stubCASSleep(t)
+	s := newSoakRepo(t, soakWorkers)
+	res := s.runHighVelocity()
+
+	// (a) every land cleanly committed via the isolated path — no lost land, no fallback.
+	for i, r := range res {
+		if !r.OK || !r.Committed {
+			t.Fatalf("worker %d land not clean: OK=%v Committed=%v reason=%q detail=%q",
+				i, r.OK, r.Committed, r.Reason, r.Detail)
+		}
+		if !strings.Contains(r.Reason, "isolated-index") {
+			t.Fatalf("worker %d did not take the isolated path: reason=%q", i, r.Reason)
+		}
+	}
+	// (b) the shared-index window never opened: peer sweeps never fired.
+	if got := s.sweeps.Load(); got != 0 {
+		t.Fatalf("isolated lands must never expose the shared index; peer sweep fired %d time(s)", got)
+	}
+	// (c) every worker's file was committed and is intact on HEAD.
+	lineage := s.lineageAboveBase()
+	carriedBy := map[string]int{}
+	for _, ci := range lineage {
+		for _, f := range ci.files {
+			carriedBy[f]++
+		}
+	}
+	for i, f := range s.files {
+		if carriedBy[f] != 1 {
+			t.Fatalf("worker %d file %s carried by %d commits, want exactly 1", i, f, carriedBy[f])
+		}
 		content, ok := s.headContent(f)
 		if !ok || content != fmt.Sprintf("worker %d\n", i) {
 			t.Fatalf("worker %d: HEAD %s = %q (ok=%v), want %q", i, f, content, ok, fmt.Sprintf("worker %d\n", i))

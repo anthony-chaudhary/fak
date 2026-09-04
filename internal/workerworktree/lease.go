@@ -1,0 +1,278 @@
+package workerworktree
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
+)
+
+const (
+	// WorkerLeaseFileName is the standard lease file written inside each worker worktree.
+	WorkerLeaseFileName = "lease.json"
+
+	// DefaultHeartbeatStaleThreshold is the cutoff after which a worktree with an un-updated
+	// heartbeat is considered stale and eligible for reaping (#11239).
+	DefaultHeartbeatStaleThreshold = 15 * time.Minute
+)
+
+// WorkerLease represents the durable heartbeat lease stored inside each worker worktree (#11239).
+type WorkerLease struct {
+	PID         int       `json:"pid"`
+	SessionID   string    `json:"session_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	HeartbeatTS time.Time `json:"heartbeat_ts"`
+}
+
+// WriteWorkerLease writes lease.json inside wtPath atomically.
+func WriteWorkerLease(wtPath string, lease WorkerLease) error {
+	if wtPath == "" {
+		return fmt.Errorf("worker worktree path cannot be empty")
+	}
+	if lease.PID <= 0 {
+		lease.PID = os.Getpid()
+	}
+	now := time.Now().UTC()
+	if lease.CreatedAt.IsZero() {
+		lease.CreatedAt = now
+	}
+	if lease.HeartbeatTS.IsZero() {
+		lease.HeartbeatTS = now
+	}
+	data, err := json.MarshalIndent(lease, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal worker lease: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		return fmt.Errorf("create worker worktree dir: %w", err)
+	}
+	target := filepath.Join(wtPath, WorkerLeaseFileName)
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write temp worker lease: %w", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace worker lease: %w", err)
+	}
+	return nil
+}
+
+// ReadWorkerLease reads and parses lease.json from wtPath.
+func ReadWorkerLease(wtPath string) (WorkerLease, error) {
+	var lease WorkerLease
+	data, err := os.ReadFile(filepath.Join(wtPath, WorkerLeaseFileName))
+	if err != nil {
+		return lease, err
+	}
+	if err := json.Unmarshal(data, &lease); err != nil {
+		return lease, fmt.Errorf("unmarshal worker lease: %w", err)
+	}
+	return lease, nil
+}
+
+// UpdateHeartbeat updates the heartbeat_ts in lease.json of wtPath to the current UTC time.
+func UpdateHeartbeat(wtPath string) error {
+	lease, err := ReadWorkerLease(wtPath)
+	if err != nil {
+		return err
+	}
+	lease.HeartbeatTS = time.Now().UTC()
+	return WriteWorkerLease(wtPath, lease)
+}
+
+// ensureGitExclude appends pattern to the git info/exclude file so metadata like
+// lease.json is excluded from git status and untracked file listings.
+func ensureGitExclude(root, pattern string) {
+	if root == "" || pattern == "" {
+		return
+	}
+	excludePath := filepath.Join(root, ".git", "info", "exclude")
+	if fi, err := os.Stat(filepath.Join(root, ".git")); err == nil && !fi.IsDir() {
+		if data, err := os.ReadFile(filepath.Join(root, ".git")); err == nil {
+			s := strings.TrimSpace(string(data))
+			if strings.HasPrefix(s, "gitdir: ") {
+				gd := strings.TrimPrefix(s, "gitdir: ")
+				if !filepath.IsAbs(gd) {
+					gd = filepath.Join(root, gd)
+				}
+				excludePath = filepath.Join(gd, "info", "exclude")
+			}
+		}
+	}
+	if data, err := os.ReadFile(excludePath); err == nil {
+		if strings.Contains(string(data), pattern) {
+			return
+		}
+	}
+	_ = os.MkdirAll(filepath.Dir(excludePath), 0o755)
+	f, err := os.OpenFile(excludePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, _ = f.WriteString("\n" + pattern + "\n")
+		_ = f.Close()
+	}
+}
+
+// DeadWorktreeSweepReport records the outcome of a dead worktree sweep.
+type DeadWorktreeSweepReport struct {
+	Inspected int      `json:"inspected"`
+	Pruned    int      `json:"pruned"`
+	Unlocked  int      `json:"unlocked"`
+	Paths     []string `json:"paths,omitempty"`
+}
+
+// SweepDeadWorktrees runs a non-blocking sweep of managed worker worktrees.
+// It checks .git/worktrees/fak-worker-wt-*, _scratch/fak-worker-wt-*, and wtRoot.
+// If the recorded PID is dead or heartbeat stale >15m, it forcibly unlocks and
+// prunes the worktree. All Git operations use bounded timeouts.
+func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepReport {
+	var report DeadWorktreeSweepReport
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cleanupGit := git
+	if cleanupGit == nil {
+		cleanupGit = BoundedGitRunner(ctx)
+	}
+
+	gitCommon := filepath.Join(root, ".git")
+	if fi, err := os.Stat(gitCommon); err == nil && !fi.IsDir() {
+		if data, err := os.ReadFile(gitCommon); err == nil {
+			s := strings.TrimSpace(string(data))
+			if strings.HasPrefix(s, "gitdir: ") {
+				gd := strings.TrimPrefix(s, "gitdir: ")
+				if !filepath.IsAbs(gd) {
+					gd = filepath.Join(root, gd)
+				}
+				if filepath.Base(filepath.Dir(gd)) == "worktrees" {
+					gitCommon = filepath.Dir(filepath.Dir(gd))
+				} else {
+					gitCommon = gd
+				}
+			}
+		}
+	}
+
+	worktreesDir := filepath.Join(gitCommon, "worktrees")
+	if entries, err := os.ReadDir(worktreesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || !IsWorkerWorktree(entry.Name()) {
+				continue
+			}
+			report.Inspected++
+			wtAdminDir := filepath.Join(worktreesDir, entry.Name())
+			gitdirFile := filepath.Join(wtAdminDir, "gitdir")
+			lockedFile := filepath.Join(wtAdminDir, "locked")
+
+			var wtPath string
+			if content, err := os.ReadFile(gitdirFile); err == nil {
+				wtPath = filepath.Dir(strings.TrimSpace(string(content)))
+			}
+
+			dead := false
+			stale := false
+
+			if wtPath == "" {
+				dead = true
+			} else if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+				dead = true
+			} else {
+				// Do not reap idle pool members
+				if record, err := readPoolMember(wtPath); err == nil && record.State == poolStateIdle {
+					continue
+				}
+				if lease, lerr := ReadWorkerLease(wtPath); lerr == nil {
+					if lease.PID > 0 && !processalive.Check(lease.PID) {
+						dead = true
+					}
+					if !lease.HeartbeatTS.IsZero() && time.Since(lease.HeartbeatTS) > DefaultHeartbeatStaleThreshold {
+						stale = true
+					}
+				} else if stamp, serr := readOwnerStamp(wtPath); serr == nil {
+					if stamp.PID > 0 && !processalive.Check(stamp.PID) {
+						dead = true
+					}
+					if !stamp.CreatedAt.IsZero() && time.Since(stamp.CreatedAt) > DefaultHeartbeatStaleThreshold {
+						stale = true
+					}
+				}
+			}
+
+			if dead || stale {
+				_ = os.Remove(lockedFile)
+				run(cleanupGit, root, []string{"worktree", "unlock", entry.Name()})
+				if wtPath != "" {
+					run(cleanupGit, root, []string{"worktree", "unlock", wtPath})
+					_ = os.RemoveAll(wtPath)
+					_ = os.Remove(OwnerStampPath(wtPath))
+				}
+				run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"})
+				_ = os.RemoveAll(wtAdminDir)
+				report.Pruned++
+				report.Unlocked++
+				if wtPath != "" {
+					report.Paths = append(report.Paths, wtPath)
+				}
+			}
+		}
+	}
+
+	var scratchDirs []string
+	if root != "" {
+		scratchDirs = append(scratchDirs, filepath.Join(root, "_scratch"))
+	}
+
+	for _, sdir := range scratchDirs {
+		entries, err := os.ReadDir(sdir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || !IsWorkerWorktree(entry.Name()) {
+				continue
+			}
+			wtPath := filepath.Join(sdir, entry.Name())
+			if record, err := readPoolMember(wtPath); err == nil && record.State == poolStateIdle {
+				continue
+			}
+			dead := false
+			stale := false
+			if lease, lerr := ReadWorkerLease(wtPath); lerr == nil {
+				if lease.PID > 0 && !processalive.Check(lease.PID) {
+					dead = true
+				}
+				if !lease.HeartbeatTS.IsZero() && time.Since(lease.HeartbeatTS) > DefaultHeartbeatStaleThreshold {
+					stale = true
+				}
+			} else if stamp, serr := readOwnerStamp(wtPath); serr == nil {
+				if stamp.PID > 0 && !processalive.Check(stamp.PID) {
+					dead = true
+				}
+				if !stamp.CreatedAt.IsZero() && time.Since(stamp.CreatedAt) > DefaultHeartbeatStaleThreshold {
+					stale = true
+				}
+			}
+			if dead || stale {
+				run(cleanupGit, root, []string{"worktree", "unlock", wtPath})
+				run(cleanupGit, root, []string{"worktree", "unlock", entry.Name()})
+				_ = os.RemoveAll(wtPath)
+				run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"})
+				_ = os.Remove(OwnerStampPath(wtPath))
+				report.Pruned++
+				report.Paths = append(report.Paths, wtPath)
+			}
+		}
+	}
+
+	return report
+}
+
+func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
+	_ = SweepDeadWorktrees(root, wtRoot, git)
+}

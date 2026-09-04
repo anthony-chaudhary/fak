@@ -72,12 +72,35 @@ func replyLandDiff(g *fakeGit, declaredNames, patch, allNames string) *fakeGit {
 		replyOnce("diff", 0, allNames)
 }
 
+func gitVerb(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" && i+1 < len(args) {
+			i++
+			continue
+		}
+		return args[i]
+	}
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
+}
+
+func stripGlobalFlags(c []string) []string {
+	i := 0
+	for i < len(c) {
+		if c[i] == "-c" && i+1 < len(c) {
+			i += 2
+			continue
+		}
+		break
+	}
+	return c[i:]
+}
+
 func (f *fakeGit) run(root string, args []string) (int, string) {
 	f.calls = append(f.calls, append([]string{}, args...))
-	verb := ""
-	if len(args) > 0 {
-		verb = args[0]
-	}
+	verb := gitVerb(args)
 	if queue := f.replies[verb]; len(queue) > 0 {
 		r := queue[0]
 		f.replies[verb] = queue[1:]
@@ -97,10 +120,7 @@ func (f *fakeGit) run(root string, args []string) (int, string) {
 func (f *fakeGit) runEnv(root string, env map[string]string, args []string) (int, string) {
 	f.envCalls = append(f.envCalls, append([]string{}, args...))
 	f.lastEnv = env
-	verb := ""
-	if len(args) > 0 {
-		verb = args[0]
-	}
+	verb := gitVerb(args)
 	// Recovery anchors are an added side effect of isolated landing. Keep legacy
 	// CAS response queues scoped to trunk update-ref calls.
 	if len(args) > 1 && verb == "update-ref" && args[1] == "--create-reflog" {
@@ -127,7 +147,11 @@ func (f *fakeGit) envCallsWithPrefix(prefix ...string) [][]string {
 
 func (f *fakeGit) callsWithPrefix(prefix ...string) [][]string {
 	var out [][]string
-	for _, c := range f.calls {
+	for _, raw := range f.calls {
+		c := raw
+		if len(prefix) > 0 && prefix[0] != "-c" {
+			c = stripGlobalFlags(raw)
+		}
 		if len(c) < len(prefix) {
 			continue
 		}
@@ -139,7 +163,7 @@ func (f *fakeGit) callsWithPrefix(prefix ...string) [][]string {
 			}
 		}
 		if match {
-			out = append(out, c)
+			out = append(out, raw)
 		}
 	}
 	return out
@@ -1064,8 +1088,9 @@ func TestPrepareOwnedBoundedTimeoutEmitsNoOwnerReceipt(t *testing.T) {
 	cancelled := false
 	calls := 0
 	var cleanupCalls []string
-	git := func(root string, args []string) (int, string) {
+	git := func(root string, rawArgs []string) (int, string) {
 		calls++
+		args := stripGlobalFlags(rawArgs)
 		if len(args) > 1 && args[0] == "rev-parse" {
 			return 0, base + "\n"
 		}
@@ -1074,7 +1099,7 @@ func TestPrepareOwnedBoundedTimeoutEmitsNoOwnerReceipt(t *testing.T) {
 			return ReapTimeoutExitCode, context.Canceled.Error()
 		}
 		if len(args) > 1 && args[0] == "worktree" && (args[1] == "remove" || args[1] == "prune") {
-			cleanupCalls = append(cleanupCalls, strings.Join(args, " "))
+			cleanupCalls = append(cleanupCalls, strings.Join(rawArgs, " "))
 		}
 		return 0, ""
 	}
@@ -1158,4 +1183,135 @@ func TestBoundedGitRunnerCancelsBlockedCommand(t *testing.T) {
 	if rc != ReapTimeoutExitCode || !strings.Contains(out, "deadline") {
 		t.Fatalf("bounded runner = (%d, %q)", rc, out)
 	}
+}
+
+func TestPrepare_WindowsIndexResetSelfRecoveringAndAtomic(t *testing.T) {
+	t.Run("recovers from index reset failure", func(t *testing.T) {
+		root := t.TempDir()
+		wtRoot := t.TempDir()
+		base := "0123456789abcdef0123456789abcdef01234567"
+		lane := "tools"
+		key := "recovery-test"
+		expectedWT := Path(lane, key, wtRoot)
+
+		var cleanupCalls []string
+		var decoupledAttempted bool
+		var checkoutCalled bool
+		var resetCalled bool
+
+		git := func(dir string, args []string) (int, string) {
+			joined := strings.Join(args, " ")
+
+			// 1. First worktree add simulates index reset failure on Windows
+			if strings.Contains(joined, "worktree add") && !strings.Contains(joined, "--no-checkout") {
+				// Simulate partial directory creation by git before failure
+				_ = os.MkdirAll(expectedWT, 0o755)
+				return 1, "fatal: Could not reset index file to revision 'HEAD'"
+			}
+
+			// 2. Immediate cleanup via ForceReap
+			if strings.Contains(joined, "worktree remove") || strings.Contains(joined, "worktree prune") {
+				cleanupCalls = append(cleanupCalls, joined)
+				return 0, ""
+			}
+
+			// 3. Windows-safe decoupled retry
+			if strings.Contains(joined, "worktree add") && strings.Contains(joined, "--no-checkout") {
+				decoupledAttempted = true
+				if !strings.Contains(joined, "-c core.longpaths=true") {
+					t.Errorf("decoupled retry missing -c core.longpaths=true: %s", joined)
+				}
+				// Simulate git creating directory on --no-checkout
+				_ = os.MkdirAll(expectedWT, 0o755)
+				return 0, ""
+			}
+
+			// 4. Decoupled checkout and reset
+			if strings.Contains(joined, "checkout --force") {
+				checkoutCalled = true
+				if dir != expectedWT {
+					t.Errorf("checkout working directory = %q, want %q", dir, expectedWT)
+				}
+				if !strings.Contains(joined, "-c core.longpaths=true") {
+					t.Errorf("checkout missing -c core.longpaths=true: %s", joined)
+				}
+				return 0, ""
+			}
+
+			if strings.Contains(joined, "reset --hard") {
+				resetCalled = true
+				if dir != expectedWT {
+					t.Errorf("reset working directory = %q, want %q", dir, expectedWT)
+				}
+				if !strings.Contains(joined, "-c core.longpaths=true") {
+					t.Errorf("reset missing -c core.longpaths=true: %s", joined)
+				}
+				return 0, ""
+			}
+
+			return 0, ""
+		}
+
+		res := Prepare(root, lane, key, base, wtRoot, git)
+		if !res.OK {
+			t.Fatalf("expected Prepare to succeed via decoupled retry, got: %+v", res)
+		}
+		if len(cleanupCalls) == 0 {
+			t.Errorf("expected cleanup (ForceReap) to occur after initial failure")
+		}
+		if !decoupledAttempted {
+			t.Errorf("expected decoupled retry with --no-checkout")
+		}
+		if !checkoutCalled {
+			t.Errorf("expected decoupled checkout --force")
+		}
+		if !resetCalled {
+			t.Errorf("expected decoupled reset --hard")
+		}
+		if res.Path != expectedWT {
+			t.Errorf("res.Path = %q, want %q", res.Path, expectedWT)
+		}
+	})
+
+	t.Run("atomic cleanup when both fail", func(t *testing.T) {
+		root := t.TempDir()
+		wtRoot := t.TempDir()
+		base := "0123456789abcdef0123456789abcdef01234567"
+		lane := "tools"
+		key := "fail-test"
+		expectedWT := Path(lane, key, wtRoot)
+
+		var forceReapCalls []string
+
+		git := func(dir string, args []string) (int, string) {
+			joined := strings.Join(args, " ")
+
+			if strings.Contains(joined, "worktree add") {
+				_ = os.MkdirAll(expectedWT, 0o755)
+				if !strings.Contains(joined, "--no-checkout") {
+					return 1, "fatal: Could not reset index file to revision 'HEAD'"
+				}
+				// Retry also fails
+				return 1, "fatal: retry also failed"
+			}
+
+			if strings.Contains(joined, "worktree remove") || strings.Contains(joined, "worktree prune") {
+				forceReapCalls = append(forceReapCalls, joined)
+				return 0, ""
+			}
+
+			return 0, ""
+		}
+
+		res := Prepare(root, lane, key, base, wtRoot, git)
+		if res.OK {
+			t.Fatalf("expected Prepare to fail when both attempts fail, got: %+v", res)
+		}
+		if len(forceReapCalls) == 0 {
+			t.Errorf("expected ForceReap to be called")
+		}
+		if _, err := os.Stat(expectedWT); !os.IsNotExist(err) {
+			t.Errorf("worktree directory %s still exists; atomic cleanup failed", expectedWT)
+		}
+	})
 }
