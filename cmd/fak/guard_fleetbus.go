@@ -47,6 +47,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetbus"
 	"github.com/anthony-chaudhary/fak/internal/goalpark"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
 
@@ -128,7 +129,62 @@ func (a *guardBusApplier) Apply(d fleetbus.Directive) fleetbus.Outcome {
 	if a.sessions == nil {
 		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "this guard has no session applier wired")
 	}
+	if sessionctl.ControlOp(strings.TrimSpace(string(d.Op))) == sessionctl.OpResume {
+		return a.applyResume(d)
+	}
 	return a.sessions.Apply(d)
+}
+
+func (a *guardBusApplier) applyResume(d fleetbus.Directive) fleetbus.Outcome {
+	if a.sessions.tbl == nil {
+		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "this guard has no session table to write")
+	}
+	reason := d.Reason
+	if reason == "" {
+		reason = "fleet control resume"
+	}
+	ctx := a.sessions.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var count int
+	if !d.Selector.NarrowsSessions() {
+		resumed := a.sessions.tbl.ResumeAll(reason)
+		count = len(resumed)
+		if a.sessions.durability != nil && a.sessions.durability.registry != nil {
+			for _, st := range resumed {
+				if err := a.sessions.durability.writeThrough(ctx, st.TraceID, st); err != nil {
+					return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
+						"resume applied in memory for %s but durable mirror failed: %v", st.TraceID, err)
+				}
+			}
+		}
+	} else {
+		matched := a.sessions.matchedStates(d.Selector)
+		for _, prev := range matched {
+			if prev.Run != session.Paused {
+				continue
+			}
+			st, took := a.sessions.tbl.Transition(prev.TraceID, session.Running, reason)
+			if !took {
+				continue
+			}
+			count++
+			if a.sessions.durability != nil && a.sessions.durability.registry != nil {
+				if err := a.sessions.durability.writeThrough(ctx, prev.TraceID, st); err != nil {
+					return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
+						"resume applied in memory for %s but durable mirror failed: %v", prev.TraceID, err)
+				}
+			}
+		}
+	}
+	witness := fmt.Sprintf("resumed %d session(s)", count)
+	if a.sessions.durability != nil && a.sessions.durability.registry != nil {
+		witness = "durable:" + witness
+	} else {
+		witness = "memory-only:" + witness
+	}
+	return fleetbus.OutcomeApplied(witness, count)
 }
 
 // --- seat-refresh ---------------------------------------------------------- //

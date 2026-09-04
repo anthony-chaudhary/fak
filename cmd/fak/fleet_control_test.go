@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fleetbus"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // controlBus opens a scratch bus and returns it with its directory.
@@ -486,5 +487,77 @@ func TestSanitizeBusToken(t *testing.T) {
 		if got := sanitizeBusToken(in); !fleetbus.ValidToken(got) {
 			t.Errorf("sanitizeBusToken(%q) = %q, which fleetbus.ValidToken rejects", in, got)
 		}
+	}
+}
+
+// TestFleetControlSendResumeBroadcastAcknowledged proves issue #10847:
+// `fak fleet control send --op resume --all` broadcasts to live instances,
+// each instance applies ResumeAll, and the control point folds the Acks.
+func TestFleetControlSendResumeBroadcastAcknowledged(t *testing.T) {
+	bus, dir := controlBus(t)
+	now := time.Now()
+
+	tbl1 := &session.Table{}
+	tbl1.Transition("s1-paused", session.Paused, "paused for test")
+	tbl1.Transition("s1-running", session.Running, "")
+
+	tbl2 := &session.Table{}
+	tbl2.Transition("s2-paused1", session.Paused, "paused for test")
+	tbl2.Transition("s2-paused2", session.Paused, "paused for test")
+
+	inst1, r1 := fleetbus.NewInstance("guard-1", "box-a", guardFleetBusRole, 4201, "", guardFleetBusAdvertisedOps(), now)
+	if r1 != nil {
+		t.Fatalf("NewInstance guard-1: %v", r1)
+	}
+	inst2, r2 := fleetbus.NewInstance("guard-2", "box-a", guardFleetBusRole, 4202, "", guardFleetBusAdvertisedOps(), now)
+	if r2 != nil {
+		t.Fatalf("NewInstance guard-2: %v", r2)
+	}
+	if err := bus.Announce(inst1); err != nil {
+		t.Fatalf("Announce guard-1: %v", err)
+	}
+	if err := bus.Announce(inst2); err != nil {
+		t.Fatalf("Announce guard-2: %v", err)
+	}
+
+	code, stdout, stderr := runControl(t, "send", "--op", "resume", "--all", "--bus", dir, "--wait", "0")
+	if code != 1 {
+		t.Fatalf("send exit = %d, want 1 before drain (unwitnessed); stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	ds, err := bus.Directives()
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("Directives() = %d, %v; want 1", len(ds), err)
+	}
+	d := ds[0]
+
+	ap1 := guardTestApplier(t, tbl1, guardSeatRefresher{})
+	ap2 := guardTestApplier(t, tbl2, guardSeatRefresher{})
+
+	if _, err := fleetbus.Drain(bus, inst1, ap1, now); err != nil {
+		t.Fatalf("Drain guard-1: %v", err)
+	}
+	if _, err := fleetbus.Drain(bus, inst2, ap2, now); err != nil {
+		t.Fatalf("Drain guard-2: %v", err)
+	}
+
+	code, stdout, stderr = runControl(t, "status", "--directive", d.ID, "--bus", dir)
+	if code != 0 {
+		t.Fatalf("status exit = %d, want 0 after both instances applied; stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, want := range []string{"applied", "affected=3", "targeted=2"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("status output %q is missing %q", stdout, want)
+		}
+	}
+
+	// Verify states in tables were resumed to Running
+	if cur := tbl1.Get("s1-paused"); cur.Run != session.Running {
+		t.Errorf("s1-paused run state = %v, want Running", cur.Run)
+	}
+	if cur := tbl2.Get("s2-paused1"); cur.Run != session.Running {
+		t.Errorf("s2-paused1 run state = %v, want Running", cur.Run)
+	}
+	if cur := tbl2.Get("s2-paused2"); cur.Run != session.Running {
+		t.Errorf("s2-paused2 run state = %v, want Running", cur.Run)
 	}
 }
