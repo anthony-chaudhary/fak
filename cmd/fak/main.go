@@ -617,6 +617,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdAntipatternScorecard(args)
 	case "maturity":
 		cmdMaturity(args)
+	case "debt-lanes", "debt-lanes-scorecard":
+		cmdDebtLanes(args)
 	case "balance":
 		// The night-balance readout (#3128): resume recovery-vs-stranding and
 		// gardening-vs-throughput folded side by side; exit non-zero on an
@@ -789,6 +791,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdWorktreeVerb(args)
 	case "wip":
 		cmdWip(args)
+	case "tree":
+		cmdTree(args)
 	case "tree-doctor":
 		cmdTreeDoctor(args)
 	case "storage-pressure":

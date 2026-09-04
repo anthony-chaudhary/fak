@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/archcheck"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
+	"github.com/anthony-chaudhary/fak/internal/treestatus"
 )
 
 // MCP transport. The kernel is exposed as an MCP server speaking JSON-RPC 2.0,
@@ -494,6 +495,21 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInternalError, Message: err.Error()}
 		}
 		return mcpToolResult(res), nil
+	case "fak_tree_status":
+		var args struct {
+			Lane string   `json:"lane"`
+			Mine []string `json:"mine"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		root := "."
+		rep, err := treestatus.Collect(root, treestatus.Options{
+			Lane: args.Lane,
+			Mine: args.Mine,
+		})
+		if err != nil {
+			return nil, &rpcError{Code: rpcInternalError, Message: err.Error()}
+		}
+		return mcpToolResult(rep), nil
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -911,6 +927,11 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_arch_check",
 			"description": "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
 			"inputSchema": json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}}}`),
+		},
+		{
+			"name":        "fak_tree_status",
+			"description": "Inspect working tree status with lane partitioning: isolates session-owned diffs from peer WIP in <20ms.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"lane":{"type":"string","description":"target lane name to treat as session-owned"},"mine":{"type":"array","items":{"type":"string"},"description":"repo-relative paths to treat as session-owned"}}}`),
 		},
 	}
 	// The scoped trajectory-query surface (#3550): trajquery over MCP with the same
