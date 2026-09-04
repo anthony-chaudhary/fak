@@ -18,6 +18,7 @@ import (
 
 // Standard binary byte units for VRAM and host RAM calculations.
 // Invariant: binary byte multipliers must follow IEC power-of-two definitions.
+// Guard: byte scale constants are immutable positive powers of two.
 const (
 	// KiB represents kibibytes (1024 bytes).
 	KiB = int64(1024)
@@ -31,10 +32,12 @@ const (
 
 // AcceleratorType identifies supported GCP GPU accelerator hardware types.
 // Invariant: values must correspond to supported GCP accelerator designations.
+// Guard: unsupported accelerator strings fail IsValid and return errors during parse.
 type AcceleratorType string
 
 // Accelerator constants for supported GCP GPU accelerator hardware types.
 // Invariant: accelerator types must map to valid GCP compute engine accelerator designations.
+// Guard: unknown designations return zero-value capabilities and fail parse operations.
 const (
 	// L4 represents the NVIDIA L4 Ada Lovelace 24GB accelerator.
 	L4 AcceleratorType = "nvidia-l4"
@@ -61,6 +64,7 @@ const (
 
 // MemoryPerGPU returns standard physical VRAM capacity per GPU in bytes.
 // Invariant: returns positive byte capacity for supported accelerators; 0 for invalid types.
+// Guard: unsupported accelerators return 0 bytes to fail closed against unverified capacity.
 func (a AcceleratorType) MemoryPerGPU() int64 {
 	switch a {
 	case L4:
@@ -80,6 +84,7 @@ func (a AcceleratorType) MemoryPerGPU() int64 {
 
 // ComputeCapability returns the CUDA compute capability version (major.minor).
 // Invariant: returns non-empty major.minor string for supported accelerators.
+// Guard: unsupported accelerators return an empty string to prevent invalid dispatch.
 func (a AcceleratorType) ComputeCapability() string {
 	switch a {
 	case L4:
@@ -97,6 +102,7 @@ func (a AcceleratorType) ComputeCapability() string {
 
 // Architecture returns the GPU micro-architecture family name.
 // Invariant: returns known micro-architecture string for supported accelerators, or "Unknown".
+// Guard: unsupported accelerators return "Unknown" to fail closed against invalid execution plans.
 func (a AcceleratorType) Architecture() string {
 	switch a {
 	case L4:
@@ -115,6 +121,7 @@ func (a AcceleratorType) Architecture() string {
 // GenerationRank returns relative hardware generation rank (higher = newer silicon).
 // Used for priority tie-breaking in scheduling decisions.
 // Invariant: newer GPU architectures must have strictly higher rank than older ones.
+// Guard: unsupported accelerators return rank 0 to rank lowest in selection.
 func (a AcceleratorType) GenerationRank() int {
 	switch a {
 	case H100_80GB:
@@ -134,6 +141,7 @@ func (a AcceleratorType) GenerationRank() int {
 
 // GPUFamily returns the GCP Quotas API family name for this accelerator.
 // Invariant: maps supported accelerators to standard GCP quota metric identifiers.
+// Guard: unsupported accelerators return empty string to prevent invalid quota queries.
 func (a AcceleratorType) GPUFamily() string {
 	switch a {
 	case L4:
@@ -153,6 +161,7 @@ func (a AcceleratorType) GPUFamily() string {
 
 // IsValid reports whether the accelerator type is one of the recognized GCP GPU types.
 // Invariant: returns true only for supported NVIDIA GPU architectures (L4, A100, H100, T4).
+// Guard: unknown or malformed accelerator designations return false.
 func (a AcceleratorType) IsValid() bool {
 	switch a {
 	case L4, A100_40GB, A100_80GB, H100_80GB, T4:
@@ -164,6 +173,7 @@ func (a AcceleratorType) IsValid() bool {
 
 // ParseAccelerator parses a string (slug, short name, or GCP type) into a recognized AcceleratorType.
 // Invariant: case-insensitive and trims whitespace; returns ErrInvalidAccelerator for unrecognized input.
+// Guard: unrecognized strings return ErrInvalidAccelerator to prevent unregistered device allocation.
 func ParseAccelerator(s string) (AcceleratorType, error) {
 	norm := strings.ToLower(strings.TrimSpace(s))
 	switch norm {
@@ -184,6 +194,7 @@ func ParseAccelerator(s string) (AcceleratorType, error) {
 
 // InstanceSpec describes the hardware topology and capacity of a GCP GPU instance.
 // Invariant: GPUCount and VCPUs must be positive; TotalVRAMBytes equals GPUCount * VRAMBytesPerGPU.
+// Guard: specifications with non-positive GPU counts or negative memory are rejected on construction.
 type InstanceSpec struct {
 	MachineType     string          `json:"machine_type"`       // GCP machine type, e.g. "g2-standard-8", "a2-highgpu-1g"
 	Accelerator     AcceleratorType `json:"accelerator"`        // L4, A100_40GB, A100_80GB, H100_80GB, T4
@@ -196,6 +207,7 @@ type InstanceSpec struct {
 
 // NewInstanceSpec constructs and validates an InstanceSpec, populating VRAM defaults if omitted.
 // Invariant: machineType must be non-empty, accelerator must be valid, and gpuCount/vcpus must be positive.
+// Guard: returns ErrInvalidNodeSpec or ErrInvalidAccelerator when constraints are violated.
 func NewInstanceSpec(machineType string, accel AcceleratorType, gpuCount int, vcpus int, hostMemBytes int64) (InstanceSpec, error) {
 	if strings.TrimSpace(machineType) == "" {
 		return InstanceSpec{}, fmt.Errorf("%w: machine type cannot be empty", ErrInvalidNodeSpec)
@@ -228,10 +240,12 @@ func NewInstanceSpec(machineType string, accel AcceleratorType, gpuCount int, vc
 
 // NodeStatus defines the operational lifecycle state of a GPU node.
 // Invariant: must be one of Ready, Busy, Degraded, or Offline.
+// Guard: unrecognized status values fail IsValid checks and are blocked during updates.
 type NodeStatus string
 
 // Operational status constants defining node availability states.
 // Invariant: a registered node must always hold one of Ready, Busy, Degraded, or Offline.
+// Guard: non-Ready statuses prevent workload dispatch.
 const (
 	// Ready indicates the node is operational and accepting workloads.
 	Ready NodeStatus = "Ready"
@@ -254,6 +268,7 @@ const (
 
 // IsValid reports whether the status is one of Ready, Busy, Degraded, or Offline.
 // Invariant: returns true only for recognized lifecycle states.
+// Guard: invalid status strings return false to block illegal state transitions.
 func (s NodeStatus) IsValid() bool {
 	switch s {
 	case Ready, Busy, Degraded, Offline:
@@ -265,6 +280,7 @@ func (s NodeStatus) IsValid() bool {
 
 // TelemetryMetrics holds real-time utilization, memory, and thermal telemetry for a node.
 // Invariant: AllocatedVRAMBytes and UsedVRAMBytes must be non-negative; GPUUtilizationPct is in [0, 100].
+// Guard: negative memory counters are clamped to zero; temperatures >= 95C trigger Degraded state.
 type TelemetryMetrics struct {
 	AllocatedVRAMBytes int64     `json:"allocated_vram_bytes"`
 	UsedVRAMBytes      int64     `json:"used_vram_bytes"`
@@ -277,10 +293,12 @@ type TelemetryMetrics struct {
 
 // NodeTelemetry is an alias for TelemetryMetrics.
 // Invariant: identical structure and semantics to TelemetryMetrics.
+// Guard: inherits the same safety bounds and clamping rules as TelemetryMetrics.
 type NodeTelemetry = TelemetryMetrics
 
 // GPUNode represents an individual GCP GPU host registered in the fleet.
 // Invariant: ID must be non-empty and unique within FleetManager; AvailableVRAM must not exceed TotalVRAMBytes.
+// Guard: nodes missing endpoints, carrying health errors, or holding non-Ready status cannot accept work.
 type GPUNode struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
@@ -299,6 +317,7 @@ type GPUNode struct {
 
 // AvailableVRAM returns the free VRAM in bytes on the node.
 // Invariant: returns non-negative value bounded by Spec.TotalVRAMBytes.
+// Guard: nil node or over-allocated VRAM returns 0 to prevent negative capacity assumptions.
 func (n *GPUNode) AvailableVRAM() int64 {
 	if n == nil {
 		return 0
@@ -316,6 +335,7 @@ func (n *GPUNode) AvailableVRAM() int64 {
 
 // IsDispatchReady reports whether the node is ready for immediate remote workload dispatch.
 // Invariant: returns true only if Status is Ready, endpoint is set, HealthErrors is empty, and AvailableVRAM > 0.
+// Guard: any health error, empty endpoint, non-Ready status, or zero VRAM returns false.
 func (n *GPUNode) IsDispatchReady() bool {
 	if n == nil {
 		return false
@@ -334,6 +354,7 @@ func (n *GPUNode) IsDispatchReady() bool {
 
 // Clone produces a deep copy of GPUNode to prevent cross-goroutine mutation.
 // Invariant: deep-copies labels and health errors slices.
+// Guard: nil receiver returns an empty GPUNode struct safely.
 func (n *GPUNode) Clone() GPUNode {
 	if n == nil {
 		return GPUNode{}
@@ -354,6 +375,7 @@ func (n *GPUNode) Clone() GPUNode {
 
 // ProbeResult captures the verified health state and telemetry check of a node probe.
 // Invariant: Healthy is true only when Status is Ready and Errors is empty.
+// Guard: probe failures or context cancellations populate Errors and mark Healthy false.
 type ProbeResult struct {
 	NodeID        string        `json:"node_id"`
 	Timestamp     time.Time     `json:"timestamp"`
@@ -368,6 +390,7 @@ type ProbeResult struct {
 
 // QuotaSpec records GPU quota limits and live consumption for an accelerator in a region.
 // Invariant: Limit must be non-negative; Available returns max(0, Limit - InUse).
+// Guard: Available clamps negative headroom to 0 when InUse exceeds Limit.
 type QuotaSpec struct {
 	Accelerator AcceleratorType `json:"accelerator"`
 	Region      string          `json:"region"`
@@ -377,6 +400,7 @@ type QuotaSpec struct {
 
 // Available returns the remaining unallocated GPU quota.
 // Invariant: never returns negative; clamps to zero when InUse exceeds Limit.
+// Guard: over-subscribed quota returns 0 to block additional node admissions.
 func (q QuotaSpec) Available() int {
 	avail := q.Limit - q.InUse
 	if avail < 0 {
@@ -385,8 +409,9 @@ func (q QuotaSpec) Available() int {
 	return avail
 }
 
-// AccelCapacity aggregates capacity for a specific accelerator type across the fleet.
+// AccelCapacity summarizes capacity for a specific accelerator type across the fleet.
 // Invariant: TotalNodes equals ReadyNodes + BusyNodes + DegradedNodes + OfflineNodes for this accelerator.
+// Guard: metrics provide a point-in-time read-only view of accelerator resources.
 type AccelCapacity struct {
 	Accelerator        AcceleratorType `json:"accelerator"`
 	TotalNodes         int             `json:"total_nodes"`
@@ -400,8 +425,9 @@ type AccelCapacity struct {
 	QuotaInUse         int             `json:"quota_in_use"`
 }
 
-// RegionCapacity aggregates capacity metrics for a specific GCP region.
+// RegionCapacity summarizes capacity metrics for a specific GCP region.
 // Invariant: TotalNodes and TotalGPUs equal the sum of registered nodes and GPUs in this region.
+// Guard: region capacity reports provide read-only isolation across regional boundaries.
 type RegionCapacity struct {
 	Region             string `json:"region"`
 	TotalNodes         int    `json:"total_nodes"`
@@ -412,8 +438,9 @@ type RegionCapacity struct {
 	AvailableVRAMBytes int64  `json:"available_vram_bytes"`
 }
 
-// CapacityReport provides an aggregated snapshot of fleet-wide GPU compute and memory readiness.
+// CapacityReport provides a consolidated snapshot of fleet-wide GPU compute and memory readiness.
 // Invariant: TotalNodes equals sum of ReadyNodes, BusyNodes, DegradedNodes, and OfflineNodes.
+// Guard: unready or degraded nodes are isolated from DispatchReadyNodes.
 type CapacityReport struct {
 	Timestamp          time.Time                         `json:"timestamp"`
 	TotalNodes         int                               `json:"total_nodes"`
@@ -433,52 +460,67 @@ type CapacityReport struct {
 
 // Sentinel errors for deterministic error checking with errors.Is.
 // Invariant: all sentinel errors are typed and immutable singletons.
+// Guard: sentinel comparisons prevent ambiguous failure classification across subsystems.
 var (
 	// ErrNodeNotFound is returned when the specified node ID does not exist in the fleet.
 	// Invariant: indicates lookup failure for an un-registered node ID.
+	// Guard: operations targeting missing IDs fail closed immediately.
 	ErrNodeNotFound = errors.New("gcpgpu: node not found")
 	// ErrNodeAlreadyExists is returned when attempting to register a node with an existing ID.
 	// Invariant: node registration requires unique node IDs.
+	// Guard: duplicate IDs are rejected without overwriting existing registrations.
 	ErrNodeAlreadyExists = errors.New("gcpgpu: node already registered")
 	// ErrInvalidNodeSpec is returned when a node specification fails parameter validation.
 	// Invariant: specifications must have positive GPU count, vCPUs, and valid parameters.
+	// Guard: malformed hardware topologies are rejected on admission.
 	ErrInvalidNodeSpec = errors.New("gcpgpu: invalid node specification")
 	// ErrInvalidAccelerator is returned when an accelerator type string is not recognized.
 	// Invariant: only supported GCP accelerator types are permitted.
+	// Guard: unrecognized accelerator types fail closed to prevent erroneous allocation.
 	ErrInvalidAccelerator = errors.New("gcpgpu: unsupported accelerator type")
 	// ErrInsufficientVRAM is returned when no ready node has sufficient free VRAM for a model.
 	// Invariant: dispatch requests require available VRAM >= required bytes.
+	// Guard: model dispatch requests exceeding capacity are rejected without partial allocation.
 	ErrInsufficientVRAM = errors.New("gcpgpu: insufficient VRAM for model")
 	// ErrNoReadyNodes is returned when the fleet has no nodes in Ready status.
 	// Invariant: at least one node must be Ready to service model dispatch requests.
+	// Guard: dispatch halts fail-closed when zero nodes are in operational status.
 	ErrNoReadyNodes = errors.New("gcpgpu: no ready nodes available")
 	// ErrNodeNotReady is returned when an operation requires a Ready node but the node is not Ready.
 	// Invariant: allocation requires node Status == Ready.
+	// Guard: Busy, Degraded, or Offline nodes reject direct allocation attempts.
 	ErrNodeNotReady = errors.New("gcpgpu: node is not ready for dispatch")
 	// ErrQuotaExceeded is returned when registering a node would exceed the regional GPU quota.
 	// Invariant: enforced only when FleetManager is configured with quota enforcement.
+	// Guard: registrations exceeding regional limits fail closed when enforcement is active.
 	ErrQuotaExceeded = errors.New("gcpgpu: accelerator quota exceeded")
 	// ErrFleetEmpty is returned when an operation requires registered nodes but fleet size is zero.
 	// Invariant: operations requiring nodes fail-fast when len(nodes) == 0.
+	// Guard: empty fleets reject node scheduling requests immediately.
 	ErrFleetEmpty = errors.New("gcpgpu: fleet has no registered nodes")
 	// ErrProbeFailed is returned when a node health probe cannot execute.
 	// Invariant: indicates transport or context failure during health probe execution.
+	// Guard: probe execution failures mark nodes Degraded.
 	ErrProbeFailed = errors.New("gcpgpu: probe execution failed")
 	// ErrNodeDegraded is returned when a node is degraded due to health errors or thermal throttling.
 	// Invariant: degraded nodes are excluded from dispatch scheduling.
+	// Guard: degraded nodes reject new workload assignments until recovered.
 	ErrNodeDegraded = errors.New("gcpgpu: node is in degraded state")
 	// ErrNodeOffline is returned when an operation is attempted on an offline node.
 	// Invariant: offline nodes cannot receive allocations or dispatch workloads.
+	// Guard: administratively offline nodes are excluded from all active dispatch routes.
 	ErrNodeOffline = errors.New("gcpgpu: node is offline")
 )
 
 // ProberFunc defines the signature for node health checking probes.
 // Invariant: probers must respect context cancellation and return non-nil ProbeResult.
+// Guard: unhandled errors during probing return Degraded status and record failure details.
 type ProberFunc func(ctx context.Context, node *GPUNode) (ProbeResult, error)
 
 // FleetManager coordinates GCP GPU compute nodes, capacity allocation, health probes,
 // telemetry, quota constraints, and remote dispatch readiness.
 // Invariant: all exported methods are concurrency-safe via sync.RWMutex synchronization.
+// Guard: invalid inputs and unready node states return typed sentinel errors.
 type FleetManager struct {
 	mu           sync.RWMutex
 	nodes        map[string]*GPUNode
@@ -490,10 +532,12 @@ type FleetManager struct {
 
 // Option configures a FleetManager instance.
 // Invariant: options mutate FleetManager state before concurrent use.
+// Guard: functional options apply only during initialization before concurrent access.
 type Option func(*FleetManager)
 
 // WithQuotaEnforcement enables rejection of node registration if regional GPU quota is exceeded.
 // Invariant: enforces quota limits when enforce is true.
+// Guard: registration attempts exceeding quota return ErrQuotaExceeded when enabled.
 func WithQuotaEnforcement(enforce bool) Option {
 	return func(m *FleetManager) {
 		m.enforceQuota = enforce
@@ -502,6 +546,7 @@ func WithQuotaEnforcement(enforce bool) Option {
 
 // WithProber overrides the default health check prober implementation.
 // Invariant: custom prober replaces defaultProber when provided.
+// Guard: nil prober falls back safely to defaultProber during probe execution.
 func WithProber(p ProberFunc) Option {
 	return func(m *FleetManager) {
 		m.prober = p
@@ -510,6 +555,7 @@ func WithProber(p ProberFunc) Option {
 
 // WithTimeSource overrides time.Now for deterministic testing.
 // Invariant: replaces wall-clock time with deterministic time provider.
+// Guard: nil provider falls back safely to time.Now().UTC().
 func WithTimeSource(fn func() time.Time) Option {
 	return func(m *FleetManager) {
 		m.timeNow = fn
@@ -518,6 +564,7 @@ func WithTimeSource(fn func() time.Time) Option {
 
 // NewFleetManager constructs an initialized FleetManager.
 // Invariant: returns non-nil manager with initialized maps and default clock.
+// Guard: allocations and quota maps are initialized empty to prevent nil-map panics.
 func NewFleetManager(opts ...Option) *FleetManager {
 	m := &FleetManager{
 		nodes:   make(map[string]*GPUNode),
@@ -543,6 +590,7 @@ func quotaKey(region string, accel AcceleratorType) string {
 
 // DeriveRegion extracts a region from a zone (e.g. "us-central1-a" -> "us-central1") or returns input.
 // Invariant: strips single-letter zone suffix following last dash.
+// Guard: inputs without single-letter zone suffix are returned unchanged.
 func DeriveRegion(zoneOrRegion string) string {
 	s := strings.TrimSpace(zoneOrRegion)
 	if idx := strings.LastIndex(s, "-"); idx != -1 {
@@ -559,6 +607,7 @@ func DeriveRegion(zoneOrRegion string) string {
 // It validates spec parameters, calculates VRAM totals, verifies quotas if enforced,
 // and stores the node thread-safely.
 // Invariant: fails with ErrNodeAlreadyExists if node ID is already registered; verifies quota if enforced.
+// Guard: invalid node specs or quota exceedances return typed errors and reject registration.
 func (m *FleetManager) RegisterNode(node GPUNode) error {
 	nodeID := strings.TrimSpace(node.ID)
 	if nodeID == "" {
@@ -627,6 +676,7 @@ func (m *FleetManager) RegisterNode(node GPUNode) error {
 
 // UnregisterNode removes a node from the fleet and releases its quota allocation.
 // Invariant: returns ErrNodeNotFound if ID does not exist; decrements quota InUse counter.
+// Guard: missing node IDs return ErrNodeNotFound without modifying fleet state.
 func (m *FleetManager) UnregisterNode(nodeID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -650,6 +700,7 @@ func (m *FleetManager) UnregisterNode(nodeID string) error {
 
 // GetNode retrieves a deep-copy of a node by ID.
 // Invariant: returns ErrNodeNotFound if ID does not exist; returned node is isolated from internal state.
+// Guard: missing node IDs return ErrNodeNotFound and an empty GPUNode value.
 func (m *FleetManager) GetNode(nodeID string) (GPUNode, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -663,6 +714,7 @@ func (m *FleetManager) GetNode(nodeID string) (GPUNode, error) {
 
 // ListNodes returns a slice of all registered nodes in the fleet.
 // Invariant: returned slice is sorted lexicographically by node ID.
+// Guard: returns empty non-nil slice when no nodes are registered.
 func (m *FleetManager) ListNodes() []GPUNode {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -680,6 +732,7 @@ func (m *FleetManager) ListNodes() []GPUNode {
 
 // UpdateNodeStatus explicitly updates the operational status of a node.
 // Invariant: status must be valid; returns ErrNodeNotFound if node does not exist.
+// Guard: invalid status values return ErrInvalidNodeSpec without altering node state.
 func (m *FleetManager) UpdateNodeStatus(nodeID string, status NodeStatus) error {
 	if !status.IsValid() {
 		return fmt.Errorf("%w: invalid status %q", ErrInvalidNodeSpec, status)
@@ -699,6 +752,7 @@ func (m *FleetManager) UpdateNodeStatus(nodeID string, status NodeStatus) error 
 
 // UpdateTelemetry updates live telemetry metrics for a node and evaluates status thresholds.
 // Invariant: thermal readings >= 95C transition node to Degraded; memory saturation toggles Busy/Ready.
+// Guard: missing node IDs return ErrNodeNotFound; negative metrics are clamped to zero.
 func (m *FleetManager) UpdateTelemetry(nodeID string, metrics TelemetryMetrics) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -759,6 +813,7 @@ func (m *FleetManager) UpdateTelemetry(nodeID string, metrics TelemetryMetrics) 
 //     and lexicographical node ID.
 //
 // Invariant: candidate must be Ready, endpoint non-empty, error-free, and satisfy VRAM >= required.
+// Guard: returns ErrFleetEmpty, ErrNoReadyNodes, or ErrInsufficientVRAM when no node qualifies.
 func (m *FleetManager) BestNodeForModel(vramRequiredBytes int64) (*GPUNode, error) {
 	if vramRequiredBytes <= 0 {
 		return nil, fmt.Errorf("%w: required VRAM must be positive (got %d)", ErrInvalidNodeSpec, vramRequiredBytes)
@@ -834,6 +889,7 @@ func (m *FleetManager) BestNodeForModel(vramRequiredBytes int64) (*GPUNode, erro
 // AllocateVRAM reserves a slice of VRAM on a specific node.
 // Returns ErrInsufficientVRAM if the node cannot satisfy the request, or ErrNodeNotReady.
 // Invariant: allocates bytes only if node is Ready and AvailableVRAM >= bytes; saturating VRAM marks Busy.
+// Guard: requests exceeding available VRAM or targeting non-Ready nodes return typed errors.
 func (m *FleetManager) AllocateVRAM(nodeID string, bytes int64) error {
 	if bytes <= 0 {
 		return fmt.Errorf("%w: bytes to allocate must be positive", ErrInvalidNodeSpec)
@@ -869,6 +925,7 @@ func (m *FleetManager) AllocateVRAM(nodeID string, bytes int64) error {
 
 // ReleaseVRAM releases previously allocated VRAM on a node.
 // Invariant: decrements AllocatedVRAMBytes floor-clamped at 0; restores Ready if busy due to memory.
+// Guard: missing node IDs return ErrNodeNotFound; allocated VRAM is prevented from underflowing below 0.
 func (m *FleetManager) ReleaseVRAM(nodeID string, bytes int64) error {
 	if bytes <= 0 {
 		return fmt.Errorf("%w: bytes to release must be positive", ErrInvalidNodeSpec)
@@ -966,6 +1023,7 @@ func defaultProber(ctx context.Context, node *GPUNode) (ProbeResult, error) {
 // It executes the configured ProberFunc without holding locks during probe execution,
 // then applies the verified state back to the node thread-safely.
 // Invariant: prober runs lock-free; results update node status and LastProbedAt under write lock.
+// Guard: missing node IDs return ErrNodeNotFound; probe errors set node status to Degraded.
 func (m *FleetManager) ProbeNode(ctx context.Context, nodeID string) (ProbeResult, error) {
 	// Snapshot node under read lock
 	m.mu.RLock()
@@ -1014,6 +1072,7 @@ func (m *FleetManager) ProbeNode(ctx context.Context, nodeID string) (ProbeResul
 
 // ProbeAll concurrently probes all nodes in the fleet and returns their ProbeResults.
 // Invariant: probes execute concurrently across goroutines; results sorted by node ID.
+// Guard: returns nil slice and nil error immediately when the fleet has no registered nodes.
 func (m *FleetManager) ProbeAll(ctx context.Context) ([]ProbeResult, error) {
 	m.mu.RLock()
 	nodeIDs := make([]string, 0, len(m.nodes))
@@ -1053,6 +1112,7 @@ func (m *FleetManager) ProbeAll(ctx context.Context) ([]ProbeResult, error) {
 
 // SetQuota registers or updates the GCP GPU quota limit for an accelerator in a region.
 // Invariant: recalculates InUse count from currently registered nodes; limit must be non-negative.
+// Guard: negative limits or invalid accelerator types return ErrInvalidNodeSpec / ErrInvalidAccelerator.
 func (m *FleetManager) SetQuota(accel AcceleratorType, region string, limit int) error {
 	if !accel.IsValid() {
 		return fmt.Errorf("%w: %q", ErrInvalidAccelerator, accel)
@@ -1093,6 +1153,7 @@ func (m *FleetManager) SetQuota(accel AcceleratorType, region string, limit int)
 
 // GetQuota retrieves the quota spec for an accelerator and region.
 // Invariant: returns copy of QuotaSpec and true if configured, or empty QuotaSpec and false if absent.
+// Guard: unconfigured quotas return false and zero-value QuotaSpec to prevent false headroom assumptions.
 func (m *FleetManager) GetQuota(accel AcceleratorType, region string) (QuotaSpec, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1105,8 +1166,9 @@ func (m *FleetManager) GetQuota(accel AcceleratorType, region string) (QuotaSpec
 	return *q, true
 }
 
-// CapacityReport computes an aggregated snapshot of fleet-wide GPU compute and memory readiness.
-// Invariant: aggregates counts across all nodes and provides breakdown by accelerator and region.
+// CapacityReport computes a consolidated snapshot of fleet-wide GPU compute and memory readiness.
+// Invariant: consolidates counts across all nodes and provides breakdown by accelerator and region.
+// Guard: dispatch ready node list filters out non-Ready or failing nodes fail-closed.
 func (m *FleetManager) CapacityReport() CapacityReport {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1152,7 +1214,7 @@ func (m *FleetManager) CapacityReport() CapacityReport {
 			report.DispatchReadyNodes = append(report.DispatchReadyNodes, node.ID)
 		}
 
-		// Aggregate by Accelerator
+		// Rollup by Accelerator
 		ac := report.ByAccelerator[accel]
 		ac.Accelerator = accel
 		ac.TotalNodes++
@@ -1171,7 +1233,7 @@ func (m *FleetManager) CapacityReport() CapacityReport {
 		}
 		report.ByAccelerator[accel] = ac
 
-		// Aggregate by Region
+		// Rollup by Region
 		rc := report.ByRegion[reg]
 		rc.Region = reg
 		rc.TotalNodes++

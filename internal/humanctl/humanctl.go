@@ -9,8 +9,12 @@ import (
 // Verb is the stable identity of what a human is trying to make an agent do.
 // It is intentionally independent of transport words such as send, queue, or
 // inject: those say when a control arrives, not what outcome the human wants.
+//
+// Invariant: verb values are members of the closed catalog defined in the package index.
+// Guard: uncataloged verbs fail validation when parsed or executed.
 type Verb string
 
+// Canonical verbs defined in the closed human control catalog.
 const (
 	FlagConcern  Verb = "flag_concern"
 	Reject       Verb = "reject"
@@ -33,8 +37,12 @@ const (
 )
 
 // Family names the human outcome being controlled, rather than the UI gesture.
+//
+// Invariant: family membership partitions the verb index into disjoint semantic categories.
+// Guard: unknown families are rejected by catalog validation.
 type Family string
 
+// Outcome families defined in the closed human control catalog.
 const (
 	Evaluation Family = "evaluation"
 	Direction  Family = "direction"
@@ -47,8 +55,12 @@ const (
 
 // Strength is an ordinal modifier. Unspecified preserves the human's ambiguity;
 // callers must not silently turn it into Medium.
+//
+// Invariant: non-empty strength must be one of low, medium, high, or absolute.
+// Guard: unrecognised strength tokens fail validation rather than coercing defaults.
 type Strength string
 
+// Strength levels for ordinal control modulation.
 const (
 	StrengthUnspecified Strength = ""
 	StrengthLow         Strength = "low"
@@ -58,6 +70,9 @@ const (
 )
 
 // Definition is one row in the closed, typed index.
+//
+// Invariant: every definition has a non-empty verb, family, default strength, and intent.
+// Guard: terminal and non-composable verbs must not permit subsequent control chaining.
 type Definition struct {
 	Verb            Verb
 	Family          Family
@@ -94,6 +109,9 @@ var definitions = []Definition{
 // Instruction combines a typed control with human text that remains evidence,
 // not syntax. Target says what to affect; Reason says why; Text preserves any
 // unstructured qualification that a closed vocabulary cannot honestly encode.
+//
+// Invariant: verbs requiring targets must have non-blank target strings.
+// Guard: invalid verbs, illegal strengths, or forbidden reasons cause Validate to fail closed.
 type Instruction struct {
 	Verb     Verb     `json:"verb"`
 	Strength Strength `json:"strength,omitempty"`
@@ -103,6 +121,9 @@ type Instruction struct {
 }
 
 // Index returns a defensive copy in stable declaration order.
+//
+// Invariant: the returned slice contains isolated copies of definitions and alias slices.
+// Guard: mutations by callers do not corrupt the internal package catalog.
 func Index() []Definition {
 	out := make([]Definition, len(definitions))
 	for i, d := range definitions {
@@ -115,6 +136,9 @@ func Index() []Definition {
 // Lookup resolves a canonical verb or exact, case-insensitive alias. It does
 // not pretend to classify arbitrary prose; Text on Instruction is the escape
 // hatch for ambiguity and future extractors can emit confidence separately.
+//
+// Invariant: exact canonical verb match or alias match returns ok=true and the canonical definition.
+// Guard: unmatched query strings fail closed returning false and a zero-value Definition.
 func Lookup(s string) (Definition, bool) {
 	n := normalize(s)
 	for _, d := range definitions {
@@ -131,6 +155,9 @@ func Lookup(s string) (Definition, bool) {
 }
 
 // Validate checks the typed portion without discarding unstructured context.
+//
+// Invariant: validated instructions reference cataloged verbs with compliant targets and strengths.
+// Guard: returns a non-nil error if the verb is unknown, target is missing when required, or strength is invalid.
 func (i Instruction) Validate() error {
 	d, ok := Lookup(string(i.Verb))
 	if !ok || d.Verb != i.Verb {
@@ -150,6 +177,9 @@ func (i Instruction) Validate() error {
 
 // EffectiveStrength applies declared defaults only when an executor explicitly
 // asks for them. The original Instruction remains losslessly unspecified.
+//
+// Invariant: explicit strength overrides default; unspecified returns catalog default or unspecified if unknown.
+// Guard: unknown verbs without explicit strength return StrengthUnspecified.
 func (i Instruction) EffectiveStrength() Strength {
 	if i.Strength != StrengthUnspecified {
 		return i.Strength
@@ -164,6 +194,9 @@ func (i Instruction) EffectiveStrength() Strength {
 // Compose validates an ordered control program. Terminal and suspension verbs
 // cannot hide trailing instructions; that would make natural-language order
 // lie about what can execute.
+//
+// Invariant: non-composable verbs must appear strictly in the final position of the sequence.
+// Guard: fails closed with an error on any invalid instruction or misplaced terminal verb.
 func Compose(instructions ...Instruction) ([]Instruction, error) {
 	out := append([]Instruction(nil), instructions...)
 	for idx, instruction := range out {
@@ -179,6 +212,9 @@ func Compose(instructions ...Instruction) ([]Instruction, error) {
 }
 
 // Families returns stable family names for inventory and UI grouping.
+//
+// Invariant: returns deduplicated, lexicographically sorted family names from the catalog.
+// Guard: safe read-only projection constructed on each invocation.
 func Families() []Family {
 	seen := map[Family]bool{}
 	var out []Family
