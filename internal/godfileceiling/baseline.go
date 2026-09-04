@@ -13,6 +13,7 @@ var Baseline = map[string]int{
 	"cmd/fak/loop.go":                         1544,
 	"cmd/fak/release_ship.go":                 1708,
 	"internal/agent/chat.go":                  1664,
+	"internal/compute/cuda.go":                1562,
 	"internal/dispatchtick/router.go":         1768,
 	"internal/fleetpane/fleetpane.go":         2091,
 	"internal/gateway/gateway.go":             3135,

@@ -1,6 +1,10 @@
 // Package godfileceiling is the ratcheting god-file LOC ceiling gate (issue #2898,
 // Hermes-inspiration epic #2871).
 //
+// Invariant: Non-baseline tracked source files must never exceed HardCeiling, and baseline entries may only ratchet downward.
+// Contract: Evaluate and Repin operate as pure, deterministic mapping functions with no file I/O or ambient state.
+// Precondition: LineCount expects physical UTF-8 or ASCII text buffers; empty input returns zero lines.
+//
 // # Why
 //
 // Hermes' gateway/run.go-equivalent (gateway/run.py) grew to 20,320 lines because
