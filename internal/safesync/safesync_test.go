@@ -487,7 +487,7 @@ func TestRenameWriteSetRefuses(t *testing.T) {
 	}
 }
 
-func behindClone(t *testing.T) string {
+func behindClone(t testing.TB) string {
 	t.Helper()
 	tmp := t.TempDir()
 	origin := filepath.Join(tmp, "origin")
@@ -502,7 +502,7 @@ func behindClone(t *testing.T) string {
 	git(t, origin, "commit", "-m", "c1")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
 	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")
@@ -568,7 +568,7 @@ func isCleanHashFor(args []string, path string) bool {
 		args[2] == "--" && args[3] == path
 }
 
-func git(t *testing.T, cwd string, args ...string) {
+func git(t testing.TB, cwd string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cwd
@@ -578,7 +578,7 @@ func git(t *testing.T, cwd string, args ...string) {
 	}
 }
 
-func gitOutput(t *testing.T, cwd string, args ...string) string {
+func gitOutput(t testing.TB, cwd string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cwd
@@ -589,7 +589,7 @@ func gitOutput(t *testing.T, cwd string, args ...string) string {
 	return string(out)
 }
 
-func revString(t *testing.T, cwd, ref string) string {
+func revString(t testing.TB, cwd, ref string) string {
 	t.Helper()
 	cmd := exec.Command("git", "rev-parse", "--verify", ref)
 	cmd.Dir = cwd
@@ -600,21 +600,21 @@ func revString(t *testing.T, cwd, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func mkdir(t *testing.T, path string) {
+func mkdir(t testing.TB, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func writeFile(t *testing.T, path, text string) {
+func writeFile(t testing.TB, path, text string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func readFile(t *testing.T, path string) string {
+func readFile(t testing.TB, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {

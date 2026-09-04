@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,86 @@ func TestApplyFastForwardWithQuarantineWitness(t *testing.T) {
 
 	if got := readFile(t, filepath.Join(clone, "new.txt")); got != "n1\n" {
 		t.Fatalf("new.txt content = %q, want n1\n", got)
+	}
+}
+
+// TestSafesyncAutoQuarantineCollidingUntracked proves Issue #11233:
+// An untracked local file internal/foo/new.go with conflicting content is safely
+// quarantined across fast-forward, sync completes cleanly without "untracked working tree
+// files would be overwritten" aborts, and receipt contains the SHA256 of the preserved local file.
+func TestSafesyncAutoQuarantineCollidingUntracked(t *testing.T) {
+	clone := behindClone(t)
+	originDir := filepath.Join(filepath.Dir(clone), "origin")
+
+	// Upstream commit in origin introduces internal/foo/new.go
+	originFile := filepath.Join(originDir, "internal", "foo", "new.go")
+	if err := os.MkdirAll(filepath.Dir(originFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	remoteContent := "package foo\n\n// remote incoming addition\nfunc New() string { return \"incoming\" }\n"
+	writeFile(t, originFile, remoteContent)
+	git(t, originDir, "add", "internal/foo/new.go")
+	git(t, originDir, "commit", "-m", "add internal/foo/new.go")
+	git(t, clone, "fetch", "origin")
+
+	// Local untracked file internal/foo/new.go with conflicting content
+	localFile := filepath.Join(clone, "internal", "foo", "new.go")
+	if err := os.MkdirAll(filepath.Dir(localFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	localContent := "package foo\n\n// local conflicting untracked content\nfunc New() string { return \"conflicting-local\" }\n"
+	writeFile(t, localFile, localContent)
+
+	expectedHash, _, err := FileSHA256(localFile)
+	if err != nil {
+		t.Fatalf("FileSHA256: %v", err)
+	}
+
+	headBefore := revString(t, clone, "HEAD")
+
+	// Apply with AutoQuarantine enabled
+	applied, err := Apply(context.Background(), Options{
+		Repo:           clone,
+		Remote:         "origin",
+		Branch:         "work",
+		AutoQuarantine: true,
+	})
+	if err != nil {
+		t.Fatalf("Apply with AutoQuarantine: %v", err)
+	}
+	if !applied.OK || !applied.Applied {
+		t.Fatalf("expected apply to succeed, got: %+v", applied)
+	}
+
+	headAfter := revString(t, clone, "HEAD")
+	if headAfter == headBefore {
+		t.Fatalf("HEAD did not advance: %s", headAfter)
+	}
+
+	// Fast-forward should have populated internal/foo/new.go with remoteContent
+	if got := readFile(t, localFile); got != remoteContent {
+		t.Fatalf("working tree internal/foo/new.go = %q, want remote content %q", got, remoteContent)
+	}
+
+	// Quarantine receipt must be attached and contain the preserved file's SHA256
+	if applied.Quarantine == nil {
+		t.Fatal("expected Quarantine receipt on Assessment")
+	}
+	if applied.Quarantine.SHA256 != expectedHash && applied.Quarantine.Preserved["internal/foo/new.go"] != expectedHash {
+		t.Fatalf("quarantine receipt does not contain expected SHA256 %s: %+v", expectedHash, applied.Quarantine)
+	}
+
+	// Verify receipt on disk
+	receiptPath := applied.Quarantine.ReceiptPath
+	if receiptPath == "" {
+		gitDir, _ := worktreeGitDir(clone)
+		receiptPath = filepath.Join(gitDir, "fak-quarantine", "receipt.json")
+	}
+	receiptBytes, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("read receipt from disk (%s): %v", receiptPath, err)
+	}
+	if !strings.Contains(string(receiptBytes), expectedHash) {
+		t.Fatalf("receipt on disk does not contain expected SHA256: %s", string(receiptBytes))
 	}
 }

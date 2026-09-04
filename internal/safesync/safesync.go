@@ -62,6 +62,10 @@ type Options struct {
 	WriterLeaseTTL time.Duration `json:"-"`
 	// QuarantineScratch enables shift-left untracked artifact isolation across fast-forward (#10913).
 	QuarantineScratch bool `json:"quarantine_scratch,omitempty"`
+	// AutoQuarantine enables automatic pre-flight quarantine of incoming colliding untracked files (#11233).
+	AutoQuarantine bool `json:"auto_quarantine,omitempty"`
+	// Session identifies this sync run for quarantine tagging (#11233).
+	Session string `json:"session,omitempty"`
 	// barrier is a test-only seam fired while Apply holds the writer lease, so a
 	// concurrency test can prove a second managed writer is refused mid-window.
 	barrier func()
@@ -221,7 +225,7 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 	if err != nil {
 		return Assessment{}, err
 	}
-	identical, divergent := classify(opts.Repo, run, ctx, head, target, entries, opts.QuarantineScratch)
+	identical, divergent := classify(opts.Repo, run, ctx, head, target, entries, opts.QuarantineScratch || opts.AutoQuarantine)
 	base.State = StateBehind
 	base.WriteCount = len(entries)
 	base.Identical = identical
@@ -237,6 +241,10 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 
 // Apply performs the same assessment and runs the fast-forward only when Assess
 // says the behind state is safe. Refused states leave the tree untouched.
+// Refactored to a two-phase protocol (#11234):
+// - Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently.
+// - Phase 2 (Exclusive Write Lease): Short bounded critical section (<500ms) that moves HEAD and
+//   checks out files only when divergence requires a fast-forward write.
 func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	now := opts.Now
 	if now == nil {
@@ -251,14 +259,11 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	opts = normalizeOptions(opts)
 	run := opts.Runner
 
-	// Hold the cooperative worktree writer lease for the WHOLE assess+apply window, so a
-	// fak-managed peer writer cannot edit a classified path between Assess and the
-	// checkout (#4240). A live peer holding it means we must not enter the window at all:
-	// refuse without touching the tree. Released on every return path.
-	lease, lerr := AcquireWriterLease(opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL)
-	if lerr != nil {
+	// Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently (#11234).
+	readLease, rerr := AcquireSharedReadLease(opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL)
+	if rerr != nil {
 		var held *WriterLeaseHeldError
-		if errors.As(lerr, &held) {
+		if errors.As(rerr, &held) {
 			holder := held.Info
 			info.OK = false
 			info.Applied = false
@@ -266,24 +271,33 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 			info.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing to enter the assess/apply window so a peer writer's bytes are never overwritten", holder.Owner)
 			return info, nil
 		}
-		return info, lerr // an I/O failure taking the lease is an infrastructure error
+		return info, rerr
 	}
-	defer func() { _ = lease.Release() }()
-	// Heartbeat the lease for the whole window (#4612): an apply that outlives the TTL
-	// (a pathologically slow fast-forward) renews itself instead of being reclaimed
-	// mid-window as crash residue. Stopped (and joined) before the deferred Release.
-	stopHeartbeat := lease.keepAlive(now)
-	defer stopHeartbeat()
+	defer func() {
+		if readLease != nil {
+			_ = readLease.Release()
+		}
+	}()
+	stopReadHeartbeat := readLease.keepAlive(now)
+	defer func() {
+		if stopReadHeartbeat != nil {
+			stopReadHeartbeat()
+		}
+	}()
+
 	if opts.barrier != nil {
 		opts.barrier()
 	}
-	if lease.Lost() {
-		return Assessment{OK: false, State: "refused", Reason: "writer lease lost before apply; displaced result suppressed", Lease: func() *WriterLeaseInfo { info := lease.Info(); return &info }()}, nil
+	if readLease.Lost() {
+		return Assessment{OK: false, State: "refused", Reason: "writer lease lost before apply; displaced result suppressed", Lease: func() *WriterLeaseInfo { info := readLease.Info(); return &info }()}, nil
 	}
 
 	info, err = Assess(ctx, opts)
 	if err != nil {
 		return info, err
+	}
+	if readLease.Lost() {
+		return Assessment{OK: false, State: "refused", Reason: "writer lease lost before apply; displaced result suppressed", Lease: func() *WriterLeaseInfo { info := readLease.Info(); return &info }()}, nil
 	}
 	if info.State == StateInSync {
 		return info, nil
@@ -293,8 +307,44 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		return info, nil
 	}
 
+	// Release Shared Read Lease before entering Phase 2 Exclusive Write Lease
+	stopReadHeartbeat()
+	stopReadHeartbeat = nil
+	_ = readLease.Release()
+	readLease = nil
+
+	// Phase 2 (Exclusive Write Lease): Short bounded critical section (<500ms) that moves HEAD
+	// and checks out files only when divergence requires a fast-forward write (#11234).
+	writeLease, lerr := AcquireQueuedWriterLease(ctx, opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL, 10*time.Second)
+	if lerr != nil {
+		var held *WriterLeaseHeldError
+		if errors.As(lerr, &held) {
+			holder := held.Info
+			info.OK = false
+			info.Applied = false
+			info.Lease = &holder
+			info.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing to enter write phase", holder.Owner)
+			return info, nil
+		}
+		if errors.Is(lerr, ErrLeaseOwnerUnavailable) {
+			info.OK = false
+			info.Applied = false
+			info.Reason = ReasonLeaseOwnerUnavailable
+			return info, nil
+		}
+		return info, lerr
+	}
+	defer func() { _ = writeLease.Release() }()
+	stopWriteHeartbeat := writeLease.keepAlive(now)
+	defer stopWriteHeartbeat()
+
+	if writeLease.Lost() {
+		return Assessment{OK: false, State: "refused", Reason: "writer lease lost before apply; displaced result suppressed", Lease: func() *WriterLeaseInfo { info := writeLease.Info(); return &info }()}, nil
+	}
+
+	// Pre-flight quarantine of incoming colliding untracked files (#11233)
 	var qTx *QuarantineTransaction
-	if opts.QuarantineScratch && info.Target != "" {
+	if (opts.QuarantineScratch || opts.AutoQuarantine) && info.Target != "" {
 		entries, ffErr := ffWriteSet(ctx, run, opts.Repo, info.Head, info.Target)
 		if ffErr == nil {
 			var qPaths []string
@@ -309,7 +359,7 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 			}
 			if len(qPaths) > 0 {
 				var qErr error
-				qTx, qErr = PrepareQuarantine(opts.Repo, qPaths, identMap)
+				qTx, qErr = PrepareQuarantine(opts.Repo, qPaths, identMap, opts.Session)
 				if qErr != nil {
 					return info, qErr
 				}
@@ -322,7 +372,7 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		}
 	}
 
-	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info, lease)
+	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info, writeLease)
 	if err != nil {
 		return info, err
 	}

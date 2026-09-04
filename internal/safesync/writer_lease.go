@@ -86,7 +86,9 @@ type WriterLeaseInfo struct {
 	// renew moves the TTL window forward without changing the holder; 0 means never
 	// renewed, in which case staleness measures from AcquiredUnix exactly as a pre-#4612
 	// record did (omitempty keeps such records byte-identical).
-	RenewedUnix int64 `json:"renewed_unix,omitempty"`
+	RenewedUnix int64  `json:"renewed_unix,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Readers     int    `json:"readers,omitempty"`
 }
 
 func (i WriterLeaseInfo) acquiredAt() time.Time { return time.Unix(i.AcquiredUnix, 0) }
@@ -125,10 +127,11 @@ type WriterLease struct {
 	path string
 	ttl  time.Duration
 
-	mu       sync.Mutex // guards info: the keepAlive heartbeat renews it concurrently with Release
-	info     WriterLeaseInfo
-	lost     chan struct{}
-	lostOnce sync.Once
+	mu          sync.Mutex // guards info: the keepAlive heartbeat renews it concurrently with Release
+	info        WriterLeaseInfo
+	lost        chan struct{}
+	lostOnce    sync.Once
+	releaseHook func() error
 }
 
 // Info returns the owner record of a held lease.
@@ -158,72 +161,9 @@ func (l *WriterLease) markLost() { l.lostOnce.Do(func() { close(l.lost) }) }
 // AcquireWriterLease takes the cooperative worktree writer lease for repo. It returns
 // (lease, nil) on success; (nil, *WriterLeaseHeldError) when a live peer holds it; and
 // (nil, err) on an I/O failure. A lease older than ttl is reclaimed as crash residue
-// (a holder that died without releasing). now/ttl default to time.Now /
-// DefaultWriterLeaseTTL when zero, so a plain writer can call AcquireWriterLease(repo,
-// owner, nil, 0).
+// (a holder that died without releasing), with dead-process liveness verification via OS PID check (#11234).
 func AcquireWriterLease(repo, owner string, now func() time.Time, ttl time.Duration) (*WriterLease, error) {
-	if now == nil {
-		now = time.Now
-	}
-	if ttl <= 0 {
-		ttl = DefaultWriterLeaseTTL
-	}
-	dir, err := worktreeGitDir(repo)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, writerLeaseFile)
-	host, _ := os.Hostname()
-	rec := WriterLeaseInfo{Owner: strings.TrimSpace(owner), PID: os.Getpid(), Host: host, AcquiredUnix: now().Unix()}
-	if rec.Owner == "" {
-		rec.Owner = fmt.Sprintf("pid-%d", rec.PID)
-	}
-
-	// Two attempts: the second only runs after we reclaim a stale lease.
-	for attempt := 0; attempt < 2; attempt++ {
-		ok, err := writeLeaseExclusive(path, rec)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			return &WriterLease{path: path, ttl: ttl, info: rec, lost: make(chan struct{})}, nil
-		}
-		// Someone holds it: read the record and decide live-vs-stale.
-		cur, rerr := readLease(path)
-		if rerr != nil {
-			if os.IsNotExist(rerr) {
-				continue // the holder released between our create and read; retry
-			}
-			return nil, rerr
-		}
-		if !leaseStale(cur, now(), ttl) {
-			return nil, &WriterLeaseHeldError{Info: cur}
-		}
-		// Stale (crash residue / expired TTL): reclaim, then retry the exclusive create.
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-
-	// Lost the reclaim race to another writer that recreated it first: treat as held.
-	cur, rerr := readLease(path)
-	if rerr != nil {
-		if os.IsNotExist(rerr) {
-			// It vanished again; one more exclusive create decides the outcome.
-			if ok, werr := writeLeaseExclusive(path, rec); werr != nil {
-				return nil, werr
-			} else if ok {
-				return &WriterLease{path: path, ttl: ttl, info: rec, lost: make(chan struct{})}, nil
-			}
-			cur, rerr = readLease(path)
-			if rerr != nil {
-				return nil, rerr
-			}
-		} else {
-			return nil, rerr
-		}
-	}
-	return nil, &WriterLeaseHeldError{Info: cur}
+	return acquireWriterLease(repo, owner, now, ttl)
 }
 
 // ActiveWriterLease checks whether repo currently has an active, non-stale writer lease.
@@ -256,6 +196,11 @@ func (l *WriterLease) Release() error {
 	if l == nil {
 		return nil
 	}
+	if l.releaseHook != nil {
+		hook := l.releaseHook
+		l.releaseHook = nil
+		defer hook()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cur, err := readLease(l.path)
@@ -272,6 +217,204 @@ func (l *WriterLease) Release() error {
 		return err
 	}
 	return nil
+}
+
+// SharedReadLease is a held shared read lease (Phase 1). Release it when the read window closes.
+type SharedReadLease struct {
+	repo     string
+	dir      string
+	path     string
+	lockPath string
+	ttl      time.Duration
+
+	mu       sync.Mutex
+	info     WriterLeaseInfo
+	lost     chan struct{}
+	lostOnce sync.Once
+}
+
+func (l *SharedReadLease) Info() WriterLeaseInfo {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.info
+}
+
+func (l *SharedReadLease) Lost() bool {
+	select {
+	case <-l.lost:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *SharedReadLease) LostSignal() <-chan struct{} { return l.lost }
+
+func (l *SharedReadLease) markLost() { l.lostOnce.Do(func() { close(l.lost) }) }
+
+func (l *SharedReadLease) Release() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.path != "" {
+		_ = os.Remove(l.path)
+	}
+	if l.dir != "" {
+		readersDir := filepath.Join(l.dir, "fak-worktree-readers")
+		entries, _ := os.ReadDir(readersDir)
+		hasReaders := false
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+				hasReaders = true
+				break
+			}
+		}
+		if !hasReaders && l.lockPath != "" {
+			cur, err := readLease(l.lockPath)
+			if err == nil && (cur.Mode == "shared-read" || cur.Owner == l.info.Owner) {
+				_ = os.Remove(l.lockPath)
+			}
+		}
+	}
+	return nil
+}
+
+func (l *SharedReadLease) Refresh(now func() time.Time) error {
+	if now == nil {
+		now = time.Now
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lockPath != "" {
+		cur, err := readLease(l.lockPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				l.markLost()
+				return ErrWriterLeaseLost
+			}
+			return err
+		}
+		if cur.Owner != l.info.Owner {
+			l.markLost()
+			return ErrWriterLeaseLost
+		}
+		next := l.info
+		next.RenewedUnix = now().Unix()
+		if err := writeLeaseReplace(l.lockPath, next); err != nil {
+			return err
+		}
+	}
+	if l.path == "" {
+		return nil
+	}
+	next := l.info
+	next.RenewedUnix = now().Unix()
+	if err := writeLeaseReplace(l.path, next); err != nil {
+		return err
+	}
+	l.info = next
+	return nil
+}
+
+func (l *SharedReadLease) keepAlive(now func() time.Time) (stop func()) {
+	interval := l.ttl / 4
+	if interval <= 0 {
+		interval = DefaultWriterLeaseTTL / 4
+	}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if err := l.Refresh(now); errors.Is(err, ErrWriterLeaseLost) {
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
+}
+
+// AcquireSharedReadLease takes a cooperative shared read lease for repo (Phase 1).
+// Multiple readers can hold shared read leases concurrently to inspect git rev-parse,
+// diff audits, and remote refs without mutual exclusion (#11234).
+func AcquireSharedReadLease(repo, owner string, now func() time.Time, ttl time.Duration) (*SharedReadLease, error) {
+	if now == nil {
+		now = time.Now
+	}
+	if ttl <= 0 {
+		ttl = DefaultWriterLeaseTTL
+	}
+	dir, err := worktreeGitDir(repo)
+	if err != nil {
+		return nil, err
+	}
+	host, _ := os.Hostname()
+	lockPath := filepath.Join(dir, writerLeaseFile)
+
+	cur, rerr := readLease(lockPath)
+	if rerr == nil {
+		isLocal := cur.Host == "" || cur.Host == host
+		if isLocal && cur.PID > 0 && !isProcessAlive(cur.PID) {
+			_ = os.Remove(lockPath)
+		} else if leaseStale(cur, now(), ttl) {
+			_ = os.Remove(lockPath)
+		} else if cur.Mode == "exclusive-write" || (cur.Mode == "" && cur.Owner != strings.TrimSpace(owner)) {
+			return nil, &WriterLeaseHeldError{Info: cur}
+		}
+	}
+
+	readersDir := filepath.Join(dir, "fak-worktree-readers")
+	if err := os.MkdirAll(readersDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	readerID := fmt.Sprintf("reader-%d-%d.json", os.Getpid(), time.Now().UnixNano())
+	readerPath := filepath.Join(readersDir, readerID)
+
+	rec := WriterLeaseInfo{
+		Owner:        strings.TrimSpace(owner),
+		PID:          os.Getpid(),
+		Host:         host,
+		AcquiredUnix: now().Unix(),
+		Mode:         "shared-read",
+	}
+	if rec.Owner == "" {
+		rec.Owner = fmt.Sprintf("pid-%d", rec.PID)
+	}
+
+	enc, err := json.Marshal(rec)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(readerPath, enc, 0o644); err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		_ = writeLeaseReplace(lockPath, rec)
+	}
+
+	return &SharedReadLease{
+		repo:     repo,
+		dir:      dir,
+		path:     readerPath,
+		lockPath: lockPath,
+		ttl:      ttl,
+		info:     rec,
+		lost:     make(chan struct{}),
+	}, nil
 }
 
 // Refresh renews the lease's staleness window (a heartbeat): when the on-disk record is

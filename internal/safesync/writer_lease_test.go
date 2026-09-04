@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -421,4 +422,122 @@ func TestApplyReturnsIndeterminateOnPartialFastForward(t *testing.T) {
 		t.Fatalf("reason should name the indeterminate recovery, got %q", info.Reason)
 	}
 	_ = os.Remove(filepath.Join(clone, ".git", "MERGE_HEAD"))
+}
+
+// TestWriterLeaseReapsDeadProcessViaPIDCheck proves Issue #11234:
+// When an on-disk lease was held by a dead process on the local machine,
+// the OS PID check detects the dead process and reaps the stale lease immediately
+// instead of waiting for the full TTL or declaring LEASE_OWNER_UNAVAILABLE.
+func TestWriterLeaseReapsDeadProcessViaPIDCheck(t *testing.T) {
+	clone := behindClone(t)
+	gitDir, err := worktreeGitDir(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leasePath := filepath.Join(gitDir, writerLeaseFile)
+	host, _ := os.Hostname()
+
+	// Pick a PID that is provably dead on this system
+	deadPID := 99999999
+	for isProcessAlive(deadPID) {
+		deadPID++
+	}
+
+	deadHolder := WriterLeaseInfo{
+		Owner:        "dead-process-holder",
+		PID:          deadPID,
+		Host:         host,
+		AcquiredUnix: time.Now().Unix(), // fresh timestamp, well within TTL
+		Mode:         "exclusive-write",
+	}
+	enc, err := json.Marshal(deadHolder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leasePath, enc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct acquireWriterLease must reap the dead process lease immediately
+	l, err := AcquireWriterLease(clone, "reaping-writer", nil, time.Hour)
+	if err != nil {
+		t.Fatalf("expected dead process lease to be reaped immediately, got err: %v", err)
+	}
+	if l.Info().Owner != "reaping-writer" {
+		t.Fatalf("expected reaping-writer owner, got %s", l.Info().Owner)
+	}
+	_ = l.Release()
+
+	// AcquireQueuedWriterLease must also reap dead process lease without failing
+	if err := os.WriteFile(leasePath, enc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ql, err := AcquireQueuedWriterLease(context.Background(), clone, "reaping-queued-writer", nil, time.Hour, time.Second)
+	if err != nil {
+		t.Fatalf("AcquireQueuedWriterLease expected dead process to be reaped, got err: %v", err)
+	}
+	if ql.Info().Owner != "reaping-queued-writer" {
+		t.Fatalf("expected reaping-queued-writer owner, got %s", ql.Info().Owner)
+	}
+	_ = ql.Release()
+}
+
+// TestConcurrentSafesyncUnderContention verifies that concurrent sync routines
+// complete without unhandled LEASE_OWNER_UNAVAILABLE timeouts under contention (#11234).
+func TestConcurrentSafesyncUnderContention(t *testing.T) {
+	clone := behindClone(t)
+	const concurrent = 6
+	errCh := make(chan error, concurrent)
+
+	for i := 0; i < concurrent; i++ {
+		go func(id int) {
+			opts := Options{
+				Repo:       clone,
+				Remote:     "origin",
+				Branch:     "work",
+				LeaseOwner: fmt.Sprintf("routine-%d", id),
+			}
+			info, err := Apply(context.Background(), opts)
+			if err != nil {
+				errCh <- fmt.Errorf("routine %d error: %w", id, err)
+				return
+			}
+			if errors.Is(err, ErrLeaseOwnerUnavailable) || info.Reason == ReasonLeaseOwnerUnavailable {
+				errCh <- fmt.Errorf("routine %d hit LEASE_OWNER_UNAVAILABLE", id)
+				return
+			}
+			errCh <- nil
+		}(i)
+	}
+
+	for i := 0; i < concurrent; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkConcurrentSafesyncUnderContention proves Issue #11234:
+// Proves concurrent sync routines complete quickly without unhandled LEASE_OWNER_UNAVAILABLE timeouts.
+func BenchmarkConcurrentSafesyncUnderContention(b *testing.B) {
+	clone := behindClone(b)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		routineID := fmt.Sprintf("bench-worker-%d-%d", os.Getpid(), time.Now().UnixNano())
+		for pb.Next() {
+			opts := Options{
+				Repo:       clone,
+				Remote:     "origin",
+				Branch:     "work",
+				LeaseOwner: routineID,
+			}
+			info, err := Apply(context.Background(), opts)
+			if err != nil {
+				b.Fatalf("Apply under contention error: %v", err)
+			}
+			if errors.Is(err, ErrLeaseOwnerUnavailable) || info.Reason == ReasonLeaseOwnerUnavailable {
+				b.Fatalf("unhandled LEASE_OWNER_UNAVAILABLE timeout under contention")
+			}
+		}
+	})
 }
