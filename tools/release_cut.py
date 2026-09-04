@@ -256,8 +256,26 @@ def _public_kind(subject: str) -> str:
     return match.group(1) if match else "other"
 
 
+def extract_upgrade_notes(text: str) -> list[str]:
+    items = []
+    in_upgrade = False
+    for line in text.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith("## ") and ("upgrade" in trimmed.lower() or "breaking" in trimmed.lower()):
+            in_upgrade = True
+            continue
+        elif trimmed.startswith("## "):
+            in_upgrade = False
+            continue
+        if in_upgrade and trimmed.startswith("- "):
+            item = trimmed[2:].strip()
+            if item and not item.startswith("No manual migration required") and not item.startswith("*(No "):
+                items.append(item)
+    return items
+
+
 def render_notes(version: str, *, date: str, level: str, themes: list[str],
-                 headline: str, commits: list[dict]) -> str:
+                 headline: str, commits: list[dict], next_content: str | None = None) -> str:
     del date, level, themes
     rows = [(subject_with_generation(commit), _public_kind(str(commit.get("subject", ""))))
             for commit in commits]
@@ -282,9 +300,15 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
             clean = _clean_public_subject(item)
             lines.append(f"- {clean[0].upper() + clean[1:] if clean else clean}.")
         lines.append("")
+    custom_upgrades = extract_upgrade_notes(next_content) if next_content else []
+    lines.extend(["## Upgrade", ""])
+    if custom_upgrades:
+        for it in custom_upgrades:
+            lines.append(f"- {it}")
+        lines.append("")
+    else:
+        lines.extend(["No manual migration is required unless a change above says otherwise. Install or update with:", ""])
     lines.extend([
-        "## Upgrade", "",
-        "No manual migration is required unless a change above says otherwise. Install or update with:", "",
         "```bash", "go install github.com/anthony-chaudhary/fak/cmd/fak@latest", "```", "",
         "## Release facts", "", f"- Version: `{version}`", f"- Commit count: {len(commits)}", "",
     ])
@@ -546,6 +570,8 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
 
     notes_rel = f"docs/releases/v{target}.md"
     include_paths = dedupe([shell_quote_path(p) for p in includes + manifest_includes])
+    next_draft_path = root / "docs/releases/NEXT.md"
+    next_content = next_draft_path.read_text(encoding="utf-8", errors="replace") if next_draft_path.is_file() else None
     notes_preview = render_notes(
         target,
         date=date,
@@ -553,6 +579,7 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
         themes=cut_themes,
         headline=cut_headline,
         commits=context.get("commits_since_tag") or [],
+        next_content=next_content,
     )
     if manifest_envelope:
         notes_preview = append_manifest_notes(notes_preview, manifest_envelope)
@@ -562,7 +589,8 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
     quality_errors = notes_quality_errors(notes_preview, target)
     if quality_errors:
         return {"ok": False, "reason": "release notes failed public quality gate", "errors": quality_errors}
-    paths = dedupe(paths_from_bump_report(bump) + [notes_rel] + include_paths)
+    extra_paths = ["docs/releases/NEXT.md"] if next_draft_path.is_file() else []
+    paths = dedupe(paths_from_bump_report(bump) + [notes_rel] + include_paths + extra_paths)
     return {
         "ok": True,
         "version": target,
@@ -648,6 +676,29 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
             notes_path.parent.mkdir(parents=True, exist_ok=True)
             notes_path.write_text(plan["notes_preview"], encoding="utf-8", newline="")
             notes_written = True
+
+        next_draft_path = root / "docs/releases/NEXT.md"
+        if next_draft_path.is_file():
+            from release_next import next_version_from_base, semver_tuple
+            curr_base = semver_tuple(plan["version"]) or (0, 0, 0)
+            following_ver = next_version_from_base(curr_base, "minor")
+            next_reset_text = (
+                f"# fak vNext (targeting v{following_ver}): Work in Progress\n\n"
+                f"This document tracks in-flight work on `main` targeting the upcoming `v{following_ver}` release.\n"
+                f"It is updated as commits land so that release notes are maintained proactively rather than scrambled at cut time.\n\n"
+                f"- **Projected version:** `{following_ver}` (`minor` bump)\n"
+                f"- **Base release tag:** `v{plan['version']}`\n"
+                f"- **Commits in flight:** 0\n\n"
+                f"## What changed\n\n"
+                f"- *(No new user-visible features landed yet)*\n\n"
+                f"## Reliability and correctness\n\n"
+                f"- *(No bug fixes landed yet)*\n\n"
+                f"## Engineering quality and evidence\n\n"
+                f"- *(No maintenance/quality commits landed yet)*\n\n"
+                f"## Upgrade and breaking changes\n\n"
+                f"- No manual migration required unless specified above.\n"
+            )
+            next_draft_path.write_text(next_reset_text, encoding="utf-8", newline="\n")
 
         code, out = run(["git", "add", "--", *paths], cwd=root)
         if code != 0:

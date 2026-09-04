@@ -150,6 +150,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 			"commits_since_tag":       releaseStatusCommitsSinceTag(contextPayload, root, lastTag),
 			"files_touched_since_tag": releaseStatusFilesSinceTag(contextPayload, root, lastTag),
 			"contents":                releaseStatusContents(root, lastTag),
+			"next_draft":              releaseStatusNextDraft(root),
 			"tag_drift":               releaseStatusAnyOrNil(contextPayload["tag_drift"]),
 			"ci_on_head":              releaseStatusAnyOrNil(contextPayload["ci_on_head"]),
 			"ci_diagnosis":            ciDiag,
@@ -871,6 +872,13 @@ func renderReleaseStatus(status map[string]any) string {
 	if line := releaseStatusRenderContents(releaseStatusMap(rolling["contents"])); line != "" {
 		lines = append(lines, line)
 	}
+	if nextDraft := releaseStatusMap(rolling["next_draft"]); len(nextDraft) > 0 {
+		statusWord := "missing"
+		if releaseStatusBool(nextDraft["exists"]) {
+			statusWord = "present"
+		}
+		lines = append(lines, fmt.Sprintf("  next draft: %s [%s]", releaseStatusString(nextDraft["path"]), statusWord))
+	}
 	lines = append(lines, fmt.Sprintf("  next action: %s - %s", releaseStatusString(action["kind"]), releaseStatusString(action["detail"])))
 	if latest := releaseStatusMap(stable["latest_stable"]); len(latest) > 0 {
 		lines = append(lines, fmt.Sprintf("  stable: %s (%s); lag=%v", latest["tag"], latest["version"], stable["stable_lag"]))
@@ -1249,3 +1257,12 @@ func releaseStatusShortSHA(s string) string {
 // strmatch.Tail owns the one definition; internal/workerworktree carried a byte-identical
 // private copy for the same job (quote the END of a failing command's output).
 func releaseStatusTail(s string, n int) string { return strmatch.Tail(s, n) }
+
+func releaseStatusNextDraft(root string) map[string]any {
+	nextPath := filepath.Join(root, "docs", "releases", "NEXT.md")
+	_, err := os.Stat(nextPath)
+	return map[string]any{
+		"path":   "docs/releases/NEXT.md",
+		"exists": err == nil,
+	}
+}
