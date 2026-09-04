@@ -1,0 +1,127 @@
+# fak vNext (targeting v0.48.0): Work in Progress
+
+This document tracks in-flight work on `main` targeting the upcoming `v0.48.0` release.
+It is updated as commits land so that release notes are maintained proactively rather than scrambled at cut time.
+
+- **Projected version:** `0.48.0` (`minor` bump)
+- **Base release tag:** `v0.47.0`
+- **Commits in flight:** 300
+
+## What changed
+
+- Add fak compute amd-gpudirect status, topology audit, and P2P bandwidth benchmark CLI (#11273).
+- Add on-demand MoE expert weight streaming from NVMe to GPU VRAM for massive sparse models (#11272).
+- Add python client library and sglang/vllm connectors (#11080).
+- Isolate go test binaries to gotmp scratch directory.
+- Implement fair ticket queue for writer lease acquisition.
+- Add disaggregated prefill-to-decode KV cache transfer over AMD GPU Direct RDMA (#11271).
+- Implement wip evict verb and automatic wipscope tracking.
+- Implement daemon store client adapter and loopback integration (#11079).
+- Add 1M-token context KV cache block paging via direct NVMe-to-GPU BaM storage streaming (#11270).
+- Implement restart reconciliation for orphaned attempts (#8887).
+- Wire default guard startup posture to default-open and expose --posture flag (#11259).
+- Implement PostureDefaultOpen permissive mode with fail-closed dangerous blocklist evaluation (#11257).
+- Add dangerous-operations blocklist catalog and extensible gotchas registry (#11258).
+- Add AMD GPU Direct queue pair auto-healing, link degradation watchdog, and leak-free teardown (#11274).
+- Expose sustained reconcile controller through default CLI (#8942).
+- Wire enabling leaves and runtime proofs for production reachability.
+- Wire gpudirect-overflow flag in guard and serve commands.
+- Add Strix Halo zero-copy APU, streaming load, and RDMA pool (#11242, #11245).
+- 2-4 GiB UMA DRAM write-back dirty ring buffer for NVMe wear-out (#11244).
+- Register issue-orchestrator and bench-effort verbs and arm sys tools in chat.
+- Add reflex profile with fast turn limits and model defaults.
+- Support canonical tool normalization and dynamic effort modulation.
+- Add git-pull sidestep and read to fak_read transform.
+- Add volume multiplier and decision routing for effort tiers (#11186).
+- Add L3 cache server implementation and benchmarks.
+- Add arch fitness and rank subcommands.
+- Implement untracked file isolation and fence stripping (#11231).
+- Implement adaptive reasoning effort flags, balanced titration, and think budget.
+- Add physical Windows display subsystem topology prober for AMD GPU Direct (#11226).
+- Add Windows display topology probe and cross-platform host discovery (#11267).
+- Implement bounded turn-decay and LRU aging for faulted cold tool schemas (#11153).
+- Implement Strix Halo gotchas detection, mock QA matrix, and remediation (#11241).
+- Implement zero-copy RDMA verbs QP and direct storage memory engine for AMD GPU Direct (#11226).
+- Expose portable managed-worker defaults (#10531).
+- Implement scheduler contracts, constraints, and validation.
+- Implement matched PR isolation cohort evaluation (#7332).
+- Add checkpoint recovery drill in detached isolation (#7331).
+- Implement source-work protection latency measurement (#7328).
+- Implement working-tree census readout and preview-only sweep (#6202).
+- Implement raw surfaces logical units and unresolved join debt reporting (#10440).
+- Add L3 cache server implementation and benchmarks.
+
+## Reliability and correctness
+
+- Add substantive benchmark suite and retire debt.
+- Support 96GB Strix Halo tier and strengthen gotcha audit matrix (#11249, #11250).
+- Advance maturity curve to benchmarked and retire debt.
+- Define EnvRunner interface and implementation for GitRunner.
+- Prevent futile retry loop and correct threshold on host commit headroom.
+- Prevent unit test memory allocation from host commit exhaustion.
+- Prevent massive non-linux memory allocation and stabilize test uptime.
+- Add benchmarks and reach production grade.
+- Add benchmarks and complete documentation.
+- Add worker filter and hard deadline to worktree list (#10447).
+- Add l3_serve definition for main dispatch (#11177).
+- Add benchmarks and reach target maturity.
+- Define cmdL3Serve stub to restore buildability.
+- Sanitize and standardize cache naming to L3.
+- Add strict mutation veto to proactive inline interceptor.
+- Detect and penalize excess comment bloat and formulaic noise.
+- Add benchmarks and contract invariants.
+- Add benchmarks and prune comment bloat.
+- Make sanctioned detached worker commit and land reliable (#8813).
+- Prune comment bloat and verify contracts.
+- Prune comment bloat and verify benchmarks.
+- Add benchmarks and eliminate comment bloat.
+- Add benchmarks and contracts.
+- Add benchmarks and contracts to reach target maturity.
+- Prevent recurring Windows worker prepare index-reset failures (#9891).
+- Add contracts and expand benchmark coverage.
+- Suppress console flash on Windows display topology probe (#11226).
+- Add contracts and exported documentation.
+- Add contract benchmarks and maturity docs.
+- Add benchmarks and contract comments.
+- Add benchmarks and contract documentation.
+- Add benchmarks and complete documentation contracts.
+- Add benchmarks for accumulator and retained mass.
+- Advance maturity curve and add benchmarks.
+- Repair BuildInternalImportGraph call and fence incomplete draft tests (#11177).
+
+## Engineering quality and evidence
+
+- Implement device paging and prefix placement awareness (#9357).
+- Add production benchmarks and retire maturity debt.
+- Register l3server tier and lane declarations.
+- Retire amoprofpub package and update architest registry.
+- Add integration tests for default-open and dangerous gotchas (#11260).
+- Document default_open posture and dangerous gotchas catalog (#11261).
+- Remove cmdL3Serve stub now implemented in l3_serve.go.
+- Add benchmarks and reach target maturity.
+- Add benchmarks and contract invariants.
+- Register l3server lane in dos.toml.
+- Add substantive benchmarks for core operations.
+- Use sanitized placeholder user home path in diagnostic test.
+- Refresh benchmark authority and scorecards for mac metal results.
+- Index mac-threeway-bench report in benchmarks readme.
+- Add benchmark test coverage.
+- Define 4-tier default priority hierarchy.
+- Document managed lifecycle, portable defaults, and remote recovery (#10508).
+- Refresh default priority hierarchy and v0.47.0 verification.
+- Add benchmarks and contracts.
+- Add end-to-end distributed inference and physical host GPU tests (#11226).
+- Add adapter benchmarks and contract specifications.
+- Add study drift invariants and benchmark suite.
+- Add coverage invariants and benchmark suite.
+- Add correlation matrix benchmarks and invariant tests.
+- Add invariant test coverage and benchmark suite.
+- Add allocation benchmarks and formal contract comments.
+- Add preflight runtime benchmarks and contract invariants.
+- Add mac-perf target and shift-left performance verification (#11138).
+- Prove unit lifecycle through issue session checkpoint worktree and landing (#10441).
+- Add lifecycle test proof for maturity rung.
+
+## Upgrade and breaking changes
+
+- No manual migration required unless specified above.
