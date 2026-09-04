@@ -131,6 +131,9 @@ func reject(out Outcome, reason ReasonCode, p Provenance) Result {
 		Evidence: EvidenceSummary{CapacityAndDrift: EvidenceModeled, Latency: EvidenceModeled, Envelope: "not evaluated"}}
 }
 
+// Invariant: Q-eviction evaluation is fail-closed and deterministic across all evaluation traces.
+// Guard: Requests with unknown contract versions, mismatched recipes, or invalid artifact digests are rejected with DecisionAbstain.
+// Precondition: Window events in a trace must have strictly monotonic step indices and valid byte allocations.
 func Evaluate(req Request) Result {
 	p := req.Provenance
 	if req.ContractVersion != ContractVersion {
