@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import sys
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
 
 SCRIPT = Path(__file__).resolve().parent / "issue_lane_router.py"
 
@@ -1310,6 +1315,79 @@ class RequiredCapsTest(unittest.TestCase):
             m.issue_required_caps(
                 issue(5595, "feat(operator): subtract parked emissions before the verdict",
                       body="one emitted ref waits on a live 8-GPU lab witness")),
+            [])
+
+    def test_requires_labels_annotate_caps(self):
+        cases = [
+            ("requires:gpu", ["gpu"]),
+            ("requires:gpu:single", ["gpu"]),
+            ("requires:gpu:multi", ["gpu"]),
+            ("requires:cuda", ["gpu"]),
+            ("requires:hardware", ["hardware"]),
+            ("requires:lab-hw", ["hardware"]),
+            ("requires:lab", ["hardware"]),
+            ("requires:metal", ["metal"]),
+            ("requires:quota", ["quota"]),
+        ]
+        for lab, want in cases:
+            with self.subTest(label=lab):
+                self.assertEqual(
+                    m.issue_required_caps(issue(1, "task", labels=[lab])),
+                    want)
+
+    def test_requires_none_is_unconstrained(self):
+        # requires:none is the explicit unconstrained baseline and suppresses inference
+        # even if body prose mentions an accelerator keyword in passing.
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(1, "task mentioning a100 in title",
+                      body="prose mentioning an h100 or dgx keyword in passing",
+                      labels=["requires:none"])),
+            [])
+
+    def test_body_execution_boundary_declaration(self):
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(1, "task",
+                      body="Execution boundary: Single GPU (CUDA / Metal) [requires:gpu]")),
+            ["gpu"])
+        # Multi-GPU and lab hardware combinations
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(2, "task",
+                      body="Execution boundary: Multi-GPU (Tensor Parallel / NCCL / DGX) [requires:gpu, requires:hardware]")),
+            ["gpu", "hardware"])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(3, "task",
+                      body="Execution boundary: Sanctioned lab hardware (bare metal / reboot host) [requires:hardware]")),
+            ["hardware"])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(4, "task",
+                      body="Execution boundary: Cloud quota / burst network [requires:quota]")),
+            ["quota"])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(5, "task",
+                      body="Requires: requires:metal")),
+            ["metal"])
+
+    def test_body_standard_runner_is_unconstrained(self):
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(1, "task with a100 log parsing",
+                      body="Execution boundary: Standard runner (CPU / local / portable) [default]\ninspect a100 error logs")),
+            [])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(2, "task",
+                      body="Execution Target: Standard runner (CPU / local / portable) [default]")),
+            [])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(3, "task",
+                      body="Requires: requires:none\ninspect dgx cluster logs")),
             [])
 
 

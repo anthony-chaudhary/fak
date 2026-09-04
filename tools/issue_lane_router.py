@@ -35,6 +35,10 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
+
 from dispatch_worker import no_window_creationflags
 
 SCHEMA = "fleet-issue-lane-router/1"
@@ -322,6 +326,24 @@ GPU_CAP_KEYWORDS = ("h100", "a100", "dgx", "nvidia")
 # signal, so the precise human label wins over the broader regex.
 HARDWARE_CAP_LABEL = "gated/hardware"
 HARDWARE_CAP = "hardware"
+
+# Shift-left resource requirement labels and signals (#10965).
+# Recognises static hardware/resource capability requirement axis labels and explicit
+# body execution target declarations (Execution boundary / Execution Target / Requires).
+REQUIRES_GPU_LABELS = {"requires:gpu", "requires:gpu:single", "requires:gpu:multi", "requires:cuda"}
+REQUIRES_HARDWARE_LABELS = {"requires:hardware", "requires:lab-hw", "requires:lab"}
+REQUIRES_METAL_LABELS = {"requires:metal"}
+REQUIRES_QUOTA_LABELS = {"requires:quota"}
+REQUIRES_NONE_LABEL = "requires:none"
+
+_EXECUTION_BOUNDARY_RE = re.compile(
+    r"^[#*\-\s]*(?:\*\*)?(?:execution\s+boundary(?:\s*/\s*resource\s+requirement)?|execution\s+target|requires):?(?:\*\*)?:?\s*(.+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_EXECUTION_BOUNDARY_BLOCK_RE = re.compile(
+    r"^[#*\-\s]*(?:\*\*)?(?:execution\s+boundary(?:\s*/\s*resource\s+requirement)?|execution\s+target|requires):?(?:\*\*)?:?\s*\n+([^\n#]+)",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 # ---------------------------------------------------------------------------
 # Work-CLASS axis (infra / frontdoor / dev) — orthogonal to the lane an issue
@@ -645,27 +667,101 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     issue, sorted and deduplicated.
 
     Contributes "gpu" when the issue carries an unambiguous accelerator signal — a
-    cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/dgx/
-    nvidia) in the title/body — and "hardware" when it carries the maintainer-applied
-    HARDWARE_CAP_LABEL (see that constant for why the human label is its own capability
-    rather than an alias for "gpu"). Both can apply, and the dispatcher requires the
-    node to declare every one of them; [] means any host can run it.
+    cuda/gpu/multi-gpu label or scope, a named-accelerator keyword (h100/a100/dgx/
+    nvidia) in the title/body, a requires:gpu/* label, or an explicit execution
+    boundary declaring single/multi GPU / CUDA — and "hardware" when it carries
+    HARDWARE_CAP_LABEL or requires:hardware/* or lab hardware / DGX, "metal" for
+    requires:metal, and "quota" for requires:quota.
 
-    The dispatcher's capability gate skips an issue whose required_caps a node lacks,
-    leaving it OPEN + visible for a capable node's dispatcher to claim; it does NOT stop
-    or cool the issue. Pure + deterministic."""
+    Explicit `requires:none` or a "Standard runner" execution target declaration
+    designates unconstrained CPU execution and suppresses inferred accelerator
+    keywords. Pure + deterministic."""
     labels = {ln.lower() for ln in _label_names(issue)}
     caps: set[str] = set()
+    suppress_inference = False
+
+    if REQUIRES_NONE_LABEL in labels:
+        suppress_inference = True
+
+    for lab in labels:
+        if lab in REQUIRES_GPU_LABELS:
+            caps.add("gpu")
+        elif lab in REQUIRES_HARDWARE_LABELS:
+            caps.add(HARDWARE_CAP)
+        elif lab in REQUIRES_METAL_LABELS:
+            caps.add("metal")
+        elif lab in REQUIRES_QUOTA_LABELS:
+            caps.add("quota")
+
     if HARDWARE_CAP_LABEL in labels:
         caps.add(HARDWARE_CAP)
     if labels & GPU_CAP_LABELS:
         caps.add("gpu")
-    scope = _scope_token(str(issue.get("title") or ""))
-    if scope in GPU_CAP_LABELS:
-        caps.add("gpu")
-    text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
-    if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
-        caps.add("gpu")
+
+    body = str(issue.get("body") or "")
+    targets: list[str] = []
+    for m in _EXECUTION_BOUNDARY_RE.finditer(body):
+        t = m.group(1).strip()
+        if t:
+            targets.append(t)
+    if not targets:
+        for m in _EXECUTION_BOUNDARY_BLOCK_RE.finditer(body):
+            t = m.group(1).strip()
+            if t:
+                targets.append(t)
+
+    for target in targets:
+        if (re.search(r"\bstandard\s+runner\b", target, re.IGNORECASE) or
+                re.search(r"\brequires:none\b", target, re.IGNORECASE)):
+            suppress_inference = True
+            continue
+
+        # Extract explicit requires:* tags in target
+        for tr in re.findall(r"requires:[\w:-]+", target, re.IGNORECASE):
+            tr_lower = tr.lower()
+            if tr_lower in REQUIRES_GPU_LABELS:
+                caps.add("gpu")
+            elif tr_lower in REQUIRES_HARDWARE_LABELS:
+                caps.add(HARDWARE_CAP)
+            elif tr_lower in REQUIRES_METAL_LABELS:
+                caps.add("metal")
+            elif tr_lower in REQUIRES_QUOTA_LABELS:
+                caps.add("quota")
+            elif tr_lower == REQUIRES_NONE_LABEL:
+                suppress_inference = True
+
+        # Check prose mentions
+        if re.search(r"\bsingle[- ]gpu\b", target, re.IGNORECASE):
+            caps.add("gpu")
+        if re.search(r"\bcuda\b", target, re.IGNORECASE):
+            caps.add("gpu")
+        if re.search(r"\bmulti[- ]gpu\b", target, re.IGNORECASE):
+            caps.add("gpu")
+        if re.search(r"\bdgx\b", target, re.IGNORECASE):
+            caps.add("gpu")
+            caps.add(HARDWARE_CAP)
+        if re.search(r"\blab\s+hardware\b", target, re.IGNORECASE):
+            caps.add(HARDWARE_CAP)
+
+        # Check for Metal, excluding generic template options like "(CUDA / Metal)" or "bare metal"
+        clean_target = re.sub(r"\(\s*cuda\s*/\s*metal\s*\)", "", target, flags=re.IGNORECASE)
+        clean_target = re.sub(r"\bbare\s+metal\b", "", clean_target, flags=re.IGNORECASE)
+        clean_target = re.sub(r"requires:[\w:-]+", "", clean_target, flags=re.IGNORECASE)
+        if re.search(r"\bmetal\b", clean_target, re.IGNORECASE):
+            caps.add("gpu")
+            caps.add("metal")
+
+        if re.search(r"\bquota\b", target, re.IGNORECASE):
+            caps.add("quota")
+
+    if not suppress_inference:
+        scope = _scope_token(str(issue.get("title") or ""))
+        if scope in GPU_CAP_LABELS:
+            caps.add("gpu")
+        text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
+        if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
+            caps.add("gpu")
+
     return sorted(caps)
 
 

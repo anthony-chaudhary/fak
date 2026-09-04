@@ -34,6 +34,9 @@ Label taxonomy is fleet's, baked in as defaults:
               good first issue
   dependency blocked-by | blocks  (directional pair naming a prerequisite edge
               between two issues; see DEPENDENCY below)
+  requires   requires:none | requires:gpu | requires:hardware | requires:metal |
+              requires:quota (static hardware/resource capability requirement axis;
+              see REQUIRES below)
 Override thresholds via flags; override label sets via --config (JSON file).
 
 Ranking (the "do next" order) is a transparent integer score, not a model:
@@ -63,9 +66,13 @@ import datetime as dt
 import hashlib
 import json
 import subprocess
-from dispatch_worker import install_no_window_subprocess_defaults
 import sys
 from pathlib import Path
+
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
+from dispatch_worker import install_no_window_subprocess_defaults
 install_no_window_subprocess_defaults(subprocess)
 
 try:
@@ -109,6 +116,13 @@ WORKFLOW = {"in-progress", "duplicate", "wontfix", "invalid", "help wanted",
 # issue-BODY token. Declaring the label side first is what lets the edges accumulate
 # on real issues before a reader exists to walk them.
 DEPENDENCY = {"blocked-by", "blocks"}
+# REQUIRES is the static hardware/resource capability requirement axis (#10965):
+# `requires:gpu`, `requires:hardware`, `requires:metal`, `requires:quota`,
+# defaulting to unconstrained `requires:none`. Distinct from the transient
+# `blocked` status or causal `blocked-by` dependencies — an issue carrying
+# `requires:gpu` is not stuck, it simply requires an execution host with that
+# capability to run.
+REQUIRES = {"requires"}
 # Bare kind fallback for the "documentation" docs(fak) spam pattern — the
 # docs(fak):* issues carry only `documentation`+`enhancement`, no priority, no
 # area. They are the canonical "needs-priority + garden" candidate.
@@ -129,11 +143,11 @@ class IncompleteRankingError(RuntimeError):
 def _load_config(path: str | None) -> None:
     """Override label sets from a JSON file. Schema (all optional):
        {"priority": {"label": weight}, "kind": [...], "area": [...],
-        "workflow": [...], "dependency": [...], "stale_days": N,
+        "workflow": [...], "dependency": [...], "requires": [...], "stale_days": N,
         "q_idle_days": N}"""
     if not path:
         return
-    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, DEPENDENCY
+    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, DEPENDENCY, REQUIRES
     global STALE_DAYS, Q_IDLE_DAYS
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     if "priority" in cfg:
@@ -148,6 +162,8 @@ def _load_config(path: str | None) -> None:
         WORKFLOW = set(cfg["workflow"])
     if "dependency" in cfg:
         DEPENDENCY = set(cfg["dependency"])
+    if "requires" in cfg:
+        REQUIRES = set(cfg["requires"])
     STALE_DAYS = int(cfg.get("stale_days", STALE_DAYS))
     Q_IDLE_DAYS = int(cfg.get("q_idle_days", Q_IDLE_DAYS))
 
