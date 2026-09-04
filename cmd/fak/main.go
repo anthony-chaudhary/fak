@@ -119,6 +119,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runTempArtifacts(os.Stdout, os.Stderr, args))
 	case "workspin":
 		cmdWorkspin(args)
+	case "causal-receipt", "causalreceipt":
+		cmdCausalReceipt(args)
 	case "codex-resume":
 		cmdCodexResume(args)
 	case "sessionjournal":
@@ -253,6 +255,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdTrajectory(args)
 	case "quantwatch":
 		cmdQuantwatch(args)
+	case "bitnetmeta":
+		cmdBitnetmeta(args)
 	case "work-delivery":
 		cmdWorkDelivery(args)
 	case "worktype":
@@ -320,6 +324,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdNegate(args)
 	case "claim-check":
 		cmdClaimCheck(args)
+	case "citeverify":
+		cmdCiteverify(args)
 	case "native-first-lint":
 		os.Exit(cmdNativeFirstLint(args))
 	case "headless-lint":
@@ -826,6 +832,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdNativePerformance(args)
 	case "quantbench":
 		cmdQuantbench(args)
+	case "bitnetruntime":
+		cmdBitnetRuntime(args)
 	case "frontierswe":
 		cmdFrontierswe(args)
 	case "sota":

@@ -1,4 +1,10 @@
 // Package causalreceipt records privacy-safe whole-turn causal evidence without requiring an external tracing SDK.
+//
+// Invariants and contracts:
+//   - Invariant: A causal receipt enforces strict fail-closed validation over causal identity and phase hierarchy.
+//   - Invariant: Privacy guard rejects any sensitive content-bearing attributes (e.g. prompts, outputs, arguments, screenshots).
+//   - Invariant: Every referenced resource must be explicitly released (lifecycle closure guard).
+//   - Invariant: Orphan phases lacking valid parentage or carrying ambiguous native engines are rejected.
 package causalreceipt
 
 import (
@@ -10,40 +16,93 @@ import (
 	"time"
 )
 
+// Schema is the canonical schema identifier for causal receipts.
 const Schema = "fak.causal-receipt/1"
 
-type IDs struct{ Work, Turn, Graph, Request, ModelSession string }
-type Decision struct{ Kind, ID, Reason, Planned, Actual string }
-type Phase struct {
-	ID, ParentID, Kind, Engine, Backend, Outcome, Reason                                                               string
-	Started, Ended                                                                                                     time.Time
-	Tokens, Bytes, CacheReuseBytes, QueueNS, LoadNS, TransferNS, RecomputeNS, RecoveryNS, VerificationNS, EnergyMicroJ int64
-	Quality                                                                                                            string
-	ResourceIDs, OperationIDs                                                                                          []string
-}
-type Resource struct {
-	ID, Kind, State, PlannedLocality, ActualLocality string
-	Bytes, TransferBytes, RecomputeBytes             int64
-	Released                                         bool
-}
-type Receipt struct {
-	Schema         string
-	IDs            IDs
-	Phases         []Phase
-	Resources      []Resource
-	Decisions      []Decision
-	ModuleVersions map[string]string
-	Attributes     map[string]string
-}
-type Metrics struct {
-	PhaseCount                                 int
-	Tokens, Bytes, CacheReuseBytes, OverheadNS int64
-	Outcomes                                   map[string]int
+// IDs captures the causal identity scope across work, turn, graph, request, and model session.
+type IDs struct {
+	Work         string `json:"work"`
+	Turn         string `json:"turn"`
+	Graph        string `json:"graph"`
+	Request      string `json:"request"`
+	ModelSession string `json:"model_session,omitempty"`
 }
 
+// Decision records an individual causal decision and its outcome.
+type Decision struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Reason  string `json:"reason,omitempty"`
+	Planned string `json:"planned,omitempty"`
+	Actual  string `json:"actual"`
+}
+
+// Phase represents a bounded execution phase in the turn graph.
+type Phase struct {
+	ID              string    `json:"id"`
+	ParentID        string    `json:"parent_id,omitempty"`
+	Kind            string    `json:"kind"`
+	Engine          string    `json:"engine"`
+	Backend         string    `json:"backend"`
+	Outcome         string    `json:"outcome"`
+	Reason          string    `json:"reason,omitempty"`
+	Started         time.Time `json:"started,omitempty"`
+	Ended           time.Time `json:"ended,omitempty"`
+	Tokens          int64     `json:"tokens,omitempty"`
+	Bytes           int64     `json:"bytes,omitempty"`
+	CacheReuseBytes int64     `json:"cache_reuse_bytes,omitempty"`
+	QueueNS         int64     `json:"queue_ns,omitempty"`
+	LoadNS          int64     `json:"load_ns,omitempty"`
+	TransferNS      int64     `json:"transfer_ns,omitempty"`
+	RecomputeNS     int64     `json:"recompute_ns,omitempty"`
+	RecoveryNS      int64     `json:"recovery_ns,omitempty"`
+	VerificationNS  int64     `json:"verification_ns,omitempty"`
+	EnergyMicroJ    int64     `json:"energy_micro_j,omitempty"`
+	Quality         string    `json:"quality,omitempty"`
+	ResourceIDs     []string  `json:"resource_ids,omitempty"`
+	OperationIDs    []string  `json:"operation_ids,omitempty"`
+}
+
+// Resource tracks an allocated resource and its lifecycle state.
+type Resource struct {
+	ID              string `json:"id"`
+	Kind            string `json:"kind"`
+	State           string `json:"state"`
+	PlannedLocality string `json:"planned_locality,omitempty"`
+	ActualLocality  string `json:"actual_locality,omitempty"`
+	Bytes           int64  `json:"bytes,omitempty"`
+	TransferBytes   int64  `json:"transfer_bytes,omitempty"`
+	RecomputeBytes  int64  `json:"recompute_bytes,omitempty"`
+	Released        bool   `json:"released"`
+}
+
+// Receipt records whole-turn causal evidence across IDs, phases, resources, decisions, and attributes.
+type Receipt struct {
+	Schema         string            `json:"schema"`
+	IDs            IDs               `json:"ids"`
+	Phases         []Phase           `json:"phases"`
+	Resources      []Resource        `json:"resources,omitempty"`
+	Decisions      []Decision        `json:"decisions,omitempty"`
+	ModuleVersions map[string]string `json:"module_versions,omitempty"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
+}
+
+// Metrics aggregates whole-turn resource overheads, token usage, and outcomes.
+type Metrics struct {
+	PhaseCount      int            `json:"phase_count"`
+	Tokens          int64          `json:"tokens"`
+	Bytes           int64          `json:"bytes"`
+	CacheReuseBytes int64          `json:"cache_reuse_bytes"`
+	OverheadNS      int64          `json:"overhead_ns"`
+	Outcomes        map[string]int `json:"outcomes"`
+}
+
+// ErrInvalid signals an ill-formed or privacy-violating causal receipt.
 var ErrInvalid = errors.New("causalreceipt: invalid receipt")
+
 var sensitive = regexp.MustCompile(`(?i)(prompt|output|argument|result|content|screenshot|file[_-]?path)`)
 
+// Validate checks that a receipt conforms to the causal schema and contains no sensitive content.
 func Validate(r Receipt) error {
 	if r.Schema != Schema || r.IDs.Work == "" || r.IDs.Turn == "" || r.IDs.Graph == "" || r.IDs.Request == "" {
 		return fmt.Errorf("%w: missing causal identity", ErrInvalid)
@@ -78,6 +137,8 @@ func Validate(r Receipt) error {
 	}
 	return nil
 }
+
+// DeriveMetrics computes aggregated turn metrics after validating the receipt.
 func DeriveMetrics(r Receipt) (Metrics, error) {
 	if e := Validate(r); e != nil {
 		return Metrics{}, e
@@ -102,6 +163,8 @@ func MetricLabels(r Receipt) map[string]string {
 	}
 	return out
 }
+
+// IncidentAnswers extracts incident and failure signatures from phase latencies and evicted resources.
 func IncidentAnswers(r Receipt) []string {
 	answers := []string{}
 	for _, p := range r.Phases {

@@ -63,3 +63,26 @@ func TestVerifyRejectsUnsafeSources(t *testing.T) {
 		t.Fatalf("outside root: got %q", got)
 	}
 }
+
+func BenchmarkVerify(b *testing.B) {
+	root := b.TempDir()
+	path := filepath.Join(root, "pkg", "benchmark_target.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	content := "package pkg\nfunc BenchmarkTargetSymbol() {}\n\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	claim := "`BenchmarkTargetSymbol` exists in source"
+	evidence := []string{"pkg/benchmark_target.go:2"}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		st := Verify(claim, evidence, root)
+		if st != Supports {
+			b.Fatalf("Verify() = %q, want supports", st)
+		}
+	}
+}
