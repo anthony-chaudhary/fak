@@ -316,3 +316,31 @@ func testCodexAccountDigest(accountID string) string {
 	sum := sha256.Sum256([]byte("fak/codex-account-identity/v1\x00" + accountID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
+
+func TestNormalizeCodexModelSlug(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"gpt-6-astra", GPT6AstraModel},
+		{"gpt 6 astra", GPT6AstraModel},
+		{"GPT 6 ASTRA", GPT6AstraModel},
+		{"gpt6astra", GPT6AstraModel},
+		{"gpt-6", GPT6AstraModel},
+		{"gpt6", GPT6AstraModel},
+		{"astra", GPT6AstraModel},
+		{"ASTRA", GPT6AstraModel},
+		{"openai/gpt-6-astra", GPT6AstraModel},
+		{"openai/gpt-6", GPT6AstraModel},
+		{"openai/astra", GPT6AstraModel},
+		{"  gpt 6 astra  ", GPT6AstraModel},
+		{"gpt-5.6-sol", "gpt-5.6-sol"},
+		{"custom-model", "custom-model"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := NormalizeCodexModelSlug(tc.in); got != tc.want {
+			t.Errorf("NormalizeCodexModelSlug(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

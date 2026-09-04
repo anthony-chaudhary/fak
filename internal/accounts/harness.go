@@ -14,18 +14,34 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
+// GPT6AstraModel is the OpenAI GPT-6 Astra flagship model slug.
+const GPT6AstraModel = "gpt-6-astra"
+
 // CodexDefaultModel and CodexDefaultReasoningEffort are the config-home defaults shared by
 // the Codex account picker and every guarded Codex launch. Keep the exact flagship slug here
-// (rather than the moving gpt-5.6 alias) so the picker, launch plan, and child config all name
+// (rather than the moving gpt-6 alias) so the picker, launch plan, and child config all name
 // the same effective model. The Codex config reference calls the reasoning key
 // model_reasoning_effort and admits xhigh on supported Responses models. The default effort
 // is the user-configured `high` (#10669): guarded sessions must never silently escalate to
 // xhigh — measured to roughly double the post-tool wait — so xhigh is opt-in only at the
 // launch site (FAK_GUARD_CODEX_REASONING_EFFORT), never a shared default.
 const (
-	CodexDefaultModel           = "gpt-5.6-sol"
+	CodexDefaultModel           = GPT6AstraModel
 	CodexDefaultReasoningEffort = "high"
 )
+
+// NormalizeCodexModelSlug maps natural aliases and slugs (such as "gpt 6 astra",
+// "gpt-6", "astra", "gpt6astra") to the canonical model slug ("gpt-6-astra").
+// Unrecognized models are returned unchanged (trimmed).
+func NormalizeCodexModelSlug(model string) string {
+	m := strings.TrimSpace(model)
+	switch strings.ToLower(m) {
+	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra", "openai/gpt-6-astra", "openai/gpt-6", "openai/astra":
+		return GPT6AstraModel
+	default:
+		return m
+	}
+}
 
 // harness.go generalizes the account model so a NON-Claude harness's config homes — the
 // ~/.codex* homes today — enter the SAME rotation pool the ~/.claude* homes use (C4,
