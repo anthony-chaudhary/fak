@@ -50,6 +50,9 @@ type PrefixSnapshot struct {
 	qwen35     *qwen35HALState
 	Backend    compute.Backend
 	Tokens     int
+	// DenseGPULayers / GPULayers preserve layer placement across prefix snapshots.
+	DenseGPULayers int
+	GPULayers      int
 	// Native MTP consumes the exact pre-final-norm residual history. It is part of
 	// session state just as surely as KV: restoring one without the other can make
 	// a rejected draft visible to the next proposal even though attention rolled back.
@@ -72,7 +75,7 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 		// halKV plus recurrent tensors.
 		tokens = s.halKV.Len()
 	}
-	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens}
+	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers}
 	s.targetHiddenMu.RLock()
 	out.captureTargetHidden = s.captureTargetHidden
 	out.targetHidden = cloneTargetHidden(s.targetHidden)
@@ -150,6 +153,12 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 		p.halKV, p.qwen35 = nil, nil
 		p.halLineage = tokenLineage{}
 	}
+	if s.DenseGPULayers == 0 && p.DenseGPULayers != 0 {
+		s.DenseGPULayers = p.DenseGPULayers
+	}
+	if s.GPULayers == 0 && p.GPULayers != 0 {
+		s.GPULayers = p.GPULayers
+	}
 	s.Cache = p.Cache
 	p.Cache = nil
 	p.halLineage = tokenLineage{}
@@ -205,6 +214,11 @@ type Session struct {
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
 	Backend compute.Backend
+	// DenseGPULayers bounds the contiguous layer band [0, DenseGPULayers) placed on the
+	// device (Backend), with the remaining layers [DenseGPULayers, NumLayers) executing on
+	// host CPU. GPULayers is supported as an alias. 0 (default) runs all layers on Backend.
+	DenseGPULayers int
+	GPULayers      int
 	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
 	// gate/up output slab. The default remains off until the measured KEEP gate lands.
 	Q4KGateUpOutputSlab bool
@@ -478,6 +492,57 @@ func (m *Model) NewSession() *Session {
 	return s
 }
 
+func (s *Session) denseGPULayers() int {
+	if s == nil {
+		return 0
+	}
+	if s.DenseGPULayers != 0 && s.GPULayers != 0 && s.DenseGPULayers != s.GPULayers {
+		panic(fmt.Sprintf("model: DenseGPULayers=%d and GPULayers=%d conflict", s.DenseGPULayers, s.GPULayers))
+	}
+	if s.DenseGPULayers != 0 {
+		return s.DenseGPULayers
+	}
+	return s.GPULayers
+}
+
+func (s *Session) validateDenseGPULayers() (int, bool) {
+	if s == nil || s.M == nil {
+		return 0, false
+	}
+	n := s.denseGPULayers()
+	cfg := s.M.Cfg
+	if n < 0 || n > cfg.NumLayers {
+		panic(fmt.Sprintf("model: DenseGPULayers=%d out of bounds for NumLayers=%d", n, cfg.NumLayers))
+	}
+	if n > 0 && s.Backend == nil {
+		panic(fmt.Sprintf("model: DenseGPULayers=%d requires a non-nil Backend", n))
+	}
+	if s.Cache == nil {
+		s.Cache = NewKVCache(cfg)
+	}
+	return n, n > 0 && n < cfg.NumLayers
+}
+
+func (s *Session) hostMatKernel() matKernel {
+	m, cfg := s.M, s.M.Cfg
+	if s.Q4 && m.q4w != nil {
+		return sessionQ4Kernel{s: s}
+	}
+	if s.Q4K && m.q4kw != nil {
+		return sessionQ4KKernel{s: s}
+	}
+	if s.Quant {
+		if cfg.IsMoE() {
+			return q8Kernel{m: m}
+		}
+		return sessionQ8Kernel{s: s}
+	}
+	if m.has("model.layers.0.self_attn.q_proj.weight") {
+		return f32Kernel{m: m}
+	}
+	return residentKernel{m: m}
+}
+
 // token runs one position through all layers and projects to logits. It is
 // tokenHidden (the shared prefill/decode compute) followed by the LM head; kept as
 // the decode path (Step) where every step's logits are actually consumed.
@@ -504,6 +569,7 @@ func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 }
 
 func (s *Session) token(id, pos int) []float32 {
+	s.validateDenseGPULayers()
 	if s.Backend != nil {
 		s.requirePreNorm("HAL decode")
 		return s.tappedLogitsAt(pos, s.tokenHAL(id, pos))
@@ -902,6 +968,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
+	s.validateDenseGPULayers()
 	if result, used, err := s.tryQwen35SequencePrefill(ids, true); used {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
@@ -935,12 +1002,6 @@ func (s *Session) Prefill(ids []int) []float32 {
 		// wrong shape on this arch's local layers.
 		return s.prefillGemma4(ids)
 	}
-	if s.Q4 {
-		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
-		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
-		// only the resident int4 weights (the lean q4-only mode freed the Q8_0 copy).
-		return s.headQ4(s.tokenLoopHidden(s.tokenHiddenQ, ids))
-	}
 	if s.Backend != nil {
 		// A device session executes the WHOLE forward through the HAL (matWeightHAL now
 		// dispatches q8w/q4kw/f32), so the device path must take precedence over the CPU
@@ -948,6 +1009,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 		// (s.Cache) while decoding from the empty device cache (s.halKV) → garbage (#949).
 		s.requirePreNorm("HAL prefill")
 		return s.prefillHAL(ids, true)
+	}
+	if s.Q4 {
+		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
+		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
+		// only the resident int4 weights (the lean q4-only mode freed the Q8_0 copy).
+		return s.headQ4(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
 	if s.Q4K {
 		// Resident Q4_K prefill (plan P1/P3). For a PreNorm standard-attention model (the
@@ -1021,6 +1088,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
+	s.validateDenseGPULayers()
 	if _, used, err := s.tryQwen35SequencePrefill(ids, false); used {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
@@ -1049,15 +1117,15 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		s.gemma4Ingest(ids)
 		return
 	}
+	if s.Backend != nil {
+		s.requirePreNorm("HAL prefill")
+		s.prefillHAL(ids, false)
+		return
+	}
 	if s.Q4 {
 		for _, id := range ids {
 			s.tokenHiddenQ(id, s.Cache.Len())
 		}
-		return
-	}
-	if s.Backend != nil {
-		s.requirePreNorm("HAL prefill")
-		s.prefillHAL(ids, false)
 		return
 	}
 	if s.Q4K {
@@ -1146,6 +1214,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 func (s *Session) Step(id int) []float32 {
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
+	s.validateDenseGPULayers()
 	// Coordinated expert-parallel serve (#4835) — see the note in Prefill.
 	if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
 		defer rel()
