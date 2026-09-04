@@ -35,8 +35,12 @@ type Store struct {
 // applies its current correction to rawEstimate, so its output cannot feed back
 // into the quantity it learns.
 //
-// Observations with a non-positive estimate or a negative real-token count are
-// ignored because they cannot describe a valid ratio.
+// Invariant: estimate calibration is fail-closed and clamps bounds safely.
+// Observations with a non-positive raw estimate or a negative billed token count
+// are discarded so that corrupt or degenerate values cannot pollute learned ratios.
+//
+// Precondition: rawEstimate > 0 and realTokens >= 0 are required for an observation
+// to be accepted; unvalidated or invalid updates are safely ignored without mutation.
 func (s *Store) Observe(provider, model string, rawEstimate, realTokens int) {
 	if rawEstimate <= 0 || realTokens < 0 {
 		return
@@ -66,6 +70,8 @@ func (s *Store) Observe(provider, model string, rawEstimate, realTokens int) {
 // Ratio returns the learned correction for provider/model once MinSamples
 // observations exist. The false result deliberately distinguishes insufficient
 // evidence from a trusted ratio of 1.
+//
+// Guard: below MinSamples observations, Ratio fails closed by returning (0, false).
 func (s *Store) Ratio(provider, model string) (float64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
