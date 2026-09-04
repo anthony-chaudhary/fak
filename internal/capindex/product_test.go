@@ -174,3 +174,24 @@ func TestNativePerformanceStagesDoNotCaptureUnrelatedIntents(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryProductOutcomesPLEDiskStream(t *testing.T) {
+	for _, query := range []string{"ple disk stream", "moe offload", "direct io", "nvme stream"} {
+		t.Run(query, func(t *testing.T) {
+			got := QueryProductOutcomes(query, 3)
+			if len(got) == 0 {
+				t.Fatalf("query %q returned zero outcomes", query)
+			}
+			found := false
+			for _, outcome := range got {
+				if outcome.ID == "ple-disk-stream" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("query %q did not include ple-disk-stream: %#v", query, got)
+			}
+		})
+	}
+}
