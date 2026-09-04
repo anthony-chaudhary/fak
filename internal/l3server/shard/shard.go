@@ -542,7 +542,7 @@ func (s *Shard) SubmitAsync(op ShardOp) bool {
 			s.circuit.consecutiveDrops = 0
 			s.circuit.cooldownDur = 0
 			s.circuit.halfOpen = false
-			log.Printf("[cama] shard %d circuit breaker CLOSED (half-open probe succeeded)", s.id)
+			log.Printf("[l3server] shard %d circuit breaker CLOSED (half-open probe succeeded)", s.id)
 		} else {
 			s.circuit.consecutiveDrops = 0 // successful enqueue resets drop counter
 		}
@@ -560,7 +560,7 @@ func (s *Shard) SubmitAsync(op ShardOp) bool {
 			if op.Result != nil {
 				op.Result <- OpResult{Err: errDispatchTimeout}
 			}
-			log.Printf("[cama] shard %d circuit breaker half-open probe FAILED â€” escalating cooldown to %v",
+			log.Printf("[l3server] shard %d circuit breaker half-open probe FAILED â€” escalating cooldown to %v",
 				s.id, s.circuit.cooldownDur)
 			return false
 		}
@@ -570,14 +570,14 @@ func (s *Shard) SubmitAsync(op ShardOp) bool {
 			s.circuit.cooldownDur = circuitCooldownBase
 			s.circuit.cooldownUntil = time.Now().Add(s.circuit.cooldownDur)
 			s.metrics.IncrCircuitTrips()
-			log.Printf("[cama] WARNING: shard %d circuit breaker TRIPPED â€” %d consecutive drops, cooldown %v",
+			log.Printf("[l3server] WARNING: shard %d circuit breaker TRIPPED â€” %d consecutive drops, cooldown %v",
 				s.id, consecutiveDropThreshold, s.circuit.cooldownDur)
 		}
 		// H4: Rate-limited drop logging (1s gate)
 		now := time.Now().UnixNano()
 		if last := s.dropLogLast.Load(); now-last > int64(time.Second) {
 			if s.dropLogLast.CompareAndSwap(last, now) {
-				log.Printf("[cama] WARNING: shard %d op queue full (cap=%d) â€” op dropped (type=%d)",
+				log.Printf("[l3server] WARNING: shard %d op queue full (cap=%d) â€” op dropped (type=%d)",
 					s.id, cap(s.ops), op.Type)
 			}
 		}

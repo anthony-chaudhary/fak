@@ -20,7 +20,7 @@ func (d *Dispatcher) fanOutShards(groups []*batchGroup, makeOp func(*batchGroup)
 	for i, g := range groups {
 		ops[i] = makeOp(g)
 		if !g.shard.SubmitAsync(ops[i]) {
-			log.Printf("[cama] WARNING: batch dispatch to shard %d dropped â€” queue full (%d groups total)", g.shard.ID(), len(groups))
+			log.Printf("[l3server] WARNING: batch dispatch to shard %d dropped â€” queue full (%d groups total)", g.shard.ID(), len(groups))
 		}
 	}
 
@@ -52,7 +52,7 @@ func (d *Dispatcher) fanOutShards(groups []*batchGroup, makeOp func(*batchGroup)
 			remaining--
 		case <-timer.C:
 			completed := len(groups) - remaining
-			log.Printf("[cama] WARNING: batch dispatch timed out â€” %d/%d completed", completed, len(groups))
+			log.Printf("[l3server] WARNING: batch dispatch timed out â€” %d/%d completed", completed, len(groups))
 			metrics.IncrBatchTimeouts()
 			return nil, errDispatchTimeout
 		}
@@ -86,7 +86,7 @@ func (d *Dispatcher) HandleMGet(msg protocol.Message) protocol.Message {
 						Result:    make(chan shard.OpResult, 1),
 					})
 					if result.Err != nil {
-						log.Printf("[cama] WARNING: MGET shard error (cluster local): %v", result.Err)
+						log.Printf("[l3server] WARNING: MGET shard error (cluster local): %v", result.Err)
 						continue
 					}
 					for j, localIdx := range g.indices {
@@ -134,7 +134,7 @@ func (d *Dispatcher) HandleMGet(msg protocol.Message) protocol.Message {
 		}
 		for i, g := range groups {
 			if results[i].Err != nil {
-				log.Printf("[cama] WARNING: MGET shard error (shard group %d): %v", i, results[i].Err)
+				log.Printf("[l3server] WARNING: MGET shard error (shard group %d): %v", i, results[i].Err)
 				continue // leave values[origIdx]=nil, founds[origIdx]=false
 			}
 			for j, origIdx := range g.indices {
@@ -337,7 +337,7 @@ func (d *Dispatcher) HandleMTest(msg protocol.Message) protocol.Message {
 	}
 	for i, g := range groups {
 		if results[i].Err != nil {
-			log.Printf("[cama] WARNING: MTEST shard error (shard group %d): %v", i, results[i].Err)
+			log.Printf("[l3server] WARNING: MTEST shard error (shard group %d): %v", i, results[i].Err)
 			continue // leave founds[origIdx]=false
 		}
 		for j, origIdx := range g.indices {
@@ -421,7 +421,7 @@ func (d *Dispatcher) HandleFlush(msg protocol.Message) protocol.Message {
 		totalKeys += sh.IndexCount()
 		totalAllocBytes += sh.Allocator().AllocatedBytes()
 	}
-	log.Printf("[cama] flush: starting across %d shards (%d keys, %.2f GB allocated)",
+	log.Printf("[l3server] flush: starting across %d shards (%d keys, %.2f GB allocated)",
 		n, totalKeys, float64(totalAllocBytes)/(1<<30))
 
 	start := time.Now()
@@ -432,7 +432,7 @@ func (d *Dispatcher) HandleFlush(msg protocol.Message) protocol.Message {
 			Result: make(chan shard.OpResult, 1),
 		})
 		if result.Err != nil {
-			log.Printf("[cama] flush: shard %d failed: %v", i, result.Err)
+			log.Printf("[l3server] flush: shard %d failed: %v", i, result.Err)
 			return ErrResponse(msg.Header.RequestID, result.Err.Error())
 		}
 	}
@@ -441,7 +441,7 @@ func (d *Dispatcher) HandleFlush(msg protocol.Message) protocol.Message {
 		d.ConnReg.ResetAll()
 	}
 
-	log.Printf("[cama] flush: completed in %v (%d keys cleared, %.2f GB freed)",
+	log.Printf("[l3server] flush: completed in %v (%d keys cleared, %.2f GB freed)",
 		time.Since(start).Round(time.Millisecond), totalKeys, float64(totalAllocBytes)/(1<<30))
 	return OKResponse(msg.Header.RequestID)
 }

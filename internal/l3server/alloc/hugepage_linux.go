@@ -476,7 +476,7 @@ func DistributeNodeHugepages(nodeBudgets []NodeBudget, pageSizeKB int) []NodeHug
 }
 
 // DefaultHugepageStatePath is used when no explicit path is configured.
-const DefaultHugepageStatePath = "/tmp/cama-hugepages.state"
+const DefaultHugepageStatePath = "/tmp/l3-hugepages.state"
 
 // HugepageState records allocation state so hugepages can be released after a crash.
 type HugepageState struct {

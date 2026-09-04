@@ -11,7 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/l3server/index"
 )
 
-// Config is the top-level CAMA configuration.
+// Config is the top-level L3 configuration.
 type Config struct {
 	ListenAddrs       []string `json:"listen_addrs"`
 	RDMAAddrs         []string `json:"rdma_addrs"`
@@ -270,7 +270,7 @@ func (c *Config) Validate() error {
 			if c.BudgetHeadroomGB < 8.0 {
 				c.BudgetHeadroomGB = 8.0
 			}
-			log.Printf("[cama] budget_headroom_gb auto-scaled to %.1f GB (10%% of %.0f GB system RAM)",
+			log.Printf("[l3server] budget_headroom_gb auto-scaled to %.1f GB (10%% of %.0f GB system RAM)",
 				c.BudgetHeadroomGB, sysRAM)
 		} else {
 			c.BudgetHeadroomGB = 8.0
@@ -303,9 +303,9 @@ func (c *Config) Validate() error {
 			if c.MaxRDMAConnections < 4 {
 				c.MaxRDMAConnections = 4
 			}
-			log.Printf("[cama] RDMA max_connections auto-computed: %d (%.1f GB RAM × 10%% / %d MB per-conn)", c.MaxRDMAConnections, sysRAM, perConnMB)
+			log.Printf("[l3server] RDMA max_connections auto-computed: %d (%.1f GB RAM × 10%% / %d MB per-conn)", c.MaxRDMAConnections, sysRAM, perConnMB)
 			if c.MaxRDMAConnections < 16 {
-				log.Printf("[cama] WARNING: auto-computed max_rdma_connections=%d is very low — supports at most %d concurrent GPU ranks (pool_size=4). Set max_rdma_connections in JSON to override.", c.MaxRDMAConnections, c.MaxRDMAConnections/4)
+				log.Printf("[l3server] WARNING: auto-computed max_rdma_connections=%d is very low — supports at most %d concurrent GPU ranks (pool_size=4). Set max_rdma_connections in JSON to override.", c.MaxRDMAConnections, c.MaxRDMAConnections/4)
 			}
 		}
 	}
@@ -317,7 +317,7 @@ func (c *Config) Validate() error {
 			cqSafeConns = 4
 		}
 		if c.MaxRDMAConnections > cqSafeConns {
-			log.Printf("[cama] max_rdma_connections capped %d → %d (CQ depth %d / %d CQEs per conn — increase rdma_cq_depth to raise limit)",
+			log.Printf("[l3server] max_rdma_connections capped %d → %d (CQ depth %d / %d CQEs per conn — increase rdma_cq_depth to raise limit)",
 				c.MaxRDMAConnections, cqSafeConns, c.RDMACQDepth, maxSendWR+recvBufCount)
 			c.MaxRDMAConnections = cqSafeConns
 		}
@@ -353,7 +353,7 @@ func (c *Config) Validate() error {
 		default:
 			c.SlabDistribution = "uniform"
 		}
-		log.Printf("[cama] slab_distribution not set, inferred %q from legacy fields", c.SlabDistribution)
+		log.Printf("[l3server] slab_distribution not set, inferred %q from legacy fields", c.SlabDistribution)
 	}
 	switch c.SlabDistribution {
 	case "auto", "model", "uniform", "dedicated":
@@ -381,7 +381,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.SlabDistribution == "uniform" && c.ModelPageBytes > 0 {
-		log.Printf("[cama] slab_distribution=%q: zeroing model_page_bytes=%d (uniform ignores model weighting)",
+		log.Printf("[l3server] slab_distribution=%q: zeroing model_page_bytes=%d (uniform ignores model weighting)",
 			c.SlabDistribution, c.ModelPageBytes)
 		c.ModelPageBytes = 0
 	}
@@ -534,7 +534,7 @@ func (c *Config) Validate() error {
 		if c.MaxTCPConnections < 256 {
 			c.MaxTCPConnections = 256
 		}
-		log.Printf("[cama] max_tcp_connections auto-computed: %d", c.MaxTCPConnections)
+		log.Printf("[l3server] max_tcp_connections auto-computed: %d", c.MaxTCPConnections)
 	} else if c.MaxTCPConnections < 256 {
 		return fmt.Errorf("max_tcp_connections must be >= 256, got %d", c.MaxTCPConnections)
 	}
@@ -550,7 +550,7 @@ func (c *Config) Validate() error {
 		rdmaConns := c.MaxRDMAConnections
 		if rdmaConns <= 0 {
 			rdmaConns = 32
-			log.Printf("[cama] WARNING: max_rdma_connections=0 (unlimited) — using %d for budget estimate. "+
+			log.Printf("[l3server] WARNING: max_rdma_connections=0 (unlimited) — using %d for budget estimate. "+
 				"Set max_rdma_connections in JSON to control RDMA memory usage.", rdmaConns)
 		}
 		rdmaGB := float64(rdmaConns) * float64(perConnMB) / 1024.0
@@ -572,7 +572,7 @@ func (c *Config) Validate() error {
 				hostname = "localhost"
 			}
 			c.ClusterNodeID = fmt.Sprintf("%s:%d", hostname, c.GossipPort)
-			log.Printf("[cama] cluster_node_id auto-generated: %s", c.ClusterNodeID)
+			log.Printf("[l3server] cluster_node_id auto-generated: %s", c.ClusterNodeID)
 		}
 		for _, peer := range c.ClusterPeers {
 			if _, _, err := net.SplitHostPort(peer); err != nil {
@@ -628,7 +628,7 @@ func (c *Config) Validate() error {
 		indexBytesTotal := idxCapPow2 * index.BytesPerEntry * ns
 		indexGB := float64(indexBytesTotal) / float64(1<<30)
 		if totalKeys > 50_000_000 && indexGB > 4.0 {
-			log.Printf("[cama] WARNING: max_keys=%d × %d shards = %dM total key capacity, "+
+			log.Printf("[l3server] WARNING: max_keys=%d × %d shards = %dM total key capacity, "+
 				"index overhead %.1f GB — consider reducing max_keys if your workload "+
 				"uses fewer keys to reclaim memory for slab data",
 				c.MaxKeys, ns, totalKeys/1_000_000, indexGB)

@@ -1,7 +1,7 @@
 // Package l3server provides the top-level orchestration and server runtime for
-// the Content-Addressed Memory Architecture (CAMA) L3 disaggregated KV-cache tier.
+// the L3 disaggregated KV-cache tier.
 //
-// Invariant: CAMA L3 server provides disaggregated, multi-tenant KV-cache storage with bounded slab allocation and deterministic eviction.
+// Invariant: L3 server provides disaggregated, multi-tenant KV-cache storage with bounded slab allocation and deterministic eviction.
 // Guard: fail-closed admission and shard isolation prevent memory corruption and cross-tenant leakage.
 package l3server
 
