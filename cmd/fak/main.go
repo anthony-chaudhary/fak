@@ -617,8 +617,10 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdAntipatternScorecard(args)
 	case "maturity":
 		cmdMaturity(args)
-	case "debt-lanes", "debt-lanes-scorecard":
+	case "debtlane", "debtlanes", "debt-lanes", "debt-lanes-scorecard":
 		cmdDebtLanes(args)
+	case "scoreboard-debt-page", "scoreboard-debt":
+		os.Exit(runScoreboardDebtPage(os.Stdout, os.Stderr, args))
 	case "balance":
 		// The night-balance readout (#3128): resume recovery-vs-stranding and
 		// gardening-vs-throughput folded side by side; exit non-zero on an
