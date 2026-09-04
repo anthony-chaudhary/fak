@@ -9,15 +9,25 @@ import (
 	"strings"
 )
 
+// Invariant: Performance contracts must enforce the fak-native engine and reject simulated fallbacks.
+// Guard: Any unbounded label dimension such as request IDs or prompts causes immediate validation failure.
+// Precondition: Every registered surface must map to either an exported metric or a justified exclusion.
+// Postcondition: Validated contract JSON produces canonical, deterministic formatting with stable ordering.
+
 const (
+	// Schema identifies the immutable canonical schema specification for native performance observability contracts.
 	Schema = "fak-native-performance-observability-contract/1"
+	// Engine defines the mandatory fak-native runtime engine identifier enforced during validation.
 	Engine = "fak-native"
 
+	// StatusExported denotes an execution surface whose performance signals are actively emitted as contracted metrics.
 	StatusExported = "exported"
+	// StatusExcluded denotes an execution surface that is deliberately excluded from metrics with formal architectural justification.
 	StatusExcluded = "excluded"
 )
 
-// Metric is one stable signal in the native performance contract.
+// Metric defines one immutable telemetry signal with bounded labels and explicit cardinality budgets in the native performance contract.
+// Invariant: All metric identifiers must adhere to the fak_native_ namespace prefix and declare a positive cardinality budget.
 type Metric struct {
 	Name              string   `json:"name"`
 	Kind              string   `json:"kind"`
@@ -29,8 +39,8 @@ type Metric struct {
 	Unsupported       string   `json:"unsupported"`
 }
 
-// Surface maps one required native execution stage to an exported signal or a
-// justified exclusion. UNKNOWN is deliberately not a valid status.
+// Surface maps one mandatory native execution stage to an exported metric signal or a formally justified exclusion.
+// Invariant: Surfaces require non-empty producer paths and evidence links; UNKNOWN coverage status is strictly forbidden as debt.
 type Surface struct {
 	ID        string `json:"id"`
 	Producer  string `json:"producer"`
@@ -40,7 +50,8 @@ type Surface struct {
 	Evidence  string `json:"evidence"`
 }
 
-// Contract is the machine-readable, deterministic coverage matrix.
+// Contract represents the complete, machine-readable coverage matrix for native inference performance observability.
+// Invariant: A valid contract specifies the canonical schema, the fak-native engine, and Qwen3.8 as the default model.
 type Contract struct {
 	Schema       string    `json:"schema"`
 	Engine       string    `json:"engine"`
@@ -49,9 +60,9 @@ type Contract struct {
 	Surfaces     []Surface `json:"surfaces"`
 }
 
-// Frozen returns the versioned native performance signal contract. Metrics use
-// receipt-bounded labels only; request IDs, prompts, paths, hosts, and arbitrary
-// model strings are intentionally absent.
+// Frozen returns the canonical versioned native performance signal contract with deterministic metrics and execution surfaces.
+// Invariant: Returned metrics enforce bounded label dimensions with zero unbound runtime identifiers or prompt strings.
+// Postcondition: The resulting contract is fully populated and guaranteed to pass Validate without errors.
 func Frozen() Contract {
 	return Contract{
 		Schema:       Schema,
@@ -100,7 +111,10 @@ func surface(id, producer, metricName, evidence string) Surface {
 	return Surface{ID: id, Producer: producer, Status: StatusExported, Metric: metricName, Evidence: evidence}
 }
 
-// Validate rejects incomplete, ambiguous, high-cardinality, or non-native contracts.
+// Validate verifies that a candidate contract satisfies all structural, naming, cardinality, and engine-safety invariants.
+// Precondition: Contract fields, metrics, and surfaces must be non-empty and well-formed.
+// Invariant: Validation rejects non-native engines, missing execution surfaces, unbounded labels, and unknown coverage statuses.
+// Postcondition: Returns nil if and only if every metric and surface complies with the frozen observability specification.
 func Validate(c Contract) error {
 	var problems []string
 	if c.Schema != Schema {
@@ -184,7 +198,9 @@ func Validate(c Contract) error {
 	return nil
 }
 
-// JSON validates and renders the canonical matrix with stable indentation and order.
+// JSON validates the candidate contract and serializes it into canonical indented JSON representation.
+// Precondition: The candidate contract must successfully satisfy all Validate checks before serialization.
+// Postcondition: Returns formatted JSON bytes or a non-nil validation or formatting error.
 func JSON(c Contract) ([]byte, error) {
 	if err := Validate(c); err != nil {
 		return nil, err
