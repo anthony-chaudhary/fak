@@ -50,7 +50,10 @@ import (
 
 // Schema identifiers for the two dataset record kinds. Bump on any shape change.
 const (
+	// SessionSchema identifies the canonical schema version for session record entries.
 	SessionSchema = "fak-guard-session/1"
+
+	// ExampleSchema identifies the canonical schema version for individual redacted decision examples.
 	ExampleSchema = "fak-guard-example/1"
 
 	// maxAllowExamples bounds how many ALLOW rows a single session contributes as
@@ -82,8 +85,13 @@ var knownVerdicts = map[string]bool{
 
 // Outcome classes for a session.
 const (
-	OutcomeClean       = "CLEAN"
-	OutcomeCrashed     = "CRASHED"
+	// OutcomeClean indicates that the guarded session completed normally without crashes or unhandled faults.
+	OutcomeClean = "CLEAN"
+
+	// OutcomeCrashed indicates that the child process terminated unexpectedly due to an unhandled crash or fatal signal.
+	OutcomeCrashed = "CRASHED"
+
+	// OutcomeRateLimited indicates that the session halted because provider throughput limits were exceeded.
 	OutcomeRateLimited = "RATE_LIMITED"
 )
 
@@ -111,7 +119,7 @@ type HonestyHoles struct {
 	ChildCrash        int `json:"child_crash"`
 }
 
-// SessionRecord is one row of the fak-guard-session/1 dataset.
+// SessionRecord encapsulates aggregate execution metrics, verdict distributions, and integrity indicators for a session.
 type SessionRecord struct {
 	Schema          string         `json:"schema"`
 	TraceID         string         `json:"trace_id,omitempty"`
@@ -129,8 +137,7 @@ type SessionRecord struct {
 	ChainVerified   bool           `json:"chain_verified"`
 }
 
-// Example is one row of the fak-guard-example/1 dataset: a redacted, labeled,
-// replayable adjudication. Only journal-redacted fields are carried.
+// Example encapsulates a single redacted, replayable adjudication record suitable for model evaluation.
 type Example struct {
 	Schema       string `json:"schema"`
 	TraceID      string `json:"trace_id,omitempty"`
@@ -148,6 +155,10 @@ type Example struct {
 // Fold projects one session's rows into its SessionRecord and Example rows. It
 // is the pure core; the CLI shell owns discovery, chain verification, and the
 // SessionMeta join. Rows are taken in journal order (the caller preserves it).
+//
+// Invariant: Journal row ordering is strictly preserved when aggregating decisions and computing session duration bounds.
+// Precondition: Input meta provides resolved session provenance and rows slice contains sequential decision journal records.
+// Postcondition: SessionRecord aggregates complete verdict distributions while examples slice contains bounded, redacted records.
 func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	rec := SessionRecord{
 		Schema:        SessionSchema,
@@ -240,6 +251,8 @@ func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	return rec, examples
 }
 
+// Invariant: Example redaction bounds are inherited directly from journal-scrubbed fields without secondary expansion.
+// Postcondition: Returns an immutable Example record populated with sanitized arguments, taints, and witness prose.
 func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example {
 	return Example{
 		Schema:       ExampleSchema,
@@ -259,6 +272,9 @@ func exampleFrom(meta SessionMeta, r journal.Row, kind, verdict string) Example 
 // normalizeVerdict resolves the row's verdict, falling back to the decision Kind
 // when the explicit verdict field is blank (a DENY row's Kind is "DENY"). It
 // mirrors guardrsi's resolution so the two folds classify identically.
+//
+// Precondition: Candidate verdict and kind tokens represent raw classification strings extracted from journal rows.
+// Postcondition: Returns an uppercase canonical verdict or empty string if the row represents an operational event.
 func normalizeVerdict(verdict, kind string) string {
 	if v := strings.TrimSpace(verdict); v != "" {
 		return strings.ToUpper(v)
@@ -278,6 +294,8 @@ func normalizeVerdict(verdict, kind string) string {
 // bounded evidence points at rate limiting, else "". A rate-limit exit is a
 // terminal outcome but not process instability, so it must not count as a crash.
 // Mirrors guardrsi.childRateLimitExitClass over the same bounded fields.
+//
+// Postcondition: Returns a normalized rate limit category string when matching evidence is present, or empty string otherwise.
 func rateLimitClass(r journal.Row) string {
 	for _, raw := range []string{r.Reason, r.Witness, r.ArgsLabel} {
 		low := strings.ToLower(strings.TrimSpace(raw))
