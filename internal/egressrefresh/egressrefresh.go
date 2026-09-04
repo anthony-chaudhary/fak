@@ -166,6 +166,12 @@ func artifactPath(dir, name string) string { return filepath.Join(dir, name+".tx
 
 // Refresh re-fetches the selected lists and rewrites the artifacts whose upstream moved.
 //
+// Contract: Refresh never modifies disk if dry-run is requested, and preserves all
+// previously pinned artifacts whenever an upstream fetch fails or violates guard constraints.
+//
+// Invariant: egress list refresh is fail-closed and provenance-verified.
+// Guard: every upstream fetch refusal preserves the previously-pinned artifact and checksum without mutating disk.
+//
 // The returned error is reserved for a run that could not start or could not be committed
 // (an unreadable manifest, an unknown --name, a failed write) — a per-list refusal is NOT
 // an error, it is a Result with StatusFailed, because a run over ten feeds where one
