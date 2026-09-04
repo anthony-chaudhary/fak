@@ -21,9 +21,9 @@ import (
 
 // plannerKind classifies the /v1/chat/completions backend for the /healthz
 // "planner" field, so an operator (or a liveness probe) can tell at a glance
-// whether a served chat is a real model or the deterministic offline mock:
+// whether a served chat is a real model or the deterministic offline synthetic planner:
 //
-//   - "mock"     the scripted offline fallback (no --base-url, no --gguf) — the
+//   - "synthetic" the scripted offline fallback (no --base-url, no --gguf) — the
 //     same condition New warns about loudly at boot.
 //   - "proxy"    one live upstream provider (fak serve --base-url).
 //   - "replica"  a static round-robin live upstream fleet.
@@ -35,8 +35,8 @@ import (
 // real backend.
 func plannerKind(p agent.Planner) string {
 	switch p.(type) {
-	case *agent.MockPlanner:
-		return "mock"
+	case *agent.SyntheticPlanner:
+		return "synthetic"
 	case *agent.HTTPPlanner:
 		return "proxy"
 	case *ReplicaRouter:

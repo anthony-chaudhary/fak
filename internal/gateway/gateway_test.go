@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/memq"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 )
@@ -453,6 +454,7 @@ func TestHealthReportsMockPlanner(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterEngine("mock", engine.MockEngine)
 	abi.RegisterAdjudicator(0, toolAdj{})
 
 	// Silent-fallback path: planner:"mock" + a loud, captured startup warning.
@@ -470,14 +472,14 @@ func TestHealthReportsMockPlanner(t *testing.T) {
 
 	var health map[string]any
 	getJSON(t, ts.URL+"/healthz", &health)
-	if health["planner"] != "mock" {
-		t.Errorf(`/healthz planner = %v, want "mock" on the no-base-url/no-gguf fallback path`, health["planner"])
+	if health["planner"] != "synthetic" {
+		t.Errorf(`/healthz planner = %v, want "synthetic" on the no-base-url/no-gguf fallback path`, health["planner"])
 	}
-	if w := warn.String(); !strings.Contains(w, "MOCK") || !strings.Contains(strings.ToLower(w), "scripted") {
-		t.Errorf("silent fallback must emit a loud mock-planner warning, got %q", w)
+	if w := warn.String(); (!strings.Contains(w, "SYNTHETIC") && !strings.Contains(w, "MOCK")) || !strings.Contains(strings.ToLower(w), "scripted") {
+		t.Errorf("silent fallback must emit a loud synthetic-planner warning, got %q", w)
 	}
 
-	// Proxy path (--base-url set): the field reflects the real backend, not "mock".
+	// Proxy path (--base-url set): the field reflects the real backend, not "mock" or "synthetic".
 	psrv, err := New(Config{EngineID: "test", Model: "m", BaseURL: "http://127.0.0.1:1/v1", Provider: "openai", VDSO: true})
 	if err != nil {
 		t.Fatal(err)
@@ -492,13 +494,76 @@ func TestHealthReportsMockPlanner(t *testing.T) {
 	}
 
 	// Fail-safe: an unrecognized planner reports "unknown" rather than masquerading
-	// as a real backend ("mock"/"proxy"/"inkernel") — the worst outcome would be a
+	// as a real backend ("synthetic"/"proxy"/"inkernel") — the worst outcome would be a
 	// scripted/unknown planner that a probe reads as a live model.
 	srv.planner = stubPlanner{}
 	var uhealth map[string]any
 	getJSON(t, ts.URL+"/healthz", &uhealth)
 	if uhealth["planner"] != "unknown" {
 		t.Errorf(`/healthz planner = %v, want "unknown" for an unrecognized planner`, uhealth["planner"])
+	}
+}
+
+func TestHealthReportsSyntheticFallbackAndInKernelDisambiguation(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterEngine("mock", engine.MockEngine)
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	// 1. validateNewGatewayConfig: if InKernelModel != nil and cfg.Model == "" (or "mock"),
+	// default to "inkernel-unspecified", never "mock".
+	cfgEmpty := Config{EngineID: "test", InKernelModel: &model.Model{}}
+	if err := validateNewGatewayConfig(&cfgEmpty); err != nil {
+		t.Fatalf("validateNewGatewayConfig failed: %v", err)
+	}
+	if cfgEmpty.Model != "inkernel-unspecified" {
+		t.Errorf("expected model %q, got %q", "inkernel-unspecified", cfgEmpty.Model)
+	}
+
+	cfgMock := Config{EngineID: "test", InKernelModel: &model.Model{}, Model: "mock"}
+	if err := validateNewGatewayConfig(&cfgMock); err != nil {
+		t.Fatalf("validateNewGatewayConfig failed: %v", err)
+	}
+	if cfgMock.Model != "inkernel-unspecified" {
+		t.Errorf("expected model %q, got %q", "inkernel-unspecified", cfgMock.Model)
+	}
+
+	cfgNamed := Config{EngineID: "test", InKernelModel: &model.Model{}, Model: "custom-qwen"}
+	if err := validateNewGatewayConfig(&cfgNamed); err != nil {
+		t.Fatalf("validateNewGatewayConfig failed: %v", err)
+	}
+	if cfgNamed.Model != "custom-qwen" {
+		t.Errorf("expected model %q, got %q", "custom-qwen", cfgNamed.Model)
+	}
+
+	// 2. Healthz reporting with InKernelModel != nil and Tokenizer == nil:
+	// exposes chat_fallback: "synthetic" while preserving in_kernel_model_but_chat_is_mock: true.
+	srv, err := New(Config{
+		EngineID:      "test",
+		InKernelModel: &model.Model{},
+		VDSO:          true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var health map[string]any
+	getJSON(t, ts.URL+"/healthz", &health)
+	if health["planner"] != "synthetic" {
+		t.Errorf(`/healthz planner = %v, want "synthetic"`, health["planner"])
+	}
+	if health["model"] != "inkernel-unspecified" {
+		t.Errorf(`/healthz model = %v, want "inkernel-unspecified"`, health["model"])
+	}
+	if health["in_kernel_model_but_chat_is_mock"] != true {
+		t.Errorf(`/healthz in_kernel_model_but_chat_is_mock = %v, want true`, health["in_kernel_model_but_chat_is_mock"])
+	}
+	if health["chat_fallback"] != "synthetic" {
+		t.Errorf(`/healthz chat_fallback = %v, want "synthetic"`, health["chat_fallback"])
 	}
 }
 
