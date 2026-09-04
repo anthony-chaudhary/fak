@@ -1,35 +1,6 @@
-// Package completiondist folds historical issue-closure durations into a
-// duration DISTRIBUTION the capacity model can consume, instead of the single
-// assumed median that internal/fleetcap otherwise takes on faith. It is one leaf
-// of the "safe 400 GitHub issues/hour parallel-agent throughput" program (issue
-// #1820, fleet-400iph; this leaf is #1821).
-//
-// # Why a distribution, not a median
-//
-// internal/fleetcap.RequiredWorkers turns a target issue-rate and a median
-// session duration into a required concurrent-worker count via Little's law. If
-// you feed it a median you GUESSED, the whole capacity plan inherits that guess.
-// This package closes the loop: it takes the durations we ACTUALLY observed
-// closing past issues, folds them into a Distribution (count, min/max, median,
-// p95, mean, and difficulty-mirroring histogram buckets), and hands
-// fleetcap.RequiredWorkers a MedianSec() drawn from real data. The p95 sits
-// beside the median so an operator can see the heavy tail a median alone hides —
-// the same reason internal/fleetmetrics reports p95 next to p50.
-//
-// # Percentile method
-//
-// Median and p95 are computed by internal/fleetmetrics.Percentiles, which uses
-// the NEAREST-RANK method (no interpolation): the returned value is always an
-// element that is actually present in the input, so a fixture's expected median
-// and p95 are trivially hand-verifiable. This package does NOT re-implement the
-// percentile fold; it reuses fleetmetrics so there is one canonical method.
-//
-// Everything here is deterministic (no time.Now), stdlib + internal/fleetmetrics
-// + internal/fleetcap only, and off the hot path. An empty sample set folds to a
-// zero-valued Distribution.
-//
-// Invariant: completion distribution analysis is fail-closed and deterministic across all executions.
-// Guard: empty sample sets yield an explicit zero-value distribution, and negative durations fail closed with an error.
+// Package completiondist folds historical issue-closure durations into an
+// empirical duration distribution (count, min, max, mean, nearest-rank median,
+// p95, and histogram buckets) used by the capacity model to size agent fleets.
 package completiondist
 
 import (
@@ -43,30 +14,23 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 )
 
-// ClosureSample is one historical issue closure: which issue it was and how long
-// it took to close, in seconds. DurationSec is wall-clock from open (or from the
-// moment a worker picked it up) to close — the fold does not care which epoch, it
-// only folds the durations it is handed.
+// ClosureSample records one historical issue closure and its elapsed duration in seconds.
 type ClosureSample struct {
 	Issue       int     `json:"issue"`
 	DurationSec float64 `json:"duration_sec"`
 }
 
-// Bucket is one histogram bucket of the closure-duration distribution: a
-// human label, its half-open second bounds [MinSec, MaxSec), and how many
-// samples fell into it. The top bucket carries MaxSec == 0 to mean "no upper
-// bound" (everything at or above MinSec).
+// Bucket represents a duration histogram bin bounded by [MinSec, MaxSec).
+// MaxSec == 0 denotes an unbounded upper bucket.
 type Bucket struct {
-	Label  string  // human label, e.g. "<15m" or "1-4h"
-	MinSec float64 // inclusive lower bound in seconds
-	MaxSec float64 // exclusive upper bound in seconds; 0 == unbounded (top bucket)
-	Count  int     // samples that fell in [MinSec, MaxSec)
+	Label  string  // Human-readable interval label.
+	MinSec float64 // Inclusive lower bound in seconds.
+	MaxSec float64 // Exclusive upper bound in seconds; 0 means unbounded.
+	Count  int     // Number of samples falling within [MinSec, MaxSec).
 }
 
-// DefaultBuckets mirrors the difficulty buckets used elsewhere in the fleet: a
-// sub-15-minute quick close, a 15-60 minute normal, a 1-4 hour hard, and an
-// unbounded >4h tail. Callers that want their own edges pass them to
-// BuildWith; Build uses these.
+// DefaultBuckets returns standard fleet difficulty duration intervals:
+// sub-15m quick closes, 15-60m normal, 1-4h hard, and unbounded >4h tails.
 func DefaultBuckets() []Bucket {
 	const (
 		min15 = 15 * 60.0     // 900s
@@ -81,34 +45,25 @@ func DefaultBuckets() []Bucket {
 	}
 }
 
-// Distribution is the folded closure-duration distribution: the summary
-// statistics plus the populated histogram buckets. All durations are in seconds.
-// A Distribution built from no samples is the zero value with empty Buckets.
+// Distribution holds folded closure-duration summary statistics and histogram buckets.
 type Distribution struct {
-	Count      int      // number of samples folded
-	MinSec     float64  // smallest duration; 0 when Count == 0
-	MaxSec     float64  // largest duration; 0 when Count == 0
-	MeanSec    float64  // arithmetic mean; 0 when Count == 0
-	MedianSecV float64  // p50 (nearest-rank); 0 when Count == 0
-	P95Sec     float64  // p95 (nearest-rank); 0 when Count == 0
-	Buckets    []Bucket // histogram buckets with populated Counts
+	Count      int      // Total samples folded into the distribution.
+	MinSec     float64  // Minimum duration observed in seconds.
+	MaxSec     float64  // Maximum duration observed in seconds.
+	MeanSec    float64  // Arithmetic mean duration in seconds.
+	MedianSecV float64  // Nearest-rank 50th percentile duration in seconds.
+	P95Sec     float64  // Nearest-rank 95th percentile duration in seconds.
+	Buckets    []Bucket // Histogram buckets with populated sample counts.
 }
 
-// Build folds samples into a Distribution using DefaultBuckets. It is the common
-// entry point; BuildWith takes caller-supplied buckets.
+// Build folds duration samples into a Distribution using DefaultBuckets.
 func Build(samples []ClosureSample) Distribution {
 	return BuildWith(samples, DefaultBuckets())
 }
 
-// BuildWith folds samples into a Distribution over the given histogram buckets.
-// Median and p95 are computed via fleetmetrics.Percentiles (nearest-rank), so
-// they are always values present in the input. Buckets are copied so the
-// caller's slice is left untouched; each returned bucket carries the count of
-// samples whose DurationSec fell in its half-open [MinSec, MaxSec) range (the
-// top bucket, MaxSec == 0, is unbounded above). An empty sample set yields the
-// zero-valued Distribution with the buckets present but all counts 0.
+// BuildWith folds samples into a Distribution over caller-provided histogram buckets.
+// Median and p95 percentiles are computed via fleetmetrics nearest-rank selection.
 func BuildWith(samples []ClosureSample, buckets []Bucket) Distribution {
-	// Copy the caller's bucket edges so we own the Count fields we write.
 	bs := make([]Bucket, len(buckets))
 	copy(bs, buckets)
 
@@ -144,10 +99,7 @@ func BuildWith(samples []ClosureSample, buckets []Bucket) Distribution {
 	}
 }
 
-// bucketFor increments the count of the first bucket whose [MinSec, MaxSec)
-// range contains d. A bucket with MaxSec == 0 is unbounded above, so it catches
-// everything at or above its MinSec. Samples below the lowest MinSec fall
-// through uncounted (DefaultBuckets start at 0, so nothing is lost there).
+// bucketFor increments the matching bucket count for duration d.
 func bucketFor(buckets []Bucket, d float64) {
 	for i := range buckets {
 		b := buckets[i]
@@ -161,34 +113,19 @@ func bucketFor(buckets []Bucket, d float64) {
 	}
 }
 
-// MedianSec is the distribution's median closure duration in seconds — the value
-// the capacity model should feed to fleetcap.RequiredWorkers instead of a
-// hard-coded median. fleetcap takes minutes, so a caller composes:
-//
-//	dist := completiondist.Build(samples)
-//	workers := fleetcap.RequiredWorkers(400, dist.MedianSec()/60)
-//
-// On an empty distribution this is 0, which fleetcap treats as "no standing
-// worker required" (a zero/negative duration describes no sustained work).
+// MedianSec returns the distribution's median closure duration in seconds.
 func (d Distribution) MedianSec() float64 { return d.MedianSecV }
 
-// P95 is the 95th-percentile closure duration in seconds. It is exposed so a
-// tail-aware sizing can provision against the p95 rather than the median when a
-// heavy tail would otherwise starve the fleet.
+// P95 returns the 95th-percentile closure duration in seconds for tail-risk analysis.
 func (d Distribution) P95() float64 { return d.P95Sec }
 
-// RequiredWorkersAtMedian is the direct composition this leaf exists to enable:
-// it sizes the fleet at targetRatePerHour issue completions using THIS
-// distribution's real median (converted seconds→minutes) as Little's-law W,
-// instead of a guessed median. It is a thin convenience over
-// fleetcap.RequiredWorkers so the composition has a single, testable name.
+// RequiredWorkersAtMedian calculates required concurrent workers at targetRatePerHour
+// using the empirical median closure duration via Little's law.
 func (d Distribution) RequiredWorkersAtMedian(targetRatePerHour float64) int {
 	return fleetcap.RequiredWorkers(targetRatePerHour, d.MedianSec()/60.0)
 }
 
-// Render formats the distribution as a compact operator block: the count and
-// summary percentiles on one line, then one line per populated bucket. An empty
-// distribution reports "no samples" rather than a misleading row of zeros.
+// Render formats the distribution as an operator summary with bucket counts.
 func (d Distribution) Render() string {
 	if d.Count == 0 {
 		return "issue-closure duration: no samples"
@@ -202,16 +139,10 @@ func (d Distribution) Render() string {
 	return b.String()
 }
 
-// ParseSamples reads a JSONL stream of ClosureSample records (one JSON object
-// per line) and returns them in file order. Blank lines and lines that are only
-// whitespace are skipped; any line that is not valid JSON, or whose
-// duration_sec is negative, is an error naming the 1-based line number so a bad
-// fixture is easy to locate. It is deterministic and does not touch the clock.
+// ParseSamples decodes a JSONL byte stream of ClosureSample records into a slice.
 func ParseSamples(data []byte) ([]ClosureSample, error) {
 	var out []ClosureSample
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	// Allow long lines (default token cap is 64KiB; closure rows are tiny, but
-	// be generous so a wide line does not silently truncate).
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	line := 0
 	for sc.Scan() {
