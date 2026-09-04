@@ -31,6 +31,7 @@ var (
 	syncSafePush                  = safesync.SafePush
 	syncRouteReconciliation       = safesync.RouteReconciliation
 	syncBuildReconciliationPacket = safesync.BuildReconciliationPacket
+	syncExecutePacket             = safesync.ExecutePacket
 	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
@@ -38,7 +39,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push", "drain", "reconcile", "packet":
+		case "check", "apply", "push", "drain", "reconcile", "packet", "execute":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -46,7 +47,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, or packet)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, packet, or execute)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -78,7 +79,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	goal := fs.String("goal", "publish", "reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)")
 	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
+	executeFlag := fs.Bool("execute", false, "reconcile: execute reconciliation packet with independent graph readback")
 	emitPacket := fs.Bool("emit-packet", false, "reconcile: emit owner-aware reconciliation packet")
+	packetFile := fs.String("packet", "", "execute: path to reconciliation packet JSON file")
 	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
 	var suspendPaths pathList
 	fs.Var(&suspendPaths, "suspend-paths", "reconcile: paths to suspend and reapply across integration (repeatable)")
@@ -179,10 +182,11 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			Branch:       *branch,
 			Goal:         *goal,
 			Apply:        *applyFlag,
+			Execute:      *executeFlag,
 			Fetch:        *fetch,
 			SuspendPaths: suspendPaths,
 			Session:      sess,
-			EmitPacket:   *emitPacket,
+			EmitPacket:   *emitPacket || *executeFlag,
 		}
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
@@ -196,6 +200,12 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			}
 		} else {
 			renderSyncReconcile(stdout, assessment)
+		}
+		if *executeFlag {
+			if assessment.ExecuteReceipt != nil && assessment.ExecuteReceipt.Status == safesync.ExecuteStatusExecuted {
+				return syncExitOK
+			}
+			return syncExitRefused
 		}
 		if *applyFlag {
 			if assessment.Route == safesync.RouteNoop || assessment.Applied {
@@ -240,6 +250,81 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		}
 		return syncExitRefused
+	}
+
+	if command == "execute" {
+		repoPath := pathutil.ExpandTilde(*repo)
+		var pkt *safesync.ReconciliationPacket
+		if *packetFile != "" {
+			var data []byte
+			var err error
+			if *packetFile == "-" {
+				data, err = io.ReadAll(os.Stdin)
+			} else {
+				data, err = os.ReadFile(pathutil.ExpandTilde(*packetFile))
+			}
+			if err != nil {
+				fmt.Fprintf(stderr, "fak sync execute: read packet file: %v\n", err)
+				return syncExitInternal
+			}
+			pkt = &safesync.ReconciliationPacket{}
+			if err := json.Unmarshal(data, pkt); err != nil {
+				fmt.Fprintf(stderr, "fak sync execute: unmarshal packet: %v\n", err)
+				return syncExitInternal
+			}
+		} else {
+			sess := strings.TrimSpace(*sessionFlag)
+			if sess == "" {
+				sess = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"), "sync-execute")
+			}
+			pktOpts := safesync.PacketOptions{
+				Repo:         repoPath,
+				Remote:       *remote,
+				Branch:       *branch,
+				Fetch:        *fetch,
+				Session:      sess,
+				SuspendPaths: suspendPaths,
+			}
+			var err error
+			pkt, err = syncBuildReconciliationPacket(context.Background(), pktOpts)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak sync execute: build packet: %v\n", err)
+				return syncExitInternal
+			}
+		}
+
+		execOpts := safesync.ExecuteOptions{
+			Repo:               repoPath,
+			Remote:             *remote,
+			Branch:             *branch,
+			WriterLeaseTTL:     safesync.DefaultWriterLeaseTTL,
+			PushVelocityBudget: *budget,
+			SuspendPaths:       suspendPaths,
+		}
+		receipt, err := syncExecutePacket(context.Background(), pkt, execOpts)
+		if *asJSON {
+			if receipt != nil {
+				if writeErr := writeIndentedJSON(stdout, receipt); writeErr != nil {
+					fmt.Fprintf(stderr, "fak sync: %v\n", writeErr)
+					return syncExitInternal
+				}
+			} else {
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+				}
+				if writeErr := writeIndentedJSON(stdout, map[string]string{"error": errMsg}); writeErr != nil {
+					fmt.Fprintf(stderr, "fak sync: %v\n", writeErr)
+					return syncExitInternal
+				}
+			}
+		} else {
+			renderSyncExecute(stdout, receipt, err)
+		}
+		if err != nil || receipt == nil || receipt.Status != safesync.ExecuteStatusExecuted {
+			return syncExitRefused
+		}
+		return syncExitOK
 	}
 
 	opts := safesync.Options{
@@ -350,8 +435,9 @@ func syncUsage(w io.Writer) {
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
-  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet]
+  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+  fak sync execute   [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
@@ -455,9 +541,39 @@ func renderSyncReconcile(w io.Writer, info safesync.ReconcileAssessment) {
 	if info.Park != nil {
 		fmt.Fprintf(w, "  park: session=%s status=%s (%d selected paths, %d effects)\n", info.Park.Session, info.Park.Status, len(info.Park.SelectedPaths), len(info.Park.Effects))
 	}
+	if info.ExecuteReceipt != nil {
+		fmt.Fprintf(w, "  execute: status=%s pushed=%v new_head=%s\n", info.ExecuteReceipt.Status, info.ExecuteReceipt.Pushed, short(info.ExecuteReceipt.NewHEAD))
+	}
 	if info.Packet != nil {
 		fmt.Fprintln(w)
 		renderSyncPacket(w, info.Packet)
+	}
+}
+
+func renderSyncExecute(w io.Writer, receipt *safesync.ExecutionReceipt, err error) {
+	if receipt == nil {
+		if err != nil {
+			fmt.Fprintf(w, "[FAILED] execution error: %v\n", err)
+		}
+		return
+	}
+	switch receipt.Status {
+	case safesync.ExecuteStatusExecuted:
+		fmt.Fprintf(w, "[%s] reconciliation packet executed: new HEAD %s (target %s)\n", receipt.Status, short(receipt.NewHEAD), short(receipt.TargetSHA))
+		fmt.Fprintf(w, "  pushed: %v, local commits contained: %v, peer bytes preserved: %v\n", receipt.Pushed, receipt.LocalCommitsContained, receipt.PeerBytesPreserved)
+	case safesync.ExecuteStatusRefused:
+		fmt.Fprintf(w, "[%s] reconciliation packet refused: %s\n", receipt.Status, receipt.Reason)
+		if receipt.Detail != "" {
+			fmt.Fprintf(w, "  detail: %s\n", receipt.Detail)
+		}
+	default:
+		fmt.Fprintf(w, "[%s] reconciliation packet execution: %s\n", receipt.Status, receipt.Reason)
+		if receipt.Detail != "" {
+			fmt.Fprintf(w, "  detail: %s\n", receipt.Detail)
+		}
+		if err != nil {
+			fmt.Fprintf(w, "  error: %v\n", err)
+		}
 	}
 }
 

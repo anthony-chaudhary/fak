@@ -46,6 +46,7 @@ type ReconcileOptions struct {
 	SuspendPaths   []string         `json:"suspend_paths,omitempty"`
 	Session        string           `json:"session,omitempty"`
 	EmitPacket     bool             `json:"emit_packet,omitempty"`
+	Execute        bool             `json:"execute,omitempty"`
 }
 
 // GoalInfo represents the parsed reconciliation goal.
@@ -91,6 +92,7 @@ type ReconcileAssessment struct {
 	Execution      *ReconcileExecution   `json:"execution,omitempty"`
 	Park           *ParkReceipt          `json:"park,omitempty"`
 	Packet         *ReconciliationPacket `json:"packet,omitempty"`
+	ExecuteReceipt *ExecutionReceipt     `json:"execute_receipt,omitempty"`
 }
 
 // ParseGoal decomposes a goal string into structured GoalInfo.
@@ -177,7 +179,7 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 	if err != nil {
 		return assessment, err
 	}
-	if r.opts.EmitPacket || assessment.Route == RouteReconcilePacket {
+	if r.opts.EmitPacket || assessment.Route == RouteReconcilePacket || r.opts.Execute {
 		branch := assessment.Branch
 		if branch == "" {
 			branch = r.opts.Branch
@@ -196,6 +198,42 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 		}
 		if pkt, pktErr := BuildReconciliationPacket(ctx, pktOpts); pktErr == nil {
 			assessment.Packet = pkt
+		}
+	}
+	if r.opts.Execute && assessment.Packet != nil {
+		execOpts := ExecuteOptions{
+			Repo:           r.opts.Repo,
+			Remote:         r.opts.Remote,
+			Branch:         assessment.Branch,
+			WriterLeaseTTL: r.opts.WriterLeaseTTL,
+			SuspendPaths:   r.opts.SuspendPaths,
+			Session:        r.opts.Session,
+			Runner:         r.opts.Runner,
+			Now:            r.opts.Now,
+		}
+		receipt, execErr := ExecutePacket(ctx, assessment.Packet, execOpts)
+		assessment.ExecuteReceipt = receipt
+		if receipt != nil && receipt.Status == ExecuteStatusExecuted {
+			assessment.Applied = true
+			assessment.Execution = &ReconcileExecution{
+				Primitive: "fak sync execute",
+				Applied:   true,
+				Success:   true,
+				NewHead:   receipt.NewHEAD,
+				Detail:    "reconciliation packet executed successfully",
+			}
+		} else {
+			errMsg := ""
+			if execErr != nil {
+				errMsg = execErr.Error()
+			}
+			assessment.Applied = false
+			assessment.Execution = &ReconcileExecution{
+				Primitive: "fak sync execute",
+				Applied:   false,
+				Success:   false,
+				Error:     errMsg,
+			}
 		}
 	}
 	return assessment, nil
