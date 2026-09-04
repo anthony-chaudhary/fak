@@ -69,4 +69,16 @@
 // (too little evidence yields UNKNOWN + no action). The impure shell
 // (cmd/fak/doomloop) gathers the real samples and owns the single side effect of
 // delivering a correction.
+//
+// # Invariants and contract guards
+//
+// Invariant: doom loop detection is fail-closed and bounded.
+//   - When sample evidence is insufficient (< MinSamples), ambiguous, or unreadable,
+//     the classifier strictly defaults to VerdictUnknown with CorrectNone.
+//   - Recommendations are strictly reversible-first (OBSERVE -> NUDGE -> ESCALATE)
+//     and never trigger destructive teardowns or worker kills autonomously.
+//
+// Guard:
+//   - A window is only considered burning-flat when effort delta > 0 and verified progress delta == 0.
+//   - At least TripWindows consecutive burning-flat windows are required before tripping VerdictDoomLoop.
 package doomloop
