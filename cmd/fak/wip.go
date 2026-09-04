@@ -88,6 +88,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipSweepGuard(stdout, stderr, argv[1:])
 	case "admit":
 		return runWipAdmit(stdout, stderr, argv[1:])
+	case "latency":
+		return runWipLatency(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -269,6 +271,10 @@ func wipUsage(w io.Writer) {
       hunk SAFE (owned solely by the self session) or HAZARD (owned by a peer — LIVE
       peers flagged sharply — SHARED, or ORPHAN). Exit 3 if any hunk is a HAZARD, 0 if
       the sweep is clean. Advisory: it inspects and warns, it never stages anything.
+
+  fak wip latency [--repo .] [--json] [--budget 1h]
+      Measure source-work protection latency intervals across working tree, checkpoints,
+      and git history, and verify SLO compliance against budget (default 1h).
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta

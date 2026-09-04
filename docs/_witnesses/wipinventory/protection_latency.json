@@ -1,0 +1,62 @@
+{
+  "schema": "fak-protection-latency/1",
+  "observed_at": "2026-09-04T12:00:00Z",
+  "repo": "/fak/repo",
+  "total_source_paths": 4,
+  "outcomes": {
+    "checkpointed": 2,
+    "landed": 1,
+    "unprotected": 0,
+    "worker_isolated": 1
+  },
+  "surfaces": {
+    "checkpoint": 2,
+    "detached_worker": 1,
+    "shared_trunk": 1
+  },
+  "p50_seconds": 45.0,
+  "p95_seconds": 90.0,
+  "max_seconds": 90.0,
+  "protected_within_budget_ratio": 1.0,
+  "stale_refusal_count": 0,
+  "unknown_clock_count": 0,
+  "path_samples": [
+    {
+      "path": "cmd/fak/wip.go",
+      "first_seen": "2026-09-04T11:58:30Z",
+      "protected_at": "2026-09-04T11:58:30Z",
+      "latency_seconds": 0.0,
+      "outcome": "landed",
+      "surface": "shared_trunk",
+      "clock_known": true
+    },
+    {
+      "path": "cmd/fak/wip_latency.go",
+      "first_seen": "2026-09-04T11:50:00Z",
+      "protected_at": "2026-09-04T11:50:45Z",
+      "latency_seconds": 45.0,
+      "outcome": "checkpointed",
+      "surface": "checkpoint",
+      "clock_known": true
+    },
+    {
+      "path": "internal/wipinventory/latency.go",
+      "first_seen": "2026-09-04T11:52:00Z",
+      "protected_at": "2026-09-04T11:52:30Z",
+      "latency_seconds": 30.0,
+      "outcome": "checkpointed",
+      "surface": "checkpoint",
+      "clock_known": true
+    },
+    {
+      "path": "internal/wipinventory/latency_test.go",
+      "first_seen": "2026-09-04T11:54:00Z",
+      "protected_at": "2026-09-04T11:55:30Z",
+      "latency_seconds": 90.0,
+      "outcome": "worker_isolated",
+      "surface": "detached_worker",
+      "clock_known": true
+    }
+  ],
+  "slo_verdict": "PASS"
+}
