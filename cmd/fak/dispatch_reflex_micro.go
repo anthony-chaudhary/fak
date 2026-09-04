@@ -208,17 +208,21 @@ func ExecuteReflexMicroDispatch(ctx context.Context, req ReflexMicroDispatchRequ
 }
 
 func defaultExecuteReflexTask(ctx context.Context, workspace string, task ReflexMicroTask, dryRun bool) (agenttopo.ReflexMicroReceipt, error) {
+	return executeTask(ctx, workspace, task, dryRun)
+}
+
+func executeTask(ctx context.Context, workspace string, task ReflexMicroTask, dryRun bool) (agenttopo.ReflexMicroReceipt, error) {
+	start := time.Now()
 	if dryRun {
-		return agenttopo.ReflexMicroReceipt{
-			Schema:      agenttopo.ReflexMicroReceiptSchema,
-			Lane:        task.Lane,
-			Witness:     fmt.Sprintf("dry-run:%s", task.Lane),
-			State:       "dry_run",
-			Allowed:     1,
-			Denied:      0,
-			TokensSaved: 12500,
-			ElapsedMs:   0,
-		}, nil
+		return agenttopo.BuildReflexReceipt(
+			task.Lane,
+			fmt.Sprintf("dry-run:%s", task.Lane),
+			"dry_run",
+			1,
+			0,
+			12500,
+			0,
+		), nil
 	}
 
 	witnessCmd := strings.TrimSpace(task.Witness)
@@ -230,37 +234,39 @@ func defaultExecuteReflexTask(ctx context.Context, workspace string, task Reflex
 			cmd.Dir = workspace
 		}
 		out, err := cmd.CombinedOutput()
+		elapsed := time.Since(start)
 		if err != nil {
-			return agenttopo.ReflexMicroReceipt{
-				Schema:      agenttopo.ReflexMicroReceiptSchema,
-				Lane:        task.Lane,
-				Witness:     strings.TrimSpace(string(out)),
-				State:       "failed",
-				Allowed:     0,
-				Denied:      1,
-				TokensSaved: 0,
-			}, err
+			return agenttopo.BuildReflexReceipt(
+				task.Lane,
+				strings.TrimSpace(string(out)),
+				"failed",
+				0,
+				1,
+				0,
+				elapsed,
+			), err
 		}
-		return agenttopo.ReflexMicroReceipt{
-			Schema:      agenttopo.ReflexMicroReceiptSchema,
-			Lane:        task.Lane,
-			Witness:     witnessCmd,
-			State:       "completed",
-			Allowed:     1,
-			Denied:      0,
-			TokensSaved: 12500,
-		}, nil
+		return agenttopo.BuildReflexReceipt(
+			task.Lane,
+			witnessCmd,
+			"completed",
+			1,
+			0,
+			12500,
+			elapsed,
+		), nil
 	}
 
-	return agenttopo.ReflexMicroReceipt{
-		Schema:      agenttopo.ReflexMicroReceiptSchema,
-		Lane:        task.Lane,
-		Witness:     fmt.Sprintf("reflex-leaf:%s:verified", task.Lane),
-		State:       "completed",
-		Allowed:     1,
-		Denied:      0,
-		TokensSaved: 12500,
-	}, nil
+	elapsed := time.Since(start)
+	return agenttopo.BuildReflexReceipt(
+		task.Lane,
+		fmt.Sprintf("reflex-leaf:%s:verified", task.Lane),
+		"completed",
+		1,
+		0,
+		12500,
+		elapsed,
+	), nil
 }
 
 // runDispatchReflex is the CLI subcommand handler for `fak dispatch reflex`.

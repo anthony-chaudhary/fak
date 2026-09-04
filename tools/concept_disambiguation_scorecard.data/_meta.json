@@ -9508,6 +9508,11 @@
           "category": "incidental",
           "reason": "KV cache eviction policy field",
           "token": "eviction_policy"
+        },
+        {
+          "category": "incidental",
+          "reason": "setter for active policy runtime",
+          "token": "SetPolicyRuntime"
         }
       ],
       "exclude": [
@@ -9592,6 +9597,7 @@
         "RunCIPreflight",
         "SIGNATURE_POLICY",
         "SessionCapabilityCorpusSchema",
+        "SetPolicyRuntime",
         "SinkPolicy",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
@@ -12240,6 +12246,11 @@
           "category": "incidental",
           "reason": "KV cache FIFO eviction policy constant",
           "token": "EvictionPolicyFIFO"
+        },
+        {
+          "category": "incidental",
+          "reason": "evict clean pages in dirty ring buffer",
+          "token": "evictCleanPagesLocked"
         }
       ],
       "id": "evict",
@@ -12267,6 +12278,7 @@
         "TransitionPressureEvict",
         "cache_evictions",
         "digestEvictor",
+        "evictCleanPagesLocked",
         "evictIDs",
         "evictSupported",
         "evictable",
@@ -12615,6 +12627,11 @@
           "category": "incidental",
           "reason": "typed benchmark parser claim admission decision enum",
           "token": "AdmissionDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "alias for agentopt TurnEffortDecision",
+          "token": "DynamicEffortDecision"
         }
       ],
       "id": "decision",
@@ -12635,6 +12652,7 @@
         "DecisionSamples",
         "DemotionDecision",
         "DerivedDecision",
+        "DynamicEffortDecision",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
         "IndexDecision",

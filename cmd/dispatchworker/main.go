@@ -31,6 +31,7 @@ func main() {
 	}
 	lane := flag.String("lane", "", "lane to dispatch on (required)")
 	workerModel := flag.String("worker-model", "", "worker model used for context-envelope selection")
+	profileFlag := flag.String("profile", "", "worker execution profile (e.g. reflex)")
 	backendFlag := flag.String("backend", "", "worker backend (claude|opencode; default: env FLEET_WORKER_BACKEND or claude)")
 	workspaceFlag := flag.String("workspace", "", "workspace root (default: repo root above cwd)")
 	dryRun := flag.Bool("dry-run", false, "print the command instead of launching")
@@ -52,6 +53,11 @@ func main() {
 		backend = b
 	}
 
+	resolvedModel := *workerModel
+	if *profileFlag != "" {
+		resolvedModel, _ = applyProfile(*profileFlag, resolvedModel, nil)
+	}
+
 	// Resolve the argv to actually launch, fronting it with `fak guard` when dogfood
 	// mode is on and a fak binary resolves (fail OPEN to an unwrapped worker otherwise).
 	// Computed for BOTH paths so --dry-run reveals the kernel-fronted argv an operator
@@ -60,21 +66,21 @@ func main() {
 	guarded := false
 	if errMsg == "" {
 		raw, _ := buildCommand(*lane, backend)
-		if *workerModel != "" {
-			raw = append(raw, "--model", *workerModel)
+		if resolvedModel != "" {
+			raw = append(raw, "--model", resolvedModel)
 		}
-		command, guarded = guardedLaunchCommand(raw, *lane, backend, workspace, *workerModel, nil)
+		command, guarded = guardedLaunchCommand(raw, *lane, backend, workspace, resolvedModel, nil)
 	}
 
 	if *dryRun || errMsg != "" {
-		emit(buildPayload(*lane, backend, workspace, true, nil, errMsg, command, guarded), *asJSON)
+		emit(buildPayload(*lane, backend, workspace, true, nil, errMsg, command, guarded, *profileFlag), *asJSON)
 		if errMsg != "" {
 			os.Exit(2)
 		}
 		os.Exit(0)
 	}
 
-	env := childEnv(*lane, backend, workspace, nil)
+	env := childEnv(*lane, backend, workspace, nil, *profileFlag)
 	if guarded {
 		guardEnvAugment(env)
 	}
@@ -84,11 +90,11 @@ func main() {
 		RegistrationID: env["FAK_REGISTRATION_ID"], ParentRegistrationID: env["FAK_PARENT_REGISTRATION_ID"], ParentAttemptID: env["FAK_PARENT_ATTEMPT_ID"], RootRegistrationID: env["FAK_ROOT_REGISTRATION_ID"], RootOutcome: env["FAK_ROOT_OUTCOME"], RootIssue: firstEnv(env, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstEnv(env, "FAK_TASK_ID", "DISPATCH_ISSUE"), GoalID: firstEnv(env, "FAK_GOAL_ID"), AttemptID: env["FAK_ATTEMPT_ID"], ResumeOfAttemptID: env["FAK_RESUME_OF_ATTEMPT_ID"], LaunchKind: "headless_worker", Scope: []string{workspace}, Lane: *lane, LeaseID: env["FAK_LEASE_ID"], Runtime: backend, HostID: env["COMPUTERNAME"],
 	})
 	if regErr != nil {
-		emit(payload{Schema: workerSchema, OK: false, Lane: *lane, Backend: backend, Workspace: workspace, Command: command, Error: "child registration refused: " + regErr.Error()}, *asJSON)
+		emit(payload{Schema: workerSchema, OK: false, Lane: *lane, Backend: backend, Profile: *profileFlag, Workspace: workspace, Command: command, Error: "child registration refused: " + regErr.Error()}, *asJSON)
 		os.Exit(2)
 	}
 	result := launchRegistered(command, workspace, env, nil, timeout, bounded, &launchRegistration{Store: sessionregistry.Store{Path: registryPath(env)}, Record: registration})
-	p := buildPayload(*lane, backend, workspace, false, &result, "", command, guarded)
+	p := buildPayload(*lane, backend, workspace, false, &result, "", command, guarded, *profileFlag)
 	p.GuardAuditPruned = guardAuditPruned
 	emit(p, *asJSON)
 	os.Exit(result.ReturnCode)

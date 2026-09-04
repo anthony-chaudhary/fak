@@ -358,3 +358,36 @@ func TestReflexWorkerProfileAndS0S1Validation(t *testing.T) {
 		t.Errorf("expected exit code 124 on timeout, got %d", receipt.ExitCode)
 	}
 }
+
+func TestBuildReflexReceipt(t *testing.T) {
+	elapsed := 125 * time.Millisecond
+	receipt := BuildReflexReceipt("gateway", "witness:test", "completed", 1, 0, 12500, elapsed)
+
+	if receipt.Schema != ReflexMicroReceiptSchema {
+		t.Errorf("schema = %q, want %q", receipt.Schema, ReflexMicroReceiptSchema)
+	}
+	if receipt.Schema != "fleet-reflex-micro-receipt/1" {
+		t.Errorf("schema = %q, want fleet-reflex-micro-receipt/1", receipt.Schema)
+	}
+	if receipt.Lane != "gateway" {
+		t.Errorf("lane = %q, want gateway", receipt.Lane)
+	}
+	if receipt.Witness != "witness:test" {
+		t.Errorf("witness = %q, want witness:test", receipt.Witness)
+	}
+	if receipt.State != "completed" {
+		t.Errorf("state = %q, want completed", receipt.State)
+	}
+	if receipt.Allowed != 1 {
+		t.Errorf("allowed = %d, want 1", receipt.Allowed)
+	}
+	if receipt.Denied != 0 {
+		t.Errorf("denied = %d, want 0", receipt.Denied)
+	}
+	if receipt.TokensSaved != 12500 {
+		t.Errorf("tokensSaved = %d, want 12500", receipt.TokensSaved)
+	}
+	if receipt.ElapsedMs != 125 {
+		t.Errorf("elapsed_ms = %d, want 125", receipt.ElapsedMs)
+	}
+}

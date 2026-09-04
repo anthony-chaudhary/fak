@@ -30,6 +30,11 @@ import (
 const (
 	workerSchema   = "fleet-dispatch-worker/1"
 	defaultBackend = "claude"
+
+	profileReflex      = "reflex"
+	defaultReflexModel = "glm-4.5-air"
+	reflexMaxTurns     = 3
+
 	// defaultTimeoutS bounds an unattended worker session. A dispatch worker is a
 	// full agentic `claude -p` / `opencode run` session that runs UNATTENDED, so an
 	// unbounded run lets a wedged session burn tokens with nothing to stop it. 30
@@ -113,11 +118,30 @@ func buildCommand(lane, backend string) ([]string, error) {
 	return nil, fmt.Errorf("unknown backend %q; expected one of %v", backend, backends)
 }
 
+// applyProfile applies profile-specific settings to the worker model and child environment.
+// When profile is "reflex", it defaults workerModel to "glm-4.5-air" if unset,
+// and injects FAK_PROFILE=reflex, DISPATCH_PROFILE=reflex, and max turns 3 into env.
+func applyProfile(profile, workerModel string, env map[string]string) (string, map[string]string) {
+	if strings.EqualFold(profile, profileReflex) {
+		if workerModel == "" {
+			workerModel = defaultReflexModel
+		}
+		if env != nil {
+			env["FAK_PROFILE"] = "reflex"
+			env["DISPATCH_PROFILE"] = "reflex"
+			env["FAK_MAX_TURNS"] = "3"
+			env["DISPATCH_MAX_TURNS"] = "3"
+			env["MAX_TURNS"] = "3"
+		}
+	}
+	return workerModel, env
+}
+
 // childEnv is the env the child worker runs under. DISPATCH_WORKSPACE/LANE/BACKEND
 // are the self-describing contract a worker reads to know its assignment
 // independent of prompt rendering. Mirrors dispatch_worker.child_env: base (or the
 // process env) is passed through, then the three keys are stamped.
-func childEnv(lane, backend, workspace string, base map[string]string) map[string]string {
+func childEnv(lane, backend, workspace string, base map[string]string, profile ...string) map[string]string {
 	env := map[string]string{}
 	if base != nil {
 		for k, v := range base {
@@ -133,6 +157,9 @@ func childEnv(lane, backend, workspace string, base map[string]string) map[strin
 	env["DISPATCH_WORKSPACE"] = workspace
 	env["DISPATCH_LANE"] = lane
 	env["DISPATCH_BACKEND"] = backend
+	if len(profile) > 0 && profile[0] != "" {
+		applyProfile(profile[0], "", env)
+	}
 	return env
 }
 
@@ -302,6 +329,7 @@ type payload struct {
 	OK               bool              `json:"ok"`
 	Lane             string            `json:"lane"`
 	Backend          string            `json:"backend"`
+	Profile          string            `json:"profile,omitempty"`
 	Guarded          bool              `json:"guarded"`
 	GuardAuditPruned int               `json:"guard_audit_pruned"`
 	Workspace        string            `json:"workspace"`
@@ -322,7 +350,7 @@ type payload struct {
 // (unguarded) worker argv when nil (backward compat); a live/dry-run launch passes
 // the ACTUAL launched argv (kernel-fronted when guarded) so the record shows exactly
 // what ran. ok is true iff there was no error and (no result yet or returncode 0).
-func buildPayload(lane, backend, workspace string, dryRun bool, result *launchResult, errMsg string, command []string, guarded bool) payload {
+func buildPayload(lane, backend, workspace string, dryRun bool, result *launchResult, errMsg string, command []string, guarded bool, profile ...string) payload {
 	if command == nil && errMsg == "" {
 		command, _ = buildCommand(lane, backend)
 	}
@@ -331,25 +359,34 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 	if backend == "claude" {
 		baselineTokens, budgetTokens = claudeGuardBudgetObservable(workspace, workerModelFromCommand(command), nil)
 	}
+	prof := ""
+	if len(profile) > 0 {
+		prof = profile[0]
+	}
+	env := map[string]string{
+		"DISPATCH_WORKSPACE":           workspace,
+		"DISPATCH_LANE":                lane,
+		"DISPATCH_BACKEND":             backend,
+		"DISPATCH_GOAL":                envOr("DISPATCH_GOAL", lane),
+		"DISPATCH_ACCOUNT":             os.Getenv("DISPATCH_ACCOUNT"),
+		"DISPATCH_POOL":                os.Getenv("DISPATCH_POOL"),
+		"DISPATCH_LEASE":               os.Getenv("DISPATCH_LEASE"),
+		"DISPATCH_WITNESS_REQUIREMENT": os.Getenv("DISPATCH_WITNESS_REQUIREMENT"),
+	}
+	if prof != "" {
+		applyProfile(prof, "", env)
+	}
 	return payload{
-		Schema:    workerSchema,
-		OK:        ok,
-		Lane:      lane,
-		Backend:   backend,
-		Guarded:   guarded,
-		Workspace: workspace,
-		DryRun:    dryRun,
-		Command:   command,
-		Env: map[string]string{
-			"DISPATCH_WORKSPACE":           workspace,
-			"DISPATCH_LANE":                lane,
-			"DISPATCH_BACKEND":             backend,
-			"DISPATCH_GOAL":                envOr("DISPATCH_GOAL", lane),
-			"DISPATCH_ACCOUNT":             os.Getenv("DISPATCH_ACCOUNT"),
-			"DISPATCH_POOL":                os.Getenv("DISPATCH_POOL"),
-			"DISPATCH_LEASE":               os.Getenv("DISPATCH_LEASE"),
-			"DISPATCH_WITNESS_REQUIREMENT": os.Getenv("DISPATCH_WITNESS_REQUIREMENT"),
-		},
+		Schema:                   workerSchema,
+		OK:                       ok,
+		Lane:                     lane,
+		Backend:                  backend,
+		Profile:                  prof,
+		Guarded:                  guarded,
+		Workspace:                workspace,
+		DryRun:                   dryRun,
+		Command:                  command,
+		Env:                      env,
 		Result:                   result,
 		Error:                    errMsg,
 		GuardBaselineTokens:      baselineTokens,

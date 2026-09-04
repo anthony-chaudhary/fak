@@ -19,49 +19,73 @@ import (
 const Schema = "fak-fleet-search/1"
 
 const (
+	// DefaultLimit defines the fallback ceiling for returned search hits when unspecified.
 	DefaultLimit = 20
-	MaxLimit     = 100
+	// MaxLimit defines the upper bound for search results allowed in a single query.
+	MaxLimit = 100
 )
 
+// Verdict expresses the terminal match assessment derived across all queried stores.
 type Verdict string
 
 const (
-	VerdictSoleMatch       Verdict = "SOLE_MATCH"
-	VerdictMatches         Verdict = "MATCHES"
-	VerdictNoMatch         Verdict = "NO_MATCH"
-	VerdictNoContentTerms  Verdict = "NO_CONTENT_TERMS"
+	// VerdictSoleMatch indicates exactly one operational session satisfied all query predicates.
+	VerdictSoleMatch Verdict = "SOLE_MATCH"
+	// VerdictMatches indicates multiple operational sessions satisfied the query criteria.
+	VerdictMatches Verdict = "MATCHES"
+	// VerdictNoMatch indicates zero operational sessions satisfied the query criteria.
+	VerdictNoMatch Verdict = "NO_MATCH"
+	// VerdictNoContentTerms indicates the query lacked plain-language terms for text matching.
+	VerdictNoContentTerms Verdict = "NO_CONTENT_TERMS"
+	// VerdictPartialCoverage indicates at least one requested store was skipped, unreadable, or degraded.
 	VerdictPartialCoverage Verdict = "PARTIAL_COVERAGE"
 )
 
+// Store identifies an operational session data source ingested by fleet search.
 type Store string
 
 const (
-	StoreLifecycle    Store = "lifecycle"
+	// StoreLifecycle selects the durable lifecycle session journal as a query source.
+	StoreLifecycle Store = "lifecycle"
+	// StoreRegistration selects the child worker registration store as a query source.
 	StoreRegistration Store = "registration"
-	StoreToolProcess  Store = "tool_process"
+	// StoreToolProcess selects the background tool execution tracking store as a query source.
+	StoreToolProcess Store = "tool_process"
 )
 
 var storeOrder = []Store{StoreLifecycle, StoreRegistration, StoreToolProcess}
 
+// CoverageStatus describes whether an ingested store was completely read or degraded.
 type CoverageStatus string
 
 const (
-	CoverageComplete    CoverageStatus = "COMPLETE"
-	CoverageIncomplete  CoverageStatus = "PARTIAL"
+	// CoverageComplete indicates all records from the store were successfully parsed.
+	CoverageComplete CoverageStatus = "COMPLETE"
+	// CoverageIncomplete indicates store records were partially read or had format anomalies.
+	CoverageIncomplete CoverageStatus = "PARTIAL"
+	// CoverageUnavailable indicates the store file was missing or could not be accessed.
 	CoverageUnavailable CoverageStatus = "UNAVAILABLE"
-	CoverageSkipped     CoverageStatus = "SKIPPED"
+	// CoverageSkipped indicates the store was intentionally bypassed by query configuration.
+	CoverageSkipped CoverageStatus = "SKIPPED"
 )
 
+// Liveness classifies the execution state of an operational session.
 type Liveness string
 
 const (
-	LivenessActive    Liveness = "ACTIVE"
-	LivenessStale     Liveness = "STALE"
-	LivenessCrashed   Liveness = "CRASHED"
+	// LivenessActive designates sessions actively heartbeating or running child processes.
+	LivenessActive Liveness = "ACTIVE"
+	// LivenessStale designates sessions whose heartbeat or progress exceeded the threshold.
+	LivenessStale Liveness = "STALE"
+	// LivenessCrashed designates sessions terminated by unhandled errors or killed processes.
+	LivenessCrashed Liveness = "CRASHED"
+	// LivenessCompleted designates sessions that reached normal terminal exit.
 	LivenessCompleted Liveness = "COMPLETED"
-	LivenessUnknown   Liveness = "UNKNOWN"
+	// LivenessUnknown designates sessions with insufficient lifecycle telemetry to determine state.
+	LivenessUnknown Liveness = "UNKNOWN"
 )
 
+// Query holds parsed content terms, store filters, liveness constraints, and result limits.
 type Query struct {
 	Raw      string     `json:"raw"`
 	Terms    []string   `json:"terms"`
@@ -70,6 +94,7 @@ type Query struct {
 	Limit    int        `json:"limit"`
 }
 
+// Coverage records the read status, path, row count, and diagnostics for one store.
 type Coverage struct {
 	Store   Store          `json:"store"`
 	Status  CoverageStatus `json:"status"`
@@ -78,6 +103,7 @@ type Coverage struct {
 	Detail  string         `json:"detail,omitempty"`
 }
 
+// Evidence links an individual matched session attribute back to its originating store.
 type Evidence struct {
 	Store   Store  `json:"store"`
 	Kind    string `json:"kind"`
@@ -85,6 +111,7 @@ type Evidence struct {
 	Summary string `json:"summary"`
 }
 
+// Hit summarizes a matched operational session with scores, identifiers, and store evidence.
 type Hit struct {
 	SessionID    string     `json:"session_id"`
 	Liveness     Liveness   `json:"liveness"`
@@ -98,6 +125,7 @@ type Hit struct {
 	Evidence     []Evidence `json:"evidence"`
 }
 
+// Report encapsulates the complete search output including query, hits, verdict, and coverage.
 type Report struct {
 	Schema       string     `json:"schema"`
 	Query        Query      `json:"query"`
