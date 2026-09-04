@@ -6,7 +6,7 @@ import "fmt"
 
 func (r *Region) allocate() error {
 	allocSize := r.size
-	const maxDevHeap = 1 << 30 // 1GB dev ceiling on non-Linux
+	const maxDevHeap = 64 << 20 // 64MB dev ceiling on non-Linux
 	if allocSize > maxDevHeap {
 		allocSize = maxDevHeap
 	}
