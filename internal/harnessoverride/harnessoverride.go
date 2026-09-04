@@ -1,3 +1,5 @@
+// Package harnessoverride produces structured, reviewable proposals to override
+// changeable capabilities within a verified harness lock.
 package harnessoverride
 
 import (
@@ -9,8 +11,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// Schema defines the canonical schema identifier for harness override proposals.
 const Schema = "fak-harness-override/1"
 
+// Request specifies the target capability and desired changes for an override proposal.
 type Request struct {
 	Capability string
 	Value      string
@@ -18,6 +22,7 @@ type Request struct {
 	LayerID    string
 }
 
+// Proposal holds the generated override layer, manifest, and review steps.
 type Proposal struct {
 	Schema     string                  `json:"schema"`
 	CurrentID  string                  `json:"current_lock_id"`
@@ -30,6 +35,7 @@ type Proposal struct {
 	Next       []string                `json:"next"`
 }
 
+// Propose validates an override request against an active lock and constructs a reviewable Proposal.
 func Propose(lock harnessresolve.Lock, request Request) (Proposal, error) {
 	kind, id, ok := strings.Cut(strings.TrimSpace(request.Capability), ":")
 	if !ok || kind == "" || id == "" {
@@ -79,6 +85,7 @@ func Propose(lock harnessresolve.Lock, request Request) (Proposal, error) {
 	}, nil
 }
 
+// Render formats a Proposal into a human-readable summary with next-step instructions.
 func Render(proposal Proposal) string {
 	asset := proposal.Layer.Assets[0]
 	var b strings.Builder
