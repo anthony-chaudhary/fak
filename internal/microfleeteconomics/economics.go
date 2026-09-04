@@ -85,9 +85,15 @@ type Result struct {
 	CostPerAcceptedDenominator uint64       `json:"cost_per_accepted_denominator"`
 }
 
+// Invariant: microfleet economics accounting is fail-closed and bounded.
+// Any zero-accepted receipt, uncounted branch execution, or integer overflow
+// fails closed with a typed refusal error rather than returning an invalid ratio.
 var (
+	// ErrNoAcceptedWork indicates that a receipt claimed zero accepted units of work.
 	ErrNoAcceptedWork = errors.New("accepted work must be greater than zero")
-	ErrOverflow       = errors.New("cost accounting overflow")
+
+	// ErrOverflow indicates that an accumulator or price computation exceeded uint64 bounds.
+	ErrOverflow = errors.New("cost accounting overflow")
 )
 
 // Evaluate validates a receipt, sums every ledger category, and prices it.

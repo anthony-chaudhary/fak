@@ -99,6 +99,9 @@ type DistillOutcome struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+// Invariant: lookahead lesson distillation is fail-closed and deterministic.
+// Guard: witness gating permits FACT only under W3 evidence; W2 is restricted to RISK, and W0/W1 are refused with LESSON_OVERCLAIMS.
+//
 // DistillLesson distills a Lesson from a fork-rollout's evidence and transcript through an
 // injected seam, then applies the witness gate. Decline discipline first (never poisons a seed):
 // a nil seam, a transcript below minLessonTranscriptChars, or a seam that returns ok=false is a

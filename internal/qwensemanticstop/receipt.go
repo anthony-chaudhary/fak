@@ -70,6 +70,9 @@ type Receipt struct {
 	EvaluatedAt            time.Time     `json:"evaluated_at,omitempty"`
 }
 
+// Invariant: semantic stop evaluation is fail-closed and deterministic.
+// Guard: Evaluate rejects missing receipts, unsupported cancellation, model mismatches,
+// insufficient evaluation pairs, invalid control parameters, or late cancellations.
 // Evaluate fails closed unless a receipt proves that ten interleaved exact-model
 // disconnects reached the scheduler and stopped generation within the declared bound.
 func Evaluate(r *Receipt) error {

@@ -50,6 +50,7 @@ type ParkOptions struct {
 	Now            func() time.Time `json:"-"`
 	WriterLeaseTTL time.Duration    `json:"-"`
 	LeaseOwner     string           `json:"lease_owner,omitempty"`
+	Lease          *WriterLease     `json:"-"`
 }
 
 // PathEffect classifies the outcome of reapplying a parked path.
@@ -80,6 +81,12 @@ type ParkReceipt struct {
 
 // ParkReport is an alias for ParkReceipt.
 type ParkReport = ParkReceipt
+
+// ParkAndReapply executes path suspend, target integration, and reapplying of effects (#10059).
+func ParkAndReapply(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
+	opts.Apply = true
+	return Park(ctx, opts)
+}
 
 // Park suspends owner-authorized dirty paths, integrates target, and reapplies
 // unique effects without clobbering unrelated dirty paths (#10076).
@@ -276,19 +283,23 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	}
 
 	// 4. Acquire worktree writer lease
-	lease, lerr := AcquireWriterLease(repo, leaseOwner, now, ttl)
-	if lerr != nil {
-		var held *WriterLeaseHeldError
-		if errors.As(lerr, &held) {
-			receipt.Status = ParkStatusConflict
-			receipt.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing", held.Info.Owner)
-			return receipt, nil
+	lease := opts.Lease
+	if lease == nil {
+		var lerr error
+		lease, lerr = AcquireWriterLease(repo, leaseOwner, now, ttl)
+		if lerr != nil {
+			var held *WriterLeaseHeldError
+			if errors.As(lerr, &held) {
+				receipt.Status = ParkStatusConflict
+				receipt.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing", held.Info.Owner)
+				return receipt, nil
+			}
+			return receipt, lerr
 		}
-		return receipt, lerr
+		defer func() { _ = lease.Release() }()
+		stopHeartbeat := lease.keepAlive(now)
+		defer stopHeartbeat()
 	}
-	defer func() { _ = lease.Release() }()
-	stopHeartbeat := lease.keepAlive(now)
-	defer stopHeartbeat()
 
 	// 3. Mint durable path-scoped recovery checkpoint object
 	tmpDir, err := os.MkdirTemp("", "fak-park-idx-")

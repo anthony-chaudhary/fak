@@ -1,3 +1,4 @@
+// Package mtpeval provides multi-task speculative evaluation harnesses and quality gates.
 package mtpeval
 
 import (
@@ -15,9 +16,13 @@ import (
 // TaskCategory specifies the domain of evaluation.
 type TaskCategory string
 
+// Task category constants for multi-task evaluation routing.
 const (
+	// CategoryCode evaluates code generation tasks.
 	CategoryCode TaskCategory = "Code"
+	// CategoryJSON evaluates structured JSON schema generation tasks.
 	CategoryJSON TaskCategory = "JSON"
+	// CategoryMath evaluates exact mathematical and logical reasoning tasks.
 	CategoryMath TaskCategory = "Math"
 )
 
@@ -434,6 +439,10 @@ func ValidateTaskOutput(task EvalCase, output string) (bool, string) {
 	}
 }
 
+// Invariant: MTP evaluations are fail-closed and deterministic across all evaluation suites.
+// Precondition: A non-nil SpeculativeGenerator must be provided; nil generators trigger an immediate error.
+// Guard: QualityGates enforce strict validation, minimum TPS, and draft acceptance rates.
+// If any quality gate fails or context cancellation occurs, the evaluation reports a failure fail-closed.
 // RunEvaluation evaluates a speculative generator across all cases in the suite.
 func RunEvaluation(ctx context.Context, gen SpeculativeGenerator, suite []EvalCase, gates QualityGates) (*EvaluationReport, error) {
 	if gen == nil {

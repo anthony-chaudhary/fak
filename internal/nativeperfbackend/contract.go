@@ -1,5 +1,9 @@
 // Package nativeperfbackend defines the bounded Prometheus contract used by the
 // fak-native Metal and CUDA backend drill-down dashboard.
+//
+// Invariant: native perf backend snapshots are fail-closed and bounded.
+// Guard: unavailable backends cannot publish measurement zeros or stale values,
+// and fallback engines outside fak-native are strictly rejected.
 package nativeperfbackend
 
 import (
@@ -117,6 +121,9 @@ func Metrics() []Metric {
 // Snapshot is one backend scrape. Missing optional values remain absent rather
 // than becoming misleading zeros. An unavailable backend carries only identity,
 // availability, and an explicit bounded reason.
+//
+// Invariant: native perf backend snapshots are fail-closed and bounded.
+// Guard: unavailable backends cannot publish measurement zeros or stale values.
 type Snapshot struct {
 	Backend              Backend
 	Engine               string

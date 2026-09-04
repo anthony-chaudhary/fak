@@ -210,6 +210,11 @@ type Params struct {
 	Drain *resume.WatchdogDrainStatus
 }
 
+// Invariant: operator touches MTTR folding is fail-closed and deterministic.
+// Recovery drain reports require witnessed progress; unproven launched sessions
+// are refused and never count toward recovery metrics.
+// Guard: missing drain witness or empty recovered set returns not_yet status.
+//
 // Fold computes the R1 report from loop-event rows (any number of ledgers,
 // pre-concatenated). Pure: no I/O, no clock — AsOf comes from the caller.
 func Fold(events []loopmgr.Event, p Params) Report {

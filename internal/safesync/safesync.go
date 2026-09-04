@@ -32,6 +32,7 @@ const (
 	ReasonQueuedAwaitingQuiescence = "QUEUED_AWAITING_QUIESCENCE"
 	ReasonTargetMoved              = "TARGET_MOVED"
 	ReasonLeaseOwnerUnavailable    = "LEASE_OWNER_UNAVAILABLE"
+	ReasonPathspecRace             = "PATHSPEC_RACE"
 )
 
 // Runner executes a git subcommand in repo. Err is non-nil only when git could

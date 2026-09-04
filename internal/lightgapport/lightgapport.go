@@ -8,19 +8,23 @@ import (
 	"sort"
 )
 
+// Schema defines the canonical schema identifier for the portability report artifact.
 const Schema = "fak-lightgap-portability/1"
 
+// Witness identifies a committed test file and test function serving as concrete evidence.
 type Witness struct {
 	Path string `json:"path"`
 	Test string `json:"test"`
 }
 
+// Swap models an individual portability swap point and its verified alternatives.
 type Swap struct {
 	ID           string             `json:"id"`
 	Fak          Witness            `json:"fak"`
 	Alternatives map[string]Witness `json:"alternatives"`
 }
 
+// Report collects all verified portability swap points under the canonical schema.
 type Report struct {
 	Schema string `json:"schema"`
 	Swaps  []Swap `json:"swaps"`
@@ -29,6 +33,8 @@ type Report struct {
 // Contract is the lock-in/exit-path instrument used by the lightgap scorecard.
 // A swap is witnessed only when the named committed test exists; prose and
 // feature lists are deliberately not accepted as substitutes.
+//
+// Invariant: lightgap swap witness checking is fail-closed and bounded.
 func Contract() Report {
 	alts := func() map[string]Witness {
 		return map[string]Witness{
@@ -47,6 +53,9 @@ func Contract() Report {
 	}}
 }
 
+// Load audits all swap points against the repository root and fails closed if any witness is missing.
+//
+// Guard: all referenced test witnesses must exist and define their respective test functions.
 func Load(root string) (Report, error) {
 	r := Contract()
 	for i := range r.Swaps {
@@ -95,6 +104,7 @@ func contains(b, sub []byte) bool {
 	return false
 }
 
+// Write serializes the portability report to disk formatted with sorted swap identifiers.
 func Write(path string, r Report) error {
 	sort.Slice(r.Swaps, func(i, j int) bool { return r.Swaps[i].ID < r.Swaps[j].ID })
 	b, err := json.MarshalIndent(r, "", "  ")
