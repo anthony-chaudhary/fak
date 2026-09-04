@@ -3,6 +3,14 @@
 // (internal/session.RunState) and the loop supervisor state
 // (internal/loopmgr.LoopState).
 //
+// Invariant: life bridge conversions are fail-closed and bijective over shared states.
+//
+// Guard conditions:
+//   - Only canonical lifecycle phases present at both altitudes map successfully.
+//   - Altitude-specific states (e.g. session.Throttled or loopmgr.StateArmed/Disabled)
+//     or unmapped/out-of-range states fail-closed, returning (zero, false).
+//   - Neither side silently defaults or coerces an unknown state.
+//
 // It owns NEITHER type — it sits above both and asserts they are one vocabulary by
 // pivoting every conversion through the shared internal/lifecycle.Phase. Keeping
 // the converter here (rather than making one package import the other) is what lets
