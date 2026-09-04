@@ -6,6 +6,7 @@ const SchemaVersion = "quantobs/v1"
 // Code is a closed low-cardinality telemetry value.
 type Code uint8
 
+// Telemetry codes categorize quantization artifact formats, precisions, recipes, delegations, and errors.
 const (
 	CodeUnknown Code = iota
 	CodeNotApplicable
@@ -51,6 +52,7 @@ const (
 // EventKind identifies one of the fixed quantization telemetry dimensions.
 type EventKind uint8
 
+// Telemetry event kinds enumerate the orthogonal observation dimensions recorded per quantization transaction.
 const (
 	EventArtifactFormat EventKind = iota + 1
 	EventEffectivePrecision
@@ -63,6 +65,7 @@ const (
 // Outcome is the typed adjudication result for an event.
 type Outcome uint8
 
+// Adjudication outcomes indicate whether quantization telemetry was observed, abstained, or refused.
 const (
 	OutcomeObserved Outcome = iota + 1
 	OutcomeAbstained
@@ -73,6 +76,7 @@ const (
 // recipe declaration from being presented as a measured hardware result.
 type Evidence uint8
 
+// Verification evidence classes distinguish artifact metadata from runtime reports and measured hardware.
 const (
 	EvidenceArtifactMetadata Evidence = iota + 1
 	EvidenceRecipeDeclaration
@@ -85,6 +89,7 @@ const (
 // Envelope states whether residency was measured on hardware.
 type Envelope uint8
 
+// Hardware residency envelopes declare whether memory placement was actively measured on physical hardware.
 const (
 	EnvelopeNotApplicable Envelope = iota + 1
 	EnvelopeUnmeasured
@@ -103,6 +108,8 @@ type SensitiveContext struct {
 	RuntimeInstanceID string
 }
 
+// Precondition: callers must supply a valid schema version matching SchemaVersion alongside classified enum codes.
+
 // Input is the bounded neutral descriptor consumed by Build. Code values are
 // shared across fields so unknown values have one explicit handling path.
 type Input struct {
@@ -117,6 +124,8 @@ type Input struct {
 	Sensitive          SensitiveContext
 }
 
+// Invariant: telemetry results always produce exactly six ordered categorical events without caller strings.
+
 // Event is a deterministic, categorical telemetry record. Value and Recipe are
 // closed codes; no caller-provided string can reach the serialized event.
 type Event struct {
@@ -128,6 +137,8 @@ type Event struct {
 	Envelope Envelope
 	Reason   Code
 }
+
+// Postcondition: returns a deterministic Result containing categorized events with terminal failure states on mismatch.
 
 // Result contains the six event dimensions in their canonical order.
 type Result struct {
