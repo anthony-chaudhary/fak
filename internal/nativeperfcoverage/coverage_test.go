@@ -358,7 +358,7 @@ func TestVisualWitnessManifestBindsCurrentInputs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := fmt.Sprintf("%x", sha256.Sum256(raw))
+			got := fmt.Sprintf("%x", sha256.Sum256(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))))
 			if got != want {
 				t.Fatalf("manifest digest for %s is stale: got %s want %s", file, got, want)
 			}
@@ -417,13 +417,36 @@ func successfulLiveProof(t *testing.T, completed time.Time, engine string) []byt
 	return raw
 }
 
-func repoRoot(t *testing.T) string {
+func repoRoot(t testing.TB) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// BenchmarkCoverageScore measures the execution time and allocation overhead of
+// validating the complete native performance dashboard coverage matrix against repo contracts.
+func BenchmarkCoverageScore(b *testing.B) {
+	root := repoRoot(b)
+	checker := &acceptingChecker{}
+	cfg := Config{
+		Root:    root,
+		Checker: checker,
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		matrix, err := Validate(context.Background(), cfg)
+		if err != nil {
+			b.Fatalf("Validate failed: %v", err)
+		}
+		if len(matrix.Dashboards) != 4 {
+			b.Fatalf("unexpected dashboard count: %d", len(matrix.Dashboards))
+		}
+	}
 }
 
 func fixtureRepo(t *testing.T) string {

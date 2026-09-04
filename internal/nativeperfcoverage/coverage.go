@@ -16,9 +16,17 @@ import (
 )
 
 const (
+	// LiveReceiptSchema defines the canonical v1 schema identifier expected on all
+	// signed native performance live-execution witness receipts.
 	LiveReceiptSchema = "fak-nativeperf-live-receipt/v1"
-	NativeEngine      = "fak-native"
-	Qwen38Prefix      = "Qwen3.8"
+
+	// NativeEngine identifies the required in-kernel inference execution engine
+	// token, distinguishing native paths from external runtimes like llama.cpp.
+	NativeEngine = "fak-native"
+
+	// Qwen38Prefix specifies the required model family prefix for default native
+	// performance benchmarks and operational validation evidence.
+	Qwen38Prefix = "Qwen3.8"
 )
 
 // Spec binds one dashboard to its authoritative public contract and fixture.
@@ -138,9 +146,14 @@ type Series struct {
 type QueryKind string
 
 const (
+	// PanelTarget denotes a query that originates from an individual Grafana dashboard panel.
 	PanelTarget QueryKind = "panel"
-	Annotation  QueryKind = "annotation"
-	Variable    QueryKind = "variable"
+
+	// Annotation indicates a query that produces point or range dashboard event markers.
+	Annotation QueryKind = "annotation"
+
+	// Variable designates a query used to populate dashboard template variables dynamically.
+	Variable QueryKind = "variable"
 )
 
 // QueryCoverage is the deterministic proof row for one extracted query.
@@ -203,6 +216,7 @@ type QueryChecker interface {
 // QueryCheckerFunc adapts a function to QueryChecker.
 type QueryCheckerFunc func(context.Context, string) error
 
+// Check executes the underlying query verification function against the supplied PromQL expression.
 func (f QueryCheckerFunc) Check(ctx context.Context, expr string) error { return f(ctx, expr) }
 
 // Config controls deterministic contract validation.
@@ -222,6 +236,12 @@ type loadedSpec struct {
 	allowed   map[string]bool
 }
 
+// Contract: Validate requires non-empty PromQL expressions, valid dashboard/contract/fixture
+// paths, and exact UID alignment across dashboards and authoritative provisioning contracts.
+// Invariant: Missing fixture metrics or absent Prometheus series must resolve to explicit
+// UNAVAILABLE states rather than coerced zero values or empty ungrounded displays.
+// Fail-closed: Any unparsed PromQL expression, unknown metric family, or unauthorized
+// datasource UID immediately aborts coverage evaluation with a non-nil verification error.
 // Validate loads and proves all four exact dashboard/contract/fixture triples.
 func Validate(ctx context.Context, cfg Config) (Matrix, error) {
 	if cfg.Root == "" {
