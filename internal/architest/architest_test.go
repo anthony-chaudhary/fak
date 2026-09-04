@@ -809,6 +809,10 @@ var tier = map[string]int{
 	"marketplace":                1,
 	"mtpeval":                    1,
 	"mtptune":                    1,
+	"blobcommon":                 1,
+	"breathgate":                 1,
+	"childproc":                  1,
+	"ciyaml":                     1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
