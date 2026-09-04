@@ -78,13 +78,39 @@ func (c runConfig) seedMessages(task string) []Message {
 	return append(msgs, Message{Role: RoleUser, Content: task})
 }
 
+// WithTodoTools arms the kernel-mediated planning and todo tools (todowrite, todoread)
+// and merges them into the run's tool catalog.
+func WithTodoTools() RunOption {
+	return func(c *runConfig) {
+		_, _ = ArmTodoTools()
+		c.todoTools = true
+	}
+}
+
 // seedTools resolves this run's tool catalog: the request-scoped one when wired,
 // otherwise the kernel-owned built-in catalog.
 func (c runConfig) seedTools() []ToolDef {
-	if len(c.toolCatalog) > 0 {
-		return c.toolCatalog
+	base := c.toolCatalog
+	if len(base) == 0 {
+		base = ToolCatalog()
 	}
-	return ToolCatalog()
+	if c.todoTools {
+		hasTodo := false
+		for _, t := range base {
+			if t.Function.Name == ToolTodoWrite {
+				hasTodo = true
+				break
+			}
+		}
+		if !hasTodo {
+			todoDefs := TodoToolCatalog()
+			if len(todoDefs) == 0 {
+				todoDefs = todoToolDefs()
+			}
+			base = append(append([]ToolDef(nil), base...), todoDefs...)
+		}
+	}
+	return base
 }
 
 func ownedAgentSystemPrompt() string {
