@@ -17,6 +17,7 @@ const PageLines = 150
 // child pages rather than remaining a monolith.
 const DocumentSetMarker = "<!-- fak:document-set -->"
 
+// SizeFinding records a Markdown file exceeding the permitted source line budget.
 type SizeFinding struct {
 	Path  string
 	Lines int
