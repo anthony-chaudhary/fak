@@ -206,6 +206,15 @@ func (pi *ProactiveInterceptor) extractReadTarget(turn TurnState) (*readTarget, 
 				path = "."
 			}
 			return &readTarget{tool: ToolClaudeGrep, path: cleanPathString(path), pattern: pat}, true
+		case "bash", "sh":
+			cmd := strings.TrimSpace(turn.TargetPattern)
+			if cmd == "" {
+				cmd = strings.TrimSpace(turn.TargetPath)
+			}
+			if isDeterministicReadOnlyBashCommand(cmd) {
+				return &readTarget{tool: ToolClaudeBash, pattern: cmd}, true
+			}
+			return nil, false
 		default:
 			// Non-read tool explicitly specified -> not a deterministic read target.
 			return nil, false
@@ -227,6 +236,29 @@ func (pi *ProactiveInterceptor) extractReadTarget(turn TurnState) (*readTarget, 
 	}
 
 	return nil, false
+}
+
+func isDeterministicReadOnlyBashCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return false
+	}
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false
+	}
+	switch parts[0] {
+	case "pwd", "whoami":
+		return true
+	case "git":
+		if len(parts) > 1 {
+			switch parts[1] {
+			case "status", "branch", "diff", "log", "rev-parse", "show":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func stripQuoted(s string) string {
@@ -349,6 +381,16 @@ func parseJSONToolTarget(text string) (*readTarget, bool) {
 				filePath = "."
 			}
 			return &readTarget{tool: ToolClaudeGrep, path: filePath, pattern: pattern}, true
+		}
+	case "bash", "sh", "exec":
+		cmd := pattern
+		if cmd == "" {
+			if v, ok := m["command"].(string); ok {
+				cmd = strings.TrimSpace(v)
+			}
+		}
+		if isDeterministicReadOnlyBashCommand(cmd) {
+			return &readTarget{tool: ToolClaudeBash, pattern: cmd}, true
 		}
 	}
 
@@ -478,6 +520,18 @@ func parseGlobIntent(text string) (*readTarget, bool) {
 }
 
 func parseReadIntent(text string) (*readTarget, bool) {
+	// 1. Backticked strings: check first if it's a read-only bash command
+	for _, m := range backtickRe.FindAllStringSubmatch(text, -1) {
+		if len(m) > 1 && isDeterministicReadOnlyBashCommand(m[1]) {
+			return &readTarget{tool: ToolClaudeBash, pattern: cleanPathString(m[1])}, true
+		}
+	}
+
+	// Check for deterministic read-only bash command intent (e.g. "git status")
+	if isDeterministicReadOnlyBashCommand(text) {
+		return &readTarget{tool: ToolClaudeBash, pattern: cleanPathString(text)}, true
+	}
+
 	lower := strings.ToLower(text)
 	hasReadKeyword := false
 	for _, kw := range []string{"read", "cat", "inspect", "examine", "view", "open", "check", "load", "file:", "path:", "target:"} {
@@ -656,6 +710,8 @@ func (pi *ProactiveInterceptor) probeVDSO(
 		if target.path == "." || target.path == "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q}`, target.pattern))
 		}
+	case ToolClaudeBash:
+		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"command":%q}`, target.pattern))
 	default:
 		return nil, nil, false
 	}
