@@ -109,6 +109,7 @@ func decodeGeminiContent(c geminiContent) []Message {
 						Name:      p.FunctionCall.Name,
 						Arguments: geminiArgsToString(p.FunctionCall.Args),
 					},
+					ThoughtSignature: p.ThoughtSignature,
 				})
 			}
 		}
@@ -139,8 +140,9 @@ func decodeGeminiContent(c geminiContent) []Message {
 // serializes these into a candidate's content.parts, either as a buffered
 // generateContent response or as the synthesized streamGenerateContent SSE frames.
 type GeminiPartOut struct {
-	Text         string              `json:"text,omitempty"`
-	FunctionCall *GeminiFunctionCall `json:"functionCall,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
+	FunctionCall     *GeminiFunctionCall `json:"functionCall,omitempty"`
 }
 
 // GeminiFunctionCall is the model-side function call a Gemini client round-trips
@@ -163,12 +165,17 @@ func GeminiResponseParts(m Message) []GeminiPartOut {
 		parts = append(parts, GeminiPartOut{Text: m.Content})
 	}
 	for _, tc := range m.ToolCalls {
+		sig := tc.ThoughtSignature
+		if sig == "" {
+			sig = m.ThinkingSignature
+		}
 		parts = append(parts, GeminiPartOut{
 			FunctionCall: &GeminiFunctionCall{
 				Name: tc.Function.Name,
 				Args: geminiArgsObject(tc.Function.Arguments),
 				ID:   tc.ID,
 			},
+			ThoughtSignature: sig,
 		})
 	}
 	return parts
