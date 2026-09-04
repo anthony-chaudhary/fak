@@ -107,6 +107,14 @@ func (r *RDMARegisteredRegion) StagingCopyCount() int {
 	return r.StagingCopy
 }
 
+// NVMeOpcode defines standard NVMe NVM command opcodes.
+const (
+	// NVMeOpcodeWrite represents NVMe NVM command Write (0x01).
+	NVMeOpcodeWrite uint8 = 0x01
+	// NVMeOpcodeRead represents NVMe NVM command Read (0x02).
+	NVMeOpcodeRead uint8 = 0x02
+)
+
 // NVMeP2PCommand represents a direct NVMe storage command (Read/Write) targeting AMD GPU VRAM.
 // Inspired by BaM (Big Accelerator Memory) and SPDK ROCm plugins, the NVMe submission queue entry (SQE)
 // contains physical PRP/SGL entries directly pointing to GPU BAR1 VRAM.
@@ -121,6 +129,12 @@ type NVMeP2PCommand struct {
 	Completed      bool    `json:"completed"`
 	Status         uint16  `json:"status"` // NVMe status code (0 = success)
 	DurationNanos  int64   `json:"duration_nanos"`
+}
+
+// StagingCopyCount returns the number of intermediate host DRAM staging copies for NVMe direct P2P DMA.
+// Under BaM / SPDK, this invariant is always 0.
+func (cmd *NVMeP2PCommand) StagingCopyCount() int {
+	return 0
 }
 
 // HSAMemorySignal models an aligned 64-bit atomic completion signal in GPU coherent memory (hsa_signal_t).
@@ -177,6 +191,53 @@ func (s *HSAMemorySignal) WaitRelaxed(target int64, timeout time.Duration) (bool
 	return false, fmt.Errorf("hsa_signal %s timed out waiting for target %d (current=%d)", s.SignalID, target, s.value.Load())
 }
 
+// HSADoorbell models an aligned 64-bit hardware dispatch doorbell (AQL packet submission).
+// Host CPU or peer GPU wavefronts ring the doorbell to notify the AMD GPU Command Processor (CP)
+// of newly submitted AQL packets with sub-microsecond latency.
+type HSADoorbell struct {
+	value   atomic.Uint64
+	ID      string  `json:"doorbell_id"`
+	Address uintptr `json:"address"`
+	QueueID uint32  `json:"queue_id"`
+}
+
+// NewHSADoorbell allocates a new HSA dispatch doorbell.
+func NewHSADoorbell(id string, addr uintptr, queueID uint32) *HSADoorbell {
+	return &HSADoorbell{
+		ID:      id,
+		Address: addr,
+		QueueID: queueID,
+	}
+}
+
+// Ring atomically stores the packet write index with release memory semantics, ringing the doorbell.
+func (d *HSADoorbell) Ring(packetIndex uint64) {
+	d.value.Store(packetIndex)
+}
+
+// ReadRelaxed reads the latest packet index written to the doorbell.
+func (d *HSADoorbell) ReadRelaxed() uint64 {
+	return d.value.Load()
+}
+
+// WaitPacket polls the doorbell until the packet index reaches target or timeout expires.
+// Simulates CP doorbell polling with sub-microsecond spin before backing off.
+func (d *HSADoorbell) WaitPacket(target uint64, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	for i := 0; i < 5000; i++ {
+		if d.value.Load() >= target {
+			return true, nil
+		}
+	}
+	for time.Now().Before(deadline) {
+		if d.value.Load() >= target {
+			return true, nil
+		}
+		time.Sleep(10 * time.Microsecond)
+	}
+	return false, fmt.Errorf("hsa_doorbell %s timed out waiting for packet %d (current=%d)", d.ID, target, d.value.Load())
+}
+
 // AMDGPUDirectConfig defines configuration and topology hints for AMDGPUDirectHAL.
 type AMDGPUDirectConfig struct {
 	EnableLargeBARCheck    bool   `json:"enable_large_bar_check"`
@@ -194,6 +255,7 @@ type AMDGPUDirectHAL struct {
 	dmabufs    map[int]*DMABUFHandle
 	rdmaMRs    map[uint32]*RDMARegisteredRegion
 	signals    map[string]*HSAMemorySignal
+	doorbells  map[string]*HSADoorbell
 	transfers  int64
 	bytesMoved uint64
 	nextFD     int
@@ -206,13 +268,14 @@ func NewAMDGPUDirectHAL(cfg AMDGPUDirectConfig) *AMDGPUDirectHAL {
 		cfg.DefaultPageSize = 4096
 	}
 	return &AMDGPUDirectHAL{
-		cfg:     cfg,
-		nodes:   make(map[int]*AMDDeviceNode),
-		dmabufs: make(map[int]*DMABUFHandle),
-		rdmaMRs: make(map[uint32]*RDMARegisteredRegion),
-		signals: make(map[string]*HSAMemorySignal),
-		nextFD:  100,
-		nextKey: 0x2000,
+		cfg:       cfg,
+		nodes:     make(map[int]*AMDDeviceNode),
+		dmabufs:   make(map[int]*DMABUFHandle),
+		rdmaMRs:   make(map[uint32]*RDMARegisteredRegion),
+		signals:   make(map[string]*HSAMemorySignal),
+		doorbells: make(map[string]*HSADoorbell),
+		nextFD:    100,
+		nextKey:   0x2000,
 	}
 }
 
@@ -238,6 +301,26 @@ func (e *AMDGPUDirectHAL) RegisterNode(node AMDDeviceNode) error {
 	return nil
 }
 
+// RouteEntry represents a resolved peer route between two device nodes in a TopologyMatrix.
+type RouteEntry struct {
+	DirectP2PCapable bool          `json:"direct_p2p_capable"`
+	Fabric           AMDFabricType `json:"fabric"`
+	BandwidthGBps    float64       `json:"bandwidth_gbps"`
+	LatencyNanos     uint32        `json:"latency_nanos"`
+	Reason           string        `json:"reason,omitempty"`
+}
+
+// TopologyMatrix represents the complete N x N peer-to-peer route and bandwidth matrix across all discovered nodes.
+type TopologyMatrix struct {
+	NodeIDs []int                      `json:"node_ids"`
+	Routes  map[int]map[int]RouteEntry `json:"routes"`
+}
+
+// JSON encodes the TopologyMatrix as indented JSON bytes.
+func (tm TopologyMatrix) JSON() ([]byte, error) {
+	return json.MarshalIndent(tm, "", "  ")
+}
+
 // DiscoverTopology returns the active AMD device topology, connectivity matrix, and hardware posture.
 func (e *AMDGPUDirectHAL) DiscoverTopology() []AMDDeviceNode {
 	e.mu.RLock()
@@ -253,11 +336,67 @@ func (e *AMDGPUDirectHAL) DiscoverTopology() []AMDDeviceNode {
 	return res
 }
 
+// TopologyMatrix computes and returns the complete N x N peer route matrix across all registered nodes.
+func (e *AMDGPUDirectHAL) TopologyMatrix() TopologyMatrix {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	nodeIDs := make([]int, 0, len(e.nodes))
+	for id := range e.nodes {
+		nodeIDs = append(nodeIDs, id)
+	}
+
+	routes := make(map[int]map[int]RouteEntry, len(nodeIDs))
+	for _, srcID := range nodeIDs {
+		routes[srcID] = make(map[int]RouteEntry, len(nodeIDs))
+		for _, dstID := range nodeIDs {
+			ok, fabric, reason := e.validateP2PRouteLocked(srcID, dstID)
+			var bw float64
+			var lat uint32
+			if ok {
+				if srcID == dstID {
+					fabric = FabricXGMI
+					bw = 896.0
+					lat = 50
+				} else {
+					src := e.nodes[srcID]
+					for _, p := range src.Peers {
+						if p.TargetNodeID == dstID {
+							bw = p.BandwidthGBps
+							lat = p.LatencyNanos
+							break
+						}
+					}
+					if bw == 0 {
+						bw = 32.0 // fallback PCIe Gen4
+						lat = 800
+					}
+				}
+			}
+			routes[srcID][dstID] = RouteEntry{
+				DirectP2PCapable: ok,
+				Fabric:           fabric,
+				BandwidthGBps:    bw,
+				LatencyNanos:     lat,
+				Reason:           reason,
+			}
+		}
+	}
+
+	return TopologyMatrix{
+		NodeIDs: nodeIDs,
+		Routes:  routes,
+	}
+}
+
 // ValidateP2PRoute verifies whether two AMD devices can perform direct peer-to-peer DMA without CPU bounce.
 func (e *AMDGPUDirectHAL) ValidateP2PRoute(srcNodeID, dstNodeID int) (bool, AMDFabricType, string) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.validateP2PRouteLocked(srcNodeID, dstNodeID)
+}
 
+func (e *AMDGPUDirectHAL) validateP2PRouteLocked(srcNodeID, dstNodeID int) (bool, AMDFabricType, string) {
 	src, okSrc := e.nodes[srcNodeID]
 	dst, okDst := e.nodes[dstNodeID]
 	if !okSrc || !okDst {
@@ -310,6 +449,9 @@ func (e *AMDGPUDirectHAL) ExportVRAMToDMABUF(nodeID int, vaddr uintptr, size uin
 	if !ok {
 		return nil, fmt.Errorf("amddirect: unknown node ID %d", nodeID)
 	}
+	if !node.DMABUFCapable {
+		return nil, fmt.Errorf("amddirect: node %d does not support kernel DMA-BUF export", nodeID)
+	}
 	if size == 0 {
 		return nil, errors.New("amddirect: export size must be > 0")
 	}
@@ -339,6 +481,13 @@ func (e *AMDGPUDirectHAL) ExportVRAMToDMABUF(nodeID int, vaddr uintptr, size uin
 
 	e.dmabufs[handle.FD] = handle
 	return handle, nil
+}
+
+// GetDMABUF retrieves an exported DMA-BUF handle by file descriptor.
+func (e *AMDGPUDirectHAL) GetDMABUF(fd int) *DMABUFHandle {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.dmabufs[fd]
 }
 
 // CloseDMABUF releases an exported DMA-BUF handle.
@@ -423,6 +572,13 @@ func (e *AMDGPUDirectHAL) DeregisterRDMARegion(rkey uint32) error {
 	return nil
 }
 
+// GetRDMARegion retrieves an active RDMA memory region by its registration key (rkey).
+func (e *AMDGPUDirectHAL) GetRDMARegion(rkey uint32) *RDMARegisteredRegion {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.rdmaMRs[rkey]
+}
+
 // ExecuteNVMeP2PTransfer executes a direct NVMe-to-GPU peer-to-peer DMA transfer (BaM / SPDK-lite).
 // The NVMe controller DMA engine reads or writes flash blocks directly to/from the GPU VRAM address
 // over the PCIe bus without intermediate host DRAM staging copies.
@@ -436,6 +592,9 @@ func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransfer(cmd *NVMeP2PCommand) error {
 	if cmd.TargetVRAMAddr == 0 {
 		return errors.New("amddirect: target VRAM address cannot be 0")
 	}
+	if cmd.Opcode != 0 && cmd.Opcode != NVMeOpcodeRead && cmd.Opcode != NVMeOpcodeWrite {
+		return fmt.Errorf("amddirect: unsupported NVMe opcode 0x%02x (must be 0x01 Write or 0x02 Read)", cmd.Opcode)
+	}
 
 	start := time.Now()
 	// Simulate controller direct DMA execution over PCIe P2P bus
@@ -446,6 +605,30 @@ func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransfer(cmd *NVMeP2PCommand) error {
 	atomic.AddInt64(&e.transfers, 1)
 	atomic.AddUint64(&e.bytesMoved, cmd.ByteLength)
 	return nil
+}
+
+// ExecuteNVMeP2PTransferAsync initiates an asynchronous direct NVMe-to-GPU peer-to-peer DMA transfer.
+// Returns a receive-only channel that receives the completion error (or nil on success) once the transfer finishes.
+func (e *AMDGPUDirectHAL) ExecuteNVMeP2PTransferAsync(cmd *NVMeP2PCommand) (<-chan error, error) {
+	if cmd == nil {
+		return nil, errors.New("amddirect: nil NVMe P2P command")
+	}
+	if cmd.ByteLength == 0 {
+		return nil, errors.New("amddirect: transfer byte length must be > 0")
+	}
+	if cmd.TargetVRAMAddr == 0 {
+		return nil, errors.New("amddirect: target VRAM address cannot be 0")
+	}
+	if cmd.Opcode != 0 && cmd.Opcode != NVMeOpcodeRead && cmd.Opcode != NVMeOpcodeWrite {
+		return nil, fmt.Errorf("amddirect: unsupported NVMe opcode 0x%02x (must be 0x01 Write or 0x02 Read)", cmd.Opcode)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		err := e.ExecuteNVMeP2PTransfer(cmd)
+		done <- err
+	}()
+	return done, nil
 }
 
 // TransferP2P performs a validated peer-to-peer data transfer between two AMD GPU nodes.
@@ -486,6 +669,23 @@ func (e *AMDGPUDirectHAL) GetSignal(id string) *HSAMemorySignal {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.signals[id]
+}
+
+// RegisterDoorbell registers an HSA dispatch doorbell with the coordinator.
+func (e *AMDGPUDirectHAL) RegisterDoorbell(d *HSADoorbell) {
+	if d == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.doorbells[d.ID] = d
+}
+
+// GetDoorbell retrieves a registered HSA dispatch doorbell by ID.
+func (e *AMDGPUDirectHAL) GetDoorbell(id string) *HSADoorbell {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.doorbells[id]
 }
 
 // AuditReport summarizes the configuration, hardware posture, and potential bottlenecks.

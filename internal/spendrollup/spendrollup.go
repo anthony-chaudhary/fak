@@ -22,41 +22,74 @@ import (
 )
 
 // Schema is the rollup's stable identifier for JSON consumers.
+//
+// Invariant: Payload consumers inspect Schema to detect serialization and format drift.
+// Guard: Any mismatch against Schema indicates unsupported version skew.
 const Schema = "fak-spend-rollup/1"
 
 // Provenance labels WHO authored a spend figure — the same WITNESSED/OBSERVED axis the
 // conflation scorecard enforces on every reported number.
+//
+// Invariant: Every spend figure in a verified rollup must carry either Witnessed or Observed provenance.
+// Guard: Gate fails closed on empty, unknown, or unclassified provenance values.
 type Provenance string
 
 const (
 	// Witnessed marks a figure fak MEASURED locally and stands behind (fak authored it).
+	//
+	// Invariant: Author-attributed to fak; valued strictly on locally observed net usage.
+	// Guard: Never applied to external provider-billed dollar amounts.
 	Witnessed Provenance = "WITNESSED"
 	// Observed marks a figure fak RELAYS from an external provider (fak did not author it).
+	//
+	// Invariant: Relayed as-is from external telemetry; zero fak authorial claim.
+	// Guard: Never conflated into fak-authored session or compute totals.
 	Observed Provenance = "OBSERVED"
 )
 
 // ValidProvenance reports whether p is a recognized WITNESSED/OBSERVED label. An empty or
 // unknown provenance is what the gate fails.
+//
+// Invariant: Returns true strictly for canonical Witnessed or Observed values.
+// Guard: Fails closed (false) on empty strings, lower-case forms, or undefined provenance tokens.
 func ValidProvenance(p Provenance) bool { return p == Witnessed || p == Observed }
 
 // ValuationBasis names the pricing basis a spend figure was valued on, so a session count
 // fak authored is never silently read as a provider-billed dollar. The token enum reuses
 // the conflation scorecard's valuation-basis vocabulary (#2796).
+//
+// Invariant: Every spend figure must explicitly define its measurement or pricing basis.
+// Guard: Unspecified or unrecognized bases are rejected fail-closed by Gate.
 type ValuationBasis string
 
 const (
 	// BasisObservedNet is fak's own locally observed net usage (a WITNESSED basis).
+	//
+	// Invariant: Represents internal metrics directly metered by fak.
+	// Guard: Must only pair with Witnessed provenance figures.
 	BasisObservedNet ValuationBasis = "OBSERVED_NET"
 	// BasisProviderBilled is the provider's own billed number, relayed (an OBSERVED basis).
+	//
+	// Invariant: External billing ledger quantity reported by the remote vendor.
+	// Guard: Must only pair with Observed provenance figures.
 	BasisProviderBilled ValuationBasis = "PROVIDER_BILLED"
 	// BasisFullInput prices a token at 1.0x full-input.
+	//
+	// Invariant: Baseline un-discounted token input accounting.
+	// Guard: Cannot be combined with marginal read basis in subtotal aggregation.
 	BasisFullInput ValuationBasis = "FULL_INPUT"
 	// BasisCacheReadMarginal prices a token at 0.1x cache-read marginal.
+	//
+	// Invariant: Applies solely to verified prompt cache hits.
+	// Guard: Cannot be folded into un-discounted full input subtotals.
 	BasisCacheReadMarginal ValuationBasis = "CACHE_READ_MARGINAL"
 )
 
 // ValidBasis reports whether b is a recognized valuation basis. An empty or unknown basis
 // is what the gate fails.
+//
+// Invariant: Returns true strictly for declared members of ValuationBasis.
+// Guard: Fails closed (false) for unrecognized, blank, or malformed basis tokens.
 func ValidBasis(b ValuationBasis) bool {
 	switch b {
 	case BasisObservedNet, BasisProviderBilled, BasisFullInput, BasisCacheReadMarginal:
@@ -68,6 +101,9 @@ func ValidBasis(b ValuationBasis) bool {
 
 // Figure is one labeled spend number in the rollup. Amount is deliberately paired with a
 // Unit so a "live-sessions" count is never conflated with a provider dollar.
+//
+// Invariant: Amount is dimensionless without pairing to Unit, Basis, and Provenance.
+// Guard: Gate verifies that Provenance and Basis satisfy ValidProvenance and ValidBasis.
 type Figure struct {
 	Account    string         `json:"account"`
 	Provider   string         `json:"provider"`
@@ -82,6 +118,9 @@ type Figure struct {
 // Subtotal folds figures that share a (provenance, unit, basis) key. There is deliberately
 // NO single grand total: summing a WITNESSED session count and an OBSERVED provider-window
 // state into one number is the exact conflation this rollup exists to prevent.
+//
+// Invariant: Subtotals partition figures strictly by the tuple (Provenance, Unit, Basis).
+// Guard: Prevents dimensional collapse; cross-provenance or cross-basis summation is refused.
 type Subtotal struct {
 	Provenance Provenance     `json:"provenance"`
 	Unit       string         `json:"unit"`
@@ -91,6 +130,9 @@ type Subtotal struct {
 }
 
 // Rollup is the cross-account spend rollup behind `fak spend`.
+//
+// Invariant: Schema is initialized to Schema ("fak-spend-rollup/1") by Build.
+// Guard: Callers must invoke Gate() to ensure no unlabeled or malformed figures are accepted.
 type Rollup struct {
 	Schema    string     `json:"schema"`
 	Figures   []Figure   `json:"figures"`
@@ -102,6 +144,9 @@ type Rollup struct {
 // emits is labeled by construction, so Build's output always passes Gate; the gate exists to
 // catch a hand-constructed or future figure that forgets its label. Only routable worker
 // rows contribute — duplicate/excluded/non-account rows carry no spend of their own.
+//
+// Invariant: Figures and subtotals are generated strictly from routable worker accounts.
+// Guard: Non-routable accounts (duplicates, excluded identities, non-accounts) are filtered out fail-closed.
 func Build(rows []fleetaccounts.Account) Rollup {
 	rollup := Rollup{Schema: Schema, Figures: []Figure{}, Subtotals: []Subtotal{}, Warnings: []string{}}
 	for _, row := range rows {
@@ -149,6 +194,9 @@ func Build(rows []fleetaccounts.Account) Rollup {
 // Gate fails the rollup if ANY figure is unlabeled — missing a WITNESSED/OBSERVED
 // provenance label OR missing/unknown a valuation basis. It returns nil when every figure
 // is labeled. This is the "gate failing an unlabeled spend figure" witness (issue #2903).
+//
+// Invariant: A valid rollup has zero unlabeled figures across its entire Figures slice.
+// Guard: Fails closed on any invalid Provenance or ValuationBasis; returns aggregated defects.
 func (r Rollup) Gate() error {
 	var defects []string
 	for i, f := range r.Figures {
@@ -230,6 +278,9 @@ func warnings(figures []Figure) []string {
 
 // Render draws the compact human rollup. It leads with the provenance discipline so a
 // reader is never left to guess whether a number is fak-authored or provider-relayed.
+//
+// Invariant: Formats figures and subtotals with provenance explicitly rendered in column 1.
+// Guard: When Figures is empty, prints a safe notice rather than invalid or empty tables.
 func Render(r Rollup) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak spend — cross-account rollup (%s)\n", r.Schema)

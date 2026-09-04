@@ -17,10 +17,14 @@ const maxResponseBytes = 8 << 20
 
 const defaultHTTPTimeout = 30 * time.Second
 
+// Error code constants returned in typed API errors.
 const (
-	CodeUnavailable     = "UNAVAILABLE"
+	// CodeUnavailable denotes network reachability or deadline failure.
+	CodeUnavailable = "UNAVAILABLE"
+	// CodeInvalidResponse denotes malformed JSON or payload constraint violations.
 	CodeInvalidResponse = "INVALID_RESPONSE"
-	CodeHTTPError       = "HTTP_ERROR"
+	// CodeHTTPError denotes non-2xx HTTP status from the upstream service.
+	CodeHTTPError = "HTTP_ERROR"
 )
 
 // Config describes one optional OpenViking service boundary. Empty identity
@@ -64,6 +68,7 @@ type APIError struct {
 	cause      error
 }
 
+// Error returns a formatted, credential-redacted error string describing the failed operation.
 func (e *APIError) Error() string {
 	if e == nil {
 		return "<nil>"
@@ -84,6 +89,7 @@ func (e *APIError) Error() string {
 	return prefix
 }
 
+// Unwrap returns the underlying causal error if one was preserved.
 func (e *APIError) Unwrap() error { return e.cause }
 
 // HealthStatus is the raw, deliberately unauthenticated /health response.
@@ -187,6 +193,7 @@ type errorInfo struct {
 	Details json.RawMessage `json:"details"`
 }
 
+// Invariant: OpenViking client operations are fail-closed and deterministic.
 // NewClient validates an HTTP(S) service root before any network I/O.
 func NewClient(cfg Config) (*Client, error) {
 	base, err := validateBaseURL(cfg.BaseURL)

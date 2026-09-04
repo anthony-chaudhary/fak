@@ -226,6 +226,29 @@ func AcquireWriterLease(repo, owner string, now func() time.Time, ttl time.Durat
 	return nil, &WriterLeaseHeldError{Info: cur}
 }
 
+// ActiveWriterLease checks whether repo currently has an active, non-stale writer lease.
+func ActiveWriterLease(repo string, now func() time.Time, ttl time.Duration) (*WriterLeaseInfo, bool) {
+	if now == nil {
+		now = time.Now
+	}
+	if ttl <= 0 {
+		ttl = DefaultWriterLeaseTTL
+	}
+	gd, err := worktreeGitDir(repo)
+	if err != nil {
+		return nil, false
+	}
+	path := filepath.Join(gd, writerLeaseFile)
+	info, err := readLease(path)
+	if err != nil {
+		return nil, false
+	}
+	if !leaseStale(info, now(), ttl) {
+		return &info, true
+	}
+	return nil, false
+}
+
 // Release drops the lease if we still own it. It is a no-op when a peer already
 // reclaimed the lease (our record was overwritten), so a reclaimed writer never deletes
 // the peer's live lease. Safe to call on a nil lease.

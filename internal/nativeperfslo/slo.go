@@ -98,13 +98,17 @@ type LiveRunInput struct {
 }
 
 type LiveSeriesResult struct {
-	Status            SeriesStatus        `json:"status"`
-	UnavailableReason UnavailableReason   `json:"unavailable_reason"`
-	LifecycleStatus   LifecycleStatus     `json:"lifecycle_status"`
-	Result            Result              `json:"result,omitempty"`
-	Prometheus        string              `json:"prometheus,omitempty"`
+	Status            SeriesStatus      `json:"status"`
+	UnavailableReason UnavailableReason `json:"unavailable_reason"`
+	LifecycleStatus   LifecycleStatus   `json:"lifecycle_status"`
+	Result            Result            `json:"result,omitempty"`
+	Prometheus        string            `json:"prometheus,omitempty"`
 }
 
+// Invariant: native performance SLO evaluations are fail-closed and bounded.
+// Mismatched benchmark envelopes, stale candidate observations, or missing
+// evidence immediately cause series to become unavailable without zero coercion.
+//
 // ProduceLiveSeries evaluates a candidate observation against a matched baseline,
 // verifies envelope validity and freshness, and emits bounded SLO and lifecycle Prometheus series.
 func ProduceLiveSeries(now time.Time, maxAge time.Duration, evaluator *Evaluator, input LiveRunInput) LiveSeriesResult {

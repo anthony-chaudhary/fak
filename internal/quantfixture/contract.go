@@ -1,5 +1,9 @@
 // Package quantfixture provides deterministic, redistributable quantization
 // interoperability fixtures and verifies their provenance manifest.
+//
+// Invariant: quant fixture verification is fail-closed and tamper-evident across all recipes.
+// Contract: every artifact must match its declared SHA256 digest, size bounds, and deterministic recipe.
+// Guard: unknown schemas, missing artifacts, or unapproved licenses are immediately rejected.
 package quantfixture
 
 import (
@@ -12,9 +16,13 @@ import (
 	"path/filepath"
 )
 
+// Schema identifies the canonical specification version for quant fixture manifests.
 const Schema = "quantfixture/1"
+
+// PublicDomainLicense defines the required permissive license for redistributable test fixtures.
 const PublicDomainLicense = "CC0-1.0"
 
+// Entry describes an individual quantization test artifact and its deterministic generation recipe.
 type Entry struct {
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
@@ -24,6 +32,7 @@ type Entry struct {
 	Recipe   string `json:"recipe"`
 }
 
+// Manifest represents a complete collection of verified quantization interoperability fixtures.
 type Manifest struct {
 	Schema   string  `json:"schema"`
 	Fixtures []Entry `json:"fixtures"`

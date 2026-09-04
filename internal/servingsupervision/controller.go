@@ -8,6 +8,8 @@ import (
 )
 
 // DesiredServingState specifies the declarative serving workload.
+// Invariant: Declares target replica count, model artifact, drain timeouts, and restart budgets.
+// Guard: Serves as the single source of truth for controller reconciliation.
 type DesiredServingState struct {
 	DeploymentID  string        `json:"deployment_id"`
 	ModelArtifact string        `json:"model_artifact"`
@@ -17,6 +19,8 @@ type DesiredServingState struct {
 }
 
 // ReconciliationReport captures the actions taken during controller reconciliation or restart.
+// Invariant: Categorizes replicas into adopted, created, and removed slices.
+// Guard: PreservedProxy indicates whether existing ingress proxy was non-destructively preserved.
 type ReconciliationReport struct {
 	AdoptedReplicas []string `json:"adopted_replicas"`
 	CreatedReplicas []string `json:"created_replicas"`
@@ -25,6 +29,8 @@ type ReconciliationReport struct {
 }
 
 // ControllerSupervisor owns state reconciliation from desired state and non-destructive adoption.
+// Invariant: Controller crash/restart adopts existing healthy replicas without restarting or disrupting them.
+// Guard: Desired replica count is maintained by creating missing replicas or draining excess ones.
 type ControllerSupervisor struct {
 	mu           sync.Mutex
 	domainID     string
@@ -42,9 +48,11 @@ type ControllerSupervisor struct {
 }
 
 // ControllerOption configures optional behavior on a ControllerSupervisor.
+// Invariant: Applied during constructor execution.
 type ControllerOption func(*ControllerSupervisor)
 
 // WithControllerBackend sets the engine identity (default EngineNative).
+// Invariant: Preserves FAK-native engine provenance in supervision receipts.
 func WithControllerBackend(engine string) ControllerOption {
 	return func(c *ControllerSupervisor) {
 		c.engine = engine
@@ -52,6 +60,8 @@ func WithControllerBackend(engine string) ControllerOption {
 }
 
 // NewControllerSupervisor builds a supervisor for the serving controller domain.
+// Invariant: Non-positive DrainTimeout defaults to 5s; non-positive RestartBudget defaults to 5.
+// Guard: Role is pinned strictly to RoleController; initial phase is PhaseStarting.
 func NewControllerSupervisor(
 	spec ServingDomainSpec,
 	desired DesiredServingState,
@@ -89,6 +99,8 @@ func NewControllerSupervisor(
 }
 
 // Start brings the controller into PhaseReady.
+// Invariant: Transitions controller and internal drain manager to PhaseReady.
+// Guard: Protected by internal mutex.
 func (c *ControllerSupervisor) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -99,7 +111,8 @@ func (c *ControllerSupervisor) Start(ctx context.Context) error {
 }
 
 // Reconcile reconciles running runtime components against the desired state.
-// Existing healthy replicas are adopted non-destructively without restarts.
+// Invariant: Existing healthy replicas are adopted non-destructively without restarts.
+// Guard: Deficits trigger creation of new replicas; excesses trigger graceful drain before removal.
 func (c *ControllerSupervisor) Reconcile(
 	ctx context.Context,
 	existingReplicas []*ReplicaSupervisor,
@@ -199,6 +212,8 @@ func (c *ControllerSupervisor) Reconcile(
 }
 
 // Restart recovers the controller domain, advancing its generation and non-destructively adopting existing workers.
+// Invariant: Drains controller domain, bumps generation, and adopts running replicas and proxy without worker teardown.
+// Guard: Reconciles desired state; emits audit receipt witnessing controller recovery.
 func (c *ControllerSupervisor) Restart(
 	ctx context.Context,
 	existingReplicas []*ReplicaSupervisor,
@@ -235,6 +250,8 @@ func (c *ControllerSupervisor) Restart(
 }
 
 // HealthyReplicas lists all currently healthy and unquarantined replicas.
+// Invariant: Returns snapshot slice of replicas currently in PhaseReady and unquarantined.
+// Guard: Thread-safe read protected by internal mutex.
 func (c *ControllerSupervisor) HealthyReplicas() []*ReplicaSupervisor {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -249,6 +266,8 @@ func (c *ControllerSupervisor) HealthyReplicas() []*ReplicaSupervisor {
 }
 
 // Replicas returns a snapshot map of all tracked replicas.
+// Invariant: Returns shallow copy map of all registered replicas (healthy or otherwise).
+// Guard: Thread-safe read protected by internal mutex.
 func (c *ControllerSupervisor) Replicas() map[string]*ReplicaSupervisor {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -261,6 +280,8 @@ func (c *ControllerSupervisor) Replicas() map[string]*ReplicaSupervisor {
 }
 
 // Proxy returns the managed proxy supervisor.
+// Invariant: Returns the active ingress proxy supervisor reference.
+// Guard: Thread-safe read protected by internal mutex.
 func (c *ControllerSupervisor) Proxy() *ProxySupervisor {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -268,6 +289,8 @@ func (c *ControllerSupervisor) Proxy() *ProxySupervisor {
 }
 
 // Phase returns the current serving phase of the controller.
+// Invariant: Thread-safe read of the active controller phase.
+// Guard: Protected by internal mutex.
 func (c *ControllerSupervisor) Phase() ServingPhase {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -275,6 +298,8 @@ func (c *ControllerSupervisor) Phase() ServingPhase {
 }
 
 // Generation returns the current generation counter.
+// Invariant: Increments monotonically on controller restart.
+// Guard: Protected by internal mutex.
 func (c *ControllerSupervisor) Generation() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -282,6 +307,8 @@ func (c *ControllerSupervisor) Generation() uint64 {
 }
 
 // LastReceipt returns the most recent supervision receipt for the controller.
+// Invariant: Returns nil if no drain or restart action has occurred.
+// Guard: Thread-safe read protected by internal mutex.
 func (c *ControllerSupervisor) LastReceipt() *ServingReceipt {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -289,11 +316,13 @@ func (c *ControllerSupervisor) LastReceipt() *ServingReceipt {
 }
 
 // DomainID returns the failure domain ID.
+// Invariant: Immutable domain identifier.
 func (c *ControllerSupervisor) DomainID() string {
 	return c.domainID
 }
 
 // ControllerID returns the controller identity.
+// Invariant: Immutable controller identifier.
 func (c *ControllerSupervisor) ControllerID() string {
 	return c.controllerID
 }

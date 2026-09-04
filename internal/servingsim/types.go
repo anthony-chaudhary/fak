@@ -6,16 +6,26 @@ import (
 )
 
 // EventType identifies the nature of a simulation event in the discrete-event loop.
+//
+// Invariant: Event types are non-empty string tokens recognized by the discrete-event dispatcher.
+// Guard: Unknown event types are treated as unhandled no-ops.
 type EventType string
 
 const (
 	// EventRequestArrival signals the arrival of a new inference request.
+	//
+	// Invariant: Event carries a non-nil RequestState payload with non-negative ArrivalTimeMS.
 	EventRequestArrival EventType = "request_arrival"
 	// EventStepComplete signals that a batch execution step has finished on the hardware.
+	//
+	// Invariant: Emitted only when a hardware execution step is currently in-flight.
 	EventStepComplete EventType = "step_complete"
 )
 
 // SimEvent is a discrete-event structure managed by a min-heap priority queue.
+//
+// Invariant: TimeMS is non-negative and events with identical TimeMS break ties via monotonic Seq.
+// Guard: Seq is strictly assigned by the engine sequencer to preserve deterministic scheduling.
 type SimEvent struct {
 	TimeMS  float64       `json:"time_ms"`
 	Type    EventType     `json:"type"`
@@ -28,6 +38,10 @@ type SimEvent struct {
 }
 
 // RequestState represents the lifecycle and metrics for an individual LLM inference request.
+//
+// Invariant: PromptTokens > 0, OutputTarget > 0, and ArrivalTimeMS >= 0.
+// Invariant: PrefillComputed <= PromptTokens and TokensGenerated <= OutputTarget.
+// Guard: Requests violating positive token bounds are rejected fail-closed during engine validation.
 type RequestState struct {
 	ID               string  `json:"id"`
 	ArrivalTimeMS    float64 `json:"arrival_time_ms"`
@@ -48,6 +62,9 @@ type RequestState struct {
 
 // HardwareLatencyTable models execution latency for prefill chunk and decode step
 // as functions of batch size, token count, and speculative draft length K.
+//
+// Invariant: Latency calculations yield non-negative values for positive workload dimensions.
+// Guard: Zero or negative batch sizes and token counts return 0 latency fail-closed.
 type HardwareLatencyTable struct {
 	// Linear execution model parameters (fallback when functions are nil)
 	BasePrefillMS     float64 `json:"base_prefill_ms"`
@@ -65,6 +82,8 @@ type HardwareLatencyTable struct {
 }
 
 // DefaultHardwareLatencyTable provides typical baseline latencies for modern data-center GPUs (e.g. H100/A100).
+//
+// Invariant: All returned baseline coefficients are strictly positive.
 func DefaultHardwareLatencyTable() HardwareLatencyTable {
 	return HardwareLatencyTable{
 		BasePrefillMS:     1.5,
@@ -78,6 +97,9 @@ func DefaultHardwareLatencyTable() HardwareLatencyTable {
 }
 
 // PrefillChunkLatency calculates the execution latency of a prefill chunk.
+//
+// Invariant: Returns non-negative latency in milliseconds.
+// Guard: If tokens <= 0 or batchSize <= 0, returns 0.0 fail-closed without hardware evaluation.
 func (h HardwareLatencyTable) PrefillChunkLatency(tokens int, batchSize int) float64 {
 	if tokens <= 0 || batchSize <= 0 {
 		return 0
@@ -96,6 +118,9 @@ func (h HardwareLatencyTable) PrefillChunkLatency(tokens int, batchSize int) flo
 }
 
 // DecodeStepLatency calculates the execution latency of a decode step.
+//
+// Invariant: Returns non-negative latency in milliseconds.
+// Guard: If batchSize <= 0, returns 0.0 fail-closed.
 func (h HardwareLatencyTable) DecodeStepLatency(batchSize int, draftK int) float64 {
 	if batchSize <= 0 {
 		return 0
@@ -114,6 +139,9 @@ func (h HardwareLatencyTable) DecodeStepLatency(batchSize int, draftK int) float
 }
 
 // StepLatency calculates execution latency for a combined or distinct serving step.
+//
+// Invariant: Returns non-negative execution latency in milliseconds.
+// Guard: If both prefillBatch <= 0 and decodeBatch <= 0, returns 0.0 fail-closed.
 func (h HardwareLatencyTable) StepLatency(prefillTokens int, prefillBatch int, decodeBatch int, draftK int) float64 {
 	if prefillBatch <= 0 && decodeBatch <= 0 {
 		return 0
@@ -137,20 +165,34 @@ func (h HardwareLatencyTable) StepLatency(prefillTokens int, prefillBatch int, d
 }
 
 // SpeculativeMode specifies the stochastic or deterministic model for draft token acceptance.
+//
+// Invariant: Mode is one of the closed set of recognized sampling strategies.
+// Guard: Unrecognized or empty modes default safely to SpeculativeModePrefix (or SpeculativeModeDeterministic if configured).
 type SpeculativeMode string
 
 const (
 	// SpeculativeModePrefix tests tokens sequentially from position 0 to K-1, stopping at the first rejection.
+	//
+	// Invariant: Accepted count cannot exceed the index of the first rejected draft token.
 	SpeculativeModePrefix SpeculativeMode = "prefix"
 	// SpeculativeModeBinomial samples acceptance count from Binomial(K, alpha).
+	//
+	// Invariant: Accepted count is bounded in [0, K].
 	SpeculativeModeBinomial SpeculativeMode = "binomial"
 	// SpeculativeModePoisson samples acceptance count from Poisson(K * alpha).
+	//
+	// Invariant: Accepted count is clamped to [0, K].
 	SpeculativeModePoisson SpeculativeMode = "poisson"
 	// SpeculativeModeDeterministic accepts round(K * alpha) tokens deterministically.
+	//
+	// Invariant: Accepted count is deterministic and clamped in [0, K].
 	SpeculativeModeDeterministic SpeculativeMode = "deterministic"
 )
 
 // SimulatorConfig configures the continuous-batching discrete-event scheduler.
+//
+// Invariant: AcceptanceRate is bounded in [0.0, 1.0] and SpeculativeHorizon >= 0.
+// Guard: Invalid configurations fail-closed during NewServingSimulator initialization.
 type SimulatorConfig struct {
 	MaxBatchSize        int                   `json:"max_batch_size"`
 	MaxTokensPerStep    int                   `json:"max_tokens_per_step"` // chunked prefill budget
@@ -167,6 +209,8 @@ type SimulatorConfig struct {
 }
 
 // PercentileLatency holds P50, P90, P95, and P99 summary latency figures.
+//
+// Invariant: P50 <= P90 <= P95 <= P99 for non-empty distributions.
 type PercentileLatency struct {
 	P50  float64 `json:"p50"`
 	P90  float64 `json:"p90"`
@@ -178,6 +222,9 @@ type PercentileLatency struct {
 }
 
 // SimulationMetrics summarizes the performance and resource efficiency of a simulation run.
+//
+// Invariant: PeakKVBlocksUsed <= TotalKVBlocks and KVBlockUtilization is bounded in [0.0, 1.0].
+// Invariant: SpeculativeYield + SpeculativeWaste == 1.0 when speculative drafts are proposed.
 type SimulationMetrics struct {
 	TotalRequests       int               `json:"total_requests"`
 	SimulatedDurationMS float64           `json:"simulated_duration_ms"`
@@ -195,6 +242,9 @@ type SimulationMetrics struct {
 }
 
 // ComputePercentiles calculates P50, P90, P95, P99, Min, Max, and Mean from a slice of values.
+//
+// Invariant: Non-empty inputs return sorted quantile interpolations where Min <= P50 <= P99 <= Max.
+// Guard: Empty input slices return a zero-valued PercentileLatency fail-closed.
 func ComputePercentiles(values []float64) PercentileLatency {
 	n := len(values)
 	if n == 0 {
