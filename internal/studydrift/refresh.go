@@ -10,15 +10,22 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
+// RefreshReceiptSchema defines the schema identifier for studydrift refresh receipt payloads.
 const RefreshReceiptSchema = "fak-study-refresh-receipt/1"
 
+// RefreshStatus classifies the outcome of validating and refreshing a pinned source against new evidence.
 type RefreshStatus string
 
 const (
-	RefreshUnchanged    RefreshStatus = "unchanged"
-	RefreshMoved        RefreshStatus = "moved"
-	RefreshChanged      RefreshStatus = "changed"
-	RefreshUnavailable  RefreshStatus = "unavailable"
+	// RefreshUnchanged indicates the observed source content and metadata match the pinned source.
+	RefreshUnchanged RefreshStatus = "unchanged"
+	// RefreshMoved indicates content digest is identical but repository location or revision changed.
+	RefreshMoved RefreshStatus = "moved"
+	// RefreshChanged indicates content digest modified, requiring superseded observation and decision tracking.
+	RefreshChanged RefreshStatus = "changed"
+	// RefreshUnavailable indicates observation was explicitly marked unavailable upstream.
+	RefreshUnavailable RefreshStatus = "unavailable"
+	// RefreshUnverifiable indicates content digest mismatch, corrupted timestamps, or missing tracking IDs.
 	RefreshUnverifiable RefreshStatus = "unverifiable"
 )
 
@@ -45,6 +52,7 @@ type SourceObservation struct {
 	Unavailable   bool   `json:"unavailable,omitempty"`
 }
 
+// Supersession records prior observation and decision IDs replaced by an updated source.
 type Supersession struct {
 	Observation string `json:"observation"`
 	Decision    string `json:"decision"`
@@ -63,11 +71,16 @@ type RefreshReceipt struct {
 	Supersedes  *Supersession     `json:"supersedes,omitempty"`
 }
 
+// DigestSource computes a deterministic sha256 hex digest prefixed with "sha256:" for byte slices.
 func DigestSource(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// RefreshSource evaluates an observed source against an immutable pinned source pin.
+// Contract:
+// - Invariant: inputs are cloned deeply so caller slices and pinned sources are never mutated in place.
+// - Fail-closed guard: missing timestamps, digest mismatches, or missing supersede IDs immediately yield RefreshUnverifiable with nil Canonical.
 func RefreshSource(pin PinnedSource, observation SourceObservation) RefreshReceipt {
 	pin = clonePinnedSource(pin)
 	observation = cloneSourceObservation(observation)
