@@ -105,6 +105,10 @@ func (a *StorageComputeArbitrator) Decide(tokens int, reuseProb float64) Decisio
 
 // Decide evaluates recompute vs. offload costs using the provided hardware profile.
 //
+// Invariant: compute tuning arbitration is fail-closed and deterministic.
+// If tokens <= 0, reuseProb <= 0, or parameters are unvalidated, Decide
+// safely falls back to VerdictRecompute with zero cost or explicit write overhead.
+//
 // Cost equations:
 //
 //	Cost_offload = (Bytes / BW_write) + (LambdaWear * Bytes) + reuseProb * (Bytes / BW_read)

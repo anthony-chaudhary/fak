@@ -171,6 +171,7 @@ func (m Manifest) Digest() (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// Invariant: candidate validation precedes benchmark timing, and lookup is fail-closed.
 // Tune deterministically enumerates candidates, validates output before any
 // timing, then selects the lowest median. Failed candidates remain in the report.
 func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, measure Measure, policy Policy) (Manifest, Report, error) {
