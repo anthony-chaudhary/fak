@@ -82,6 +82,12 @@ func TestDecodeStateValidation(t *testing.T) {
 		t.Errorf("negative metadata Validate() expected ErrCorruptedState, got %v", err)
 	}
 
+	badBlock := state.Clone()
+	badBlock.KVMetadata.BlockSize = -1
+	if err := badBlock.Validate(); !errors.Is(err, ErrCorruptedState) {
+		t.Errorf("negative block size Validate() expected ErrCorruptedState, got %v", err)
+	}
+
 	// Corrupted payload without checksum recalculation
 	corrupted := state.Clone()
 	corrupted.Payload[len(corrupted.Payload)-1] ^= 0xFF
@@ -100,6 +106,14 @@ func TestNewDecodeState_Errors(t *testing.T) {
 	}
 	if _, err := NewDecodeState(VersionV1Legacy, "m", "", nil, meta, nil); !errors.Is(err, ErrCorruptedState) {
 		t.Errorf("NewDecodeState with empty sequenceID expected ErrCorruptedState, got %v", err)
+	}
+	badMeta := KVBufferMetadata{NumLayers: -1, NumHeads: 2, HeadDim: 64}
+	if _, err := NewDecodeState(VersionV1Legacy, "m", "s", nil, badMeta, nil); !errors.Is(err, ErrCorruptedState) {
+		t.Errorf("NewDecodeState with negative NumLayers expected ErrCorruptedState, got %v", err)
+	}
+	badBlockMeta := KVBufferMetadata{NumLayers: 4, NumHeads: 2, HeadDim: 64, BlockSize: -1}
+	if _, err := NewDecodeState(VersionV1Legacy, "m", "s", nil, badBlockMeta, nil); !errors.Is(err, ErrCorruptedState) {
+		t.Errorf("NewDecodeState with negative BlockSize expected ErrCorruptedState, got %v", err)
 	}
 }
 
@@ -299,6 +313,42 @@ func TestMigrationFailClosed_StepFailureAndRollback(t *testing.T) {
 	_, err = engine.Migrate(state, FormatVersion(13))
 	if !errors.Is(err, ErrMigrationFailed) {
 		t.Errorf("expected ErrMigrationFailed for KV structural invariant violation, got %v", err)
+	}
+
+	// Register a step that mutates ModelID
+	_ = engine.RegisterStep(MigrationStep{
+		From:        VersionV1Legacy,
+		To:          FormatVersion(14),
+		Description: "ModelID mutating step",
+		Apply: func(s *DecodeState) (*DecodeState, error) {
+			cp := s.Clone()
+			cp.Version = FormatVersion(14)
+			cp.ModelID = "mutated-model-id"
+			return cp, nil
+		},
+	})
+
+	_, err = engine.Migrate(state, FormatVersion(14))
+	if !errors.Is(err, ErrMigrationFailed) {
+		t.Errorf("expected ErrMigrationFailed for model identity violation, got %v", err)
+	}
+
+	// Register a step that mutates SequenceID
+	_ = engine.RegisterStep(MigrationStep{
+		From:        VersionV1Legacy,
+		To:          FormatVersion(15),
+		Description: "SequenceID mutating step",
+		Apply: func(s *DecodeState) (*DecodeState, error) {
+			cp := s.Clone()
+			cp.Version = FormatVersion(15)
+			cp.SequenceID = "mutated-sequence-id"
+			return cp, nil
+		},
+	})
+
+	_, err = engine.Migrate(state, FormatVersion(15))
+	if !errors.Is(err, ErrMigrationFailed) {
+		t.Errorf("expected ErrMigrationFailed for sequence identity violation, got %v", err)
 	}
 }
 

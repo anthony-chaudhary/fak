@@ -255,4 +255,30 @@ func TestExecuteRoute_SourceMismatch(t *testing.T) {
 	if !errors.Is(err, ErrIncompatibleFormat) {
 		t.Errorf("expected ErrIncompatibleFormat on route source mismatch, got %v", err)
 	}
+
+	// Malformed route: Source != Target but zero steps
+	emptyRoute := &MigrationRoute{
+		Source: VersionV1Legacy,
+		Target: VersionV2Paged,
+		Steps:  nil,
+	}
+	_, err = engine.ExecuteRoute(state, emptyRoute)
+	if !errors.Is(err, ErrMigrationFailed) {
+		t.Errorf("expected ErrMigrationFailed on empty route with Source != Target, got %v", err)
+	}
+
+	// Malformed route: steps end at V2 but Target claimed V4
+	stepV1V2, err := engine.Route(VersionV1Legacy, VersionV2Paged)
+	if err != nil {
+		t.Fatalf("Route failed: %v", err)
+	}
+	truncatedRoute := &MigrationRoute{
+		Source: VersionV1Legacy,
+		Target: VersionV4Compressed,
+		Steps:  stepV1V2.Steps, // Only goes to V2
+	}
+	_, err = engine.ExecuteRoute(state, truncatedRoute)
+	if !errors.Is(err, ErrMigrationFailed) {
+		t.Errorf("expected ErrMigrationFailed on route ending prematurely, got %v", err)
+	}
 }

@@ -163,7 +163,7 @@ func (s *DecodeState) Validate() error {
 	if s.SequenceID == "" {
 		return fmt.Errorf("%w: empty sequence ID", ErrCorruptedState)
 	}
-	if s.KVMetadata.NumLayers < 0 || s.KVMetadata.NumHeads < 0 || s.KVMetadata.HeadDim < 0 || s.KVMetadata.TotalTokens < 0 {
+	if s.KVMetadata.NumLayers < 0 || s.KVMetadata.NumHeads < 0 || s.KVMetadata.HeadDim < 0 || s.KVMetadata.BlockSize < 0 || s.KVMetadata.TotalTokens < 0 {
 		return fmt.Errorf("%w: negative KV metadata dimensions", ErrCorruptedState)
 	}
 
@@ -208,6 +208,9 @@ func NewDecodeState(version FormatVersion, modelID, sequenceID string, tokens []
 	}
 	if sequenceID == "" {
 		return nil, fmt.Errorf("%w: sequenceID cannot be empty", ErrCorruptedState)
+	}
+	if kvMeta.NumLayers < 0 || kvMeta.NumHeads < 0 || kvMeta.HeadDim < 0 || kvMeta.BlockSize < 0 || kvMeta.TotalTokens < 0 {
+		return nil, fmt.Errorf("%w: negative KV metadata dimensions", ErrCorruptedState)
 	}
 
 	s := &DecodeState{
@@ -421,6 +424,10 @@ func (e *MigrationRunner) ExecuteRoute(state *DecodeState, plan *MigrationRoute)
 			return nil, fmt.Errorf("%w: step %d violated KV cache structural invariants", ErrMigrationFailed, idx)
 		}
 
+		if transformed.ModelID != backup.ModelID || transformed.SequenceID != backup.SequenceID {
+			return nil, fmt.Errorf("%w: step %d violated model or sequence identity invariants", ErrMigrationFailed, idx)
+		}
+
 		// Post-step checksum recalculation and validation.
 		transformed.Checksum = transformed.ComputeChecksum()
 		if err := transformed.Validate(); err != nil {
@@ -428,6 +435,10 @@ func (e *MigrationRunner) ExecuteRoute(state *DecodeState, plan *MigrationRoute)
 		}
 
 		current = transformed
+	}
+
+	if current.Version != plan.Target {
+		return nil, fmt.Errorf("%w: route execution reached version %s, want target %s", ErrMigrationFailed, current.Version, plan.Target)
 	}
 
 	return current, nil
