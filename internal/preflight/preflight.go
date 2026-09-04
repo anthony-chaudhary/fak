@@ -5,6 +5,10 @@
 // typed hard-negative (passed cheap rung k, failed expensive rung k+1) — the
 // self-labeling signal that trains the syscall-tuned model (unit 50).
 //
+// Invariant: ladder rungs execute cheapest-first and fail-closed on any validation error.
+// Guard: malformed tool invocations or schema mismatches produce immediate structured denials.
+// Fail-closed: any parse failure or schema violation rejects the tool call before invocation.
+//
 // Rungs in v0.1:
 //
 //	rung 0  static parse  — are the args even valid JSON? (unit 47)
@@ -30,12 +34,18 @@ import (
 type FieldType string
 
 const (
+	// TypeString represents a JSON string primitive value in schema specifications.
 	TypeString FieldType = "string"
+	// TypeNumber represents a JSON floating-point or integer numeric primitive value.
 	TypeNumber FieldType = "number"
-	TypeBool   FieldType = "boolean"
+	// TypeBool represents a JSON boolean true/false primitive value.
+	TypeBool FieldType = "boolean"
+	// TypeObject represents a JSON associative map or dictionary object structure.
 	TypeObject FieldType = "object"
-	TypeArray  FieldType = "array"
-	TypeAny    FieldType = ""
+	// TypeArray represents an ordered sequence or slice of JSON elements.
+	TypeArray FieldType = "array"
+	// TypeAny represents an unconstrained wildcard schema field that accepts any JSON type.
+	TypeAny FieldType = ""
 )
 
 // Schema is a tiny JSON-Schema subset: required keys + their expected types.

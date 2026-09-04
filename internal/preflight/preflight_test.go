@@ -646,3 +646,36 @@ func TestDogfoodRuntimeExecution(t *testing.T) {
 		t.Fatalf("row1 = %+v, want deny/MALFORMED/passed=0/failed=1", row1)
 	}
 }
+
+// BenchmarkLadderAdjudicate benchmarks preflight ladder evaluation on well-formed vs malformed calls.
+func BenchmarkLadderAdjudicate(b *testing.B) {
+	l := New()
+	l.SetSchema("read_file", Schema{
+		Required: map[string]FieldType{
+			"path": TypeString,
+		},
+	})
+	ctx := context.Background()
+	goodCall := inlineCall("read_file", `{"path":"/foo/bar.go"}`)
+	badCall := inlineCall("read_file", `{"path":12345}`)
+
+	b.Run("defer_valid", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			v := l.Adjudicate(ctx, goodCall)
+			if v.Kind != abi.VerdictDefer {
+				b.Fatalf("unexpected verdict kind: %v", v.Kind)
+			}
+		}
+	})
+
+	b.Run("deny_schema_mismatch", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			v := l.Adjudicate(ctx, badCall)
+			if v.Kind != abi.VerdictDeny {
+				b.Fatalf("unexpected verdict kind: %v", v.Kind)
+			}
+		}
+	})
+}

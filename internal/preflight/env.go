@@ -18,15 +18,18 @@ import (
 )
 
 const (
+	// EnvPreflightSchema names version 1 of the environment preflight constraint schema.
 	EnvPreflightSchema = "fak.preflight.env/1"
 
-	// EnvVerdictClear means no live lease overlaps the declared paths.
-	// EnvVerdictLeased means at least one does — coordinate before editing.
-	EnvVerdictClear  = "CLEAR"
+	// EnvVerdictClear indicates no live lease overlaps declared paths and git tooling is clear.
+	EnvVerdictClear = "CLEAR"
+	// EnvVerdictLeased indicates at least one active lease overlaps the requested file set.
 	EnvVerdictLeased = "LEASED"
 
+	// GitShellPowerShell specifies PowerShell as the mandatory shell for git and gh tools.
 	GitShellPowerShell = "powershell"
-	GitShellBash       = "bash"
+	// GitShellBash specifies Bash as a safe and supported shell environment for git tooling.
+	GitShellBash = "bash"
 )
 
 // EnvProbe is the caller-supplied host evidence. Data only: this package never

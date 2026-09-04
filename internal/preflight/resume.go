@@ -9,16 +9,22 @@ const (
 	// observed-at-bill rows can live in one ledger.
 	ResumePreflightSchema = "fak.preflight.resume/1"
 
+	// ResumeBudgetColdPrefillExceeded indicates projected cold prefill tokens exceed configured budget.
 	ResumeBudgetColdPrefillExceeded = "COLD_PREFILL_BUDGET_EXCEEDED"
 )
 
+// ResumePath identifies a specific candidate strategy for resuming or resetting agent state.
 type ResumePath string
 
 const (
+	// ResumePathWarmSplice represents a zero-cost resume via in-process key-value state splice.
 	ResumePathWarmSplice ResumePath = "WARM-SPLICE"
-	ResumePathWarm       ResumePath = "WARM"
-	ResumePathCut        ResumePath = "CUT"
-	ResumePathReset      ResumePath = "RESET"
+	// ResumePathWarm represents resuming an intact session where remote prompt cache is still warm.
+	ResumePathWarm ResumePath = "WARM"
+	// ResumePathCut represents truncating older history to fit within context window limits.
+	ResumePathCut ResumePath = "CUT"
+	// ResumePathReset represents clearing conversational context entirely to restart fresh.
+	ResumePathReset ResumePath = "RESET"
 )
 
 // ResumeInput is the pure pre-resume rung input. The caller supplies resume.Plan's
@@ -30,6 +36,7 @@ type ResumeInput struct {
 	BudgetTokens        int          `json:"budget_tokens,omitempty"`
 }
 
+// ResumeTokensFromBytes estimates token count from raw payload byte length using a 4-bytes/token rule.
 func ResumeTokensFromBytes(n int) int {
 	if n <= 0 {
 		return 0
@@ -37,6 +44,7 @@ func ResumeTokensFromBytes(n int) int {
 	return (n + 3) / 4
 }
 
+// ResumePathCost projects the token consumption and estimated dollar cost of a resume candidate.
 type ResumePathCost struct {
 	Path                   ResumePath      `json:"path"`
 	Strategy               resume.Strategy `json:"strategy,omitempty"`
