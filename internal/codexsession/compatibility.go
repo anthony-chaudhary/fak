@@ -20,7 +20,9 @@ type CompatibilityReceipt struct {
 	Fixture         string
 }
 
-// CompatibilityEnvelope describes the app-server protocol presented at startup.
+// CompatibilityEnvelope captures the startup capability configuration presented by
+// a Codex app-server, containing its binary version, protocol version, schema bytes,
+// and registered authority methods.
 type CompatibilityEnvelope struct {
 	BinaryVersion    string
 	ProtocolVersion  string
@@ -50,11 +52,15 @@ type CompatibilityError struct {
 	Reason          string
 }
 
+// Error formats the compatibility rejection diagnostic detailing mismatched version, protocol, or digest.
 func (e *CompatibilityError) Error() string {
 	return fmt.Sprintf("codexsession: unsupported Codex compatibility envelope binary=%q protocol=%q schema_sha256=%s: %s; refresh conformance fixtures or roll back Codex", e.BinaryVersion, e.ProtocolVersion, e.SchemaDigest, e.Reason)
 }
 
-// LoadCompatibilityReceipt validates a fixture and returns its tested binding.
+// LoadCompatibilityReceipt reads, parses, and validates a versioned conformance fixture,
+// ensuring its scrubbed schema digest matches tested fixture manifests.
+// Precondition: fixture file path must exist, be readable, and contain valid JSON schema bindings.
+// Postcondition: returns validated CompatibilityReceipt whose digest matches known tested fixture manifests.
 func LoadCompatibilityReceipt(path string) (CompatibilityReceipt, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -83,6 +89,8 @@ func LoadCompatibilityReceipt(path string) (CompatibilityReceipt, error) {
 // CheckCompatibility fails closed when the presented schema or authority
 // surface does not exactly match a tested receipt. Callers must invoke this
 // before starting the app-server process.
+// Precondition: got envelope, tested receipt, and expected authority method slices must be populated.
+// Postcondition: returns nil if schema digest and authority methods match tested receipt, error otherwise.
 func CheckCompatibility(got CompatibilityEnvelope, tested CompatibilityReceipt, expectedAuthority []string) error {
 	gotDigest := digest(got.Schema)
 	if got.BinaryVersion != tested.BinaryVersion || got.ProtocolVersion != tested.ProtocolVersion || gotDigest != tested.SchemaDigest {
