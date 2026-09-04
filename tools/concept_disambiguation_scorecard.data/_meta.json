@@ -1277,6 +1277,21 @@
           "category": "incidental",
           "reason": "asymmetric kv cache constructor",
           "token": "NewAsymmetricKVCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ops config field for Go build cache",
+          "token": "GoCacheHighBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ops config field for Go build cache",
+          "token": "GoCacheLowBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ops config field for Go build cache",
+          "token": "GoCacheMinAge"
         }
       ],
       "id": "cache",
@@ -1327,6 +1342,9 @@
         "FAK_WORKER_COUPLING_CACHE_LOAD_MAX",
         "FAK_WORKER_COUPLING_CACHE_MAX",
         "FreshRuntimeConstants",
+        "GoCacheHighBytes",
+        "GoCacheLowBytes",
+        "GoCacheMinAge",
         "InputCached",
         "InputCachedPerMillion",
         "InputUncached",
@@ -8254,6 +8272,16 @@
           "category": "incidental",
           "reason": "driver for web_search",
           "token": "webSearchEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Global operations engine in service daemon",
+          "token": "serviceOpsEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for ops.Engine",
+          "token": "NewEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8285,6 +8313,7 @@
         "MigrationEngine",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
+        "NewEngine",
         "NewSessionAffinityGateway",
         "NewSpeculativeEngine",
         "PrivateAgentAEngineCalls",
@@ -8368,6 +8397,7 @@
         "response_vdso_memo",
         "revokeVDSOWitness",
         "selectorGateway",
+        "serviceOpsEngine",
         "shrinkWireInKernel",
         "webSearchEngine",
         "writeEngine"
@@ -12138,10 +12168,31 @@
           "category": "incidental",
           "reason": "age-conditioned hazard rate eviction victim selector",
           "token": "PickEvictionVictimHazard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field in ops status report",
+          "token": "LocksEvicted"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ops action type for lock eviction",
+          "token": "ActionLockEvict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ops event type string",
+          "token": "LOCK_EVICT"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local boolean variable in lock clearance",
+          "token": "shouldEvict"
         }
       ],
       "id": "evict",
       "ignore": [
+        "ActionLockEvict",
         "CauseCacheEviction",
         "CompactReasonPinEvictRefused",
         "CounterCacheEvictions",
@@ -12154,6 +12205,8 @@
         "KVDigestEvictor",
         "KVEvictionCostHazard",
         "L2Evictions",
+        "LOCK_EVICT",
+        "LocksEvicted",
         "NewWithTierBudgetsAndEvictionPolicy",
         "PickEvictionVictimHazard",
         "ReasonPinEvictRefused",
@@ -12173,7 +12226,8 @@
         "noteEviction",
         "pressure_evict",
         "recordEvictChoice",
-        "replayableEvictedCount"
+        "replayableEvictedCount",
+        "shouldEvict"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -13088,6 +13142,11 @@
           "category": "incidental",
           "reason": "dataslot unmaterialized status const",
           "token": "StatusUnmaterialized"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal helper for rendering launchd plist xml",
+          "token": "renderPlistXML"
         }
       ],
       "id": "render-materialize",
@@ -13162,6 +13221,7 @@
         "renderIssueContractReviews",
         "renderLaunchPosture",
         "renderNextNativePerformance",
+        "renderPlistXML",
         "renderProviders",
         "renderREADME",
         "renderRanks",
@@ -14708,6 +14768,16 @@
           "category": "incidental",
           "reason": "Agentqueue-local desired population bounds; not a resource or inference pool.",
           "token": "PoolSpec"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal Kimi K3 paged attention memory block allocator",
+          "token": "PagePool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for internal Kimi K3 paged attention allocator",
+          "token": "NewPagePool"
         }
       ],
       "exclude": [
@@ -14717,7 +14787,9 @@
       "ignore": [
         "ErrNotPoolable",
         "FLEET_WORKER_WORKTREE_POOL",
+        "NewPagePool",
         "NewSeatPool",
+        "PagePool",
         "PoolID",
         "PoolSpec",
         "PoolState",

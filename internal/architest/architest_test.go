@@ -49,6 +49,7 @@ var tier = map[string]int{
 	"agentquery":         2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
 	"bgloop":             2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
 	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
+	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
 	"abi":                0,
 	"launchguard":        1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
 	"servingsupervision": 3, // serving failure-domain isolation and supervision; mechanism leaf, off the hot path.

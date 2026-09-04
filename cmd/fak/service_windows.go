@@ -168,6 +168,7 @@ func runWindowsControlLoop(ctx context.Context, stdout, stderr io.Writer, interv
 		if rc := windowsControlResumeTick(stdout, stderr); rc != 0 {
 			return rc
 		}
+		serviceOpsTick(ctx, stdout, stderr)
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():

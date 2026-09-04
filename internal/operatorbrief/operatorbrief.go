@@ -18,6 +18,15 @@ import (
 // Schema is the stable JSON contract for the operator brief.
 const Schema = "fak-operator-brief/1"
 
+// OpsInfo carries host operations health and autonomous maintenance telemetry.
+type OpsInfo struct {
+	Status          string `json:"status"`
+	FreeDiskBytes   uint64 `json:"free_disk_bytes,omitempty"`
+	BytesReclaimed  int64  `json:"bytes_reclaimed,omitempty"`
+	ProcessesReaped int    `json:"processes_reaped,omitempty"`
+	DeadLocksClean  int    `json:"dead_locks_clean,omitempty"`
+}
+
 // Inputs are the report envelopes the brief summarizes. Nil reports are treated
 // as missing sources, because an operator cannot reason about the whole fleet
 // from a partial pane without knowing which panes are absent.
@@ -42,9 +51,12 @@ type Inputs struct {
 	DebtWitnesses []DebtWitnessRecord
 
 	// Reboot carries per-sample host-reboot advice from stallscan. Advised
-	// crossings surface as human-authority pages (approve and schedule a reboot),
+	// crossing surfaces as human-authority pages (approve and schedule a reboot),
 	// deduplicated by (axis, process) so one sustained crossing pages once.
 	Reboot []stallscan.RebootAdvice
+
+	// Ops carries host operations telemetry and background health.
+	Ops *OpsInfo
 
 	// TriageGate selects the decenter-the-human paging policy applied during
 	// Fold: "enforce" re-partitions the human bucket through choicetriage so the
@@ -371,6 +383,9 @@ func Fold(in Inputs) Report {
 	if in.OSP != nil {
 		addOSP(&r, *in.OSP)
 	}
+	if in.Ops != nil {
+		addOps(&r, *in.Ops)
+	}
 	addDebtWitnesses(&r, in.DebtWitnesses)
 	r.Coherence = sourceCoherence(r.Sources)
 	if r.Coherence.Status == "mixed" {
@@ -524,6 +539,12 @@ func addReboot(r *Report, advice []stallscan.RebootAdvice) {
 func humanAxis(axis string) string {
 	a := strings.ReplaceAll(axis, "_high_water", " high-water")
 	return strings.ReplaceAll(a, "_", " ")
+}
+
+func addOps(r *Report, ops OpsInfo) {
+	detail := fmt.Sprintf("status=%s (reclaimed: %d bytes, reaped: %d procs, locks: %d clean)",
+		ops.Status, ops.BytesReclaimed, ops.ProcessesReaped, ops.DeadLocksClean)
+	r.addBackground("host-ops", "host operations "+ops.Status, detail, "keep autonomous host operations ticking")
 }
 
 func (r *Report) finalize() {

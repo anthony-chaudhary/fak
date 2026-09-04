@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/ops"
 	"github.com/anthony-chaudhary/fak/internal/serviceledger"
 	"github.com/anthony-chaudhary/fak/internal/servicespec"
 	"github.com/anthony-chaudhary/fak/internal/servicewatchdog"
@@ -40,6 +41,19 @@ var serviceCommand = exec.Command
 var serviceCommandOutput = exec.Command
 var serviceTick = func(stdout, stderr io.Writer) int {
 	return runResumeWatchdog(stdout, stderr, []string{"--live", "--json"})
+}
+var serviceOpsEngine *ops.Engine
+var serviceOpsTick = func(ctx context.Context, stdout, stderr io.Writer) {
+	if serviceOpsEngine == nil {
+		root := discoverRepoRoot()
+		engine, err := ops.NewEngine(root, ops.DefaultConfig())
+		if err == nil {
+			serviceOpsEngine = engine
+		}
+	}
+	if serviceOpsEngine != nil {
+		_ = serviceOpsEngine.Tick(ctx, false)
+	}
 }
 
 // defaultRootedPath fills an unset path flag with a default anchored at the filesystem
@@ -283,6 +297,7 @@ func runServiceLoopContext(ctx context.Context, stdout, stderr io.Writer, interv
 		if rc := serviceTick(stdout, stderr); rc != 0 {
 			return rc
 		}
+		serviceOpsTick(ctx, stdout, stderr)
 		if err := notify.Progress(); err != nil {
 			fmt.Fprintln(stderr, "fak service run: watchdog:", err)
 			return 1

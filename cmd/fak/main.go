@@ -354,6 +354,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdWatchdog(args)
 	case "service":
 		cmdService(args)
+	case "ops":
+		os.Exit(runOps(os.Stdout, os.Stderr, args))
 	case "micro":
 		// The native in-process Go microagent runtime front door (see cmdMicro).
 		cmdMicro(args)
@@ -612,6 +614,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
 		cmdAntipatternScorecard(args)
+	case "debt-lanes":
+		cmdDebtLanes(args)
 	case "maturity":
 		cmdMaturity(args)
 	case "balance":
