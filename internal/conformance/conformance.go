@@ -20,6 +20,10 @@
 // and examples/dogfood-claude-policy.json) so the suite cannot silently lag the kernel:
 // this is the #453 SLA-to-ABI-cadence requirement — a safety-conformance suite that
 // trails the floor is a public attestation of a stale floor, worse than no mark.
+//
+// Invariant: conformance checking is fail-closed and deterministic across all evaluation paths.
+// Precondition: embedded ABI golden contracts and dogfood policies are non-empty and well-formed.
+// Guard: any deviation from the frozen ABI wire contract or policy verdict matrix yields a fail report.
 package conformance
 
 import (
@@ -69,6 +73,9 @@ type Report struct {
 // Run executes the full conformance suite against the compiled kernel and the embedded
 // contracts, and returns a structured Report. It has no side effects and reads nothing
 // from disk, so it is safe to call from a shipped binary in any working directory.
+//
+// Invariant: conformance checking is fail-closed; any individual check failure results in Pass=false.
+// Guard: all checks must pass for the suite to certify the build as conformant.
 func Run() Report {
 	checks := []CheckResult{
 		checkABIContract(),
