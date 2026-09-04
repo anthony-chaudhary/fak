@@ -377,6 +377,12 @@ func (g *Group) checkBroadcastScope(payload abi.Ref) error {
 	return nil
 }
 
+// Invariant: collective communication operations are fail-closed and rank-ordered.
+// Every member dispatch is validated against canonical rank order and submitted
+// through the kernel adjudication floor without widening Ref scope or taint.
+//
+// Guard: collective submission fails closed immediately upon kernel denial or arity mismatch,
+// guaranteeing that no partial or unadjudicated collective operation can proceed.
 func (g *Group) submitCollective(ctx context.Context, k abi.Kernel, tool string, args func(int, Member) abi.Ref, meta map[string]string) (CollectiveRequest, error) {
 	if k == nil {
 		return CollectiveRequest{}, ErrNoKernel

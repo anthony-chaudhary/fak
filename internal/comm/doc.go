@@ -25,6 +25,13 @@
 // return the existing abi.SubmissionHandle set with StatusPending and complete via
 // Kernel.Reap; no ABI edit is needed.
 //
+// Invariant: collective communication operations are fail-closed and rank-ordered.
+// Group membership is deterministic and immutable, and all collective dispatches
+// cross the kernel adjudication floor independently under fail-closed bounds.
+//
+// Guard: collective submission fails closed immediately upon kernel denial or arity mismatch,
+// ensuring no partial or unadjudicated collective operation can proceed.
+//
 // Honesty caveat (borrow the term, disclaim the scope). This is NOT MPI. These are
 // adjudicated agent collectives borrowing collective NAMES and rank-order STRUCTURE:
 // Broadcast is a scope-bounded context share, Scatter is a per-rank goal fan-out,
