@@ -40,15 +40,25 @@ var maintainedAdapterLicenses = map[string]string{
 }
 
 type EndpointConfig struct {
-	Endpoint    string        `json:"endpoint"`
-	APIKey      string        `json:"api_key,omitempty"`
-	Model       string        `json:"model"`
-	Repetitions int           `json:"repetitions,omitempty"`
-	Timeout     time.Duration `json:"timeout,omitempty"`
+	Endpoint               string        `json:"endpoint"`
+	APIKey                 string        `json:"api_key,omitempty"`
+	Model                  string        `json:"model"`
+	Repetitions            int           `json:"repetitions,omitempty"`
+	Timeout                time.Duration `json:"timeout,omitempty"`
+	NativeInferenceReceipt bool          `json:"native_inference_receipt,omitempty"`
+	NativeDecodeTrace      bool          `json:"native_decode_trace,omitempty"`
 }
 
 func (c EndpointConfig) runnerConfig() Config {
-	return Config{Endpoint: c.Endpoint, APIKey: c.APIKey, Model: c.Model, Repetitions: c.Repetitions, Timeout: c.Timeout}
+	return Config{
+		Endpoint:               c.Endpoint,
+		APIKey:                 c.APIKey,
+		Model:                  c.Model,
+		Repetitions:            c.Repetitions,
+		Timeout:                c.Timeout,
+		NativeInferenceReceipt: c.NativeInferenceReceipt,
+		NativeDecodeTrace:      c.NativeDecodeTrace,
+	}
 }
 
 // ManagedServerConfig makes a READY lifecycle receipt, rather than a hand-copied
