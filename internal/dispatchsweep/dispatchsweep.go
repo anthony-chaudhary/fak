@@ -125,6 +125,10 @@ type Config struct {
 // means the tick could not be run or parsed — a tooling fault that stops the sweep NOT-ok.
 type TickFunc func(iter int) (TickResult, error)
 
+// Invariant: dispatch sweep execution is fail-closed and bounded by the configured agent ceiling and iteration backstop.
+// Guard: execution immediately halts on the first unrecoverable tick failure, unexpected refusal, or queue drain boundary.
+// Contract: RunSweep never exceeds MaxAgents live spawns and paces each iteration via settle to prevent subprocess storms.
+//
 // RunSweep drives find->spawn->repeat. tick runs one dispatch tick; settle is called after each
 // successful LIVE spawn (so the spawned worker's de-dup log lands before the next tick runs its
 // in-flight check). Both are injected so the loop is tested with no subprocess and no sleep.
