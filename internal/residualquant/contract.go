@@ -128,6 +128,10 @@ func PinnedPaperDescriptor() Descriptor {
 // Adjudicate returns an explicit capability outcome. Metadata inspection is
 // local; execution is delegated only after artifact, recipe, and runtime pins
 // are complete. There is no implicit precision or runtime fallback.
+//
+// Invariant: residual quantization is fail-closed and bounded. Metadata
+// inspection is permitted locally for pinned artifacts, while any execution
+// delegation requires complete weights and runtime verification.
 func Adjudicate(req Request) Result {
 	if req.Contract != ContractID {
 		return refuse(ReasonUnknownContract, "contract must equal "+ContractID)
