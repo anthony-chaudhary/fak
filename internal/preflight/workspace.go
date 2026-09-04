@@ -157,8 +157,6 @@ type WorkspacePreflight struct {
 }
 
 // Invariant: Preflight planning is pure computation with no external side effects or clock reads.
-// Precondition: Package graph and test probe must represent consistent host environment state.
-// Postcondition: Returns WorkspacePreflight with populated preparation steps and deterministic readiness verdict.
 // PlanWorkspacePreflight folds declared read/write globs, package graph
 // evidence, live lease observations, and host test-route facts into one stable
 // preparation plan. It never shells out or reads the filesystem. A live lease
@@ -241,8 +239,6 @@ func PlanWorkspacePreflight(in WorkspacePreflightInput) WorkspacePreflight {
 	return out
 }
 
-// Invariant: Package arguments are normalized to a sorted unique set to guarantee reproducible compiler invocations.
-// Postcondition: Returns a GoBuildWarmRequest with formatted command arguments and positive warm threshold.
 // PlanGoBuildWarm constructs a compilation warm request for the specified packages using default compiler flags.
 func PlanGoBuildWarm(packages []string, verify bool, thresholdMS int64) GoBuildWarmRequest {
 	pkgs := sortedUnique(packages)
@@ -286,8 +282,6 @@ type GoBuildRunner interface {
 	RunGoBuild(context.Context, GoBuildWarmRequest) (GoBuildRun, error)
 }
 
-// Precondition: runner must be non-nil when packages slice is non-empty, otherwise returns WouldBeRed.
-// Postcondition: Returns GoBuildWarmReport detailing elapsed timings and warm status verification.
 // WarmGoBuildCache executes the planned go-build cache warm through an injected
 // runner. With VerifyWarm set it runs a second build to witness the warm-cache
 // elapsed time and reports the cold-vs-warm delta without reading a clock itself.
@@ -394,9 +388,6 @@ type WorkspaceStepOutcome struct {
 	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
 }
 
-// Invariant: Lease acquisition must precede build cache warming to prevent unleased side effects on shared trees.
-// Precondition: prep must be non-nil when plan verdict is READY to allow executing scheduled steps.
-// Postcondition: Returns WorkspacePreparationReport reflecting step outcomes or early termination on refusal.
 // PrepareWorkspace runs the side-effectful part of a READY workspace preflight
 // through injected seams. Lease acquisition happens before build/devindex warming,
 // so tests can prove the first edit would see an already-held lease.
