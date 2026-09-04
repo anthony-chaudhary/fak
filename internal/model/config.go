@@ -643,6 +643,11 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if c.SharedIntermediateSize == 0 && h.SharedExpertIntermediateAlt != nil && *h.SharedExpertIntermediateAlt > 0 {
 		c.SharedIntermediateSize = *h.SharedExpertIntermediateAlt
 	}
+	c.deriveFamilySpecificDefaults(family, h)
+	return nil
+}
+
+func (c *Config) deriveFamilySpecificDefaults(family string, h configJSONHints) {
 	if strings.Contains(family, "mixtral") && c.NumExperts > 0 && h.NormTopKProb == nil {
 		// HF Mixtral does not serialize norm_topk_prob, but MixtralSparseMoeBlock
 		// normalizes the selected top-k router weights before the expert weighted sum.
@@ -720,7 +725,6 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if strings.Contains(family, "stablelm") && h.LayerNorm == nil {
 		c.LayerNorm = true
 	}
-	return nil
 }
 
 // gemmaSlidingWindowPattern is the published local/global cadence PERIOD for a Gemma

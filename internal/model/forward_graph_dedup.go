@@ -30,38 +30,9 @@ type GraphDedupReceipt struct {
 // higher-level callers that differ only in callee names become equivalent and merge.
 // The lexicographically smallest function name is selected as representative.
 func DeduplicateGraphFunctions(program GraphInlineProgram) (GraphInlineProgram, GraphDedupReceipt, error) {
-	functions := make(map[string]GraphInlineFunction, len(program.Functions))
-	referenced := make(map[string]bool)
-
-	for idx := range program.Functions {
-		target := program.Functions[idx]
-		if target.Name == "" {
-			return GraphInlineProgram{}, GraphDedupReceipt{}, fmt.Errorf("function name is empty")
-		}
-		if _, seen := functions[target.Name]; seen {
-			return GraphInlineProgram{}, GraphDedupReceipt{}, fmt.Errorf("duplicate function %q", target.Name)
-		}
-		functions[target.Name] = cloneGraphInlineFunction(target)
-		for _, op := range target.Instructions {
-			if op.Reference != "" {
-				referenced[op.Reference] = true
-			}
-		}
-	}
-
-	if _, ok := functions[program.Entry]; !ok {
-		return GraphInlineProgram{}, GraphDedupReceipt{}, fmt.Errorf("entry function %q is missing", program.Entry)
-	}
-
-	for scopeName, item := range functions {
-		for _, op := range item.Instructions {
-			if op.Call != "" && functions[op.Call].Name == "" {
-				return GraphInlineProgram{}, GraphDedupReceipt{}, fmt.Errorf("function %q calls missing function %q", scopeName, op.Call)
-			}
-			if op.Reference != "" && functions[op.Reference].Name == "" {
-				return GraphInlineProgram{}, GraphDedupReceipt{}, fmt.Errorf("function %q references missing function %q", scopeName, op.Reference)
-			}
-		}
+	functions, referenced, err := validateDedupProgram(program)
+	if err != nil {
+		return GraphInlineProgram{}, GraphDedupReceipt{}, err
 	}
 
 	// Compute dependency depth (level) for bottom-up processing.
@@ -321,4 +292,41 @@ func areFunctionsStructurallyEquivalent(f1, f2 GraphInlineFunction, aliases map[
 	}
 
 	return true
+}
+
+func validateDedupProgram(program GraphInlineProgram) (map[string]GraphInlineFunction, map[string]bool, error) {
+	functions := make(map[string]GraphInlineFunction, len(program.Functions))
+	referenced := make(map[string]bool)
+
+	for idx := range program.Functions {
+		target := program.Functions[idx]
+		if target.Name == "" {
+			return nil, nil, fmt.Errorf("function name is empty")
+		}
+		if _, seen := functions[target.Name]; seen {
+			return nil, nil, fmt.Errorf("duplicate function %q", target.Name)
+		}
+		functions[target.Name] = cloneGraphInlineFunction(target)
+		for _, op := range target.Instructions {
+			if op.Reference != "" {
+				referenced[op.Reference] = true
+			}
+		}
+	}
+
+	if _, ok := functions[program.Entry]; !ok {
+		return nil, nil, fmt.Errorf("entry function %q is missing", program.Entry)
+	}
+
+	for scopeName, item := range functions {
+		for _, op := range item.Instructions {
+			if op.Call != "" && functions[op.Call].Name == "" {
+				return nil, nil, fmt.Errorf("function %q calls missing function %q", scopeName, op.Call)
+			}
+			if op.Reference != "" && functions[op.Reference].Name == "" {
+				return nil, nil, fmt.Errorf("function %q references missing function %q", scopeName, op.Reference)
+			}
+		}
+	}
+	return functions, referenced, nil
 }

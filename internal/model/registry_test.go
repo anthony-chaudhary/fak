@@ -393,4 +393,9 @@ func TestRegistryConcurrency(t *testing.T) {
 	}
 
 	wg.Wait()
+
+	spec, ok := LookupModelSpec("concurrent-model")
+	if !ok || spec.ID != "concurrent-model" {
+		t.Fatalf("concurrent registration lost spec: got %+v, ok=%v", spec, ok)
+	}
 }
