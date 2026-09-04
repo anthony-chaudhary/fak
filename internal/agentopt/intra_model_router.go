@@ -105,8 +105,14 @@ const (
 	CategoryPlanAndDecompose OperationalCategory = "plan_and_decompose"
 	// CategoryRoutineToolInvocation covers straightforward file inspections, directory listings, and formatting.
 	CategoryRoutineToolInvocation OperationalCategory = "routine_tool_invocation"
+	// CategoryRoutineTool is an alias for CategoryRoutineToolInvocation.
+	CategoryRoutineTool = CategoryRoutineToolInvocation
 	// CategoryDiagnosticAndVerification covers evaluating tool outputs, test passes, linter checks, and diffs.
 	CategoryDiagnosticAndVerification OperationalCategory = "diagnostic_and_verification"
+	// CategoryDiagnosticVerify is an alias for CategoryDiagnosticAndVerification.
+	CategoryDiagnosticVerify = CategoryDiagnosticAndVerification
+	// CategorySynthesisReport is an alias for CategoryDiagnosticAndVerification for synthesis reports.
+	CategorySynthesisReport = CategoryDiagnosticAndVerification
 	// CategoryErrorRecovery covers compiler errors, test failures, kernel policy blocks, and panic traces.
 	CategoryErrorRecovery OperationalCategory = "error_recovery"
 )
@@ -114,6 +120,13 @@ const (
 // String returns the string representation of the OperationalCategory.
 func (c OperationalCategory) String() string {
 	return string(c)
+}
+
+// TurnMessage models a single message within a turn context.
+type TurnMessage struct {
+	Role        string   `json:"role,omitempty"`
+	Content     string   `json:"content,omitempty"`
+	ToolResults []string `json:"tool_results,omitempty"`
 }
 
 // TurnContext captures the state, signals, and inputs of an incoming agent turn.
@@ -129,6 +142,8 @@ type TurnContext struct {
 
 	// ToolName is the primary tool invoked or returning output.
 	ToolName string `json:"tool_name,omitempty"`
+	// TargetToolName is an alias for ToolName for compatibility.
+	TargetToolName string `json:"target_tool_name,omitempty"`
 	// ToolArgs are arguments passed to the tool.
 	ToolArgs map[string]any `json:"tool_args,omitempty"`
 	// ToolOutput contains stdout/data returned by the tool.
@@ -142,10 +157,30 @@ type TurnContext struct {
 
 	// IsInitial explicitly marks this turn as the initial prompt of a task.
 	IsInitial bool `json:"is_initial,omitempty"`
+	// IsPlanning explicitly marks this turn as planning/reasoning intensive.
+	IsPlanning bool `json:"is_planning,omitempty"`
 	// IsReplan explicitly marks this turn as an explicit replanning request.
 	IsReplan bool `json:"is_replan,omitempty"`
 	// HasError explicitly flags an active error or failure state.
 	HasError bool `json:"has_error,omitempty"`
+	// TestFailure flags an explicit test failure.
+	TestFailure bool `json:"test_failure,omitempty"`
+	// CompilerError flags an explicit compiler or build error.
+	CompilerError bool `json:"compiler_error,omitempty"`
+	// ExecutionPanic flags a runtime panic or crash.
+	ExecutionPanic bool `json:"execution_panic,omitempty"`
+	// PolicyRefusal flags a kernel policy block.
+	PolicyRefusal bool `json:"policy_refusal,omitempty"`
+	// PolicyReason carries the policy refusal reason.
+	PolicyReason string `json:"policy_reason,omitempty"`
+	// ErrorMessage carries an explicit error message.
+	ErrorMessage string `json:"error_message,omitempty"`
+	// Messages carries the turn-level messages.
+	Messages []TurnMessage `json:"messages,omitempty"`
+	// LastRole carries the last message role.
+	LastRole string `json:"last_role,omitempty"`
+	// LastContent carries the last message content.
+	LastContent string `json:"last_content,omitempty"`
 
 	// RecentErrors carries recent failure messages in the current trajectory.
 	RecentErrors []string `json:"recent_errors,omitempty"`
@@ -155,11 +190,15 @@ type TurnContext struct {
 
 // TurnClassification provides the complete adjudication for an agent turn.
 type TurnClassification struct {
-	Effort         EffortTier          `json:"effort"`
-	Category       OperationalCategory `json:"category"`
-	ThinkingBudget int                 `json:"thinking_budget"`
-	Reason         string              `json:"reason"`
+	Effort          EffortTier          `json:"effort"`
+	Category        OperationalCategory `json:"category"`
+	ThinkingBudget  int                 `json:"thinking_budget"`
+	AllocatedBudget int                 `json:"allocated_budget,omitempty"`
+	Reason          string              `json:"reason"`
 }
+
+// TurnEffortDecision is an alias for TurnClassification to support dynamic effort modulation.
+type TurnEffortDecision = TurnClassification
 
 // IntraModelEffortRouter routes and classifies turns into reasoning effort tiers.
 type IntraModelEffortRouter struct {
@@ -336,6 +375,16 @@ var defaultLinterTools = map[string]bool{
 	"govet":         true,
 }
 
+func newTurnClassification(effort EffortTier, cat OperationalCategory, budget int, reason string) TurnClassification {
+	return TurnClassification{
+		Effort:          effort,
+		Category:        cat,
+		ThinkingBudget:  budget,
+		AllocatedBudget: budget,
+		Reason:          reason,
+	}
+}
+
 // Classify classifies a TurnContext into an EffortTier and OperationalCategory with deterministic reasoning.
 func (r *IntraModelEffortRouter) Classify(input TurnContext) TurnClassification {
 	r.mu.RLock()
@@ -345,150 +394,90 @@ func (r *IntraModelEffortRouter) Classify(input TurnContext) TurnClassification 
 	}
 	r.mu.RUnlock()
 
-	normTool := strings.ToLower(strings.TrimSpace(input.ToolName))
+	tool := input.ToolName
+	if tool == "" {
+		tool = input.TargetToolName
+	}
+	normTool := strings.ToLower(strings.TrimSpace(tool))
 
 	// 0. Check for empty turn context.
-	if input.Prompt == "" && input.ToolName == "" && input.ToolOutput == "" &&
+	if input.Prompt == "" && tool == "" && input.ToolOutput == "" &&
 		input.ToolError == "" && len(input.ToolCalls) == 0 && !input.HasError &&
-		!input.IsInitial && !input.IsReplan && len(input.RecentErrors) == 0 &&
-		input.ExitCode == 0 {
-		return TurnClassification{
-			Effort:         EffortNone,
-			Category:       CategoryRoutineToolInvocation,
-			ThinkingBudget: r.ThinkingBudget(EffortNone),
-			Reason:         "empty turn context defaults to no effort",
-		}
+		!input.IsInitial && !input.IsPlanning && !input.IsReplan && len(input.RecentErrors) == 0 &&
+		input.ExitCode == 0 && !input.TestFailure && !input.CompilerError && !input.ExecutionPanic && !input.PolicyRefusal {
+		return newTurnClassification(EffortNone, CategoryRoutineToolInvocation, r.ThinkingBudget(EffortNone), "empty turn context defaults to no effort")
 	}
 
 	// 1. Error Recovery / Discrepancy -> EffortHigh
 	// Catches compiler errors, test failures, panic traces, kernel policy blocks, and explicit error flags.
 	if isErr, reason := r.detectErrorRecovery(input); isErr {
-		return TurnClassification{
-			Effort:         EffortHigh,
-			Category:       CategoryErrorRecovery,
-			ThinkingBudget: r.ThinkingBudget(EffortHigh),
-			Reason:         reason,
-		}
+		return newTurnClassification(EffortHigh, CategoryErrorRecovery, r.ThinkingBudget(EffortHigh), reason)
 	}
 
 	// Check if a custom tool registration dictates category.
 	if cat, ok := customTools[normTool]; ok {
 		switch cat {
 		case CategoryErrorRecovery:
-			return TurnClassification{
-				Effort:         EffortHigh,
-				Category:       CategoryErrorRecovery,
-				ThinkingBudget: r.ThinkingBudget(EffortHigh),
-				Reason:         fmt.Sprintf("custom tool %q registered as error recovery", normTool),
-			}
+			return newTurnClassification(EffortHigh, CategoryErrorRecovery, r.ThinkingBudget(EffortHigh), fmt.Sprintf("custom tool %q registered as error recovery", normTool))
 		case CategoryPlanAndDecompose:
-			return TurnClassification{
-				Effort:         EffortHigh,
-				Category:       CategoryPlanAndDecompose,
-				ThinkingBudget: r.ThinkingBudget(EffortHigh),
-				Reason:         fmt.Sprintf("custom tool %q registered as plan and decompose", normTool),
-			}
+			return newTurnClassification(EffortHigh, CategoryPlanAndDecompose, r.ThinkingBudget(EffortHigh), fmt.Sprintf("custom tool %q registered as plan and decompose", normTool))
 		case CategoryRoutineToolInvocation:
-			return TurnClassification{
-				Effort:         EffortNone,
-				Category:       CategoryRoutineToolInvocation,
-				ThinkingBudget: r.ThinkingBudget(EffortNone),
-				Reason:         fmt.Sprintf("custom tool %q registered as routine tool invocation", normTool),
-			}
+			return newTurnClassification(EffortNone, CategoryRoutineToolInvocation, r.ThinkingBudget(EffortNone), fmt.Sprintf("custom tool %q registered as routine tool invocation", normTool))
 		case CategoryDiagnosticAndVerification:
-			return TurnClassification{
-				Effort:         EffortMedium,
-				Category:       CategoryDiagnosticAndVerification,
-				ThinkingBudget: r.ThinkingBudget(EffortMedium),
-				Reason:         fmt.Sprintf("custom tool %q registered as diagnostic and verification", normTool),
-			}
+			return newTurnClassification(EffortMedium, CategoryDiagnosticAndVerification, r.ThinkingBudget(EffortMedium), fmt.Sprintf("custom tool %q registered as diagnostic and verification", normTool))
 		}
 	}
 
 	// 2. Plan & Decompose: explicit replan instruction -> EffortHigh
 	if input.IsReplan {
-		return TurnClassification{
-			Effort:         EffortHigh,
-			Category:       CategoryPlanAndDecompose,
-			ThinkingBudget: r.ThinkingBudget(EffortHigh),
-			Reason:         "explicit replan instruction requested",
-		}
+		return newTurnClassification(EffortHigh, CategoryPlanAndDecompose, r.ThinkingBudget(EffortHigh), "explicit replan instruction requested")
 	}
 
 	// 3. Synthesis & Diagnostic evaluation prompts -> EffortMedium
 	// If the user prompt specifically asks to synthesize or evaluate verification findings.
 	if strings.TrimSpace(input.Prompt) != "" && reSynthesis.MatchString(input.Prompt) {
-		return TurnClassification{
-			Effort:         EffortMedium,
-			Category:       CategoryDiagnosticAndVerification,
-			ThinkingBudget: r.ThinkingBudget(EffortMedium),
-			Reason:         "synthesis prompt evaluating findings and diagnostic state",
-		}
+		return newTurnClassification(EffortMedium, CategoryDiagnosticAndVerification, r.ThinkingBudget(EffortMedium), "synthesis prompt evaluating findings and diagnostic state")
 	}
 
 	// 4. Routine Tool Invocation -> EffortNone
 	// Straightforward tool calls (Read, Glob, Grep, ListDir, routine formatting, file inspection).
 	if isRoutine, reason := r.detectRoutineTool(input); isRoutine {
-		return TurnClassification{
-			Effort:         EffortNone,
-			Category:       CategoryRoutineToolInvocation,
-			ThinkingBudget: r.ThinkingBudget(EffortNone),
-			Reason:         reason,
-		}
+		return newTurnClassification(EffortNone, CategoryRoutineToolInvocation, r.ThinkingBudget(EffortNone), reason)
 	}
 
 	// 5. Diagnostic & Verification: test passes, linter checks, diff inspections -> EffortLow or EffortMedium
 	if isDiag, effort, reason := r.detectDiagnostic(input); isDiag {
-		return TurnClassification{
-			Effort:         effort,
-			Category:       CategoryDiagnosticAndVerification,
-			ThinkingBudget: r.ThinkingBudget(effort),
-			Reason:         reason,
-		}
+		return newTurnClassification(effort, CategoryDiagnosticAndVerification, r.ThinkingBudget(effort), reason)
 	}
 
 	// 6. Plan & Decompose: Initial user prompt, high-level query, explicit planning instruction -> EffortHigh
 	if isPlan, reason := r.detectPlanAndDecompose(input); isPlan {
-		return TurnClassification{
-			Effort:         EffortHigh,
-			Category:       CategoryPlanAndDecompose,
-			ThinkingBudget: r.ThinkingBudget(EffortHigh),
-			Reason:         reason,
-		}
+		return newTurnClassification(EffortHigh, CategoryPlanAndDecompose, r.ThinkingBudget(EffortHigh), reason)
 	}
 
 	// Fallback handling
 	if r.defaultEffort != "" {
-		return TurnClassification{
-			Effort:         r.defaultEffort,
-			Category:       CategoryPlanAndDecompose,
-			ThinkingBudget: r.ThinkingBudget(r.defaultEffort),
-			Reason:         "fallback to configured default effort",
-		}
+		return newTurnClassification(r.defaultEffort, CategoryPlanAndDecompose, r.ThinkingBudget(r.defaultEffort), "fallback to configured default effort")
 	}
 
 	// If prompt exists, default to high effort planning; otherwise routine none.
 	if strings.TrimSpace(input.Prompt) != "" {
-		return TurnClassification{
-			Effort:         EffortHigh,
-			Category:       CategoryPlanAndDecompose,
-			ThinkingBudget: r.ThinkingBudget(EffortHigh),
-			Reason:         "unclassified user prompt defaults to plan and decompose",
-		}
+		return newTurnClassification(EffortHigh, CategoryPlanAndDecompose, r.ThinkingBudget(EffortHigh), "unclassified user prompt defaults to plan and decompose")
 	}
 
-	return TurnClassification{
-		Effort:         EffortNone,
-		Category:       CategoryRoutineToolInvocation,
-		ThinkingBudget: r.ThinkingBudget(EffortNone),
-		Reason:         "unclassified turn without prompt defaults to routine execution",
-	}
+	return newTurnClassification(EffortNone, CategoryRoutineToolInvocation, r.ThinkingBudget(EffortNone), "unclassified turn without prompt defaults to routine execution")
 }
 
 // detectErrorRecovery checks for active errors, crashes, test failures, compiler failures, and policy blocks.
 func (r *IntraModelEffortRouter) detectErrorRecovery(input TurnContext) (bool, string) {
-	if input.HasError {
-		return true, "explicit error flag set"
+	if input.HasError || input.TestFailure || input.CompilerError || input.ExecutionPanic || input.PolicyRefusal {
+		reason := "explicit error flag set"
+		if input.ErrorMessage != "" {
+			reason = input.ErrorMessage
+		} else if input.PolicyReason != "" {
+			reason = input.PolicyReason
+		}
+		return true, reason
 	}
 	if input.ExitCode != 0 {
 		return true, fmt.Sprintf("non-zero process exit code: %d", input.ExitCode)
@@ -633,13 +622,20 @@ func (r *IntraModelEffortRouter) detectDiagnostic(input TurnContext) (bool, Effo
 		}
 	}
 
+	outputToScan := input.ToolOutput
+	if outputToScan == "" {
+		for _, m := range input.Messages {
+			outputToScan += "\n" + m.Content
+		}
+	}
+
 	// 3. Test passes -> EffortLow
-	if reTestPass.MatchString(input.ToolOutput) {
+	if reTestPass.MatchString(outputToScan) {
 		return true, EffortLow, "test pass verification"
 	}
 
 	// 4. Benchmark evaluation -> EffortMedium
-	if strings.Contains(input.ToolOutput, "ns/op") || strings.Contains(input.ToolOutput, "B/op") {
+	if strings.Contains(outputToScan, "ns/op") || strings.Contains(outputToScan, "B/op") {
 		return true, EffortMedium, "benchmark diagnostic evaluation"
 	}
 
@@ -648,8 +644,8 @@ func (r *IntraModelEffortRouter) detectDiagnostic(input TurnContext) (bool, Effo
 
 // detectPlanAndDecompose checks for planning, initial prompts, and high-level queries.
 func (r *IntraModelEffortRouter) detectPlanAndDecompose(input TurnContext) (bool, string) {
-	if input.IsInitial {
-		return true, "explicit initial task turn"
+	if input.IsInitial || input.IsPlanning {
+		return true, "explicit initial or planning task turn"
 	}
 
 	// TurnIndex 0 with a prompt represents the task entry point

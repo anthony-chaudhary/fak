@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/comm"
 )
 
 // Structured refusal reasons for reflex dispatch.
@@ -185,6 +187,83 @@ func (r SpeculativeReceipt) CompactJSON() string {
 // IsSuccess reports whether the receipt represents a successful, zero-exit execution.
 func (r SpeculativeReceipt) IsSuccess() bool {
 	return r.ExitCode == 0 && r.Error == ""
+}
+
+// ReflexMicroReceiptSchema is the closed schema for a single reflex micro-agent receipt.
+const ReflexMicroReceiptSchema = "fleet-reflex-micro-receipt/1"
+
+// ReflexMicroReceipt represents the compact, witnessed result of a single reflex micro-agent leaf task.
+type ReflexMicroReceipt struct {
+	Schema      string `json:"schema"`
+	Lane        string `json:"lane"`
+	Witness     string `json:"witness"`
+	State       string `json:"state"`
+	Allowed     int    `json:"allowed"`
+	Denied      int    `json:"denied"`
+	TokensSaved int    `json:"tokens_saved"`
+	ElapsedMs   int64  `json:"elapsed_ms"`
+}
+
+// ReflexWorkerConfig configures a reflex worker candidate for tree-disjoint lease admission and topology declaration.
+type ReflexWorkerConfig struct {
+	Model       string   `json:"model"`
+	NonThinking bool     `json:"non_thinking"`
+	MaxTurns    int      `json:"max_turns"`
+	LaneLease   string   `json:"lane_lease"`
+	Tree        []string `json:"tree"`
+}
+
+// ValidateTreeDisjointLeases validates that candidate reflex workers have valid, non-colliding lane leases
+// and pairwise tree-disjoint file boundaries.
+func ValidateTreeDisjointLeases(configs []ReflexWorkerConfig) error {
+	for i := 0; i < len(configs); i++ {
+		c1 := configs[i]
+		lane1 := strings.TrimSpace(c1.LaneLease)
+		if lane1 == "" {
+			return fmt.Errorf("%w: lane is required", ErrInvalidS0S1)
+		}
+		for j := i + 1; j < len(configs); j++ {
+			c2 := configs[j]
+			lane2 := strings.TrimSpace(c2.LaneLease)
+			if strings.EqualFold(lane1, lane2) {
+				return fmt.Errorf("colliding lane lease: lane %q is claimed multiple times", lane1)
+			}
+			if treesCollide(c1.Tree, c2.Tree) {
+				return fmt.Errorf("overlapping tree lease between lane %q and lane %q: %v collides with %v", lane1, lane2, c1.Tree, c2.Tree)
+			}
+		}
+	}
+	return nil
+}
+
+// NewReflexTopology constructs a star gather topology (workers -> coordinator) for reflex micro-agent dispatch.
+func NewReflexTopology(name, coordinator string, configs []ReflexWorkerConfig) (*Topology, error) {
+	if coordinator == "" {
+		coordinator = "coordinator"
+	}
+	members := []comm.Member{
+		{ID: coordinator, Lane: "coordinator"},
+	}
+	edges := make([]Edge, 0, len(configs))
+	for i, cfg := range configs {
+		workerID := fmt.Sprintf("worker-%s", cfg.LaneLease)
+		if cfg.LaneLease == "" {
+			workerID = fmt.Sprintf("worker-%d", i)
+		}
+		members = append(members, comm.Member{
+			ID:   workerID,
+			Lane: cfg.LaneLease,
+		})
+		edges = append(edges, Edge{
+			From: workerID,
+			To:   coordinator,
+		})
+	}
+	group, err := comm.New("reflex-"+name, "", members)
+	if err != nil {
+		return nil, err
+	}
+	return Declare(name, group, edges)
 }
 
 // LaneLease represents an active tree-disjoint lease held by a reflex worker.
