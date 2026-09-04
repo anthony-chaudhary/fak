@@ -13,10 +13,13 @@ import (
 	"strings"
 )
 
+// Schema identifies the JSON schema for learning observation stores.
 const Schema = "fak.learning-observation.v1"
 
+// Kind distinguishes the lifecycle stage of a learning record.
 type Kind string
 
+// Supported observation record kinds.
 const (
 	KindObservation Kind = "observation"
 	KindCandidate   Kind = "candidate"
@@ -24,6 +27,7 @@ const (
 	KindVerdict     Kind = "verdict"
 )
 
+// Valid reports whether k is a known record kind.
 func (k Kind) Valid() bool {
 	switch k {
 	case KindObservation, KindCandidate, KindWitness, KindVerdict:
@@ -33,17 +37,22 @@ func (k Kind) Valid() bool {
 	}
 }
 
+// Outcome defines the evaluation decision for a verdict record.
 type Outcome string
 
+// Supported verdict outcomes.
 const (
 	OutcomeKept     Outcome = "kept"
 	OutcomeRejected Outcome = "rejected"
 )
 
+// Valid reports whether o is a supported verdict outcome.
 func (o Outcome) Valid() bool { return o == OutcomeKept || o == OutcomeRejected }
 
+// Relation defines a typed directed lineage connection between records.
 type Relation string
 
+// Supported lineage relations.
 const (
 	ObservedFrom Relation = "observed-from"
 	Supports     Relation = "supports"
@@ -54,8 +63,10 @@ const (
 	RejectedAs   Relation = "rejected-as"
 )
 
+// Relations lists all supported lineage relation types.
 var Relations = []Relation{ObservedFrom, Supports, Contradicts, Proposes, TestedBy, KeptAs, RejectedAs}
 
+// Valid reports whether r is in Relations.
 func (r Relation) Valid() bool {
 	for _, known := range Relations {
 		if r == known {
@@ -65,6 +76,7 @@ func (r Relation) Valid() bool {
 	return false
 }
 
+// Record is a content-addressed learning entity with normalized provenance.
 type Record struct {
 	ID      string  `json:"id"`
 	Kind    Kind    `json:"kind"`
@@ -73,18 +85,21 @@ type Record struct {
 	Outcome Outcome `json:"outcome,omitempty"`
 }
 
+// Edge is a directed lineage relationship from one record to another.
 type Edge struct {
 	From     string   `json:"from"`
 	Relation Relation `json:"relation"`
 	To       string   `json:"to"`
 }
 
+// Store contains content-addressed learning records and their lineage edges.
 type Store struct {
 	Schema  string   `json:"schema"`
 	Records []Record `json:"records"`
 	Edges   []Edge   `json:"edges"`
 }
 
+// Error sentinels returned by Store operations.
 var (
 	ErrConflict        = errors.New("conflicting content")
 	ErrDanglingID      = errors.New("dangling id")
@@ -92,6 +107,7 @@ var (
 	ErrCycle           = errors.New("lineage cycle")
 )
 
+// Load reads a store from disk. If path does not exist, an empty store is returned.
 func Load(path string) (*Store, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -110,6 +126,7 @@ func Load(path string) (*Store, error) {
 	return &s, nil
 }
 
+// Add inserts a record or returns an existing identical record. Conflicting content returns ErrConflict.
 func (s *Store) Add(kind Kind, source, content string, outcome Outcome) (Record, bool, error) {
 	source = normalize(source)
 	content = normalize(content)
@@ -140,6 +157,7 @@ func (s *Store) Add(kind Kind, source, content string, outcome Outcome) (Record,
 	return record, true, nil
 }
 
+// Link connects two existing records with a directed lineage edge, rejecting unknown relations, dangling IDs, and cycles.
 func (s *Store) Link(from string, relation Relation, to string) (bool, error) {
 	if !relation.Valid() {
 		return false, fmt.Errorf("%w %q", ErrUnknownRelation, relation)
@@ -163,8 +181,10 @@ func (s *Store) Link(from string, relation Relation, to string) (bool, error) {
 	return true, nil
 }
 
+// String returns the string representation of the relation.
 func (r Relation) String() string { return string(r) }
 
+// Trace traverses the lineage reachable from candidateID, returning all reached records and edges.
 func (s *Store) Trace(candidateID string) ([]Record, []Edge, error) {
 	root := s.find(candidateID)
 	if root == nil {
@@ -199,6 +219,7 @@ func (s *Store) Trace(candidateID string) ([]Record, []Edge, error) {
 	return records, edges, nil
 }
 
+// Save writes the store atomically to path with 0600 permissions.
 func (s *Store) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
