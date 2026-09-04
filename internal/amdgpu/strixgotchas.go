@@ -460,19 +460,24 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		if env.IsWSL2 {
 			return StatusAdvisory, "Running under WSL2: memory allocation is governed by %USERPROFILE%\\.wslconfig memory limit rather than Linux ttm.pages_limit."
 		}
-		// Scale threshold based on 128GB vs 64GB platform tier
+		// Scale threshold based on 64GB / 96GB / 128GB platform tier
 		expectedPages := uint64(30000000) // ~120 GiB on 128GB systems
 		targetGiB := "120 GiB"
 		targetPagesExact := "31457280"
-		if env.TotalRAMBytes > 0 && env.TotalRAMBytes < 96*1024*1024*1024 {
+		if env.TotalRAMBytes > 0 && env.TotalRAMBytes < 80*1024*1024*1024 {
 			expectedPages = uint64(14000000) // ~56 GiB on 64GB systems
 			targetGiB = "56 GiB"
 			targetPagesExact = "14680064"
+		} else if env.TotalRAMBytes >= 80*1024*1024*1024 && env.TotalRAMBytes < 112*1024*1024*1024 {
+			expectedPages = uint64(22000000) // ~88 GiB on 96GB systems
+			targetGiB = "88 GiB"
+			targetPagesExact = "23068672"
 		}
 		if env.SysfsTTMPagesVal >= expectedPages ||
 			strings.Contains(env.KernelCmdline, "ttm.pages_limit="+targetPagesExact) ||
-			(env.TotalRAMBytes >= 96*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=31457280")) ||
-			(env.TotalRAMBytes < 96*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=14680064")) {
+			(env.TotalRAMBytes >= 112*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=31457280")) ||
+			(env.TotalRAMBytes >= 80*1024*1024*1024 && env.TotalRAMBytes < 112*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=23068672")) ||
+			(env.TotalRAMBytes > 0 && env.TotalRAMBytes < 80*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=14680064")) {
 			return StatusSafeConfigured, fmt.Sprintf("TTM pages_limit is configured for full aperture (%d pages / ~%s)", env.SysfsTTMPagesVal, targetGiB)
 		}
 		if env.SysfsTTMPagesVal == 0 {
@@ -1036,9 +1041,12 @@ func GenerateFixPlan(report *GotchaAuditReport) []string {
 			case "GOTCHA_TTM_50PCT_CEILING":
 				ttmParam := "ttm.pages_limit=31457280 amdgpu.gttsize=131072"
 				titleDesc := "Unlock full 120GB UMA aperture in Linux TTM subsystem"
-				if report.TotalRAMGiB > 0 && report.TotalRAMGiB < 96 {
+				if report.TotalRAMGiB > 0 && report.TotalRAMGiB < 80 {
 					ttmParam = "ttm.pages_limit=14680064 amdgpu.gttsize=65536"
 					titleDesc = "Unlock full 56GB UMA aperture in Linux TTM subsystem"
+				} else if report.TotalRAMGiB >= 80 && report.TotalRAMGiB < 112 {
+					ttmParam = "ttm.pages_limit=23068672 amdgpu.gttsize=98304"
+					titleDesc = "Unlock full 88GB UMA aperture in Linux TTM subsystem"
 				}
 				fixes = append(fixes, "# Fix 2: "+titleDesc)
 				if report.IsContainer {
@@ -1058,7 +1066,7 @@ func GenerateFixPlan(report *GotchaAuditReport) []string {
 			case "GOTCHA_OLLAMA_IGPU_FALLBACK":
 				fixes = append(fixes, "# Fix 3: Force Ollama to use Radeon 8060S Vulkan iGPU instead of CPU")
 				fixes = append(fixes, "sudo mkdir -p /etc/systemd/system/ollama.service.d")
-				fixes = append(fixes, "echo -e '[Service]\\nEnvironment=\"OLLAMA_VULKAN=1\"\\nEnvironment=\"OLLAMA_IGPU_ENABLE=1\"\\nEnvironment=\"HIP_VISIBLE_DEVICES=-1\"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf")
+				fixes = append(fixes, "printf '[Service]\\nEnvironment=\"OLLAMA_VULKAN=1\"\\nEnvironment=\"OLLAMA_IGPU_ENABLE=1\"\\nEnvironment=\"HIP_VISIBLE_DEVICES=-1\"\\n' | sudo tee /etc/systemd/system/ollama.service.d/override.conf")
 				fixes = append(fixes, "sudo systemctl daemon-reload && sudo systemctl restart ollama")
 
 			case "GOTCHA_GFX1151_OVERRIDE":

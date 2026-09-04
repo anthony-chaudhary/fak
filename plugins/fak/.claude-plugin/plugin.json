@@ -1,7 +1,7 @@
 {
   "name": "fak",
   "description": "Adjudicate every tool call like a syscall. fak's MCP server exposes capability-gated adjudication verbs so Claude Code can screen a proposed tool call, run one through the kernel, or quarantine a tool result before it enters context.",
-  "version": "0.47.0",
+  "version": "0.48.0",
   "author": {
     "name": "anthony-chaudhary",
     "url": "https://github.com/anthony-chaudhary/fak"

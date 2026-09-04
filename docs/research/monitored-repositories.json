@@ -4,6 +4,31 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "mitkox/Personal-AI-Router",
+      "url": "https://github.com/mitkox/Personal-AI-Router",
+      "status": "studied",
+      "priority": 1,
+      "why": "NVIDIA Personal AI Router (PAIR): Local multi-node inference router distributing independent requests across heterogeneous PCs/Macs (Windows, macOS, Linux); RFC 9140 EAP-NOOB zero-trust pairing, Windows unicast UDP multicast send fix, native Win32 DXGI COM and PDH GPU telemetry, and macOS IORegistry IOAccelerator telemetry.",
+      "last_checked": "2026-09-04",
+      "checked_revision": "13b68115fa2c9c1d94f1ead1358f8d5a527cfecf",
+      "stars_at_check": 12,
+      "last_push_at_check": "2026-09-04T07:19:07Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-NVIDIA-PERSONAL-AI-ROUTER-2026-09-04.md",
+      "receipt_id": "study_e10f8240a711d1576ec020f28f43fb275e320d5cb289c86f47b816bb088e7f6d",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "13b68115fa2c9c1d94f1ead1358f8d5a527cfecf",
+        "subsystem_count": 14,
+        "candidate_count": 7,
+        "filed_issue_count": 3,
+        "issue_refs": [
+          "#11317",
+          "#11318",
+          "#11319"
+        ]
+      }
+    },
+    {
       "repository": "ROCm/rccl",
       "url": "https://github.com/ROCm/rccl",
       "status": "studied",

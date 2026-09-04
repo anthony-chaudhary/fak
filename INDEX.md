@@ -294,6 +294,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-NVIDIA-PERSONAL-AI-ROUTER-2026-09-04.md`](docs/notes/CONCEPT-STUDY-NVIDIA-PERSONAL-AI-ROUTER-2026-09-04.md) — pinned deep study of NVIDIA Personal AI Router (PAIR, mitkox/Personal-AI-Router@13b6811): local multi-node inference routing across heterogeneous PCs/Macs, per-interface unicast UDP sockets for Windows multicast heartbeat transmission (#11317), native Win32 DXGI COM and PDH GPU VRAM/utilization telemetry (#11318), macOS Apple Silicon Metal memory allocation probing via IORegistry (#11319), single-port protocol-peeking listener multiplexer (`splitlisten`), streaming proof-of-life liveness vouching, and RFC 9140 EAP-NOOB zero-trust pairing; receipt `study_e10f8240a711d1576ec020f28f43fb275e320d5cb289c86f47b816bb088e7f6d`.
+
 - [`docs/notes/CONCEPT-STUDY-AMD-GPU-DIRECT-ROCM-RDMA-2026-09-04.md`](docs/notes/CONCEPT-STUDY-AMD-GPU-DIRECT-ROCM-RDMA-2026-09-04.md) — pinned deep study of OSS AMD GPU Direct, ROCm-RDMA, xGMI/PCIe P2P, and BaM NVMe Direct DMA: Linux DMA-BUF export (`AMDKFD_IOC_EXPORT_DMABUF`), `ibv_reg_dmabuf_mr` zero-copy memory registration without host bounce buffers (#11228), topology discovery and ReBAR/ACS validation (#11227), direct NVMe P2P storage streaming (#11229), sub-microsecond HSA completion signals (#11230), RDMA verbs QP engine (#11262), NVMe VRAM queue storage memory slab (#11263), AMDGPUDirectCollective communicator (#11264), and fak-dev CLI tooling (#11265); parent epic #11226; receipt `study_6f42749e9f4a8d98a9ca9bd3686fd5dc863fc131dd7c2951a30d4044645748f5`.
 - [Concept Study: adrienbrault/qwen3.8-27b-rtx5090 — Consumer Blackwell Serving, sm120 NVFP4 Scaling, and Direct-I/O Disk KV Tier](docs/notes/CONCEPT-STUDY-ADRIENBRAULT-RTX5090-2026-09-03.md) -- auto-indexed dated note.
 - [CONCEPT-STUDY: airawatraj/dgx-spark-qwen38-flash-agent — HashK GPU PLE compression, Mamba DeltaNet speculative rollback invariants, and Blackwell SM121 runtime patches (2026-09-03)](docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md) -- auto-indexed dated note.
@@ -474,7 +476,6 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Portability formats: reuse the package, registry, sync, and context layers](docs/notes/RESEARCH-PORTABILITY-FORMATS-2026-08-13.md) -- auto-indexed dated note.
 - [Native desktop command center for durable coding sessions](docs/notes/NATIVE-DESKTOP-DURABLE-SESSION-COMMAND-CENTER-2026-08-13.md) -- auto-indexed dated note.
 - [Fleet repository-targeting incident — 2026-08-13](docs/notes/FLEET-REPOSITORY-TARGETING-INCIDENT-2026-08-13.md) -- auto-indexed dated note.
-- [Deterministic AMOProf-to-Confluence publication rerun — 2026-08-12](docs/notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md) -- auto-indexed dated note.
 - [NVIDIA-hosted Nemo API demo fleet audit — 2026-08-11..12](docs/notes/NVIDIA-NEMO-API-DEMO-FLEET-AUDIT-2026-08-12.md) -- auto-indexed dated note.
 - [Terminal relief runs inside a managed pause barrier](docs/notes/TERMINAL-RELIEF-PAUSE-BARRIER-2026-08-12.md) -- auto-indexed dated note.
 - [Context as variable vs addressable context](docs/notes/CONTEXT-AS-VARIABLE-RLM-STUDY-2026-08-12.md) -- auto-indexed dated note.
