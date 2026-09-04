@@ -2,16 +2,23 @@ package fleetbottleneck
 
 import "sort"
 
+// Class designates the category of fleet bottleneck identified during evaluation.
 type Class string
 
 const (
-	ClassSeats    Class = "seats"
+	// ClassSeats indicates saturation of available execution slots across machines.
+	ClassSeats Class = "seats"
+	// ClassThrottle indicates execution capacity diminished by active rate limits.
 	ClassThrottle Class = "throttle"
-	ClassResume   Class = "resume"
-	ClassHost     Class = "host"
-	ClassAuth     Class = "auth"
+	// ClassResume indicates worker backlog waiting on session restoration.
+	ClassResume Class = "resume"
+	// ClassHost indicates compute host resource strain or high CPU load.
+	ClassHost Class = "host"
+	// ClassAuth indicates worker starvation due to invalid or missing credentials.
+	ClassAuth Class = "auth"
 )
 
+// Snapshot captures operational fleet metrics across machines, seats, and workers.
 type Snapshot struct {
 	Machines       int
 	Sessions       int
@@ -23,12 +30,18 @@ type Snapshot struct {
 	AuthBlocked    int
 }
 
+// Bottleneck describes an identified constraint with its severity score and diagnostic text.
 type Bottleneck struct {
 	Class    Class
 	Score    float64
 	Evidence string
 }
 
+// Rank evaluates fleet operational metrics and orders active constraints by severity.
+//
+// Invariant: fleet bottleneck ranking is fail-closed and deterministic.
+// Guard: empty snapshots or non-positive machine counts return nil without error.
+// Precondition: caller provides a valid Snapshot with non-negative metrics.
 func Rank(s Snapshot) []Bottleneck {
 	if s.Machines <= 0 {
 		return nil
