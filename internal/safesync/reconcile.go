@@ -45,6 +45,7 @@ type ReconcileOptions struct {
 	Contention     bool             `json:"-"` // test or override seam for active contention
 	SuspendPaths   []string         `json:"suspend_paths,omitempty"`
 	Session        string           `json:"session,omitempty"`
+	EmitPacket     bool             `json:"emit_packet,omitempty"`
 }
 
 // GoalInfo represents the parsed reconciliation goal.
@@ -68,27 +69,28 @@ type ReconcileExecution struct {
 
 // ReconcileAssessment is the typed, evidence-backed reconciliation verdict.
 type ReconcileAssessment struct {
-	Schema         string              `json:"schema"`
-	Route          string              `json:"route"`
-	Primitive      string              `json:"primitive,omitempty"`
-	Goal           string              `json:"goal"`
-	State          string              `json:"state"`
-	OK             bool                `json:"ok"`
-	Reason         string              `json:"reason,omitempty"`
-	Detail         string              `json:"detail,omitempty"`
-	Head           string              `json:"head"`
-	Target         string              `json:"target"`
-	TargetRef      string              `json:"target_ref"`
-	Branch         string              `json:"branch"`
-	Remote         string              `json:"remote"`
-	Dirty          bool                `json:"dirty"`
-	DirtyPaths     []string            `json:"dirty_paths,omitempty"`
-	CollidingPaths []string            `json:"colliding_paths,omitempty"`
-	MergeActive    bool                `json:"merge_active,omitempty"`
-	Contention     bool                `json:"contention,omitempty"`
-	Applied        bool                `json:"applied,omitempty"`
-	Execution      *ReconcileExecution `json:"execution,omitempty"`
-	Park           *ParkReceipt        `json:"park,omitempty"`
+	Schema         string                `json:"schema"`
+	Route          string                `json:"route"`
+	Primitive      string                `json:"primitive,omitempty"`
+	Goal           string                `json:"goal"`
+	State          string                `json:"state"`
+	OK             bool                  `json:"ok"`
+	Reason         string                `json:"reason,omitempty"`
+	Detail         string                `json:"detail,omitempty"`
+	Head           string                `json:"head"`
+	Target         string                `json:"target"`
+	TargetRef      string                `json:"target_ref"`
+	Branch         string                `json:"branch"`
+	Remote         string                `json:"remote"`
+	Dirty          bool                  `json:"dirty"`
+	DirtyPaths     []string              `json:"dirty_paths,omitempty"`
+	CollidingPaths []string              `json:"colliding_paths,omitempty"`
+	MergeActive    bool                  `json:"merge_active,omitempty"`
+	Contention     bool                  `json:"contention,omitempty"`
+	Applied        bool                  `json:"applied,omitempty"`
+	Execution      *ReconcileExecution   `json:"execution,omitempty"`
+	Park           *ParkReceipt          `json:"park,omitempty"`
+	Packet         *ReconciliationPacket `json:"packet,omitempty"`
 }
 
 // ParseGoal decomposes a goal string into structured GoalInfo.
@@ -171,6 +173,35 @@ func RouteReconciliation(ctx context.Context, opts ReconcileOptions) (ReconcileA
 
 // Route runs the state inspection pipeline and emits the ReconcileAssessment.
 func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error) {
+	assessment, err := r.routeInternal(ctx)
+	if err != nil {
+		return assessment, err
+	}
+	if r.opts.EmitPacket || assessment.Route == RouteReconcilePacket {
+		branch := assessment.Branch
+		if branch == "" {
+			branch = r.opts.Branch
+		}
+		pktOpts := PacketOptions{
+			Repo:         r.opts.Repo,
+			Remote:       r.opts.Remote,
+			Branch:       branch,
+			TargetRef:    assessment.TargetRef,
+			TargetSHA:    assessment.Target,
+			LocalHead:    assessment.Head,
+			Session:      r.opts.Session,
+			SuspendPaths: r.opts.SuspendPaths,
+			Runner:       r.opts.Runner,
+			Now:          r.opts.Now,
+		}
+		if pkt, pktErr := BuildReconciliationPacket(ctx, pktOpts); pktErr == nil {
+			assessment.Packet = pkt
+		}
+	}
+	return assessment, nil
+}
+
+func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessment, error) {
 	run := r.opts.Runner
 	repo := r.opts.Repo
 

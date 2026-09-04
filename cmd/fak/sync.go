@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,17 +27,18 @@ const (
 var syncAheadAudit = defaultSyncAheadAudit
 var syncWorktree = defaultSyncWorktree
 var (
-	syncAssess              = safesync.Assess
-	syncSafePush            = safesync.SafePush
-	syncRouteReconciliation = safesync.RouteReconciliation
-	syncCaptureSource       = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
+	syncAssess                    = safesync.Assess
+	syncSafePush                  = safesync.SafePush
+	syncRouteReconciliation       = safesync.RouteReconciliation
+	syncBuildReconciliationPacket = safesync.BuildReconciliationPacket
+	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push", "drain", "reconcile":
+		case "check", "apply", "push", "drain", "reconcile", "packet":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -44,7 +46,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, or reconcile)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, or packet)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -76,6 +78,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	goal := fs.String("goal", "publish", "reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)")
 	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
+	emitPacket := fs.Bool("emit-packet", false, "reconcile: emit owner-aware reconciliation packet")
 	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
 	var suspendPaths pathList
 	fs.Var(&suspendPaths, "suspend-paths", "reconcile: paths to suspend and reapply across integration (repeatable)")
@@ -179,6 +182,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			Fetch:        *fetch,
 			SuspendPaths: suspendPaths,
 			Session:      sess,
+			EmitPacket:   *emitPacket,
 		}
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
@@ -200,6 +204,39 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitRefused
 		}
 		if assessment.OK {
+			return syncExitOK
+		}
+		return syncExitRefused
+	}
+
+	if command == "packet" {
+		repoPath := pathutil.ExpandTilde(*repo)
+		sess := strings.TrimSpace(*sessionFlag)
+		if sess == "" {
+			sess = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"), "sync-packet")
+		}
+		opts := safesync.PacketOptions{
+			Repo:         repoPath,
+			Remote:       *remote,
+			Branch:       *branch,
+			Fetch:        *fetch,
+			Session:      sess,
+			SuspendPaths: suspendPaths,
+		}
+		pkt, err := syncBuildReconciliationPacket(context.Background(), opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sync packet: %v\n", err)
+			return syncExitInternal
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, pkt); err != nil {
+				fmt.Fprintf(stderr, "fak sync: %v\n", err)
+				return syncExitInternal
+			}
+		} else {
+			renderSyncPacket(stdout, pkt)
+		}
+		if pkt.Dispatchable {
 			return syncExitOK
 		}
 		return syncExitRefused
@@ -313,7 +350,8 @@ func syncUsage(w io.Writer) {
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
-  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json]
+  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet]
+  fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
@@ -416,6 +454,71 @@ func renderSyncReconcile(w io.Writer, info safesync.ReconcileAssessment) {
 	}
 	if info.Park != nil {
 		fmt.Fprintf(w, "  park: session=%s status=%s (%d selected paths, %d effects)\n", info.Park.Session, info.Park.Status, len(info.Park.SelectedPaths), len(info.Park.Effects))
+	}
+	if info.Packet != nil {
+		fmt.Fprintln(w)
+		renderSyncPacket(w, info.Packet)
+	}
+}
+
+func renderSyncPacket(w io.Writer, pkt *safesync.ReconciliationPacket) {
+	if pkt == nil {
+		return
+	}
+	fmt.Fprintf(w, "[%s] reconciliation packet\n", pkt.Schema)
+	fmt.Fprintf(w, "  disposition:  %s (dispatchable: %v)\n", pkt.Disposition, pkt.Dispatchable)
+	fmt.Fprintf(w, "  head:         %s\n", short(pkt.LocalHead))
+	fmt.Fprintf(w, "  target:       %s (%s)\n", pkt.TargetRef, short(pkt.TargetSHA))
+	if pkt.MergeBase != "" {
+		fmt.Fprintf(w, "  merge base:   %s\n", short(pkt.MergeBase))
+	}
+	fmt.Fprintf(w, "  preview:      clean=%v superset=%v conflicts=%d\n", pkt.MergePreview.Clean, pkt.MergePreview.Superset, len(pkt.MergePreview.Conflicts))
+	for _, c := range pkt.MergePreview.Conflicts {
+		fmt.Fprintf(w, "    conflict: %s\n", c)
+	}
+	if len(pkt.LocalCommits) > 0 {
+		fmt.Fprintf(w, "  local commits (%d):\n", len(pkt.LocalCommits))
+		for _, c := range pkt.LocalCommits {
+			fmt.Fprintf(w, "    - %s %s (%s)\n", short(c.SHA), c.Subject, strings.Join(c.Paths, ", "))
+		}
+	}
+	if len(pkt.RemoteCommits) > 0 {
+		fmt.Fprintf(w, "  remote commits (%d):\n", len(pkt.RemoteCommits))
+		for _, c := range pkt.RemoteCommits {
+			fmt.Fprintf(w, "    - %s %s (%s)\n", short(c.SHA), c.Subject, strings.Join(c.Paths, ", "))
+		}
+	}
+	if len(pkt.DirtyPaths) > 0 {
+		fmt.Fprintf(w, "  dirty paths (%d):\n", len(pkt.DirtyPaths))
+		for _, p := range pkt.DirtyPaths {
+			fmt.Fprintf(w, "    - %s\n", p)
+		}
+	}
+	if len(pkt.PathOwnership) > 0 {
+		fmt.Fprintf(w, "  path ownership (%d):\n", len(pkt.PathOwnership))
+		keys := make([]string, 0, len(pkt.PathOwnership))
+		for k := range pkt.PathOwnership {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			owner := pkt.PathOwnership[k]
+			status := "inactive"
+			if owner.Active {
+				status = "active"
+			}
+			details := []string{fmt.Sprintf("lane=%s", owner.Lane), fmt.Sprintf("status=%s", status)}
+			if owner.Owner != "" {
+				details = append(details, fmt.Sprintf("owner=%s", owner.Owner))
+			}
+			if owner.SessionID != "" {
+				details = append(details, fmt.Sprintf("session=%s", owner.SessionID))
+			}
+			fmt.Fprintf(w, "    - %s: %s\n", k, strings.Join(details, " "))
+		}
+	}
+	if len(pkt.RequiredWitnesses) > 0 {
+		fmt.Fprintf(w, "  required witnesses: %s\n", strings.Join(pkt.RequiredWitnesses, ", "))
 	}
 }
 
