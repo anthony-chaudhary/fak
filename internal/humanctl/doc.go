@@ -5,6 +5,9 @@
 // The package deliberately separates semantic controls (redirect, verify,
 // undo) from delivery controls (send now, queue, inject) and execution policy.
 //
+// Invariant: human control semantics remain decoupled from transport delivery mechanisms.
+// Guard: non-compliant upward imports violate the architectural tier constraint (tier <= 1).
+//
 // Tier: primitive (1) - see internal/architest. This package may import only
-// packages whose tier is <= 1; an upward import fails the architest gate.
+// packages whose tier is <= 1; an upward import fails the architest boundary check.
 package humanctl
