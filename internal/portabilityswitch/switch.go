@@ -1,5 +1,9 @@
 // Package portabilityswitch coordinates context changes with the existing lifecycle
 // and process-forest authorities. It owns transaction state, not processes.
+//
+// Invariant: portability switch evaluations are fail-closed and bounded. Any missing
+// authority evidence, stale generation identity, or external unmanaged process
+// immediately aborts the transition before mutating execution state.
 package portabilityswitch
 
 import (
@@ -83,6 +87,13 @@ type Coordinator struct {
 	Journal Journal
 }
 
+// Switch executes a managed portability switch transaction across registered runtimes and adapters.
+//
+// Invariant: portability switch evaluations are fail-closed and bounded. Any missing
+// authority evidence, stale generation identity, or external unmanaged process
+// immediately aborts the transition before mutating execution state.
+// Guard: all inputs must be non-empty and all dependencies non-nil; missing authority evidence or
+// unmanaged external processes trigger an immediate fail-closed abort prior to adapter mutation.
 func (c Coordinator) Switch(q Request) (Receipt, error) {
 	if q.Transaction == "" || q.Root == "" || q.Context == "" || c.Adapter == nil || c.Runtime == nil || c.Journal == nil {
 		return Receipt{}, errors.New("portability switch: incomplete request")
