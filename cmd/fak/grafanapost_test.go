@@ -134,3 +134,14 @@ func TestGrafanaSurfaceRegisteredInSlackCheck(t *testing.T) {
 		t.Fatalf("grafana should use its built-in channel default: %+v", g)
 	}
 }
+
+func TestGrafanaContractCLI(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runGrafanaContract(&out, &errb, []string{"--dashboard", "../../tools/grafana/dashboards/fak-fleet-overview.json"})
+	if code != 0 {
+		t.Fatalf("runGrafanaContract failed with %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "PASS") {
+		t.Fatalf("expected PASS in output, got: %s", out.String())
+	}
+}

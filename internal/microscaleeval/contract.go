@@ -112,6 +112,10 @@ type Verdict struct {
 // Evaluate returns a closed typed outcome. It does not silently convert a
 // descriptor, select a universal format, or promote paper-reported data to an
 // observation.
+//
+// Invariant: microscale evaluations are fail-closed and deterministic.
+// Guard: unknown schema versions, missing provenance digests, or unverified
+// observed evidence immediately refuse evaluation rather than inferring runtime support.
 func Evaluate(r Request) Verdict {
 	v := Verdict{Provenance: r.Provenance, Evidence: r.Evidence}
 	if r.Descriptor.Schema != SchemaV1 {

@@ -58,6 +58,26 @@ type PagedKVPool struct {
 	MaxBlocks int
 }
 
+// Alloc allocates and returns an owned block id from the pool.
+func (p *PagedKVPool) Alloc() int {
+	return p.alloc()
+}
+
+// Release returns a block id reference to the pool.
+func (p *PagedKVPool) Release(id int) {
+	p.release(id)
+}
+
+// FreeBlocks returns the count of free blocks currently in the pool.
+func (p *PagedKVPool) FreeBlocks() int {
+	return len(p.free)
+}
+
+// TotalBlocks returns the total allocated physical blocks (live + free).
+func (p *PagedKVPool) TotalBlocks() int {
+	return len(p.blocks)
+}
+
 // NewPagedKVPool builds a pool sized to a model config with blockTokens tokens per block.
 // A non-positive blockTokens falls back to 16 (the vLLM default page size); a degenerate
 // config (no layers / zero stride) is allowed — such a pool simply allocates empty blocks.

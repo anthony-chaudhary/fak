@@ -1,6 +1,7 @@
 package market
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -142,6 +143,7 @@ func TestJSONGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if string(got) != string(want) {
 		t.Fatalf("golden mismatch\nGOT:\n%s\nWANT:\n%s", got, want)
 	}

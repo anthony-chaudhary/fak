@@ -207,6 +207,10 @@ const usageCoreText = `usage:
                 (KVBM eviction validation: replay a committed fak.kvbm.replay/v1
                  artifact and gate cost-aware >= LRU hit tokens at the same budget,
                  active-pin safety, and byte-identical restore after eviction)
+  fak kvvectoreval inspect|eval|verify-artifact [--json]
+                (NOVA-KV vector quantization research contract evaluation:
+                 inspect pinned artifacts/metrics, evaluate contract request
+                 tuples, or verify artifact digests against pinned research)
   fak bench-runs list|show|compare|best|table|summary
                 (native query surface for experiments/benchmark/catalog.json and run
                  artifacts; the Go replacement for tools/bench_cli.py)

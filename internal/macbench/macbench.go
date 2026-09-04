@@ -573,9 +573,9 @@ type Row struct {
 func DefaultOptions() Options {
 	return Options{
 		Gateway:       "http://127.0.0.1:8080",
-		Model:         "qwen3.6-27b",
+		Model:         "qwen38:27b",
 		Suite:         SuiteAll,
-		DecodeTokens:  []int{256, 512},
+		DecodeTokens:  []int{16, 32, 64, 128, 256, 512},
 		PrefillTokens: []int{128, 512, 2048, 4096},
 		Concurrency:   2,
 	}

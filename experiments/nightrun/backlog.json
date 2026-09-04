@@ -40,11 +40,27 @@
       "weights"
     ],
     "manual": true,
-    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions with prompt_tokens=25 max_tokens={256,512} (finish=length) and record completion_tokens/time_total. WARM the serve first (discard any cold first request). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
+    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions prompt_tokens=25 max_tokens={256,512} (finish=length) and record completion_tokens/time_total. WARM the serve first (discard any cold first request). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
     "acceptance": "a recorded warm decode tok/s at 256 and 512 tok for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel), plotted against the existing 16/32/64/128 points to show the asymptote",
     "recheck_days": 14,
     "timeout_sec": 1800,
     "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  {
+    "id": "witness-qwen38-27b-metal-serving-curve",
+    "title": "Qwen3.8-27B Q4_K_M Metal serving-curve sweep: decode (16,32,64,128), longgen (256,512), prefill sweep (128,512,2048,4096), and 2-stream concurrency in fak's own Apple Silicon Metal kernel (engine=inkernel, --metal). Fulfills issue #11138 and records the full serving curve in a fak.macbench.result.v1 artifact.",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": [
+      "metal",
+      "weights"
+    ],
+    "manual": true,
+    "run": "fak macbench all --gateway http://127.0.0.1:8080 --model qwen38:27b --json",
+    "acceptance": "a fak.macbench.result.v1 artifact recording observed tok/s rows for decode-longgen (16,32,64,128,256,512), prefill sweep (128,512,2048,4096), and 2-stream concurrency against the loopback gateway with bearer scrubbed",
+    "recheck_days": 14,
+    "timeout_sec": 7200,
+    "doc": "docs/benchmarks/QWEN38-27B-LATEST.md"
   },
   {
     "id": "witness-qwen36-27b-metal-prefill-sweep",

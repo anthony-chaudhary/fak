@@ -16,7 +16,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
-	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -370,8 +369,7 @@ type Server struct {
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
 	// ONLY on the diagnostic reads (/debug/vars, /metrics, /v1/fak/observation),
 	// never on a mutating route.
-	readBearer    string
-	policyRuntime *policy.Runtime
+	readBearer string
 	// keyset binds additional api keys to org/project isolation principals
 	// (Config.KeyPrincipals, #5332), matched in withAuth by a constant-time digest
 	// compare. nil => RequireKey-only auth, unchanged. Holds only key DIGESTS — the raw

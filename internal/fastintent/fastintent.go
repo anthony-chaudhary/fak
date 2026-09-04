@@ -25,26 +25,26 @@ const Schema = "fak-fast-intent-replay/1"
 // ProviderRealization binds a provider to its realized service tier receipt.
 type ProviderRealization struct {
 	// Provider is the distinct model provider name.
-	Provider string                        `json:"provider"`
+	Provider string `json:"provider"`
 	// Receipt captures the realized service mode and tier status.
-	Receipt  modelroute.ServiceTierReceipt `json:"receipt"`
+	Receipt modelroute.ServiceTierReceipt `json:"receipt"`
 }
 
 // ReplayBundle represents an immutable, replayable record of execution plan,
 // provider outcomes, and benchmark evaluation.
 type ReplayBundle struct {
 	// Schema is the bundle schema identifier.
-	Schema         string                           `json:"schema"`
+	Schema string `json:"schema"`
 	// Plan is the resolved fast execution plan.
-	Plan           orchestration.FastExecutionPlan  `json:"plan"`
+	Plan orchestration.FastExecutionPlan `json:"plan"`
 	// Providers lists the provider realizations evaluated.
-	Providers      []ProviderRealization            `json:"providers"`
+	Providers []ProviderRealization `json:"providers"`
 	// Evaluation contains the paired benchmark profile report.
-	Evaluation     ultracodebench.FastProfileReport `json:"evaluation"`
+	Evaluation ultracodebench.FastProfileReport `json:"evaluation"`
 	// Verdict is the evaluator verdict (e.g. GAIN, NO_GAIN, ABSTAIN).
-	Verdict        string                           `json:"verdict"`
+	Verdict string `json:"verdict"`
 	// EvidenceDigest is the SHA-256 hash across canonical bundle content.
-	EvidenceDigest string                           `json:"evidence_digest"`
+	EvidenceDigest string `json:"evidence_digest"`
 }
 
 // Join accepts only realized provider outcomes and a quality-constrained paired

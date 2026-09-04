@@ -134,3 +134,31 @@ func Example_local() {
 		t.Fatalf("empty candidates = %d, %v", n, ok)
 	}
 }
+
+func TestCommentQualityFlagsTautologicalDocComments(t *testing.T) {
+	src := `package sample
+
+// Foo defines the foo.
+func Foo() {}
+
+// Bar specifies Bar.
+type Bar struct{}
+
+// ReasonSupported indicates full support for the metadata envelope.
+const ReasonSupported = "supported"
+`
+	d := commentQualityDiff("sample.go", src, 3, 6, 9)
+	findings, err := gateCommentQuality(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 tautological findings, got %d: %#v", len(findings), findings)
+	}
+	if !strings.Contains(findings[0].Detail, "Foo") || findings[0].Line != 3 {
+		t.Errorf("expected finding on Foo at line 3, got %#v", findings[0])
+	}
+	if !strings.Contains(findings[1].Detail, "Bar") || findings[1].Line != 6 {
+		t.Errorf("expected finding on Bar at line 6, got %#v", findings[1])
+	}
+}

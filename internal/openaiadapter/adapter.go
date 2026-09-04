@@ -1,5 +1,8 @@
-// Package openaiadapter provides the migration-critical OpenAI wire subset for one authenticated app.
 package openaiadapter
+
+// Invariant: OpenAI adapter conversions are fail-closed and preserve request integrity.
+// Guard: Requests with invalid app tokens, unmapped model aliases, or unsupported response formats
+// are rejected deterministically before execution.
 
 import (
 	"context"

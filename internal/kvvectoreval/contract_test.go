@@ -87,7 +87,7 @@ func TestResearchDocumentCarriesContractAndNoObservedLabClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, needle := range []string{ContractID, PaperID, RecipeID, RuntimeID, "Modeled", "Observed (paper/repository)", "No fak lab run is claimed"} {
+	for _, needle := range []string{ContractID, PaperID, RecipeID, "v0.5.10+nova-kv.d81c77b", "Modeled", "Observed (paper/repository)", "No fak lab run is claimed"} {
 		if !strings.Contains(text, needle) {
 			t.Errorf("research witness missing %q", needle)
 		}

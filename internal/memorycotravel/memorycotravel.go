@@ -13,20 +13,30 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/rolloutmode"
 )
 
+// Invariant: memory cotravel evaluation is fail-closed and bounded.
+// Guard: rollout gate defaults to shadow mode to prevent unintended disk writes across workspace boundaries.
+// Contract: memory files are transferred only when allowed by the active strategy and gate.
+
 const (
-	DefaultGate      = string(rolloutmode.Shadow)
-	DefaultStrategy  = "additive"
+	// DefaultGate is the safe rollout mode used when no environment or option override is provided.
+	DefaultGate = string(rolloutmode.Shadow)
+	// DefaultStrategy is the fallback merge policy that preserves existing destination files.
+	DefaultStrategy = "additive"
+	// DefaultLedgerCap specifies the maximum byte threshold before the JSONL audit ledger undergoes single-generation rotation.
 	DefaultLedgerCap = 8 * 1024 * 1024
 )
 
+// Decision computes the planned transfer action ("copy" or "skip") for a given source and destination file.
 type Decision func(src, dst string) string
 
+// PlanItem records the prospective transfer action and destination file presence for a single memory entry.
 type PlanItem struct {
 	Name      string `json:"name"`
 	Action    string `json:"action"`
 	DstExists bool   `json:"dst_exists"`
 }
 
+// Record captures an auditable memory synchronization execution including gate, strategy, plan, and outcome.
 type Record struct {
 	Timestamp    string     `json:"ts"`
 	Session      string     `json:"session"`
@@ -44,6 +54,7 @@ type Record struct {
 	Note         string     `json:"note,omitempty"`
 }
 
+// Strategies maps named resolution policies to their corresponding Decision implementation functions.
 var Strategies = map[string]Decision{
 	"additive":     Additive,
 	"source_wins":  SourceWins,
@@ -63,8 +74,10 @@ func parseGate(raw string) rolloutmode.Mode {
 	return m
 }
 
+// Gate returns the active rollout gate string parsed from FAK_MEMORY_COTRAVEL.
 func Gate() string { return parseGate(os.Getenv("FAK_MEMORY_COTRAVEL")).String() }
 
+// StrategyName returns the configured resolution policy name parsed from FAK_MEMORY_MERGE.
 func StrategyName() string {
 	s := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_MEMORY_MERGE")))
 	if _, ok := Strategies[s]; ok {
@@ -73,6 +86,7 @@ func StrategyName() string {
 	return DefaultStrategy
 }
 
+// Differ compares two files on disk and returns true if their byte contents differ or either read fails.
 func Differ(src, dst string) bool {
 	a, err := os.ReadFile(src)
 	if err != nil {
@@ -85,6 +99,7 @@ func Differ(src, dst string) bool {
 	return !bytes.Equal(a, b)
 }
 
+// Additive implements a non-destructive conflict policy that copies only when the destination file is missing.
 func Additive(_src, dst string) string {
 	if _, err := os.Stat(dst); err == nil {
 		return "skip"
@@ -92,6 +107,7 @@ func Additive(_src, dst string) string {
 	return "copy"
 }
 
+// SourceWins implements a source-preferred conflict policy that copies when the source and destination differ.
 func SourceWins(src, dst string) string {
 	if Differ(src, dst) {
 		return "copy"
@@ -99,6 +115,7 @@ func SourceWins(src, dst string) string {
 	return "skip"
 }
 
+// NewestMtime implements a timestamp-based conflict policy that copies when the source file has a newer modification time.
 func NewestMtime(src, dst string) string {
 	dstInfo, err := os.Stat(dst)
 	if err != nil {
@@ -114,6 +131,7 @@ func NewestMtime(src, dst string) string {
 	return "skip"
 }
 
+// PlanOneDir inspects the source memory directory and evaluates decision rules against corresponding destination paths.
 func PlanOneDir(srcMem, dstMem string, decide Decision) []PlanItem {
 	info, err := os.Stat(srcMem)
 	if err != nil || !info.IsDir() {
@@ -135,12 +153,14 @@ func PlanOneDir(srcMem, dstMem string, decide Decision) []PlanItem {
 	return plan
 }
 
+// Options provides parameter overrides for memory cotravel execution including destination slug, gate, and strategy.
 type Options struct {
 	DstSlug  string
 	Gate     string
 	Strategy string
 }
 
+// CotravelMemory executes memory synchronization from source to destination configuration roots under the specified options.
 func CotravelMemory(srcCfg, dstCfg, slug, sid string, opts Options) Record {
 	g := parseGate(opts.Gate).String()
 	if strings.TrimSpace(opts.Gate) == "" {
@@ -204,6 +224,7 @@ func CotravelMemory(srcCfg, dstCfg, slug, sid string, opts Options) Record {
 	return rec
 }
 
+// LedgerPath resolves the audit log location using FAK_MEMORY_COTRAVEL_LEDGER or home directory defaults.
 func LedgerPath() string {
 	if p := os.Getenv("FAK_MEMORY_COTRAVEL_LEDGER"); strings.TrimSpace(p) != "" {
 		return p
@@ -217,6 +238,7 @@ func LedgerPath() string {
 	return filepath.Join(home, ".claude", "fak-memory-cotravel-ledger.jsonl")
 }
 
+// AppendLedger records an auditable synchronization entry to the JSONL log file, performing rotation if needed.
 func AppendLedger(row Record) {
 	path := LedgerPath()
 	if path == "" {
@@ -256,6 +278,7 @@ func AppendLedger(row Record) {
 	}
 }
 
+// ReadLedger deserializes and returns all recorded synchronization entries from the active ledger path.
 func ReadLedger() []map[string]any {
 	path := LedgerPath()
 	f, err := os.Open(path)

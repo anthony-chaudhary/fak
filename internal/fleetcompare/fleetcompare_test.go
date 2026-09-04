@@ -42,3 +42,31 @@ func TestSliceFixedTurnsSweepsAgents(t *testing.T) {
 		t.Fatalf("isolated = %+v", got.Isolated)
 	}
 }
+
+func BenchmarkSliceFixed(b *testing.B) {
+	cols := fixtureCols()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = SliceFixed(cols, "agents", 50)
+	}
+}
+
+func BenchmarkSliceFixedLarge(b *testing.B) {
+	n := 1000
+	cols := map[string][]float64{
+		"agents":            make([]float64, n),
+		"turns":             make([]float64, n),
+		"shared_saved_mean": make([]float64, n),
+		"cross_uplift_mean": make([]float64, n),
+	}
+	for i := 0; i < n; i++ {
+		cols["agents"][i] = float64(i % 10)
+		cols["turns"][i] = float64(i)
+		cols["shared_saved_mean"][i] = float64(i * 2)
+		cols["cross_uplift_mean"][i] = float64(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = SliceFixed(cols, "agents", 5)
+	}
+}

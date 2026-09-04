@@ -2,10 +2,12 @@ package microagent_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
 
@@ -114,4 +116,83 @@ func contextText(messages []microagent.Msg) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// TestContextCompactionCacheHitRate50Turns verifies that cache-preserving context compaction
+// retains prompt cache prefix integrity ([fak:goal] and cache_control: {type: "ephemeral"})
+// and maintains prompt cache hit rates > 85% across 50-turn benchmark sessions (#11182).
+func TestContextCompactionCacheHitRate50Turns(t *testing.T) {
+	type block map[string]any
+	const numTurns = 50
+	const budget = 400
+
+	// Initial stable system & task prompt with [fak:goal] and cache_control ephemeral
+	systemPrompt := "[fak:goal] Implement reliable agent harness and maintain invariant contracts."
+	systemBlocks := []block{
+		{"type": "text", "text": systemPrompt, "cache_control": map[string]any{"type": "ephemeral"}},
+	}
+
+	msgs := make([]map[string]any, 0, numTurns*2)
+	// Initial user turn pinned with cache_control
+	msgs = append(msgs, map[string]any{
+		"role": "user",
+		"content": []block{
+			{"type": "text", "text": "Task initialization with pinned goal: " + systemPrompt, "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+	})
+	msgs = append(msgs, map[string]any{
+		"role":    "assistant",
+		"content": "Understood. Pinned goal acknowledged.",
+	})
+
+	cacheHits := 0
+	totalTurnsEvaluated := 0
+
+	for turn := 2; turn < numTurns; turn++ {
+		// Append turn messages
+		msgs = append(msgs, map[string]any{
+			"role": "user",
+			"content": []block{
+				{"type": "text", "text": fmt.Sprintf("Turn %d request: perform intermediate analysis %s", turn, strings.Repeat("data ", 20))},
+			},
+		})
+		msgs = append(msgs, map[string]any{
+			"role":    "assistant",
+			"content": fmt.Sprintf("Turn %d response: intermediate analysis step complete.", turn),
+		})
+
+		bodyMap := map[string]any{
+			"model":    "claude-3-7-sonnet",
+			"system":   systemBlocks,
+			"messages": msgs,
+		}
+		rawBody, err := json.Marshal(bodyMap)
+		if err != nil {
+			t.Fatalf("marshal turn %d body: %v", turn, err)
+		}
+
+		compacted, outcome := agent.CompactAnthropicHistoryWithOptions(rawBody, agent.CompactOptions{
+			Budget:      budget,
+			Anchor:      agent.CompactAnchorFirstBP,
+			TotalTurns:  numTurns,
+			CurrentTurn: turn,
+		})
+
+		totalTurnsEvaluated++
+
+		// Verify prompt cache hit: the initial system block and first breakpoint message remain intact
+		if bytes.Contains(compacted, []byte("Task initialization with pinned goal")) &&
+			bytes.Contains(compacted, []byte("[fak:goal]")) &&
+			outcome.Reason != agent.CompactReasonNoBreakpoint {
+			cacheHits++
+		}
+	}
+
+	hitRate := float64(cacheHits) / float64(totalTurnsEvaluated)
+	t.Logf("50-turn context compaction benchmark: %d/%d cache hits (hit rate: %.2f%%)", cacheHits, totalTurnsEvaluated, hitRate*100)
+
+	// Invariant: Prompt cache hit rate must exceed 85%
+	if hitRate <= 0.85 {
+		t.Fatalf("prompt cache hit rate %.2f%% did not meet > 85%% requirement", hitRate*100)
+	}
 }

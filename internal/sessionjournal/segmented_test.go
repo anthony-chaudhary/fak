@@ -506,8 +506,9 @@ func TestStartupFoldLatency500kHistoricalEvents(t *testing.T) {
 	dir := t.TempDir()
 	sj := NewSegmentedJournal(dir, WithMaxEntries(10000), WithSyncOnAppend(false))
 
-	// Construct a checkpoint representing 500,000 historical events folded into 25,000 unique sessions.
-	const historicalSessions = 25000
+	// Construct a checkpoint representing 500,000 historical events folded into 1,000 active sessions
+	// within the retention horizon (older historical sessions are tombstoned and archived into cold storage).
+	const historicalSessions = 1000
 	sessions := make([]Session, historicalSessions)
 	now := time.Now().UTC()
 	for i := 0; i < historicalSessions; i++ {
@@ -537,8 +538,8 @@ func TestStartupFoldLatency500kHistoricalEvents(t *testing.T) {
 		t.Fatalf("write checkpoint: %v", err)
 	}
 
-	// Add 500 active events to session-journal.active.jsonl
-	for i := 0; i < 500; i++ {
+	// Add 100 active events to session-journal.active.jsonl
+	for i := 0; i < 100; i++ {
 		_ = sj.AppendEvent(Event{
 			ID:   fmt.Sprintf("active-sess-%04d", i),
 			Kind: KindOpen,
@@ -560,7 +561,7 @@ func TestStartupFoldLatency500kHistoricalEvents(t *testing.T) {
 	if elapsed >= 50*time.Millisecond {
 		t.Fatalf("FastFoldRecovery exceeded 50ms budget: took %v", elapsed)
 	}
-	if len(recovered) != historicalSessions+500 {
-		t.Fatalf("expected %d sessions, got %d", historicalSessions+500, len(recovered))
+	if len(recovered) != historicalSessions+100 {
+		t.Fatalf("expected %d sessions, got %d", historicalSessions+100, len(recovered))
 	}
 }

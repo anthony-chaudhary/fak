@@ -495,6 +495,10 @@ concurrent = [
   "decodemigrate",
   "dosadapter",
   "interactivesession",
+  "harnessbench",
+  "workspaceslot",
+  "schedcontract",
+  "agentsched",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1588,6 +1592,10 @@ agentopt = ["internal/agentopt/**"]
 decodemigrate = ["internal/decodemigrate/**"]
 dosadapter = ["internal/dosadapter/**"]
 interactivesession = ["internal/interactivesession/**"]
+harnessbench = ["internal/harnessbench/**"]
+workspaceslot = ["internal/workspaceslot/**"]
+schedcontract = ["internal/schedcontract/**"]
+agentsched = ["internal/agentsched/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -2944,5 +2952,74 @@ refusal  = true
 summary  = "A micro-context witness, quality ledger, cache A/B, or health scorecard failed schema or accounting reconciliation, so fak refused to grade or publish it."
 fix      = "Run the matching `microcontextdemo -verify-* <artifact>` command printed by the producing stage; regenerate the artifact from the source run rather than editing totals by hand."
 see_also = ["cmd/microcontextdemo", "docs/research/README.md", "go run ./cmd/microcontextdemo -h"]
+
+# Closed sync divergence refusal vocabulary (issue #10060).
+# These tokens are emitted when a safe push or safe sync operation encounters non-fast-forward
+# or diverged remote state, overlapping active working tree state, or unquiescent concurrency.
+# BEHIND_FASTFORWARDABLE and TARGET_MOVED provide safe executable recovery; diverged, active peer
+# merge, and dirty overlap conditions provide typed manual integration diagnostics.
+[reasons.BEHIND_FASTFORWARDABLE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The local branch is behind the remote tracking ref, but local HEAD is an ancestor of the remote ref and all paths can be cleanly fast-forwarded."
+fix      = "Run `fak sync apply --fetch --remote origin --branch <trunk>` to fast-forward cleanly before retrying push."
+see_also = ["fak sync apply", "internal/safesync", "cmd/fak/recover.go", "BEHIND"]
+
+[reasons.DIVERGED_DISJOINT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The local branch and remote have diverged with distinct commit histories, but touch non-overlapping file trees that can be safely integrated."
+fix      = "Run dry-run integration with `fak sync check --fetch --remote origin --branch <trunk>` to preview changes, then merge or rebase in place."
+see_also = ["fak sync check", "internal/safesync", "DIVERGED_OVERLAP", "cmd/fak/recover.go"]
+
+[reasons.DIVERGED_OVERLAP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The local branch and remote have diverged and touch overlapping file paths, requiring manual resolution of content divergence."
+fix      = "Inspect differences with `git diff origin/<trunk>...HEAD`, reconcile conflicting changes in place, verify tests, and commit."
+see_also = ["fak sync check", "internal/safesync", "DIVERGED_DISJOINT", "cmd/fak/recover.go"]
+
+[reasons.MERGE_ACTIVE_PEER_OWNED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A peer-owned merge or rebase is currently active (e.g. MERGE_HEAD is present) on the working tree."
+fix      = "Inspect working tree status with `git status`, unstage any pending paths with `git restore --staged`, and wait for the peer merge to complete."
+see_also = ["internal/safesync", "MERGE_IN_PROGRESS", "cmd/fak/recover.go"]
+
+[reasons.DIRTY_WRITE_OVERLAP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Uncommitted dirty changes in the working tree overlap with incoming changes from the remote ref."
+fix      = "Inspect dirty state with `git status`, checkpoint finished local work with `fak wip checkpoint`, and ensure working paths are clear before syncing."
+see_also = ["fak wip checkpoint", "internal/safesync", "COLLISION_RISK", "cmd/fak/recover.go"]
+
+[reasons.QUEUED_AWAITING_QUIESCENCE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The repository or trunk is under heavy concurrent update activity and sync operations are queued awaiting quiescence."
+fix      = "Wait for concurrent activity to settle, or run `fak sync drain --remote origin --branch <trunk>` to flush once quiescent."
+see_also = ["fak sync drain", "internal/safesync", "cmd/fak/recover.go"]
+
+[reasons.TARGET_MOVED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The remote target ref moved concurrently between the pre-push check and execution."
+fix      = "Refresh state and verify alignment with `fak sync check --fetch --remote origin --branch <trunk>`, then retry."
+see_also = ["fak sync check", "internal/safesync", "BEHIND_FASTFORWARDABLE", "cmd/fak/recover.go"]
+
+[reasons.LEASE_OWNER_UNAVAILABLE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A writer or lane lease is held by an owner process that is unreachable or unresponsive."
+fix      = "Inspect active leases and workers with `dos top`, determine if the holder has stalled or terminated, and reclaim if confirmed stale."
+see_also = ["dos top", "internal/safesync", "LOCK_BUSY", "cmd/fak/recover.go"]
+
+[reasons.BEHIND]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Compatibility alias for sync divergence: the local branch is behind or diverged from remote. Superseded by typed reasons (BEHIND_FASTFORWARDABLE, DIVERGED_DISJOINT, DIVERGED_OVERLAP, TARGET_MOVED)."
+fix      = "Run `fak sync check --fetch --remote origin --branch <trunk>` to classify divergence into typed reasons (such as BEHIND_FASTFORWARDABLE), then follow the typed recovery plan."
+see_also = ["BEHIND_FASTFORWARDABLE", "DIVERGED_DISJOINT", "DIVERGED_OVERLAP", "TARGET_MOVED", "fak sync check"]
+
 [retention]
 audits_keep_last = 30

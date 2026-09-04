@@ -1,4 +1,7 @@
 // Package localappux renders host-app language for local compute lifecycle states.
+//
+// Invariant: UX rendering is deterministic and fail-closed.
+// Guard: Diagnostic preview enforces strict redaction of sensitive paths, tokens, and prompts before serialization.
 package localappux
 
 import (
@@ -9,8 +12,10 @@ import (
 	"strings"
 )
 
+// Mode designates the compute execution policy mode for the host application.
 type Mode string
 
+// Host-app compute execution modes.
 const (
 	ModeAutomatic   Mode = "automatic"
 	ModePreferLocal Mode = "prefer_local"
@@ -18,8 +23,10 @@ const (
 	ModePaused      Mode = "paused"
 )
 
+// State designates the local compute readiness lifecycle state.
 type State string
 
+// Lifecycle readiness states.
 const (
 	StateFirstRun      State = "first_run"
 	StatePartial       State = "partial_readiness"
@@ -35,6 +42,7 @@ const (
 	StateReady         State = "ready"
 )
 
+// View represents the current display state of the local compute features.
 type View struct {
 	State                            State
 	Mode                             Mode
@@ -45,6 +53,8 @@ type View struct {
 	CanRetry, CanRepair, CanRollback bool
 }
 
+// Render returns the user-facing status title, detail message, and action text.
+// Invariant: UX rendering is deterministic and fail-closed.
 func Render(v View) string {
 	title, detail, action := "Local features are ready", "Your tasks run on this Mac.", ""
 	switch v.State {
@@ -126,6 +136,7 @@ func labelMode(m Mode) string {
 	return "Automatic"
 }
 
+// Diagnostic contains local application state and telemetry for issue reports.
 type Diagnostic struct {
 	AppVersion string   `json:"app_version"`
 	State      State    `json:"state"`
@@ -139,6 +150,8 @@ type Diagnostic struct {
 
 var sensitive = regexp.MustCompile(`(?i)(token|secret|password|prompt|path|user)`)
 
+// PreviewDiagnostic generates a consent-safe JSON report with sensitive data scrubbed.
+// Guard: Any key containing sensitive strings (tokens, secrets, passwords, prompts, paths, users) is stripped.
 func PreviewDiagnostic(d Diagnostic) ([]byte, error) {
 	raw := map[string]any{"schema": "fak.local-app-diagnostic/1", "app_version": d.AppVersion, "state": d.State, "mode": d.Mode, "engine": d.Engine, "error_code": d.ErrorCode}
 	for k := range raw {

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/anthony-chaudhary/fak/internal/grafanacontract"
 	"github.com/anthony-chaudhary/fak/internal/grafanapost"
 )
 
-// cmdGrafana posts fak #grafana-channel cards — exported Grafana snapshots and
-// long-lived dashboard / debug links. It is reached as `fak grafana post` and is the
-// outbound Grafana surface, the twin of `fak bench post` / `fak dojo post`.
+// cmdGrafana handles Grafana integration surfaces: posting cards to #grafana-channel
+// and verifying dashboard contracts against shipped schemas.
 //
 //	fak grafana post --snapshot --title "p99 spike" --url <snapshot> \
 //	    --dashboard "FAK Gateway Observability" --range "last 6h"   # an exported snapshot
@@ -20,6 +20,7 @@ import (
 //	fak grafana post --rollup all                                   # fold the link registry
 //	fak grafana post --rollup public-demo                           # only long-lived demo links
 //	fak grafana post --link fak-gateway-observability               # one dashboard link
+//	fak grafana contract [--dashboard <path>]                       # verify dashboard contracts
 //
 // A plain snapshot post is a POST of a URL the operator already exported from Grafana.
 // With --create it instead PULLS one: it calls the live Grafana snapshots API
@@ -28,9 +29,31 @@ import (
 // FAK_GRAFANA_* workspace (Slack token falls back to the scoreboard token; channel falls
 // back to the public built-in default) and honor --dry-run.
 func cmdGrafana(argv []string) {
-	dispatchSubcommands("grafana", "post", argv,
+	dispatchSubcommands("grafana", "post | contract", argv,
 		subcommand{"post", runGrafanaPost},
+		subcommand{"contract", runGrafanaContract},
 	)
+}
+
+func runGrafanaContract(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak grafana contract", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dashboardPath := fs.String("dashboard", "tools/grafana/dashboards/fak-fleet-overview.json", "path to dashboard JSON to verify against contract")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	res, err := grafanacontract.VerifyFleetOverview(*dashboardPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak grafana contract: %v\n", err)
+		return 1
+	}
+	if !res.Passed {
+		fmt.Fprintf(stderr, "fak grafana contract: FAIL - missing required tokens: %v\n", res.Missing)
+		return 1
+	}
+	fmt.Fprintf(stdout, "fak grafana contract: PASS (%s)\n", *dashboardPath)
+	return 0
 }
 
 func runGrafanaPost(stdout, stderr io.Writer, argv []string) int {

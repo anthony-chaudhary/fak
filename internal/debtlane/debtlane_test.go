@@ -2,6 +2,9 @@ package debtlane
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 	"time"
@@ -621,5 +624,155 @@ func TestTreesOverlapWindowsSlashes(t *testing.T) {
 	}
 	if TreesOverlap(`internal\foo`, `internal\bar`) {
 		t.Errorf("disjoint windows paths should not overlap")
+	}
+}
+
+func TestAntiGamingTautologicalDocComments(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool // true = tautological
+	}{
+		{"Foo", "Foo defines the foo.", true},
+		{"Bar", "Bar specifies Bar.", true},
+		{"ReasonSupported", "ReasonSupported indicates ReasonSupported.", true},
+		{"Model", "Model is a model.", true},
+		{"OutcomeSupported", "OutcomeSupported indicates outcome supported.", true},
+		{"PackBytes", "PackBytes returns the embedded raw JSON bytes of the test pack fixture.", false},
+		{"Exported", "Exported explains the public contract and invariants.", false},
+		{"ReasonSupported", "ReasonSupported indicates full support for the metadata and capability envelope.", false},
+		{"Config", "Config specifies engine execution hyperparameters and timeout budgets.", false},
+	}
+
+	for _, tc := range cases {
+		got := isTautologicalDoc(tc.name, tc.text)
+		if got != tc.want {
+			t.Errorf("isTautologicalDoc(%q, %q) = %v, want %v", tc.name, tc.text, got, tc.want)
+		}
+	}
+}
+
+func TestAntiGamingBenchmarkValidation(t *testing.T) {
+	fset := token.NewFileSet()
+	src := `package test
+import "testing"
+func BenchmarkEmpty(b *testing.B) {}
+func BenchmarkStub(b *testing.B) {
+	_ = 1 + 1
+}
+func BenchmarkValidFor(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = i
+	}
+}
+func BenchmarkValidRun(b *testing.B) {
+	b.Run("sub", func(b *testing.B) {})
+}
+`
+	node, err := parser.ParseFile(fset, "sample_bench_test.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, decl := range node.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fn.Name.Name {
+		case "BenchmarkEmpty", "BenchmarkStub":
+			if isSubstantiveBenchmark(fn) {
+				t.Errorf("%s should NOT be recognized as substantive benchmark", fn.Name.Name)
+			}
+		case "BenchmarkValidFor", "BenchmarkValidRun":
+			if !isSubstantiveBenchmark(fn) {
+				t.Errorf("%s should be recognized as substantive benchmark", fn.Name.Name)
+			}
+		}
+	}
+}
+
+func TestAntiGamingContractComments(t *testing.T) {
+	fset := token.NewFileSet()
+	src := `package test
+
+// invariant
+var a = 1
+
+// guard
+var b = 2
+
+// Invariant: invariant assumption guard fail-closed
+var c = 3
+
+// Invariant: callers must acquire the shard lease lock before mutating table partitions.
+var d = 4
+`
+	node, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(node.Comments) != 4 {
+		t.Fatalf("expected 4 comments, got %d", len(node.Comments))
+	}
+	// The first 3 should be rejected as non-substantive or keyword-stuffed
+	if isSubstantiveContractComment(node.Comments[0]) {
+		t.Errorf("comment 0 (single word) should be rejected")
+	}
+	if isSubstantiveContractComment(node.Comments[1]) {
+		t.Errorf("comment 1 (single word) should be rejected")
+	}
+	if isSubstantiveContractComment(node.Comments[2]) {
+		t.Errorf("comment 2 (keyword soup) should be rejected")
+	}
+	// The 4th is genuine invariant explanation
+	if !isSubstantiveContractComment(node.Comments[3]) {
+		t.Errorf("comment 3 (real invariant) should be accepted")
+	}
+}
+
+func TestMaturityRungGatingRequiresPrerequisites(t *testing.T) {
+	// An unintegrated package with tests, benchmarks, docs, contracts
+	// MUST NOT climb past tested (ceiling 5.0) or claim dogfooded/integrated rungs.
+	unintegrated := Evidence{
+		HasCode:             true,
+		CodeLines:           250,
+		HasTests:            true,
+		TestFilesCount:      2,
+		Benchmarked:         true,
+		Documented:          true,
+		ExportedSymbols:     10,
+		DocumentedExports:   10,
+		HasContractComments: true,
+		Integrated:          false,
+		Dogfooded:           false,
+	}
+
+	score, rung := EvaluateMaturityCurve(unintegrated)
+	if score > 5.0 {
+		t.Fatalf("unintegrated package score must be clamped at 5.0, got %.1f", score)
+	}
+	if rung != "tested" {
+		t.Fatalf("unintegrated package rung must be 'tested', got %q", rung)
+	}
+
+	// Once integrated, climbs to integrated.
+	integrated := unintegrated
+	integrated.Integrated = true
+	scoreInt, rungInt := EvaluateMaturityCurve(integrated)
+	if scoreInt < 6.5 {
+		t.Fatalf("integrated package score should climb, got %.1f", scoreInt)
+	}
+	if rungInt != "integrated" {
+		t.Fatalf("integrated without dogfooded proof must be rung 'integrated', got %q", rungInt)
+	}
+
+	// Once dogfooded, reaches dogfooded or higher rung.
+	dogfooded := integrated
+	dogfooded.Dogfooded = true
+	_, rungDog := EvaluateMaturityCurve(dogfooded)
+	if rungDog != "production_grade" && rungDog != "hardened" && rungDog != "benchmarked" && rungDog != "dogfooded" {
+		t.Fatalf("dogfooded package should reach at least dogfooded rung, got %q", rungDog)
 	}
 }

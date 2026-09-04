@@ -174,9 +174,25 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 // emittedRecoveryReasons is the refusal vocabulary recover must cover. Adding a
 // refusal token without an actionable recovery must fail CI, not a live agent turn.
 var emittedRecoveryReasons = []string{
-	"COMMITTED_RED", "CONCEPT_ADMISSION", "CONCEPT_FRESHNESS", "DISAMBIGUATION_TIMEOUT",
-	"ISSUE_NOT_DISPATCH_LEAF", "ISSUE_UNROUTED", "LOCK_BUSY", "PATHSPEC_RACE", "REQUIRE_WITNESS",
+	"BEHIND",
+	"BEHIND_FASTFORWARDABLE",
+	"COMMITTED_RED",
+	"CONCEPT_ADMISSION",
+	"CONCEPT_FRESHNESS",
+	"DIRTY_WRITE_OVERLAP",
+	"DISAMBIGUATION_TIMEOUT",
+	"DIVERGED_DISJOINT",
+	"DIVERGED_OVERLAP",
+	"ISSUE_NOT_DISPATCH_LEAF",
+	"ISSUE_UNROUTED",
+	"LEASE_OWNER_UNAVAILABLE",
+	"LOCK_BUSY",
+	"MERGE_ACTIVE_PEER_OWNED",
+	"PATHSPEC_RACE",
+	"QUEUED_AWAITING_QUIESCENCE",
+	"REQUIRE_WITNESS",
 	"SYSTEM_COMMIT_HEADROOM",
+	"TARGET_MOVED",
 }
 
 func recoveryPlans(trunk string) map[string]recoveryPlan {
@@ -190,6 +206,113 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 	originTrunk := "origin/" + trunk
 	return map[string]recoveryPlan{
+		"BEHIND": {
+			Reason:     "BEHIND",
+			Summary:    "legacy sync divergence token; superseded by closed typed reasons",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "sync", "check", "--fetch", "--remote", "origin", "--branch", trunk}, Summary: "classify divergence into typed reasons (such as BEHIND_FASTFORWARDABLE)"},
+			},
+			Notes: []string{
+				"BEHIND is a compatibility transition alias; use typed reasons like BEHIND_FASTFORWARDABLE or DIVERGED_DISJOINT",
+				"run `fak sync check --fetch` to determine whether changes are fast-forwardable or diverged",
+			},
+		},
+		"BEHIND_FASTFORWARDABLE": {
+			Reason:     "BEHIND_FASTFORWARDABLE",
+			Summary:    "the local branch is behind origin and can be cleanly fast-forwarded",
+			Executable: true,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "sync", "apply", "--fetch", "--remote", "origin", "--branch", trunk}, Summary: "fast-forward the local branch to the remote tracking ref", Safe: true},
+			},
+			Notes: []string{
+				"fast-forward only runs when the working tree write set is clean",
+				"retry push after the fast-forward is applied",
+			},
+		},
+		"TARGET_MOVED": {
+			Reason:     "TARGET_MOVED",
+			Summary:    "the remote tracking ref moved concurrently during pre-push evaluation",
+			Executable: true,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "sync", "check", "--fetch", "--remote", "origin", "--branch", trunk}, Summary: "refresh and verify alignment against the moved target ref", Safe: true},
+			},
+			Notes: []string{
+				"re-verify divergence status and retry the push once the target settles",
+			},
+		},
+		"DIVERGED_DISJOINT": {
+			Reason:     "DIVERGED_DISJOINT",
+			Summary:    "the local branch and remote have diverged with disjoint changed file sets",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "sync", "check", "--fetch", "--remote", "origin", "--branch", trunk}, Summary: "preview the disjoint integration changes in dry-run mode"},
+			},
+			Notes: []string{
+				"changes touch non-overlapping files; integrate in place with merge or rebase",
+				"do not force-push; verify tests pass after integration",
+			},
+		},
+		"DIVERGED_OVERLAP": {
+			Reason:     "DIVERGED_OVERLAP",
+			Summary:    "the local branch and remote have diverged with overlapping modified paths",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "diff", originTrunk + "...HEAD"}, Summary: "inspect overlapping differences between local branch and remote"},
+			},
+			Notes: []string{
+				"resolve content conflicts in place before committing and re-pushing",
+				"never force-push, reset, or discard peer work",
+			},
+		},
+		"MERGE_ACTIVE_PEER_OWNED": {
+			Reason:     "MERGE_ACTIVE_PEER_OWNED",
+			Summary:    "a peer-owned merge is currently in progress on the shared working tree",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "status"}, Summary: "inspect in-progress merge state"},
+			},
+			Notes: []string{
+				"unstage your pending paths with `git restore --staged` and wait for the peer merge to complete",
+				"if MERGE_HEAD belongs to you, finish it; otherwise do not abort or commit a peer's merge",
+			},
+		},
+		"DIRTY_WRITE_OVERLAP": {
+			Reason:     "DIRTY_WRITE_OVERLAP",
+			Summary:    "uncommitted local changes overlap with incoming remote changes",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "status"}, Summary: "inspect dirty working tree changes"},
+			},
+			Notes: []string{
+				"checkpoint finished local changes with `fak wip checkpoint` before syncing",
+				"ensure working tree paths are clean or disjoint from remote changes",
+			},
+		},
+		"QUEUED_AWAITING_QUIESCENCE": {
+			Reason:     "QUEUED_AWAITING_QUIESCENCE",
+			Summary:    "high concurrent trunk activity; operations queued awaiting repository quiescence",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "sync", "drain", "--remote", "origin", "--branch", trunk}, Summary: "drain the queue and flush changes when trunk activity quiesces"},
+			},
+			Notes: []string{
+				"wait for concurrent workers to settle before retrying sync or push",
+				"the drain command safely batches pending changes once a quiet window opens",
+			},
+		},
+		"LEASE_OWNER_UNAVAILABLE": {
+			Reason:     "LEASE_OWNER_UNAVAILABLE",
+			Summary:    "the writer or lane lease owner is unresponsive or unreachable",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"dos", "top"}, Summary: "inspect active leases and worker status"},
+			},
+			Notes: []string{
+				"verify whether the lease holder is still active or has terminated",
+				"reclaim the lease only after confirming the holder is stale; do not bypass lease safety",
+			},
+		},
 		"REQUIRE_WITNESS": {Reason: "REQUIRE_WITNESS", Summary: "the claimed effect has no independently inspectable witness", Notes: []string{"capture the failure-class witness (test, render, live read-back, or dos verify) and retry with that artifact; do not self-certify the effect"}},
 		"SYSTEM_COMMIT_HEADROOM": {Reason: "SYSTEM_COMMIT_HEADROOM", Summary: "the host's operating-system commit reserve is at or below the managed-worker safety floor", Notes: []string{
 			"let an in-flight managed worker finish, then rerun dispatch preflight so the host is measured again",
@@ -331,7 +454,11 @@ func normalizeRecoveryReason(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "-", "_")
 	s = strings.ReplaceAll(s, " ", "_")
-	return strings.ToUpper(s)
+	s = strings.ToUpper(s)
+	if s == "BEHIND_FAST_FORWARDABLE" {
+		return "BEHIND_FASTFORWARDABLE"
+	}
+	return s
 }
 
 func renderRecoverList(w io.Writer, plans map[string]recoveryPlan, asJSON bool) int {
