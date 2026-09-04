@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ErrSysfsUnavailable indicates that Linux KFD/DRM sysfs topology interfaces are not reachable.
@@ -280,6 +282,7 @@ func ProbeWindowsDisplayTopology() ([]AMDDeviceNode, error) {
 
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'Radeon|AMD' } | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("amddirect: querying Win32_VideoController: %w", err)
