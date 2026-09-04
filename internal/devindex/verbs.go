@@ -332,7 +332,7 @@ var verbManifest = []Verb{
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Lane: "cmd"},
 	{Name: "search", Synopsis: "search the repository text corpus with bounded results and JSON output", Lane: "cmd"},
 	{Name: "scratch-janitor", Synopsis: "plan or remove abandoned session scratch directories with age and resume guards", Lane: "cmd"},
-	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Lane: "cmd"},
+	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Aliases: []string{"self"}, Lane: "cmd"},
 	{Name: "serve", Synopsis: "run the OpenAI-compatible gateway in front of a local or remote model", Lane: "gateway"},
 	{Name: "serve-wiring", Synopsis: "audit fak serve flag -> gateway.Config -> runtime-read wiring", Lane: "gateway"},
 	{Name: "service", Synopsis: "run or install fak as a long-lived OS service (Windows service dispatcher + install/status)", Lane: "cmd"},

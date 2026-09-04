@@ -119,6 +119,26 @@ func (m *MMU) codecID() string {
 // name still used by ctxmmu_test.go). limit <= 0 falls back to DefaultMaxHeld.
 func NewWithHeldLimit(limit int) *MMU { return NewWithLimit(limit) }
 
+// Compactor returns an active sliding-window compactor backed by this MMU.
+func (m *MMU) Compactor(cfg ...CompactorConfig) *Compactor {
+	var cCfg CompactorConfig
+	if len(cfg) > 0 {
+		cCfg = cfg[0]
+	}
+	return NewCompactorWithMMU(cCfg, m)
+}
+
+// SlidingWindow constructs an active multi-turn context sliding window backed by this MMU.
+func (m *MMU) SlidingWindow(cfg ...CompactorConfig) *SlidingWindow {
+	return NewSlidingWindow(m.Compactor(cfg...))
+}
+
+// CompactPositive executes positive-state history compaction, shedding failed tool call attempts,
+// error banners, and apology clutter while retaining original goal, verified facts, and active affordance.
+func (m *MMU) CompactPositive(turns []TurnRecord, originalGoal string) *PositiveCompactedHistory {
+	return CompactPositiveState(turns, originalGoal)
+}
+
 func (m *MMU) Caps() []abi.Capability { return nil }
 
 // Admit is the write-time gate. It inspects the produced result and returns:

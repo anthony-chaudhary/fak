@@ -947,3 +947,8 @@ func (sw *SlidingWindow) PageCount() int {
 	defer sw.mu.RUnlock()
 	return len(sw.pages)
 }
+
+// CompactPositive executes positive-state history compaction on the given turn trajectory.
+func (c *Compactor) CompactPositive(turns []TurnRecord, originalGoal string) *PositiveCompactedHistory {
+	return CompactPositiveState(turns, originalGoal)
+}

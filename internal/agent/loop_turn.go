@@ -348,6 +348,12 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		if tool == toolBook && strings.Contains(content, "confirmation") && !strings.Contains(content, `"error"`) {
 			r.metrics.TaskCompleted = true
 		}
+		if r.cfg.goalAnchor != nil {
+			if ev.Verdict == "DENIED" || strings.Contains(strings.ToLower(content), `"error"`) {
+				r.cfg.goalAnchor.RecordRecoveryTurn()
+				r.metrics.GoalAnchorRecoveryTurns = r.cfg.goalAnchor.RecoveryTurnCount
+			}
+		}
 		if recordRepeatedFailure(&r.repeatedFailures, tool, rawArgs, content) {
 			return false, fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
 		}

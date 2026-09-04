@@ -133,6 +133,18 @@ func outOfTreeWriteTargets(cmd string) []string {
 		}
 		out = append(out, redirectWriteTargets(src)...)
 	}
+	for _, ht := range ExtractHeredocTargets(cmd) {
+		if ht.Path != "" {
+			out = append(out, ht.Path)
+		}
+	}
+	if parsed, _, err := ParseBashWriteTargets(cmd); err == nil {
+		for _, pt := range parsed {
+			if pt.Path != "" {
+				out = append(out, pt.Path)
+			}
+		}
+	}
 	return out
 }
 

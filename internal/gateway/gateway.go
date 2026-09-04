@@ -42,6 +42,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
@@ -383,7 +384,41 @@ func New(cfg Config) (*Server, error) {
 		})
 	}
 
+	kvs := cfg.KVStore
+	if kvs == nil {
+		if store, err := kv.DefaultStore(); err == nil {
+			kvs = store
+		}
+	}
+	s.kvStore = kvs
+
 	return s, nil
+}
+
+// KVStore returns the server's active direct I/O and paged KV cache storage instance.
+func (s *Server) KVStore() kv.Store {
+	return s.kvStore
+}
+
+// CompactDenySummary returns a compressed 2-line envelope for refused adjudications.
+func (s *Server) CompactDenySummary(adjs []ToolAdjudication) string {
+	return CompactDenySummary(adjs)
+}
+
+// VerifyNominalHostCallbacks audits execution variants ensuring host callbacks are preserved
+// and memory leaks are detected.
+func (s *Server) VerifyNominalHostCallbacks(variants []ExecutionVariant, hasOOMProof bool) (CallbackElisionAuditReceipt, error) {
+	return VerifyNominalHostCallbackRetention(variants, hasOOMProof)
+}
+
+// ApplyGrammarMask applies allowed-token grammar filter to logits with domain monotonicity.
+func (s *Server) ApplyGrammarMask(logits []float32, allowedTokens map[int]bool) (GrammarMaskDomainMonotonicityReceipt, error) {
+	return ApplyGrammarMaskWithMonotonicity(logits, allowedTokens)
+}
+
+// EvaluateSpeculativeRunaway evaluates speculative recovery strategies on hard prompts.
+func (s *Server) EvaluateSpeculativeRunaway(hardPrompts []string, maxTokens int) (RunawayEvaluationReceipt, error) {
+	return EvaluateSpeculativeRecoveryRunaway(hardPrompts, maxTokens)
 }
 
 func (s *Server) installRichDashboardManager(cfg RichDashboardConfig) {

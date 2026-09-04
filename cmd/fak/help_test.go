@@ -297,3 +297,19 @@ func TestManageSuggestionPrefersCanonicalSpelling(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfHelpResolvesToSelfUpdate(t *testing.T) {
+	for _, tok := range []string{"self", "self-update"} {
+		var b bytes.Buffer
+		if !printVerbHelp(&b, tok) {
+			t.Fatalf("printVerbHelp(%q) = false, want true", tok)
+		}
+		got := b.String()
+		if !strings.Contains(got, "fak self-update") {
+			t.Fatalf("printVerbHelp(%q) missing 'fak self-update':\n%s", tok, got)
+		}
+		if !strings.Contains(got, "flags: fak self-update -h") {
+			t.Fatalf("printVerbHelp(%q) missing 'flags: fak self-update -h':\n%s", tok, got)
+		}
+	}
+}

@@ -787,6 +787,10 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  days. The dual of 'fak self-update' (which converges a built-from-source
                  binary on origin/main): this catches @latest rotting when no tag is cut
                  as work lands. --check exits non-zero when @latest is stale/very-stale)
+  fak self-update [--check] [--force] [--json] [--root DIR] [--target FILE]
+                (converge a built-from-source fak binary on origin/main: checks
+                 whether the binary is stale vs HEAD, rebuilds and gates the candidate,
+                 then atomically replaces this binary)
   fak dojo      run --corpus DIR [--ttl 5m|1h] [--lever a,b] [--json] [--check]
                     [--append-history] [--ledger FILE] | list [--json]
                 (the prediction-vs-reality gym: scores each calibration lever's CLAIMED

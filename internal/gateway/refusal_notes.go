@@ -635,3 +635,9 @@ func CompressRefusalNote(rawNote string) string {
 	reason := extractReasonFromText(rawNote)
 	return FormatCompactRefusalNote(reason, rawNote, "")
 }
+
+// CompactDenySummary renders a compressed 2-line refusal note envelope for refused tool calls.
+func CompactDenySummary(adjs []ToolAdjudication) string {
+	raw := denySummary(adjs)
+	return CompressRefusalNote(raw)
+}

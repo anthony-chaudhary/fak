@@ -120,12 +120,17 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		}
 		defer cleanupBuildCache()
 	}
+	var companionBinary string
 	cleanupAttempt := func() {
+		if companionBinary != "" {
+			_ = os.Remove(companionBinary)
+		}
 		cleanupBuildCache()
 		cleanup()
 	}
 
-	companionBinary, companionPaths, companionErr := prepareFakDevUpdate(ctx, buildRunner, buildDir, companionPaths, headRev)
+	var companionErr error
+	companionBinary, companionPaths, companionErr = prepareFakDevUpdate(ctx, buildRunner, buildDir, companionPaths, headRev)
 	if companionErr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", companionErr)
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, companionErr.Error())
@@ -213,6 +218,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 			detail = "swap: gated candidate was not captured"
 		}
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
+		if companionBinary != "" {
+			_ = os.Remove(companionBinary)
+		}
 		cleanupAttempt() // os.Exit skips deferred functions; owned cache/source cleanup must run first.
 		os.Exit(1)
 	}
