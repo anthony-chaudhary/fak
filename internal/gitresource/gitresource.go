@@ -1,5 +1,12 @@
 // Package gitresource defines the ownership vocabulary used to reason about
 // shared Git repositories, linked worktrees, and cleanup authority.
+//
+// Invariant: git resource operations are fail-closed and bounded.
+// Every resource acquisition, validation, and cleanup decision requires explicit
+// canonical identities, active lease verification, and valid epoch fencing before
+// mutating or deleting any underlying git working tree or shared reference state.
+// Guard: AdmitCleanup refuses any candidate with unpushed, untracked, dirty, or
+// live working-tree state to guarantee zero data loss.
 package gitresource
 
 import (
