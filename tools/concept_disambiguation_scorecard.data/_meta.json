@@ -6088,6 +6088,11 @@
           "category": "incidental",
           "reason": "speculative draft token slot ceiling",
           "token": "max_preallocated_draft_slots"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper checking if any session in table is running",
+          "token": "hasActiveSessions"
         }
       ],
       "exclude": [
@@ -6309,6 +6314,7 @@
         "handleSessionMove",
         "handoffSession",
         "handoff_session_give_up",
+        "hasActiveSessions",
         "hashUnit",
         "hedge_loser_slot_released",
         "installGuardCodexSessionStartHookAt",

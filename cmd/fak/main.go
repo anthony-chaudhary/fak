@@ -33,7 +33,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -42,7 +41,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
-	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
@@ -1137,159 +1135,6 @@ func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 	}
 	fmt.Fprintf(w, "\nThe turn-saving is small at the real ~%.1f%% rate (the safety floor is the reason to run the kernel there);\n", r.RealWorldHitRate*100)
 	fmt.Fprintln(w, "it only becomes large in error/dup-rich regimes. The airline demo slice (9/14) is the far high end of this curve.")
-}
-
-// fak agent  -  the LIVE agentic loop. A real model (or the offline mock) drives a
-// multi-turn tool-calling conversation TWICE over the same task: once with every
-// tool call mediated by the in-process kernel (fak arm), once naive (the "now"
-// baseline). It reports turns, tokens, in-syscall repairs, vDSO dedup hits,
-// adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
-// measurement the static bench could not produce.
-func cmdAgent(argv []string) {
-	if len(argv) > 0 && argv[0] == "profiles" {
-		if err := printAgentOutputProfiles(os.Stdout, argv[1:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-		return
-	}
-	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	verbFlagUsage(fs, "agent")
-	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
-	outputStyle := fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
-	consoleConfig := fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
-	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
-	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
-	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
-	model := fs.String("model", "gemini-2.5-flash", "model id")
-	apiKeyEnv := fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
-	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
-	offline := fs.Bool("offline", false, "use the deterministic mock planner (no network)")
-	native := fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
-	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
-	out := fs.String("out", "agent-report.json", "report output path")
-	logOut := fs.String("log", "", "optional path to write the per-call trace log")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
-	codeTools := fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
-	codeWorkspace := fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
-	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
-	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
-	_ = fs.Parse(argv)
-
-	outputStyleExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "output-style" {
-			outputStyleExplicit = true
-		}
-	})
-	preference, err := resolveAgentOutputStylePreference(*outputStyle, outputStyleExplicit, *consoleConfig)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	restoreStyle, err := applyAgentOutputStyle(preference.Style)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent: set --output-style: %v\n", err)
-		os.Exit(2)
-	}
-	defer restoreStyle()
-	workProfileExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "work-profile" {
-			workProfileExplicit = true
-		}
-	})
-	work, err := resolveAgentWorkProfilePreference(*workProfile, workProfileExplicit)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	restoreWork, err := applyAgentWorkProfile(work.Profile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent: set --work-profile: %v\n", err)
-		os.Exit(2)
-	}
-	defer restoreWork()
-	printAgentProfileValue(os.Stderr, preference, work)
-	applyPolicy(*policyPath)
-	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
-	must(err)
-	runOpts = append(runOpts, agent.WithResponseProfileSource(preference.Source))
-	if loadedRoute != nil {
-		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
-	}
-	announceAgentRouteAccounts(os.Stderr, *routeAccounts, loadedAccounts)
-	if *codeTools {
-		root := strings.TrimSpace(*codeWorkspace)
-		if root == "" {
-			root, err = os.Getwd()
-			must(err)
-		}
-		catalog, armErr := agent.ArmFocusedCodeTools(root)
-		must(armErr)
-		defer agent.DisarmCodeTools()
-		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
-	}
-
-	var planner agent.Planner
-	if *offline || *baseURL == "" {
-		if !*offline {
-			fmt.Fprintln(os.Stderr, "fak agent: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
-		}
-		planner = agent.NewMockPlanner(*model)
-	} else {
-		key := os.Getenv(*apiKeyEnv)
-		if key == "" {
-			// A local endpoint (e.g. the transformers shim) needs no key; a remote
-			// one will return 401, which the planner surfaces clearly. Warn, proceed.
-			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *apiKeyEnv)
-		}
-		p, err := agent.NewProviderHTTPPlanner(*provider, *baseURL, *model, key)
-		must(err)
-		scheme, ok := agent.ParseAnthropicAuthScheme(*anthropicAuth)
-		if !ok {
-			must(fmt.Errorf("--anthropic-auth %q: want auto, bearer, or x-api-key", *anthropicAuth))
-		}
-		p.AnthropicAuthScheme = scheme
-		planner = p
-	}
-
-	if *native {
-		if *logOut != "" {
-			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
-		}
-		metrics, err := agent.RunArm(ctx(), planner, *task, true, *maxTurns, nil, runOpts...)
-		must(err)
-		receipt := newNativeAgentReceipt(*task, planner.Model(), metrics)
-		must(os.WriteFile(*out, jsonIndent(receipt), 0o644))
-		fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
-		announceAgentReport(os.Stderr, *out)
-		return
-	}
-
-	res, trace, err := agent.Run(ctx(), planner, *task, *maxTurns, runOpts...)
-	must(err)
-
-	must(os.WriteFile(*out, jsonIndent(res), 0o644))
-	if *logOut != "" {
-		_ = os.WriteFile(*logOut, agent.RenderTrace(trace), 0o644)
-	}
-	agent.PrintReport(os.Stdout, res, trace, *out)
-	// The summary above names the file; this names the DIRECTORY it went to, so
-	// the first-run proof never leaves an unfindable artifact behind (#5473).
-	announceAgentReport(os.Stderr, *out)
-}
-
-func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, nil, nil
-	}
-	manifest, err := modelroute.LoadManifest(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("fak agent: --route-manifest: %w", err)
-	}
-	return &manifest, []agent.RunOption{agent.WithRouteManifest(&manifest)}, nil
 }
 
 func jsonIndent(v any) []byte {

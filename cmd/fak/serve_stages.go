@@ -652,6 +652,11 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		*sf.fleetBusInterval, serveSessions, *sf.native, serveGwBusApplier{srv: rt.srv, addr: fleetIdentity.Addr})
 	defer stopFleetBus()
 
+	if *sf.keepAwake == KeepAwakeWhileActive {
+		stopKeepAwakeMonitor := startKeepAwakeActiveMonitor(ctx, serveSessions)
+		defer stopKeepAwakeMonitor()
+	}
+
 	// Everything a finished serve must leave behind, whichever transport served it. The stdio
 	// and HTTP exits below record the SAME four things and differ only in the transport word
 	// they record it under, so the sequence lives here once: a new observation added for one
