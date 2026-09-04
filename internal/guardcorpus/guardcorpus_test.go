@@ -166,8 +166,9 @@ func TestGoldenCorpusRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (regenerate with FAK_UPDATE_GOLDEN=1): %v", err)
 	}
-	if got != string(want) {
-		t.Fatalf("corpus golden mismatch — a fold change flipped the dataset.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if got != wantStr {
+		t.Fatalf("corpus golden mismatch — a fold change flipped the dataset.\n--- got ---\n%s\n--- want ---\n%s", got, wantStr)
 	}
 }
 

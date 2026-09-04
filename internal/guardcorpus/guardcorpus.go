@@ -48,9 +48,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
+// Invariant: guard corpus entries maintain deterministic immutable hash signatures and valid category taxonomy.
+
 // Schema identifiers for the two dataset record kinds. Bump on any shape change.
 const (
+	// SessionSchema is the schema identifier for the version 1 session record dataset.
 	SessionSchema = "fak-guard-session/1"
+	// ExampleSchema is the schema identifier for the version 1 guard example record dataset.
 	ExampleSchema = "fak-guard-example/1"
 
 	// maxAllowExamples bounds how many ALLOW rows a single session contributes as
@@ -82,8 +86,11 @@ var knownVerdicts = map[string]bool{
 
 // Outcome classes for a session.
 const (
-	OutcomeClean       = "CLEAN"
-	OutcomeCrashed     = "CRASHED"
+	// OutcomeClean indicates that the guarded session completed without crashes or rate limits.
+	OutcomeClean = "CLEAN"
+	// OutcomeCrashed indicates that the child process wrapped by the guard terminated abnormally.
+	OutcomeCrashed = "CRASHED"
+	// OutcomeRateLimited indicates that the session terminated due to provider capacity or rate limits.
 	OutcomeRateLimited = "RATE_LIMITED"
 )
 
@@ -111,7 +118,7 @@ type HonestyHoles struct {
 	ChildCrash        int `json:"child_crash"`
 }
 
-// SessionRecord is one row of the fak-guard-session/1 dataset.
+// SessionRecord represents one row of the fak-guard-session/1 dataset capturing aggregate session metrics.
 type SessionRecord struct {
 	Schema          string         `json:"schema"`
 	TraceID         string         `json:"trace_id,omitempty"`
@@ -129,7 +136,7 @@ type SessionRecord struct {
 	ChainVerified   bool           `json:"chain_verified"`
 }
 
-// Example is one row of the fak-guard-example/1 dataset: a redacted, labeled,
+// Example represents one row of the fak-guard-example/1 dataset: a redacted, labeled,
 // replayable adjudication. Only journal-redacted fields are carried.
 type Example struct {
 	Schema       string `json:"schema"`
@@ -148,6 +155,7 @@ type Example struct {
 // Fold projects one session's rows into its SessionRecord and Example rows. It
 // is the pure core; the CLI shell owns discovery, chain verification, and the
 // SessionMeta join. Rows are taken in journal order (the caller preserves it).
+// Contract: Fold is pure, deterministic, and preserves input journal row ordering.
 func Fold(meta SessionMeta, rows []journal.Row) (SessionRecord, []Example) {
 	rec := SessionRecord{
 		Schema:        SessionSchema,
