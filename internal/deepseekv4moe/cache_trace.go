@@ -6,9 +6,13 @@ import (
 )
 
 var (
+	// ErrInvalidTraceCapacity indicates the cache capacity given to trace simulation is non-positive.
 	ErrInvalidTraceCapacity = errors.New("deepseekv4moe: expert-cache trace capacity must be positive")
-	ErrInvalidTraceShape    = errors.New("deepseekv4moe: expert-cache trace shape is invalid")
-	ErrInvalidTraceRoute    = errors.New("deepseekv4moe: expert-cache route is invalid")
+	// ErrInvalidTraceShape indicates dimension parameters are non-positive or top-k exceeds expert count.
+	ErrInvalidTraceShape = errors.New("deepseekv4moe: expert-cache trace shape is invalid")
+	// ErrInvalidTraceRoute indicates a route has an invalid layer index, expert index, or top-k width.
+	ErrInvalidTraceRoute = errors.New("deepseekv4moe: expert-cache route is invalid")
+	// ErrDuplicateTraceExpert indicates duplicate expert IDs were selected within a single route.
 	ErrDuplicateTraceExpert = errors.New("deepseekv4moe: duplicate expert in cache route")
 )
 

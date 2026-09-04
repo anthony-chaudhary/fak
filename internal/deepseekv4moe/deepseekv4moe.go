@@ -58,11 +58,16 @@ func V4Config() Config {
 // Failure-mode sentinels — the closed set of dispatch-contract violations the fixture
 // drives on purpose.
 var (
-	ErrTopKWidth        = errors.New("deepseekv4moe: top-k width out of range (need 1..NumRoutedExperts)")
-	ErrMissingRouter    = errors.New("deepseekv4moe: router/gate weight missing")
+	// ErrTopKWidth indicates the top-k routed expert width is zero or exceeds routed expert count.
+	ErrTopKWidth = errors.New("deepseekv4moe: top-k width out of range (need 1..NumRoutedExperts)")
+	// ErrMissingRouter indicates the router/gate weight tensor is absent.
+	ErrMissingRouter = errors.New("deepseekv4moe: router/gate weight missing")
+	// ErrSharedMisOffload indicates the always-on shared expert was improperly flagged as offloaded.
 	ErrSharedMisOffload = errors.New("deepseekv4moe: shared expert must stay resident, not offloaded as routed")
-	ErrExpertCount      = errors.New("deepseekv4moe: routed-expert count must be positive")
-	ErrSharedCount      = errors.New("deepseekv4moe: shared-expert count must be non-negative")
+	// ErrExpertCount indicates the routed expert count is non-positive.
+	ErrExpertCount = errors.New("deepseekv4moe: routed-expert count must be positive")
+	// ErrSharedCount indicates the shared expert count is negative.
+	ErrSharedCount = errors.New("deepseekv4moe: shared-expert count must be non-negative")
 )
 
 // Validate returns the specific contract violation, or nil when the config is a legal
