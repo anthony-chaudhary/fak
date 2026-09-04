@@ -739,4 +739,157 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 			t.Fatal("timed out waiting for immediate tree limit")
 		}
 	})
+
+	t.Run("guardSuspendProcess called on headroom trip and guardResumeProcess on recovery", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		var suspendedPIDs []int
+		var resumedPIDs []int
+		oldSuspend := guardSuspendProcess
+		oldResume := guardResumeProcess
+		guardSuspendProcess = func(pid int) error {
+			suspendedPIDs = append(suspendedPIDs, pid)
+			return nil
+		}
+		guardResumeProcess = func(pid int) error {
+			resumedPIDs = append(resumedPIDs, pid)
+			return nil
+		}
+		t.Cleanup(func() {
+			guardSuspendProcess = oldSuspend
+			guardResumeProcess = oldResume
+		})
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  60 * time.Millisecond,
+			Stop:              stop,
+		}
+
+		tickCount := 0
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-suspend-resume", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			tickCount++
+			systemBytes := uint64(500) // healthy
+			if tickCount <= 2 {
+				// ticks 1, 2: deficit
+				systemBytes = 950
+			}
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: systemBytes,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		// Wait for both suspension and resumption to occur
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if len(suspendedPIDs) > 0 && len(resumedPIDs) > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		if len(suspendedPIDs) == 0 || suspendedPIDs[0] != 42 {
+			t.Fatalf("expected guardSuspendProcess to be called with PID 42, got %v", suspendedPIDs)
+		}
+		if len(resumedPIDs) == 0 || resumedPIDs[0] != 42 {
+			t.Fatalf("expected guardResumeProcess to be called with PID 42, got %v", resumedPIDs)
+		}
+
+		select {
+		case ev := <-ch:
+			t.Fatalf("unexpected event on recovery: %+v", ev)
+		default:
+		}
+	})
+
+	t.Run("deferred resumption on monitor exit when suspended", func(t *testing.T) {
+		stop := make(chan struct{})
+
+		var resumedPIDs []int
+		oldResume := guardResumeProcess
+		guardResumeProcess = func(pid int) error {
+			resumedPIDs = append(resumedPIDs, pid)
+			return nil
+		}
+		t.Cleanup(func() { guardResumeProcess = oldResume })
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  200 * time.Millisecond,
+			Stop:              stop,
+		}
+
+		_ = startGuardChildResourceMonitorWithCollector(42, "trace-defer-resume", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: 950,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		time.Sleep(25 * time.Millisecond) // wait for at least one tick which suspends
+		close(stop)                       // close stop channel to exit monitor
+		time.Sleep(25 * time.Millisecond) // wait for defer to run
+
+		if len(resumedPIDs) == 0 || resumedPIDs[0] != 42 {
+			t.Fatalf("expected deferred guardResumeProcess on monitor exit, got %v", resumedPIDs)
+		}
+	})
+}
+
+func TestGuardHeadroomDebounceConfiguration(t *testing.T) {
+	oldConfig := guardResourceConfigured
+	t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
+
+	t.Run("default is 15s", func(t *testing.T) {
+		setGuardResourceConfig(guardResourceConfig{})
+		p := guardResourcePolicyConfigured()
+		if p.HeadroomDebounce != 15*time.Second {
+			t.Fatalf("HeadroomDebounce = %v, want %v", p.HeadroomDebounce, 15*time.Second)
+		}
+	})
+
+	t.Run("flag configures policy.HeadroomDebounce", func(t *testing.T) {
+		flagVal := 45 * time.Second
+		resolved := resolveGuardHeadroomDebounce(flagVal, "")
+		setGuardResourceConfig(guardResourceConfig{HeadroomDebounce: resolved})
+		p := guardResourcePolicyConfigured()
+		if p.HeadroomDebounce != 45*time.Second {
+			t.Fatalf("HeadroomDebounce = %v, want %v", p.HeadroomDebounce, 45*time.Second)
+		}
+	})
+
+	t.Run("env var configures policy.HeadroomDebounce when flag <= 0", func(t *testing.T) {
+		resolved := resolveGuardHeadroomDebounce(0, "30s")
+		setGuardResourceConfig(guardResourceConfig{HeadroomDebounce: resolved})
+		p := guardResourcePolicyConfigured()
+		if p.HeadroomDebounce != 30*time.Second {
+			t.Fatalf("HeadroomDebounce = %v, want %v", p.HeadroomDebounce, 30*time.Second)
+		}
+	})
+
+	t.Run("flag takes precedence over env var", func(t *testing.T) {
+		flagVal := 25 * time.Second
+		resolved := resolveGuardHeadroomDebounce(flagVal, "50s")
+		setGuardResourceConfig(guardResourceConfig{HeadroomDebounce: resolved})
+		p := guardResourcePolicyConfigured()
+		if p.HeadroomDebounce != 25*time.Second {
+			t.Fatalf("HeadroomDebounce = %v, want %v", p.HeadroomDebounce, 25*time.Second)
+		}
+	})
 }
