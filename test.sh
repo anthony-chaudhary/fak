@@ -137,6 +137,7 @@ if [ "${FAK_FAST:-}" = "1" ]; then
         --exclude="/$TOKEN_CACHE_REL"
         --exclude="/.git/*.lock"
         --exclude="/.git/**/*.lock"
+        --exclude="/.git/worktrees"
         --exclude="/.codex-tmp"
         --exclude="/.dispatch-runs"
         --exclude="/.dos/metrics"
@@ -155,8 +156,8 @@ if [ "${FAK_FAST:-}" = "1" ]; then
         if [ "$rsync_rc" -eq 0 ]; then
           break
         fi
-        if [ "$rsync_rc" -eq 23 ] && [ "$rsync_attempt" -lt 3 ]; then
-          echo "fak/test.sh: rsync saw concurrent source mutation (exit 23); retrying mirror ($rsync_attempt/3)"
+        if ([ "$rsync_rc" -eq 23 ] || [ "$rsync_rc" -eq 24 ]) && [ "$rsync_attempt" -lt 3 ]; then
+          echo "fak/test.sh: rsync saw concurrent source mutation (exit $rsync_rc); retrying mirror ($rsync_attempt/3)"
           sleep 0.2
           continue
         fi
