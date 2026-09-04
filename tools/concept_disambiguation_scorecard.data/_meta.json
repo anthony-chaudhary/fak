@@ -12246,6 +12246,11 @@
           "category": "incidental",
           "reason": "KV cache FIFO eviction policy constant",
           "token": "EvictionPolicyFIFO"
+        },
+        {
+          "category": "incidental",
+          "reason": "evict clean pages in dirty ring buffer",
+          "token": "evictCleanPagesLocked"
         }
       ],
       "id": "evict",
@@ -12273,6 +12278,7 @@
         "TransitionPressureEvict",
         "cache_evictions",
         "digestEvictor",
+        "evictCleanPagesLocked",
         "evictIDs",
         "evictSupported",
         "evictable",
