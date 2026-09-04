@@ -43,16 +43,23 @@ const (
 )
 
 func validateQwen35CausalAttentionPanelKVGeometry(tokens, prefix, nKV, headDim int) error {
-	if tokens != qwen38CausalAttentionPanelTokens ||
-		prefix != qwen38CausalAttentionPanelPrefix ||
-		nKV != qwen38CausalAttentionPanelKVHeads ||
+	if tokens <= 0 || prefix < 0 {
+		return &Qwen35SequenceError{
+			Stage: "causal-attention-geometry", Layer: -1,
+			Reason: fmt.Sprintf(
+				"prompt attention requires positive token count and non-negative prefix, got tokens=%d prefix=%d",
+				tokens, prefix,
+			),
+		}
+	}
+	if nKV != qwen38CausalAttentionPanelKVHeads ||
 		headDim != qwen38CausalAttentionPanelHeadDim {
 		return &Qwen35SequenceError{
 			Stage: "causal-attention-geometry", Layer: -1,
 			Reason: fmt.Sprintf(
-				"prompt attention supports only Qwen3.8 source-spine geometry tokens=%d prefix=%d KV_heads=%d head_dim=%d",
-				qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix,
+				"prompt attention supports only Qwen3.8 source-spine geometry KV_heads=%d head_dim=%d (got KV_heads=%d head_dim=%d)",
 				qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim,
+				nKV, headDim,
 			),
 		}
 	}
@@ -221,15 +228,16 @@ type qwen35KVReservation struct {
 }
 
 func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, needed int) error {
-	exactNeeded := (qwen38CausalAttentionPanelPrefix + qwen38CausalAttentionPanelTokens) *
-		qwen38CausalAttentionPanelKVHeads * qwen38CausalAttentionPanelHeadDim
 	if kv == nil || kv.cfg.NumKVHeads != qwen38CausalAttentionPanelKVHeads ||
-		kv.cfg.HeadDim != qwen38CausalAttentionPanelHeadDim || needed != exactNeeded {
+		kv.cfg.HeadDim != qwen38CausalAttentionPanelHeadDim || needed <= 0 {
 		return &Qwen35SequenceError{
 			Stage:  "causal-attention-geometry",
 			Layer:  -1,
 			Reason: "KV reservation exceeds the bounded CUDA prompt-attention geometry",
 		}
+	}
+	if int64(needed) > qwen35GDNMaxCInt {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "KV reservation overflows the CUDA int ABI"}
 	}
 	if graphEnabled && kv.maxPos > 0 && needed/kv.stride() > kv.maxPos {
 		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: fmt.Sprintf("fixed CUDA graph KV capacity %d is smaller than requested position %d", kv.maxPos, needed/kv.stride())}

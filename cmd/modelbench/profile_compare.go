@@ -585,27 +585,11 @@ func incompleteBetaContinuedFraction(a, b, x float64) (float64, bool) {
 		m := float64(iteration)
 		m2 := 2 * m
 		aa := m * (b - m) * x / ((qam + m2) * (a + m2))
-		d = 1 + aa*d
-		if math.Abs(d) < minimum {
-			d = minimum
-		}
-		c = 1 + aa/c
-		if math.Abs(c) < minimum {
-			c = minimum
-		}
-		d = 1 / d
+		c, d = stepContinuedFraction(c, d, aa, minimum)
 		h *= d * c
 
 		aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
-		d = 1 + aa*d
-		if math.Abs(d) < minimum {
-			d = minimum
-		}
-		c = 1 + aa/c
-		if math.Abs(c) < minimum {
-			c = minimum
-		}
-		d = 1 / d
+		c, d = stepContinuedFraction(c, d, aa, minimum)
 		delta := d * c
 		h *= delta
 		if math.Abs(delta-1) < epsilon {
@@ -613,6 +597,18 @@ func incompleteBetaContinuedFraction(a, b, x float64) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func stepContinuedFraction(c, d, aa, minimum float64) (float64, float64) {
+	d = 1 + aa*d
+	if math.Abs(d) < minimum {
+		d = minimum
+	}
+	c = 1 + aa/c
+	if math.Abs(c) < minimum {
+		c = minimum
+	}
+	return c, 1 / d
 }
 
 func positiveFinite(value float64) bool {

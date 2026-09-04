@@ -2219,4 +2219,37 @@ func TestGeminiSchemaSanitization(t *testing.T) {
 			t.Fatalf("expected 1 anyOf alternative, got %d", len(alts))
 		}
 	})
+
+	t.Run("strips_additional_properties_and_schema", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"type": "object",
+			"properties": {
+				"path": {"type": "string"},
+				"nested": {
+					"type": "object",
+					"properties": {"k": {"type": "string"}},
+					"additionalProperties": false
+				}
+			},
+			"additionalProperties": {"type": "string"}
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes := outAny.(json.RawMessage)
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if _, hasSchema := parsed["$schema"]; hasSchema {
+			t.Fatalf("expected $schema to be stripped, got: %s", string(outBytes))
+		}
+		if _, hasAddl := parsed["additionalProperties"]; hasAddl {
+			t.Fatalf("expected additionalProperties to be stripped, got: %s", string(outBytes))
+		}
+		props := parsed["properties"].(map[string]any)
+		nested := props["nested"].(map[string]any)
+		if _, hasNestedAddl := nested["additionalProperties"]; hasNestedAddl {
+			t.Fatalf("expected nested additionalProperties to be stripped, got: %s", string(outBytes))
+		}
+	})
 }

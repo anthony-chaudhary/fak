@@ -82,10 +82,7 @@ func computeBoundedForgetElement(aLog, fProj, dtBias float32) float32 {
 	}
 
 	if u == 0 {
-		// scaled = exp(a_log) * 0 = 0.
-		// sigmoid(0) = 0.5.
-		// forget = -5.0 * 0.5 = -2.5.
-		// decay = exp(-2.5).
+		// At zero input, scaled evaluates to 0, sigmoid to 0.5, and decay to exp(-2.5).
 		decay := float32(math.Exp(-2.5))
 		if decay < MinBoundedDecay {
 			return MinBoundedDecay

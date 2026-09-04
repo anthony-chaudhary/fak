@@ -728,6 +728,155 @@ class DriverScriptTest(unittest.TestCase):
         os.remove(p)
 
 
+class BenchmarkScaleAndPairedReportTest(unittest.TestCase):
+    """100x benchmarking scale, sweeps, and base-and-arm paired reporting."""
+
+    def test_resolve_bench_params_defaults_and_100x(self):
+        # 1x default: 512 prefill, 128 decode, 5 reps
+        self.assertEqual(gcp_bench.resolve_bench_params(False),
+                         (gcp_bench.DEFAULT_PREFILL_1X, gcp_bench.DEFAULT_DECODE_1X, gcp_bench.DEFAULT_REPS_1X))
+        # 100x scale: dense grid across 6 prompt sizes, 5 decode sizes, 20 reps
+        self.assertEqual(gcp_bench.resolve_bench_params(True),
+                         (gcp_bench.DEFAULT_PREFILL_100X, gcp_bench.DEFAULT_DECODE_100X, gcp_bench.DEFAULT_REPS_100X))
+        # Explicit overrides take precedence
+        self.assertEqual(gcp_bench.resolve_bench_params(True, prefill_sizes="256,1024", decode_steps="64", reps=50),
+                         ("256,1024", "64", 50))
+
+    def test_render_driver_script_100x_scale(self):
+        body = gcp_bench.render_driver_script(
+            ["llama", "fak-cuda-q8", "fak-cuda-tf32", "vllm"],
+            gcp_bench.DEFAULT_HF_REPO, gcp_bench.DEFAULT_HF_FILE, "80", scale_100x=True)
+        self.assertNotIn("@@", body)
+        self.assertIn('PREFILL_SIZES="64,128,256,512,1024"', body)
+        self.assertIn('DECODE_STEPS="16,32,64,128,256"', body)
+        self.assertIn('BENCH_REPS="5"', body)
+        self.assertIn('SCALE_100X="1"', body)
+        self.assertIn('PAIRED_REPORT="1"', body)
+        self.assertIn('BASE_ARM="llama"', body)
+        # llama-bench receives sweep args
+        self.assertIn('-p "$PREFILL_SIZES" -n "$DECODE_STEPS" -r "$BENCH_REPS"', body)
+        # modelbench receives sweep args
+        self.assertIn('-prefill-sizes "$PREFILL_SIZES" -prefill-reps "$BENCH_REPS"', body)
+
+    def test_norm_llama_captures_sweeps(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        d = tempfile.mkdtemp()
+        helper = Path(d) / "norm_llama.py"
+        gcp_bench.write_lf(helper, gcp_bench._PY_NORM_LLAMA.strip("\n") + "\n")
+        raw_llama = [
+            {"n_prompt": 128, "n_gen": 0, "avg_ts": 520.1, "stddev_ts": 8.2, "samples": 5},
+            {"n_prompt": 512, "n_gen": 0, "avg_ts": 450.3, "stddev_ts": 6.1, "samples": 5},
+            {"n_prompt": 0, "n_gen": 128, "avg_ts": 36.5, "stddev_ts": 0.4, "samples": 5},
+            {"n_prompt": 0, "n_gen": 256, "avg_ts": 35.8, "stddev_ts": 0.5, "samples": 5},
+        ]
+        in_file = Path(d) / "llama-bench.json"
+        in_file.write_text(json.dumps(raw_llama), encoding="utf-8")
+        out_file = Path(d) / "engine-llama.json"
+        subprocess.run([sys.executable, str(helper), str(in_file), "1x A100", "qwen2.5-3b", str(out_file)], check=True)
+        res = json.loads(out_file.read_text(encoding="utf-8"))
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["prefill_tok_per_sec"], 450.3)
+        self.assertEqual(res["decode_tok_per_sec"], 36.5)
+        self.assertEqual(len(res["sweeps"]), 4)
+        self.assertEqual(res["sweeps"][0]["n_prompt"], 128)
+        self.assertEqual(res["sweeps"][0]["tok_per_sec"], 520.1)
+        for p in (helper, in_file, out_file):
+            p.unlink(missing_ok=True)
+
+    def test_norm_fak_captures_sweeps(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        d = tempfile.mkdtemp()
+        helper = Path(d) / "norm_fak.py"
+        gcp_bench.write_lf(helper, gcp_bench._PY_NORM_FAK.strip("\n") + "\n")
+        raw_fak = {
+            "engine": "cuda", "precision": "Q8_0", "load_ms": 120.0, "workers": 1,
+            "prefill": [
+                {"tokens": 128, "tok_per_sec": 510.0, "samples": [508, 510, 512]},
+                {"tokens": 512, "tok_per_sec": 440.0, "samples": [438, 440, 442]},
+            ],
+            "decode": {"prompt_tokens": 16, "steps": 128, "tok_per_sec": 38.2, "samples": [38.0, 38.2, 38.4]}
+        }
+        in_file = Path(d) / "fak-cuda-q8-report.json"
+        in_file.write_text(json.dumps(raw_fak), encoding="utf-8")
+        out_file = Path(d) / "engine-fak-cuda-q8.json"
+        subprocess.run([sys.executable, str(helper), "fak-cuda-q8", str(in_file), str(out_file)], check=True)
+        res = json.loads(out_file.read_text(encoding="utf-8"))
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["prefill_tok_per_sec"], 440.0)
+        self.assertEqual(res["decode_tok_per_sec"], 38.2)
+        self.assertEqual(len(res["sweeps"]), 3)
+        for p in (helper, in_file, out_file):
+            p.unlink(missing_ok=True)
+
+    def test_combiner_builds_paired_base_and_arm_report(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        d = tempfile.mkdtemp()
+        combine = Path(d) / "combine.py"
+        gcp_bench.write_lf(combine, gcp_bench._PY_COMBINE.strip("\n") + "\n")
+        # Write engine files
+        (Path(d) / "engine-llama.json").write_text(json.dumps({
+            "engine": "llama", "ok": True, "backend": "llama.cpp CUDA", "precision": "Q8_0",
+            "prefill_tok_per_sec": 450.0, "decode_tok_per_sec": 36.0,
+            "sweeps": [{"n_prompt": 512, "n_gen": 0, "tok_per_sec": 450.0}, {"n_prompt": 0, "n_gen": 128, "tok_per_sec": 36.0}]
+        }), encoding="utf-8")
+        (Path(d) / "engine-fak-cuda-q8.json").write_text(json.dumps({
+            "engine": "fak-cuda-q8", "ok": True, "backend": "cuda", "precision": "Q8_0",
+            "prefill_tok_per_sec": 460.0, "decode_tok_per_sec": 38.0,
+            "sweeps": [{"n_prompt": 512, "n_gen": 0, "tok_per_sec": 460.0}, {"n_prompt": 16, "n_gen": 128, "tok_per_sec": 38.0}]
+        }), encoding="utf-8")
+        (Path(d) / "engine-fak-cuda-tf32.json").write_text(json.dumps({
+            "engine": "fak-cuda-tf32", "ok": True, "backend": "cuda", "precision": "f32",
+            "prefill_tok_per_sec": 620.0, "decode_tok_per_sec": 12.0,
+            "sweeps": [{"n_prompt": 512, "n_gen": 0, "tok_per_sec": 620.0}]
+        }), encoding="utf-8")
+        (Path(d) / "engine-vllm.json").write_text(json.dumps({
+            "engine": "vllm", "ok": True, "backend": "vLLM", "precision": "bf16",
+            "prefill_tok_per_sec": None, "decode_tok_per_sec": 120.0,
+            "sweeps": [{"n_prompt": 512, "n_gen": 128, "tok_per_sec": 120.0}]
+        }), encoding="utf-8")
+
+        subprocess.run([sys.executable, str(combine), str(d), "1x A100", "qwen2.5-3b", "sm_80", "llama"], check=True)
+        result = json.loads((Path(d) / "result.json").read_text(encoding="utf-8"))
+        paired = json.loads((Path(d) / "paired-report.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total_sweep_points"], 6)
+        self.assertEqual(paired["schema"], "fak.armbench.paired-report/1")
+        self.assertEqual(paired["tuned_baseline"], "llama")
+
+        arms = paired["arms"]
+        self.assertIn("fak-cuda-q8", arms)
+        self.assertIn("fak-cuda-tf32", arms)
+        self.assertIn("vllm", arms)
+
+        # fak-cuda-q8 vs llama: true apples-to-apples Q8_0 GEMV
+        q8 = arms["fak-cuda-q8"]
+        self.assertTrue(q8["apples_to_apples"])
+        self.assertAlmostEqual(q8["speedup_decode"], 38.0 / 36.0, places=3)
+        self.assertAlmostEqual(q8["paired_delta_decode"], 2.0, places=2)
+        self.assertIn("TRUE APPLES-TO-APPLES", q8["honesty_note"])
+
+        # fak-cuda-tf32 vs llama: TF32 prefill lever
+        tf32 = arms["fak-cuda-tf32"]
+        self.assertTrue(tf32["apples_to_apples"])
+        self.assertAlmostEqual(tf32["speedup_prefill"], 620.0 / 450.0, places=3)
+        self.assertIn("TF32", tf32["honesty_note"])
+
+        # vllm vs llama: cross-paradigm disclosure
+        vl = arms["vllm"]
+        self.assertFalse(vl["apples_to_apples"])
+        self.assertIn("CROSS-PARADIGM", vl["honesty_note"])
+
+
 class SourceTarballLayoutTest(unittest.TestCase):
     """The on-VM driver guards on `$SRC/go.mod` where $SRC=$WORK/fak, so the
     tarball MUST carry a fak/go.mod member regardless of repo layout. A

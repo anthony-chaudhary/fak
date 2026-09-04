@@ -19,90 +19,8 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			return nil, false
 		}
 	}
-	// Resolve every required resident handle before mutating any lane.
-	type layerWeights struct {
-		linear         *metalgemm.Qwen35DecodeWeights
-		full           *metalgemm.Qwen35FullAttentionWeights
-		out            *metalgemm.Q4KWeight
-		gate, up, down *metalgemm.Q4KWeight
-	}
-	lw := make([]layerWeights, cfg.NumLayers)
-	for l := range lw {
-		p := func(s string) string { return layerName(l, s) }
-		if cfg.isLinearAttnLayer(l) {
-			for _, name := range []string{p("linear_attn.conv1d.weight"), p("linear_attn.A_log"), p("linear_attn.dt_bias"), p("linear_attn.norm.weight")} {
-				if !m.has(name) {
-					return nil, false
-				}
-			}
-			n := []string{p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"), p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"), p("linear_attn.out_proj.weight")}
-			h := qwen35BatchQ8Handles(m, n)
-			if len(h) != 5 {
-				return nil, false
-			}
-			w := metalgemm.Qwen35DecodeWeights{InQKV: h[0], InZ: h[1], InB: h[2], InA: h[3], Out: h[4]}
-			lw[l].linear = &w
-		} else {
-			h := qwen35BatchQ8Handles(m, []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight")})
-			v := m.metalQ4KWeight(p("self_attn.v_proj.weight"), m.q4kw[p("self_attn.v_proj.weight")])
-			o := m.metalQ4KWeight(p("self_attn.o_proj.weight"), m.q4kw[p("self_attn.o_proj.weight")])
-			if len(h) != 2 || v == nil || o == nil {
-				return nil, false
-			}
-			w := metalgemm.Qwen35FullAttentionWeights{Q: h[0], K: h[1], V: v}
-			lw[l].full = &w
-			lw[l].out = o
-		}
-		if !m.has(p("input_layernorm.weight")) || !m.has(p("post_attention_layernorm.weight")) {
-			return nil, false
-		}
-		if cfg.isLinearAttnLayer(l) {
-			for _, s := range bs.Seqs {
-				if qwen35BatchGDNState(s, l) == nil {
-					return nil, false
-				}
-			}
-		} else {
-			for _, name := range []string{p("self_attn.q_norm.weight"), p("self_attn.k_norm.weight")} {
-				if !m.has(name) {
-					return nil, false
-				}
-			}
-			kvw := nKV * hd
-			for _, s := range bs.Seqs {
-				pos := s.Cache.Len()
-				if l >= len(s.Cache.K) || len(s.Cache.K[l]) != pos*kvw || len(s.Cache.V[l]) != pos*kvw {
-					return nil, false
-				}
-			}
-		}
-		for _, item := range []struct {
-			name string
-			dst  **metalgemm.Q4KWeight
-		}{{p("mlp.gate_proj.weight"), &lw[l].gate}, {p("mlp.up_proj.weight"), &lw[l].up}, {p("mlp.down_proj.weight"), &lw[l].down}} {
-			qt := m.q4kw[item.name]
-			if qt == nil {
-				return nil, false
-			}
-			*item.dst = m.metalQ4KWeight(item.name, qt)
-			if *item.dst == nil {
-				return nil, false
-			}
-		}
-	}
-	if !m.has("model.norm.weight") {
-		return nil, false
-	}
-	headName := m.q4kHeadName()
-	headQT := m.q4khead
-	if headQT == nil {
-		headQT = m.q4kw[headName]
-	}
-	if headQT == nil {
-		return nil, false
-	}
-	head := m.metalQ4KWeight(headName, headQT)
-	if head == nil {
+	lw, head, ok := resolveQwen35BatchLayerWeights(bs)
+	if !ok {
 		return nil, false
 	}
 
@@ -125,16 +43,7 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			}
 			p := func(x string) string { return layerName(l, x) }
 			o, r, accepted, err := metalgemm.RunQwen35DecodeBatch(metalgemm.Qwen35DecodeBatchRequest{Input: Xn, Weights: *w.linear, States: states, Panel: metalgemm.GDNPanel{Tokens: 1, Conv1D: m.tensor(p("linear_attn.conv1d.weight")), ALog: m.tensor(p("linear_attn.A_log")), DTBias: m.tensor(p("linear_attn.dt_bias")), Norm: m.tensor(p("linear_attn.norm.weight")), RMSNormEpsilon: eps}})
-			if err != nil {
-				if accepted || shared > 0 {
-					panic(err)
-				}
-				return nil, false
-			}
-			if !accepted {
-				if shared > 0 {
-					panic("model: Qwen batch linear layer declined after state mutation")
-				}
+			if !checkQwen35BatchResult(err, accepted, shared, "linear") {
 				return nil, false
 			}
 			attn = joinQwen35Rows(o, H)
@@ -158,16 +67,7 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			cosv, sinv := qwen35BatchRope(cfg, l, max+1)
 			p := func(x string) string { return layerName(l, x) }
 			res, r, accepted, err := metalgemm.RunQwen35FullAttentionDecodeBatch(metalgemm.Qwen35FullAttentionBatchRequest{Input: Xn, Weights: *w.full, Lanes: lanes, QNorm: m.tensor(p("self_attn.q_norm.weight")), KNorm: m.tensor(p("self_attn.k_norm.weight")), Cos: cosv, Sin: sinv, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: cfg.rotaryDim(), Scale: cfg.attnScale(), QKNormEpsilon: cfg.qkNormEps(), Gain1p: cfg.NormGain1p, QKNorm: cfg.QKNorm})
-			if err != nil {
-				if accepted || shared > 0 {
-					panic(err)
-				}
-				return nil, false
-			}
-			if !accepted {
-				if shared > 0 {
-					panic("model: Qwen batch attention layer declined after state mutation")
-				}
+			if !checkQwen35BatchResult(err, accepted, shared, "attention") {
 				return nil, false
 			}
 			shared += r.ProjectionDispatches
@@ -227,6 +127,22 @@ func qwen35BatchQ8Handles(m *Model, names []string) []*metalgemm.Q8Weight {
 	return out
 }
 
+func checkQwen35BatchResult(err error, accepted bool, shared int, layerDesc string) bool {
+	if err != nil {
+		if accepted || shared > 0 {
+			panic(err)
+		}
+		return false
+	}
+	if !accepted {
+		if shared > 0 {
+			panic("model: Qwen batch " + layerDesc + " layer declined after state mutation")
+		}
+		return false
+	}
+	return true
+}
+
 func joinQwen35Rows(rows [][]float32, w int) []float32 {
 	out := make([]float32, len(rows)*w)
 	for i, r := range rows {
@@ -251,4 +167,96 @@ func qwen35BatchGDNState(s *Session, layer int) *metalgemm.GDNState {
 		return nil
 	}
 	return b.state(s.qwen35HAL.sequenceLayers[layer])
+}
+
+type qwen35BatchLayerWeights struct {
+	linear         *metalgemm.Qwen35DecodeWeights
+	full           *metalgemm.Qwen35FullAttentionWeights
+	out            *metalgemm.Q4KWeight
+	gate, up, down *metalgemm.Q4KWeight
+}
+
+func resolveQwen35BatchLayerWeights(bs *BatchSession) ([]qwen35BatchLayerWeights, *metalgemm.Q4KWeight, bool) {
+	m, cfg := bs.M, bs.M.Cfg
+	hd, nKV := cfg.HeadDim, cfg.NumKVHeads
+	lw := make([]qwen35BatchLayerWeights, cfg.NumLayers)
+	for l := range lw {
+		p := func(s string) string { return layerName(l, s) }
+		if cfg.isLinearAttnLayer(l) {
+			for _, name := range []string{p("linear_attn.conv1d.weight"), p("linear_attn.A_log"), p("linear_attn.dt_bias"), p("linear_attn.norm.weight")} {
+				if !m.has(name) {
+					return nil, nil, false
+				}
+			}
+			n := []string{p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"), p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"), p("linear_attn.out_proj.weight")}
+			h := qwen35BatchQ8Handles(m, n)
+			if len(h) != 5 {
+				return nil, nil, false
+			}
+			w := metalgemm.Qwen35DecodeWeights{InQKV: h[0], InZ: h[1], InB: h[2], InA: h[3], Out: h[4]}
+			lw[l].linear = &w
+		} else {
+			h := qwen35BatchQ8Handles(m, []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight")})
+			v := m.metalQ4KWeight(p("self_attn.v_proj.weight"), m.q4kw[p("self_attn.v_proj.weight")])
+			o := m.metalQ4KWeight(p("self_attn.o_proj.weight"), m.q4kw[p("self_attn.o_proj.weight")])
+			if len(h) != 2 || v == nil || o == nil {
+				return nil, nil, false
+			}
+			w := metalgemm.Qwen35FullAttentionWeights{Q: h[0], K: h[1], V: v}
+			lw[l].full = &w
+			lw[l].out = o
+		}
+		if !m.has(p("input_layernorm.weight")) || !m.has(p("post_attention_layernorm.weight")) {
+			return nil, nil, false
+		}
+		if cfg.isLinearAttnLayer(l) {
+			for _, s := range bs.Seqs {
+				if qwen35BatchGDNState(s, l) == nil {
+					return nil, nil, false
+				}
+			}
+		} else {
+			for _, name := range []string{p("self_attn.q_norm.weight"), p("self_attn.k_norm.weight")} {
+				if !m.has(name) {
+					return nil, nil, false
+				}
+			}
+			kvw := nKV * hd
+			for _, s := range bs.Seqs {
+				pos := s.Cache.Len()
+				if l >= len(s.Cache.K) || len(s.Cache.K[l]) != pos*kvw || len(s.Cache.V[l]) != pos*kvw {
+					return nil, nil, false
+				}
+			}
+		}
+		for _, item := range []struct {
+			name string
+			dst  **metalgemm.Q4KWeight
+		}{{p("mlp.gate_proj.weight"), &lw[l].gate}, {p("mlp.up_proj.weight"), &lw[l].up}, {p("mlp.down_proj.weight"), &lw[l].down}} {
+			qt := m.q4kw[item.name]
+			if qt == nil {
+				return nil, nil, false
+			}
+			*item.dst = m.metalQ4KWeight(item.name, qt)
+			if *item.dst == nil {
+				return nil, nil, false
+			}
+		}
+	}
+	if !m.has("model.norm.weight") {
+		return nil, nil, false
+	}
+	headName := m.q4kHeadName()
+	headQT := m.q4khead
+	if headQT == nil {
+		headQT = m.q4kw[headName]
+	}
+	if headQT == nil {
+		return nil, nil, false
+	}
+	head := m.metalQ4KWeight(headName, headQT)
+	if head == nil {
+		return nil, nil, false
+	}
+	return lw, head, true
 }

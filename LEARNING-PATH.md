@@ -508,6 +508,14 @@ go test ./internal/compute/
 
 **Checkpoint:** Explain why a CUDA backend declares Approx not Reference, and what RequireReference(b) prevents.
 
+### Shipped Subsystem and Tooling Surfaces
+
+Recent runtime, tooling, and infrastructure additions covered across the curriculum and appendix:
+
+- **Launch & storage operations:** `fak launchguard`, `fak scratch-janitor`, `fak storage-pressure`, `fak temp-artifacts`, and `fak workspin`.
+- **Architecture and debt inspection:** `fak arch`, `fak debt-lanes`, `fak debt-lanes-scorecard`, and `fak tree`.
+- **Runtime and lifecycle packages:** `internal/deployment`, `internal/extensionfault`, `internal/generalizationdebt`, `internal/gitresource`, `internal/optsdefault`, `internal/stablejson`, `internal/wipreadiness`, and `internal/workspin`.
+
 ---
 
 ## The staged parts

@@ -25,7 +25,8 @@ type Config struct {
 	// NativeDecodeTrace requests the buffered fak-native token-commit receipt.
 	// It never enables streaming or infers tokens from response fragments.
 	NativeDecodeTrace bool
-	// NativeInferenceReceipt requests the model.NativeInferenceReceipt debug payload.
+	// NativeInferenceReceipt requests the deterministic native token IDs and
+	// logprobs/logits receipt from the gateway.
 	NativeInferenceReceipt bool
 	BeforeTrial            func(context.Context, qwen38quant.Fixture, int) error
 	Sample                 func(context.Context) (ResourceSample, error)
@@ -210,6 +211,8 @@ func (r Runner) runFixtures(ctx context.Context, client *http.Client, cfg Config
 			}
 			if cfg.NativeInferenceReceipt && resp.Fak != nil && resp.Fak.NativeInferenceReceipt != nil {
 				receipt := *resp.Fak.NativeInferenceReceipt
+				receipt.TokenIDs = append([]int(nil), receipt.TokenIDs...)
+				receipt.TokenLogprobs = append([]float64(nil), receipt.TokenLogprobs...)
 				res.NativeInferenceReceipt = &receipt
 			}
 			if cfg.Sample != nil {
@@ -360,6 +363,11 @@ func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.
 			return out, traceErr
 		}
 		out.DecodeWindows = &report
+	}
+	if cfg.NativeInferenceReceipt {
+		if out.Fak == nil || out.Fak.NativeInferenceReceipt == nil {
+			return out, fmt.Errorf("response missing fak.native_inference_receipt")
+		}
 	}
 	return out, nil
 }

@@ -130,6 +130,7 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
 			return
 		}
+		time.Sleep(100 * time.Microsecond)
 		var body struct {
 			Messages []struct {
 				Content string `json:"content"`

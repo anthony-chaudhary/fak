@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -231,26 +232,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer waitEPFanout()
-	var req ResponsesRequest
-	if !decodeRequestBody(w, r, &req) {
+
+	req, messages, tools, ok := decodeResponsesRequestBody(w, r)
+	if !ok {
 		return
 	}
-	messages, err := decodeResponsesInput(req.Input, req.Instructions)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "input: "+err.Error())
-		return
-	}
-	// An empty/missing input is a CLIENT error, mirroring the chat wire's
-	// empty-messages floor — reject here rather than spending an upstream round-trip
-	// on a degenerate request.
-	if len(messages) == 0 {
-		writeErr(w, http.StatusBadRequest, "input: field required")
-		return
-	}
-	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
-		return
-	}
-	tools := responsesToolsToToolDefs(req.Tools)
 
 	reqModel := req.Model
 	if reqModel == "" {
@@ -320,57 +306,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
-
-	// #5212: a turn whose every proposed call was refused would otherwise reach Codex as
-	// a `completed` response carrying ONLY the guard's remediation prose — which Codex
-	// reads as the model authoring a final answer, and answers with `task_complete` while
-	// the requested work sits untouched. Hand the refusals back to the MODEL as structured
-	// tool results and re-sample ONCE, so the turn gets a second actuation opportunity
-	// before the client ever sees a response. refusedFirst holds the original refusals
-	// (empty when no recovery ran), which stay on the wire extension and in the evidence:
-	// they happened, whatever the recovery went on to do.
-	//
-	var refusedFirst []ToolAdjudication
-	if turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText) {
-		if rc, ok := s.recoverDeniedResponsesTurn(ctx, sessionTurn, messages, comp.Message, adjs, tools, sampleOpts...); ok {
-			refusedFirst = adjs
-			firstUsage := comp.Usage
-			comp = rc
-			comp.Usage = foldRecoveryUsage(firstUsage, rc.Usage)
-			asst = comp.Message
-			asst.Role = agent.RoleAssistant
-			kept, adjs, dropped, servedText, servedHits, bodyRefused = s.adjudicateProposedTurn(ctx, asst, reqTrace)
-		}
-	}
-	// blocked: the recovery ran and STILL produced neither an allowed actuation nor a
-	// model-authored answer. That is a blocked turn, and it is rendered as one below
-	// rather than dressed up as a completion.
-	blocked := len(refusedFirst) > 0 && turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText)
-	turnAdjs := turnAdjudications(refusedFirst, adjs)
-
-	// #5212: fold this turn's adjudication SHAPE into the same turn-control signal the
-	// Anthropic wire already records (messages.go). The Responses wire recorded NOTHING
-	// here before, so a Codex session stopping on the same refusal turn after turn was
-	// indistinguishable from a run of clean completions — which is why the body's operator
-	// had to notice the false `task_complete` by hand. Recorded exactly ONCE per HTTP turn,
-	// on the turn's FINAL shape, so a recovered turn resets the streak rather than counting
-	// the refusal it successfully routed around.
-	//
-	// A blocked turn is forced to deny-all even when its refusals were individually tagged
-	// RETRYABLE: "retryable" describes a call the model may fix, and by this point the model
-	// has already BEEN handed the refusal and re-sampled without producing an allowed call.
-	// The retry happened and failed, so what remains is a terminal stop, and counting it as
-	// mere feedback would hide precisely the denial→terminal transition this issue is about.
-	signal := adjudicationOutcomeForTurn(adjs, len(kept), servedHits)
-	if blocked {
-		signal = adjudicationOutcomeDenyAll
-	}
-	denyFP := ""
-	if signal == adjudicationOutcomeDenyAll {
-		denyFP = denyAllFingerprint(turnAdjs)
-	}
-	s.recordAdjudicationOutcome(signal, denyFP)
+	kept, adjs, dropped, servedText, servedHits, bodyRefused, turnAdjs, blocked := s.recoverAndSignalResponsesTurn(
+		ctx, sessionTurn, messages, comp, &asst, tools, sampleOpts, reqTrace,
+	)
 
 	asst.ToolCalls = kept
 	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,
@@ -915,4 +853,53 @@ func trimLeadingWS(raw json.RawMessage) []byte {
 		i++
 	}
 	return b[i:]
+}
+
+func decodeResponsesRequestBody(w http.ResponseWriter, r *http.Request) (ResponsesRequest, []agent.Message, []agent.ToolDef, bool) {
+	var req ResponsesRequest
+	if !decodeRequestBody(w, r, &req) {
+		return req, nil, nil, false
+	}
+	messages, err := decodeResponsesInput(req.Input, req.Instructions)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "input: "+err.Error())
+		return req, nil, nil, false
+	}
+	if len(messages) == 0 {
+		writeErr(w, http.StatusBadRequest, "input: field required")
+		return req, nil, nil, false
+	}
+	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
+		return req, nil, nil, false
+	}
+	tools := responsesToolsToToolDefs(req.Tools)
+	return req, messages, tools, true
+}
+
+func (s *Server) recoverAndSignalResponsesTurn(ctx context.Context, sessionTurn servedSessionTurn, messages []agent.Message, comp *agent.Completion, asst *agent.Message, tools []agent.ToolDef, sampleOpts []agent.SampleOpt, reqTrace string) ([]agent.ToolCall, []ToolAdjudication, int, string, int, bool, []ToolAdjudication, bool) {
+	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, *asst, reqTrace)
+	var refusedFirst []ToolAdjudication
+	if turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText) {
+		if rc, ok := s.recoverDeniedResponsesTurn(ctx, sessionTurn, messages, comp.Message, adjs, tools, sampleOpts...); ok {
+			refusedFirst = adjs
+			firstUsage := comp.Usage
+			*comp = *rc
+			comp.Usage = foldRecoveryUsage(firstUsage, rc.Usage)
+			*asst = comp.Message
+			asst.Role = agent.RoleAssistant
+			kept, adjs, dropped, servedText, servedHits, bodyRefused = s.adjudicateProposedTurn(ctx, *asst, reqTrace)
+		}
+	}
+	blocked := len(refusedFirst) > 0 && turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText)
+	turnAdjs := turnAdjudications(refusedFirst, adjs)
+	signal := adjudicationOutcomeForTurn(adjs, len(kept), servedHits)
+	if blocked {
+		signal = adjudicationOutcomeDenyAll
+	}
+	denyFP := ""
+	if signal == adjudicationOutcomeDenyAll {
+		denyFP = denyAllFingerprint(turnAdjs)
+	}
+	s.recordAdjudicationOutcome(signal, denyFP)
+	return kept, adjs, dropped, servedText, servedHits, bodyRefused, turnAdjs, blocked
 }

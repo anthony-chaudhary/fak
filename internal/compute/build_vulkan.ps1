@@ -70,7 +70,7 @@ $VK = if ($env:VULKAN_SDK) { $env:VULKAN_SDK } else { "C:\VulkanSDK\1.4.350.0" }
 $glslc = Join-Path $VK "Bin\glslc.exe"
 $vkInclude = Join-Path $VK "Include"
 $vkLib = Join-Path $VK "Lib"
-if (-not (Test-Path $glslc)) { throw "glslc not found at $glslc — set VULKAN_SDK" }
+if (-not (Test-Path $glslc)) { throw "glslc not found at $glslc -- set VULKAN_SDK" }
 
 $llvmBin = "C:\Program Files\LLVM\bin"
 if ($isWindowsHost -and (Test-Path $llvmBin) -and ($env:PATH -notlike "*$llvmBin*")) {

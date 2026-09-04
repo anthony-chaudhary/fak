@@ -142,4 +142,7 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 - [Incumbent inference architecture bottlenecks (2026-08-28)](incumbent-inference-architecture-bottlenecks-2026-08-28.md) — vLLM/SGLang/Dynamo/MAX bottleneck study (#9894): the binding constraint is the interaction cross-product among scheduling, reusable state, specialization, and compilation lifecycle, not one missing kernel.
 - [metrics-service study (2026-08-29)](metrics-service-study-2026-08-29.md) — snapshot-pinned study of an external Go observability runtime (#10287): deadline-aligned collection, normalized validated snapshots, and concurrent sink fan-out, with the bounded borrow/disposition map.
 - [ActaClad/plumbline study (2026-08-31)](plumbline-study-2026-08-31.md) — Python static-analyzer study (#10452): borrow four bounded mechanisms (stable evidence paths, negative fixtures, a new-findings gate, export into existing surfaces); do not adopt a second analyzer framework.
+- [Composable system prompt algebra](composable-system-prompt-algebra-2026-09.md) — algebra and transformation rules for composable agent system prompts.
+- [Qwen3.8 and GLM-5.3 deep subagent inventory](qwen38_glm53_deep_subagent_inventory.md) — inventory and capability analysis of deep subagent hierarchies.
+- [Qwen3.8 and GLM-5.3 Flash inventory](qwen38_glm53_flash_inventory.md) — feature and compatibility inventory for fast-tier models.
 

@@ -93,28 +93,14 @@ func (t *ToolSchemaTelemetryTracker) AuditToolCall(toolName string, rawArgs stri
 	// 3. Schema conformance check
 	for _, reqKey := range decl.Required {
 		if _, exists := parsed[reqKey]; !exists {
-			t.counts[ToolConformanceSchemaMismatch]++
-			t.events = append(t.events, ToolSchemaTelemetryEvent{
-				ToolName:  toolName,
-				Outcome:   ToolConformanceSchemaMismatch,
-				ParamKeys: keys,
-				Violation: "missing_required:" + reqKey,
-			})
-			return ToolConformanceSchemaMismatch, fmt.Errorf("missing required parameter %q", reqKey)
+			return t.recordMismatch(toolName, keys, "missing_required:"+reqKey, "missing required parameter %q", reqKey)
 		}
 	}
 
 	for k, val := range parsed {
 		wantType, specified := decl.ParamTypes[k]
 		if specified && !matchesType(val, wantType) {
-			t.counts[ToolConformanceSchemaMismatch]++
-			t.events = append(t.events, ToolSchemaTelemetryEvent{
-				ToolName:  toolName,
-				Outcome:   ToolConformanceSchemaMismatch,
-				ParamKeys: keys,
-				Violation: "type_mismatch:" + k,
-			})
-			return ToolConformanceSchemaMismatch, fmt.Errorf("type mismatch on parameter %q", k)
+			return t.recordMismatch(toolName, keys, "type_mismatch:"+k, "type mismatch on parameter %q", k)
 		}
 	}
 
@@ -150,6 +136,17 @@ func matchesType(val any, want string) bool {
 	default:
 		return true
 	}
+}
+
+func (t *ToolSchemaTelemetryTracker) recordMismatch(toolName string, keys []string, violation, format string, arg any) (ToolSchemaConformanceOutcome, error) {
+	t.counts[ToolConformanceSchemaMismatch]++
+	t.events = append(t.events, ToolSchemaTelemetryEvent{
+		ToolName:  toolName,
+		Outcome:   ToolConformanceSchemaMismatch,
+		ParamKeys: keys,
+		Violation: violation,
+	})
+	return ToolConformanceSchemaMismatch, fmt.Errorf(format, arg)
 }
 
 // Counts returns a copy of outcome counters.

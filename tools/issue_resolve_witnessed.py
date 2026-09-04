@@ -238,7 +238,7 @@ EVIDENCE_INCOMPLETE_HOLD = "EVIDENCE_INCOMPLETE"
 # ALLOW with an audit note rather than a hold -- same asymmetry, and for the same reason,
 # as ``disclaimer_binds_closure``.
 EVIDENCE_UNREADABLE_NOTE = "EVIDENCE_STATUS_UNREADABLE"
-_EVIDENCE_PREFIX = "docs/benchmarks/"
+_EVIDENCE_PREFIX = ("docs/benchmarks/", "docs/notes/")
 _EVIDENCE_SUFFIX = ".md"
 # Uppercase, word-bounded: a status TOKEN. Packet prose says "incomplete" in lower case.
 _INCOMPLETE_TOKEN_RE = re.compile(r"\bINCOMPLETE\b")
@@ -903,6 +903,135 @@ def note_gate(item: dict[str, Any], msg: str | None) -> None:
         item.setdefault("gate_notes", []).append(msg)
 
 
+def _evaluate_one_candidate(root: Path, row: dict[str, Any], gate_active: bool,
+                            live: bool, counted: set[int]) -> dict[str, Any]:
+    rv = reverify(root, row["sha"])
+    item = {**row, **rv, "command": close_cmd(row)}
+    if not rv["witness_ok"]:
+        item["action"] = "skip_unwitnessed"
+        return item
+    binds, hold_reason = claim_binds_resolution(rv, row)
+    if not binds:
+        item["action"] = "skip_nonresolving"
+        item["reason"] = hold_reason
+        return item
+    # #5865: a commit whose own message disclaims resolution -- "The issue stays
+    # open", "this commit does not claim it", "would be claiming an integration that
+    # has no witness" -- can never witness that resolution, at ANY rung. Runs here,
+    # ahead of every gh probe, because it is a local git read and a self-disclaimed
+    # witness needs no tracker round-trip to refuse. An unreadable message ALLOWS
+    # with an audit note (see disclaimer_binds_closure): the gate adds refusals on
+    # positive evidence only, it never converts silence into a hold.
+    undisclaimed, disclaim_hold = disclaimer_binds_closure(root, row)
+    if not undisclaimed:
+        item["action"] = "skip_disclaimed"
+        item["reason"] = disclaim_hold
+        return item
+    note_gate(item, disclaim_hold)  # gate abstained (commit message unreadable)
+    # A commit whose own EVIDENCE declares itself unfinished cannot witness a
+    # resolution either. Runs beside the #5865 message gate -- both are local git
+    # reads over the commit, both refuse only on positive author-written evidence,
+    # and both belong ahead of every gh probe. This is the gate the 2026-08-10 mass
+    # close of #6122 .. #6205 needed: 31 `docs/benchmarks/` packets headed
+    # `Status: **INCOMPLETE**` closed their own issues. An unreadable packet ALLOWS
+    # with an audit note (see evidence_binds_closure); silence is never a hold.
+    evidence_ok, evidence_hold = evidence_binds_closure(root, row)
+    if not evidence_ok:
+        item["action"] = "skip_incomplete_evidence"
+        item["reason"] = evidence_hold
+        return item
+    note_gate(item, evidence_hold)  # gate abstained (evidence unreadable)
+    if gate_active and not reachable_from_origin(root, row["sha"]):
+        item["action"] = "skip_unpushed"
+        item["reason"] = "resolving commit not on origin/main yet (not durable)"
+        return item
+    tip = closure_tip(root) if gate_active else None
+    if gate_active:
+        survives, survival_reason = effect_survives_at_tip(
+            root, row.get("sha", ""), tip or "")
+        item["closure_tip"] = tip
+        if not survives:
+            item["reason"] = survival_reason
+            if survival_reason and survival_reason.startswith(EFFECT_REVERTED_HOLD):
+                item["action"] = "skip_effect_reverted"
+            else:
+                item["action"] = "skip_effect_survival_unknown"
+            return item
+    # #4374: an auto-reclose may not override a `reopened` event unless a commit
+    # landed AFTER it. The arm cites a witnessing commit; if that commit predates
+    # the most recent reopen, re-closing silently undoes a correction reopen (and
+    # in the witnessed #4350 case re-marked a BROKEN main "resolved"). Read-only
+    # timeline probe, runs even in dry-run so the plan reflects the hold; an
+    # unreadable timeline fails CLOSED (skip_reopen_unknown), never a false close.
+    allowed, reopen_hold = reopen_blocks_close(root, row)
+    if not allowed:
+        unknown = str(reopen_hold or "").startswith(REOPEN_UNKNOWN_HOLD)
+        item["action"] = "skip_reopen_unknown" if unknown else "skip_reopened"
+        item["reason"] = reopen_hold
+        return item
+    note_gate(item, reopen_hold)  # gate abstained (no GitHub context)
+    # #3870: a diff-witnessed commit closes an issue only when the issue is not
+    # EXPLICITLY multi-part. A read-only body/label probe runs even in dry-run so
+    # the plan reflects the hold; an unreadable body holds (COVERAGE_UNKNOWN) and
+    # never false-closes an issue we could not inspect.
+    covers, cover_hold = coverage_binds_closure(root, row)
+    if not covers:
+        unknown = str(cover_hold or "").startswith(COVERAGE_UNKNOWN_HOLD)
+        item["action"] = "skip_coverage_unknown" if unknown else "skip_partial"
+        item["reason"] = cover_hold
+        return item
+    note_gate(item, cover_hold)  # gate abstained (no GitHub context)
+    # #4747: a model-correctness defect closes only on OBSERVED-EFFECT
+    # evidence -- an independent real artifact showing the original symptom
+    # gone -- never on an instrumentation/diagnostic commit satisfying an
+    # earlier resolution class (the #4273/#4627 harm). Read-only body/label
+    # probe, runs even in dry-run so the plan reflects the typed hold; an
+    # unreadable body fails CLOSED (skip_effect_unknown).
+    effect_ok, effect_hold = observed_effect_binds_closure(root, row)
+    if not effect_ok:
+        unknown = str(effect_hold or "").startswith(EFFECT_UNKNOWN_HOLD)
+        item["action"] = ("skip_effect_unknown" if unknown
+                          else "skip_effect_unobserved")
+        item["reason"] = effect_hold
+        return item
+    note_gate(item, effect_hold)  # gate abstained (no GitHub context)
+    if not live:
+        item["action"] = "would_close"
+        return item
+    number = row.get("number")
+    rc, out, err = run_capture(close_cmd(row), root, timeout=60)
+    item["returncode"] = rc
+    if rc != 0:
+        item["action"] = "close_failed"
+        item["error"] = (err or out).strip()[-300:]
+        return item
+    # #2641: rc 0 is not proof of a durable close. Read the authoritative state
+    # back and count the close ONLY when GitHub reports CLOSED; an issue still or
+    # again OPEN (e.g. stateReason REOPENED) is a distinct, non-persistent event
+    # and is never tallied as the loop's durable work.
+    state = readback_state(root, number)
+    item["state_after"] = state.get("state") or None
+    item["state_reason"] = state.get("state_reason") or None
+    if state.get("state") != DURABLE_CLOSED_STATE:
+        item["action"] = CLOSE_NOT_PERSISTENT
+        item["reason"] = (
+            f"gh reports state={state.get('state') or '?'} "
+            f"reason={state.get('state_reason') or '?'} after close attempt; "
+            "not a durable closure")
+        return item
+    # Authoritative state is CLOSED. Count once per issue per run: a repeated
+    # close of an issue already counted this run (with no intervening reopen —
+    # that path is caught above) must not inflate closed / closed_by_loop_total.
+    if isinstance(number, int) and number in counted:
+        item["action"] = CLOSE_ALREADY_COUNTED
+        item["reason"] = f"#{number} already durably closed this run"
+        return item
+    item["action"] = "closed"
+    if isinstance(number, int):
+        counted.add(number)
+    return item
+
+
 def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
              max_commits: int, require_pushed: bool = True) -> dict[str, Any]:
     audit = load_audit(root, audit_json, max_commits)
@@ -917,179 +1046,19 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     # it must not wedge the loop.
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
-    closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
-    skipped_disclaimed = skipped_incomplete_evidence = 0
-    skipped_effect_reverted = skipped_effect_survival_unknown = 0
-    close_not_persistent = already_counted = 0
-    skipped_partial = skipped_coverage_unknown = 0
-    skipped_reopened = skipped_reopen_unknown = 0
-    skipped_effect_unobserved = skipped_effect_unknown = 0
     # Unique issue IDs durably closed THIS run — a repeated close tick on an issue
     # already counted here does not inflate the tally (#2641, done condition 3).
     counted: set[int] = set()
+    action_counts: dict[str, int] = {}
     for row in candidates:
-        rv = reverify(root, row["sha"])
-        item = {**row, **rv, "command": close_cmd(row)}
+        item = _evaluate_one_candidate(root, row, gate_active, live, counted)
         planned.append(item)
-        if not rv["witness_ok"]:
-            item["action"] = "skip_unwitnessed"
-            skipped += 1
-            results.append(item)
-            continue
-        binds, hold_reason = claim_binds_resolution(rv, row)
-        if not binds:
-            item["action"] = "skip_nonresolving"
-            item["reason"] = hold_reason
-            skipped_nonresolving += 1
-            results.append(item)
-            continue
-        # #5865: a commit whose own message disclaims resolution -- "The issue stays
-        # open", "this commit does not claim it", "would be claiming an integration that
-        # has no witness" -- can never witness that resolution, at ANY rung. Runs here,
-        # ahead of every gh probe, because it is a local git read and a self-disclaimed
-        # witness needs no tracker round-trip to refuse. An unreadable message ALLOWS
-        # with an audit note (see disclaimer_binds_closure): the gate adds refusals on
-        # positive evidence only, it never converts silence into a hold.
-        undisclaimed, disclaim_hold = disclaimer_binds_closure(root, row)
-        if not undisclaimed:
-            item["action"] = "skip_disclaimed"
-            item["reason"] = disclaim_hold
-            skipped_disclaimed += 1
-            results.append(item)
-            continue
-        note_gate(item, disclaim_hold)  # gate abstained (commit message unreadable)
-        # A commit whose own EVIDENCE declares itself unfinished cannot witness a
-        # resolution either. Runs beside the #5865 message gate -- both are local git
-        # reads over the commit, both refuse only on positive author-written evidence,
-        # and both belong ahead of every gh probe. This is the gate the 2026-08-10 mass
-        # close of #6122 .. #6205 needed: 31 `docs/benchmarks/` packets headed
-        # `Status: **INCOMPLETE**` closed their own issues. An unreadable packet ALLOWS
-        # with an audit note (see evidence_binds_closure); silence is never a hold.
-        evidence_ok, evidence_hold = evidence_binds_closure(root, row)
-        if not evidence_ok:
-            item["action"] = "skip_incomplete_evidence"
-            item["reason"] = evidence_hold
-            skipped_incomplete_evidence += 1
-            results.append(item)
-            continue
-        note_gate(item, evidence_hold)  # gate abstained (evidence unreadable)
-        if gate_active and not reachable_from_origin(root, row["sha"]):
-            item["action"] = "skip_unpushed"
-            item["reason"] = "resolving commit not on origin/main yet (not durable)"
-            skipped_unpushed += 1
-            results.append(item)
-            continue
-        tip = closure_tip(root) if gate_active else None
-        if gate_active:
-            survives, survival_reason = effect_survives_at_tip(
-                root, row.get("sha", ""), tip or "")
-            item["closure_tip"] = tip
-            if not survives:
-                item["reason"] = survival_reason
-                if survival_reason and survival_reason.startswith(EFFECT_REVERTED_HOLD):
-                    item["action"] = "skip_effect_reverted"
-                    skipped_effect_reverted += 1
-                else:
-                    item["action"] = "skip_effect_survival_unknown"
-                    skipped_effect_survival_unknown += 1
-                results.append(item)
-                continue
-        # #4374: an auto-reclose may not override a `reopened` event unless a commit
-        # landed AFTER it. The arm cites a witnessing commit; if that commit predates
-        # the most recent reopen, re-closing silently undoes a correction reopen (and
-        # in the witnessed #4350 case re-marked a BROKEN main "resolved"). Read-only
-        # timeline probe, runs even in dry-run so the plan reflects the hold; an
-        # unreadable timeline fails CLOSED (skip_reopen_unknown), never a false close.
-        allowed, reopen_hold = reopen_blocks_close(root, row)
-        if not allowed:
-            unknown = str(reopen_hold or "").startswith(REOPEN_UNKNOWN_HOLD)
-            item["action"] = "skip_reopen_unknown" if unknown else "skip_reopened"
-            item["reason"] = reopen_hold
-            if unknown:
-                skipped_reopen_unknown += 1
-            else:
-                skipped_reopened += 1
-            results.append(item)
-            continue
-        note_gate(item, reopen_hold)  # gate abstained (no GitHub context)
-        # #3870: a diff-witnessed commit closes an issue only when the issue is not
-        # EXPLICITLY multi-part. A read-only body/label probe runs even in dry-run so
-        # the plan reflects the hold; an unreadable body holds (COVERAGE_UNKNOWN) and
-        # never false-closes an issue we could not inspect.
-        covers, cover_hold = coverage_binds_closure(root, row)
-        if not covers:
-            unknown = str(cover_hold or "").startswith(COVERAGE_UNKNOWN_HOLD)
-            item["action"] = "skip_coverage_unknown" if unknown else "skip_partial"
-            item["reason"] = cover_hold
-            if unknown:
-                skipped_coverage_unknown += 1
-            else:
-                skipped_partial += 1
-            results.append(item)
-            continue
-        note_gate(item, cover_hold)  # gate abstained (no GitHub context)
-        # #4747: a model-correctness defect closes only on OBSERVED-EFFECT
-        # evidence -- an independent real artifact showing the original symptom
-        # gone -- never on an instrumentation/diagnostic commit satisfying an
-        # earlier resolution class (the #4273/#4627 harm). Read-only body/label
-        # probe, runs even in dry-run so the plan reflects the typed hold; an
-        # unreadable body fails CLOSED (skip_effect_unknown).
-        effect_ok, effect_hold = observed_effect_binds_closure(root, row)
-        if not effect_ok:
-            unknown = str(effect_hold or "").startswith(EFFECT_UNKNOWN_HOLD)
-            item["action"] = ("skip_effect_unknown" if unknown
-                              else "skip_effect_unobserved")
-            item["reason"] = effect_hold
-            if unknown:
-                skipped_effect_unknown += 1
-            else:
-                skipped_effect_unobserved += 1
-            results.append(item)
-            continue
-        note_gate(item, effect_hold)  # gate abstained (no GitHub context)
-        if not live:
-            item["action"] = "would_close"
-            results.append(item)
-            continue
-        number = row.get("number")
-        rc, out, err = run_capture(close_cmd(row), root, timeout=60)
-        item["returncode"] = rc
-        if rc != 0:
-            item["action"] = "close_failed"
-            item["error"] = (err or out).strip()[-300:]
-            failed += 1
-            results.append(item)
-            continue
-        # #2641: rc 0 is not proof of a durable close. Read the authoritative state
-        # back and count the close ONLY when GitHub reports CLOSED; an issue still or
-        # again OPEN (e.g. stateReason REOPENED) is a distinct, non-persistent event
-        # and is never tallied as the loop's durable work.
-        state = readback_state(root, number)
-        item["state_after"] = state.get("state") or None
-        item["state_reason"] = state.get("state_reason") or None
-        if state.get("state") != DURABLE_CLOSED_STATE:
-            item["action"] = CLOSE_NOT_PERSISTENT
-            item["reason"] = (
-                f"gh reports state={state.get('state') or '?'} "
-                f"reason={state.get('state_reason') or '?'} after close attempt; "
-                "not a durable closure")
-            close_not_persistent += 1
-            results.append(item)
-            continue
-        # Authoritative state is CLOSED. Count once per issue per run: a repeated
-        # close of an issue already counted this run (with no intervening reopen —
-        # that path is caught above) must not inflate closed / closed_by_loop_total.
-        if isinstance(number, int) and number in counted:
-            item["action"] = CLOSE_ALREADY_COUNTED
-            item["reason"] = f"#{number} already durably closed this run"
-            already_counted += 1
-            results.append(item)
-            continue
-        item["action"] = "closed"
-        if isinstance(number, int):
-            counted.add(number)
-        closed += 1
         results.append(item)
+        act = item.get("action", "")
+        action_counts[act] = action_counts.get(act, 0) + 1
+
+    closed = action_counts.get("closed", 0)
+    failed = action_counts.get("close_failed", 0)
     ok = failed == 0 and (live or bool(candidates))
     return {
         "schema": SCHEMA, "ok": ok,
@@ -1100,24 +1069,26 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
         "planned_count": len(planned),
         "pushed_gate": ("active" if gate_active else
                         "disabled" if not require_pushed else "no-origin-ref"),
-        "counts": {"closed": closed, "would_close": sum(
-            1 for r in results if r.get("action") == "would_close"),
-            "skipped_unwitnessed": skipped,
-            "skipped_nonresolving": skipped_nonresolving,
-            "skipped_disclaimed": skipped_disclaimed,
-            "skipped_incomplete_evidence": skipped_incomplete_evidence,
-            "skipped_partial": skipped_partial,
-            "skipped_coverage_unknown": skipped_coverage_unknown,
-            "skipped_reopened": skipped_reopened,
-            "skipped_reopen_unknown": skipped_reopen_unknown,
-            "skipped_effect_unobserved": skipped_effect_unobserved,
-            "skipped_effect_unknown": skipped_effect_unknown,
-            "skipped_unpushed": skipped_unpushed,
-            "skipped_effect_reverted": skipped_effect_reverted,
-            "skipped_effect_survival_unknown": skipped_effect_survival_unknown,
-            "close_not_persistent": close_not_persistent,
-            "already_counted": already_counted,
-            "failed": failed},
+        "counts": {
+            "closed": closed,
+            "would_close": action_counts.get("would_close", 0),
+            "skipped_unwitnessed": action_counts.get("skip_unwitnessed", 0),
+            "skipped_nonresolving": action_counts.get("skip_nonresolving", 0),
+            "skipped_disclaimed": action_counts.get("skip_disclaimed", 0),
+            "skipped_incomplete_evidence": action_counts.get("skip_incomplete_evidence", 0),
+            "skipped_partial": action_counts.get("skip_partial", 0),
+            "skipped_coverage_unknown": action_counts.get("skip_coverage_unknown", 0),
+            "skipped_reopened": action_counts.get("skip_reopened", 0),
+            "skipped_reopen_unknown": action_counts.get("skip_reopen_unknown", 0),
+            "skipped_effect_unobserved": action_counts.get("skip_effect_unobserved", 0),
+            "skipped_effect_unknown": action_counts.get("skip_effect_unknown", 0),
+            "skipped_unpushed": action_counts.get("skip_unpushed", 0),
+            "skipped_effect_reverted": action_counts.get("skip_effect_reverted", 0),
+            "skipped_effect_survival_unknown": action_counts.get("skip_effect_survival_unknown", 0),
+            "close_not_persistent": action_counts.get(CLOSE_NOT_PERSISTENT, 0),
+            "already_counted": action_counts.get(CLOSE_ALREADY_COUNTED, 0),
+            "failed": failed,
+        },
         # The unique issue IDs this run drove to a readback-confirmed CLOSED state —
         # the honest durable-closure set the progress ledger should tally (#2641).
         "closed_numbers": sorted(counted),

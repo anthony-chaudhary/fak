@@ -1,3 +1,8 @@
+---
+title: "Next-Gen OSS Performance Scout: Qwen 3.8 & GLM 5.3 Flash"
+description: "Scouting report of 50 retained open-source repositories benchmarking performance, hardware configurations, and serving engines for Qwen 3.8 and GLM 5.3 Flash."
+---
+
 # Next-Gen OSS Performance Scout: Qwen 3.8 & GLM 5.3 Flash
 
 - **Generated At**: 2026-09-03 18:36:59 UTC
