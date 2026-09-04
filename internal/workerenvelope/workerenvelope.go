@@ -100,6 +100,12 @@ func looksLikeSHA(s string) bool {
 	return true
 }
 
+// Invariant: worker envelope parsing and validation is fail-closed and bounded.
+// Any untrusted input missing mandatory outcome witnesses, containing malformed commit
+// identifiers, or reporting inconsistent blocker claims is strictly refused.
+// Guard: status must be one of the closed vocabulary values (shipped, blocked, not_yet)
+// and enforce matching verification preconditions before acceptance.
+//
 // Validate enforces the witness-gated dispatch contract. It returns a
 // descriptive error naming the first field that violates the contract for the
 // declared Status, or nil if the envelope is well-formed.
