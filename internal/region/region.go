@@ -13,54 +13,103 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
-const (
-	ToolPut        = "region.put"
-	ToolGet        = "region.get"
-	ToolAccumulate = "region.accumulate"
-)
+// ToolPut is the synthetic tool identifier submitted to the kernel for region store calls.
+// Guard: Kernel admission check must succeed before storage mutation occurs.
+// Invariant: Synthetic tool call is constructed with region and destructive metadata.
+const ToolPut = "region.put"
+
+// ToolGet is the synthetic tool identifier submitted to the kernel for region fetch calls.
+// Guard: Evaluated as read-only and idempotent prior to resolver lookup.
+// Invariant: Never executed against empty windows without stored refs.
+const ToolGet = "region.get"
+
+// ToolAccumulate is the synthetic tool identifier submitted to the kernel for region fold operations.
+// Guard: Kernel admission check must succeed before fold execution and persistence.
+// Invariant: Dispatched with destructive metadata marking state mutation.
+const ToolAccumulate = "region.accumulate"
 
 // AccumulateOp names the deterministic fold Accumulate applies.
+// Invariant: Must be one of Sum, Max, or Concat; invalid operators return ErrUnknownOp.
 type AccumulateOp string
 
 const (
-	Sum    AccumulateOp = "sum"
-	Max    AccumulateOp = "max"
+	// Sum performs deterministic numeric addition over float64 representations.
+	// Guard: Both current and delta values must parse as valid floats.
+	Sum AccumulateOp = "sum"
+
+	// Max computes the numeric maximum over float64 representations.
+	// Guard: Delta must parse as a valid float; empty current values fold directly to delta.
+	Max AccumulateOp = "max"
+
+	// Concat appends raw byte slices deterministically.
+	// Invariant: Preserves exact byte ordering without insertion of delimiters.
 	Concat AccumulateOp = "concat"
 )
 
 var (
-	ErrDenied      = errors.New("region: access denied")
-	ErrEmpty       = errors.New("region: empty window")
-	ErrNoKernel    = errors.New("region: nil kernel")
-	ErrNoResolver  = errors.New("region: nil resolver")
-	ErrScopeWiden  = errors.New("region: write would widen scope")
-	ErrUnknownOp   = errors.New("region: unknown accumulate op")
-	ErrNilTarget   = errors.New("region: nil target ref")
+	// ErrDenied indicates kernel admission refused the synthetic tool call.
+	// Guard: Fail-closed; write and resolver mutations are skipped.
+	ErrDenied = errors.New("region: access denied")
+
+	// ErrEmpty indicates an uninitialized window holding no Ref was read.
+	// Guard: Fail-closed; returns before kernel submission or resolver fetch.
+	ErrEmpty = errors.New("region: empty window")
+
+	// ErrNoKernel indicates a nil abi.Kernel was passed.
+	// Guard: Non-nil admission authority required; fails closed immediately.
+	ErrNoKernel = errors.New("region: nil kernel")
+
+	// ErrNoResolver indicates no non-nil abi.Resolver is available.
+	// Guard: Storage backend required; fails closed if neither kernel nor options provide one.
+	ErrNoResolver = errors.New("region: nil resolver")
+
+	// ErrScopeWiden indicates an attempted scope widening or an attempt to exceed ScopeFleet.
+	// Guard: Monotonic scope enforcement; writes cannot widen beyond current scope or ScopeFleet.
+	// Invariant: ScopeTenant is refused at region boundary.
+	ErrScopeWiden = errors.New("region: write would widen scope")
+
+	// ErrUnknownOp indicates an unrecognised AccumulateOp was supplied.
+	// Guard: Closed operation set (Sum, Max, Concat); invalid operators fail closed.
+	ErrUnknownOp = errors.New("region: unknown accumulate op")
+
+	// ErrNilTarget indicates a nil target Ref pointer was passed to Accumulate.
+	// Guard: Target pointer must be non-nil to receive updated Ref.
+	ErrNilTarget = errors.New("region: nil target ref")
+
 	accumulateLock sync.Mutex
 )
 
 // Coherence observes successful write-shaped completions. *vdso.VDSO implements it.
+// Guard: Nil observer suppresses event dispatch without failing the write.
+// Invariant: Completion notifications occur only after verified storage commit.
 type Coherence interface {
 	Emit(abi.Event)
 }
 
-// Option configures a Window.
+// Option configures a Window during construction.
+// Invariant: Evaluated in order prior to resolver validation.
 type Option func(*Window)
 
 // WithResolver overrides the kernel's active Resolver. Tests and custom stores use
 // this when the kernel is only an adjudication fence.
+// Guard: Overridden resolver must be non-nil at completion of New or ErrNoResolver is returned.
+// Invariant: Explicit option takes precedence over k.Resolver().
 func WithResolver(r abi.Resolver) Option {
 	return func(w *Window) { w.resolver = r }
 }
 
 // WithCoherence overrides the write-completion observer. Passing nil disables the
 // epoch bump, which is useful only for isolated tests.
+// Guard: Optional observer; nil disables coherence emission without error.
+// Invariant: Non-nil observer receives EvComplete events on successful mutations.
 func WithCoherence(c Coherence) Option {
 	return func(w *Window) { w.coherence = c }
 }
 
 // Window is a one-sided shared region containing the current Ref and a scope
 // ceiling. Its mutex is the lost-update-safe linearization point for Accumulate.
+// Guard: Concurrent reads and mutations linearize under internal mutex lock.
+// Invariant: Window scope ceiling is immutable and bounded by ScopeFleet.
 type Window struct {
 	mu        sync.Mutex
 	kernel    abi.Kernel
@@ -73,6 +122,8 @@ type Window struct {
 
 // New builds a region window admitted by k. scope is the maximum share scope this
 // window may write; ScopeTenant is rejected because region writes cap at ScopeFleet.
+// Guard: k must be non-nil; scope must not exceed ScopeFleet.
+// Invariant: Returns non-nil Window with non-nil resolver, or fail-closed error.
 func New(k abi.Kernel, scope abi.ShareScope, opts ...Option) (*Window, error) {
 	if k == nil {
 		return nil, ErrNoKernel
@@ -96,6 +147,8 @@ func New(k abi.Kernel, scope abi.ShareScope, opts ...Option) (*Window, error) {
 }
 
 // Ref returns the current window Ref, if one has been written.
+// Guard: Thread-safe read protected by window mutex lock.
+// Invariant: Returns false when no Ref has been successfully written.
 func (w *Window) Ref() (abi.Ref, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -104,11 +157,15 @@ func (w *Window) Ref() (abi.Ref, bool) {
 
 // Put adjudicates and stores b, then makes the returned Ref the current window
 // value. The requested scope must not widen the window or the existing Ref.
+// Guard: Requires kernel admission; scope must not widen window.scope or current ref.Scope.
+// Invariant: On rejection or error, existing window Ref remains unchanged. Defaults taint to TaintTainted.
 func (w *Window) Put(ctx context.Context, b []byte, scope abi.ShareScope) (abi.Ref, abi.Verdict, error) {
 	return w.PutTainted(ctx, b, scope, abi.TaintTainted)
 }
 
 // PutTainted is Put with an explicit taint label.
+// Guard: Scope ceiling checks and kernel admission must pass before storage write.
+// Invariant: Atomically advances window Ref upon successful adjudication and storage.
 func (w *Window) PutTainted(ctx context.Context, b []byte, scope abi.ShareScope, taint abi.TaintLabel) (abi.Ref, abi.Verdict, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -132,6 +189,8 @@ func (w *Window) commitWriteLocked(ctx context.Context, tool, op string, adjudic
 }
 
 // Get adjudicates a read and resolves the current Ref.
+// Guard: Window must hold a valid Ref; kernel admission must allow the read.
+// Invariant: Returns ErrEmpty without kernel dispatch if no Ref has been written.
 func (w *Window) Get(ctx context.Context) ([]byte, abi.Ref, abi.Verdict, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -153,11 +212,15 @@ func (w *Window) Get(ctx context.Context) ([]byte, abi.Ref, abi.Verdict, error) 
 // Accumulate adjudicates and applies op to the current Ref and delta. A missing
 // window value folds from the operation identity: 0 for sum, delta for max, and
 // empty bytes for concat.
+// Guard: Kernel admission and valid numeric/byte format required.
+// Invariant: Lost-update-safe via window mutex linearization. Defaults taint to TaintTainted.
 func (w *Window) Accumulate(ctx context.Context, op AccumulateOp, delta []byte) (abi.Ref, abi.Verdict, error) {
 	return w.AccumulateTainted(ctx, op, delta, abi.TaintTainted)
 }
 
 // AccumulateTainted is Accumulate with an explicit contribution taint.
+// Guard: Kernel admission required; input numbers must parse if op is Sum or Max.
+// Invariant: Monotonically joins existing Ref taint with contribution taint.
 func (w *Window) AccumulateTainted(ctx context.Context, op AccumulateOp, delta []byte, taint abi.TaintLabel) (abi.Ref, abi.Verdict, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -190,11 +253,15 @@ func (w *Window) checkWriteScopeLocked(scope abi.ShareScope) error {
 
 // Put adjudicates and stores b through k's Resolver. It is the stateless helper
 // for callers that already hold their own Ref slot.
+// Guard: k and k.Resolver() must be non-nil; scope must not exceed ScopeFleet.
+// Invariant: Fails closed with ErrNoKernel, ErrNoResolver, or ErrScopeWiden before write. Defaults taint to TaintTainted.
 func Put(ctx context.Context, k abi.Kernel, b []byte, scope abi.ShareScope) (abi.Ref, abi.Verdict, error) {
 	return PutTainted(ctx, k, b, scope, abi.TaintTainted)
 }
 
 // PutTainted is Put with an explicit taint label.
+// Guard: k and k.Resolver() must be non-nil; scope must not exceed ScopeFleet; kernel must admit call.
+// Invariant: Adjudicated write with explicit taint; fails closed without storage on admission denial.
 func PutTainted(ctx context.Context, k abi.Kernel, b []byte, scope abi.ShareScope, taint abi.TaintLabel) (abi.Ref, abi.Verdict, error) {
 	if k == nil {
 		return abi.Ref{}, abi.Verdict{}, ErrNoKernel
@@ -234,6 +301,8 @@ func commitWrite(ctx context.Context, k abi.Kernel, r abi.Resolver, c Coherence,
 }
 
 // Get adjudicates and resolves ref through k's Resolver.
+// Guard: k and k.Resolver() must be non-nil; kernel admission required.
+// Invariant: Read-only call submitted to kernel; fails closed on denial or resolve error.
 func Get(ctx context.Context, k abi.Kernel, ref abi.Ref) ([]byte, abi.Verdict, error) {
 	if k == nil {
 		return nil, abi.Verdict{}, ErrNoKernel
@@ -257,6 +326,8 @@ func Get(ctx context.Context, k abi.Kernel, ref abi.Ref) ([]byte, abi.Verdict, e
 // Accumulate adjudicates and applies op to *target under a package-wide
 // linearization lock. Window.Accumulate gives narrower locking when callers can
 // own a Window value; this helper exists for a shared Ref slot.
+// Guard: target, k, and k.Resolver() must be non-nil; scope cannot widen beyond ScopeFleet.
+// Invariant: Thread-safe through package accumulateLock; target updated only on successful commit.
 func Accumulate(ctx context.Context, k abi.Kernel, target *abi.Ref, op AccumulateOp, delta []byte) (abi.Ref, abi.Verdict, error) {
 	if target == nil {
 		return abi.Ref{}, abi.Verdict{}, ErrNilTarget
