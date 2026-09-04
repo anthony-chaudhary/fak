@@ -27,7 +27,7 @@ func TestReleaseNextSubcommandDispatchesHelper(t *testing.T) {
 	}
 }
 
-func TestRunReleaseNextInvokesReleaseNextScript(t *testing.T) {
+func TestReleaseNextInvokesReleaseNextScript(t *testing.T) {
 	oldScript := releaseRunScript
 	defer func() { releaseRunScript = oldScript }()
 
