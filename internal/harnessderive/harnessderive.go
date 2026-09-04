@@ -14,9 +14,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// Schema identifies the schema format for harness derivation receipts.
 const Schema = "fak.harness-derivation/v1alpha1"
+
+// Verifier identifies the verifier engine and version producing derivations.
 const Verifier = "fak/harnessderive-v1"
 
+// Delta specifies a mutation to apply to an active base capability.
 type Delta struct {
 	Capability string   `json:"capability"`
 	Operation  string   `json:"operation"`
@@ -24,11 +28,13 @@ type Delta struct {
 	Denies     []string `json:"denies,omitempty"`
 }
 
+// Request describes a derivation operation over a base lock.
 type Request struct {
 	Layer  string
 	Deltas []Delta
 }
 
+// Receipt provides tamper-evident cryptographic provenance for a derived lock.
 type Receipt struct {
 	SchemaID    string                     `json:"id"`
 	Schema      string                     `json:"schema"`
@@ -41,11 +47,13 @@ type Receipt struct {
 	Rebuild     string                     `json:"rebuild"`
 }
 
+// Result wraps the newly derived lock alongside its verification receipt.
 type Result struct {
 	Lock    harnessresolve.Lock `json:"lock"`
 	Receipt Receipt             `json:"receipt"`
 }
 
+// Derive computes a new verified lock by applying typed deltas to an immutable base lock.
 func Derive(base harnessresolve.Lock, request Request) (Result, error) {
 	if err := harnessresolve.VerifyLock(base); err != nil {
 		return Result{}, fmt.Errorf("verify base: %w", err)
@@ -216,6 +224,7 @@ func identifyReceipt(receipt *Receipt) error {
 	return nil
 }
 
+// VerifyReceipt validates the cryptographic integrity and digest of a derivation receipt.
 func VerifyReceipt(receipt Receipt) error {
 	if receipt.Schema != Schema || receipt.SchemaID == "" || receipt.BaseID == "" || receipt.ResultID == "" || receipt.Verifier != Verifier {
 		return fmt.Errorf("invalid derivation receipt")
