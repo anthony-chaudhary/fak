@@ -1,9 +1,11 @@
 package toolbound
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,11 +16,12 @@ func Ready() bool { return true }
 
 // BoundedOutput represents the result of bounding tool output.
 type BoundedOutput struct {
-	Preview       string // bounded preview string
-	CompletePath  string // path to managed spill file if spilled, or empty
-	OriginalBytes int    // original byte length
-	OriginalLines int    // original line count
-	Truncated     bool   // whether bounding / truncation was applied
+	Preview       string   // bounded preview string
+	CompletePath  string   // path to managed spill file if spilled, or empty
+	SpilledImages []string // paths to spilled image files (#10679)
+	OriginalBytes int      // original byte length
+	OriginalLines int      // original line count
+	Truncated     bool     // whether bounding / truncation was applied
 }
 
 // Options configures output bounding limits and spill locations.
@@ -27,6 +30,65 @@ type Options struct {
 	MaxBytes    int    // maximum allowed UTF-8 bytes before truncation (0 = unconstrained)
 	SpillDir    string // directory for managed spill files (if empty, defaults to os.TempDir())
 	SpillPrefix string // file prefix (defaults to "fak-tool-output-")
+	SpillImages bool   // whether to detect inline base64 images, save to disk files, and replace with file references (#10679)
+}
+
+// dataImageURIRegex matches data:image/<ext>;base64,<data> strings.
+var dataImageURIRegex = regexp.MustCompile(`data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]{40,})`)
+
+// SpillInlineImages scans raw text for inline base64 data URIs, writes each image to a
+// managed file in spillDir, and replaces the inline URI with a concise reference tag (#10679).
+func SpillInlineImages(raw, spillDir, spillPrefix string) (string, []string, error) {
+	if spillDir == "" {
+		spillDir = os.TempDir()
+	}
+	if spillPrefix == "" {
+		spillPrefix = "fak-tool-output-"
+	}
+
+	matches := dataImageURIRegex.FindAllStringSubmatchIndex(raw, -1)
+	if len(matches) == 0 {
+		return raw, nil, nil
+	}
+
+	var sb strings.Builder
+	var spilled []string
+	lastIdx := 0
+
+	for _, idxs := range matches {
+		sb.WriteString(raw[lastIdx:idxs[0]])
+		ext := raw[idxs[2]:idxs[3]]
+		b64Data := raw[idxs[4]:idxs[5]]
+
+		decoded, err := base64.StdEncoding.DecodeString(b64Data)
+		if err != nil {
+			// If base64 decoding fails, preserve raw match
+			sb.WriteString(raw[idxs[0]:idxs[1]])
+			lastIdx = idxs[1]
+			continue
+		}
+
+		f, err := os.CreateTemp(spillDir, fmt.Sprintf("%simage-*.%s", spillPrefix, ext))
+		if err != nil {
+			return "", nil, fmt.Errorf("create spill image: %w", err)
+		}
+		imgFilePath := filepath.Clean(f.Name())
+		if _, err := f.Write(decoded); err != nil {
+			_ = f.Close()
+			_ = os.Remove(imgFilePath)
+			return "", nil, fmt.Errorf("write spill image: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(imgFilePath)
+			return "", nil, fmt.Errorf("close spill image: %w", err)
+		}
+
+		spilled = append(spilled, imgFilePath)
+		sb.WriteString(fmt.Sprintf("[image: %s (%s, %d bytes)]", imgFilePath, ext, len(decoded)))
+		lastIdx = idxs[1]
+	}
+	sb.WriteString(raw[lastIdx:])
+	return sb.String(), spilled, nil
 }
 
 // Bounder bounds tool output strings and manages spill files.
@@ -50,6 +112,18 @@ func (b *Bounder) Bound(raw string) (*BoundedOutput, error) {
 	origBytes := len(raw)
 	origLines := measureLines(raw)
 
+	var spilledImages []string
+	if b.opts.SpillImages {
+		transformed, images, err := SpillInlineImages(raw, b.opts.SpillDir, b.opts.SpillPrefix)
+		if err != nil {
+			return nil, err
+		}
+		if len(images) > 0 {
+			raw = transformed
+			spilledImages = images
+		}
+	}
+
 	exceedsLines := b.opts.MaxLines > 0 && origLines > b.opts.MaxLines
 	exceedsBytes := b.opts.MaxBytes > 0 && origBytes > b.opts.MaxBytes
 
@@ -57,9 +131,10 @@ func (b *Bounder) Bound(raw string) (*BoundedOutput, error) {
 		return &BoundedOutput{
 			Preview:       raw,
 			CompletePath:  "",
+			SpilledImages: spilledImages,
 			OriginalBytes: origBytes,
 			OriginalLines: origLines,
-			Truncated:     false,
+			Truncated:     len(spilledImages) > 0,
 		}, nil
 	}
 
@@ -93,6 +168,7 @@ func (b *Bounder) Bound(raw string) (*BoundedOutput, error) {
 	return &BoundedOutput{
 		Preview:       preview,
 		CompletePath:  completePath,
+		SpilledImages: spilledImages,
 		OriginalBytes: origBytes,
 		OriginalLines: origLines,
 		Truncated:     true,

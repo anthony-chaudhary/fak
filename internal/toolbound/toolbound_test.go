@@ -410,3 +410,51 @@ func TestInvalidSpillDir(t *testing.T) {
 		t.Fatal("expected error when CleanupSpillFiles runs on a file path, got nil")
 	}
 }
+
+func TestSpillInlineImages(t *testing.T) {
+	tempDir := t.TempDir()
+	// 1x1 red PNG pixel in base64
+	pngB64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+	raw := "Result contains chart: data:image/png;base64," + pngB64 + " and conclusion text."
+
+	transformed, images, err := SpillInlineImages(raw, tempDir, "test-spill-")
+	if err != nil {
+		t.Fatalf("SpillInlineImages failed: %v", err)
+	}
+	if len(images) != 1 {
+		t.Fatalf("expected 1 spilled image, got %d", len(images))
+	}
+	if strings.Contains(transformed, pngB64) {
+		t.Fatalf("transformed text should not contain raw base64 data")
+	}
+	if !strings.Contains(transformed, "[image: ") || !strings.Contains(transformed, "png") {
+		t.Fatalf("transformed text missing reference tag: %q", transformed)
+	}
+
+	// Verify image file on disk
+	content, err := os.ReadFile(images[0])
+	if err != nil {
+		t.Fatalf("failed reading spilled image file: %v", err)
+	}
+	if len(content) == 0 {
+		t.Fatalf("spilled image file is empty")
+	}
+
+	// Test Bound with SpillImages option
+	b := New(Options{
+		MaxLines:    100,
+		MaxBytes:    10000,
+		SpillDir:    tempDir,
+		SpillImages: true,
+	})
+	out, err := b.Bound(raw)
+	if err != nil {
+		t.Fatalf("Bound with SpillImages failed: %v", err)
+	}
+	if len(out.SpilledImages) != 1 {
+		t.Fatalf("expected 1 SpilledImages in BoundedOutput, got %d", len(out.SpilledImages))
+	}
+	if !out.Truncated {
+		t.Fatalf("expected Truncated=true when image was spilled")
+	}
+}
