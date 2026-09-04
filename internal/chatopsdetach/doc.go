@@ -54,4 +54,10 @@
 // mints a run id or steals a seat. Completion is not narrated: the witnessed
 // finalize rides slackoutbox.Card's Witness, which derives SHIPPED from evidence,
 // never from a text claim. This package only decides what the shell must do next.
+//
+// # Invariants and Guards
+//
+// Invariant: chatops detach decision logic is fail-closed and deterministic.
+// No run can be dispatched without an explicit Admitted verdict from the front door.
+// Guard: prior dispatched records strictly take precedence over fresh admission to prevent duplicate execution.
 package chatopsdetach

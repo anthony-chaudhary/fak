@@ -107,6 +107,9 @@ type Decision struct {
 	Record Record // the spool row the shell should persist
 }
 
+// Invariant: chatops detach decision logic is fail-closed and deterministic.
+// Guard: prior dispatched records strictly take precedence over fresh admission to prevent double-dispatch.
+//
 // Decide routes one command delivery. It is a pure fold — (command, admission
 // verdict, prior spool row) in, decision out — with no I/O, so a replay of the
 // same inputs yields the same decision.
