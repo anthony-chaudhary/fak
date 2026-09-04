@@ -158,6 +158,15 @@ type Policy struct {
 	// test lives at the producer, not here. Operators set it with
 	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
 	AutoRepairSidestep bool
+
+	// TestLanes lists lane names explicitly designated as test lanes.
+	TestLanes []string
+	// ExemptLanes lists additional lanes exempt from test immunity.
+	ExemptLanes []string
+	// DisableTestImmunity disables the test-immunity gate entirely.
+	DisableTestImmunity bool
+	// Lane specifies the active policy lane name.
+	Lane string
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
