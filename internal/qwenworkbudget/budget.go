@@ -12,7 +12,9 @@ import (
 type Boundary string
 
 const (
-	BoundaryLaunch       Boundary = "launch"
+	// BoundaryLaunch marks the start of a new Qwen execution campaign before work commences.
+	BoundaryLaunch Boundary = "launch"
+	// BoundaryContinuation marks an intermediate checkpoint during an ongoing Qwen campaign run.
 	BoundaryContinuation Boundary = "continuation"
 )
 
@@ -55,6 +57,11 @@ type Receipt struct {
 	Override       *trajectory.QwenAmplificationOverrideReceipt
 }
 
+// Invariant: Qwen work budget evaluations are fail-closed and bounded.
+// Missing audits, invalid engines, or unparseable usage records immediately yield
+// non-eligible receipts rather than defaulting to permissive continuation.
+// Guard: Campaign continuation requires explicit observed witness and ratio satisfaction.
+//
 // Evaluate aggregates only Qwen transcript rows from the canonical audit and
 // evaluates them without mutating the packet or silently reducing its evidence.
 func (p Policy) Evaluate(packet Packet) Receipt {
