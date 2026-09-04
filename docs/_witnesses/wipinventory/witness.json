@@ -1,0 +1,54 @@
+{
+  "schema": "fak-wip-reconcile/1",
+  "repo": "/fak/repo",
+  "head": "1041900000000000000000000000000000001041",
+  "observed_at": "2026-09-04T12:10:00Z",
+  "raw_surfaces": {
+    "issues": 1,
+    "sessions": 3,
+    "checkpoints": 2,
+    "lane_leases": 2,
+    "managed_worktrees": 3,
+    "unlinked_files": 0,
+    "unlinked_dirs": 0
+  },
+  "logical_units": {
+    "total": 3,
+    "active": 0,
+    "terminal": 3,
+    "single_representation": 0,
+    "split_representations": 3
+  },
+  "transition_counts": {
+    "bind": 5,
+    "create": 3,
+    "handoff": 1,
+    "land": 2,
+    "split": 1
+  },
+  "unresolved_join_debt": [
+    {
+      "reason": "conflicting_parentage",
+      "surface": "managed_worktree",
+      "identifiers": [
+        "lease-10419-a",
+        "wip:v1:00000000000000000000000000000002",
+        "wip:v1:00000000000000000000000000000004",
+        "worktree:wt-conflict"
+      ],
+      "details": "managed worktree and lease declare conflicting owners",
+      "sample": "lease-10419-a"
+    },
+    {
+      "reason": "unjoined_sessions",
+      "surface": "dispatch_session",
+      "identifiers": [
+        "reg-orphan-sess",
+        "sess-orphan-1"
+      ],
+      "details": "worker session lacks matching issue registration",
+      "sample": "reg-orphan-sess"
+    }
+  ],
+  "source_errors": []
+}
