@@ -90,6 +90,9 @@ fak worktree <subcommand>
                    List the live per-worker worktrees. The default preserves the
                    existing {count, paths, inventory} output; --json emits the
                    typed association/liveness/cleanliness/lifecycle inventory.
+      defaults [--json] [--root <repo>]
+                   Expose portable managed-worker worktree defaults, root location,
+                   and supported environment overrides (guaranteed read-only).
       publish --remote R [--dry-run|--apply]
                    Explicitly publish one bounded path-scrubbed per-host snapshot.
       recover [--remote R] [--fetch] [--cleanup REF] [--force]
@@ -124,6 +127,8 @@ func cmdWorktreeWorker(argv []string) {
 		worktreeWorkerPublish(argv[1:])
 	case "recover":
 		worktreeWorkerRecover(argv[1:])
+	case "defaults":
+		worktreeWorkerDefaults(argv[1:])
 	case "-h", "--help", "help":
 		worktreeWorkerUsage()
 	default:
