@@ -182,6 +182,9 @@ const (
 	// reason. Explicit denies, self-modify, arg-rule violations, and write-shaped
 	// default denies still fail closed.
 	PostureAdmitAndLog
+	// PostureDefaultOpen permits tools by default after all provable refusal
+	// checks have passed, even when no affirmative allow matched.
+	PostureDefaultOpen
 )
 
 // ArgKind selects which argument-value matcher an ArgPredicate applies.
@@ -501,6 +504,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 	}
 
+	// TEST_IMMUNITY: a write, edit, or delete targeting a gating test suite
+	// (*_test.go, testdata/**, etc.) under an implementation lane is refused.
+	if v, ok := a.testImmunityVerdict(ctx, p, c, lowerTool, args); ok {
+		return v
+	}
+
 	// ARG-LEVEL value predicates (issue #9): the floor gates argument VALUES, not
 	// just the tool name. A constrained arg that fails its predicate is a PROVABLE
 	// refusal even for an otherwise allow-listed tool — denied here, never passed
@@ -549,6 +558,16 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		return v
 	}
 
+	// DANGEROUS GOTCHAS (#11258): fail-closed protection against destructive deletions,
+	// raw disk operations, host evasion, privilege escalation, infrastructure teardown,
+	// and critical system disruption across default-open posture.
+	// Run before allow so dangerous gotchas are fail-closed.
+	if p.Posture == PostureDefaultOpen {
+		if v, ok := EvalDangerousGotchas(c.Tool, args); ok {
+			return v
+		}
+	}
+
 	redactedArgs, redacted := applyRedactionTransforms(p, argPreds, args, cl, pr)
 
 	// REVERSIBILITY (#2156): before any path that would otherwise dispatch the
@@ -587,6 +606,25 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// only the narrow positive grammar may replace the default deny below.
 	if v, ok := a.execCommandReadOnlyVerdict(c, args); ok {
 		return v
+	}
+
+	if p.Posture == PostureDefaultOpen {
+		if confirmedWithToken {
+			if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+				return v
+			}
+		}
+		meta := map[string]string{
+			"posture": "default_open",
+		}
+		if len(advisoryNotes) > 0 {
+			meta["advisory_violations"] = strings.Join(advisoryNotes, "; ")
+		}
+		return abi.Verdict{
+			Kind: abi.VerdictAllow,
+			By:   "monitor",
+			Meta: meta,
+		}
 	}
 
 	// Nothing affirmatively allowed it — fail-closed default deny.
@@ -835,6 +873,9 @@ func (p *Policy) admitAndLogLower(tool, lowerTool string) bool {
 }
 
 func wouldAdmit(p Policy, tool, lowerTool string) bool {
+	if p.Posture == PostureDefaultOpen {
+		return true
+	}
 	if p.Allow[tool] || p.admitAndLogLower(tool, lowerTool) || p.AdvisoryReasons[abi.ReasonDefaultDeny] {
 		return true
 	}
@@ -871,6 +912,14 @@ func (a *Adjudicator) NeverAdmits(tool string) bool {
 // never admitted, so they report true too; the inbound compactor only ever needs the
 // "model can't reach it" guarantee, which both classes satisfy.
 func (p Policy) NeverAdmits(tool string) bool {
+	if r, denied := p.Deny[tool]; denied {
+		// A name-deny whose cited reason is advisory can still be admitted (the
+		// soften downgrade), so its tool-def must not be pruned.
+		return !p.AdvisoryReasons[r]
+	}
+	if p.Posture == PostureDefaultOpen {
+		return false
+	}
 	// Fail-safe against an UNCONFIGURED floor: a Policy with no affirmative-allow
 	// surface at all (empty Allow, empty AllowPrefix, fail-closed posture) denies
 	// EVERY tool — true by the rule below, but as a DROP signal that is almost always
@@ -881,11 +930,6 @@ func (p Policy) NeverAdmits(tool string) bool {
 	// pruning of the names it genuinely never admits.
 	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
 		return false
-	}
-	if r, denied := p.Deny[tool]; denied {
-		// A name-deny whose cited reason is advisory can still be admitted (the
-		// soften downgrade), so its tool-def must not be pruned.
-		return !p.AdvisoryReasons[r]
 	}
 	if p.Allow[tool] {
 		return false
@@ -904,6 +948,19 @@ func (p Policy) NeverAdmits(tool string) bool {
 }
 
 func defaultDeny(p Policy, tool, lowerTool string, advisoryNotes []string) abi.Verdict {
+	if p.Posture == PostureDefaultOpen {
+		meta := map[string]string{
+			"posture": "default_open",
+		}
+		if len(advisoryNotes) > 0 {
+			meta["advisory_violations"] = strings.Join(advisoryNotes, "; ")
+		}
+		return abi.Verdict{
+			Kind: abi.VerdictAllow,
+			By:   "monitor",
+			Meta: meta,
+		}
+	}
 	if p.admitAndLogLower(tool, lowerTool) {
 		// Admit-and-log record (#671): the default-deny rung is the refusal being
 		// suppressed, so the record carries would_deny = its reason name via

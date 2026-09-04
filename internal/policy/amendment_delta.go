@@ -165,12 +165,18 @@ func DiffAmendment(old, next adjudicator.Policy) AmendmentDelta {
 		d.route(false, AmendmentChange{Field: "SelfModifyGlobs", Label: "added_self_modify_globs", New: g})
 	}
 
-	// Posture: fail_closed -> admit_and_log loosens; the reverse tightens.
-	if old.Posture == adjudicator.PostureFailClosed && next.Posture == adjudicator.PostureAdmitAndLog {
-		d.route(true, AmendmentChange{Field: "Posture", Label: "posture", Old: "fail_closed", New: "admit_and_log"})
-	}
-	if old.Posture == adjudicator.PostureAdmitAndLog && next.Posture == adjudicator.PostureFailClosed {
-		d.route(false, AmendmentChange{Field: "Posture", Label: "posture", Old: "admit_and_log", New: "fail_closed"})
+	// Posture: diffing by strictness: fail_closed (2) > admit_and_log (1) > default_open (0).
+	// Lowering strictness widens; raising strictness tightens.
+	if old.Posture != next.Posture {
+		oldRank, oldWord := postureStrictness(old.Posture)
+		nextRank, nextWord := postureStrictness(next.Posture)
+		widened := nextRank < oldRank
+		d.route(widened, AmendmentChange{
+			Field: "Posture",
+			Label: "posture",
+			Old:   oldWord,
+			New:   nextWord,
+		})
 	}
 
 	// ArgPredicates: an added rule can only turn an allow into a deny
@@ -325,4 +331,17 @@ func regexpStrings(patterns []*regexp.Regexp) []string {
 		}
 	}
 	return out
+}
+
+func postureStrictness(p adjudicator.Posture) (int, string) {
+	switch p {
+	case adjudicator.PostureFailClosed:
+		return 2, postureFailClosed
+	case adjudicator.PostureAdmitAndLog:
+		return 1, postureAdmitAndLog
+	case adjudicator.PostureDefaultOpen:
+		return 0, postureDefaultOpen
+	default:
+		return 0, fmt.Sprintf("unrecognized(%d)", uint8(p))
+	}
 }

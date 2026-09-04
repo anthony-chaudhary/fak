@@ -43,6 +43,14 @@ const Version = "fak-policy/v1"
 const (
 	postureFailClosed  = "fail_closed"
 	postureAdmitAndLog = "admit_and_log"
+	postureDefaultOpen = "default_open"
+)
+
+// Exported posture string constants matching manifest schema.
+const (
+	PostureDefaultOpen = "default_open"
+	PostureFailClosed  = "fail_closed"
+	PostureAdmitAndLog = "admit_and_log"
 )
 
 // Manifest is the on-disk schema. It maps 1:1 to adjudicator.Policy, but names
@@ -558,16 +566,24 @@ func (m Manifest) validateVersion() error {
 	}
 }
 
-func parsePosture(s string) (adjudicator.Posture, error) {
+// ParsePosture parses a posture string into an adjudicator.Posture.
+// Accept "default_open", "", "fail_closed", "admit_and_log".
+func ParsePosture(s string) (adjudicator.Posture, error) {
 	switch strings.TrimSpace(s) {
 	case "", postureFailClosed:
 		return adjudicator.PostureFailClosed, nil
 	case postureAdmitAndLog:
 		return adjudicator.PostureAdmitAndLog, nil
+	case postureDefaultOpen:
+		return adjudicator.PostureDefaultOpen, nil
 	default:
 		return adjudicator.PostureFailClosed, fmt.Errorf(
-			"unknown posture %q (want %s|%s)", s, postureFailClosed, postureAdmitAndLog)
+			"unknown posture %q (want %s|%s|%s)", s, postureFailClosed, postureAdmitAndLog, postureDefaultOpen)
 	}
+}
+
+func parsePosture(s string) (adjudicator.Posture, error) {
+	return ParsePosture(s)
 }
 
 // FromPolicy renders a runtime Policy back into a manifest — the basis of
@@ -583,6 +599,8 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 	}
 	if p.Posture == adjudicator.PostureAdmitAndLog {
 		m.Posture = postureAdmitAndLog
+	} else if p.Posture == adjudicator.PostureDefaultOpen {
+		m.Posture = postureDefaultOpen
 	}
 	if len(p.AdvisoryReasons) > 0 {
 		m.AdvisoryReasons = make([]string, 0, len(p.AdvisoryReasons))
@@ -717,6 +735,8 @@ func postureName(p adjudicator.Posture) string {
 	switch p {
 	case adjudicator.PostureAdmitAndLog:
 		return postureAdmitAndLog
+	case adjudicator.PostureDefaultOpen:
+		return postureDefaultOpen
 	default:
 		return postureFailClosed
 	}

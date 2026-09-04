@@ -79,6 +79,10 @@ var analyzedAmendmentFields = map[string]bool{
 	"EgressBlockLists":         true,
 	"EgressRestrict":           true,
 	"AutoRepairSidestep":       true,
+	"TestLanes":                true,
+	"ExemptLanes":              true,
+	"DisableTestImmunity":      true,
+	"Lane":                     true,
 }
 
 // diffRemainingKnobs applies the per-knob directional rules for the twelve
@@ -143,6 +147,19 @@ func diffRemainingKnobs(d *AmendmentDelta, old, next adjudicator.Policy) {
 	diffResearchAllowHosts(d, old, next)
 	diffSecretVerdict(d, old, next)
 	diffRungElision(d, old, next)
+
+	d.additiveTightenSet("TestLanes", "test_lanes", old.TestLanes, next.TestLanes)
+	d.additiveWidenSet("ExemptLanes", "exempt_lanes", old.ExemptLanes, next.ExemptLanes)
+	d.boolWidenOnTrue("DisableTestImmunity", "disable_test_immunity", old.DisableTestImmunity, next.DisableTestImmunity)
+	if old.Lane != next.Lane {
+		if old.Lane == "" && next.Lane != "" {
+			d.route(false, AmendmentChange{Field: "Lane", Label: "lane", New: next.Lane})
+		} else if old.Lane != "" && next.Lane == "" {
+			d.route(true, AmendmentChange{Field: "Lane", Label: "lane", Old: old.Lane})
+		} else {
+			d.route(true, AmendmentChange{Field: "Lane", Label: "lane", Old: old.Lane, New: next.Lane})
+		}
+	}
 }
 
 // diffResearchAllowHosts handles the one knob whose direction depends on
