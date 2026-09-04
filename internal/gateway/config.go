@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -262,6 +263,9 @@ type Config struct {
 	// HedgePolicy explicitly enables bounded delayed hedging for eligible buffered
 	// calls. Nil preserves the historical one-physical-call default.
 	HedgePolicy *HedgePolicy
+	// KVStore configures the direct I/O block KV cache backend for the gateway.
+	// When non-nil, Server.KVStore() returns this store; otherwise New initializes DefaultStore().
+	KVStore kv.Store
 	// Provider selects the upstream transcript wire when BaseURL is set
 	// (openai, anthropic, gemini, xai). Empty keeps the OpenAI-compatible default.
 	Provider string

@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -1074,6 +1075,7 @@ type Server struct {
 	// controlSocketMu guards the optional local Unix domain socket listener for control IPC.
 	controlSocketMu sync.Mutex
 	controlSocket   *ControlSocketServer
+	kvStore         kv.Store
 }
 
 // SetTable attaches or replaces the session table on Server.
