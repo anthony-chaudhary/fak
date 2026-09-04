@@ -82,12 +82,13 @@ func KnownWitnesses() map[string]bool {
 // these for the task's concept, so a task cannot claim a real-but-wrong referee
 // (e.g. dos_arbitrate for a commit_stamp task).
 var conceptWitness = map[Concept]map[string]bool{
-	ConceptCommitStamp:   {WitnessDosVerify: true, WitnessDosCommitAudit: true},
-	ConceptLane:          {WitnessDosArbitrate: true},
-	ConceptRefusal:       {WitnessDosCheckReason: true},
-	ConceptVerdictRepair: {WitnessToolDescriptors: true},
-	ConceptHookProtocol:  {WitnessHandoffSchema: true},
-	ConceptHonesty:       {WitnessDosCommitAudit: true},
+	ConceptCommitStamp:        {WitnessDosVerify: true, WitnessDosCommitAudit: true},
+	ConceptLane:               {WitnessDosArbitrate: true},
+	ConceptRefusal:            {WitnessDosCheckReason: true},
+	ConceptVerdictRepair:      {WitnessToolDescriptors: true},
+	ConceptHookProtocol:       {WitnessHandoffSchema: true},
+	Concept("task_retention"): {WitnessHandoffSchema: true},
+	ConceptHonesty:            {WitnessDosCommitAudit: true},
 }
 
 // TaskErrorKind is the closed set of validation failure modes. It lets callers

@@ -169,7 +169,10 @@ func NewRegistry() *Registry {
 		r.register(m, ArmGateway, "internal/gateway", TierFrontier)
 	}
 	r.register("claude-3-5-haiku", ArmGateway, "internal/gateway", TierSmall)
-	for _, m := range []string{"qwen3.6", "smollm2", "glm-5.2"} {
+	for _, m := range []string{
+		"qwen3.6", "smollm2", "glm-5.2",
+		"qwen2.5-7b", "qwen2.5-coder-7b", "llama-3.2-3b", "gemma-4-4b", "qwen3-4b",
+	} {
 		r.register(m, ArmServe, "fak serve --gguf", TierSmall)
 	}
 	return r

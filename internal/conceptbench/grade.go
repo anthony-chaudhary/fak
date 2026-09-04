@@ -25,6 +25,10 @@ const (
 	ConceptVerdictRepair Concept = "verdict_repair"
 	ConceptHookProtocol  Concept = "hook_protocol"
 	ConceptHonesty       Concept = "honesty"
+
+	// ConceptTaskRetention is the task retention / hook protocol axis (#3812, epic #2721 concept #5).
+	// It aliases ConceptHookProtocol so callers can use either identifier.
+	ConceptTaskRetention Concept = ConceptHookProtocol
 )
 
 // Concepts is the full graded set, in the order of the issue's dispatch table.
@@ -158,7 +162,7 @@ func Grade(concept Concept, tr Transcript, fx Fixture, ref Referee) (Verdict, er
 		return gradeRefusal(tr, ref), nil
 	case ConceptVerdictRepair:
 		return gradeVerdictRepair(tr, fx, ref), nil
-	case ConceptHookProtocol:
+	case ConceptHookProtocol, Concept("task_retention"):
 		return gradeHookProtocol(tr), nil
 	case ConceptHonesty:
 		return gradeHonesty(tr, ref), nil
