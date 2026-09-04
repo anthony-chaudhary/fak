@@ -169,6 +169,9 @@ type WarmBand struct {
 	hits, thaws, refills, sheds int
 	closed                      bool
 
+	coldMu     sync.RWMutex
+	coldStates map[string]*HibernatedState
+
 	nudge chan struct{} // producer kick (buffered 1, coalescing)
 	done  chan struct{}
 	wg    sync.WaitGroup
@@ -189,19 +192,20 @@ func NewWarmBand(cfg WarmBandConfig) (*WarmBand, error) {
 		nowFn = time.Now
 	}
 	b := &WarmBand{
-		rc:      NewResidentCapBand(cfg.Low, cfg.High),
-		reserve: NewWarmReserve(cfg.MaxWarm),
-		store:   store,
-		horizon: cfg.Horizon,
-		now:     nowFn,
-		onDisk:  map[string]bool{},
-		blanks:  map[string]func() Hibernable{},
-		held:    map[string]Hibernable{},
-		warmAt:  map[string]time.Time{},
-		warming: map[string]bool{},
-		freed:   make(chan struct{}),
-		nudge:   make(chan struct{}, 1),
-		done:    make(chan struct{}),
+		rc:         NewResidentCapBand(cfg.Low, cfg.High),
+		reserve:    NewWarmReserve(cfg.MaxWarm),
+		store:      store,
+		horizon:    cfg.Horizon,
+		now:        nowFn,
+		onDisk:     map[string]bool{},
+		blanks:     map[string]func() Hibernable{},
+		held:       map[string]Hibernable{},
+		warmAt:     map[string]time.Time{},
+		warming:    map[string]bool{},
+		coldStates: map[string]*HibernatedState{},
+		freed:      make(chan struct{}),
+		nudge:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
 	}
 	b.wg.Add(1)
 	go b.produce()
@@ -235,6 +239,7 @@ func (b *WarmBand) Enroll(id string, r Restorable) error {
 		b.mu.Unlock()
 		return err
 	}
+	_, _ = b.recordColdState(id, r)
 	b.mu.Lock()
 	b.addParkedLocked(id)
 	b.mu.Unlock()
@@ -440,6 +445,7 @@ func (b *WarmBand) Yield(id string) error {
 		b.releaseSlot()
 		return err
 	}
+	_, _ = b.recordColdState(id, h)
 	b.mu.Lock()
 	b.addParkedLocked(id)
 	b.mu.Unlock()
@@ -530,6 +536,7 @@ func (b *WarmBand) Close() {
 		if _, err := b.store.Park(id, h); err != nil {
 			continue // the value is dropped either way; the loud path is the next Acquire
 		}
+		_, _ = b.recordColdState(id, h)
 		b.mu.Lock()
 		b.addParkedLocked(id)
 		b.mu.Unlock()
