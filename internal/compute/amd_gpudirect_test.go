@@ -1,0 +1,355 @@
+package compute
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestAMDGPUDirectHAL_TopologyAndReBAR(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		EnableLargeBARCheck:    true,
+		EnforceACSZeroRedirect: true,
+		DefaultPageSize:        4096,
+	})
+
+	// Register MI300X Node 0 (192 GB VRAM, 192 GB Large BAR)
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Instinct MI300X (Node 0)",
+		Architecture:   "gfx942",
+		PCIeBDF:        "0000:41:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024, // Full 192GB Large BAR
+		ACSEnabled:     false,
+		ACSRedirect:    false,
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     1,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+				Coherent:         true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error registering node 0: %v", err)
+	}
+
+	// Register MI300X Node 1 (192 GB VRAM, 192 GB Large BAR)
+	err = engine.RegisterNode(AMDDeviceNode{
+		NodeID:         1,
+		GPUID:          1,
+		DeviceName:     "AMD Instinct MI300X (Node 1)",
+		Architecture:   "gfx942",
+		PCIeBDF:        "0000:42:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		ACSEnabled:     false,
+		ACSRedirect:    false,
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     0,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+				Coherent:         true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error registering node 1: %v", err)
+	}
+
+	nodes := engine.DiscoverTopology()
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 topology nodes, got %d", len(nodes))
+	}
+
+	for _, n := range nodes {
+		if !n.IsLargeBAR {
+			t.Errorf("expected node %d to have IsLargeBAR=true", n.NodeID)
+		}
+	}
+
+	// Validate P2P route between Node 0 and Node 1 (direct xGMI)
+	ok, fabric, reason := engine.ValidateP2PRoute(0, 1)
+	if !ok {
+		t.Fatalf("expected route 0 -> 1 to be valid, reason: %s", reason)
+	}
+	if fabric != FabricXGMI {
+		t.Errorf("expected FabricXGMI, got %s", fabric)
+	}
+
+	// Execute P2P transfer
+	fb, bw, err := engine.TransferP2P(0, 1, 64*1024*1024)
+	if err != nil {
+		t.Fatalf("P2P transfer failed: %v", err)
+	}
+	if fb != FabricXGMI || bw != 896.0 {
+		t.Errorf("expected FabricXGMI / 896 GBps, got %s / %.1f GBps", fb, bw)
+	}
+
+	audit := engine.Audit()
+	if !audit.Healthy {
+		t.Errorf("expected healthy audit report, got unhealthy: %+v", audit)
+	}
+	if audit.NodesWithLargeBAR != 2 || audit.NodesWithSmallBAR != 0 {
+		t.Errorf("expected 2 Large BAR nodes and 0 Small BAR nodes, got %+v", audit)
+	}
+}
+
+func TestAMDGPUDirectHAL_SmallBARWarningAndACSConflict(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		EnableLargeBARCheck:    true,
+		EnforceACSZeroRedirect: true,
+	})
+
+	// Node 0 with Small BAR (256MB window for 24GB card)
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Radeon RX 7900 XTX (Small BAR)",
+		Architecture:   "gfx1100",
+		PCIeBDF:        "0000:03:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 24 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  256 * 1024 * 1024, // 256MB Small BAR!
+		ACSEnabled:     false,
+		ACSRedirect:    false,
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     1,
+				Fabric:           FabricPCIeSwitch,
+				BandwidthGBps:    64.0,
+				LatencyNanos:     450,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	// Node 1 with ACS Request Redirect enabled on PCIe bridge (P2P killer)
+	err = engine.RegisterNode(AMDDeviceNode{
+		NodeID:         1,
+		GPUID:          1,
+		DeviceName:     "AMD Radeon RX 7900 XTX (ACS Conflict)",
+		Architecture:   "gfx1100",
+		PCIeBDF:        "0000:04:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 24 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  24 * 1024 * 1024 * 1024,
+		ACSEnabled:     true,
+		ACSRedirect:    true, // ACS Request Redirect active!
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+	})
+	if err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	// Validate route should fail due to ACS Request Redirect over PCIe
+	ok, _, reason := engine.ValidateP2PRoute(0, 1)
+	if ok {
+		t.Fatalf("expected route 0 -> 1 to fail due to ACS Request Redirect, but succeeded")
+	}
+	if !strings.Contains(reason, "Access Control Services (ACS) Request Redirect") {
+		t.Errorf("expected ACS reason in error, got: %s", reason)
+	}
+
+	audit := engine.Audit()
+	if audit.Healthy {
+		t.Errorf("expected audit report to flag unhealthy status due to ACS conflict")
+	}
+	if !audit.ACSConflictDetected {
+		t.Errorf("expected ACSConflictDetected=true")
+	}
+	if audit.NodesWithSmallBAR != 1 {
+		t.Errorf("expected 1 Small BAR node, got %d", audit.NodesWithSmallBAR)
+	}
+
+	// Verify JSON output
+	data, err := audit.JSON()
+	if err != nil || len(data) == 0 {
+		t.Fatalf("failed to serialize audit JSON: %v", err)
+	}
+}
+
+func TestAMDGPUDirectHAL_DMABUFAndRDMARegistration(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		DefaultPageSize: 4096,
+	})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Instinct MI300X",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		DMABUFCapable:  true,
+	})
+	if err != nil {
+		t.Fatalf("register node failed: %v", err)
+	}
+
+	// Export 64 MiB VRAM buffer into DMA-BUF
+	vramAddr := uintptr(0x7f0000000000)
+	size := uint64(64 * 1024 * 1024)
+	dmabuf, err := engine.ExportVRAMToDMABUF(0, vramAddr, size)
+	if err != nil {
+		t.Fatalf("ExportVRAMToDMABUF failed: %v", err)
+	}
+	if dmabuf.FD <= 0 {
+		t.Errorf("invalid dmabuf fd %d", dmabuf.FD)
+	}
+	if dmabuf.VRAMAddress != vramAddr {
+		t.Errorf("vram address mismatch: got 0x%x, want 0x%x", dmabuf.VRAMAddress, vramAddr)
+	}
+
+	// Register DMA-BUF with RDMA subsystem (matching ibv_reg_dmabuf_mr)
+	rdmaRegion, err := engine.RegisterDMABUFForRDMA(dmabuf.FD, size)
+	if err != nil {
+		t.Fatalf("RegisterDMABUFForRDMA failed: %v", err)
+	}
+
+	// Crucial invariant: zero host CPU bounce/staging copies!
+	if rdmaRegion.StagingCopyCount() != 0 {
+		t.Fatalf("expected 0 staging copies, got %d", rdmaRegion.StagingCopyCount())
+	}
+	if rdmaRegion.RKey == 0 || rdmaRegion.LKey == 0 {
+		t.Errorf("invalid rdma keys: rkey=0x%x, lkey=0x%x", rdmaRegion.RKey, rdmaRegion.LKey)
+	}
+	if len(rdmaRegion.SGEs) != 1 {
+		t.Fatalf("expected 1 ScatterGatherElement, got %d", len(rdmaRegion.SGEs))
+	}
+	if rdmaRegion.SGEs[0].Address != vramAddr {
+		t.Errorf("SGE address mismatch: got 0x%x, want 0x%x", rdmaRegion.SGEs[0].Address, vramAddr)
+	}
+
+	// Deregister RDMA
+	err = engine.DeregisterRDMARegion(rdmaRegion.RKey)
+	if err != nil {
+		t.Fatalf("DeregisterRDMARegion failed: %v", err)
+	}
+
+	// Close DMA-BUF
+	err = engine.CloseDMABUF(dmabuf.FD)
+	if err != nil {
+		t.Fatalf("CloseDMABUF failed: %v", err)
+	}
+}
+
+func TestAMDGPUDirectHAL_MultiGigabyteSGEChunking(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		DefaultPageSize: 4096,
+	})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Instinct MI300X",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		DMABUFCapable:  true,
+	})
+	if err != nil {
+		t.Fatalf("register node failed: %v", err)
+	}
+
+	// Register a 6 GiB VRAM buffer (> math.MaxUint32 = 4 GiB - 1)
+	// Must produce 2 SGE chunks without integer truncation
+	vramAddr := uintptr(0x7f1000000000)
+	size := uint64(6 * 1024 * 1024 * 1024) // 6 GiB
+	dmabuf, err := engine.ExportVRAMToDMABUF(0, vramAddr, size)
+	if err != nil {
+		t.Fatalf("ExportVRAMToDMABUF failed: %v", err)
+	}
+
+	rdmaRegion, err := engine.RegisterDMABUFForRDMA(dmabuf.FD, size)
+	if err != nil {
+		t.Fatalf("RegisterDMABUFForRDMA failed: %v", err)
+	}
+
+	if len(rdmaRegion.SGEs) != 2 {
+		t.Fatalf("expected 2 SGE chunks for 6 GiB, got %d", len(rdmaRegion.SGEs))
+	}
+	if rdmaRegion.SGEs[0].Length != MaxSGELengthBytes {
+		t.Errorf("expected chunk 0 length %d, got %d", MaxSGELengthBytes, rdmaRegion.SGEs[0].Length)
+	}
+	expectedRem := uint32(size - MaxSGELengthBytes)
+	if rdmaRegion.SGEs[1].Length != expectedRem {
+		t.Errorf("expected chunk 1 length %d, got %d", expectedRem, rdmaRegion.SGEs[1].Length)
+	}
+}
+
+func TestAMDGPUDirectHAL_NVMeDirectStorageP2P(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+
+	cmd := &NVMeP2PCommand{
+		CommandID:      1,
+		Opcode:         0x02, // Read
+		NamespaceID:    1,
+		StartingLBA:    1024,
+		BlockCount:     8,
+		TargetVRAMAddr: uintptr(0x7f8000000000),
+		ByteLength:     32 * 1024, // 32 KiB
+	}
+
+	err := engine.ExecuteNVMeP2PTransfer(cmd)
+	if err != nil {
+		t.Fatalf("ExecuteNVMeP2PTransfer failed: %v", err)
+	}
+
+	if !cmd.Completed || cmd.Status != 0 {
+		t.Errorf("expected command completed with status 0, got completed=%v status=%d", cmd.Completed, cmd.Status)
+	}
+
+	audit := engine.Audit()
+	if audit.TotalTransfers != 1 || audit.TotalBytesMoved != 32*1024 {
+		t.Errorf("audit stats mismatch: transfers=%d bytes=%d", audit.TotalTransfers, audit.TotalBytesMoved)
+	}
+}
+
+func TestAMDGPUDirectHAL_HSAMemorySignal(t *testing.T) {
+	sig := NewHSAMemorySignal("sig_001", 0, uintptr(0xf4001000))
+	if sig.LoadRelaxed() != 0 {
+		t.Errorf("expected initial signal value 0, got %d", sig.LoadRelaxed())
+	}
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		sig.StoreRelease(42)
+	}()
+
+	ok, err := sig.WaitRelaxed(42, 500*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("WaitRelaxed failed: ok=%v, err=%v", ok, err)
+	}
+
+	// Test timeout
+	ok, err = sig.WaitRelaxed(999, 10*time.Millisecond)
+	if err == nil || ok {
+		t.Errorf("expected timeout error, got ok=%v, err=%v", ok, err)
+	}
+
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+	engine.RegisterSignal(sig)
+	retrieved := engine.GetSignal("sig_001")
+	if retrieved == nil || retrieved.LoadRelaxed() != 42 {
+		t.Errorf("failed to retrieve registered signal: %+v", retrieved)
+	}
+}
