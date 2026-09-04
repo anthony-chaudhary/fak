@@ -146,7 +146,7 @@ func negotiateCacheIntent(provider Provider, model string, in *CacheIntent) (Cac
 
 func openAISupportsExtendedRetention(model string) bool {
 	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4")
+	return strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "gpt-6") || strings.Contains(m, "astra") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4")
 }
 func anthropicSupportsTTL(model string) bool {
 	m := strings.ToLower(model)

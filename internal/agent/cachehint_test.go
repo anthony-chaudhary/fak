@@ -21,6 +21,7 @@ func TestCacheHintNegotiationCompatibility(t *testing.T) {
 		reason   string
 	}{
 		{"openai supported", ProviderOpenAIResponses, "gpt-5.6", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
+		{"openai gpt-6-astra supported", ProviderOpenAIResponses, "gpt-6-astra", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
 		{"openai privacy fail closed", ProviderOpenAIResponses, "gpt-5.6", intent(CacheHorizonTwentyFourHours, CacheResidencyMemory), CacheHintRejected, true, "privacy"},
 		{"openai unsupported fail closed", ProviderOpenAIResponses, "gpt-4.1", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintRejected, true, "does not support"},
 		{"openai advisory downgrade", ProviderOpenAIResponses, "gpt-4.1", func() *CacheIntent {
