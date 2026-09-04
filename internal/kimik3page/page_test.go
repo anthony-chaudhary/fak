@@ -72,3 +72,27 @@ func TestMarketingPageRepositoryLinksResolve(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePageContent(t *testing.T) {
+	root := pageRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := ValidatePageContent(string(raw))
+	if !report.Valid {
+		t.Fatalf("marketing page failed validation: missing=%v forbidden=%v", report.MissingRequired, report.ForbiddenMatches)
+	}
+
+	// Negative case: missing required tokens and containing forbidden claims.
+	invalidReport := ValidatePageContent("This is the fastest and cheapest solution.")
+	if invalidReport.Valid {
+		t.Fatalf("expected invalid report, got valid")
+	}
+	if len(invalidReport.MissingRequired) == 0 {
+		t.Errorf("expected missing required tokens")
+	}
+	if len(invalidReport.ForbiddenMatches) < 2 {
+		t.Errorf("expected at least 2 forbidden claims detected, got %v", invalidReport.ForbiddenMatches)
+	}
+}
