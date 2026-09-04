@@ -268,6 +268,7 @@ var tier = map[string]int{
 	"spendrollup":      2, // cross-account `fak spend` rollup with a WITNESSED/OBSERVED provenance gate that fails any figure missing its valuation basis or provenance label; imports fleetaccounts(1), off the hot path.
 	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
 	"goalregistry":     2, // canonical cross-harness goal identity and bindings; foundation composite over the tier-0 flock primitive.
+	"schedcontract":    1, // scheduler contracts, constraints, and validation; stdlib-only primitive.
 	"serverartifact":   1, // stdlib-only local artifact identity, digest, and mutation verification; imports no internal package.
 	"serverproduct":    2, // independent local-server product contract and readiness receipts; foundation composite over protocol and artifact identities.
 	"serveradapter":    2, // independent llama-server invocation rendering and readiness probes; foundation composite over server product contracts.

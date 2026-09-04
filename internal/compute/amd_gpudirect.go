@@ -256,10 +256,12 @@ type AMDGPUDirectHAL struct {
 	rdmaMRs    map[uint32]*RDMARegisteredRegion
 	signals    map[string]*HSAMemorySignal
 	doorbells  map[string]*HSADoorbell
+	queuePairs map[uint32]*RDMAQueuePair
 	transfers  int64
 	bytesMoved uint64
 	nextFD     int
 	nextKey    uint32
+	nextQPN    uint32
 }
 
 // NewAMDGPUDirectHAL initializes an AMD GPU Direct HAL coordinator.
@@ -268,14 +270,16 @@ func NewAMDGPUDirectHAL(cfg AMDGPUDirectConfig) *AMDGPUDirectHAL {
 		cfg.DefaultPageSize = 4096
 	}
 	return &AMDGPUDirectHAL{
-		cfg:       cfg,
-		nodes:     make(map[int]*AMDDeviceNode),
-		dmabufs:   make(map[int]*DMABUFHandle),
-		rdmaMRs:   make(map[uint32]*RDMARegisteredRegion),
-		signals:   make(map[string]*HSAMemorySignal),
-		doorbells: make(map[string]*HSADoorbell),
-		nextFD:    100,
-		nextKey:   0x2000,
+		cfg:        cfg,
+		nodes:      make(map[int]*AMDDeviceNode),
+		dmabufs:    make(map[int]*DMABUFHandle),
+		rdmaMRs:    make(map[uint32]*RDMARegisteredRegion),
+		signals:    make(map[string]*HSAMemorySignal),
+		doorbells:  make(map[string]*HSADoorbell),
+		queuePairs: make(map[uint32]*RDMAQueuePair),
+		nextFD:     100,
+		nextKey:    0x2000,
+		nextQPN:    0x1000,
 	}
 }
 
@@ -579,6 +583,44 @@ func (e *AMDGPUDirectHAL) GetRDMARegion(rkey uint32) *RDMARegisteredRegion {
 	return e.rdmaMRs[rkey]
 }
 
+// CreateQueuePair allocates and registers an RDMA Queue Pair in this coordinator.
+func (e *AMDGPUDirectHAL) CreateQueuePair(initAttr QPInitAttr) (*RDMAQueuePair, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.nextQPN++
+	qpNum := e.nextQPN
+	qp, err := NewRDMAQueuePair(qpNum, initAttr)
+	if err != nil {
+		return nil, err
+	}
+
+	e.queuePairs[qpNum] = qp
+	return qp, nil
+}
+
+// GetQueuePair retrieves an active Queue Pair by its QP number.
+func (e *AMDGPUDirectHAL) GetQueuePair(qpNum uint32) *RDMAQueuePair {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.queuePairs[qpNum]
+}
+
+// DestroyQueuePair destroys an active Queue Pair and flushes its remaining work.
+func (e *AMDGPUDirectHAL) DestroyQueuePair(qpNum uint32) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	qp, ok := e.queuePairs[qpNum]
+	if !ok {
+		return fmt.Errorf("amddirect: unknown queue pair number %d", qpNum)
+	}
+
+	_ = qp.Modify(QPAttr{State: QPStateError})
+	delete(e.queuePairs, qpNum)
+	return nil
+}
+
 // ExecuteNVMeP2PTransfer executes a direct NVMe-to-GPU peer-to-peer DMA transfer (BaM / SPDK-lite).
 // The NVMe controller DMA engine reads or writes flash blocks directly to/from the GPU VRAM address
 // over the PCIe bus without intermediate host DRAM staging copies.
@@ -696,6 +738,7 @@ type AuditReport struct {
 	ACSConflictDetected bool     `json:"acs_conflict_detected"`
 	ActiveDMABUFCount   int      `json:"active_dmabuf_count"`
 	ActiveRDMARegions   int      `json:"active_rdma_regions"`
+	ActiveQueuePairs    int      `json:"active_queue_pairs"`
 	TotalTransfers      int64    `json:"total_transfers"`
 	TotalBytesMoved     uint64   `json:"total_bytes_moved"`
 	Warnings            []string `json:"warnings"`
@@ -711,6 +754,7 @@ func (e *AMDGPUDirectHAL) Audit() AuditReport {
 		TotalNodes:        len(e.nodes),
 		ActiveDMABUFCount: len(e.dmabufs),
 		ActiveRDMARegions: len(e.rdmaMRs),
+		ActiveQueuePairs:  len(e.queuePairs),
 		TotalTransfers:    atomic.LoadInt64(&e.transfers),
 		TotalBytesMoved:   atomic.LoadUint64(&e.bytesMoved),
 		Warnings:          make([]string, 0),

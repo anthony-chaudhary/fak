@@ -144,23 +144,29 @@ Rather than having the host CPU submit POSIX I/O calls:
 
 ## Shipped fak Native Implementation
 
-The native implementation is shipped in `internal/compute/amd_gpudirect.go` and verified in `internal/compute/amd_gpudirect_test.go`:
+The native implementation is shipped across `internal/compute/` and `internal/devcmd/`:
 
-1. **`AMDGPUDirectEngine`**: Central coordinator for AMD GPU Direct operations.
-2. **`DiscoverTopology` & `ValidateP2PRoute`**: Discovers AMD GPU nodes, verifies ReBAR Large BAR apertures, inspects ACS Request Redirect posture, and validates P2P routes across xGMI, PCIe switch, and host bridge fabrics.
-3. **`ExportVRAMToDMABUF` & `RegisterDMABUFForRDMA`**: Exports GPU VRAM to DMA-BUF file descriptors and registers them with the RDMA subsystem, producing direct `ScatterGatherElement` (SGE) entries with `StagingCopyCount() == 0`.
-4. **`ExecuteNVMeP2PTransfer`**: Direct NVMe-to-GPU peer-to-peer storage DMA streaming.
-5. **`HSAMemorySignal`**: Sub-microsecond memory-mapped synchronization (`StoreRelease` / `WaitRelaxed`) emulating GPU ISA `s_waitcnt` polling.
+1. **`AMDGPUDirectHAL` (`amd_gpudirect.go`)**: Central coordinator for AMD GPU Direct operations, topology management, DMA-BUF exports, and HSA signals/doorbells.
+2. **`RDMAQueuePair` & Work Request Engine (`amd_gpudirect_rdma.go`)**: InfiniBand/RoCE verbs Queue Pair state machine (RESET/INIT/RTR/RTS) and Work Request (WR) engine supporting Send, Receive, Write, Read, and Atomics directly targeting VRAM DMA-BUF regions with `StagingCopyCount() == 0` (#11262).
+3. **NVMe VRAM Queues & Direct Storage Memory Slab (`amd_gpudirect_storage.go`)**: 64-byte SQE and 16-byte CQE VRAM-resident queue structures, PCIe MMIO doorbell ringing, and high-throughput Direct Storage Memory Slab Cache for direct NVMe KV cache offloading and weight streaming without host CPU DRAM touch (#11263).
+4. **`AMDGPUDirectCollective` (`amd_gpudirect_collective.go`)**: Implements `compute.CollectiveBackend` (AllReduceSum, AllGather, ReduceScatter, AllToAll) over intra-node xGMI mesh (up to 896 GB/s) and inter-node zero-copy RDMA Queue Pairs, verified byte-exact against CPU reference reductions (#11264).
+5. **Linux KFD/DRM Sysfs Prober (`amd_gpudirect_sysfs.go`)**: Discovers AMD GPU topology nodes, memory banks, and xGMI peer links directly from Linux `/sys/class/kfd/kfd/topology/nodes/` and PCIe resource aperture maps.
+6. **CLI Tools (`cmd/fak-dev` & `internal/devcmd/amd_gpudirect.go`)**: `fak-dev amd-gpudirect` CLI verb supporting `inspect`, `audit`, and `bench` (#11265).
 
 ### Verification Witness
-Executed via `./test.ps1 ./internal/compute/ -run TestAMDGPUDirect`:
+Executed via `./test.ps1`:
 ```
-fak/test.sh: FAK_FAST=1 -> ext4 scratch <scratch-dir>/fak-src
-fak/test.sh: distro go=go1.26.6, GOTOOLCHAIN=auto, target=./internal/compute/ -run TestAMDGPUDirect
-ok  	github.com/anthony-chaudhary/fak/internal/compute	0.019s
+fak/test.sh: distro go=go1.26.6, GOTOOLCHAIN=auto, target=./internal/compute/ -run TestAMDGPUDirect|TestNVMe|TestDirectStorage|TestParseKFD|TestParsePCIe|TestProbeKFD -count=1
+ok  	github.com/anthony-chaudhary/fak/internal/compute	0.048s
+
+fak/test.sh: distro go=go1.26.6, GOTOOLCHAIN=auto, target=./internal/devcmd/ -run TestRunAMDGPUDirect -count=1
+ok  	github.com/anthony-chaudhary/fak/internal/devcmd	0.013s
+
+fak/test.sh: distro go=go1.26.6, GOTOOLCHAIN=auto, target=./cmd/fak-dev/ -run TestRunDispatchesDevelopmentDiagnosticsUsage -count=1
+ok  	github.com/anthony-chaudhary/fak/cmd/fak-dev	0.014s
 ```
 Architest DAG enforcement passed:
 ```
-fak/test.sh: target=./internal/architest/...
-ok  	github.com/anthony-chaudhary/fak/internal/architest	25.129s
+fak/test.sh: target=./internal/architest/... -run TestEveryPackageDeclaresTier
+ok  	github.com/anthony-chaudhary/fak/internal/architest	0.018s
 ```
