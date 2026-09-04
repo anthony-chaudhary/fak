@@ -6,7 +6,7 @@
 // provider cache counter. It reasons in NORMALIZED units — one dense (uncompressed)
 // KV entry, per token, per layer, is 1.0 — so the absolute per-entry byte size (which
 // depends on unpublished V4 head dims) cancels out and is never fabricated. What the
-// fixture asserts is the published, witnessed invariants:
+// fixture asserts is the published, witnessed specifications:
 //
 //   - CSA is a rate-4 compressed KV block  (0.25 units/token/layer).
 //   - HCA is a rate-128 compressed KV block (1/128 units/token/layer).
@@ -45,12 +45,17 @@ var ReportContexts = []int{Ctx128K, Ctx512K, Ctx1M}
 type Kind int
 
 const (
-	KindCSA  Kind = iota // compressed rate-4 classical cache
-	KindHCA              // compressed rate-128 classical cache
-	KindSWA              // sliding-window side state (bounded to SWAWindow)
-	KindTail             // uncompressed recent tail (dense)
+	// KindCSA identifies compressed rate-4 classical attention cache blocks.
+	KindCSA Kind = iota
+	// KindHCA identifies hierarchical compressed rate-128 attention cache blocks.
+	KindHCA
+	// KindSWA identifies sliding-window attention side state bounded to SWAWindow tokens.
+	KindSWA
+	// KindTail identifies uncompressed dense recent tokens.
+	KindTail
 )
 
+// String returns the canonical human-readable abbreviation for the cache kind.
 func (k Kind) String() string {
 	switch k {
 	case KindCSA:
@@ -119,11 +124,15 @@ func MandatoryDurableUnits(seq int) float64 {
 type Policy int
 
 const (
-	FullSWACache       Policy = iota // store the SWA window at a window-cadence; zero recompute on hit.
-	PeriodicCheckpoint               // store SWA state every N tokens; recompute the tail from the nearest checkpoint.
-	ZeroSWACache                     // store nothing for SWA; recompute the whole window on a hit.
+	// FullSWACache stores the sliding window at window cadence, eliminating recompute on hits.
+	FullSWACache Policy = iota
+	// PeriodicCheckpoint persists sliding window state every N tokens, recomputing trailing tokens.
+	PeriodicCheckpoint
+	// ZeroSWACache retains no durable sliding window state, recomputing the entire window on hits.
+	ZeroSWACache
 )
 
+// String returns the descriptive identifier for the on-disk sliding window policy.
 func (p Policy) String() string {
 	switch p {
 	case FullSWACache:
