@@ -640,3 +640,231 @@ func pointIDs(points []Point) []string {
 }
 
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }
+
+// MonotonicityType specifies expected directional monotonicity of a metric surface.
+type MonotonicityType string
+
+const (
+	MonotonicNonDecreasing MonotonicityType = "non-decreasing"
+)
+
+// PrefillSample represents one observation point in a prompt prefill response surface.
+type PrefillSample struct {
+	PromptLength int     `json:"prompt_length"`
+	Throughput   float64 `json:"throughput"`
+	LatencyMs    float64 `json:"latency_ms"`
+}
+
+// CertificationCriteria specifies quality and stability boundaries for certification.
+type CertificationCriteria struct {
+	MaxVariance       float64          `json:"max_variance,omitempty"`
+	MaxCV             float64          `json:"max_cv,omitempty"`
+	Monotonicity      MonotonicityType `json:"monotonicity,omitempty"`
+	MaxTurnDurationMs float64          `json:"max_turn_duration_ms,omitempty"`
+}
+
+// SweepCertResult captures the evaluation verdict and cryptographic receipt digest.
+type SweepCertResult struct {
+	Passed     bool     `json:"passed"`
+	Monotonic  bool     `json:"monotonic"`
+	Digest     string   `json:"digest"`
+	Violations []string `json:"violations,omitempty"`
+}
+
+// TokenLatencyDistribution captures inter-token latency measurements and jitter tolerances.
+type TokenLatencyDistribution struct {
+	LatenciesMs []float64 `json:"latencies_ms"`
+	MaxJitterMs float64   `json:"max_jitter_ms"`
+}
+
+// AgentTurnSample captures resource usage and latency of a single conversational turn.
+type AgentTurnSample struct {
+	TurnIndex        int     `json:"turn_index"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CumulativeTokens int     `json:"cumulative_tokens"`
+	TurnDurationMs   float64 `json:"turn_duration_ms"`
+}
+
+// SweepCert evaluates empirical benchmark sweeps against strict performance bounds.
+type SweepCert struct{}
+
+// NewSweepCert constructs a new SweepCert validator.
+func NewSweepCert() *SweepCert {
+	return &SweepCert{}
+}
+
+// CertifyPrefillSurface verifies throughput monotonicity and statistical variance.
+func (s *SweepCert) CertifyPrefillSurface(samples []PrefillSample, criteria *CertificationCriteria) (*SweepCertResult, error) {
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("empty prefill points")
+	}
+	for _, sample := range samples {
+		if !finite(sample.Throughput) || sample.Throughput < 0 {
+			return nil, fmt.Errorf("invalid throughput: %v", sample.Throughput)
+		}
+	}
+
+	monotonic := true
+	var violations []string
+
+	for i := 1; i < len(samples); i++ {
+		if samples[i].Throughput < samples[i-1].Throughput {
+			monotonic = false
+			violations = append(violations, fmt.Sprintf("monotonicity violation: throughput regressed from %f to %f at prompt length %d",
+				samples[i-1].Throughput, samples[i].Throughput, samples[i].PromptLength))
+		}
+	}
+
+	throughputs := make([]float64, len(samples))
+	for i, sample := range samples {
+		throughputs[i] = sample.Throughput
+	}
+	variance, cv := computeVarianceAndCV(throughputs)
+
+	if criteria != nil {
+		if criteria.Monotonicity == MonotonicNonDecreasing && !monotonic {
+			// already recorded violation
+		}
+		if criteria.MaxVariance > 0 && variance > criteria.MaxVariance {
+			violations = append(violations, fmt.Sprintf("variance %f exceeds ceiling %f", variance, criteria.MaxVariance))
+		}
+		if criteria.MaxCV > 0 && cv > criteria.MaxCV {
+			violations = append(violations, fmt.Sprintf("CV %f exceeds ceiling %f", cv, criteria.MaxCV))
+		}
+	}
+
+	h := sha256.New()
+	b, _ := json.Marshal(samples)
+	h.Write(b)
+	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
+
+	passed := len(violations) == 0 && monotonic
+	return &SweepCertResult{
+		Passed:     passed,
+		Monotonic:  monotonic,
+		Digest:     digest,
+		Violations: violations,
+	}, nil
+}
+
+// CertifyTokenLatencyDistribution verifies inter-token latency jitter and distribution stability.
+func (s *SweepCert) CertifyTokenLatencyDistribution(dist TokenLatencyDistribution, criteria *CertificationCriteria) (*SweepCertResult, error) {
+	if len(dist.LatenciesMs) == 0 {
+		return nil, fmt.Errorf("empty token latencies")
+	}
+	for _, lat := range dist.LatenciesMs {
+		if !finite(lat) || lat < 0 {
+			return nil, fmt.Errorf("invalid token latency: %v", lat)
+		}
+	}
+
+	var violations []string
+	if dist.MaxJitterMs > 0 {
+		for i := 1; i < len(dist.LatenciesMs); i++ {
+			jitter := math.Abs(dist.LatenciesMs[i] - dist.LatenciesMs[i-1])
+			if jitter > dist.MaxJitterMs {
+				violations = append(violations, fmt.Sprintf("jitter %f ms exceeds max %f ms between token %d and %d",
+					jitter, dist.MaxJitterMs, i-1, i))
+				break
+			}
+		}
+	}
+
+	variance, cv := computeVarianceAndCV(dist.LatenciesMs)
+	if criteria != nil {
+		if criteria.MaxVariance > 0 && variance > criteria.MaxVariance {
+			violations = append(violations, fmt.Sprintf("latency variance %f exceeds ceiling %f", variance, criteria.MaxVariance))
+		}
+		if criteria.MaxCV > 0 && cv > criteria.MaxCV {
+			violations = append(violations, fmt.Sprintf("latency CV %f exceeds ceiling %f", cv, criteria.MaxCV))
+		}
+	}
+
+	h := sha256.New()
+	b, _ := json.Marshal(dist)
+	h.Write(b)
+	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
+
+	return &SweepCertResult{
+		Passed:     len(violations) == 0,
+		Monotonic:  true,
+		Digest:     digest,
+		Violations: violations,
+	}, nil
+}
+
+// CertifyAgentTurns verifies monotonic cumulative tokens and bounded turn latency.
+func (s *SweepCert) CertifyAgentTurns(turns []AgentTurnSample, criteria *CertificationCriteria) (*SweepCertResult, error) {
+	if len(turns) == 0 {
+		return nil, fmt.Errorf("empty agent turns")
+	}
+	for _, turn := range turns {
+		if !finite(turn.TurnDurationMs) || turn.TurnDurationMs < 0 {
+			return nil, fmt.Errorf("invalid turn duration: %v", turn.TurnDurationMs)
+		}
+	}
+
+	var violations []string
+	for i := 1; i < len(turns); i++ {
+		if turns[i].CumulativeTokens < turns[i-1].CumulativeTokens {
+			violations = append(violations, fmt.Sprintf("cumulative token rollback at turn %d: %d < %d",
+				turns[i].TurnIndex, turns[i].CumulativeTokens, turns[i-1].CumulativeTokens))
+			break
+		}
+	}
+
+	durations := make([]float64, len(turns))
+	for i, turn := range turns {
+		durations[i] = turn.TurnDurationMs
+		if criteria != nil && criteria.MaxTurnDurationMs > 0 && turn.TurnDurationMs > criteria.MaxTurnDurationMs {
+			violations = append(violations, fmt.Sprintf("turn %d duration %f ms exceeds ceiling %f ms",
+				turn.TurnIndex, turn.TurnDurationMs, criteria.MaxTurnDurationMs))
+		}
+	}
+
+	variance, cv := computeVarianceAndCV(durations)
+	if criteria != nil {
+		if criteria.MaxVariance > 0 && variance > criteria.MaxVariance {
+			violations = append(violations, fmt.Sprintf("turn duration variance %f exceeds ceiling %f", variance, criteria.MaxVariance))
+		}
+		if criteria.MaxCV > 0 && cv > criteria.MaxCV {
+			violations = append(violations, fmt.Sprintf("turn duration CV %f exceeds ceiling %f", cv, criteria.MaxCV))
+		}
+	}
+
+	h := sha256.New()
+	b, _ := json.Marshal(turns)
+	h.Write(b)
+	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
+
+	return &SweepCertResult{
+		Passed:     len(violations) == 0,
+		Monotonic:  true,
+		Digest:     digest,
+		Violations: violations,
+	}, nil
+}
+
+func computeVarianceAndCV(values []float64) (float64, float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	mean := sum / float64(len(values))
+	var sqDiffSum float64
+	for _, v := range values {
+		diff := v - mean
+		sqDiffSum += diff * diff
+	}
+	variance := sqDiffSum / float64(len(values))
+	stdDev := math.Sqrt(variance)
+	cv := 0.0
+	if mean > 0 {
+		cv = stdDev / mean
+	}
+	return variance, cv
+}
