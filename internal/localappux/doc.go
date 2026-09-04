@@ -1,0 +1,6 @@
+// Package localappux renders host-app language for local compute lifecycle states.
+//
+// Invariant: UX rendering is deterministic and fail-closed.
+// Guard: Diagnostic export enforces strict redaction of sensitive identifiers, tokens, and prompt context before external serialization.
+// Assumption: All state transitions resolve to well-defined lifecycle copy with safe fallback actions.
+package localappux
