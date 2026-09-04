@@ -10,6 +10,10 @@
 // The clock is an abstract integer chosen by the caller: Deadline, now, and
 // PredictedCost must all be expressed in the same unit. An item is dispatched no
 // earlier than now, so it is predicted to finish at now+PredictedCost.
+//
+// Invariant: deadline admission decisions are fail-closed and deterministic.
+// Guard: non-degradable items are never shed, ensuring critical tasks are retained even under contention.
+// Guard: on-time items are never shed (miss margin must be strictly positive and >= dropThreshold).
 package deadlineadmit
 
 import "sort"
