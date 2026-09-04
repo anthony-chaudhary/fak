@@ -1,3 +1,9 @@
+// Package qwenflashnext implements prompt formatting and response parsing for
+// the Qwen3.8 Flash-Next generation model family.
+//
+// Invariant: Prompt formatting matches the pinned upstream chat template exactly across system, user, assistant, and tool roles.
+// Contract: ParseResponse extracts reasoning blocks, final text responses, and tool calls deterministically without side effects.
+// Precondition: Non-empty message slices must begin with a system message if any system message is present.
 package qwenflashnext
 
 import (
@@ -13,9 +19,13 @@ const (
 	IMEnd   = "<|im_end|>"
 )
 
+// StopTokens lists the string tokens indicating generation cessation in Qwen chat format.
 var StopTokens = []string{IMEnd}
+
+// StopTokenIDs specifies the numeric vocabulary token identifiers that terminate generation.
 var StopTokenIDs = []int{248046}
 
+// Message represents a single conversational turn with role, body, optional reasoning, and tool calls.
 type Message struct {
 	Role             string
 	Content          string
@@ -23,11 +33,13 @@ type Message struct {
 	ToolCalls        []ToolCall
 }
 
+// ToolCall describes a structured tool invocation with function name and parameter arguments.
 type ToolCall struct {
 	Name      string
 	Arguments map[string]any
 }
 
+// RenderOptions configures prompt generation including thinking blocks and reasoning effort directives.
 type RenderOptions struct {
 	AddGenerationPrompt bool
 	EnableThinking      bool
@@ -164,6 +176,7 @@ func renderToolCall(b *strings.Builder, call ToolCall) {
 	b.WriteString("</function>\n</tool_call>")
 }
 
+// ParsedResponse holds the decomposed segments of a model generation output.
 type ParsedResponse struct {
 	Analysis   string
 	Final      string
