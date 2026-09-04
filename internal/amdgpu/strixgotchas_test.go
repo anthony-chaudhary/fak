@@ -275,6 +275,87 @@ func TestAuditHostGotchas_StrixHalo64GB_TTM(t *testing.T) {
 	if !strings.Contains(fixText, "ttm.pages_limit=14680064") {
 		t.Errorf("expected 64GB fix plan to target 14680064 pages, got: %s", fixText)
 	}
+
+	// Dynamic scaling contrast: on a 128GB system, 14680064 pages (~56 GiB) is INSUFFICIENT (<30M threshold)
+	// and must be flagged as DEFECT_DETECTED with 120 GiB (31457280) target.
+	env128Insufficient := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    128 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 14680064,
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report128Insufficient := AuditHostGotchas(env128Insufficient)
+	for _, f := range report128Insufficient.Findings {
+		if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+			if f.Status != StatusDefectDetected {
+				t.Fatalf("expected 128GB system with 14.6M pages to be DEFECT_DETECTED, got %s", f.Status)
+			}
+			if !strings.Contains(f.Details, "120 GiB") {
+				t.Errorf("expected 128GB defect details to cite 120 GiB target, got: %s", f.Details)
+			}
+		}
+	}
+	fixes128 := GenerateFixPlan(report128Insufficient)
+	fixText128 := strings.Join(fixes128, "\n")
+	if !strings.Contains(fixText128, "ttm.pages_limit=31457280") {
+		t.Errorf("expected 128GB fix plan to target 31457280 pages, got: %s", fixText128)
+	}
+
+	// 128GB system with full 31457280 pages should be SAFE_CONFIGURED and cite 120 GiB
+	env128Safe := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    128 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 31457280,
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report128Safe := AuditHostGotchas(env128Safe)
+	for _, f := range report128Safe.Findings {
+		if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+			if f.Status != StatusSafeConfigured {
+				t.Fatalf("expected 128GB system with 31.4M pages to be SAFE_CONFIGURED, got %s", f.Status)
+			}
+			if !strings.Contains(f.Details, "120 GiB") {
+				t.Errorf("expected 128GB details to cite 120 GiB, got: %s", f.Details)
+			}
+		}
+	}
+
+	// 96GB system with full 23068672 pages (~88 GiB) should be SAFE_CONFIGURED and cite 88 GiB
+	env96Safe := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    96 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 23068672,
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report96Safe := AuditHostGotchas(env96Safe)
+	for _, f := range report96Safe.Findings {
+		if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+			if f.Status != StatusSafeConfigured {
+				t.Fatalf("expected 96GB system with 23M pages to be SAFE_CONFIGURED, got %s", f.Status)
+			}
+			if !strings.Contains(f.Details, "88 GiB") {
+				t.Errorf("expected 96GB details to cite 88 GiB, got: %s", f.Details)
+			}
+		}
+	}
+
+	// 96GB system with 0 pages should suggest 88 GiB / 23068672
+	env96Defect := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    96 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 0,
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report96Defect := AuditHostGotchas(env96Defect)
+	fixes96 := GenerateFixPlan(report96Defect)
+	fixText96 := strings.Join(fixes96, "\n")
+	if !strings.Contains(fixText96, "ttm.pages_limit=23068672") {
+		t.Errorf("expected 96GB fix plan to target 23068672 pages, got: %s", fixText96)
+	}
 }
 
 func TestAuditHostGotchas_LiveGotchasEvaluations(t *testing.T) {
@@ -489,6 +570,252 @@ func TestAuditHostGotchas_LiveGotchasEvaluations(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("GOTCHA_WC_CPU_READ_COLLAPSE", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, ProcCPUInfo: "flags: sse sse2"}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_WC_CPU_READ_COLLAPSE" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when CPU lacks avx512, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, ProcCPUInfo: "flags: avx512f"}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_WC_CPU_READ_COLLAPSE" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when CPU has avx512, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_GFX1151_OVERRIDE", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"HSA_OVERRIDE_GFX_VERSION": "11.0.0"},
+		}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_GFX1151_OVERRIDE" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED for HSA_OVERRIDE_GFX_VERSION=11.0.0, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"HSA_OVERRIDE_GFX_VERSION": "11.5.1"},
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_GFX1151_OVERRIDE" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED for HSA_OVERRIDE_GFX_VERSION=11.5.1, got %s", f.Status)
+				}
+			}
+		}
+
+		envAdvisory := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"HSA_OVERRIDE_GFX_VERSION": "12.0.0"},
+		}
+		rep = AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_GFX1151_OVERRIDE" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY for non-standard HSA_OVERRIDE_GFX_VERSION, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_GGML_UNIFIED_CORRUPT", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"GGML_CUDA_ENABLE_UNIFIED_MEMORY": "0"},
+		}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_GGML_UNIFIED_CORRUPT" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when GGML_CUDA_ENABLE_UNIFIED_MEMORY is defined, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{},
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_GGML_UNIFIED_CORRUPT" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when GGML_CUDA_ENABLE_UNIFIED_MEMORY is unset, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_IOMMU_DISABLE_SIDE_EFFECTS", func(t *testing.T) {
+		envAdvisory := GotchaProbeEnvironment{
+			GOOS:          "linux",
+			IsStrixHalo:   true,
+			KernelCmdline: "amd_iommu=off",
+		}
+		rep := AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_IOMMU_DISABLE_SIDE_EFFECTS" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY when amd_iommu=off, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:          "linux",
+			IsStrixHalo:   true,
+			KernelCmdline: "quiet splash",
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_IOMMU_DISABLE_SIDE_EFFECTS" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when IOMMU enabled, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_MESA_RADV_STALE", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			MesaVersion: "24.2.1",
+		}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_MESA_RADV_STALE" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED for Mesa 24.2.1, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			MesaVersion: "25.3.0",
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_MESA_RADV_STALE" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED for Mesa 25.3.0, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_KERNEL7_KFD_DEADLOCK", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{
+			GOOS:          "linux",
+			IsStrixHalo:   true,
+			KernelVersion: "7.0.0-28-generic",
+		}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_KERNEL7_KFD_DEADLOCK" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED for kernel 7.0.0-28, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:          "linux",
+			IsStrixHalo:   true,
+			KernelVersion: "6.17.0-35-generic",
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_KERNEL7_KFD_DEADLOCK" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED for kernel 6.17.0, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_CPU_STORM_INVLPGB", func(t *testing.T) {
+		envAdvisory := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			ProcCPUInfo: "model name: Zen 5\nflags: avx512f",
+		}
+		rep := AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_CPU_STORM_INVLPGB" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY when invlpgb missing, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			ProcCPUInfo: "model name: Zen 5\nflags: avx512f invlpgb",
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_CPU_STORM_INVLPGB" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when invlpgb present, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_VLLM_HIPBLASLT", func(t *testing.T) {
+		envAdvisory := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{},
+		}
+		rep := AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_VLLM_HIPBLASLT" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY when TORCH_BLAS_PREFER_HIPBLASLT unset, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_VLLM_HIPBLASLT" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when TORCH_BLAS_PREFER_HIPBLASLT=1, got %s", f.Status)
+				}
+			}
+		}
+	})
 }
 
 func TestAuditHostGotchas_ContainerAndWSL2(t *testing.T) {
@@ -525,8 +852,24 @@ func TestAuditHostGotchas_ContainerAndWSL2(t *testing.T) {
 		// Fix plan must not emit update-grub for container
 		fixes := GenerateFixPlan(rep)
 		fixText := strings.Join(fixes, "\n")
-		if strings.Contains(fixText, "update-grub") {
-			t.Errorf("fix plan emitted update-grub inside container environment")
+		if strings.Contains(fixText, "update-grub") || strings.Contains(fixText, "grub-mkconfig") {
+			t.Errorf("fix plan emitted bootloader update inside container environment: %s", fixText)
+		}
+
+		// Rollback script must not emit update-grub for container
+		rollbacks := GenerateRollbackScript(rep)
+		rbText := strings.Join(rollbacks, "\n")
+		if strings.Contains(rbText, "update-grub") || strings.Contains(rbText, "grub-mkconfig") || strings.Contains(rbText, "/etc/default/grub") {
+			t.Errorf("rollback emitted grub modifications inside container environment: %s", rbText)
+		}
+
+		// Container detection via cgroup when .dockerenv is absent
+		mockCgroupFS := NewMockFS()
+		mockCgroupFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
+		mockCgroupFS.files["/proc/1/cgroup"] = []byte("0::/docker/e938dfbc1234\n")
+		cgroupEnv := BuildHostProbeEnvironmentWithFS(mockCgroupFS)
+		if !cgroupEnv.IsContainer {
+			t.Errorf("expected container detection via /proc/1/cgroup")
 		}
 	})
 
@@ -560,8 +903,14 @@ func TestAuditHostGotchas_ContainerAndWSL2(t *testing.T) {
 
 		fixes := GenerateFixPlan(rep)
 		fixText := strings.Join(fixes, "\n")
-		if strings.Contains(fixText, "update-grub") {
-			t.Errorf("fix plan emitted update-grub in WSL2 environment")
+		if strings.Contains(fixText, "update-grub") || strings.Contains(fixText, "grub-mkconfig") {
+			t.Errorf("fix plan emitted bootloader update in WSL2 environment: %s", fixText)
+		}
+
+		rollbacks := GenerateRollbackScript(rep)
+		rbText := strings.Join(rollbacks, "\n")
+		if strings.Contains(rbText, "update-grub") || strings.Contains(rbText, "grub-mkconfig") || strings.Contains(rbText, "/etc/default/grub") {
+			t.Errorf("rollback emitted grub modifications in WSL2 environment: %s", rbText)
 		}
 	})
 }
@@ -604,6 +953,18 @@ func TestAuditHostGotchas_MultiDistroBootloaderAndPackageManager(t *testing.T) {
 			}
 			if !strings.Contains(joined, tc.mesaCmd) {
 				t.Errorf("distro %s: expected mesa command %q in fix plan, got: %s", tc.distro, tc.mesaCmd, joined)
+			}
+
+			rollbacks := GenerateRollbackScript(rep)
+			rbJoined := strings.Join(rollbacks, "\n")
+			if tc.distro == "nixos" {
+				if strings.Contains(rbJoined, "update-grub") || strings.Contains(rbJoined, "grub-mkconfig") {
+					t.Errorf("distro nixos: expected no grub commands in rollback, got: %s", rbJoined)
+				}
+			} else {
+				if !strings.Contains(rbJoined, tc.bootloaderCmd) {
+					t.Errorf("distro %s: expected bootloader command %q in rollback, got: %s", tc.distro, tc.bootloaderCmd, rbJoined)
+				}
 			}
 		})
 	}
@@ -713,6 +1074,35 @@ func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
 	if !env.IsStrixHalo {
 		t.Errorf("expected IsStrixHalo=true")
 	}
+
+	// Test VRAM BAR fallback via /sys/class/drm/card0/device/resource when mem_info_vram_total is absent
+	mockBarFS := NewMockFS()
+	mockBarFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
+	// resource file format: start end flags (hex)
+	// 512 MiB BAR: start 0x0000007fe0000000 end 0x0000007fffffffff (536870912 bytes)
+	mockBarFS.files["/sys/class/drm/card0/device/resource"] = []byte("0x0000007fe0000000 0x0000007fffffffff 0x0014220c\n")
+	envBar := BuildHostProbeEnvironmentWithFS(mockBarFS)
+	if envBar.SysfsVRAMTotalBytes != 512*1024*1024 {
+		t.Errorf("expected 512 MiB VRAM from resource fallback, got %d", envBar.SysfsVRAMTotalBytes)
+	}
+
+	// Test Mesa version probing via dpkg status
+	mockDpkgFS := NewMockFS()
+	mockDpkgFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
+	mockDpkgFS.files["/var/lib/dpkg/status"] = []byte("Package: libgl1-mesa-dri\nStatus: install ok installed\nVersion: 26.0.2-1ubuntu1\n\nPackage: bash\nVersion: 5.2-1\n")
+	envDpkg := BuildHostProbeEnvironmentWithFS(mockDpkgFS)
+	if envDpkg.MesaVersion != "26.0.2" {
+		t.Errorf("expected MesaVersion '26.0.2' from dpkg status, got %q", envDpkg.MesaVersion)
+	}
+
+	// Test Mesa version probing via pacman desc
+	mockPacmanFS := NewMockFS()
+	mockPacmanFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
+	mockPacmanFS.files["/var/lib/pacman/local/mesa-25.2.0-1/desc"] = []byte("%NAME%\nmesa\n\n%VERSION%\n25.2.0-1\n")
+	envPacman := BuildHostProbeEnvironmentWithFS(mockPacmanFS)
+	if envPacman.MesaVersion != "25.2.0" {
+		t.Errorf("expected MesaVersion '25.2.0' from pacman desc, got %q", envPacman.MesaVersion)
+	}
 }
 
 func TestAuditHostGotchas_RollbackScriptAndBoundaryChecking(t *testing.T) {
@@ -774,6 +1164,17 @@ func TestAuditHostGotchas_RollbackScriptAndBoundaryChecking(t *testing.T) {
 	if valid || err == nil {
 		t.Errorf("expected 70 GiB on 64 GiB to be invalid, got valid=%t, err=%v", valid, err)
 	}
+
+	valid, err = ValidateTTMPagesLimit(16252928, total64GB) // 62 GiB (leaves only 2 GiB reserve < 4 GiB)
+	if valid || err == nil {
+		t.Errorf("expected 62 GiB on 64 GiB (leaving 2GB reserve) to be invalid, got valid=%t, err=%v", valid, err)
+	}
+
+	// Boundary check with zero RAM (graceful pass)
+	valid, err = ValidateTTMPagesLimit(1000, 0)
+	if !valid || err != nil {
+		t.Errorf("expected 0 total RAM to return valid=true, got valid=%t, err=%v", valid, err)
+	}
 }
 
 func TestRunGotchasCLI_RollbackAndOutput(t *testing.T) {
@@ -801,7 +1202,8 @@ func TestRunGotchasCLI_RollbackAndOutput(t *testing.T) {
 func TestAuditHostGotchas_ReadOnlySysfs(t *testing.T) {
 	// Issue #11250: Mock sysfs handling read-only or empty files
 	mockFS := NewMockFS()
-	// No files created in mockFS; all ReadFile calls will fail with os.ErrNotExist
+	mockFS.files["/proc/version"] = []byte("Linux version 6.17.0 (test@build) #1 SMP\n")
+	// No sysfs files created in mockFS; all ReadFile calls will fail with os.ErrNotExist
 	env := BuildHostProbeEnvironmentWithFS(mockFS)
 	rep := AuditHostGotchas(env)
 	if rep == nil {
