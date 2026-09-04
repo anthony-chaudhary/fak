@@ -6,10 +6,13 @@ import (
 	"strings"
 )
 
+// Schema defines the canonical local app contract schema version.
 const Schema = "fak.local-app-contract/1"
 
+// Terminal represents the terminal lifecycle outcome of a local app task.
 type Terminal string
 
+// Terminal lifecycle outcomes for local app tasks.
 const (
 	Completed Terminal = "completed"
 	Cancelled Terminal = "cancelled"
@@ -18,6 +21,7 @@ const (
 	HandedOff Terminal = "handed_off"
 )
 
+// Manifest declares the signed execution contract and task definitions for an engine.
 type Manifest struct {
 	Schema    string   `json:"schema"`
 	Revision  string   `json:"revision"`
@@ -25,6 +29,8 @@ type Manifest struct {
 	Engine    string   `json:"engine"`
 	Tasks     []string `json:"tasks"`
 }
+
+// Event represents an ordered lifecycle occurrence within a task execution stream.
 type Event struct {
 	Schema   string `json:"schema"`
 	Sequence uint64 `json:"sequence"`
@@ -32,6 +38,8 @@ type Event struct {
 	Kind     string `json:"kind"`
 	Reason   string `json:"reason,omitempty"`
 }
+
+// Receipt captures the audited terminal execution record of a task.
 type Receipt struct {
 	Schema           string           `json:"schema"`
 	TaskID           string           `json:"task_id"`
@@ -47,6 +55,7 @@ type Receipt struct {
 	Reason           string           `json:"reason,omitempty"`
 }
 
+// Validate checks that required fields are present and the terminal state is recognized.
 func (r Receipt) Validate() error {
 	if r.Schema != Schema || r.TaskID == "" || r.Engine == "" || r.Attempts < 1 {
 		return errors.New("invalid receipt")
@@ -57,12 +66,16 @@ func (r Receipt) Validate() error {
 	}
 	return errors.New("unknown terminal state")
 }
+
+// Marshal validates the receipt and serializes it to JSON.
 func (r Receipt) Marshal() ([]byte, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
 	return json.Marshal(r)
 }
+
+// CheckAdditiveCompatibility verifies that no fields from oldRaw were removed in newRaw.
 func CheckAdditiveCompatibility(oldRaw, newRaw []byte) error {
 	var a, b map[string]any
 	if json.Unmarshal(oldRaw, &a) != nil || json.Unmarshal(newRaw, &b) != nil {
@@ -75,6 +88,8 @@ func CheckAdditiveCompatibility(oldRaw, newRaw []byte) error {
 	}
 	return nil
 }
+
+// ContainsSensitiveField reports whether raw JSON contains sensitive payload fields.
 func ContainsSensitiveField(raw []byte) bool {
 	s := strings.ToLower(string(raw))
 	for _, x := range []string{"prompt", "output_text", "file_path", "username", "device_id"} {
@@ -84,6 +99,8 @@ func ContainsSensitiveField(raw []byte) bool {
 	}
 	return false
 }
+
+// Replay checks that events are schema-compliant and strictly monotonic in sequence.
 func Replay(events []Event) error {
 	var last uint64
 	for i, e := range events {
