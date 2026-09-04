@@ -674,7 +674,16 @@ func extractRedirections(seg string) (string, []BashWriteTarget) {
 						endIdx++
 					}
 				} else {
-					for endIdx < len(runes) && !isShellDelimRune(runes[endIdx]) {
+					for endIdx < len(runes) {
+						if isShellDelimRune(runes[endIdx]) {
+							numSlashes := 0
+							for k := endIdx - 1; k >= targetIdx && runes[k] == '\\'; k-- {
+								numSlashes++
+							}
+							if numSlashes%2 == 0 {
+								break
+							}
+						}
 						endIdx++
 					}
 				}
@@ -736,7 +745,25 @@ func tokenizeShellWords(cmd string) []shellWord {
 			continue
 		}
 		if c == '\\' && quote != '\'' {
-			escaped = true
+			if quote == '"' {
+				if i+1 < len(cmd) {
+					next := cmd[i+1]
+					if next == '"' || next == '\\' || next == '$' || next == '`' || next == '\n' {
+						escaped = true
+						continue
+					}
+				}
+				b.WriteByte(c)
+				continue
+			}
+			if i+1 < len(cmd) {
+				next := cmd[i+1]
+				if isShellEscapeChar(next) {
+					escaped = true
+					continue
+				}
+			}
+			b.WriteByte(c)
 			continue
 		}
 		if quote != 0 {
@@ -1094,7 +1121,41 @@ func stripShellComments(cmd string) string {
 	return b.String()
 }
 
-// cleanShellPath cleans quotes and escapes from a target path operand.
+// isWindowsVolume reports whether s starts with a Windows drive letter path matching ^[A-Za-z]:[\\/].
+func isWindowsVolume(s string) bool {
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		c := s[0]
+		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+	}
+	return false
+}
+
+// hasWindowsDrivePrefix reports whether s starts with a Windows drive specifier ^[A-Za-z]:.
+func hasWindowsDrivePrefix(s string) bool {
+	if len(s) >= 2 && s[1] == ':' {
+		c := s[0]
+		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+	}
+	return false
+}
+
+// isUNCPath reports whether s begins with a Windows UNC share prefix (\\server\share).
+func isUNCPath(s string) bool {
+	return len(s) >= 3 && s[0] == '\\' && s[1] == '\\' && s[2] != '\\' && s[2] != '/'
+}
+
+// isShellEscapeChar reports whether c is a character commonly escaped with a backslash in POSIX shells.
+func isShellEscapeChar(c byte) bool {
+	switch c {
+	case ' ', '\t', '\n', '\r', '\'', '"', '`', '$', '&', '|', ';', '<', '>', '(', ')', '*', '?', '[', ']', '{', '}', '!', '#', '~', '^', '=', '\\':
+		return true
+	default:
+		return false
+	}
+}
+
+// cleanShellPath cleans quotes and escapes from a target path operand while preserving
+// Windows volume paths (^[A-Za-z]:[\\/]) and directory separators in Windows-style paths.
 func cleanShellPath(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -1111,17 +1172,33 @@ func cleanShellPath(s string) string {
 		return inner
 	}
 
+	isWinVolume := isWindowsVolume(s) || hasWindowsDrivePrefix(s)
+	isUNC := isUNCPath(s)
+
 	var b strings.Builder
-	escaped := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if escaped {
-			b.WriteByte(c)
-			escaped = false
+		if i == 0 && isUNC && len(s) >= 2 && s[0] == '\\' && s[1] == '\\' {
+			b.WriteString(`\\`)
+			i++
 			continue
 		}
 		if c == '\\' {
-			escaped = true
+			if i+1 >= len(s) {
+				b.WriteByte(c)
+				continue
+			}
+			next := s[i+1]
+			if isWinVolume && next == '$' {
+				b.WriteByte('\\')
+				continue
+			}
+			if isShellEscapeChar(next) {
+				b.WriteByte(next)
+				i++
+				continue
+			}
+			b.WriteByte('\\')
 			continue
 		}
 		if c != '\'' && c != '"' {

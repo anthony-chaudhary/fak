@@ -760,3 +760,184 @@ func assertTargetsMatch(t *testing.T, got, want []BashWriteTarget) {
 		}
 	}
 }
+
+func TestCleanShellPath(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "windows absolute path with backslashes",
+			in:   `C:\foo\bar.txt`,
+			want: `C:\foo\bar.txt`,
+		},
+		{
+			name: "windows absolute path with Users dir",
+			in:   `C:\Users\foo\bar.txt`,
+			want: `C:\Users\foo\bar.txt`,
+		},
+		{
+			name: "windows relative path with backslash",
+			in:   `foo\bar.go`,
+			want: `foo\bar.go`,
+		},
+		{
+			name: "windows relative path with dot prefix",
+			in:   `.\foo\bar.go`,
+			want: `.\foo\bar.go`,
+		},
+		{
+			name: "windows relative path with parent prefix",
+			in:   `..\foo\bar.go`,
+			want: `..\foo\bar.go`,
+		},
+		{
+			name: "windows drive root path",
+			in:   `C:\`,
+			want: `C:\`,
+		},
+		{
+			name: "windows drive relative path",
+			in:   `C:foo\bar.txt`,
+			want: `C:foo\bar.txt`,
+		},
+		{
+			name: "windows absolute path with forward slashes",
+			in:   `C:/foo/bar.txt`,
+			want: `C:/foo/bar.txt`,
+		},
+		{
+			name: "windows UNC network path",
+			in:   `\\server\share\file.txt`,
+			want: `\\server\share\file.txt`,
+		},
+		{
+			name: "windows system path with dollar sign",
+			in:   `C:\$Recycle.Bin\test.txt`,
+			want: `C:\$Recycle.Bin\test.txt`,
+		},
+		{
+			name: "double quoted windows absolute path",
+			in:   `"C:\foo\bar.txt"`,
+			want: `C:\foo\bar.txt`,
+		},
+		{
+			name: "double quoted windows relative path",
+			in:   `"foo\bar.go"`,
+			want: `foo\bar.go`,
+		},
+		{
+			name: "single quoted windows absolute path",
+			in:   `'C:\foo\bar.txt'`,
+			want: `C:\foo\bar.txt`,
+		},
+		{
+			name: "single quoted windows relative path",
+			in:   `'foo\bar.go'`,
+			want: `foo\bar.go`,
+		},
+		{
+			name: "double backslash inside path collapses to single backslash",
+			in:   `C:\\foo\\bar.txt`,
+			want: `C:\foo\bar.txt`,
+		},
+		{
+			name: "posix escaped spaces in path",
+			in:   `path\ with\ spaces/file.txt`,
+			want: `path with spaces/file.txt`,
+		},
+		{
+			name: "posix escaped special characters",
+			in:   `file\(1\).txt`,
+			want: `file(1).txt`,
+		},
+		{
+			name: "posix standard path with forward slashes",
+			in:   `dir/subdir/file.txt`,
+			want: `dir/subdir/file.txt`,
+		},
+		{
+			name: "empty path",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "whitespace only path",
+			in:   "   \t\n",
+			want: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cleanShellPath(tc.in)
+			if got != tc.want {
+				t.Errorf("cleanShellPath(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCleanShellPath_ParseBashWriteTargets(t *testing.T) {
+	tests := []struct {
+		name      string
+		cmd       string
+		wantTargs []BashWriteTarget
+		wantKnown bool
+	}{
+		{
+			name: "stdout redirect to windows absolute path",
+			cmd:  `echo hello > C:\foo\bar.txt`,
+			wantTargs: []BashWriteTarget{
+				{Path: `C:\foo\bar.txt`, Op: "write", TreeKnown: true},
+			},
+			wantKnown: true,
+		},
+		{
+			name: "stdout redirect to windows relative path",
+			cmd:  `echo hello > foo\bar.go`,
+			wantTargs: []BashWriteTarget{
+				{Path: `foo\bar.go`, Op: "write", TreeKnown: true},
+			},
+			wantKnown: true,
+		},
+		{
+			name: "stdout redirect to quoted windows path",
+			cmd:  `echo hello > "C:\Users\foo\bar.txt"`,
+			wantTargs: []BashWriteTarget{
+				{Path: `C:\Users\foo\bar.txt`, Op: "write", TreeKnown: true},
+			},
+			wantKnown: true,
+		},
+		{
+			name: "tee to windows path",
+			cmd:  `echo hello | tee C:\foo\bar.txt`,
+			wantTargs: []BashWriteTarget{
+				{Path: `C:\foo\bar.txt`, Op: "write", TreeKnown: true},
+			},
+			wantKnown: true,
+		},
+		{
+			name: "cp with windows path",
+			cmd:  `cp src.go foo\bar.go`,
+			wantTargs: []BashWriteTarget{
+				{Path: `foo\bar.go`, Op: "copy", TreeKnown: true},
+			},
+			wantKnown: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotTargs, gotKnown, err := ParseBashWriteTargets(tc.cmd)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotKnown != tc.wantKnown {
+				t.Errorf("treeKnown = %v, want %v", gotKnown, tc.wantKnown)
+			}
+			assertTargetsMatch(t, gotTargs, tc.wantTargs)
+		})
+	}
+}
