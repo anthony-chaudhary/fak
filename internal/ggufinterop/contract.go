@@ -10,15 +10,21 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
+// Outcome describes the result of mapping a GGUF artifact into the neutral quantization contract.
 type Outcome string
 
 const (
+	// OutcomeSupported indicates the GGUF artifact was successfully mapped into a quant descriptor.
 	OutcomeSupported Outcome = "supported"
-	OutcomeDelegate  Outcome = "delegate"
-	OutcomeAbstain   Outcome = "abstain"
-	OutcomeRefuse    Outcome = "refuse"
+	// OutcomeDelegate indicates multi-shard GGUF artifacts requiring the caller runtime to coordinate all shards.
+	OutcomeDelegate Outcome = "delegate"
+	// OutcomeAbstain indicates unsupported, missing, or unrecognized GGUF structures.
+	OutcomeAbstain Outcome = "abstain"
+	// OutcomeRefuse indicates invalid input such as a nil artifact.
+	OutcomeRefuse Outcome = "refuse"
 )
 
+// Result represents the outcome and translated quantization descriptor from GGUF mapping.
 type Result struct {
 	Outcome    Outcome              `json:"outcome"`
 	Reason     string               `json:"reason"`
@@ -26,6 +32,7 @@ type Result struct {
 	SplitCount int                  `json:"split_count,omitempty"`
 }
 
+// Map translates a parsed GGUF file into fak's neutral quantization descriptor.
 func Map(f *ggufload.File) Result {
 	if f == nil {
 		return Result{Outcome: OutcomeRefuse, Reason: "nil GGUF artifact"}
