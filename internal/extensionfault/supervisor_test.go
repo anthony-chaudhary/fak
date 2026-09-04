@@ -156,3 +156,107 @@ func TestUnknownExtensionIsUnavailable(t *testing.T) {
 		t.Fatalf("error = %v, want ErrUnavailable", err)
 	}
 }
+
+func BenchmarkSupervisorCallHealthy(b *testing.B) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	name := "fault-plugin"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(b.TempDir(), name)
+	cmd := exec.Command("go", "build", "-o", binary, "./examples/mcp/fault-plugin")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		b.Fatalf("build fault plugin: %v\n%s", err, out)
+	}
+
+	supervisor, err := New(Spec{
+		Name:           "healthy",
+		Command:        []string{binary, "--mode", "healthy"},
+		StartupTimeout: 2 * time.Second,
+		CallTimeout:    2 * time.Second,
+		MaxRestarts:    1,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer supervisor.Close()
+
+	ctx := context.Background()
+	// Warm up
+	if _, err := supervisor.Call(ctx, "healthy", "warmup"); err != nil {
+		b.Fatalf("warmup failed: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		res, err := supervisor.Call(ctx, "healthy", "payload")
+		if err != nil || res != "ok:payload" {
+			b.Fatalf("call failed: %v res=%q", err, res)
+		}
+	}
+}
+
+func BenchmarkSupervisorCallQuarantined(b *testing.B) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	name := "fault-plugin"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(b.TempDir(), name)
+	cmd := exec.Command("go", "build", "-o", binary, "./examples/mcp/fault-plugin")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		b.Fatalf("build fault plugin: %v\n%s", err, out)
+	}
+
+	supervisor, err := New(Spec{
+		Name:           "crashing",
+		Command:        []string{binary, "--mode", "crash"},
+		StartupTimeout: 50 * time.Millisecond,
+		CallTimeout:    50 * time.Millisecond,
+		MaxRestarts:    0,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer supervisor.Close()
+
+	ctx := context.Background()
+	// Trigger quarantine
+	_, _ = supervisor.Call(ctx, "crashing", "trigger")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := supervisor.Call(ctx, "crashing", "check")
+		if !errors.Is(err, ErrQuarantined) {
+			b.Fatalf("expected ErrQuarantined, got %v", err)
+		}
+	}
+}
+
+func BenchmarkSupervisorStatus(b *testing.B) {
+	supervisor, err := New(Spec{
+		Name:           "bench",
+		Command:        []string{"echo"},
+		StartupTimeout: time.Second,
+		CallTimeout:    time.Second,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer supervisor.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		st, ok := supervisor.Status("bench")
+		if !ok || st.Name != "bench" {
+			b.Fatalf("unexpected status: %+v ok=%v", st, ok)
+		}
+	}
+}

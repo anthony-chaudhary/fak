@@ -29,9 +29,9 @@ const (
 	// OutcomeSupported indicates all quality budgets and provenance requirements are satisfied.
 	OutcomeSupported Outcome = "supported"
 	// OutcomeRefused indicates the candidate was explicitly evaluated and failed quality budgets.
-	OutcomeRefused   Outcome = "unsupported"
+	OutcomeRefused Outcome = "unsupported"
 	// OutcomeDelegate indicates unknown contracts, missing hardware, or incomplete evidence delegated upstream.
-	OutcomeDelegate  Outcome = "delegate"
+	OutcomeDelegate Outcome = "delegate"
 )
 
 // ReasonCode represents the deterministic reason for the evaluation outcome.
@@ -39,25 +39,25 @@ type ReasonCode string
 
 const (
 	// ReasonWithinBudget indicates all drift and task metrics stayed within tolerance.
-	ReasonWithinBudget          ReasonCode = "within_quality_budget"
+	ReasonWithinBudget ReasonCode = "within_quality_budget"
 	// ReasonQualityBudgetExceeded indicates drift or task degradation exceeded the requested budget.
 	ReasonQualityBudgetExceeded ReasonCode = "quality_budget_exceeded"
 	// ReasonUnknownContract indicates the request declared an unsupported contract version.
-	ReasonUnknownContract       ReasonCode = "unknown_contract_version"
+	ReasonUnknownContract ReasonCode = "unknown_contract_version"
 	// ReasonUnknownEvidence indicates the request used an unclassified evidence kind.
-	ReasonUnknownEvidence       ReasonCode = "unknown_evidence_kind"
+	ReasonUnknownEvidence ReasonCode = "unknown_evidence_kind"
 	// ReasonIncompletePin indicates one or more artifact, recipe, or runtime pins were incomplete.
-	ReasonIncompletePin         ReasonCode = "incomplete_provenance_pin"
+	ReasonIncompletePin ReasonCode = "incomplete_provenance_pin"
 	// ReasonInvalidBaseline indicates the unquantized baseline precision was not fp16 or bf16.
-	ReasonInvalidBaseline       ReasonCode = "invalid_unquantized_baseline"
+	ReasonInvalidBaseline ReasonCode = "invalid_unquantized_baseline"
 	// ReasonSamePrecision indicates the candidate did not specify a distinct quantized precision.
-	ReasonSamePrecision         ReasonCode = "same_precision"
+	ReasonSamePrecision ReasonCode = "same_precision"
 	// ReasonMalformedData indicates inconsistent vectors, non-finite values, or missing required fields.
-	ReasonMalformedData         ReasonCode = "malformed_data"
+	ReasonMalformedData ReasonCode = "malformed_data"
 	// ReasonMissingHardware indicates observed evidence lacked required platform, accelerator, or driver details.
-	ReasonMissingHardware       ReasonCode = "missing_hardware"
+	ReasonMissingHardware ReasonCode = "missing_hardware"
 	// ReasonMalformedJSON indicates failure to parse the incoming request JSON payload.
-	ReasonMalformedJSON         ReasonCode = "malformed_json"
+	ReasonMalformedJSON ReasonCode = "malformed_json"
 )
 
 // EvidenceKind designates whether evaluation is modeled mathematically or observed on real hardware.
@@ -65,7 +65,7 @@ type EvidenceKind string
 
 const (
 	// EvidenceModeled indicates evidence generated from synthetic or modeled attention/output distributions.
-	EvidenceModeled          EvidenceKind = "modeled"
+	EvidenceModeled EvidenceKind = "modeled"
 	// EvidenceObservedHardware indicates evidence collected directly from benchmark runs on physical accelerators.
 	EvidenceObservedHardware EvidenceKind = "observed_hardware"
 )

@@ -32,7 +32,7 @@ const (
 	// RouteGenerateContent is the route for content generation using cached prefixes.
 	RouteGenerateContent Route = "generateContent"
 	// RouteInteractions is the route for interaction endpoints.
-	RouteInteractions    Route = "interactions"
+	RouteInteractions Route = "interactions"
 )
 
 // Identity uniquely identifies a cached content object across account, project, location, model, and prefix.
@@ -126,7 +126,7 @@ type State string
 
 const (
 	// StateActive indicates the cached content is active and unexpired.
-	StateActive  State = "active"
+	StateActive State = "active"
 	// StateExpired indicates the cached content has passed its expiration time.
 	StateExpired State = "expired"
 	// StateDeleted indicates the cached content has been deleted.

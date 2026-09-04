@@ -1,6 +1,9 @@
 // Package kvvectoreval defines the pinned, evidence-graded interoperability
 // contract for the NOVA-KV attention-preserving vector-quantization research
 // evaluation tracked by issue #6259.
+//
+// Contract: guarantees exact-match evaluation against pinned research artifacts
+// and evidence without fuzzy aliases or silent fallback.
 package kvvectoreval
 
 import (
@@ -26,6 +29,7 @@ const (
 // Outcome is the typed disposition of an evaluation request.
 type Outcome string
 
+// Typed disposition outcomes for contract requests.
 const (
 	OutcomeSupported Outcome = "supported"
 	OutcomeRefused   Outcome = "unsupported"
@@ -35,6 +39,7 @@ const (
 // Reason is a stable machine-readable explanation for an outcome.
 type Reason string
 
+// Machine-readable reason tokens explaining evaluation outcomes.
 const (
 	ReasonExactMatch       Reason = "KV_VECTOR_EVAL_EXACT_MATCH"
 	ReasonMalformed        Reason = "KV_VECTOR_EVAL_MALFORMED"
@@ -50,6 +55,7 @@ const (
 // being silently promoted to locally observed measurements.
 type EvidenceKind string
 
+// EvidenceKind classification levels for metric provenance.
 const (
 	EvidenceObserved EvidenceKind = "observed"
 	EvidenceModeled  EvidenceKind = "modeled"

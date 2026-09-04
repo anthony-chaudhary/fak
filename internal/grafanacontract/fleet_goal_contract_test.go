@@ -1,43 +1,62 @@
 package grafanacontract
 
 import (
-	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
-type dashboard struct {
-	Panels []panel `json:"panels"`
-}
-type panel struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Targets     []target `json:"targets"`
-}
-type target struct {
-	Expr string `json:"expr"`
+func TestFleetOverviewCarriesRunOperationsContract(t *testing.T) {
+	path := "../../tools/grafana/dashboards/fak-fleet-overview.json"
+	res, err := VerifyFleetOverview(path)
+	if err != nil {
+		t.Fatalf("VerifyFleetOverview: %v", err)
+	}
+	if !res.Passed {
+		t.Fatalf("contract missing tokens: %v", res.Missing)
+	}
 }
 
-func TestFleetOverviewCarriesRootGoalDrilldownContract(t *testing.T) {
-	b, err := os.ReadFile("../../tools/grafana/dashboards/fak-fleet-overview.json")
+func TestVerifyDashboardBytesMissingTokens(t *testing.T) {
+	sample := []byte(`{
+		"title": "My Dashboard",
+		"panels": [
+			{"title": "P1", "description": "Desc1", "targets": [{"expr": "metric_one"}]}
+		]
+	}`)
+	res, err := VerifyDashboardBytes(sample, []string{"metric_one", "metric_two"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("VerifyDashboardBytes failed: %v", err)
 	}
-	var d dashboard
-	if err := json.Unmarshal(b, &d); err != nil {
-		t.Fatal(err)
+	if res.Passed {
+		t.Fatalf("expected failure, got pass")
 	}
-	all := ""
-	for _, p := range d.Panels {
-		all += p.Title + "\n" + p.Description + "\n"
-		for _, q := range p.Targets {
-			all += q.Expr + "\n"
+	if len(res.Missing) != 1 || res.Missing[0] != "metric_two" {
+		t.Fatalf("unexpected missing: %v", res.Missing)
+	}
+}
+
+func BenchmarkVerifyDashboardBytes(b *testing.B) {
+	content, err := os.ReadFile("../../tools/grafana/dashboards/fak-fleet-overview.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	tokens := DefaultFleetOverviewTokens()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := VerifyDashboardBytes(content, tokens)
+		if err != nil || !res.Passed {
+			b.Fatalf("benchmark failed: %v, passed: %v", err, res.Passed)
 		}
 	}
-	for _, want := range []string{"Canonical goals", "Fleet -> canonical goal -> execution root -> session", "execution_root_only", "fak_fleet_canonical_goal_execution_roots", "fak_fleet_canonical_goal_attempts_total", "fak_fleet_canonical_goal_provider_billed_micro_usd_total", "fak_fleet_canonical_goal_cache_value_reuse_ratio", "fak_fleet_canonical_goal_binding_ratio", "fak_fleet_canonical_goal_efficiency_ready", "Starting goals", "fak_fleet_goal_info", "fak_fleet_goal_usage_attribution_ratio", "fak_fleet_goal_attempts_total", "fak_fleet_goal_provider_billed_micro_usd_total", "fak_fleet_goal_provider_cost_attribution_ratio", "fak_fleet_goal_cache_value_reused_tokens_total", "fak_fleet_goal_cache_value_reuse_ratio", "fak_fleet_goal_cache_value_attribution_ratio", `fak_fleet_goal_usage_rows{attribution="unattributed"}`, "bounded to root_registration, root_issue, task, state, and outcome"} {
-		if !strings.Contains(all, want) {
-			t.Errorf("dashboard missing %q", want)
+}
+
+func BenchmarkVerifyDashboardFile(b *testing.B) {
+	path := "../../tools/grafana/dashboards/fak-fleet-overview.json"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := VerifyFleetOverview(path)
+		if err != nil || !res.Passed {
+			b.Fatalf("benchmark failed: %v, passed: %v", err, res.Passed)
 		}
 	}
 }

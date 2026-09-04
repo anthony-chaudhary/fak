@@ -88,3 +88,33 @@ func TestJoinRejectsMissingQualityAndSilentFallback(t *testing.T) {
 		t.Fatal("unreplayable evaluation accepted")
 	}
 }
+
+func BenchmarkJoin(b *testing.B) {
+	plan, providers, evaluation := fixture(&testing.T{})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bundle, err := Join(plan, providers, evaluation)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if bundle.EvidenceDigest == "" {
+			b.Fatal("missing digest")
+		}
+	}
+}
+
+func BenchmarkJoinParallel(b *testing.B) {
+	plan, providers, evaluation := fixture(&testing.T{})
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			bundle, err := Join(plan, providers, evaluation)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if bundle.EvidenceDigest == "" {
+				b.Fatal("missing digest")
+			}
+		}
+	})
+}

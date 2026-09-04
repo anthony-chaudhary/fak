@@ -9476,6 +9476,11 @@
           "category": "incidental",
           "reason": "systools refusal reason code",
           "token": "CodePolicyBlock"
+        },
+        {
+          "category": "incidental",
+          "reason": "servewiring plumbingField key for policy runtime",
+          "token": "PolicyRuntime"
         }
       ],
       "exclude": [
@@ -9540,6 +9545,7 @@
         "PolicyMediaType",
         "PolicyOriginEvidencePath",
         "PolicyRevision",
+        "PolicyRuntime",
         "PolicySchema",
         "PrefixPosture",
         "PreflightRefuseWIPLimit",

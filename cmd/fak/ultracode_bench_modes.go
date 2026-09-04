@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/fastintent"
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
@@ -18,6 +19,10 @@ func runUltracodeFastProfile(stdout, stderr io.Writer, pairPath string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "fak ultracode bench: read pair: %v\n", err)
 		return 1
+	}
+	var replay fastintent.ReplayBundle
+	if err := json.Unmarshal(b, &replay); err == nil && replay.Schema == fastintent.Schema {
+		return writeUltracodeBenchJSON(stdout, stderr, replay.Evaluation)
 	}
 	var bundle ultracodebench.FastProfileBundle
 	if err := json.Unmarshal(b, &bundle); err != nil {

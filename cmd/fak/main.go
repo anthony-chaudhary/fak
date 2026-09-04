@@ -459,6 +459,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdHeadroom(args)
 	case "vcache":
 		cmdVCache(args)
+	case "geminicache":
+		cmdGeminiCache(args)
 	case "hook":
 		cmdHook()
 	case "hooks":
@@ -733,6 +735,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdLeaseref(args)
 	case "contract":
 		cmdContract(args)
+	case "queue":
+		cmdQueueTop(args)
 	case "intent":
 		cmdIntent(args)
 	case "memgate":

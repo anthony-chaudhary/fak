@@ -10,7 +10,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
-	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -465,9 +464,6 @@ type Config struct {
 	// ReloadPolicy reloads the process policy floor in-place. Nil disables the
 	// /v1/fak/policy/reload route.
 	ReloadPolicy PolicyReloadFunc
-	// PolicyRuntime is the active policy runtime used to validate and resolve canonical tool names
-	// when normalising harness-specific tool namespace prefixes (e.g. "functions.", "mcp__<server>__").
-	PolicyRuntime *policy.Runtime
 	// PolicyCanaryTurns arms a default-off post-reload window. A deny-all streak
 	// spanning the configured number of served turns rolls the floor back.
 	PolicyCanaryTurns int

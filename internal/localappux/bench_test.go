@@ -43,7 +43,7 @@ func BenchmarkLocalAppUX(b *testing.B) {
 		Mode:       ModeLocalOnly,
 		Engine:     "fak-native",
 		ErrorCode:  "HELPER_EXIT",
-		Paths:      []string{"/Users/alice/private"},
+		Paths:      []string{"/example/path/private"},
 		Prompt:     "sensitive query",
 		Token:      "secret-token",
 	}
