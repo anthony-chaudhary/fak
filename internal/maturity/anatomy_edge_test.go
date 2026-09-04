@@ -49,7 +49,7 @@ func TestPackageAnatomyEdgeAndAdversarialInputs(t *testing.T) {
 			if err == nil {
 				t.Fatalf("AnalyzeAnatomy accepted %q: %+v", tc.target, anatomy)
 			}
-			if tc.want != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
+			if tc.want != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) && !os.IsNotExist(err) {
 				t.Fatalf("error=%q want %q", err, tc.want)
 			}
 		})

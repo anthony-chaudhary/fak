@@ -485,17 +485,15 @@ func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture HEAD: %v: %s", err, headOutput)
 	}
-	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), strings.Join([]string{
-		"fak: loaded capability floor from examples/customer-support-readonly-policy.json",
-		"fak ablate",
-		"news - slackenv",
-		"slackmeta",
-		"slackwire",
-		"usage: fak guard",
-		"fak macfit",
-		"macbench",
-		"internal/metalgemm",
-	}, "\n"))
+	proofs, err := loadRuntimeProofs(root)
+	if err != nil {
+		t.Fatalf("load runtime proofs: %v", err)
+	}
+	var outputs []string
+	for _, p := range proofs {
+		outputs = append(outputs, p.OutputContains)
+	}
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), strings.Join(outputs, "\n"))
 	oldResolver := resolveRuntimeFak
 	resolveRuntimeFak = func() (string, error) { return artifact, nil }
 	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
@@ -633,7 +631,7 @@ import (
     "os"
 )
 func main() {
-    if len(os.Args) > 1 && os.Args[1] == "version" {
+    if len(os.Args) == 2 && os.Args[1] == "version" {
         fmt.Println("0.43.0")
         fmt.Println("build: %s")
         fmt.Println("go: fixture")

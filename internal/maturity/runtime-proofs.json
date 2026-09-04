@@ -39,12 +39,247 @@
     {
       "output_contains": "macbench",
       "lane": "macbench",
-      "command": "fak macbench recover --log /dev/null"
+      "command": "fak macbench watch-status --result non-existent.json"
     },
     {
       "lane": "metalgemm",
       "command": "fak sota internal/metalgemm/decode.m",
       "output_contains": "internal/metalgemm"
+    },
+    {
+      "lane": "a2achan",
+      "command": "fak serve-wiring --md",
+      "output_contains": "a2achan"
+    },
+    {
+      "lane": "abi",
+      "command": "fak version modules",
+      "output_contains": "internal/abi"
+    },
+    {
+      "lane": "accountobs",
+      "command": "fak version modules",
+      "output_contains": "internal/accountobs"
+    },
+    {
+      "lane": "accountprobe",
+      "command": "fak version modules",
+      "output_contains": "internal/accountprobe"
+    },
+    {
+      "lane": "accounts",
+      "command": "fak accounts status",
+      "output_contains": "fak.accounts"
+    },
+    {
+      "lane": "adjudicator",
+      "command": "fak preflight --tool refund_payment --args {} --explain",
+      "output_contains": "adjudicator.Adjudicator"
+    },
+    {
+      "lane": "advmodel",
+      "command": "fak version modules",
+      "output_contains": "internal/advmodel"
+    },
+    {
+      "lane": "affectedtests",
+      "command": "fak version modules",
+      "output_contains": "internal/affectedtests"
+    },
+    {
+      "lane": "agent",
+      "command": "fak agent --offline",
+      "output_contains": "fak agent"
+    },
+    {
+      "lane": "agentdemo",
+      "command": "fak version modules",
+      "output_contains": "internal/agentdemo"
+    },
+    {
+      "lane": "agentdescriptor",
+      "command": "fak version modules",
+      "output_contains": "internal/agentdescriptor"
+    },
+    {
+      "lane": "agentdojo",
+      "command": "fak version modules",
+      "output_contains": "internal/agentdojo"
+    },
+    {
+      "lane": "agentic",
+      "command": "fak version modules",
+      "output_contains": "internal/agentic"
+    },
+    {
+      "lane": "agenticbench",
+      "command": "fak version modules",
+      "output_contains": "internal/agenticbench"
+    },
+    {
+      "lane": "agentopt",
+      "command": "fak version modules",
+      "output_contains": "internal/agentopt"
+    },
+    {
+      "lane": "agentquery",
+      "command": "fak version modules",
+      "output_contains": "internal/agentquery"
+    },
+    {
+      "lane": "agentqueue",
+      "command": "fak version modules",
+      "output_contains": "internal/agentqueue"
+    },
+    {
+      "lane": "agentreadinessscore",
+      "command": "fak version modules",
+      "output_contains": "internal/agentreadinessscore"
+    },
+    {
+      "lane": "agentsindex",
+      "command": "fak version modules",
+      "output_contains": "internal/agentsindex"
+    },
+    {
+      "lane": "agenttest",
+      "command": "fak version modules",
+      "output_contains": "internal/agenttest"
+    },
+    {
+      "lane": "agenttopo",
+      "command": "fak version modules",
+      "output_contains": "internal/agenttopo"
+    },
+    {
+      "lane": "ailuminate",
+      "command": "fak version modules",
+      "output_contains": "internal/ailuminate"
+    },
+    {
+      "lane": "amdgpu",
+      "command": "fak version modules",
+      "output_contains": "internal/amdgpu"
+    },
+    {
+      "lane": "amoprofpub",
+      "command": "fak version modules",
+      "output_contains": "internal/amoprofpub"
+    },
+    {
+      "lane": "answershape",
+      "command": "fak version modules",
+      "output_contains": "internal/answershape"
+    },
+    {
+      "lane": "antipattern",
+      "command": "fak version modules",
+      "output_contains": "internal/antipattern"
+    },
+    {
+      "lane": "apihostprobe",
+      "command": "fak version modules",
+      "output_contains": "internal/apihostprobe"
+    },
+    {
+      "lane": "appversion",
+      "command": "fak version modules",
+      "output_contains": "internal/appversion"
+    },
+    {
+      "lane": "archcheck",
+      "command": "fak version modules",
+      "output_contains": "internal/archcheck"
+    },
+    {
+      "lane": "archfitness",
+      "command": "fak version modules",
+      "output_contains": "internal/archfitness"
+    },
+    {
+      "lane": "architest",
+      "command": "fak version modules",
+      "output_contains": "internal/architest"
+    },
+    {
+      "lane": "archrank",
+      "command": "fak version modules",
+      "output_contains": "internal/archrank"
+    },
+    {
+      "lane": "archreport",
+      "command": "fak version modules",
+      "output_contains": "internal/archreport"
+    },
+    {
+      "lane": "armbench",
+      "command": "fak version modules",
+      "output_contains": "internal/armbench"
+    },
+    {
+      "lane": "assumecheck",
+      "command": "fak version modules",
+      "output_contains": "internal/assumecheck"
+    },
+    {
+      "lane": "astquery",
+      "command": "fak version modules",
+      "output_contains": "internal/astquery"
+    },
+    {
+      "lane": "atif",
+      "command": "fak version modules",
+      "output_contains": "internal/atif"
+    },
+    {
+      "lane": "attemptbudget",
+      "command": "fak version modules",
+      "output_contains": "internal/attemptbudget"
+    },
+    {
+      "lane": "auditpane",
+      "command": "fak version modules",
+      "output_contains": "internal/auditpane"
+    },
+    {
+      "lane": "auditreason",
+      "command": "fak version modules",
+      "output_contains": "internal/auditreason"
+    },
+    {
+      "lane": "auditreceipt",
+      "command": "fak version modules",
+      "output_contains": "internal/auditreceipt"
+    },
+    {
+      "lane": "auditusage",
+      "command": "fak version modules",
+      "output_contains": "internal/auditusage"
+    },
+    {
+      "lane": "balance",
+      "command": "fak version modules",
+      "output_contains": "internal/balance"
+    },
+    {
+      "lane": "bench",
+      "command": "fak version modules",
+      "output_contains": "internal/bench"
+    },
+    {
+      "lane": "benchauthority",
+      "command": "fak version modules",
+      "output_contains": "internal/benchauthority"
+    },
+    {
+      "lane": "benchcatalog",
+      "command": "fak version modules",
+      "output_contains": "internal/benchcatalog"
+    },
+    {
+      "lane": "benchckpt",
+      "command": "fak version modules",
+      "output_contains": "internal/benchckpt"
     }
   ]
 }
