@@ -94,6 +94,122 @@ func TestRunPrefillSweepParsesSSEUsageAndTTFT(t *testing.T) {
 	}
 }
 
+func TestRunQwen38ServingCurveSuiteAll(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"metal","planner":"inkernel","model":"qwen38:27b"}`))
+		case "/v1/chat/completions":
+			if r.Header.Get("Content-Type") == "application/json" {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if stream, _ := body["stream"].(bool); stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+					promptToks := 128
+					if pt, ok := body["prompt_tokens"].(float64); ok {
+						promptToks = int(pt)
+					}
+					_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"finish_reason\":\"length\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":16,\"total_tokens\":%d}}\n\n", promptToks, promptToks+16)
+					_, _ = w.Write([]byte("data: [DONE]\n\n"))
+					return
+				}
+				maxTok := 64
+				if mt, ok := body["max_tokens"].(float64); ok {
+					maxTok = int(mt)
+				}
+				_, _ = fmt.Fprintf(w, `{"choices":[{"finish_reason":"length"}],"usage":{"prompt_tokens":25,"completion_tokens":%d,"total_tokens":%d}}`, maxTok, 25+maxTok)
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	opts := DefaultOptions()
+	opts.Gateway = ts.URL
+	opts.HTTPClient = ts.Client()
+	opts.Now = func() time.Time { return time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC) }
+
+	rep, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run(Qwen38 SuiteAll): %v", err)
+	}
+	if rep.Schema != Schema {
+		t.Fatalf("schema = %q, want %q", rep.Schema, Schema)
+	}
+	if rep.Model != "qwen38:27b" {
+		t.Fatalf("model = %q, want qwen38:27b", rep.Model)
+	}
+	if rep.Suite != SuiteAll {
+		t.Fatalf("suite = %q, want SuiteAll", rep.Suite)
+	}
+	if !rep.Health.OK {
+		t.Fatalf("health not OK: %+v", rep.Health)
+	}
+
+	// Expected rows:
+	// 6 decode rows (16, 32, 64, 128, 256, 512)
+	// 4 prefill rows (128, 512, 2048, 4096)
+	// 1 2stream-aggregate + 2 2stream workers = 3 rows
+	// Total: 6 + 4 + 3 = 13 rows
+	wantDecode := []int{16, 32, 64, 128, 256, 512}
+	wantPrefill := []int{128, 512, 2048, 4096}
+	expectedTotalRows := len(wantDecode) + len(wantPrefill) + 1 + opts.Concurrency
+	if len(rep.Rows) != expectedTotalRows {
+		t.Fatalf("len(rep.Rows) = %d, want %d", len(rep.Rows), expectedTotalRows)
+	}
+
+	decodeCount := 0
+	prefillCount := 0
+	twoStreamCount := 0
+	for _, row := range rep.Rows {
+		if row.Error != "" {
+			t.Fatalf("row %s had error: %s", row.Name, row.Error)
+		}
+		switch row.Kind {
+		case "decode-longgen":
+			decodeCount++
+			if row.TokensPerSecond <= 0 {
+				t.Fatalf("decode row %s missing TokensPerSecond", row.Name)
+			}
+		case "prefill-sweep":
+			prefillCount++
+			if row.PrefillTokensPerSecond <= 0 || row.TTFTSeconds <= 0 {
+				t.Fatalf("prefill row %s missing TTFT/PrefillTokensPerSecond", row.Name)
+			}
+		case "2stream":
+			twoStreamCount++
+		default:
+			t.Fatalf("unexpected row kind: %s", row.Kind)
+		}
+	}
+	if decodeCount != len(wantDecode) {
+		t.Fatalf("decodeCount = %d, want %d", decodeCount, len(wantDecode))
+	}
+	if prefillCount != len(wantPrefill) {
+		t.Fatalf("prefillCount = %d, want %d", prefillCount, len(wantPrefill))
+	}
+	if twoStreamCount != 1+opts.Concurrency {
+		t.Fatalf("twoStreamCount = %d, want %d", twoStreamCount, 1+opts.Concurrency)
+	}
+
+	// Verify serialization to JSON preserves Schema and has no errors
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("json.Marshal(rep): %v", err)
+	}
+	var roundTrip Report
+	if err := json.Unmarshal(b, &roundTrip); err != nil {
+		t.Fatalf("json.Unmarshal(rep): %v", err)
+	}
+	if roundTrip.Schema != Schema {
+		t.Fatalf("roundTrip.Schema = %q, want %q", roundTrip.Schema, Schema)
+	}
+}
+
 func TestSanitizeGatewayForReportKeepsLoopbackOnly(t *testing.T) {
 	if got := SanitizeGatewayForReport("http://127.0.0.1:8080"); got != "http://127.0.0.1:8080" {
 		t.Fatalf("loopback sanitize = %q", got)

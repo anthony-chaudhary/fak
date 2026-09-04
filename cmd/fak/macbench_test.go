@@ -52,6 +52,65 @@ func TestMacBenchJSONDoesNotLeakBearer(t *testing.T) {
 	}
 }
 
+func TestMacBenchQwen38ServingCurveDefaultsAndSchema(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"metal","planner":"inkernel","model":"qwen38:27b"}`))
+		case "/v1/chat/completions":
+			if r.Header.Get("Content-Type") == "application/json" {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if stream, _ := body["stream"].(bool); stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+					_, _ = w.Write([]byte("data: {\"choices\":[{\"finish_reason\":\"length\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":128,\"completion_tokens\":16,\"total_tokens\":144}}\n\n"))
+					_, _ = w.Write([]byte("data: [DONE]\n\n"))
+					return
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length"}],"usage":{"prompt_tokens":25,"completion_tokens":16,"total_tokens":41}}`))
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{
+		"all",
+		"--gateway", ts.URL,
+		"--gateway-key-file", "",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runMacBench code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	var rep macbench.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("unmarshal stdout JSON: %v", err)
+	}
+	if rep.Schema != macbench.Schema {
+		t.Fatalf("schema = %q, want %q", rep.Schema, macbench.Schema)
+	}
+	if rep.Model != "qwen38:27b" {
+		t.Fatalf("default model = %q, want qwen38:27b", rep.Model)
+	}
+	if rep.Suite != macbench.SuiteAll {
+		t.Fatalf("suite = %q, want %q", rep.Suite, macbench.SuiteAll)
+	}
+	// Check default decode tokens: 16, 32, 64, 128, 256, 512 (6 rows)
+	// Check default prefill tokens: 128, 512, 2048, 4096 (4 rows)
+	// Check default concurrency: 2 (1 agg + 2 streams = 3 rows)
+	// Total = 13 rows
+	if len(rep.Rows) != 13 {
+		t.Fatalf("total rows = %d, want 13", len(rep.Rows))
+	}
+}
+
 func TestParseIntCSVRejectsBadValues(t *testing.T) {
 	if _, err := parseIntCSV("128, nope"); err == nil {
 		t.Fatal("expected parse error")
