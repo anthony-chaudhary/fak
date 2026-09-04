@@ -35,7 +35,7 @@ func TestGitGateShadowCheckpoint(t *testing.T) {
 	runGit("commit", "-m", "initial commit")
 
 	// Make modifications and add untracked file
-	if err := os.WriteFile(trackedPath, []byte("v2"), 0o644); err != nil {
+	if err := os.WriteFile(trackedPath, []byte("v2-checkpoint"), 0o644); err != nil {
 		t.Fatalf("update tracked: %v", err)
 	}
 	untrackedPath := filepath.Join(tempDir, "untracked.txt")
@@ -65,8 +65,8 @@ func TestGitGateShadowCheckpoint(t *testing.T) {
 	}
 
 	trackedBytes, err := os.ReadFile(trackedPath)
-	if err != nil || string(trackedBytes) != "v2" {
-		t.Fatalf("expected tracked content 'v2', got %q (err=%v)", string(trackedBytes), err)
+	if err != nil || string(trackedBytes) != "v2-checkpoint" {
+		t.Fatalf("expected tracked content 'v2-checkpoint', got %q (err=%v)", string(trackedBytes), err)
 	}
 
 	untrackedBytes, err := os.ReadFile(untrackedPath)

@@ -45,6 +45,10 @@ import (
 // It never shells out; its args are a SweepGuardPlan JSON object.
 const ToolSweepGuard = "gitgate.sweep_guard"
 
+// ReasonPeerWIPCollision reports that a path-scoped git op would sweep WIP owned
+// by a peer session (#11232).
+const ReasonPeerWIPCollision = "PEER_WIP_COLLISION"
+
 // SweepGuardPlan is the attribution-decidable shape screened before a path-scoped
 // mutating git op. Op is the human label of the op being screened (e.g.
 // "git commit -- internal/foo", "git checkout", "git reset internal/bar"); Self is
@@ -53,10 +57,12 @@ const ToolSweepGuard = "gitgate.sweep_guard"
 // attribution of every dirty hunk the op's pathspec would sweep, built by the
 // caller with wipattr.Attribute over the op's `git diff`.
 type SweepGuardPlan struct {
-	Op      string                `json:"op"`
-	Self    string                `json:"self"`
-	Live    []string              `json:"live"`
-	Targets []wipattr.Attribution `json:"targets"`
+	Op            string                `json:"op"`
+	Self          string                `json:"self"`
+	Live          []string              `json:"live"`
+	Targets       []wipattr.Attribution `json:"targets"`
+	QuarantineRef string                `json:"quarantine_ref,omitempty"`
+	AutoArchive   bool                  `json:"auto_archive,omitempty"`
 }
 
 // SweepDisposition is the escalation level of a sweep-guard finding.
@@ -77,6 +83,7 @@ const (
 // SweepGuardFinding is the structured result of CheckSweepGuard.
 type SweepGuardFinding struct {
 	Disposition SweepDisposition
+	Reason      string                 // structured refusal reason (e.g. ReasonPeerWIPCollision)
 	Claim       string                 // human-readable readout naming the peer session(s) + checkpoint ref
 	Hazards     []wipattr.SweepVerdict // the non-safe verdicts (peer/shared/orphan), for callers and tests
 }
@@ -103,11 +110,45 @@ func CheckSweepGuard(plan SweepGuardPlan) SweepGuardFinding {
 		op = "the path-scoped git op"
 	}
 	// An ORPHAN in the sweep is the one irrecoverable case — escalate past advisory.
+	// When backed by a quarantine ref archive (#11238), orphan files have been captured
+	// into refs/fak/quarantine/* and are recoverable, permitting the clean/purge.
 	for _, h := range hazards {
 		if h.State == wipattr.AttrOrphan {
+			if plan.QuarantineRef != "" || plan.AutoArchive {
+				continue // Backed by quarantine archive; recoverable.
+			}
 			return SweepGuardFinding{
 				Disposition: SweepRefuse,
 				Claim:       sweepRefuseClaim(op, hazards),
+				Hazards:     hazards,
+			}
+		}
+	}
+	hasNonOrphanHazards := false
+	for _, h := range hazards {
+		if h.State != wipattr.AttrOrphan {
+			hasNonOrphanHazards = true
+			break
+		}
+	}
+	if !hasNonOrphanHazards && (plan.QuarantineRef != "" || plan.AutoArchive) {
+		claim := fmt.Sprintf("%s allowed: orphan files backed by quarantine archive", op)
+		if plan.QuarantineRef != "" {
+			claim = fmt.Sprintf("%s allowed: orphan files backed by quarantine archive (%s)", op, plan.QuarantineRef)
+		}
+		return SweepGuardFinding{
+			Disposition: SweepClear,
+			Claim:       claim,
+			Hazards:     hazards,
+		}
+	}
+	// Elevate OWNED-by-peer from SweepAdvise to SweepRefuse with ReasonPeerWIPCollision (#11232).
+	for _, h := range hazards {
+		if h.State == wipattr.AttrOwned {
+			return SweepGuardFinding{
+				Disposition: SweepRefuse,
+				Reason:      ReasonPeerWIPCollision,
+				Claim:       sweepPeerWIPCollisionClaim(op, hazards),
 				Hazards:     hazards,
 			}
 		}
@@ -117,6 +158,19 @@ func CheckSweepGuard(plan SweepGuardPlan) SweepGuardFinding {
 		Claim:       sweepAdviseClaim(op, hazards),
 		Hazards:     hazards,
 	}
+}
+
+// sweepPeerWIPCollisionClaim reports the peer WIP that causes a refusal under strict file-level attribution (#11232).
+func sweepPeerWIPCollisionClaim(op string, hazards []wipattr.SweepVerdict) string {
+	var peers []string
+	for _, h := range hazards {
+		if h.State == wipattr.AttrOwned {
+			peers = append(peers, fmt.Sprintf("%s belongs to session %s (checkpointed at %s)",
+				h.File, h.Owner, wipref.SessionRef(h.Owner)))
+		}
+	}
+	return fmt.Sprintf("%s refused: %s: it would sweep a peer's WIP: %s — reconcile rather than sweep, or narrow the pathspec to your own files before retrying.",
+		op, ReasonPeerWIPCollision, strings.Join(peers, "; "))
 }
 
 // sweepAdviseClaim names each checkpointed peer/shared delta and its refs/fak/wip/*
@@ -181,7 +235,11 @@ func (g *GitGate) adjudicateSweepGuard(ctx context.Context, c *abi.ToolCall) abi
 	switch finding.Disposition {
 	case SweepRefuse:
 		v := sweepDeny(abi.ReasonPolicyBlock, finding.Claim)
-		g.recordRefusal(ctx, ToolSweepGuard, abi.ReasonName(v.Reason), []string{ToolSweepGuard}, sweepFiles(finding.Hazards))
+		reasonClass := abi.ReasonName(v.Reason)
+		if finding.Reason != "" {
+			reasonClass = finding.Reason
+		}
+		g.recordRefusal(ctx, ToolSweepGuard, reasonClass, []string{ToolSweepGuard}, sweepFiles(finding.Hazards))
 		return v
 	case SweepAdvise:
 		// Advisory-first: gitgate does not block; it surfaces a warning naming the

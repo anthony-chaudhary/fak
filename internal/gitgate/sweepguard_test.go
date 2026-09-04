@@ -83,34 +83,47 @@ func TestSweepGuardOwnPathUnaffected(t *testing.T) {
 	}
 }
 
-// TestSweepGuardCheckpointedPeerAdvises: `git commit -- <peer-path>` over a peer delta
-// that IS checkpointed at refs/fak/wip/<peer> is recoverable, so the guard ADVISEs
-// (non-blocking Defer) and names the peer session + its checkpoint ref rather than
-// refusing — the advisory-first arm.
-func TestSweepGuardCheckpointedPeerAdvises(t *testing.T) {
+// TestSweepGuardCheckpointedPeerRefuses: `git commit -- <peer-path>` over a peer delta
+// that IS checkpointed at refs/fak/wip/<peer> is elevated from SweepAdvise to SweepRefuse
+// with ReasonPeerWIPCollision under strict file-level attribution (#11232).
+func TestSweepGuardCheckpointedPeerRefuses(t *testing.T) {
 	plan := sweepPlan("git commit -- internal/peer/checkpointed.go", []wipattr.Hunk{sweepPeerCkptHunk}, sweepCheckpoints())
 
 	finding := CheckSweepGuard(plan)
-	if finding.Disposition != SweepAdvise {
-		t.Fatalf("checkpointed-peer disposition=%v, want SweepAdvise (finding=%+v)", finding.Disposition, finding)
+	if finding.Disposition != SweepRefuse {
+		t.Fatalf("checkpointed-peer disposition=%v, want SweepRefuse (finding=%+v)", finding.Disposition, finding)
+	}
+	if finding.Reason != ReasonPeerWIPCollision {
+		t.Fatalf("checkpointed-peer reason=%q, want %q", finding.Reason, ReasonPeerWIPCollision)
 	}
 	if !strings.Contains(finding.Claim, sweepPeer) {
-		t.Fatalf("advise claim does not name peer %q: %q", sweepPeer, finding.Claim)
+		t.Fatalf("refuse claim does not name peer %q: %q", sweepPeer, finding.Claim)
 	}
 	if ref := wipref.SessionRef(sweepPeer); !strings.Contains(finding.Claim, ref) {
-		t.Fatalf("advise claim does not cite checkpoint ref %q: %q", ref, finding.Claim)
+		t.Fatalf("refuse claim does not cite checkpoint ref %q: %q", ref, finding.Claim)
 	}
 
-	v := New().Adjudicate(context.Background(), sweepCall(plan))
-	if v.Kind != abi.VerdictDefer {
-		t.Fatalf("checkpointed-peer verdict=%+v, want Defer (advisory, non-blocking)", v)
+	g := New()
+	rec, captured := decisionRecorder(t)
+	g.SetRecorder(rec)
+
+	v := g.Adjudicate(context.Background(), sweepCall(plan))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+		t.Fatalf("checkpointed-peer verdict=%+v, want Deny POLICY_BLOCK", v)
 	}
-	if v.Meta["warn"] != finding.Claim {
-		t.Fatalf("checkpointed-peer Meta[warn]=%q, want the finding claim %q", v.Meta["warn"], finding.Claim)
+	if v.By != ToolSweepGuard {
+		t.Fatalf("checkpointed-peer By=%q, want %q", v.By, ToolSweepGuard)
 	}
 	wp, ok := v.Payload.(abi.WitnessPayload)
 	if !ok || !strings.Contains(wp.Claim, sweepPeer) {
-		t.Fatalf("checkpointed-peer payload=%v, want a warning naming peer %q", v.Payload, sweepPeer)
+		t.Fatalf("checkpointed-peer payload=%v, want a refusal claim naming peer %q", v.Payload, sweepPeer)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded refusal, got %d: %+v", len(*captured), *captured)
+	}
+	got := (*captured)[0]
+	if got.Op != ToolSweepGuard || got.Verdict != witness.VerdictRefuse || got.ReasonClass != ReasonPeerWIPCollision {
+		t.Fatalf("recorded decision=%+v, want sweep_guard/refuse/%s", got, ReasonPeerWIPCollision)
 	}
 }
 
@@ -220,6 +233,23 @@ func TestSweepGuardMalformedArgsDeny(t *testing.T) {
 	call := &abi.ToolCall{Tool: ToolSweepGuard, Args: abi.Ref{Kind: abi.RefInline}}
 	if v := New().Adjudicate(context.Background(), call); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonMalformed {
 		t.Fatalf("malformed sweep-guard verdict=%+v, want Deny MALFORMED", v)
+	}
+}
+
+// TestSweepGuardOrphanAllowedWhenQuarantined proves that when an orphan dirty hunk
+// is backed by a quarantine ref archive (Issue #11238), it is recoverable and allowed.
+func TestSweepGuardOrphanAllowedWhenQuarantined(t *testing.T) {
+	plan := sweepPlan("git clean -- internal/peer/orphan.go", []wipattr.Hunk{sweepPeerOrphanHunk}, sweepCheckpoints())
+	plan.QuarantineRef = "refs/fak/quarantine/sessA/20260904-120000"
+
+	finding := CheckSweepGuard(plan)
+	if finding.Disposition != SweepClear {
+		t.Fatalf("quarantined orphan disposition=%v, want SweepClear (finding=%+v)", finding.Disposition, finding)
+	}
+
+	v := New().Adjudicate(context.Background(), sweepCall(plan))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("quarantined orphan verdict=%+v, want Allow", v)
 	}
 }
 
