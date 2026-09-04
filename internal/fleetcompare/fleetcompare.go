@@ -2,6 +2,9 @@ package fleetcompare
 
 import "sort"
 
+// Slice contains decomposed metrics swept across a fixed parameter.
+// Invariant: Isolated = Shared - Cross for each corresponding index point.
+// Assumption: Input columns have aligned lengths and valid mean metrics.
 type Slice struct {
 	Xs       []float64
 	Shared   []float64
@@ -9,6 +12,9 @@ type Slice struct {
 	Cross    []float64
 }
 
+// SliceFixed slices multidimensional simulation columns by a fixed parameter key
+// (e.g. "agents" or "turns") at value val, ordering results along the orthogonal axis.
+// Guard: Decomposes shared_saved_mean and cross_uplift_mean into isolated cache savings.
 func SliceFixed(cols map[string][]float64, key string, val float64) Slice {
 	other := "turns"
 	if key == "turns" {

@@ -733,6 +733,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdLeaseref(args)
 	case "contract":
 		cmdContract(args)
+	case "queue":
+		cmdQueueTop(args)
 	case "intent":
 		cmdIntent(args)
 	case "memgate":

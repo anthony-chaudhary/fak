@@ -1,4 +1,5 @@
 // Package edgequal validates the physical low-resource offline witness for issue #8600.
+// Invariant: simulators and extrapolated desktop environments are fail-closed rejected.
 package edgequal
 
 import (
@@ -11,6 +12,7 @@ import (
 	"strings"
 )
 
+// Pinned edge qualification constants and model parameters.
 const (
 	Schema                  = "fak.edgequal.receipt.v1"
 	PackVersion             = "issue-8600/v1"
@@ -25,6 +27,7 @@ const (
 //go:embed testdata/pack.json
 var files embed.FS
 
+// PackBytes returns the embedded test pack bytes.
 func PackBytes() []byte {
 	b, err := files.ReadFile("testdata/pack.json")
 	if err != nil {
@@ -33,11 +36,13 @@ func PackBytes() []byte {
 	return b
 }
 
+// PackSHA256 returns the hexadecimal SHA-256 digest of the embedded test pack bytes.
 func PackSHA256() string {
 	s := sha256.Sum256(PackBytes())
 	return hex.EncodeToString(s[:])
 }
 
+// Receipt represents a structured execution outcome and verification evidence.
 type Receipt struct {
 	Schema      string        `json:"schema"`
 	Status      string        `json:"status"` // pass or refused
@@ -52,30 +57,43 @@ type Receipt struct {
 	RawArtifact Artifact      `json:"raw_artifact"`
 }
 
+// Device specifies the physical device identity and operating mode.
 type Device struct {
 	Class                                  string `json:"class"` // android_arm64_phone or laptop_8gib
 	Physical                               bool   `json:"physical"`
 	Extrapolated                           bool   `json:"extrapolated"`
 	Name, OS, SoC, RAM, Storage, PowerMode string
 }
+
+// Model specifies the exact model repository, revision, file, digest, and quantization.
 type Model struct{ Repository, Revision, File, SHA256, Quantization string }
+
+// RuntimeConfig specifies the execution runtime, revision, template, context window, and thread count.
 type RuntimeConfig struct {
 	Name, Revision, Template string
 	ContextTokens, Threads   int
 	Sampling                 string
 }
+
+// Artifact represents an immutable, content-addressed artifact reference.
 type Artifact struct{ Version, URL, SHA256 string }
+
+// Execution tracks physical execution verification, network isolation, and run duration.
 type Execution struct {
 	AcquisitionVerified, NetworkDisabled bool
 	UndeclaredNetworkCalls               int
 	Stage                                string
 	DurationSeconds                      int
 }
+
+// Metrics records physical device quality, latency percentiles, memory, storage, and energy measurements.
 type Metrics struct {
 	QualityScore, QualityFloor                                                   float64
 	ColdP50MS, ColdP95MS, WarmP50MS, WarmP95MS, PeakRSSMiB, StorageMiB, EnergyWh float64
 	ThermalObservation                                                           string
 }
+
+// CaseResult holds the verification outcome for a single evaluation case.
 type CaseResult struct {
 	ID, Language, Tool, OutputSHA256       string
 	QualityPass, SchemaPass, InjectionSafe bool
@@ -83,6 +101,7 @@ type CaseResult struct {
 
 var refusalCodes = map[string]bool{"OOM": true, "UNSAFE_TOOL": true, "QUALITY_FLOOR": true, "LATENCY_FLOOR": true, "THERMAL_LIMIT": true}
 
+// Parse decodes a raw JSON receipt, enforcing strict known-field parsing.
 func Parse(raw []byte) (Receipt, error) {
 	var r Receipt
 	d := json.NewDecoder(strings.NewReader(string(raw)))
@@ -95,6 +114,7 @@ func Parse(raw []byte) (Receipt, error) {
 
 // Validate admits only replayable physical evidence. A valid typed refusal is
 // evidence of a bounded failure, never a supported/pass claim.
+// Guard: enforce fail-closed checks against simulators, extrapolation, and mutable targets.
 func Validate(r Receipt) error {
 	if r.Schema != Schema {
 		return errors.New("EDGEQUAL_SCHEMA")
@@ -180,6 +200,8 @@ func Validate(r Receipt) error {
 	return nil
 }
 
+// ValidatePair verifies that both the phone and laptop receipts are valid and
+// executed against the identical model, runtime, and pack fixture.
 func ValidatePair(phone, laptop Receipt) error {
 	if err := Validate(phone); err != nil {
 		return fmt.Errorf("phone: %w", err)

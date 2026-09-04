@@ -53,11 +53,13 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocHook(os.Stdin, stderr, argv[1:])
 	case "replay":
 		return runToolprocReplay(stdout, stderr, argv[1:])
+	case "extension":
+		return runToolprocExtension(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | repeats | hook | replay)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | repeats | hook | replay | extension)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -595,6 +597,7 @@ func toolprocUsage(w io.Writer) {
   fak toolproc hook (pre | post | stop) [--journal FILE]
   fak toolproc replay --trace TRACE.jsonl [--json]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
+  fak toolproc extension --cmd "CMD" [--name EXT] [--call PAYLOAD] [--json]
 
 The adjudicator disposes a tool call at admission; the result floor disposes its
 payload at re-entry. Between the two, a long-running call (a background shell, a

@@ -41,7 +41,7 @@ import (
 )
 
 func cmdFleet(argv []string) {
-	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity | control | metrics | health | res", argv,
+	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity | control | metrics | health | res | compare", argv,
 		subcommand{"monitor", runFleetMonitor},
 		subcommand{"janitor", runFleetJanitor},
 		subcommand{"fold", runFleetFold},
@@ -51,6 +51,7 @@ func cmdFleet(argv []string) {
 		subcommand{"metrics", runFleetMetrics},
 		subcommand{"health", runFleetCommitHealth},
 		subcommand{"res", runFleetRes},
+		subcommand{"compare", runFleetCompare},
 	)
 }
 
