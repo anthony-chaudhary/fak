@@ -55,7 +55,7 @@ func (g guardWitnessedDoneGit) Run(ctx context.Context, name string, args ...str
 
 var (
 	guardDoneClaimRE = regexp.MustCompile(`(?i)(?:\b(?:done|completed|finished|implemented|fixed|shipped)\b|\btests? (?:pass|passed)\b)`)
-	guardCommitRefRE = regexp.MustCompile("(?i)\\b(?:commit(?:ted)?(?:\\s+(?:sha|as|is))?:?\\s+)[`]?([0-9a-f]{7,40})[`]?")
+	guardCommitRefRE = regexp.MustCompile(`(?i)\b(?:commit(?:ted)?(?:\s+as|\s+is|:)?\s+)([0-9a-f]{7,40})\b`)
 )
 
 func normalizeGuardWitnessedDoneMode(raw string) (string, error) {
@@ -167,7 +167,7 @@ func runGuardWitnessedDoneGate(stderr io.Writer, rawMode, transcriptPath, root, 
 		fmt.Fprintf(stderr, "fak guard Stop: %s stood down after %d blocks (bounded max=%d); allowing stop\n", finding.Reason, seq-1, max)
 		return 0, stopDispClaimUnwitnessedGiveUp, finding.Reason, true
 	}
-	fmt.Fprintf(stderr, "fak guard Stop: %s (%d/%d) — %s. Do not stop on self-narrated completion: commit the coherent change with a bindable (fak <leaf>) stamp, run its witness, cross-validate with a subagent, and report that commit.\n", finding.Reason, seq, max, finding.Detail)
+	fmt.Fprintf(stderr, "fak guard Stop: %s (%d/%d) — %s. Do not stop on self-narrated completion: commit the coherent change with a bindable (fak <leaf>) stamp, run its witness, and report that commit.\n", finding.Reason, seq, max, finding.Detail)
 	return 2, stopDispClaimUnwitnessedContinue, finding.Reason, true
 }
 

@@ -16,9 +16,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-func runHostEventScript(since time.Duration, psTemplate, label string) ([]byte, error) {
+func gatherHostCrashEvents(since time.Duration) ([]hostfault.ApplicationError1000, error) {
 	millis := since.Milliseconds()
-	script := strings.Replace(psTemplate, "__MILLIS__", strconv.FormatInt(millis, 10), 1)
+	script := strings.Replace(hostCrashEventPS, "__MILLIS__", strconv.FormatInt(millis, 10), 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
@@ -26,43 +26,52 @@ func runHostEventScript(since time.Duration, psTemplate, label string) ([]byte, 
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("Get-WinEvent %s: timed out after 30s", label)
+		return nil, fmt.Errorf("Get-WinEvent Event 1000: timed out after 30s")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("Get-WinEvent %s: %w", label, err)
+		return nil, fmt.Errorf("Get-WinEvent Event 1000: %w", err)
 	}
-	return out, nil
-}
-
-func parseAndFilterEvents[T any](out []byte, label string, since time.Duration, getTimeMS func(T) int64) ([]T, error) {
-	var events []T
+	var events []hostfault.ApplicationError1000
 	if err := json.Unmarshal(out, &events); err != nil {
-		return nil, fmt.Errorf("parse %s JSON: %w", label, err)
+		return nil, fmt.Errorf("parse Event 1000 JSON: %w", err)
 	}
 	cutoff := time.Now().Add(-since).UnixMilli()
 	kept := events[:0]
 	for _, event := range events {
-		if getTimeMS(event) >= cutoff {
+		if event.TimeMS >= cutoff {
 			kept = append(kept, event)
 		}
 	}
 	return kept, nil
 }
 
-func gatherHostCrashEvents(since time.Duration) ([]hostfault.ApplicationError1000, error) {
-	out, err := runHostEventScript(since, hostCrashEventPS, "Event 1000")
-	if err != nil {
-		return nil, err
-	}
-	return parseAndFilterEvents(out, "Event 1000", since, func(e hostfault.ApplicationError1000) int64 { return e.TimeMS })
-}
-
 func gatherHostSystemEvents(since time.Duration) ([]hostfault.WindowsSystemEvent, error) {
-	out, err := runHostEventScript(since, hostSystemEventPS, "System incidents")
-	if err != nil {
-		return nil, err
+	millis := since.Milliseconds()
+	script := strings.Replace(hostSystemEventPS, "__MILLIS__", strconv.FormatInt(millis, 10), 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("Get-WinEvent System incidents: timed out after 30s")
 	}
-	return parseAndFilterEvents(out, "System incidents", since, func(e hostfault.WindowsSystemEvent) int64 { return e.TimeMS })
+	if err != nil {
+		return nil, fmt.Errorf("Get-WinEvent System incidents: %w", err)
+	}
+	var events []hostfault.WindowsSystemEvent
+	if err := json.Unmarshal(out, &events); err != nil {
+		return nil, fmt.Errorf("parse System incidents JSON: %w", err)
+	}
+	cutoff := time.Now().Add(-since).UnixMilli()
+	kept := events[:0]
+	for _, event := range events {
+		if event.TimeMS >= cutoff {
+			kept = append(kept, event)
+		}
+	}
+	return kept, nil
 }
 
 const hostSystemEventPS = `

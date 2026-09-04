@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os/exec"
 	"path"
 	"regexp"
 	"sort"
@@ -144,7 +145,8 @@ for node in ast.walk(tree):
         raise SystemExit(0)
 raise SystemExit(1)
 `
-	cmd := windowgate.Command("python3", "-I", "-S", "-c", inspectImports, module)
+	cmd := exec.Command("python3", "-I", "-S", "-c", inspectImports, module)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdin = bytes.NewReader(source)
 	return cmd.Run() == nil
 }

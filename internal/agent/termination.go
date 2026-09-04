@@ -38,7 +38,7 @@ func ClassifyTermination(err error) Termination {
 		return Termination{Cause: TerminationContextLimit, Evidence: "request exceeded the model context limit"}
 	case containsAny(s, "policy_block", "policy block", "refused", "denied by", "stop gate", "guard blocked"):
 		return Termination{Cause: TerminationRefused, Evidence: "fak refused the turn"}
-	case containsAny(s, "upstream", "provider", "status 5", "http 5", "status 4", "http 4", "planner:", "api error:"):
+	case containsAny(s, "upstream", "provider", "status 5", "http 5"):
 		return Termination{Cause: TerminationProvider, Evidence: "provider request failed"}
 	default:
 		return Termination{Cause: TerminationUnknown, Evidence: "unclassified turn failure"}

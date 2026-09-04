@@ -65,8 +65,6 @@ GPU_FAMILY = {
     "nvidia-h100-80gb": "NVIDIA_H100",
     "nvidia-h100-mega-80gb": "NVIDIA_H100_MEGA",
     "nvidia-l4": "NVIDIA_L4",
-    "nvidia-tesla-a100": "NVIDIA_A100",
-    "nvidia-a100-80gb": "NVIDIA_A100_80GB",
 }
 
 # Older GPU families (L4, T4, A100, ...) are NOT carried by the unified
@@ -216,14 +214,12 @@ def gpu_quota_map(project: str, token: str) -> dict:
         except GcloudError:
             continue
         for d in (r.get("dimensionsInfos") or []):
-            val = _limit_val(d)
-            if not val or val <= 0:
-                continue
             region = (d.get("dimensions") or {}).get("region")
-            if region:
+            val = _limit_val(d)
+            # The legacy quota lists EVERY region (most at 0); keep only the
+            # ones with a real grant so the map stays small and truthful.
+            if region and val and val > 0:
                 out["by_family_region"][(fam, region)] = val
-            for loc in (d.get("applicableLocations") or []):
-                out["by_family_region"][(fam, loc)] = val
     return out
 
 

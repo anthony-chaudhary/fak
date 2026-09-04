@@ -154,24 +154,28 @@ func defaultHostCrashLogPath() string {
 	return filepath.Join(base, "fak", "host", "host-crashes.jsonl")
 }
 
-func readHostJSONFile[T any](path, label string) (T, error) {
-	var target T
+func readHostCrashFixture(path string) ([]hostfault.ApplicationError1000, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return target, err
+		return nil, err
 	}
-	if err := json.Unmarshal(b, &target); err != nil {
-		return target, fmt.Errorf("parse %s: %w", label, err)
+	var events []hostfault.ApplicationError1000
+	if err := json.Unmarshal(b, &events); err != nil {
+		return nil, fmt.Errorf("parse fixture: %w", err)
 	}
-	return target, nil
-}
-
-func readHostCrashFixture(path string) ([]hostfault.ApplicationError1000, error) {
-	return readHostJSONFile[[]hostfault.ApplicationError1000](path, "fixture")
+	return events, nil
 }
 
 func readHostSystemFixture(path string) ([]hostfault.WindowsSystemEvent, error) {
-	return readHostJSONFile[[]hostfault.WindowsSystemEvent](path, "system fixture")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var events []hostfault.WindowsSystemEvent
+	if err := json.Unmarshal(b, &events); err != nil {
+		return nil, fmt.Errorf("parse system fixture: %w", err)
+	}
+	return events, nil
 }
 
 func appendNewHostSystemIncidents(path string, events []hostfault.WindowsSystemEvent, maxBytesArg ...int64) ([]hostfault.SystemIncident, error) {

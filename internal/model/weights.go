@@ -171,11 +171,13 @@ type Model struct {
 	raw      []byte // all tensors, f32 LE, at the manifest offsets
 
 	// q8w holds the optional Q8_0-quantized copy of the matmul weights, built once by
-	// Quantize() and consumed only by the opt-in quantized forward path (quant.go /
-	// quant_forward.go). nil unless quantization was requested; the f32 path never reads it.
-	q8w      map[string]*q8Tensor
-	q8layers []q8Layer
-	q8head   *q8Tensor
+	// Quantize() or on-demand by q8(), and consumed only by the opt-in quantized forward
+	// path (quant.go / quant_forward.go). nil unless quantization was requested; the f32
+	// path never reads it.
+	q8w       map[string]*q8Tensor
+	q8layers  []q8Layer
+	q8head    *q8Tensor
+	quantized bool
 
 	// q4w holds the optional resident int4 (Q4_0-style) copy of the matmul weights, built
 	// once by QuantizeQ4() and consumed only by the opt-in int4 forward path (quant_q4.go).

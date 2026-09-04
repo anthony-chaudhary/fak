@@ -560,22 +560,28 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 			return result, 1
 		}
 	case "status":
-		s, exitCode := openGuardService(m, &result)
-		if exitCode != 0 {
-			return result, exitCode
+		s, err := m.OpenService(windowsGuardServiceName)
+		if err != nil {
+			return result, 3
 		}
 		defer s.Close()
+		if cfg, configErr := s.Config(); configErr == nil {
+			result.Path = windowsServiceConfigExecutable(cfg.BinaryPathName)
+		}
 		st, err := s.Query()
 		if err != nil {
 			return result, 1
 		}
 		result.Active = st.State == svc.Running
 	case "witness":
-		s, exitCode := openGuardService(m, &result)
-		if exitCode != 0 {
-			return result, exitCode
+		s, err := m.OpenService(windowsGuardServiceName)
+		if err != nil {
+			return result, 3
 		}
 		defer s.Close()
+		if cfg, configErr := s.Config(); configErr == nil {
+			result.Path = windowsServiceConfigExecutable(cfg.BinaryPathName)
+		}
 		st, err := s.Query()
 		if err != nil || st.State != svc.Running || st.ProcessId == 0 {
 			fmt.Fprintln(stderr, "service is not running")
@@ -617,11 +623,14 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 		}
 		result.StateKept = true
 	case "uninstall":
-		s, exitCode := openGuardService(m, &result)
-		if exitCode != 0 {
-			return result, exitCode
+		s, err := m.OpenService(windowsGuardServiceName)
+		if err != nil {
+			return result, 3
 		}
 		defer s.Close()
+		if cfg, configErr := s.Config(); configErr == nil {
+			result.Path = windowsServiceConfigExecutable(cfg.BinaryPathName)
+		}
 		_, _ = s.Control(svc.Stop)
 		if err = s.Delete(); err != nil {
 			return result, 1
@@ -630,15 +639,4 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 		return result, 2
 	}
 	return result, 0
-}
-
-func openGuardService(m windowsSCMManager, result *serviceResult) (windowsSCMService, int) {
-	s, err := m.OpenService(windowsGuardServiceName)
-	if err != nil {
-		return nil, 3
-	}
-	if cfg, configErr := s.Config(); configErr == nil {
-		result.Path = windowsServiceConfigExecutable(cfg.BinaryPathName)
-	}
-	return s, 0
 }

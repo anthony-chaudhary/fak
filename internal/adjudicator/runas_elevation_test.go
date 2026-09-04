@@ -163,7 +163,7 @@ func TestRunAsRecogniserMatchesShippedPolicy(t *testing.T) {
 		}
 		seen[strings.ToLower(r.Tool)] = true
 	}
-	for _, tool := range []string{"powershell", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command"} {
+	for _, tool := range []string{"powershell", "shell_command", "functions.shell_command", "exec_command"} {
 		if !seen[tool] {
 			t.Errorf("shipped policy has no RunAs rule for tool %q — the recogniser's surface list is stale", tool)
 		}

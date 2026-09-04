@@ -112,7 +112,6 @@ func polarityPreserved(before, after string) bool {
 // Reframe returns text with every unambiguous negative idiom flipped to its positive inverse,
 // leaving load-bearing judgement-tier prose and every must-keep token untouched. It is the
 // convenience wrapper over ReframePass for callers that want only the string.
-// For transforming refusal summaries into affordance-first prose, see ReframeRefusalProse (#11044).
 func Reframe(text string) string { return ReframePass(text).Text }
 
 // ReframePass runs the emit-time reframe and returns the rewritten text plus the telemetry counts.

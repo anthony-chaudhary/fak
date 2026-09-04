@@ -444,7 +444,7 @@ func ParseRefusal(token string) RefusalReason {
 		Category:    CategoryUnclassified,
 		Description: fmt.Sprintf("unrecognized refusal token %q", clean),
 		Refusal:     true,
-		Remedy:      "check reason validity using dos check-reason",
+		Remedy:      "check reason validity using dos man wedge <TOKEN> --explain",
 	}
 }
 

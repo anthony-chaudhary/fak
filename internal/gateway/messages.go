@@ -742,9 +742,6 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	}
 	scalarCfg := s.ScalarConfig()
 	compactBudget := scalarCfg.CompactHistoryBudget
-	if compactBudget <= 0 && s.compactHistoryBudget > 0 {
-		compactBudget = s.compactHistoryBudget
-	}
 	if compactBudget <= 0 {
 		s.metrics.observeCompaction(agent.CompactOutcome{}, true) // configured OFF
 		return false, ""
@@ -772,7 +769,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		Anchor:          agent.CompactAnchorFirstBP,
 		PositiveResidue: s.positiveResidualSubstitution,
 	}
-	if scalarCfg.CompactAnchorHead != 0 || s.compactAnchorHead {
+	if scalarCfg.CompactAnchorHead != 0 {
 		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can
 		// shed. headSessionPrior supplies the {TotalTurns, CurrentTurn} pair the burst gate
 		// consults: a genuine bounded horizon (turnsLeft>0) wins as before; otherwise, when the

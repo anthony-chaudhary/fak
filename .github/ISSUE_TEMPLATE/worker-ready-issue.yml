@@ -372,6 +372,19 @@ body:
       placeholder: 'fak commit --path internal/agent/retry.go -m "feat(agent): ... (fak agent)"'
     validations:
       required: true
+  - type: dropdown
+    id: execution-boundary
+    attributes:
+      label: Execution boundary / resource requirement
+      description: Lowest capability boundary needed to build and witness this change. Defaults to standard runner (CPU / local / portable); specify specialized resources only when strictly needed to witness the change.
+      options:
+        - "Standard runner (CPU / local / portable) [default]"
+        - "Single GPU (CUDA / Metal) [requires:gpu]"
+        - "Multi-GPU (Tensor Parallel / NCCL / DGX) [requires:gpu, requires:hardware]"
+        - "Sanctioned lab hardware (bare metal / reboot host) [requires:hardware]"
+        - "Cloud quota / burst network [requires:quota]"
+    validations:
+      required: true
   - type: textarea
     id: boundary-notes
     attributes:

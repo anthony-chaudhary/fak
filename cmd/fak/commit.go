@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -64,11 +63,11 @@ type pathList []string
 
 func (p *pathList) String() string { return strings.Join(*p, ",") }
 func (p *pathList) Set(v string) error {
-	parts := splitCommaList(v)
-	if len(parts) == 0 {
+	v = strings.TrimSpace(v)
+	if v == "" {
 		return fmt.Errorf("empty --path")
 	}
-	*p = append(*p, parts...)
+	*p = append(*p, v)
 	return nil
 }
 
@@ -239,12 +238,6 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, paths)
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
-	if lastBuildCheckCompileEvidence != "" {
-		buildCheck.CompileEvidence = lastBuildCheckCompileEvidence
-	}
-	if lastBuildCheckTestEvidence != "" {
-		buildCheck.TestEvidence = lastBuildCheckTestEvidence
-	}
 	if !admitBuild {
 		// COMMITTED_RED is a verdict on this pathset (exit 4: an unchanged retry recompiles the
 		// same red tree); BUILD_CHECK_TIMEOUT is contention (exit 3: the archive lost a race).
@@ -272,7 +265,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak commit: %v\n", err)
 		return 1
 	}
-	res = finalizeCommitEvidence(stderr, root, res, buildCheck, buildCheckOutcome, *push, *requireIssue, message)
+	res = finalizeCommitEvidence(stderr, root, res, buildCheck, buildCheckOutcome, *push, *requireIssue)
 
 	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak commit", *asJSON, res, func(w io.Writer) {
 		renderCommitResult(w, res)
@@ -282,18 +275,15 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	return commitExitCode(res)
 }
 
-// finalizeCommitEvidence attaches the prospective-tree gate, the delivery/review
-// receipts, and the post-commit DOS witness before the result is scored and rendered.
-func finalizeCommitEvidence(stderr io.Writer, root string, res safecommit.Result, buildCheck safecommit.BuildCheckResult, buildCheckOutcome safecommit.BuildCheckOutcome, push, requireIssue bool, message string) safecommit.Result {
+// finalizeCommitEvidence attaches the prospective-tree gate and the delivery/review
+// receipts before the result is scored and rendered.
+func finalizeCommitEvidence(stderr io.Writer, root string, res safecommit.Result, buildCheck safecommit.BuildCheckResult, buildCheckOutcome safecommit.BuildCheckOutcome, push, requireIssue bool) safecommit.Result {
 	// Attach the gate's outcome BEFORE scoring: a commit admitted without its prospective tree
 	// ever being compiled must not be graded like one that passed the gate (#6006).
 	res.BuildCheck = &buildCheck
 	completionClass := safecommit.CompletionVerifiedDelivery
 	if buildCheck.Outcome == safecommit.BuildCheckDisabled {
 		completionClass = safecommit.CompletionRecordOnly
-	}
-	if res.Committed && res.SHA != "" && dosWitnessFn != nil {
-		res.DOSWitness = dosWitnessFn(root, res.SHA, message)
 	}
 	res = safecommit.FinalizeEvidence(res, safecommit.EvidenceContract{
 		CompletionClass: completionClass,
@@ -326,66 +316,6 @@ func finalizeCommitEvidence(stderr io.Writer, root string, res safecommit.Result
 		}
 	}
 	return res
-}
-
-var dosWitnessFn = runDOSWitness
-
-func runDOSWitness(root, sha, message string) *safecommit.DOSWitnessResult {
-	if sha == "" {
-		return nil
-	}
-	dosPath, err := exec.LookPath("dos")
-	if err != nil {
-		return nil
-	}
-	witness := &safecommit.DOSWitnessResult{Ran: true}
-
-	ctxAudit, cancelAudit := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelAudit()
-	cmdAudit := exec.CommandContext(ctxAudit, dosPath, "commit-audit", sha, "--workspace", root, "--json")
-	cmdAudit.Dir = root
-	configureDispatchHelperCommand(cmdAudit)
-	if out, err := cmdAudit.Output(); err == nil {
-		var rows []struct {
-			Verdict   string `json:"verdict"`
-			Witness   string `json:"witness"`
-			ClaimKind string `json:"claim_kind"`
-			Reason    string `json:"reason"`
-		}
-		if json.Unmarshal(out, &rows) == nil && len(rows) > 0 {
-			witness.Verdict = rows[0].Verdict
-			witness.Witness = rows[0].Witness
-			witness.ClaimKind = rows[0].ClaimKind
-			witness.Reason = rows[0].Reason
-		}
-	}
-
-	firstLine := firstCommitLine(message)
-	lintRep := hooks.LintCommitMessage(firstLine, nil, root)
-	if lintRep.Leaf != "" {
-		witness.Leaf = lintRep.Leaf
-		ctxVerify, cancelVerify := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancelVerify()
-		cmdVerify := exec.CommandContext(ctxVerify, dosPath, "verify", "fak", lintRep.Leaf, "--workspace", root, "--json")
-		cmdVerify.Dir = root
-		configureDispatchHelperCommand(cmdVerify)
-		if out, err := cmdVerify.Output(); err == nil {
-			var vRes struct {
-				Shipped bool   `json:"shipped"`
-				Source  string `json:"source"`
-			}
-			if json.Unmarshal(out, &vRes) == nil {
-				if vRes.Shipped {
-					witness.VerifyState = "SHIPPED"
-					witness.VerifySource = vRes.Source
-				} else {
-					witness.VerifyState = "NOT_SHIPPED"
-				}
-			}
-		}
-	}
-
-	return witness
 }
 
 // renderCommitSyncAdvisory reports the relationship to origin using safesync's existing
@@ -628,12 +558,6 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, plan.UnionPaths)
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
-	if lastBuildCheckCompileEvidence != "" {
-		buildCheck.CompileEvidence = lastBuildCheckCompileEvidence
-	}
-	if lastBuildCheckTestEvidence != "" {
-		buildCheck.TestEvidence = lastBuildCheckTestEvidence
-	}
 	if !admitBuild {
 		commitRes := safecommit.Result{Paths: plan.UnionPaths, Reason: buildReason, Detail: buildCheck.Detail, BuildCheck: &buildCheck}
 		commitRes = safecommit.FinalizeEvidence(commitRes, safecommit.EvidenceContract{
@@ -953,25 +877,6 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 		renderCommitScore(stdout, res)
 		if res.BuildCheck != nil {
 			fmt.Fprintf(stdout, "  build check: %s (compiled=%t)\n", res.BuildCheck.Outcome, res.BuildCheck.Compiled)
-			if res.BuildCheck.CompileEvidence != "" || res.BuildCheck.TestEvidence != "" {
-				fmt.Fprintf(stdout, "  evidence: compile=%s test=%s\n", res.BuildCheck.CompileEvidence, res.BuildCheck.TestEvidence)
-			}
-		}
-		if res.DOSWitness != nil && res.DOSWitness.Ran {
-			if res.DOSWitness.Verdict != "" {
-				fmt.Fprintf(stdout, "  dos commit-audit: %s [%s]", res.DOSWitness.Verdict, res.DOSWitness.Witness)
-				if res.DOSWitness.Reason != "" {
-					fmt.Fprintf(stdout, " — %s", res.DOSWitness.Reason)
-				}
-				fmt.Fprintln(stdout)
-			}
-			if res.DOSWitness.VerifyState != "" {
-				fmt.Fprintf(stdout, "  dos verify: %s", res.DOSWitness.VerifyState)
-				if res.DOSWitness.VerifySource != "" {
-					fmt.Fprintf(stdout, " (source: %s)", res.DOSWitness.VerifySource)
-				}
-				fmt.Fprintln(stdout)
-			}
 		}
 		renderCommitVelocity(stdout, res)
 		renderCommitReview(stdout, res)

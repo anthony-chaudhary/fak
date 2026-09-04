@@ -36,7 +36,7 @@ func isRunAsArgRule(pr *ArgPredicate) bool {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "powershell", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command":
+	case "powershell", "shell_command", "functions.shell_command", "exec_command":
 		return pr.Re.String() == defaultRunAsDenyRegex
 	default:
 		return false

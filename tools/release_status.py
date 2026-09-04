@@ -842,11 +842,6 @@ def build_status(args: argparse.Namespace) -> dict:
     last_tag = (context or {}).get("last_tag") or (rolling_tags[-1] if rolling_tags else None)
     dirty = dirty_summary(root)
     ci_diag = ci_failure_diagnosis(root)
-    next_draft_path = root / "docs/releases/NEXT.md"
-    next_draft = {
-        "path": "docs/releases/NEXT.md",
-        "exists": next_draft_path.is_file(),
-    }
     status = {
         "schema": SCHEMA,
         "root": str(root),
@@ -860,7 +855,6 @@ def build_status(args: argparse.Namespace) -> dict:
             "latest_any_tag": (context or {}).get("latest_any_tag"),
             "commits_since_tag": len((context or {}).get("commits_since_tag") or []),
             "files_touched_since_tag": len((context or {}).get("files_touched_since_tag") or []),
-            "next_draft": next_draft,
             "tag_drift": (context or {}).get("tag_drift"),
             "ci_on_head": (context or {}).get("ci_on_head"),
             "ci_diagnosis": ci_diag,
@@ -892,12 +886,8 @@ def render_human(status: dict) -> str:
         f"release-status: {decision.get('decision', 'unknown').upper()} - {decision.get('reason', '')}",
         f"  last tag: {status.get('rolling', {}).get('last_tag') or '(none)'}",
         f"  commits since tag: {status.get('rolling', {}).get('commits_since_tag')}",
+        f"  next action: {action.get('kind')} - {action.get('detail')}",
     ]
-    next_draft = status.get("rolling", {}).get("next_draft", {})
-    if next_draft:
-        draft_status = "present" if next_draft.get("exists") else "missing"
-        lines.append(f"  next draft: {next_draft.get('path')} [{draft_status}]")
-    lines.append(f"  next action: {action.get('kind')} - {action.get('detail')}")
     if stable.get("latest_stable"):
         latest = stable["latest_stable"]
         lines.append(f"  stable: {latest.get('tag')} ({latest.get('version')}); lag={stable.get('stable_lag')}")

@@ -114,17 +114,16 @@ func fetchIssueReceiptWithin(ctx context.Context, r semanticRecord, timeout time
 	if e != nil {
 		return "", req.URL.String(), e
 	}
-	fallback := func(cause error) (string, string, error) {
+	if resp.StatusCode/100 != 2 {
+		// The unauthenticated REST budget is deliberately not treated as tool failure;
+		// fall back to the authenticated gh read seam and preserve the same bounded fields.
 		cmd := exec.CommandContext(ctx, "gh", "api", "repos/anthony-chaudhary/fak/issues/"+fmt.Sprint(r.Number), "--jq", "{state:.state,updated_at:.updated_at,locked:.locked}")
 		windowgate.ConfigureBackgroundCommand(cmd)
 		out, ge := cmd.Output()
 		if ge != nil {
-			return "", req.URL.String(), fmt.Errorf("%w; gh fallback: %w", cause, ge)
+			return "", req.URL.String(), fmt.Errorf("github %s; gh fallback: %w", resp.Status, ge)
 		}
 		return strings.TrimSpace(string(out)), "gh://api/repos/anthony-chaudhary/fak/issues/" + fmt.Sprint(r.Number), nil
-	}
-	if resp.StatusCode/100 != 2 {
-		return fallback(fmt.Errorf("github %s", resp.Status))
 	}
 	var x struct {
 		State     string `json:"state"`
@@ -132,7 +131,15 @@ func fetchIssueReceiptWithin(ctx context.Context, r semanticRecord, timeout time
 		Locked    bool   `json:"locked"`
 	}
 	if e = json.Unmarshal(b, &x); e != nil || x.State == "" {
-		return fallback(fmt.Errorf("github decode %v", e))
+		// A shared transport may return a successful but empty/truncated body. Use
+		// the same authenticated bounded read fallback as rate-limit responses.
+		cmd := exec.CommandContext(ctx, "gh", "api", "repos/anthony-chaudhary/fak/issues/"+fmt.Sprint(r.Number), "--jq", "{state:.state,updated_at:.updated_at,locked:.locked}")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, ge := cmd.Output()
+		if ge != nil {
+			return "", req.URL.String(), fmt.Errorf("github decode %v; gh fallback: %w", e, ge)
+		}
+		return strings.TrimSpace(string(out)), "gh://api/repos/anthony-chaudhary/fak/issues/" + fmt.Sprint(r.Number), nil
 	}
 	out, _ := json.Marshal(x)
 	return string(out), req.URL.String(), nil

@@ -889,7 +889,7 @@ def test_live_collect_real_readme() -> None:
     root = rfa.repo_root()
     if not (root / rfa.README_REL).exists():
         return  # tolerant: not in the repo tree
-    p = rfa.collect(root, today=_dt.date(2026, 8, 28))
+    p = rfa.collect(root, today=_dt.date(2026, 9, 3))
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
     assert p["ok"] is True, p

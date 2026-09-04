@@ -259,32 +259,14 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 // load-bearing for R2/R14 — NOT the fdot twin), then x·inv·weight.
 func (c *cpuBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	xf, wf := c.f32(x), c.f32(weight)
-	n := len(wf)
-	if n == 0 || len(xf)%n != 0 {
-		var ss float32
-		for _, v := range xf {
-			ss += v * v
-		}
-		inv := float32(1.0 / math.Sqrt(float64(ss/float32(len(xf))+eps)))
-		out := make([]float32, len(xf))
-		for i, v := range xf {
-			out[i] = v * inv * wf[i%n]
-		}
-		return c.result(append([]int(nil), x.Shape...), out)
+	var ss float32
+	for _, v := range xf {
+		ss += v * v
 	}
-	rows := len(xf) / n
+	inv := float32(1.0 / math.Sqrt(float64(ss/float32(len(xf))+eps)))
 	out := make([]float32, len(xf))
-	for r := 0; r < rows; r++ {
-		row := xf[r*n : (r+1)*n]
-		var ss float32
-		for _, v := range row {
-			ss += v * v
-		}
-		inv := float32(1.0 / math.Sqrt(float64(ss/float32(n)+eps)))
-		rowOut := out[r*n : (r+1)*n]
-		for i, v := range row {
-			rowOut[i] = v * inv * wf[i]
-		}
+	for i, v := range xf {
+		out[i] = v * inv * wf[i]
 	}
 	return c.result(append([]int(nil), x.Shape...), out)
 }

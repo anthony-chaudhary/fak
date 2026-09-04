@@ -363,9 +363,9 @@ concurrent = [
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
   "timeoutphase", "tokencache", "toolcoverage", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
-  "treedoctor", "treestatus", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
+  "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
-  "vcacheqa", "vcachescore", "vcachesnapshot", "vcachestar", "verifierexposure", "vllmcompile",
+  "vcacheqa", "vcachescore", "vcachesnapshot", "vcachestar", "verattest", "verifierexposure", "vllmcompile",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
   "worktreewitness", "xenginekv", "xprobe",
@@ -395,6 +395,7 @@ concurrent = [
   "toolcatalog",
   "toolcallcontrol",
   "projectassets",
+  "power",
   "sessionintent",
   "serverproduct",
   "serveradapter",
@@ -435,7 +436,7 @@ concurrent = [
   "agentdescriptor", "agentic", "agentquery", "agentqueue", "amoprofpub", "archfitness",
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
-  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools",
+  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
   "codexmcpdiag", "codexsession", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
   "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
   "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
@@ -645,6 +646,7 @@ autopick = [
   "tempartifact",
   "valuechain",
   "hostdiag",
+  "power", # internal/power leaf (cross-platform OS power assertion and wake-lock management)
   "ultracodenegcontrol",
   "systembaseline",
   "studyclass",
@@ -1234,7 +1236,6 @@ trajectory = ["internal/trajectory/**"]
 trajhook = ["internal/trajhook/**"]
 trajquery = ["internal/trajquery/**"]
 treedoctor = ["internal/treedoctor/**"]
-treestatus = ["internal/treestatus/**"]
 trendreport = ["internal/trendreport/**"]
 trigram = ["internal/trigram/**"]
 trunkbuildprobe = ["internal/trunkbuildprobe/**"]
@@ -1251,6 +1252,7 @@ vcacheqa = ["internal/vcacheqa/**"]
 vcachescore = ["internal/vcachescore/**"]
 vcachesnapshot = ["internal/vcachesnapshot/**"]
 vcachestar = ["internal/vcachestar/**"]
+verattest = ["internal/verattest/**"]
 verifierexposure = ["internal/verifierexposure/**"]
 vllmcompile = ["internal/vllmcompile/**"]
 watchdoghealth = ["internal/watchdoghealth/**"]
@@ -1295,6 +1297,7 @@ toolcatalog = ["internal/toolcatalog/**"]
 toolcallcontrol = ["internal/toolcallcontrol/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
 projectassets = ["internal/projectassets/**"]
+power = ["internal/power/**"]
 sessionintent = ["internal/sessionintent/**"]
 serverproduct = ["internal/serverproduct/**"]
 serveradapter = ["internal/serveradapter/**"]
@@ -1349,6 +1352,7 @@ citeverify = ["internal/citeverify/**"]
 cloudhandoff = ["internal/cloudhandoff/**"]
 codebookmeta = ["internal/codebookmeta/**"]
 codetools = ["internal/codetools/**"]
+systools = ["internal/systools/**"]
 codexmcpdiag = ["internal/codexmcpdiag/**"]
 codexsession = ["internal/codexsession/**"]
 commitlifecycle = ["internal/commitlifecycle/**"]
@@ -2528,7 +2532,7 @@ fix      = "Restore the checker to its declared bytes and re-grade, or -- if the
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
 
 [reasons.TEST_TAMPER_REFUSED]
-category = "INTEGRITY_GATE"
+category = "OPERATOR_GATE"
 refusal  = true
 summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
 fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."

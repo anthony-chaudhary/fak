@@ -41,9 +41,9 @@ func isRCEPipeArgRule(pr *ArgPredicate) bool {
 	tool := strings.ToLower(pr.Tool)
 	switch pr.Re.String() {
 	case legacyRCEPipeDenyRegex, defaultRCEPipeDenyRegex:
-		return tool == "bash" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command" || tool == "functions.exec_command"
+		return tool == "bash" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command"
 	case defaultPSRCEPipeDenyRegex:
-		return tool == "powershell" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command" || tool == "functions.exec_command"
+		return tool == "powershell" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command"
 	default:
 		return false
 	}

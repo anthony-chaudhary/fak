@@ -30,54 +30,12 @@ type GraphDedupReceipt struct {
 // higher-level callers that differ only in callee names become equivalent and merge.
 // The lexicographically smallest function name is selected as representative.
 func DeduplicateGraphFunctions(program GraphInlineProgram) (GraphInlineProgram, GraphDedupReceipt, error) {
-	functions, referenced, err := validateDedupProgram(program)
+	functions, referenced, err := validateAndIndexFunctions(program)
 	if err != nil {
 		return GraphInlineProgram{}, GraphDedupReceipt{}, err
 	}
 
-	// Compute dependency depth (level) for bottom-up processing.
-	depths := make(map[string]int)
-	visiting := make(map[string]bool)
-
-	var computeDepth func(string) int
-	computeDepth = func(name string) int {
-		if d, ok := depths[name]; ok {
-			return d
-		}
-		if visiting[name] {
-			return 0 // break cycles defensively
-		}
-		visiting[name] = true
-		defer func() { visiting[name] = false }()
-
-		fn := functions[name]
-		maxCalleeDepth := -1
-		for _, inst := range fn.Instructions {
-			if inst.Call != "" {
-				cd := computeDepth(inst.Call)
-				if cd > maxCalleeDepth {
-					maxCalleeDepth = cd
-				}
-			}
-		}
-		depth := maxCalleeDepth + 1
-		depths[name] = depth
-		return depth
-	}
-
-	maxDepth := 0
-	for name := range functions {
-		d := computeDepth(name)
-		if d > maxDepth {
-			maxDepth = d
-		}
-	}
-
-	// Group functions by level
-	levelGroups := make(map[int][]string)
-	for name, d := range depths {
-		levelGroups[d] = append(levelGroups[d], name)
-	}
+	levelGroups, maxDepth := computeFunctionLevels(functions)
 
 	var receipt GraphDedupReceipt
 	aliases := make(map[string]string)
@@ -122,58 +80,7 @@ func DeduplicateGraphFunctions(program GraphInlineProgram) (GraphInlineProgram, 
 				continue
 			}
 
-			sort.Strings(cluster)
-			repIndex := 0
-			for idx, cName := range cluster {
-				if isFenced(functions[cName]) {
-					repIndex = idx
-					break
-				}
-			}
-			rep := cluster[repIndex]
-			receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
-				Function:       rep,
-				Representative: rep,
-				Action:         "representative",
-			})
-
-			for idx, cName := range cluster {
-				if idx == repIndex {
-					continue
-				}
-				if isFenced(functions[cName]) {
-					receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
-						Function:       cName,
-						Representative: rep,
-						Action:         "fenced",
-						Reason:         "abi boundary preserved",
-					})
-					continue
-				}
-
-				aliases[cName] = rep
-				delete(retained, cName)
-				receipt.MergedFunctions++
-				receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
-					Function:       cName,
-					Representative: rep,
-					Action:         "merged",
-				})
-			}
-
-			for callerName, fn := range functions {
-				if !retained[callerName] {
-					continue
-				}
-				for k := range fn.Instructions {
-					inst := &fn.Instructions[k]
-					if targetRep, exists := aliases[inst.Call]; exists {
-						inst.Call = targetRep
-						receipt.CascadedCalls++
-					}
-				}
-				functions[callerName] = fn
-			}
+			mergeEquivalenceCluster(cluster, isFenced, functions, aliases, retained, &receipt)
 		}
 	}
 
@@ -211,6 +118,150 @@ func DeduplicateGraphFunctions(program GraphInlineProgram) (GraphInlineProgram, 
 	receipt.Digest = hex.EncodeToString(hash[:])
 
 	return outProgram, receipt, nil
+}
+
+func validateAndIndexFunctions(program GraphInlineProgram) (map[string]GraphInlineFunction, map[string]bool, error) {
+	functions := make(map[string]GraphInlineFunction, len(program.Functions))
+	referenced := make(map[string]bool)
+
+	for idx := range program.Functions {
+		target := program.Functions[idx]
+		if target.Name == "" {
+			return nil, nil, fmt.Errorf("function name is empty")
+		}
+		if _, seen := functions[target.Name]; seen {
+			return nil, nil, fmt.Errorf("duplicate function %q", target.Name)
+		}
+		functions[target.Name] = cloneGraphInlineFunction(target)
+		for _, op := range target.Instructions {
+			if op.Reference != "" {
+				referenced[op.Reference] = true
+			}
+		}
+	}
+
+	if _, ok := functions[program.Entry]; !ok {
+		return nil, nil, fmt.Errorf("entry function %q is missing", program.Entry)
+	}
+
+	for scopeName, item := range functions {
+		for _, op := range item.Instructions {
+			if op.Call != "" && functions[op.Call].Name == "" {
+				return nil, nil, fmt.Errorf("function %q calls missing function %q", scopeName, op.Call)
+			}
+			if op.Reference != "" && functions[op.Reference].Name == "" {
+				return nil, nil, fmt.Errorf("function %q references missing function %q", scopeName, op.Reference)
+			}
+		}
+	}
+	return functions, referenced, nil
+}
+
+func computeFunctionLevels(functions map[string]GraphInlineFunction) (map[int][]string, int) {
+	depths := make(map[string]int)
+	visiting := make(map[string]bool)
+
+	var computeDepth func(string) int
+	computeDepth = func(name string) int {
+		if d, ok := depths[name]; ok {
+			return d
+		}
+		if visiting[name] {
+			return 0 // break cycles defensively
+		}
+		visiting[name] = true
+		defer func() { visiting[name] = false }()
+
+		fn := functions[name]
+		maxCalleeDepth := -1
+		for _, inst := range fn.Instructions {
+			if inst.Call != "" {
+				cd := computeDepth(inst.Call)
+				if cd > maxCalleeDepth {
+					maxCalleeDepth = cd
+				}
+			}
+		}
+		depth := maxCalleeDepth + 1
+		depths[name] = depth
+		return depth
+	}
+
+	maxDepth := 0
+	for name := range functions {
+		d := computeDepth(name)
+		if d > maxDepth {
+			maxDepth = d
+		}
+	}
+
+	levelGroups := make(map[int][]string)
+	for name, d := range depths {
+		levelGroups[d] = append(levelGroups[d], name)
+	}
+	return levelGroups, maxDepth
+}
+
+func mergeEquivalenceCluster(
+	cluster []string,
+	isFenced func(GraphInlineFunction) bool,
+	functions map[string]GraphInlineFunction,
+	aliases map[string]string,
+	retained map[string]bool,
+	receipt *GraphDedupReceipt,
+) {
+	sort.Strings(cluster)
+	repIndex := 0
+	for idx, cName := range cluster {
+		if isFenced(functions[cName]) {
+			repIndex = idx
+			break
+		}
+	}
+	rep := cluster[repIndex]
+	receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
+		Function:       rep,
+		Representative: rep,
+		Action:         "representative",
+	})
+
+	for idx, cName := range cluster {
+		if idx == repIndex {
+			continue
+		}
+		if isFenced(functions[cName]) {
+			receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
+				Function:       cName,
+				Representative: rep,
+				Action:         "fenced",
+				Reason:         "abi boundary preserved",
+			})
+			continue
+		}
+
+		aliases[cName] = rep
+		delete(retained, cName)
+		receipt.MergedFunctions++
+		receipt.Outcomes = append(receipt.Outcomes, GraphDedupOutcome{
+			Function:       cName,
+			Representative: rep,
+			Action:         "merged",
+		})
+	}
+
+	for callerName, fn := range functions {
+		if !retained[callerName] {
+			continue
+		}
+		for k := range fn.Instructions {
+			inst := &fn.Instructions[k]
+			if targetRep, exists := aliases[inst.Call]; exists {
+				inst.Call = targetRep
+				receipt.CascadedCalls++
+			}
+		}
+		functions[callerName] = fn
+	}
 }
 
 func areFunctionsStructurallyEquivalent(f1, f2 GraphInlineFunction, aliases map[string]string) bool {
@@ -292,41 +343,4 @@ func areFunctionsStructurallyEquivalent(f1, f2 GraphInlineFunction, aliases map[
 	}
 
 	return true
-}
-
-func validateDedupProgram(program GraphInlineProgram) (map[string]GraphInlineFunction, map[string]bool, error) {
-	functions := make(map[string]GraphInlineFunction, len(program.Functions))
-	referenced := make(map[string]bool)
-
-	for idx := range program.Functions {
-		target := program.Functions[idx]
-		if target.Name == "" {
-			return nil, nil, fmt.Errorf("function name is empty")
-		}
-		if _, seen := functions[target.Name]; seen {
-			return nil, nil, fmt.Errorf("duplicate function %q", target.Name)
-		}
-		functions[target.Name] = cloneGraphInlineFunction(target)
-		for _, op := range target.Instructions {
-			if op.Reference != "" {
-				referenced[op.Reference] = true
-			}
-		}
-	}
-
-	if _, ok := functions[program.Entry]; !ok {
-		return nil, nil, fmt.Errorf("entry function %q is missing", program.Entry)
-	}
-
-	for scopeName, item := range functions {
-		for _, op := range item.Instructions {
-			if op.Call != "" && functions[op.Call].Name == "" {
-				return nil, nil, fmt.Errorf("function %q calls missing function %q", scopeName, op.Call)
-			}
-			if op.Reference != "" && functions[op.Reference].Name == "" {
-				return nil, nil, fmt.Errorf("function %q references missing function %q", scopeName, op.Reference)
-			}
-		}
-	}
-	return functions, referenced, nil
 }

@@ -211,6 +211,9 @@ func metaFor(tool string) map[string]string {
 	if m := codeToolMeta(tool); m != nil {
 		return m
 	}
+	if m, ok := sysToolMeta(tool); ok {
+		return m
+	}
 	if readOnlyTools[tool] {
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 	}
@@ -289,6 +292,9 @@ func Configure() {
 		toolConvert: true, toolFetchDoc: true, toolBook: true,
 	}
 	for _, name := range codeToolAllow() {
+		allow[name] = true
+	}
+	for _, name := range sysToolAllow() {
 		allow[name] = true
 	}
 

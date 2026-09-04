@@ -143,17 +143,13 @@ func TestExecToolRejectsMalformed(t *testing.T) {
 }
 
 // TestMockPlannerDeterministic confirms two identical runs produce identical
-// turn counts (the offline seam is reproducible). It also validates that SyntheticPlanner
-// and MockPlanner aliases remain 100% backward-compatible.
+// turn counts (the offline seam is reproducible).
 func TestMockPlannerDeterministic(t *testing.T) {
-	var _ *SyntheticPlanner = NewMockPlanner("t")
-	var _ *MockPlanner = NewSyntheticPlanner("t")
-
 	a, _, err := Run(context.Background(), NewMockPlanner("t"), DefaultTask, 12)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, err := Run(context.Background(), NewSyntheticPlanner("t"), DefaultTask, 12)
+	b, _, err := Run(context.Background(), NewMockPlanner("t"), DefaultTask, 12)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -114,17 +114,10 @@ type heartbeatConfig struct {
 	interval      time.Duration
 	started       bool
 	mu            sync.Mutex
-	writeMu       sync.Locker
 	streamStart   time.Time
 	lastEvent     time.Time
 	bytesEmitted  int64
 	eventsEmitted int64
-}
-
-func (h *heartbeatConfig) setWriteLocker(l sync.Locker) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.writeMu = l
 }
 
 // newHeartbeatConfig creates a heartbeat config from environment.
@@ -178,20 +171,13 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 	h.mu.Unlock()
 
 	hb := map[string]any{
-		"elapsed_ms":        elapsed.Milliseconds(),
-		"phase":             "mid_stream",
-		"bytes_emitted":     bytesEmitted,
-		"events_emitted":    eventsEmitted,
-		"last_event_age_ms": lastEventAge.Milliseconds(),
+		"elapsed_ms":         elapsed.Milliseconds(),
+		"phase":              "mid_stream",
+		"bytes_emitted":      bytesEmitted,
+		"events_emitted":     eventsEmitted,
+		"last_event_age_ms":  lastEventAge.Milliseconds(),
 	}
 	data, _ := json.Marshal(hb)
-	h.mu.Lock()
-	writeMu := h.writeMu
-	h.mu.Unlock()
-	if writeMu != nil {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-	}
 	_, _ = fmt.Fprintf(w, ": fak-heartbeat %s\n\n", data)
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
@@ -243,13 +229,27 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	}
 
 	// Heartbeat config for typed progress heartbeats (#10672).
-	var streamMu sync.Mutex
 	hb := newHeartbeatConfig()
-	hb.setWriteLocker(&streamMu)
-	if hbTicker, hbDone := startHeartbeat(ctx, hb, w); hbTicker != nil {
+	var hbTicker *time.Ticker
+	var hbDone chan struct{}
+	if hb.enabled {
+		hbTicker = time.NewTicker(hb.interval)
+		hbDone = make(chan struct{})
 		defer func() {
 			close(hbDone)
 			hbTicker.Stop()
+		}()
+		go func() {
+			for {
+				select {
+				case <-hbTicker.C:
+					hb.emitHeartbeat(w)
+				case <-hbDone:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
 		}()
 	}
 
@@ -258,8 +258,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// HTTP status (a 200 + SSE error is far worse for a client than a clean 502).
 	var started bool
 	start := func() error {
-		streamMu.Lock()
-		defer streamMu.Unlock()
 		if started {
 			return nil
 		}
@@ -280,8 +278,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return err
 		}
 		hb.recordEvent(len(contentDelta))
-		streamMu.Lock()
-		defer streamMu.Unlock()
 		return writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
 	}
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
@@ -289,7 +285,21 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// guard withheld is reconciled against the buffered post-lift content below.
 	guard := newLiftGuard(emitContent)
 	utf8Fragments := newUTF8FragmentBuffer(guard.write)
-	opts := buildStreamSampleOpts(req, sessionTurn)
+	opts := []agent.SampleOpt{
+		agent.WithModel(req.Model),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
+		agent.WithTemperature(req.Temperature),
+		agent.WithTopP(req.TopP),
+		agent.WithStop(normalizeStop(req.Stop)),
+		// Structured-output passthrough (#907): the streamed wire forwards the same
+		// response_format / logit_bias constraints as the buffered path, so a streamed
+		// tool-bearing turn is generated under the ride engine's constraint and still
+		// adjudicated whole. No-op when absent (bit-exact drop-in).
+		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithToolChoice(req.ToolChoice),
+		agent.WithLogitBias(req.LogitBias),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
+	}
 	lease, ok := s.admitStreamedTurn(ctx, w, "stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if !ok {
 		return true
@@ -299,7 +309,63 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
 	if err != nil {
-		s.handleStreamError(w, flusher, hb, err, started, reqTrace, began)
+		if _, _, _, ok := inKernelOOMObservation(err); ok {
+			s.observePlannerRequestMemory()
+		}
+		// Surface the failure on the default --debug-stats stderr line (the s.logf calls
+		// below only reach the --log stream, OFF by default) so an errored/stalled streamed
+		// turn is visible instead of a silent freeze. plannerErrorStatus below also bumps the
+		// upstream-error counter.
+		s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
+		if !started {
+			// Nothing on the wire yet — surface a real HTTP error, exactly as the
+			// buffered path does, and own the response (the message is generic so the
+			// upstream body never crosses the trust boundary).
+			s.logf("gateway: upstream model error (stream): %v", err)
+			s.writeUpstreamErr(w, err)
+			return true
+		}
+		// Headers + content already went out; we cannot change the status. Emit a
+		// terminal error frame + [DONE] so the client's SSE parser ends cleanly rather
+		// than hanging, and log the cause for the operator.
+		_, _, msg := s.plannerErrorStatus(err)
+		s.logf("gateway: upstream model error mid-stream: %v", err)
+
+		// Write mid-stream incident packet (#10672).
+		ic := newIncidentConfig()
+		hb.mu.Lock()
+		ttft := int64(0)
+		if !hb.streamStart.IsZero() {
+			ttft = hb.streamStart.Sub(began).Milliseconds()
+		}
+		elapsed := time.Since(began).Milliseconds()
+		bytesEmitted := hb.bytesEmitted
+		eventsEmitted := hb.eventsEmitted
+		lastEventAge := time.Since(hb.lastEvent).Milliseconds()
+		hb.mu.Unlock()
+
+		statusClass := "error"
+		boundPolicy := "max-duration=off"
+		if v := os.Getenv("FAK_STREAM_MAX_DURATION_S"); v != "" {
+			boundPolicy = "max-duration=" + v + "s"
+		}
+		var cause string
+		var ue *agent.UpstreamStalledError
+		if errors.As(err, &ue) {
+			statusClass = "stall"
+			if ue.Kind == "max-duration" {
+				statusClass = "bound:max-stream-duration"
+			}
+			cause = ue.Kind
+		} else {
+			cause = "upstream_error"
+		}
+		ic.writeIncident("openai_chat_completions", "mid_stream", statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
+
+		_ = writeSSEData(w, map[string]any{
+			"error": map[string]any{"message": msg, "type": "server_error"},
+		})
+		writeSSEDone(w, flusher)
 		return true
 	}
 
@@ -313,8 +379,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// Mid-stream this surface ends the turn in the OpenAI dialect: a data frame carrying
 	// a server_error, then [DONE].
 	if s.failClosedOnUnparsedToolCalls(w, comp, started, "stream conformance fail-closed", "conformance fail-closed", func() {
-		streamMu.Lock()
-		defer streamMu.Unlock()
 		_ = writeSSEData(w, map[string]any{
 			"error": map[string]any{"message": "upstream tool-call format not recognized", "type": "server_error"},
 		})
@@ -384,10 +448,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return true
 		}
 	}
-	streamMu.Lock()
 	if len(kept) > 0 {
 		if err := writeSSEData(w, chunk(ChatDelta{ToolCalls: streamToolCalls(kept)}, nil, nil)); err != nil {
-			streamMu.Unlock()
 			return true
 		}
 	}
@@ -398,7 +460,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	}
 	_ = writeSSEData(w, final)
 	writeSSEDone(w, flusher)
-	streamMu.Unlock()
 	return true
 }
 
@@ -409,100 +470,4 @@ func writeSSEDone(w http.ResponseWriter, flusher http.Flusher) {
 	if flusher != nil {
 		flusher.Flush()
 	}
-}
-
-func startHeartbeat(ctx context.Context, hb *heartbeatConfig, w http.ResponseWriter) (*time.Ticker, chan struct{}) {
-	if !hb.enabled {
-		return nil, nil
-	}
-	hbTicker := time.NewTicker(hb.interval)
-	hbDone := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-hbTicker.C:
-				hb.emitHeartbeat(w)
-			case <-hbDone:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return hbTicker, hbDone
-}
-
-func handleMidStreamError(w http.ResponseWriter, flusher http.Flusher, hb *heartbeatConfig, err error, msg string, began time.Time) {
-	if hb != nil {
-		hb.mu.Lock()
-		writeMu := hb.writeMu
-		hb.mu.Unlock()
-		if writeMu != nil {
-			writeMu.Lock()
-			defer writeMu.Unlock()
-		}
-	}
-	ic := newIncidentConfig()
-	hb.mu.Lock()
-	ttft := int64(0)
-	if !hb.streamStart.IsZero() {
-		ttft = hb.streamStart.Sub(began).Milliseconds()
-	}
-	elapsed := time.Since(began).Milliseconds()
-	bytesEmitted := hb.bytesEmitted
-	eventsEmitted := hb.eventsEmitted
-	lastEventAge := time.Since(hb.lastEvent).Milliseconds()
-	hb.mu.Unlock()
-
-	statusClass := "error"
-	boundPolicy := "max-duration=off"
-	if v := os.Getenv("FAK_STREAM_MAX_DURATION_S"); v != "" {
-		boundPolicy = "max-duration=" + v + "s"
-	}
-	var cause string
-	var ue *agent.UpstreamStalledError
-	if errors.As(err, &ue) {
-		statusClass = "stall"
-		if ue.Kind == "max-duration" {
-			statusClass = "bound:max-stream-duration"
-		}
-		cause = ue.Kind
-	} else {
-		cause = "upstream_error"
-	}
-	ic.writeIncident("openai_chat_completions", "mid_stream", statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
-
-	_ = writeSSEData(w, map[string]any{
-		"error": map[string]any{"message": msg, "type": "server_error"},
-	})
-	writeSSEDone(w, flusher)
-}
-
-func buildStreamSampleOpts(req ChatRequest, sessionTurn servedSessionTurn) []agent.SampleOpt {
-	return []agent.SampleOpt{
-		agent.WithModel(req.Model),
-		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(req.Temperature),
-		agent.WithTopP(req.TopP),
-		agent.WithStop(normalizeStop(req.Stop)),
-		agent.WithResponseFormat(req.ResponseFormat),
-		agent.WithToolChoice(req.ToolChoice),
-		agent.WithLogitBias(req.LogitBias),
-		agent.WithGuidedDecode(req.GuidedDecodeFields()),
-	}
-}
-
-func (s *Server) handleStreamError(w http.ResponseWriter, flusher http.Flusher, hb *heartbeatConfig, err error, started bool, reqTrace string, began time.Time) {
-	if _, _, _, ok := inKernelOOMObservation(err); ok {
-		s.observePlannerRequestMemory()
-	}
-	s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
-	if !started {
-		s.logf("gateway: upstream model error (stream): %v", err)
-		s.writeUpstreamErr(w, err)
-		return
-	}
-	_, _, msg := s.plannerErrorStatus(err)
-	s.logf("gateway: upstream model error mid-stream: %v", err)
-	handleMidStreamError(w, flusher, hb, err, msg, began)
 }

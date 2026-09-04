@@ -28,6 +28,34 @@ func (e *PagedGLMDsaBudgetError) Error() string {
 		e.Reason, e.Field, e.Requested, e.Limit, e.Bytes)
 }
 
+func checkedMulInt(a, b int) (int, bool) {
+	if a < 0 || b < 0 {
+		return 0, false
+	}
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	c := a * b
+	if c/a != b {
+		return 0, false
+	}
+	return c, true
+}
+
+func checkedMulInt64(a, b int64) (int64, bool) {
+	if a < 0 || b < 0 {
+		return 0, false
+	}
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	c := a * b
+	if c/a != b {
+		return 0, false
+	}
+	return c, true
+}
+
 type pagedRows[T any] struct {
 	blockTokens int
 	stride      int
@@ -189,7 +217,7 @@ func newPagedGLMDsaKVCache(cfg Config, blockTokens int) (*pagedGLMDsaKVCache, er
 	vBytes := int64(vBlockCells) * 4
 	idxBytes := int64(idxBlockCells) * 8
 	blockBytesPerLayer := 2*kBytes + vBytes + 2*idxBytes
-	totalInitialBytes, ok4 := checkedMul(blockBytesPerLayer, int64(cfg.NumLayers))
+	totalInitialBytes, ok4 := checkedMulInt64(blockBytesPerLayer, int64(cfg.NumLayers))
 	if !ok4 || totalInitialBytes > PagedGLMDsaByteBudget {
 		return nil, &PagedGLMDsaBudgetError{
 			Field:     "totalInitialBytes",
@@ -252,7 +280,7 @@ func GLMDsaKVCacheToPaged(c *KVCache, blockTokens int) (*pagedGLMDsaKVCache, err
 
 	if n > 0 {
 		tokenBytesPerLayer := int64(2*kStride+vStride)*4 + int64(2*idxStride)*8
-		totalTokenBytes, ok := checkedMul(tokenBytesPerLayer*int64(n), int64(c.cfg.NumLayers))
+		totalTokenBytes, ok := checkedMulInt64(tokenBytesPerLayer*int64(n), int64(c.cfg.NumLayers))
 		if !ok || totalTokenBytes > PagedGLMDsaByteBudget {
 			return nil, &PagedGLMDsaBudgetError{
 				Field:     "totalTokenBytes",

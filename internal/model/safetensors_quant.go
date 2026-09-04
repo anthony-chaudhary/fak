@@ -381,18 +381,6 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 	return nil
 }
 
-func unmarshalAndFetchTensor(raw json.RawMessage, name string, tensorBytes func(stEntry) ([]byte, error)) (stEntry, []byte, error) {
-	var e stEntry
-	if err := json.Unmarshal(raw, &e); err != nil {
-		return e, nil, fmt.Errorf("safetensors: entry %s: %w", name, err)
-	}
-	b, err := tensorBytes(e)
-	if err != nil {
-		return e, nil, fmt.Errorf("safetensors: tensor %s: %w", name, err)
-	}
-	return e, b, nil
-}
-
 func quantizeFP8BlockScaleTensorInto(
 	name string,
 	hdr map[string]json.RawMessage,
@@ -418,13 +406,17 @@ func quantizeFP8BlockScaleTensorInto(
 	if !ok {
 		return true, fmt.Errorf("safetensors: FP8 tensor %s is missing companion %s", name, scaleName)
 	}
-	scaleEntry, scaleBytes, err := unmarshalAndFetchTensor(scaleRaw, scaleName, tensorBytes)
-	if err != nil {
-		return true, err
+	var scaleEntry stEntry
+	if err := json.Unmarshal(scaleRaw, &scaleEntry); err != nil {
+		return true, fmt.Errorf("safetensors: entry %s: %w", scaleName, err)
 	}
 	weightBytes, err := tensorBytes(weightEntry)
 	if err != nil {
 		return true, fmt.Errorf("safetensors: tensor %s: %w", name, err)
+	}
+	scaleBytes, err := tensorBytes(scaleEntry)
+	if err != nil {
+		return true, fmt.Errorf("safetensors: tensor %s: %w", scaleName, err)
 	}
 	scaleF32, err := decodeSafetensorF32(scaleName, scaleEntry, scaleBytes)
 	if err != nil {
@@ -461,13 +453,20 @@ func quantizeMXFP4TensorInto(
 	if !ok {
 		return false, nil
 	}
-	blockEntry, blocks, err := unmarshalAndFetchTensor(hdr[name], name, tensorBytes)
-	if err != nil {
-		return true, err
+	var blockEntry, scaleEntry stEntry
+	if err := json.Unmarshal(hdr[name], &blockEntry); err != nil {
+		return true, fmt.Errorf("safetensors: entry %s: %w", name, err)
 	}
-	scaleEntry, scales, err := unmarshalAndFetchTensor(scaleRaw, scaleName, tensorBytes)
+	if err := json.Unmarshal(scaleRaw, &scaleEntry); err != nil {
+		return true, fmt.Errorf("safetensors: entry %s: %w", scaleName, err)
+	}
+	blocks, err := tensorBytes(blockEntry)
 	if err != nil {
-		return true, err
+		return true, fmt.Errorf("safetensors: tensor %s: %w", name, err)
+	}
+	scales, err := tensorBytes(scaleEntry)
+	if err != nil {
+		return true, fmt.Errorf("safetensors: tensor %s: %w", scaleName, err)
 	}
 	f32, shape, err := decodeMXFP4Blocks(base, blockEntry, scaleEntry, blocks, scales)
 	if err != nil {
@@ -626,10 +625,6 @@ func quantizeSourceMoETensorInto(name string, shape []int, data []float32, m *Mo
 	return false, nil
 }
 
-func expertGateUpNames(layer, e int, suffix string) (string, string) {
-	return expertName(layer, e, "gate_proj."+suffix), expertName(layer, e, "up_proj."+suffix)
-}
-
 func quantizeGPTOSSSourceMoETensor(name string, layer int, suffix string, shape []int, data []float32, m *Model, raw *[]byte, off *int) (bool, error) {
 	cfg := m.Cfg
 	E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
@@ -643,7 +638,8 @@ func quantizeGPTOSSSourceMoETensor(name string, layer int, suffix string, shape 
 			return true, err
 		}
 		for e := 0; e < E; e++ {
-			gateName, upName := expertGateUpNames(layer, e, "weight")
+			gateName := expertName(layer, e, "gate_proj.weight")
+			upName := expertName(layer, e, "up_proj.weight")
 			if anyQ8Present(m, gateName, upName) {
 				return true, fmt.Errorf("safetensors: cannot materialize %s: expert %d gate/up component already exists", name, e)
 			}
@@ -675,7 +671,8 @@ func quantizeGPTOSSSourceMoETensor(name string, layer int, suffix string, shape 
 			return true, err
 		}
 		for e := 0; e < E; e++ {
-			gateName, upName := expertGateUpNames(layer, e, "bias")
+			gateName := expertName(layer, e, "gate_proj.bias")
+			upName := expertName(layer, e, "up_proj.bias")
 			if anyF32Present(m, gateName, upName) {
 				return true, fmt.Errorf("safetensors: cannot materialize %s: expert %d gate/up bias already exists", name, e)
 			}

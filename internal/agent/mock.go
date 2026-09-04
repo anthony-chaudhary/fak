@@ -13,32 +13,26 @@ const DefaultTask = "Customer mia_li_3668 wants to book the cheapest direct flig
 	"First look up their account, then check the refund policy, then find the flights, " +
 	"tell them the cheapest price converted to EUR, and finally book that flight."
 
-// SyntheticPlanner is a deterministic, offline finite-agent that emulates a real
+// MockPlanner is a deterministic, offline finite-agent that emulates a real
 // tool-calling model. Crucially it is STATEFUL ON CONTEXT: each turn it inspects
 // the running messages and decides the next move from what it has actually SEEN.
 // That is what makes it a faithful A/B subject — the kernel changes what the
 // planner sees (a repaired call vs. an error to retry; a sanitized policy vs. a
 // poisoned one), so the SAME planner logic yields different turn counts per arm,
 // exactly as a real model would.
-type SyntheticPlanner struct{ model string }
+type MockPlanner struct{ model string }
 
-// NewSyntheticPlanner returns a deterministic offline planner reporting the given model
+// NewMockPlanner returns a deterministic offline planner reporting the given model
 // id, defaulting to "mock-deterministic" when model is empty.
-func NewSyntheticPlanner(model string) *SyntheticPlanner {
+func NewMockPlanner(model string) *MockPlanner {
 	if model == "" {
 		model = "mock-deterministic"
 	}
-	return &SyntheticPlanner{model: model}
+	return &MockPlanner{model: model}
 }
 
-// MockPlanner is a backward-compatible type alias for SyntheticPlanner.
-type MockPlanner = SyntheticPlanner
-
-// NewMockPlanner is a backward-compatible alias for NewSyntheticPlanner.
-var NewMockPlanner = NewSyntheticPlanner
-
-// Model returns the model id this synthetic planner reports.
-func (m *SyntheticPlanner) Model() string { return m.model }
+// Model returns the model id this mock planner reports.
+func (m *MockPlanner) Model() string { return m.model }
 
 // state is the planner's read of the conversation so far.
 type state struct {
@@ -102,7 +96,7 @@ func scan(messages []Message) state {
 // SampleOpts are accepted to satisfy the Planner seam but ignored by design: the
 // mock is a deterministic CI subject, so its turn count must not vary with
 // sampling params.
-func (m *SyntheticPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
+func (m *MockPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
 	s := scan(messages)
 	id := func() string { return "call_" + itoa(s.assistantTurns) }
 

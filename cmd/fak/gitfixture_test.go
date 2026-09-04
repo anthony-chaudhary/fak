@@ -41,6 +41,8 @@ func seedGitFixtureRepo(t *testing.T) (repo string, git func(args ...string) (st
 	if _, err := git("config", "core.hooksPath", emptyHooks); err != nil {
 		t.Skipf("git config failed: %v", err)
 	}
+	_, _ = git("config", "user.name", "t")
+	_, _ = git("config", "user.email", "t@t")
 	return repo, git
 }
 

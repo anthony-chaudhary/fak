@@ -42,6 +42,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Develop fak on a lab box, drive it from Slack (private) | [lab-dev-loop.md](lab-dev-loop.md) |
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](node-macos-a-activation.md) |
 | Drive the always-on Mac gateway from the fak UI | [mac-agent-ui.md](mac-agent-ui.md) |
+| Claude Code on your Mac's local model and many-agent cache savings | [claude-mac.md](claude-mac.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](gcp-tier2-control-vm.md) |
 | Bring up Qwen3.6-27B on one GCP datacenter GPU (a Claude Code coding fallback) | [qwen36-a100-gcp.md](qwen36-a100-gcp.md) |
 | Run fully offline on an edge / air-gapped node (audited, compliant) | [edge-quickstart.md](edge-quickstart.md) |

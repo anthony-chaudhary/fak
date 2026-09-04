@@ -51,7 +51,7 @@ func TestNightrunLedgerPathHelper(t *testing.T) {
 	t.Helper()
 	rel := os.Getenv(ledgerPathHelperEnv)
 	if rel == "" {
-		t.Skip("helper process only")
+		return
 	}
 	_, _ = os.Stdout.WriteString(nightrunLedgerPath(rel))
 }

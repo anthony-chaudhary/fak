@@ -46,6 +46,7 @@ func cmdOpencode(argv []string) {
 func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "opencode")
 	dryRun := fs.Bool("dry-run", false, "print the guarded OpenCode command and exit without launching")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	skipPermissions := fs.Bool("skip-permissions", true, "pass --dangerously-skip-permissions to opencode child when running unattended")

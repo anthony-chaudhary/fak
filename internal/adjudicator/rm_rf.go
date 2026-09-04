@@ -58,7 +58,7 @@ func isRmRfArgRule(pr *ArgPredicate) bool {
 		return re == defaultRmRfDenyRegex
 	case "powershell":
 		return re == defaultPSDeleteDenyRegex
-	case "shell_command", "functions.shell_command", "exec_command", "functions.exec_command":
+	case "shell_command", "functions.shell_command", "exec_command":
 		// This surface is POSIX on one host and PowerShell on another, so the
 		// shipped policy gives it BOTH rules; recognise both.
 		return re == defaultRmRfDenyRegex || re == defaultPSDeleteDenyRegex

@@ -187,10 +187,4 @@ func (s *Server) Close() {
 	if s.cacheStream != nil {
 		vdso.Default.SetCacheEventSink(nil)
 	}
-	s.controlSocketMu.Lock()
-	if s.controlSocket != nil {
-		_ = s.controlSocket.Close()
-		s.controlSocket = nil
-	}
-	s.controlSocketMu.Unlock()
 }

@@ -80,7 +80,6 @@ Use the first-class front door before helper-level debugging:
 ```bash
 fak release --help
 fak release status
-fak release next
 fak release plan
 fak release decide
 fak release cut --dry-run
@@ -89,12 +88,12 @@ fak release tag
 fak release publish
 ```
 
-Preserve this order: status/readiness → next (verify/sync in-flight WIP) → plan → decide → dry-run cut → execute cut → exact-SHA tag
+Preserve this order: status/readiness → plan → decide → dry-run cut → execute cut → exact-SHA tag
 → publish. The release lock, green-ancestor gate, and stable-context checks remain binding. Direct
 `python tools/release_*.py` commands below are fallback/debug equivalents only, not the preferred
 operator interface.
 
-Verify the canonical surface before proceeding: `fak release --help` must list `status`, `next`, `plan`,
+Verify the canonical surface before proceeding: `fak release --help` must list `status`, `plan`,
 `decide`, `cut`, `tag`, and `publish`. If one is absent, stop rather than silently falling back;
 use a helper only to diagnose the missing first-class wiring.
 

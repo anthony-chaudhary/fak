@@ -1,8 +1,3 @@
----
-title: "ADR: Composable System Prompt Algebra and Prefix-Caching Geometry"
-description: "Architecture decision record for compiled, content-addressed system prompt fragments ensuring byte-level prefix stability and high KV-cache reuse."
----
-
 # ADR: Composable System Prompt Algebra and Prefix-Caching Geometry
 
 - **Status:** Approved / RFC Reference
@@ -24,7 +19,7 @@ description: "Architecture decision record for compiled, content-addressed syste
 - **Today:** `fak` provides `defer-cold-tools` (Anthropic wire only) and `promptmmu` tool pruning. However, local OpenAI `/v1/chat/completions` and in-kernel GGUF wire paths still serialize monolithic prompts and entire tool catalogs verbatim.
 - **Better Because:** Implements a composable prompt architecture where the system prompt is a compiled projection of small, content-addressed, versioned fragments:
   $$\text{SystemPrompt} = \text{Compile}(\mathcal{F}, \text{ModelProfile}, \text{AgentTier}, \text{ContextBudget})$$
-  guaranteeing byte-level prefix stability for modeled 100% kernel KV-cache prefix hit rates on tokens $0 \dots K$, dynamic tool thinning, and scale-specialized contracts.
+  guaranteeing byte-level prefix stability for 100% KV cache hit rates on tokens $0 \dots K$, dynamic tool thinning, and scale-specialized contracts.
 - **Witness:** Deterministic topological resolution tests in `internal/promptcomp/*_test.go` proving acyclic ordering, cache breakpoint immutability, and 1,000-iteration byte-exact reproducibility.
 
 ---

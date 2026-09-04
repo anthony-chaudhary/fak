@@ -420,15 +420,27 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 		c := p.Metal
 		switch {
 		case c.WaitMilliseconds/decode >= 0.30:
-			setProfileClassification(&classification, "synchronization-bound", "", "Metal wait time is at least 30% of steady decode", "metal.command-buffer-amortization")
+			classification.Class = "synchronization-bound"
+			classification.Evidence = []string{"Metal wait time is at least 30% of steady decode"}
+			classification.RecommendedLeverID = "metal.command-buffer-amortization"
 		case c.CommandBuffers >= 32:
-			setProfileClassification(&classification, "launch-bound", "", "Metal command-buffer count is high for one decode sample", "metal.command-buffer-amortization")
+			classification.Class = "launch-bound"
+			classification.Evidence = []string{"Metal command-buffer count is high for one decode sample"}
+			classification.RecommendedLeverID = "metal.command-buffer-amortization"
 		case c.WorkingSetBytes > c.ResidentBytes:
-			setProfileClassification(&classification, "bandwidth-bound", "", "Metal working set exceeds resident bytes", "metal.paged-kv")
+			classification.Class = "bandwidth-bound"
+			classification.Evidence = []string{"Metal working set exceeds resident bytes"}
+			classification.RecommendedLeverID = "metal.paged-kv"
 		case c.DispatchMilliseconds/decode >= 0.70:
-			setProfileClassification(&classification, "compute-bound", "low", "Metal dispatch time dominates steady decode without launch, wait, or residency pressure", "metal.fused-hybrid-graph-coverage")
+			classification.Class = "compute-bound"
+			classification.Confidence = "low"
+			classification.Evidence = []string{"Metal dispatch time dominates steady decode without launch, wait, or residency pressure"}
+			classification.RecommendedLeverID = "metal.fused-hybrid-graph-coverage"
 		default:
-			setProfileClassification(&classification, "cpu-orchestration-bound", "low", "Metal device and synchronization thresholds are low while steady-decode wall time remains", "metal.command-buffer-amortization")
+			classification.Class = "cpu-orchestration-bound"
+			classification.Confidence = "low"
+			classification.Evidence = []string{"Metal device and synchronization thresholds are low while steady-decode wall time remains"}
+			classification.RecommendedLeverID = "metal.command-buffer-amortization"
 		}
 	}
 	if p.CUDA != nil {
@@ -437,15 +449,28 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 		computeRatio := c.AchievedComputeTFLOPS / c.PeakComputeTFLOPS
 		switch {
 		case c.SynchronizationMilliseconds/decode >= 0.30:
-			setProfileClassification(&classification, "synchronization-bound", "", "CUDA synchronization is at least 30% of steady decode", "cuda.default-decode-routing")
+			classification.Class = "synchronization-bound"
+			classification.Evidence = []string{"CUDA synchronization is at least 30% of steady decode"}
+			classification.RecommendedLeverID = "cuda.default-decode-routing"
 		case c.Launches >= 64:
-			setProfileClassification(&classification, "launch-bound", "", "CUDA launch count is high for one decode sample", "cuda.default-decode-routing")
+			classification.Class = "launch-bound"
+			classification.Evidence = []string{"CUDA launch count is high for one decode sample"}
+			classification.RecommendedLeverID = "cuda.default-decode-routing"
 		case bandwidthRatio >= 0.70 && computeRatio < 0.60:
-			setProfileClassification(&classification, "bandwidth-bound", "high", "CUDA achieved bandwidth is at least 70% while compute is below 60% of backend peak", "cuda.q8_1-activation-quant")
+			classification.Class = "bandwidth-bound"
+			classification.Confidence = "high"
+			classification.Evidence = []string{"CUDA achieved bandwidth is at least 70% while compute is below 60% of backend peak"}
+			classification.RecommendedLeverID = "cuda.q8_1-activation-quant"
 		case computeRatio >= 0.70:
-			setProfileClassification(&classification, "compute-bound", "high", "CUDA achieved compute is at least 70% of backend peak", "cuda.dp4a-q4k-mmvq")
+			classification.Class = "compute-bound"
+			classification.Confidence = "high"
+			classification.Evidence = []string{"CUDA achieved compute is at least 70% of backend peak"}
+			classification.RecommendedLeverID = "cuda.dp4a-q4k-mmvq"
 		default:
-			setProfileClassification(&classification, "cpu-orchestration-bound", "low", "CUDA device utilization thresholds are low without dominant synchronization", "cuda.default-decode-routing")
+			classification.Class = "cpu-orchestration-bound"
+			classification.Confidence = "low"
+			classification.Evidence = []string{"CUDA device utilization thresholds are low without dominant synchronization"}
+			classification.RecommendedLeverID = "cuda.default-decode-routing"
 		}
 	}
 
@@ -454,15 +479,6 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 		return BottleneckClassification{}, fmt.Errorf("classification recommends lever %q outside profile envelope %q", classification.RecommendedLeverID, p.EnvelopeID)
 	}
 	return classification, nil
-}
-
-func setProfileClassification(c *BottleneckClassification, class, confidence, evidence, leverID string) {
-	c.Class = class
-	if confidence != "" {
-		c.Confidence = confidence
-	}
-	c.Evidence = []string{evidence}
-	c.RecommendedLeverID = leverID
 }
 
 func NextLeverFromProfile(graph Graph, p ProfileBundle) (*Lever, BottleneckClassification, error) {

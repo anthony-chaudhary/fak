@@ -229,16 +229,38 @@ func set(values ...string) map[string]bool {
 	}
 	return out
 }
-func stringKeyMap[K ~string](in map[K]float64) map[string]float64 {
-	out := make(map[string]float64, len(in))
+func memoryMap(in map[MemoryKind]float64) map[string]float64 {
+	out := map[string]float64{}
 	for k, v := range in {
 		out[string(k)] = v
 	}
 	return out
 }
-
-func memoryMap(in map[MemoryKind]float64) map[string]float64   { return stringKeyMap(in) }
-func delayMap(in map[DelayKind]float64) map[string]float64     { return stringKeyMap(in) }
-func directionMap(in map[Direction]float64) map[string]float64 { return stringKeyMap(in) }
-func kernelMap(in map[KernelFamily]float64) map[string]float64 { return stringKeyMap(in) }
-func syncMap(in map[SyncKind]float64) map[string]float64       { return stringKeyMap(in) }
+func delayMap(in map[DelayKind]float64) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range in {
+		out[string(k)] = v
+	}
+	return out
+}
+func directionMap(in map[Direction]float64) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range in {
+		out[string(k)] = v
+	}
+	return out
+}
+func kernelMap(in map[KernelFamily]float64) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range in {
+		out[string(k)] = v
+	}
+	return out
+}
+func syncMap(in map[SyncKind]float64) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range in {
+		out[string(k)] = v
+	}
+	return out
+}

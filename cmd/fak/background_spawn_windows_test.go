@@ -22,7 +22,7 @@ func TestWindowsBackgroundSpawnsSuppressConsoleWindows(t *testing.T) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, "_windows.go") || strings.HasSuffix(name, "_test.go") || name == "windowgate_selfcheck_windows.go" {
+		if entry.IsDir() || !strings.HasSuffix(name, "_windows.go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		source, err := os.ReadFile(name)
@@ -82,7 +82,7 @@ func backgroundConfigured(file *ast.File, commandName string) bool {
 		}
 		pkg, isIdent := sel.X.(*ast.Ident)
 		arg, isArgIdent := call.Args[0].(*ast.Ident)
-		if isIdent && isArgIdent && pkg.Name == "windowgate" && (sel.Sel.Name == "ConfigureBackgroundCommand" || sel.Sel.Name == "ConfigureDetachedCommand") && arg.Name == commandName {
+		if isIdent && isArgIdent && pkg.Name == "windowgate" && sel.Sel.Name == "ConfigureBackgroundCommand" && arg.Name == commandName {
 			configured = true
 		}
 		return true

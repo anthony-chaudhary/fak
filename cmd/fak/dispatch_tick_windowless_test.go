@@ -475,6 +475,7 @@ func runDispatchCodexConsoleRoot(t *testing.T) {
 		childEnv := envMap(os.Environ())
 		childEnv[dispatchCodexConsoleRoleEnv] = "child"
 		childEnv[dispatchCodexConsoleLabelEnv] = label
+		delete(childEnv, dispatchWindowlessReleaseEnv)
 		cmd := exec.Command(path, "-test.run=^TestDispatchCodexWorkerDescendantsStayOffDesktop$")
 		cmd.Env = envSliceFromMap(childEnv)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

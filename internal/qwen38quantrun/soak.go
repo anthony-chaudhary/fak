@@ -317,7 +317,7 @@ func (r Runner) runCodingTasks(ctx context.Context, client *http.Client, cfg Cam
 		result := Result{FixtureID: task.ID, Workload: fixture.Workload, Repeat: 1, Quality: "FAIL"}
 		start := time.Now()
 		response, err := runOne(ctx, client, endpoint, fixture)
-		result.LatencyMS = float64(time.Since(start).Nanoseconds()) / float64(time.Millisecond)
+		result.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
 		if err != nil {
 			result.Failure = err.Error()
 			out = append(out, result)

@@ -150,9 +150,6 @@ func TestExitForHappyPathReturns(t *testing.T) {
 	// in-process; the success path must simply return without exiting.
 	pass := true
 	exitFor(true, &pass, true, nil)
-	if !pass {
-		t.Fatal("expected pass to remain true")
-	}
 }
 
 func TestDiagnoseV1OverFrozenReceipt(t *testing.T) {

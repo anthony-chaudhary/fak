@@ -323,11 +323,27 @@ func runModelCanaryRun(stdout, stderr io.Writer, args []string) int {
 	configSHA := digestBytes(raw)
 	var cfg modelCanaryRunConfig
 	if err := decodeModelCanaryStrict(raw, &cfg); err != nil {
-		return failModelCanaryConfig(stderr, *receiptPath, started, configSHA, err)
+		receipt := newModelCanaryReceipt(started, configSHA, runtime.GOOS, runtime.GOARCH)
+		refuseModelCanary(&receipt, modelCanaryPhaseConfigValidated, modelCanaryReasonConfigInvalid, err.Error())
+		finishModelCanaryReceipt(&receipt, time.Now().UTC())
+		if writeErr := writeModelCanaryReceiptAtomic(*receiptPath, receipt); writeErr != nil {
+			fmt.Fprintf(stderr, "fak model canary-run: %v; write terminal receipt: %v\n", err, writeErr)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak model canary-run: %v\n", err)
+		return 1
 	}
 	durations, err := validateModelCanaryConfig(cfg)
 	if err != nil {
-		return failModelCanaryConfig(stderr, *receiptPath, started, configSHA, err)
+		receipt := newModelCanaryReceipt(started, configSHA, runtime.GOOS, runtime.GOARCH)
+		refuseModelCanary(&receipt, modelCanaryPhaseConfigValidated, modelCanaryReasonConfigInvalid, err.Error())
+		finishModelCanaryReceipt(&receipt, time.Now().UTC())
+		if writeErr := writeModelCanaryReceiptAtomic(*receiptPath, receipt); writeErr != nil {
+			fmt.Fprintf(stderr, "fak model canary-run: %v; write terminal receipt: %v\n", err, writeErr)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak model canary-run: %v\n", err)
+		return 1
 	}
 
 	deps, depErr := modelCanaryLiveDependencies()
@@ -1237,16 +1253,4 @@ func nonEmptyModelCanaryLines(raw []byte) []string {
 		}
 	}
 	return lines
-}
-
-func failModelCanaryConfig(stderr io.Writer, receiptPath string, started time.Time, configSHA string, err error) int {
-	receipt := newModelCanaryReceipt(started, configSHA, runtime.GOOS, runtime.GOARCH)
-	refuseModelCanary(&receipt, modelCanaryPhaseConfigValidated, modelCanaryReasonConfigInvalid, err.Error())
-	finishModelCanaryReceipt(&receipt, time.Now().UTC())
-	if writeErr := writeModelCanaryReceiptAtomic(receiptPath, receipt); writeErr != nil {
-		fmt.Fprintf(stderr, "fak model canary-run: %v; write terminal receipt: %v\n", err, writeErr)
-		return 1
-	}
-	fmt.Fprintf(stderr, "fak model canary-run: %v\n", err)
-	return 1
 }

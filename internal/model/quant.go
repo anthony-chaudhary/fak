@@ -267,11 +267,19 @@ func qMatRowsRange(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) {
 // it); the int8 copy adds ~134 MB for dense checkpoints. Call before running any Quant
 // session.
 func (m *Model) Quantize() {
-	if m.q8w != nil {
+	q8Mu.Lock()
+	defer q8Mu.Unlock()
+	if m.quantized || m.q8layers != nil {
 		return
 	}
-	qm := make(map[string]*q8Tensor)
+	qm := m.q8w
+	if qm == nil {
+		qm = make(map[string]*q8Tensor)
+	}
 	add := func(name string) *q8Tensor {
+		if qt, ok := qm[name]; ok && qt != nil {
+			return qt
+		}
 		meta, ok := m.manifest[name]
 		if !ok {
 			panic("model: Quantize missing tensor " + name)
@@ -345,6 +353,7 @@ func (m *Model) Quantize() {
 	}
 	add(m.headName())
 	m.q8w = qm
+	m.quantized = true
 	m.initQ8CacheIfComplete()
 }
 
@@ -374,13 +383,45 @@ func (m *Model) headName() string {
 	return "model.embed_tokens.weight"
 }
 
-// q8 returns the prebuilt Q8_0 tensor for a name (Quantize must have run).
-func (m *Model) q8(name string) *q8Tensor {
-	qt, ok := m.q8w[name]
-	if !ok {
-		panic("model: q8 tensor not built: " + name + " (call Model.Quantize)")
+var q8Mu sync.RWMutex
+
+// quantizeOnDemand quantizes a 2D f32 tensor on demand from the manifest into m.q8w.
+// Returns the quantized tensor, or nil if the tensor is absent or not 2-dimensional.
+func (m *Model) quantizeOnDemand(name string) *q8Tensor {
+	if m == nil || !m.has(name) {
+		return nil
 	}
+	meta, ok := m.manifest[name]
+	if !ok || len(meta.Shape) != 2 {
+		return nil
+	}
+	out, in := meta.Shape[0], meta.Shape[1]
+	qt := quantizeQ8(m.tensor(name), out, in)
+	q8Mu.Lock()
+	if m.q8w == nil {
+		m.q8w = make(map[string]*q8Tensor)
+	}
+	m.q8w[name] = qt
+	q8Mu.Unlock()
 	return qt
+}
+
+// q8 returns the prebuilt Q8_0 tensor for a name (Quantize must have run, or the tensor
+// is quantized on demand from the f32 manifest).
+func (m *Model) q8(name string) *q8Tensor {
+	q8Mu.RLock()
+	if m.q8w != nil {
+		if qt, ok := m.q8w[name]; ok && qt != nil {
+			q8Mu.RUnlock()
+			return qt
+		}
+	}
+	q8Mu.RUnlock()
+
+	if qt := m.quantizeOnDemand(name); qt != nil {
+		return qt
+	}
+	panic("model: q8 tensor not built: " + name + " (call Model.Quantize)")
 }
 
 func (m *Model) initQ8Cache() {

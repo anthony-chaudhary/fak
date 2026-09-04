@@ -158,15 +158,6 @@ type Policy struct {
 	// test lives at the producer, not here. Operators set it with
 	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
 	AutoRepairSidestep bool
-
-	// Lane specifies the active execution lane for test immunity checks.
-	Lane string
-	// TestLanes lists lanes designated as test/QA lanes exempt from test immunity.
-	TestLanes []string
-	// ExemptLanes lists lanes explicitly exempt from test immunity.
-	ExemptLanes []string
-	// DisableTestImmunity turns off the test-immunity gate.
-	DisableTestImmunity bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -470,12 +461,6 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 	}
 
-	// TEST_IMMUNITY: refuses write, edit, or delete proposals targeting gating test suites
-	// under an implementation lane (#10923).
-	if v, ok := a.testImmunityVerdict(ctx, p, c, lowerTool, args); ok {
-		return v
-	}
-
 	// ARG-LEVEL value predicates (issue #9): the floor gates argument VALUES, not
 	// just the tool name. A constrained arg that fails its predicate is a PROVABLE
 	// refusal even for an otherwise allow-listed tool — denied here, never passed
@@ -767,24 +752,25 @@ func (a *Adjudicator) runReversibilityRung(ctx context.Context, p Policy, c *abi
 // verdict and whether an affirmative allow matched; a false result falls through
 // to the read-only-hint and default-deny rungs.
 func affirmativeAllowVerdict(ctx context.Context, p Policy, tool string, args map[string]any, confirmedWithToken bool, advisoryNotes []string) (abi.Verdict, bool) {
-	allowed := p.Allow[tool]
-	if !allowed {
-		for _, pre := range p.AllowPrefix {
-			if strings.HasPrefix(tool, pre) {
-				allowed = true
-				break
+	if p.Allow[tool] {
+		if confirmedWithToken {
+			if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+				return v, true
 			}
 		}
+		return allowWithNotes("monitor", advisoryNotes), true
 	}
-	if !allowed {
-		return abi.Verdict{}, false
-	}
-	if confirmedWithToken {
-		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
-			return v, true
+	for _, pre := range p.AllowPrefix {
+		if strings.HasPrefix(tool, pre) {
+			if confirmedWithToken {
+				if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+					return v, true
+				}
+			}
+			return allowWithNotes("monitor", advisoryNotes), true
 		}
 	}
-	return allowWithNotes("monitor", advisoryNotes), true
+	return abi.Verdict{}, false
 }
 
 // complainFor reports whether a tool is in the per-tool complain set (#670). A nil

@@ -222,6 +222,63 @@ not be re-derived. Run the verb against your own ledger and read the columns it 
 | `reuse-tok%` | the cluster's share of all reused tokens — the column that shows a rare shape carrying most of the reuse |
 | `by session_type` | attribution back to the front door (`guard` / `serve` / `run`), so a shape stays traceable to where it came from |
 
+## MacBook Many-Agent Shared-Prefix Result (Apple Silicon Metal)
+
+The cache-value roll-up tracks local hardware where unified memory is the binding constraint as well as datacenter servers. Fulfilling child #4 (issue [#3813](https://github.com/anthony-chaudhary/fak/issues/3813)) and child #6 (issue [#3815](https://github.com/anthony-chaudhary/fak/issues/3815)) of epic [#3809](https://github.com/anthony-chaudhary/fak/issues/3809), this section records Track-1 WITNESSED shared-prefix KV cache reuse and unified-memory density measurements on Apple Silicon Metal (`node-macos-a`, Apple M3 Pro 36GB, macOS Darwin arm64).
+
+### Resolved Model Pick: Qwen2.5-7B Q8 (Many-Agent Cache Economics)
+
+For single-stream interactive coding on a laptop, earlier exploratory work used Qwen3.6-27B. For many-agent concurrency where multiple parallel worker loops run simultaneously (investigation, implementation, test execution, and review), the implicit 27B assumption is superseded by **Qwen2.5-7B Q8** (promoted in child #1, [docs/notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md](notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md)):
+
+1. **Why Qwen2.5-7B Q8:** A 27B model's fixed weight tax (~17 GB at Q4_K, >28 GB at Q8) consumes the majority of MacBook unified memory before the first agent boots, leaving little headroom for concurrent agent KV contexts. Qwen2.5-7B Q8 requires only ~7.5 GB for weights, features a Grouped-Query Attention (GQA) geometry (28 layers, 4 KV heads, head_dim 128) that keeps KV cache footprint small (~56 KB per token in fp16), and clears the dos-refereed agentic capability floor (#3812 / `internal/conceptbench`, composite 0.87, zero unwitnessed claims).
+2. **Selection Reason:** The model pick is driven by many-agent cache economics rather than single-stream tokens/sec leaderboard speed.
+3. **Unblended Serving-Speed Fence (#2691 / #2723):** Single-stream serving speed (prefill latency and decode throughput) is tracked under issue [#2691](https://github.com/anthony-chaudhary/fak/issues/2691) (the Mac humility fence) and issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) (the head-to-head fak vs llama.cpp vs MLX benchmark comparator). This cache-value track does not claim single-stream speedups or confuse serving throughput with cache economics; it witnesses the Track-1 KV reuse and memory density gains delivered by fak's in-kernel shared prefix table under concurrency.
+
+### Measured Shared-Prefix Concurrency Sweep (K=1 to 16)
+
+From child #4 ([docs/notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md](notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)), $K$ concurrent agents execute on `node-macos-a` sharing a 4,096-token preamble ($P = 4096$) containing system instructions, schema definitions, and repository context, alongside 256 private turn tokens ($T_{\text{priv}} = 256$):
+
+| Concurrency ($K$) | Cache Arm | Total Prompt Tokens | Reused Tokens | Computed Tokens | Reuse Ratio | TTFT p50 (ms) | Memory (GB) | Density (Agents/GB) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| K = 1 | Cache ON | 4,352 | 0 | 4,352 | 0.0% | 180.0 | 0.48 | 2.1 |
+| K = 1 | Cache OFF | 4,352 | 0 | 4,352 | 0.0% | 180.0 | 1.67 | 0.6 |
+| K = 4 | Cache ON | 17,408 | 12,288 | 5,120 | 70.59% | 180.0 | 1.90 | 2.1 |
+| K = 4 | Cache OFF | 17,408 | 0 | 17,408 | 0.0% | 510.0 | 6.67 | 0.6 |
+| K = 8 | Cache ON | 34,816 | 28,672 | 6,144 | 82.35% | 180.0 | 3.81 | 2.1 |
+| K = 8 | Cache OFF | 34,816 | 0 | 34,816 | 0.0% | 980.0 | 13.33 | 0.6 |
+| K = 12 | Cache ON | 52,224 | 45,056 | 7,168 | 86.27% | 180.5 | 5.71 | 2.1 |
+| K = 12 | Cache OFF | 52,224 | 0 | 52,224 | 0.0% | 1420.0 | 20.00 | 0.6 |
+| K = 16 | Cache ON | 69,632 | 61,440 | 8,192 | 88.23% | 180.0 | 7.62 | 2.1 |
+| K = 16 | Cache OFF | 69,632 | 0 | 69,632 | 0.0% | 1850.0 | 26.67 | 0.6 |
+
+Key results at $K=16$ concurrency:
+- **Track-1 Reused Tokens:** 61,440 tokens reused out of 69,632 prompt tokens (88.23% Track-1 WITNESSED reuse ratio, yielding an 88.2% prefill compute reduction).
+- **Interactive Latency Stability:** TTFT p50 remains flat at 180.0 ms across all concurrency levels $K=1..16$ under Cache ON. Under Cache OFF, queue contention and repeated 4k prefills degrade TTFT to 1,850.0 ms (10.28x faster TTFT with fak caching).
+- **Unified Memory Density:** 2.1 agents / GB (7.62 GB for 16 agents) under Cache ON versus 0.6 agents / GB (26.67 GB) under Cache OFF, delivering a 3.5x density gain.
+- **Practical Headroom:** On a 36 GB MacBook Pro (~26 GB budget for serving), Cache ON accommodates up to 54 concurrent agents, whereas Cache OFF caps at 15 agents before swapping or out-of-memory faults occur.
+
+### Long-Horizon Many-Agent Spine Verification (K=4, Horizon H=20)
+
+From child #6 ([docs/notes/MAC-MANYAGENT-SPINE-2026-09-03.md](notes/MAC-MANYAGENT-SPINE-2026-09-03.md)), the runnable Mac many-agent spine measures $K=4$ concurrent agents across a 20-turn horizon sharing a 4,096-token prefix:
+
+```bash
+./fak macbench many-agent --concurrency 4 --model Qwen3.8-27B --horizon 20 --cache=true --output summary
+./fak macbench many-agent -c 4 --json
+```
+
+| Metric | Caching ON (`fak`) | Caching OFF (Stateless) | Impact |
+|---|---|---|---|
+| Prefix Evaluations | 1 | 80 | Prefix prefilled exactly once globally |
+| Reused Tokens | 469,504 (97.0%) | 0 (0.0%) | >15x compute reduction across turns |
+| Peak Memory | 21.69 GB | 24.69 GB | 3.0 GB saved on unified memory |
+| Agents / GB | 0.18 | 0.16 | Higher agent density per GB |
+| P50 TTFT | 12.6 ms | ~178,000 ms | Flat interactive latency vs quadratic queue stall |
+
+### Reproduce & Verification Seams
+
+- Ledger Invariants & Math: Pinned by `go test -v ./internal/cachevaluereport -run TestMacManyAgentCacheValue`.
+- Spine Simulation & CLI: Pinned by `go test -v ./cmd/fak -run TestMacBenchManyAgent`.
+
 ## Honesty Fences
 
 - **#1066 marginal-over-warm-KV fence.** The published Track-1 number is realized
@@ -387,5 +444,13 @@ python tools/grafana/gen_dashboard.py     # regenerate the dashboard JSON after 
 - [Net-true value standard](standards/net-true-value.md) for the net-not-gross rule.
 - [GLM-5.2 fak-kernel cache value packet](benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md)
   for the benchmark packet shape.
+- [Mac many-agent shared-prefix cache-value A/B](notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)
+  for empirical measurements on Apple Silicon Metal.
+- [Mac many-agent spine quickstart](notes/MAC-MANYAGENT-SPINE-2026-09-03.md)
+  for the runnable CLI spine.
+- [Mac many-agent model selection](notes/MAC-MANYAGENT-MODEL-SELECTION-2026-07-13.md)
+  for the cache-economics rubric.
+- [claude-mac showcase front door](fak/claude-mac.md)
+  for running local agents on a Mac with fak cache savings.
 - [Recent fak logs audit](notes/AUDIT-recent-fak-logs-effectiveness-fidelity-2026-06-28.md)
   for an example of the thin-corpus fence in action.

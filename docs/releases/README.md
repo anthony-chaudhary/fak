@@ -27,26 +27,10 @@ commit by itself.
 | **Upgrade or roll back a deployment** | [Upgrade route](../upgrade.md) | Record source and target versions, validate configuration and consumers, stage and verify the target, and retain the prior artifact or revision for rollback. |
 | **Choose a stable rollback anchor** | [Stable-release authority](../stable-releases/README.md) | A `stable/<codename>` tag promotes an already-shipped rolling commit after evidence and soak; it is a commit anchor, not a new artifact stream. |
 | **Download the current published artifact** | [GitHub releases](https://github.com/anthony-chaudhary/fak/releases/latest) | The latest published rolling `vX.Y.Z` release and its platform assets/checksums. Record the resolved tag before deployment. |
-| **Track in-flight work in progress** | [`NEXT.md`](NEXT.md) | Living draft tracking unreleased commits on `main` targeting the upcoming release. Inspected with `fak release next` and synced with `fak release next --sync`. |
 
 Rolling releases are the active binary distribution. Stable tags are sparse
 rollback anchors over commits already shipped by the rolling channel. An
 untagged trunk checkout is source development, not a published release.
-
-## The "Next" version concept (proactive WIP tracking)
-
-Between tagged releases, all work in progress on `main` belongs to the "Next"
-version (`vNext`). Rather than compiling release notes at the moment of the cut,
-in-flight features, bug fixes, and upgrade guidance are proactively tracked in
-[`NEXT.md`](NEXT.md).
-
-- **Inspect in-flight changes:** run `fak release next` (or `--json`) to view base tag,
-  commits in flight, projected semver bump level, and sync status.
-- **Sync the living draft:** run `fak release next --sync` to update [`NEXT.md`](NEXT.md)
-  with newly landed commits while preserving custom highlights and upgrade notes.
-- **Release cut promotion:** when running `fak release ship` or `fak release cut`,
-  the curated notes from [`NEXT.md`](NEXT.md) are automatically promoted into the
-  versioned record `vX.Y.Z.md`, and [`NEXT.md`](NEXT.md) is reset for the next cycle.
 
 ## Versioned release records
 

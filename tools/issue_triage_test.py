@@ -164,6 +164,22 @@ class DependencyTaxonomyTest(unittest.TestCase):
         finally:
             m.DEPENDENCY = orig
 
+    def test_requires_is_declared(self):
+        self.assertEqual(m.REQUIRES, {"requires"})
+
+    def test_config_can_override_requires(self):
+        import json
+        import tempfile
+        orig = m.REQUIRES
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "cfg.json"
+                p.write_text(json.dumps({"requires": ["demands"]}), encoding="utf-8")
+                m._load_config(str(p))
+                self.assertEqual(m.REQUIRES, {"demands"})
+        finally:
+            m.REQUIRES = orig
+
 
 class ActionsTest(unittest.TestCase):
     def test_dormant_question_yields_close_cmd(self):

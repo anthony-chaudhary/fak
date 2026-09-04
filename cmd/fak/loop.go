@@ -19,9 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/perfrsiscore"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
-	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
@@ -198,21 +196,7 @@ func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-type loopRunOptions struct {
-	ledger          string
-	loopID          string
-	runID           string
-	source          string
-	principal       string
-	asJSON          bool
-	notifySlack     bool
-	dispatchChannel string
-	dispatchToken   string
-	noGuard         bool
-	cmdArgs         []string
-}
-
-func parseLoopRunOptions(stderr io.Writer, argv []string) (loopRunOptions, int) {
+func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("loop run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
@@ -226,63 +210,26 @@ func parseLoopRunOptions(stderr io.Writer, argv []string) (loopRunOptions, int) 
 	dispatchToken := fs.String("dispatch-token", "", "override dispatch bot token (default: $FAK_DISPATCH_TOKEN, then scoreboard token)")
 	noGuard := fs.Bool("no-guard", false, "explicitly disable the default fak guard containment wrapper for this run (logged in the loop ledger)")
 	if !parseFlags(fs, argv) {
-		return loopRunOptions{}, 2
+		return 2
 	}
 	cmdArgs := fs.Args()
 	if strings.TrimSpace(*loopID) == "" {
 		fmt.Fprintln(stderr, "fak loop run: --loop is required")
-		return loopRunOptions{}, 2
+		return 2
 	}
 	if len(cmdArgs) == 0 {
 		fmt.Fprintln(stderr, "fak loop run: command is required after --")
-		return loopRunOptions{}, 2
+		return 2
 	}
 	if *runID == "" {
 		*runID = defaultLoopRunID(*loopID)
 	}
-	return loopRunOptions{
-		ledger:          *ledger,
-		loopID:          *loopID,
-		runID:           *runID,
-		source:          *source,
-		principal:       *principal,
-		asJSON:          *asJSON,
-		notifySlack:     *notifySlack,
-		dispatchChannel: *dispatchChannel,
-		dispatchToken:   *dispatchToken,
-		noGuard:         *noGuard,
-		cmdArgs:         cmdArgs,
-	}, 0
-}
 
-func handleLoopPerformanceRSI(stderr io.Writer, runID, performanceRSIInput, performanceRSIOutput string, performanceRSIPrepErr error) {
-	performanceRSIReceipt := perfrsiscore.ScoreLoopTurnFromEnvironment()
-	if performanceRSIInput == "" {
-		performanceRSIReceipt = scoreAutomaticLoopPerformanceRSI(performanceRSIOutput, runID, performanceRSIPrepErr)
-	}
-	if err := perfrsiscore.RecordLoopTurnUsage(performanceRSIReceipt); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: record performance-rsi usage: %v\n", err)
-	}
-	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
-}
-
-func runLoopRun(stdout, stderr io.Writer, argv []string) int {
-	opts, exitCode := parseLoopRunOptions(stderr, argv)
-	if exitCode != 0 {
-		return exitCode
-	}
-	ledger := &opts.ledger
-	loopID := &opts.loopID
-	runID := &opts.runID
-	source := &opts.source
-	principal := &opts.principal
-	asJSON := &opts.asJSON
-	notifySlack := &opts.notifySlack
-	dispatchChannel := &opts.dispatchChannel
-	dispatchToken := &opts.dispatchToken
-	cmdArgs := opts.cmdArgs
-	guardEnabled := !opts.noGuard
+	// Capture HEAD before the dispatch so the result card can WITNESS what it landed
+	// (HeadBefore..HeadAfter), not trust the child's self-report. "" if not a git repo.
 	headBefore := dispatchpost.HeadSHA(ctx(), "")
+
+	guardEnabled := !*noGuard
 	baseEvidence := []loopmgr.EvidenceRef{{Kind: "command", Ref: filepath.Base(cmdArgs[0])}}
 	baseMetrics := map[string]int64{"argc": int64(len(cmdArgs))}
 	if guardEnabled {
@@ -314,63 +261,9 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	childArgv := append([]string(nil), cmdArgs...)
-	admitReason := "GUARD_ADMITTED"
-	admitSummary := "loop wrapper admitted command under fak guard"
-	if guardEnabled {
-		if violations := loopContainmentViolations(cmdArgs); len(violations) > 0 {
-			m := cloneLoopMetrics(baseMetrics)
-			m["violations"] = int64(len(violations))
-			summary := repoguard.RenderReason(violations)
-			if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-				Kind:    loopmgr.EventAdmit,
-				Status:  loopmgr.StatusRefused,
-				Reason:  repoguard.Reason,
-				Summary: summary,
-				Metrics: m,
-			})); err != nil {
-				fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-				return 1
-			}
-			fmt.Fprintf(stderr, "fak loop run: containment refused command: %s\n", summary)
-			if *asJSON && !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
-				"status":    "refused",
-				"reason":    repoguard.Reason,
-				"exit_code": 3,
-			}) {
-				return 1
-			}
-			return 3
-		}
-		fakBin, err := loopExecutable()
-		if err != nil {
-			m := cloneLoopMetrics(baseMetrics)
-			m["exit_code"] = 127
-			_ = appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-				Kind:    loopmgr.EventEnd,
-				Status:  loopmgr.StatusFailed,
-				Reason:  "GUARD_UNAVAILABLE",
-				Summary: err.Error(),
-				Metrics: m,
-			}))
-			fmt.Fprintf(stderr, "fak loop run: resolve fak guard binary: %v\n", err)
-			return 127
-		}
-		childArgv = loopGuardArgv(fakBin, cmdArgs)
-	} else {
-		admitReason = "GUARD_DISABLED"
-		admitSummary = "--no-guard disabled fak guard containment"
-		fmt.Fprintln(stderr, "fak loop run: WARNING --no-guard disables fak guard containment for this run")
-	}
-	if err := appendLoopRunEvent(*ledger, loopEvent(loopmgr.Event{
-		Kind:    loopmgr.EventAdmit,
-		Status:  loopmgr.StatusAdmitted,
-		Reason:  admitReason,
-		Summary: admitSummary,
-		Metrics: cloneLoopMetrics(baseMetrics),
-	})); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-		return 1
+	childArgv, admitExit, ok := loopRunAdmit(stdout, stderr, *ledger, *loopID, *runID, cmdArgs, guardEnabled, baseMetrics, loopEvent, *asJSON)
+	if !ok {
+		return admitExit
 	}
 
 	// Per-run Slack is EXPLICITLY armed: --notify-slack uses the resolved channel,
@@ -383,24 +276,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		Command: filepath.Base(cmdArgs[0]),
 	})
 
-	performanceRSIInput := strings.TrimSpace(os.Getenv(perfrsiscore.LoopTurnInputEnv))
-	var performanceRSIOutput string
-	var performanceRSIPrepErr error
-	var childEnv []string
-	if performanceRSIInput == "" {
-		performanceRSIOutput, performanceRSIPrepErr = reserveLoopPerformanceRSIOutput(*ledger)
-		env := envMap(os.Environ())
-		env[loopIDEnv] = *loopID
-		env[loopRunIDEnv] = *runID
-		if performanceRSIOutput != "" {
-			env[loopPerformanceRSIOutputEnv] = performanceRSIOutput
-		} else {
-			delete(env, loopPerformanceRSIOutputEnv)
-		}
-		env[loopSandboxEnvAllow] = appendLoopEnvAllow(env[loopSandboxEnvAllow],
-			loopPerformanceRSIOutputEnv, loopIDEnv, loopRunIDEnv)
-		childEnv = envSliceFromMap(env)
-	}
+	childEnv, performanceRSIOutput, performanceRSIPrepErr := prepareLoopChildEnv(*ledger, *loopID, *runID)
 
 	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
 		ledger:    *ledger,
@@ -432,7 +308,12 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 			HeadAfter:  dispatchpost.HeadSHA(ctx(), ""),
 		})
 
-	handleLoopPerformanceRSI(stderr, *runID, performanceRSIInput, performanceRSIOutput, performanceRSIPrepErr)
+	// This is the ONE automatic performance-RSI seam: the child has completed and
+	// its dispatch result has already been finalized. Scoring calls the internal Go
+	// package directly, never a shell. Its receipt is always observable on stderr,
+	// while missing/invalid independently produced input remains nonfatal so the
+	// dispatch's exit code and stdout report keep their existing meaning.
+	recordLoopRunPerformanceRSI(stderr, *runID, performanceRSIOutput, performanceRSIPrepErr)
 
 	if *asJSON {
 		if !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{
@@ -1040,147 +921,6 @@ func runLoopPolicyPropose(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "\npropose-only: land an edit in %s yourself; nothing here writes it.\n", *policyPath)
 	return 0
-}
-
-func defaultLoopLedger() string {
-	if v := os.Getenv("FAK_LOOP_LEDGER"); v != "" {
-		return v
-	}
-	return filepath.Join(".fak", "loops.jsonl")
-}
-
-func defaultLoopPolicy() string {
-	if v := os.Getenv("FAK_LOOP_POLICY"); v != "" {
-		return v
-	}
-	return filepath.Join(".fak", "loop-policy.json")
-}
-
-func defaultLoopRegistry() string {
-	if v := os.Getenv("FAK_LOOP_REGISTRY"); v != "" {
-		return v
-	}
-	return filepath.Join("tools", "loop-registry.json")
-}
-
-func appendLoopRunEvent(ledger string, ev loopmgr.Event) error {
-	_, err := loopmgr.Append(ledger, ev)
-	return err
-}
-
-func cloneLoopMetrics(in map[string]int64) map[string]int64 {
-	out := make(map[string]int64, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func defaultLoopRunID(loopID string) string {
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	name := strings.Trim(replacer.Replace(loopID), "-")
-	if name == "" {
-		name = "loop"
-	}
-	return fmt.Sprintf("%s-%s-%d", name, time.Now().UTC().Format("20060102T150405Z"), os.Getpid())
-}
-
-func loopGuardArgv(fakBin string, cmdArgs []string) []string {
-	out := []string{fakBin, "guard", "--"}
-	out = append(out, cmdArgs...)
-	return out
-}
-
-func loopContainmentViolations(cmdArgs []string) []repoguard.Violation {
-	command := loopRepoguardCommand(cmdArgs)
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
-	cwd, _ := os.Getwd()
-	workspaceRoot := repoguard.FindRepoRoot(cwd)
-	return repoguard.ClassifyCommand(command, workspaceRoot, repoguard.SafeRootsForWorkspace(workspaceRoot))
-}
-
-func loopRepoguardCommand(cmdArgs []string) string {
-	if len(cmdArgs) == 0 {
-		return ""
-	}
-	if command, ok := loopShellCCommand(cmdArgs); ok {
-		return command
-	}
-	parts := make([]string, 0, len(cmdArgs))
-	for _, arg := range cmdArgs {
-		parts = append(parts, loopShellQuote(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
-func loopShellCCommand(cmdArgs []string) (string, bool) {
-	if len(cmdArgs) < 3 {
-		return "", false
-	}
-	base := strings.ToLower(strings.TrimSuffix(filepath.Base(cmdArgs[0]), ".exe"))
-	switch base {
-	case "bash", "sh", "zsh", "dash", "ksh":
-	default:
-		return "", false
-	}
-	for i := 1; i < len(cmdArgs)-1; i++ {
-		arg := cmdArgs[i]
-		if arg == "--" {
-			return "", false
-		}
-		if strings.HasPrefix(arg, "--") {
-			continue
-		}
-		if arg == "-c" || (strings.HasPrefix(arg, "-") && strings.Contains(arg[1:], "c")) {
-			return cmdArgs[i+1], true
-		}
-	}
-	return "", false
-}
-
-func loopShellQuote(arg string) string {
-	if arg == "" {
-		return "''"
-	}
-	if strings.IndexFunc(arg, func(r rune) bool {
-		return r <= ' ' || strings.ContainsRune(`'"$`+"\\"+`;|&<>(){}[]*?~!`, r)
-	}) < 0 {
-		return arg
-	}
-	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
-}
-
-type loopKVList []string
-
-func (l *loopKVList) String() string {
-	if l == nil {
-		return ""
-	}
-	return strings.Join(*l, ",")
-}
-
-func (l *loopKVList) Set(v string) error {
-	*l = append(*l, v)
-	return nil
-}
-
-func parseLoopEvidence(items []string) []loopmgr.EvidenceRef {
-	out := make([]loopmgr.EvidenceRef, 0, len(items))
-	for _, item := range items {
-		kind, ref, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		kind = strings.TrimSpace(kind)
-		ref = strings.TrimSpace(ref)
-		if kind == "" || ref == "" {
-			continue
-		}
-		out = append(out, loopmgr.EvidenceRef{Kind: kind, Ref: ref})
-	}
-	return out
 }
 
 func renderLoopStatus(w io.Writer, st loopmgr.Status) {

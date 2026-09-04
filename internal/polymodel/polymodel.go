@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -62,43 +61,6 @@ type Model struct {
 	// per-ModelID verdict barrier blocks. "" means "no declared shareable band"
 	// (this model never shares prefill with a different model). See CanShare.
 	PrefixDigest string
-
-	// LoadDuration is the time required to reload the model weights into memory.
-	// Defaults to DefaultLoadDuration (1s) if <= 0. Models with higher load durations
-	// receive lower Lemonade eviction scores under memory pressure, protecting
-	// expensive-to-reload models from thrashing.
-	LoadDuration time.Duration
-
-	// WeightFactor is an operator multiplier on reload cost.
-	// Defaults to DefaultWeightFactor (1.0) if <= 0.
-	WeightFactor float64
-}
-
-const (
-	// DefaultLoadDuration is the reload duration assumed when Model.LoadDuration is zero or negative.
-	DefaultLoadDuration = 1 * time.Second
-	// DefaultWeightFactor is the reload-cost multiplier assumed when Model.WeightFactor is non-positive.
-	DefaultWeightFactor = 1.0
-)
-
-// EvictionScore calculates the Lemonade eviction score for a model given its idle duration:
-//
-//	eviction_score = idle_duration / (load_duration * weight_factor)
-//
-// The model with the highest eviction score is chosen as the eviction victim (i.e. long idle
-// and/or cheap to reload). When loadDuration <= 0, DefaultLoadDuration (1s) is used.
-// When weightFactor <= 0, DefaultWeightFactor (1.0) is used.
-func EvictionScore(idle, loadDuration time.Duration, weightFactor float64) float64 {
-	if loadDuration <= 0 {
-		loadDuration = DefaultLoadDuration
-	}
-	if weightFactor <= 0 {
-		weightFactor = DefaultWeightFactor
-	}
-	if idle < 0 {
-		idle = 0
-	}
-	return float64(idle) / (float64(loadDuration) * weightFactor)
 }
 
 // Admission errors. Both error paths leave the pool UNCHANGED.
@@ -109,17 +71,14 @@ var (
 )
 
 type entry struct {
-	m        Model
-	used     uint64    // logical-clock recency stamp; higher == more recently used
-	lastUsed time.Time // wall-clock time when model was last admitted or touched
+	m    Model
+	used uint64 // logical-clock recency stamp; higher == more recently used
 }
 
 // Pool holds many prefill-warm models under one weight-byte budget. The budget,
 // not an architectural cap, bounds how many models stay warm; admitting past it
-// evicts the unpinned model with the highest Lemonade eviction score
-// (idle_duration / (load_duration * weight_factor)), falling back to standard LRU
-// when reload costs are uniform, so a hot or expensive-to-reload working set survives.
-// The pool tracks only residency + recency — it owns no weights and no KV (the model leaf
+// evicts the coldest UNPINNED model (LRU) so a hot working set survives. The pool
+// tracks only residency + recency — it owns no weights and no KV (the model leaf
 // does); it is the bookkeeping that lets a kernel keep 10s of models warm and
 // reason about which to drop.
 type Pool struct {
@@ -127,7 +86,6 @@ type Pool struct {
 	used   int64
 	clock  uint64
 	models map[ModelID]*entry
-	now    func() time.Time // injectable wall-clock seam; defaults to time.Now
 }
 
 // NewPool returns an empty pool with the given weight-byte budget.
@@ -138,28 +96,15 @@ func NewPool(budgetBytes int64) *Pool {
 	return &Pool{budget: budgetBytes, models: map[ModelID]*entry{}}
 }
 
-// SetNow overrides the pool's wall-clock time source (used for deterministic testing).
-func (p *Pool) SetNow(now func() time.Time) {
-	p.now = now
-}
-
-func (p *Pool) timeNow() time.Time {
-	if p.now != nil {
-		return p.now()
-	}
-	return time.Now()
-}
-
 func (p *Pool) tick() uint64 { p.clock++; return p.clock }
 
-// Admit makes m resident, evicting unpinned models by Lemonade eviction score
-// (idle_duration / (load_duration * weight_factor), falling back to LRU) as needed to
+// Admit makes m resident, evicting the coldest UNPINNED models (LRU) as needed to
 // stay within budget, and returns the evicted IDs in eviction order. A model that
 // alone exceeds the budget returns ErrTooLarge; a model that would fit only if a
 // pinned resident were dropped returns ErrPinnedNoRoom. Admission is
 // all-or-nothing: an error leaves the pool byte-for-byte unchanged. Re-admitting
 // an already-resident model is a Touch (the descriptor is immutable — Evict then
-// Admit to change WeightBytes/Pinned/Family/LoadDuration/WeightFactor).
+// Admit to change WeightBytes/Pinned/Family).
 func (p *Pool) Admit(m Model) ([]ModelID, error) {
 	if m.ID == "" {
 		return nil, ErrEmptyID
@@ -169,7 +114,6 @@ func (p *Pool) Admit(m Model) ([]ModelID, error) {
 	}
 	if e, ok := p.models[m.ID]; ok {
 		e.used = p.tick()
-		e.lastUsed = p.timeNow()
 		return nil, nil
 	}
 	if m.WeightBytes > p.budget {
@@ -195,43 +139,24 @@ func (p *Pool) Admit(m Model) ([]ModelID, error) {
 		p.used -= p.models[victim].m.WeightBytes
 		delete(p.models, victim)
 	}
-	p.models[m.ID] = &entry{m: m, used: p.tick(), lastUsed: p.timeNow()}
+	p.models[m.ID] = &entry{m: m, used: p.tick()}
 	p.used += m.WeightBytes
 	return evicted, nil
 }
 
-// coldestUnpinned returns the model chosen for eviction under memory pressure using
-// Lemonade reload-cost-weighted eviction scoring:
-//
-//	eviction_score = idle_duration / (load_duration * weight_factor)
-//
-// The unpinned model with the HIGHEST eviction score (i.e. long idle and/or cheap
-// to reload) is chosen as the eviction victim. A heavy model with high LoadDuration
-// and WeightFactor will have a much lower score and thus be protected from eviction
-// compared to a fast-loading model. When LoadDuration and WeightFactor are default/equal,
-// it falls back to standard LRU behavior (longest idle). Ties in score are broken by
-// oldest logical recency (used), then by ModelID for determinism.
-// Returns "" only when every resident is pinned (Admit's feasibility check rules that out
+// coldestUnpinned returns the least-recently-used unpinned model, tie-broken by
+// ID so the choice is deterministic regardless of map iteration order. Returns ""
+// only when every resident is pinned (Admit's feasibility check rules that out
 // before this is reached on a fitting path).
 func (p *Pool) coldestUnpinned() ModelID {
 	best := ModelID("")
-	var bestScore float64
 	var bestUsed uint64
-	now := p.timeNow()
-
 	for id, e := range p.models {
 		if e.m.Pinned {
 			continue
 		}
-		idle := now.Sub(e.lastUsed)
-		if idle <= 0 {
-			idle = time.Duration(p.clock-e.used+1) * time.Microsecond
-		}
-		score := EvictionScore(idle, e.m.LoadDuration, e.m.WeightFactor)
-		if best == "" || score > bestScore || (score == bestScore && (e.used < bestUsed || (e.used == bestUsed && id < best))) {
-			best = id
-			bestScore = score
-			bestUsed = e.used
+		if best == "" || e.used < bestUsed || (e.used == bestUsed && id < best) {
+			best, bestUsed = id, e.used
 		}
 	}
 	return best
@@ -243,7 +168,6 @@ func (p *Pool) Touch(id ModelID) bool {
 	e, ok := p.models[id]
 	if ok {
 		e.used = p.tick()
-		e.lastUsed = p.timeNow()
 	}
 	return ok
 }

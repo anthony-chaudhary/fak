@@ -56,6 +56,7 @@ var tier = map[string]int{
 	"wipreadiness":       1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
 	"timeaware":          1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
 	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
+	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
@@ -557,6 +558,7 @@ var tier = map[string]int{
 	"agentsindex":           1, // sectioned, fence-aware AGENTS.md loader (#3535, epic #3229): stdlib-only ATX view over AGENTS.md bytes with a resident TOC; imports nothing internal, off the hot path.
 	"milestoneburndown":     3, // the GitHub-milestone SCHEDULE dimension milestonereport never had: reads the live milestones' own due_on + open/closed counts + trailing closure velocity and folds each into a closed at-risk verdict (ON_TRACK/AT_RISK/OVERDUE/NO_DUE_DATE/DONE) with a projected drain date vs the due date. Pure fold + injected-`gh` collector (twin of mlpscore/versionskew); imports trendreport(1)+epicprogress(1), off the hot path.
 	"agentreadinessscore":   2, // agent-readiness scorecard (Go port of tools/agent_readiness_scorecard.py): experience-frontier + friction-debt over the git-tracked tree; stdlib-only, imports nothing internal, off the hot path.
+	"verattest":             1, // #10463: commit-bound pre-PR verification attestation validator; stdlib-only, off the hot path.
 	"verifierexposure":      2, // pure verifier-gameability score fold (#4424): declared gate signals to debt + worst-first worklist; stdlib-only, off the hot path.
 	"wiki":                  2, // #4277 deepwiki-study: witness-verified repo-wiki core — Structure (L1 #4278) projects the section→page tree from the self-index, VerifyCitations (L3 #4280) resolves Sources:[path:line] code cites vs the tree; composes devindex(1), off the hot path.
 	"projectreport":         2, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
@@ -667,6 +669,7 @@ var tier = map[string]int{
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
 	"armbench":              3, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
+	"systools":              2, // safe system and web search/fetch utility tools for the native harness
 	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
@@ -803,17 +806,11 @@ var tier = map[string]int{
 	"agentopt":                   1,
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
-	"treestatus":                 2, // structured working tree status and lane partitioning for peer WIP isolation; stdlib-only, off the hot path (#10920).
 	"ctxplanlint":                1,
 	"debtlane":                   1,
 	"marketplace":                1,
 	"mtpeval":                    1,
 	"mtptune":                    1,
-	"blobcommon":                 1,
-	"breathgate":                 1,
-	"childproc":                  1,
-	"ciyaml":                     1,
-	"kimik3page":                 1,
 	"decodemigrate":              1,
 	"dosadapter":                 1,
 	"framebus":                   1,
@@ -1434,7 +1431,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
@@ -2930,7 +2927,16 @@ var engineDriverRole = map[string]map[string]string{
 	"mlx":        {"engine": "the MLX ride-adapter fronting mlx-lm/vllm-mlx on Apple Silicon over the OpenAI-compatible wire"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
 	"sglang":     {"engine": "the SGLang EngineDriver adapter for hosted generation, metrics, and radix-cache observations"},
-	"vllm":       {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},
+	"systools.fetch_web": {
+		"systools": "safe web fetch engine with byte capping and SSRF protection",
+	},
+	"systools.get_time": {
+		"systools": "system time and timezone engine",
+	},
+	"systools.web_search": {
+		"systools": "web and documentation search engine",
+	},
+	"vllm": {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},
 }
 
 // resolveEngineIDArg returns the engine-id string a RegisterEngine call's first argument

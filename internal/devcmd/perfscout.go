@@ -27,6 +27,9 @@ func RunPerfScout(stdout, stderr io.Writer, argv []string) int {
 	fixture := fs.String("fixture", "", "path to offline JSON fixture to replay")
 	outPath := fs.String("out", "", "write Markdown report to this path")
 	jsonOut := fs.Bool("json", false, "emit report as JSON to stdout")
+	crossMatrix := fs.Bool("cross", false, "display cross-architecture innovation translation matrix")
+	sourcePlatform := fs.String("source", "", "filter cross innovations by source platform (e.g. mlx, cuda, rocm)")
+	targetPlatform := fs.String("target", "", "filter cross innovations by target platform (e.g. cuda, metal, rocm)")
 	saveFixture := fs.String("save-fixture", "", "save raw fetched repo candidates to this fixture path")
 
 	if err := fs.Parse(argv); err != nil {
@@ -35,6 +38,35 @@ func RunPerfScout(stdout, stderr io.Writer, argv []string) int {
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak-dev perfscout: unexpected positional arguments")
 		return 2
+	}
+
+	if *crossMatrix {
+		innovations := perfscout.FilterInnovations(*sourcePlatform, *targetPlatform, "")
+		if *jsonOut {
+			b, err := perfscout.RenderCrossInnovationsJSON(innovations)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak-dev perfscout: %v\n", err)
+				return 1
+			}
+			_, _ = stdout.Write(b)
+			_, _ = stdout.Write([]byte("\n"))
+			return 0
+		}
+		md := perfscout.RenderCrossInnovationsMarkdown(innovations)
+		if *outPath != "" {
+			if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
+				fmt.Fprintf(stderr, "fak-dev perfscout: %v\n", err)
+				return 1
+			}
+			if err := os.WriteFile(*outPath, []byte(md), 0o644); err != nil {
+				fmt.Fprintf(stderr, "fak-dev perfscout: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "fak-dev perfscout: wrote cross-architecture matrix to %s (%d innovations)\n", *outPath, len(innovations))
+			return 0
+		}
+		_, _ = stdout.Write([]byte(md))
+		return 0
 	}
 
 	var famFilter perfscout.ModelFamily

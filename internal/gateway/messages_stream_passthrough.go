@@ -22,7 +22,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -121,7 +120,6 @@ type anthropicPassthrough struct {
 	// hbTicker and hbDone manage the heartbeat goroutine lifecycle.
 	hbTicker *time.Ticker
 	hbDone   chan struct{}
-	writeMu  sync.Mutex
 	// checkpointDir is the directory for durable partial-output checkpoints.
 	checkpointDir string
 	// incidentDir is the directory for incident packets.
@@ -159,7 +157,6 @@ func (p *anthropicPassthrough) start() {
 	}
 	p.started = true
 	p.hb = newHeartbeatConfig()
-	p.hb.setWriteLocker(&p.writeMu)
 	if p.hb.enabled {
 		p.hbTicker = time.NewTicker(p.hb.interval)
 		p.hbDone = make(chan struct{})
@@ -182,12 +179,7 @@ func (p *anthropicPassthrough) start() {
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	p.w.WriteHeader(http.StatusOK)
-	rawSend := anthropicSSESender(p.w, p.flusher)
-	p.send = func(event string, data any) {
-		p.writeMu.Lock()
-		defer p.writeMu.Unlock()
-		rawSend(event, data)
-	}
+	p.send = anthropicSSESender(p.w, p.flusher)
 	p.hb.markStreamStart()
 }
 
@@ -463,21 +455,21 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 
 	p := &anthropicPassthrough{
-		s:               s,
-		w:               w,
-		r:               r,
-		req:             req,
-		reqTrace:        reqTrace,
-		turn:            sessionTurn,
-		flusher:         flusher,
-		passIdx:         map[int]int{},
-		toolBuf:         map[int]*sseToolAccum{},
+		s:              s,
+		w:              w,
+		r:              r,
+		req:            req,
+		reqTrace:       reqTrace,
+		turn:           sessionTurn,
+		flusher:        flusher,
+		passIdx:        map[int]int{},
+		toolBuf:        map[int]*sseToolAccum{},
 		openClientBlock: -1,
-		checkpointDir:   "",
-		incidentDir:     "",
-		traceID:         reqTrace,
-		model:           req.Model,
-		began:           time.Now(),
+		checkpointDir:  "",
+		incidentDir:    "",
+		traceID:        reqTrace,
+		model:          req.Model,
+		began:          time.Now(),
 	}
 	began := time.Now()
 

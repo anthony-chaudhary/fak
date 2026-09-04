@@ -140,7 +140,42 @@ func NewQwen35ResidentMetalDecoderForModel(m *Model) (*Qwen35ResidentMetalDecode
 }
 
 func (d *Qwen35ResidentMetalDecoder) validateAndInit() error {
-	cfg := d.cfg
+	if err := validateResidentConfig(&d.cfg); err != nil {
+		return err
+	}
+
+	if d.s.Cache == nil {
+		d.s.Cache = NewKVCache(d.cfg)
+	}
+	if d.s.Cache.linear == nil {
+		d.s.Cache.linear = newLinearAttnCache(d.cfg)
+	}
+
+	geom := metalgemm.GDNGeometry{
+		NumKeyHeads:   d.cfg.LinearNumKeyHeads,
+		NumValueHeads: d.cfg.LinearNumValueHeads,
+		KeyHeadDim:    d.cfg.LinearKeyHeadDim,
+		ValueHeadDim:  d.cfg.LinearValueHeadDim,
+		ConvKernel:    d.cfg.LinearConvKernelDim,
+	}
+
+	for l := 0; l < d.cfg.NumLayers; l++ {
+		if d.cfg.isLinearAttnLayer(l) {
+			layer, err := d.initResidentLinearLayer(l, geom)
+			if err != nil {
+				return err
+			}
+			d.linearLayers[l] = layer
+		} else {
+			d.fullLayers[l] = d.initResidentFullLayer(l)
+		}
+	}
+
+	d.finalNormWeight = d.m.tensor("model.norm.weight")
+	return nil
+}
+
+func validateResidentConfig(cfg *Config) error {
 	if !cfg.IsQwen35Hybrid() {
 		return errors.New("unsupported geometry: not a Qwen3.5/Qwen3.8 hybrid model")
 	}
@@ -172,174 +207,158 @@ func (d *Qwen35ResidentMetalDecoder) validateAndInit() error {
 	if !metalgemm.Available() {
 		return errors.New("runtime: Metal device is unavailable")
 	}
+	return nil
+}
 
-	if d.s.Cache == nil {
-		d.s.Cache = NewKVCache(cfg)
-	}
-	if d.s.Cache.linear == nil {
-		d.s.Cache.linear = newLinearAttnCache(cfg)
-	}
-
-	geom := metalgemm.GDNGeometry{
-		NumKeyHeads:   cfg.LinearNumKeyHeads,
-		NumValueHeads: cfg.LinearNumValueHeads,
-		KeyHeadDim:    cfg.LinearKeyHeadDim,
-		ValueHeadDim:  cfg.LinearValueHeadDim,
-		ConvKernel:    cfg.LinearConvKernelDim,
-	}
-
-	for l := 0; l < cfg.NumLayers; l++ {
-		p := func(suffix string) string { return layerName(l, suffix) }
-		if cfg.isLinearAttnLayer(l) {
-			for _, reqName := range []string{
-				p("linear_attn.conv1d.weight"),
-				p("linear_attn.A_log"),
-				p("linear_attn.dt_bias"),
-				p("linear_attn.norm.weight"),
-			} {
-				if !d.m.has(reqName) {
-					return fmt.Errorf("unsupported geometry: missing linear attention tensor %s", reqName)
-				}
-			}
-
-			names := []string{
-				p("linear_attn.in_proj_qkv.weight"),
-				p("linear_attn.in_proj_z.weight"),
-				p("linear_attn.in_proj_b.weight"),
-				p("linear_attn.in_proj_a.weight"),
-				p("linear_attn.out_proj.weight"),
-			}
-			metalQ4KMu.Lock()
-			table := metalQ8KW[d.m]
-			handles := make([]*metalgemm.Q8Weight, len(names))
-			if table != nil {
-				for i, name := range names {
-					handles[i] = table[name]
-				}
-			}
-			metalQ4KMu.Unlock()
-
-			var ownedQ8 []*metalgemm.Q8Weight
-			for i, name := range names {
-				if handles[i] == nil {
-					qt := d.m.q8(name)
-					if qt == nil {
-						return fmt.Errorf("missing Q8 tensor %s", name)
-					}
-					h := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
-					if h == nil {
-						return fmt.Errorf("failed to upload Q8 weight %s", name)
-					}
-					handles[i] = h
-					ownedQ8 = append(ownedQ8, h)
-				}
-			}
-
-			gateName, upName, downName := p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight")
-			gateTensor, upTensor := d.m.q4kw[gateName], d.m.q4kw[upName]
-			if gateTensor == nil || upTensor == nil {
-				return fmt.Errorf("missing MLP Q4_K tensors for layer %d", l)
-			}
-			gate := d.m.metalQ4KWeight(gateName, gateTensor)
-			up := d.m.metalQ4KWeight(upName, upTensor)
-			if gate == nil || up == nil {
-				return fmt.Errorf("failed to resolve MLP Q4_K weights for layer %d", l)
-			}
-
-			weights := metalgemm.Qwen35DecodeWeights{
-				InQKV: handles[0], InZ: handles[1], InB: handles[2], InA: handles[3], Out: handles[4],
-				MLPActivation: gate, MLPUp: up,
-			}
-			if downTensor := d.m.q4kw[downName]; downTensor != nil {
-				weights.MLPDownQ4 = d.m.metalQ4KWeight(downName, downTensor)
-			} else if downTensor := d.m.kqw[downName]; downTensor != nil && downTensor.kind == kindQ6K {
-				weights.MLPDownQ6 = d.m.metalQ6KWeight(downName, downTensor)
-			}
-			if weights.MLPDownQ4 == nil && weights.MLPDownQ6 == nil {
-				return fmt.Errorf("missing MLP down projection for layer %d", l)
-			}
-
-			attnNorm, mlpNorm := d.m.attentionNorms(l), d.m.mlpNorms(l)
-			if len(attnNorm.pre) != cfg.HiddenSize || len(mlpNorm.pre) != cfg.HiddenSize {
-				return fmt.Errorf("invalid normalization size for layer %d", l)
-			}
-
-			state, err := metalgemm.NewGDNState(geom)
-			if err != nil {
-				return fmt.Errorf("failed to allocate resident GDN state for layer %d: %w", l, err)
-			}
-
-			d.linearLayers[l] = &qwen35ResidentLinearLayer{
-				layer:   l,
-				weights: weights,
-				panel: metalgemm.GDNPanel{
-					Tokens:         1,
-					Conv1D:         d.m.tensor(p("linear_attn.conv1d.weight")),
-					ALog:           d.m.tensor(p("linear_attn.A_log")),
-					DTBias:         d.m.tensor(p("linear_attn.dt_bias")),
-					Norm:           d.m.tensor(p("linear_attn.norm.weight")),
-					RMSNormEpsilon: float32(cfg.RMSNormEps),
-				},
-				block: metalgemm.Qwen35DecodeBlock{
-					InputNorm:      attnNorm.pre,
-					MLPNorm:        mlpNorm.pre,
-					RMSNormEpsilon: float32(cfg.RMSNormEps),
-					NormGain1p:     cfg.NormGain1p,
-				},
-				geom:        geom,
-				state:       state,
-				ownsState:   true,
-				ownsWeights: ownedQ8,
-			}
-		} else {
-			attnNorm, mlpNorm := d.m.attentionNorms(l), d.m.mlpNorms(l)
-			qName := p("self_attn.q_proj.weight")
-			kName := p("self_attn.k_proj.weight")
-			vName := p("self_attn.v_proj.weight")
-			oName := p("self_attn.o_proj.weight")
-
-			var qNorm, kNorm []float32
-			if d.cfg.QKNorm || d.m.has(p("self_attn.q_norm.weight")) {
-				qNorm = d.m.tensor(p("self_attn.q_norm.weight"))
-				kNorm = d.m.tensor(p("self_attn.k_norm.weight"))
-			}
-
-			gateName, upName, downName := p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight")
-			gateTensor, upTensor := d.m.q4kw[gateName], d.m.q4kw[upName]
-			var gate, up *metalgemm.Q4KWeight
-			if gateTensor != nil && upTensor != nil {
-				gate = d.m.metalQ4KWeight(gateName, gateTensor)
-				up = d.m.metalQ4KWeight(upName, upTensor)
-			}
-
-			var downQ4 *metalgemm.Q4KWeight
-			var downQ6 *metalgemm.Q6KWeight
-			if downTensor := d.m.q4kw[downName]; downTensor != nil {
-				downQ4 = d.m.metalQ4KWeight(downName, downTensor)
-			} else if downTensor := d.m.kqw[downName]; downTensor != nil && downTensor.kind == kindQ6K {
-				downQ6 = d.m.metalQ6KWeight(downName, downTensor)
-			}
-
-			d.fullLayers[l] = &qwen35ResidentFullLayer{
-				layer:        l,
-				attnNorm:     attnNorm,
-				mlpNorm:      mlpNorm,
-				qWeight:      d.m.metalQ8Weight(qName, d.m.q8(qName)),
-				kWeight:      d.m.metalQ8Weight(kName, d.m.q8(kName)),
-				vWeight:      d.m.metalQ4KWeight(vName, d.m.q4kw[vName]),
-				oWeight:      d.m.metalQ4KWeight(oName, d.m.q4kw[oName]),
-				gateWeight:   gate,
-				upWeight:     up,
-				downWeight:   downQ4,
-				downWeightQ6: downQ6,
-				qNorm:        qNorm,
-				kNorm:        kNorm,
-			}
+func (d *Qwen35ResidentMetalDecoder) initResidentLinearLayer(l int, geom metalgemm.GDNGeometry) (*qwen35ResidentLinearLayer, error) {
+	p := func(suffix string) string { return layerName(l, suffix) }
+	for _, reqName := range []string{
+		p("linear_attn.conv1d.weight"),
+		p("linear_attn.A_log"),
+		p("linear_attn.dt_bias"),
+		p("linear_attn.norm.weight"),
+	} {
+		if !d.m.has(reqName) {
+			return nil, fmt.Errorf("unsupported geometry: missing linear attention tensor %s", reqName)
 		}
 	}
 
-	d.finalNormWeight = d.m.tensor("model.norm.weight")
-	return nil
+	names := []string{
+		p("linear_attn.in_proj_qkv.weight"),
+		p("linear_attn.in_proj_z.weight"),
+		p("linear_attn.in_proj_b.weight"),
+		p("linear_attn.in_proj_a.weight"),
+		p("linear_attn.out_proj.weight"),
+	}
+	metalQ4KMu.Lock()
+	table := metalQ8KW[d.m]
+	handles := make([]*metalgemm.Q8Weight, len(names))
+	if table != nil {
+		for i, name := range names {
+			handles[i] = table[name]
+		}
+	}
+	metalQ4KMu.Unlock()
+
+	var ownedQ8 []*metalgemm.Q8Weight
+	for i, name := range names {
+		if handles[i] == nil {
+			qt := d.m.q8(name)
+			if qt == nil {
+				return nil, fmt.Errorf("missing Q8 tensor %s", name)
+			}
+			h := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
+			if h == nil {
+				return nil, fmt.Errorf("failed to upload Q8 weight %s", name)
+			}
+			handles[i] = h
+			ownedQ8 = append(ownedQ8, h)
+		}
+	}
+
+	gateName, upName, downName := p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight")
+	gateTensor, upTensor := d.m.q4kw[gateName], d.m.q4kw[upName]
+	if gateTensor == nil || upTensor == nil {
+		return nil, fmt.Errorf("missing MLP Q4_K tensors for layer %d", l)
+	}
+	gate := d.m.metalQ4KWeight(gateName, gateTensor)
+	up := d.m.metalQ4KWeight(upName, upTensor)
+	if gate == nil || up == nil {
+		return nil, fmt.Errorf("failed to resolve MLP Q4_K weights for layer %d", l)
+	}
+
+	weights := metalgemm.Qwen35DecodeWeights{
+		InQKV: handles[0], InZ: handles[1], InB: handles[2], InA: handles[3], Out: handles[4],
+		MLPActivation: gate, MLPUp: up,
+	}
+	if downTensor := d.m.q4kw[downName]; downTensor != nil {
+		weights.MLPDownQ4 = d.m.metalQ4KWeight(downName, downTensor)
+	} else if downTensor := d.m.kqw[downName]; downTensor != nil && downTensor.kind == kindQ6K {
+		weights.MLPDownQ6 = d.m.metalQ6KWeight(downName, downTensor)
+	}
+	if weights.MLPDownQ4 == nil && weights.MLPDownQ6 == nil {
+		return nil, fmt.Errorf("missing MLP down projection for layer %d", l)
+	}
+
+	attnNorm, mlpNorm := d.m.attentionNorms(l), d.m.mlpNorms(l)
+	if len(attnNorm.pre) != d.cfg.HiddenSize || len(mlpNorm.pre) != d.cfg.HiddenSize {
+		return nil, fmt.Errorf("invalid normalization size for layer %d", l)
+	}
+
+	state, err := metalgemm.NewGDNState(geom)
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate resident GDN state for layer %d: %w", l, err)
+	}
+
+	return &qwen35ResidentLinearLayer{
+		layer:   l,
+		weights: weights,
+		panel: metalgemm.GDNPanel{
+			Tokens:         1,
+			Conv1D:         d.m.tensor(p("linear_attn.conv1d.weight")),
+			ALog:           d.m.tensor(p("linear_attn.A_log")),
+			DTBias:         d.m.tensor(p("linear_attn.dt_bias")),
+			Norm:           d.m.tensor(p("linear_attn.norm.weight")),
+			RMSNormEpsilon: float32(d.cfg.RMSNormEps),
+		},
+		block: metalgemm.Qwen35DecodeBlock{
+			InputNorm:      attnNorm.pre,
+			MLPNorm:        mlpNorm.pre,
+			RMSNormEpsilon: float32(d.cfg.RMSNormEps),
+			NormGain1p:     d.cfg.NormGain1p,
+		},
+		geom:        geom,
+		state:       state,
+		ownsState:   true,
+		ownsWeights: ownedQ8,
+	}, nil
+}
+
+func (d *Qwen35ResidentMetalDecoder) initResidentFullLayer(l int) *qwen35ResidentFullLayer {
+	p := func(suffix string) string { return layerName(l, suffix) }
+	attnNorm, mlpNorm := d.m.attentionNorms(l), d.m.mlpNorms(l)
+	qName := p("self_attn.q_proj.weight")
+	kName := p("self_attn.k_proj.weight")
+	vName := p("self_attn.v_proj.weight")
+	oName := p("self_attn.o_proj.weight")
+
+	var qNorm, kNorm []float32
+	if d.cfg.QKNorm || d.m.has(p("self_attn.q_norm.weight")) {
+		qNorm = d.m.tensor(p("self_attn.q_norm.weight"))
+		kNorm = d.m.tensor(p("self_attn.k_norm.weight"))
+	}
+
+	gateName, upName, downName := p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight")
+	gateTensor, upTensor := d.m.q4kw[gateName], d.m.q4kw[upName]
+	var gate, up *metalgemm.Q4KWeight
+	if gateTensor != nil && upTensor != nil {
+		gate = d.m.metalQ4KWeight(gateName, gateTensor)
+		up = d.m.metalQ4KWeight(upName, upTensor)
+	}
+
+	var downQ4 *metalgemm.Q4KWeight
+	var downQ6 *metalgemm.Q6KWeight
+	if downTensor := d.m.q4kw[downName]; downTensor != nil {
+		downQ4 = d.m.metalQ4KWeight(downName, downTensor)
+	} else if downTensor := d.m.kqw[downName]; downTensor != nil && downTensor.kind == kindQ6K {
+		downQ6 = d.m.metalQ6KWeight(downName, downTensor)
+	}
+
+	return &qwen35ResidentFullLayer{
+		layer:        l,
+		attnNorm:     attnNorm,
+		mlpNorm:      mlpNorm,
+		qWeight:      d.m.metalQ8Weight(qName, d.m.q8(qName)),
+		kWeight:      d.m.metalQ8Weight(kName, d.m.q8(kName)),
+		vWeight:      d.m.metalQ4KWeight(vName, d.m.q4kw[vName]),
+		oWeight:      d.m.metalQ4KWeight(oName, d.m.q4kw[oName]),
+		gateWeight:   gate,
+		upWeight:     up,
+		downWeight:   downQ4,
+		downWeightQ6: downQ6,
+		qNorm:        qNorm,
+		kNorm:        kNorm,
+	}
 }
 
 // IsFallback reports whether fail-closed reference fallback is active.

@@ -440,7 +440,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
-		health["chat_fallback"] = "synthetic"
 	}
 	// A boot-time fixed-prompt decode can prove that the local model is loaded but
 	// incoherent. Keep that process out of readiness until it restarts and probes

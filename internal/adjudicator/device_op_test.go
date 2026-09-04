@@ -308,8 +308,8 @@ func TestDiskDeviceSpellingsAreByteIdenticalToTheShippedPolicy(t *testing.T) {
 		t.Fatalf("parse shipped policy: %v", err)
 	}
 	want := map[string]map[string]bool{
-		defaultDeviceOpDenyRegex: {"bash": false, "shell_command": false, "functions.shell_command": false, "exec_command": false, "functions.exec_command": false},
-		defaultPSDiskOpDenyRegex: {"powershell": false, "shell_command": false, "functions.shell_command": false, "exec_command": false, "functions.exec_command": false},
+		defaultDeviceOpDenyRegex: {"bash": false, "shell_command": false, "functions.shell_command": false, "exec_command": false},
+		defaultPSDiskOpDenyRegex: {"powershell": false, "shell_command": false, "functions.shell_command": false, "exec_command": false},
 	}
 	for _, r := range manifest.ArgRules {
 		surfaces, ok := want[r.DenyRegex]

@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const CustomLintSchema = "fak-custom-lint/1"
@@ -114,7 +112,6 @@ func RunCustomLint(ctx context.Context, spec CustomLintSpec, req LintRequest) (r
 	runCtx, cancel := context.WithTimeout(ctx, limits.Timeout)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, spec.Command[0], spec.Command[1:]...)
-	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.WaitDelay = 250 * time.Millisecond
 	cmd.Dir = spec.Dir
 	cmd.Env = lintEnvironment(spec.Env)

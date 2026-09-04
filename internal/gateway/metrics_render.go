@@ -168,7 +168,17 @@ func (s *Server) renderMetrics() string {
 	fmt.Fprintf(&b, "fak_gateway_build_info{version=\"%s\",engine=\"%s\",model=\"%s\",vdso=\"%s\"} 1\n",
 		promQuote(s.version), promQuote(s.engineID), promQuote(s.model), promQuote(strconv.FormatBool(s.k.VDSOEnabled())))
 
-	writeHTTPMetrics(&b, httpRows)
+	writeHelpType(&b, "fak_gateway_http_requests_total", "HTTP requests served by route, method, and status.", "counter")
+	for _, row := range httpRows {
+		fmt.Fprintf(&b, "fak_gateway_http_requests_total{route=\"%s\",method=\"%s\",status=\"%s\"} %d\n",
+			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status), row.val.count)
+	}
+	writeHelpType(&b, "fak_gateway_http_request_duration_seconds", "HTTP request latency by route, method, and status.", "histogram")
+	for _, row := range httpRows {
+		baseLabels := fmt.Sprintf("route=\"%s\",method=\"%s\",status=\"%s\"",
+			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status))
+		writeHistogram(&b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
+	}
 
 	// Upstream-error visibility (the metric twin of the per-turn FAILED debug line): WHY turns
 	// failed this session, by coarse kind.
@@ -178,7 +188,19 @@ func (s *Server) renderMetrics() string {
 	// last-tick gauge, and liveness — the proof the kernel's loops keep progressing.
 	s.writeBgloopMetrics(&b)
 
-	writeOperationMetrics(&b, opRows)
+	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
+	for _, row := range opRows {
+		fmt.Fprintf(&b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
+			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
+	}
+	writeHelpType(&b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
+	for _, row := range opRows {
+		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
+			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.disposition), promQuote(row.key.by))
+		writeHistogram(&b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
+	}
 
 	c := s.k.Counters()
 	writeCounter(&b, "fak_kernel_submits_total", "Kernel submissions since process start.", c.Submits)
@@ -317,36 +339,6 @@ func (s *Server) renderMetrics() string {
 		fmt.Fprintf(&b, "fak_trajctl_nudges_total{outcome=%q} %d\n", outcome, traj.Nudges[outcome])
 	}
 	return b.String()
-}
-
-func writeHTTPMetrics(b *strings.Builder, httpRows []httpMetricSnapshot) {
-	writeHelpType(b, "fak_gateway_http_requests_total", "HTTP requests served by route, method, and status.", "counter")
-	for _, row := range httpRows {
-		fmt.Fprintf(b, "fak_gateway_http_requests_total{route=\"%s\",method=\"%s\",status=\"%s\"} %d\n",
-			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status), row.val.count)
-	}
-	writeHelpType(b, "fak_gateway_http_request_duration_seconds", "HTTP request latency by route, method, and status.", "histogram")
-	for _, row := range httpRows {
-		baseLabels := fmt.Sprintf("route=\"%s\",method=\"%s\",status=\"%s\"",
-			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status))
-		writeHistogram(b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
-	}
-}
-
-func writeOperationMetrics(b *strings.Builder, opRows []operationMetricSnapshot) {
-	writeHelpType(b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
-	for _, row := range opRows {
-		fmt.Fprintf(b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
-			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
-	}
-	writeHelpType(b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
-	for _, row := range opRows {
-		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
-			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition), promQuote(row.key.by))
-		writeHistogram(b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
-	}
 }
 
 func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {

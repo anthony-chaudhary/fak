@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
@@ -792,4 +794,587 @@ func assertDarwinWitnessPIDsGone(t *testing.T, timeout time.Duration, pids ...in
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+}
+
+func TestGuardChildResourceDarwinRefusalsAndRecovery(t *testing.T) {
+	t.Run("unsupported harness refusal names recovery", func(t *testing.T) {
+		status := guardResourceReattachUnavailableStatus("custom-harness", "trace-darwin-1", nil)
+		for _, want := range []string{
+			guardResourceReattachUnavailable,
+			"refusing a cold relaunch",
+			"recovery:",
+			"rerun the original fak guard invocation with this harness's provider-native resume command",
+			"custom-harness",
+			"trace-darwin-1",
+		} {
+			if !strings.Contains(status, want) {
+				t.Errorf("status missing %q; got:\n%s", want, status)
+			}
+		}
+	})
+
+	t.Run("claude transport error refusal names recovery", func(t *testing.T) {
+		status := guardResourceReattachUnavailableStatus("claude", "trace-darwin-claude", errors.New("socket closed unexpectedly"))
+		for _, want := range []string{
+			guardResourceReattachUnavailable,
+			"refusing a cold relaunch",
+			"recovery:",
+			"run `fak guard -- claude --continue`",
+			"socket closed unexpectedly",
+			"claude",
+			"trace-darwin-claude",
+		} {
+			if !strings.Contains(status, want) {
+				t.Errorf("status missing %q; got:\n%s", want, status)
+			}
+		}
+	})
+
+	t.Run("codex binding error refusal names recovery", func(t *testing.T) {
+		status := guardResourceReattachUnavailableStatus("codex", "trace-darwin-codex", errors.New("SessionStart binding corrupt"))
+		for _, want := range []string{
+			guardResourceReattachUnavailable,
+			"refusing a cold relaunch",
+			"recovery:",
+			"run `fak guard -- codex resume` and select the interrupted thread",
+			"SessionStart binding corrupt",
+			"codex",
+			"trace-darwin-codex",
+		} {
+			if !strings.Contains(status, want) {
+				t.Errorf("status missing %q; got:\n%s", want, status)
+			}
+		}
+	})
+
+	t.Run("restart budget exhausted refusal names recovery", func(t *testing.T) {
+		verdict := guardResourceRetryVerdict{
+			Action:  guardResourceRetryExhausted,
+			Limit:   3,
+			Attempt: 3,
+			Cause:   guardResourceRestartCauseBudget,
+		}
+		status := guardResourceRestartGiveUpStatus(verdict, "trace-darwin-budget")
+		for _, want := range []string{
+			guardResourceRestartExhaustedReason,
+			"refusing another relaunch",
+			"retry budget 3 exhausted",
+			"recovery:",
+			"inspect memory leaks in child process, increase --child-max-memory-mb, or adjust " + guardResourceRestartLimitEnv,
+			"trace-darwin-budget",
+		} {
+			if !strings.Contains(status, want) {
+				t.Errorf("status missing %q; got:\n%s", want, status)
+			}
+		}
+	})
+
+	t.Run("restart no progress refusal names recovery", func(t *testing.T) {
+		verdict := guardResourceRetryVerdict{
+			Action:     guardResourceRetryExhausted,
+			Limit:      4,
+			Attempt:    2,
+			Cause:      guardResourceRestartCauseNoProgress,
+			NoProgress: 2,
+		}
+		status := guardResourceRestartGiveUpStatus(verdict, "trace-darwin-noprogress")
+		for _, want := range []string{
+			guardResourceRestartExhaustedReason,
+			"refusing another relaunch",
+			"2 consecutive containment retries without HEAD progress",
+			"recovery:",
+			"inspect memory leaks in child process, increase --child-max-memory-mb, or adjust " + guardResourceRestartLimitEnv,
+			"trace-darwin-noprogress",
+		} {
+			if !strings.Contains(status, want) {
+				t.Errorf("status missing %q; got:\n%s", want, status)
+			}
+		}
+	})
+
+	t.Run("retry state decide with Darwin RSS breach drives typed refusal", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 2, noProgressLimit: 0}
+		event := guardChildWaitEvent{
+			Kind: guardChildResourceLimit,
+			Resource: &guardResourceDecision{
+				Stop:   true,
+				Reason: "CHILD_TREE_RSS_LIMIT",
+				Metric: procguard.MemoryMetricRSS,
+			},
+		}
+
+		v1 := state.decide(event, "claude", "sha-1")
+		if v1.Action != guardResourceRetryRelaunch || v1.Attempt != 1 || v1.ResourceType != "CHILD_TREE_RSS_LIMIT" {
+			t.Fatalf("first retry verdict=%+v", v1)
+		}
+
+		v2 := state.decide(event, "claude", "sha-2")
+		if v2.Action != guardResourceRetryRelaunch || v2.Attempt != 2 {
+			t.Fatalf("second retry verdict=%+v", v2)
+		}
+
+		v3 := state.decide(event, "claude", "sha-3")
+		if v3.Action != guardResourceRetryExhausted || v3.Cause != guardResourceRestartCauseBudget || v3.Limit != 2 {
+			t.Fatalf("exhausted retry verdict=%+v", v3)
+		}
+
+		refusal := guardResourceRestartGiveUpStatus(v3, "trace-darwin-retry-state")
+		if !strings.Contains(refusal, "recovery:") || !strings.Contains(refusal, "refusing another relaunch") {
+			t.Fatalf("exhausted refusal missing required keywords: %s", refusal)
+		}
+	})
+
+	t.Run("every refusal and error message names recovery keyword and actionable fix", func(t *testing.T) {
+		refusals := []struct {
+			name    string
+			message string
+		}{
+			{
+				name:    "reattach unavailable unsupported harness",
+				message: guardResourceReattachUnavailableStatus("custom-agent", "trace-1", nil),
+			},
+			{
+				name:    "reattach unavailable claude transport error",
+				message: guardResourceReattachUnavailableStatus("claude", "trace-2", errors.New("pipe broken")),
+			},
+			{
+				name:    "reattach unavailable codex binding error",
+				message: guardResourceReattachUnavailableStatus("codex", "trace-3", errors.New("invalid JSON")),
+			},
+			{
+				name: "restart budget exhausted",
+				message: guardResourceRestartGiveUpStatus(guardResourceRetryVerdict{
+					Action:  guardResourceRetryExhausted,
+					Limit:   3,
+					Attempt: 3,
+					Cause:   guardResourceRestartCauseBudget,
+				}, "trace-4"),
+			},
+			{
+				name: "restart no-progress exhausted",
+				message: guardResourceRestartGiveUpStatus(guardResourceRetryVerdict{
+					Action:     guardResourceRetryExhausted,
+					Limit:      4,
+					Attempt:    2,
+					Cause:      guardResourceRestartCauseNoProgress,
+					NoProgress: 2,
+				}, "trace-5"),
+			},
+		}
+
+		for _, item := range refusals {
+			t.Run("refusal/"+item.name, func(t *testing.T) {
+				if !strings.Contains(item.message, "refusing") {
+					t.Errorf("refusal %s missing 'refusing': %s", item.name, item.message)
+				}
+				idx := strings.Index(item.message, "recovery:")
+				if idx < 0 {
+					t.Errorf("refusal %s missing 'recovery:': %s", item.name, item.message)
+					return
+				}
+				remedy := strings.TrimSpace(item.message[idx+len("recovery:"):])
+				if len(remedy) == 0 {
+					t.Errorf("refusal %s has empty recovery: %s", item.name, item.message)
+				}
+			})
+		}
+
+		alivePID := os.Getpid()
+		survivorErr := guardWriteResourceReceipt(
+			guardChildWaitEvent{Resource: &guardResourceDecision{OwnedPIDs: []int{-99999, alivePID}}},
+			"trace-survivor", "codex", -99999,
+		)
+		emptyPathErr := appendGuardResourceReceipt("", guardResourceReceipt{})
+		_, unsuppCmdErr := guardResourceReattachCommand([]string{"foreign"}, "foreign", "", "trace-6")
+
+		recoveryErrors := []struct {
+			name string
+			err  error
+		}{
+			{name: "empty receipt path", err: emptyPathErr},
+			{name: "unsupported harness reattach command", err: unsuppCmdErr},
+			{name: "containment reap survivors", err: survivorErr},
+		}
+
+		for _, item := range recoveryErrors {
+			t.Run("error/"+item.name, func(t *testing.T) {
+				if item.err == nil {
+					t.Fatalf("expected non-nil error for %s", item.name)
+				}
+				msg := item.err.Error()
+				idx := strings.Index(msg, "recovery:")
+				if idx < 0 {
+					t.Errorf("error %s missing 'recovery:': %s", item.name, msg)
+					return
+				}
+				fix := strings.TrimSpace(msg[idx+len("recovery:"):])
+				if len(fix) == 0 {
+					t.Errorf("error %s has empty recovery: %s", item.name, msg)
+				}
+			})
+		}
+	})
+}
+
+func TestGuardChildResourceDarwinErrorPathsAndRecovery(t *testing.T) {
+	t.Run("empty receipt path error names recovery", func(t *testing.T) {
+		err := appendGuardResourceReceipt("", guardResourceReceipt{})
+		if err == nil {
+			t.Fatal("expected error for empty receipt path")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "recovery:") || !strings.Contains(msg, "--child-resource-journal") {
+			t.Fatalf("empty receipt error missing recovery: %v", err)
+		}
+	})
+
+	t.Run("whitespace receipt path error names recovery", func(t *testing.T) {
+		for _, invalid := range []string{" ", "\t", "\n", " \t \n "} {
+			err := appendGuardResourceReceipt(invalid, guardResourceReceipt{})
+			if err == nil {
+				t.Fatalf("expected error for whitespace receipt path %q", invalid)
+			}
+			if !strings.Contains(err.Error(), "recovery:") || !strings.Contains(err.Error(), "--child-resource-journal") {
+				t.Fatalf("whitespace receipt error missing recovery for %q: %v", invalid, err)
+			}
+		}
+	})
+
+	t.Run("unsupported agent reattach command error names recovery", func(t *testing.T) {
+		_, err := guardResourceReattachCommand([]string{"foreign-agent", "run"}, "foreign-agent", "", "trace-darwin-unsupported")
+		if err == nil {
+			t.Fatal("expected error for unsupported agent reattach")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "recovery:") || !strings.Contains(msg, "run with a supported harness (claude, codex) or without child resource restarts") {
+			t.Fatalf("unsupported reattach command error missing recovery: %v", err)
+		}
+	})
+
+	t.Run("reap survivors error names recovery", func(t *testing.T) {
+		alivePID := os.Getpid()
+		event := guardChildWaitEvent{
+			Resource: &guardResourceDecision{
+				OwnedPIDs: []int{-45100, alivePID},
+			},
+		}
+		err := guardWriteResourceReceipt(event, "trace-darwin-survivors", "codex", -45100)
+		if err == nil {
+			t.Fatal("expected error for alive reap survivors")
+		}
+		msg := err.Error()
+		for _, want := range []string{
+			"CHILD_RESOURCE_CONTAINMENT_SURVIVORS",
+			fmt.Sprintf("owned processes still alive: [%d]", alivePID),
+			"recovery:",
+			"service owner to stop these exact PIDs",
+			"do not terminate processes whose ownership is not verified",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("reap survivor error missing %q: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("missing decision in receipt writer", func(t *testing.T) {
+		err := guardWriteResourceReceipt(guardChildWaitEvent{}, "trace-darwin-nil", "codex", 1)
+		if err == nil || !strings.Contains(err.Error(), "child resource receipt missing decision") {
+			t.Fatalf("unexpected error for nil decision: %v", err)
+		}
+	})
+
+	t.Run("unwritable receipt path returns directory creation error", func(t *testing.T) {
+		blocker := filepath.Join(t.TempDir(), "blocker-file")
+		if err := os.WriteFile(blocker, []byte("file"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := appendGuardResourceReceipt(filepath.Join(blocker, "sub", "receipt.jsonl"), guardResourceReceipt{})
+		if err == nil || !strings.Contains(err.Error(), "create child resource receipt directory:") {
+			t.Fatalf("unexpected error for unwritable receipt path: %v", err)
+		}
+	})
+
+	t.Run("reap success with dead owned pids writes receipt immediately", func(t *testing.T) {
+		dir := t.TempDir()
+		journalPath := filepath.Join(dir, "reap-receipt.jsonl")
+		oldConfig := guardResourceConfigured
+		setGuardResourceConfig(guardResourceConfig{ReceiptPath: journalPath})
+		t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
+
+		ev := guardChildWaitEvent{
+			Kind: guardChildResourceLimit,
+			Resource: &guardResourceDecision{
+				Stop:      true,
+				Reason:    "CHILD_TREE_RSS_LIMIT",
+				Metric:    procguard.MemoryMetricRSS,
+				OwnedPIDs: []int{-99998, -99999},
+				Offender:  procguard.MemoryProcess{PID: -99999},
+				TreeBytes: 120 << 20,
+			},
+		}
+		if err := guardWriteResourceReceipt(ev, "trace-darwin-reap-success", "codex", -99999); err != nil {
+			t.Fatalf("unexpected reap error: %v", err)
+		}
+		data, err := os.ReadFile(journalPath)
+		if err != nil {
+			t.Fatalf("read written receipt: %v", err)
+		}
+		var receipt guardResourceReceipt
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			t.Fatalf("decode written receipt: %v", err)
+		}
+		if receipt.Reason != "CHILD_TREE_RSS_LIMIT" || receipt.MemoryMetric != string(procguard.MemoryMetricRSS) {
+			t.Fatalf("receipt mismatch: %+v", receipt)
+		}
+	})
+}
+
+func TestGuardChildResourceDarwinFailurePaths(t *testing.T) {
+	t.Run("collector general failure is non-terminal with RSS metric", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+		resource := startGuardChildResourceMonitorWithCollector(
+			1234, "trace-darwin-failure", "claude",
+			guardResourcePolicy{
+				PollInterval: 10 * time.Millisecond,
+				Metric:       procguard.MemoryMetricRSS,
+				MaxTreeBytes: 100 << 20,
+				Stop:         stop,
+			},
+			func(pid int) (procguard.MemorySnapshot, bool, string) {
+				return procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, RootPID: 1234}, true, "ps: syntax error in format list"
+			},
+		)
+
+		select {
+		case ev := <-resource:
+			if ev.Resource == nil {
+				t.Fatal("expected non-nil resource decision")
+			}
+			if ev.Resource.Stop {
+				t.Fatalf("collector failure must not stop workload: %+v", ev.Resource)
+			}
+			if ev.Resource.Reason != "CHILD_RESOURCE_COLLECTOR_FAILURE" {
+				t.Fatalf("reason = %q, want CHILD_RESOURCE_COLLECTOR_FAILURE", ev.Resource.Reason)
+			}
+			if ev.Resource.Metric != procguard.MemoryMetricRSS {
+				t.Fatalf("metric = %q, want RSS", ev.Resource.Metric)
+			}
+			if !strings.Contains(ev.Reason, "ps: syntax error") {
+				t.Fatalf("event reason missing detail: %q", ev.Reason)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("collector failure timed out")
+		}
+	})
+
+	t.Run("collector permission denied becomes inspection denied", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+		resource := startGuardChildResourceMonitorWithCollector(
+			1234, "trace-darwin-denied", "claude",
+			guardResourcePolicy{
+				PollInterval: 10 * time.Millisecond,
+				Metric:       procguard.MemoryMetricRSS,
+				MaxTreeBytes: 100 << 20,
+				Stop:         stop,
+			},
+			func(pid int) (procguard.MemorySnapshot, bool, string) {
+				return procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, RootPID: 1234}, true, "ps: Permission denied"
+			},
+		)
+
+		select {
+		case ev := <-resource:
+			if ev.Resource == nil {
+				t.Fatal("expected non-nil resource decision")
+			}
+			if ev.Resource.Stop {
+				t.Fatalf("inspection denied must not stop workload: %+v", ev.Resource)
+			}
+			if ev.Resource.Reason != "CHILD_RESOURCE_INSPECTION_DENIED" {
+				t.Fatalf("reason = %q, want CHILD_RESOURCE_INSPECTION_DENIED", ev.Resource.Reason)
+			}
+			if ev.Resource.Metric != procguard.MemoryMetricRSS {
+				t.Fatalf("metric = %q, want RSS", ev.Resource.Metric)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("inspection denied timed out")
+		}
+	})
+
+	t.Run("unsupported collector exits cleanly without false breach", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+		resource := startGuardChildResourceMonitorWithCollector(
+			1234, "trace-darwin-unsupported", "claude",
+			guardResourcePolicy{
+				PollInterval: 10 * time.Millisecond,
+				Metric:       procguard.MemoryMetricRSS,
+				MaxTreeBytes: 1,
+				Stop:         stop,
+			},
+			func(pid int) (procguard.MemorySnapshot, bool, string) {
+				return procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS}, false, "collector unsupported"
+			},
+		)
+
+		select {
+		case ev := <-resource:
+			t.Fatalf("unsupported collector emitted unexpected event on Darwin: %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
+	t.Run("non-containment failure events are terminal in retry state", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3}
+		event := guardResourceMonitorFailure(
+			1234,
+			procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS},
+			"CHILD_RESOURCE_COLLECTOR_FAILURE",
+			"malformed output",
+		)
+		verdict := state.decide(event, "claude", "sha-head")
+		if verdict.Action != guardResourceRetryTerminal {
+			t.Fatalf("non-containment event action = %v, want terminal", verdict.Action)
+		}
+		if state.restarts != 0 {
+			t.Fatalf("restarts = %d, want 0", state.restarts)
+		}
+	})
+}
+
+func TestGuardChildResourceDarwinInvalidInputs(t *testing.T) {
+	t.Run("negative root PID surfaces collector failure cleanly", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+		resource := startGuardChildResourceMonitor(-99, "trace-darwin-invalid-pid", "claude", guardResourcePolicy{
+			PollInterval: 50 * time.Millisecond,
+			Metric:       procguard.MemoryMetricRSS,
+			MaxTreeBytes: 100 << 20,
+			Stop:         stop,
+		})
+		select {
+		case ev := <-resource:
+			if ev.Resource == nil || ev.Resource.Stop || ev.Resource.Reason != "CHILD_RESOURCE_COLLECTOR_FAILURE" {
+				t.Fatalf("unexpected event for negative pid: %+v", ev)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("negative pid collection timed out")
+		}
+	})
+
+	t.Run("darwin policy config edge cases", func(t *testing.T) {
+		old := guardResourceConfigured
+		t.Cleanup(func() { setGuardResourceConfig(old) })
+
+		setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: 0, PollInterval: 10 * time.Millisecond})
+		p := guardResourcePolicyConfigured()
+		if p.Metric != procguard.MemoryMetricRSS {
+			t.Fatalf("metric = %q, want RSS", p.Metric)
+		}
+		if p.PollInterval != guardResourcePollDefault {
+			t.Fatalf("sub-100ms poll interval was not clamped: %v", p.PollInterval)
+		}
+		if p.MaxTreeBytes < guardTreeRSSMinimum || p.MaxTreeBytes > guardTreeCommitDefault {
+			t.Fatalf("default max tree bytes %d outside [%d, %d]", p.MaxTreeBytes, guardTreeRSSMinimum, guardTreeCommitDefault)
+		}
+
+		setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: ^uint64(0), PollInterval: 250 * time.Millisecond})
+		p2 := guardResourcePolicyConfigured()
+		if p2.MaxTreeBytes != p.MaxTreeBytes {
+			t.Fatalf("overflowing MaxMemoryMB changed limit: %d vs %d", p2.MaxTreeBytes, p.MaxTreeBytes)
+		}
+		if p2.PollInterval != 250*time.Millisecond {
+			t.Fatalf("valid poll interval not applied: %v", p2.PollInterval)
+		}
+
+		t.Setenv("FAK_SYSTEM_COMMIT_HEADROOM_MB", "8192")
+		p3 := guardResourcePolicyConfigured()
+		if p3.MinSystemHeadroom != 0 {
+			t.Fatalf("darwin policy must not apply system commit headroom: %d", p3.MinSystemHeadroom)
+		}
+	})
+
+	t.Run("darwin snapshot decision edge cases", func(t *testing.T) {
+		policy := guardResourcePolicy{
+			Metric:            procguard.MemoryMetricRSS,
+			MaxTreeBytes:      100 << 20,
+			MinSystemHeadroom: 0,
+		}
+
+		emptyDecision := decideGuardResource(policy, procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS})
+		if emptyDecision.Stop {
+			t.Fatalf("empty snapshot should not stop: %+v", emptyDecision)
+		}
+
+		justBelow := decideGuardResource(policy, procguard.MemorySnapshot{
+			Metric:    procguard.MemoryMetricRSS,
+			TreeBytes: (100 << 20) - 1,
+		})
+		if justBelow.Stop {
+			t.Fatalf("below threshold snapshot should not stop: %+v", justBelow)
+		}
+
+		exactLimit := decideGuardResource(policy, procguard.MemorySnapshot{
+			Metric:    procguard.MemoryMetricRSS,
+			TreeBytes: 100 << 20,
+			Processes: []procguard.MemoryProcess{{PID: 50, Bytes: 100 << 20}},
+		})
+		if !exactLimit.Stop || exactLimit.Reason != "CHILD_TREE_RSS_LIMIT" || exactLimit.Offender.PID != 50 {
+			t.Fatalf("exact limit snapshot did not stop with RSS reason: %+v", exactLimit)
+		}
+
+		highSystem := decideGuardResource(policy, procguard.MemorySnapshot{
+			Metric:      procguard.MemoryMetricRSS,
+			TreeBytes:   50 << 20,
+			SystemBytes: 999 << 30,
+			SystemLimit: 1000 << 30,
+			Processes:   []procguard.MemoryProcess{{PID: 50, Bytes: 50 << 20}},
+		})
+		if highSystem.Stop {
+			t.Fatalf("high system memory must not stop RSS-monitored child: %+v", highSystem)
+		}
+
+		hostilePIDs := decideGuardResource(policy, procguard.MemorySnapshot{
+			Metric:    procguard.MemoryMetricRSS,
+			TreeBytes: 120 << 20,
+			Processes: []procguard.MemoryProcess{
+				{PID: -10, Bytes: 20 << 20},
+				{PID: -10, Bytes: 30 << 20},
+				{PID: 0, Bytes: 70 << 20},
+			},
+		})
+		if !hostilePIDs.Stop || hostilePIDs.Reason != "CHILD_TREE_RSS_LIMIT" || hostilePIDs.Offender.PID != 0 {
+			t.Fatalf("hostile PIDs snapshot failed: %+v", hostilePIDs)
+		}
+		if !slices.Equal(hostilePIDs.OwnedPIDs, []int{-10, -10, 0}) {
+			t.Fatalf("owned PIDs = %v, want [-10, -10, 0]", hostilePIDs.OwnedPIDs)
+		}
+	})
+
+	t.Run("detail scrubber with adversarial input", func(t *testing.T) {
+		hostile := "Bearer token-12345 secret=my-secret password: supersecret api-key=abc12345 " +
+			"host=server.corp ip=10.0.1.25 /var/log/private.log C:\\Windows\\temp\\file.txt\n" +
+			strings.Repeat("long-text ", 100)
+		scrubbed := scrubGuardResourceDetail(hostile)
+		if strings.Contains(scrubbed, "token-12345") || strings.Contains(scrubbed, "my-secret") || strings.Contains(scrubbed, "supersecret") {
+			t.Fatalf("secrets leaked: %q", scrubbed)
+		}
+		if strings.Contains(scrubbed, "server.corp") || strings.Contains(scrubbed, "10.0.1.25") {
+			t.Fatalf("private network tokens leaked: %q", scrubbed)
+		}
+		if strings.Contains(scrubbed, "/var/log") || strings.Contains(scrubbed, `C:\Windows`) {
+			t.Fatalf("paths leaked: %q", scrubbed)
+		}
+		if strings.ContainsAny(scrubbed, "\r\n\t") {
+			t.Fatalf("whitespace not normalized: %q", scrubbed)
+		}
+		if len(scrubbed) > guardResourceDetailMaxBytes {
+			t.Fatalf("detail len = %d > max %d", len(scrubbed), guardResourceDetailMaxBytes)
+		}
+		if !utf8.ValidString(scrubbed) {
+			t.Fatalf("detail is not valid UTF-8: %q", scrubbed)
+		}
+	})
 }

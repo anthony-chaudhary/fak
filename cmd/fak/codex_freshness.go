@@ -410,20 +410,12 @@ type codexFreshnessSettings struct {
 	Force  bool
 }
 
-func parseNonNegativeDuration(raw, label string) (time.Duration, error) {
-	d, err := time.ParseDuration(raw)
-	if err != nil || d < 0 {
-		return 0, fmt.Errorf("%s must be a non-negative duration, got %q", label, raw)
-	}
-	return d, nil
-}
-
 func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, config codexFreshnessConfig) ([]string, codexFreshnessSettings, error) {
 	policy := codexFreshnessSettings{MaxAge: codexFreshnessLeaseTTL}
 	if raw := strings.TrimSpace(config.MaxAge); raw != "" {
-		d, err := parseNonNegativeDuration(raw, "freshness config max_age")
-		if err != nil {
-			return nil, policy, err
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			return nil, policy, fmt.Errorf("freshness config max_age must be a non-negative duration, got %q", raw)
 		}
 		policy.MaxAge = d
 	}
@@ -431,9 +423,9 @@ func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, conf
 		policy.Force = *config.Force
 	}
 	if raw := strings.TrimSpace(envMaxAge); raw != "" {
-		d, err := parseNonNegativeDuration(raw, codexFreshnessMaxAgeEnv)
-		if err != nil {
-			return nil, policy, err
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			return nil, policy, fmt.Errorf("%s must be a non-negative duration, got %q", codexFreshnessMaxAgeEnv, raw)
 		}
 		policy.MaxAge = d
 	}
@@ -457,16 +449,16 @@ func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, conf
 				return nil, policy, fmt.Errorf("--freshness-max-age requires a duration")
 			}
 			i++
-			d, err := parseNonNegativeDuration(args[i], "--freshness-max-age")
-			if err != nil {
-				return nil, policy, err
+			d, err := time.ParseDuration(args[i])
+			if err != nil || d < 0 {
+				return nil, policy, fmt.Errorf("--freshness-max-age must be a non-negative duration, got %q", args[i])
 			}
 			policy.MaxAge = d
 		case strings.HasPrefix(arg, "--freshness-max-age="):
 			raw := strings.TrimPrefix(arg, "--freshness-max-age=")
-			d, err := parseNonNegativeDuration(raw, "--freshness-max-age")
-			if err != nil {
-				return nil, policy, err
+			d, err := time.ParseDuration(raw)
+			if err != nil || d < 0 {
+				return nil, policy, fmt.Errorf("--freshness-max-age must be a non-negative duration, got %q", raw)
 			}
 			policy.MaxAge = d
 		default:

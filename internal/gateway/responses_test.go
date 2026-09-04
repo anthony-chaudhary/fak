@@ -764,7 +764,7 @@ func TestResponsesFunctionCallOutputRejectsUnsupportedShapeBeforePlanner(t *test
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
 			}
-			const want = `"message":"input: function_call_output.output`
+			const want = `"message":"input: function_call_output.output must be a string or an array of input_text parts"`
 			if !bytes.Contains(body, []byte(want)) {
 				t.Fatalf("error body = %s, want stable message containing %s", body, want)
 			}

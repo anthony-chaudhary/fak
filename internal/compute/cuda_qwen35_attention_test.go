@@ -72,7 +72,7 @@ func TestQwen38PromptAttentionABIDispatchIsFailClosed(t *testing.T) {
 		t.Fatal("Go/CUDA prompt-attention ABI declarations diverged")
 	}
 	body := qwen38SourceFunction(t, cu, "extern \"C\" "+abi)
-	preflight := strings.Index(body, "tokens <= 0 || prefix < 0 || nH != 24 || nKV != 4")
+	preflight := strings.Index(body, "tokens != 2 || prefix != 1 || nH != 24 || nKV != 4")
 	headDim := strings.Index(body, "hd != QWEN38_PROMPT_HEAD_DIM")
 	clearError := strings.Index(body, "cudaGetLastError()")
 	launch := strings.Index(body, "k_qwen38_causal_attention_panel_hd256<<<")

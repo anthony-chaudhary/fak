@@ -193,6 +193,7 @@ type serveFlags struct {
 	fleetBusDir                  *string
 	fleetBusID                   *string
 	fleetBusInterval             *time.Duration
+	keepAwake                    *string
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -293,6 +294,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.fleetBusDir = fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
 	sf.fleetBusID = fs.String("fleet-bus-id", "", "with --fleet-bus: explicit stable bus identity override. Empty derives a restart-stable id from this machine plus the fixed HTTP listen address; --stdio, --addr :0, or an unusable address use a process-local fallback. A configured name is preserved (after bus-token sanitization) and must be unique among simultaneously live serves unless deliberately sharing one apply claim.")
 	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
+	sf.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
 	return fs, sf
 }
 
@@ -362,6 +364,19 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	*sf.qwen38Runtime = qwen38Runtime
+	keepAwakeMode, err := validateKeepAwake(*sf.keepAwake)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	*sf.keepAwake = keepAwakeMode
+	keepAwakeReleaser, err := acquireProcessKeepAwake(*sf.keepAwake, "fak serve (always)")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: keep-awake: %v\n", err)
+	}
+	if keepAwakeReleaser != nil {
+		defer keepAwakeReleaser.Release()
+	}
 	if err := validateNativeQwenQ4KPrefillChunk(*sf.nativeQwenQ4KPrefillChunk); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)

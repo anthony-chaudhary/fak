@@ -244,8 +244,8 @@ def build_indexes(runs: List[Dict]) -> Dict[str, Dict[str, List[str]]]:
         run_id = run.get("run_id")
         if not run_id:
             continue
-        model = run.get("model", "unknown")
-        precision = run.get("precision", "unknown")
+        model = run.get("model") or "unknown"
+        precision = run.get("precision") or "unknown"
         timestamp = run.get("timestamp", "")
 
         # Parse date from timestamp

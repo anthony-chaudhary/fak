@@ -60,65 +60,6 @@ type qwen35QueryGateSplitBackend interface {
 	SplitQwen35QueryGate(qg compute.Tensor, nHeads, headDim int) (compute.Tensor, compute.Tensor)
 }
 
-// qwen35HybridGraphSafe reports whether a Qwen3.5/3.8 hybrid session satisfies
-// single-session CUDA graph capture and replay safety. Single-session decode graph
-// replay is safe when:
-//   - s.qwen35HAL != nil and s.qwen35HAL.backend != nil
-//   - Backend satisfies qwen35PartialRoPEBackend and qwen35QueryGateSplitBackend
-//   - s.M.Cfg.RopeScaling == "" && s.M.Cfg.LongRope == nil
-//   - Single-session (not split: !isSplit)
-//   - Pre-warmed state (GDN layer states and halKV allocated and ready)
-func (s *Session) qwen35HybridGraphSafe() bool {
-	return qwen35HybridGraphSafe(s)
-}
-
-func qwen35HybridGraphSafe(s *Session) bool {
-	if s == nil || s.M == nil || s.Backend == nil {
-		return false
-	}
-	cfg := s.M.Cfg
-	if !cfg.IsQwen35Hybrid() {
-		return false
-	}
-	if s.halClosed || s.halFailure != nil {
-		return false
-	}
-	if s.qwen35HAL == nil || s.qwen35HAL.backend == nil {
-		return false
-	}
-	if s.qwen35HAL.sequenceFailure != nil {
-		return false
-	}
-	be := s.Backend
-	if _, ok := be.(qwen35PartialRoPEBackend); !ok {
-		return false
-	}
-	if _, ok := be.(qwen35QueryGateSplitBackend); !ok {
-		return false
-	}
-	if cfg.RopeScaling != "" || cfg.LongRope != nil {
-		return false
-	}
-	if _, isSplit := s.validateDenseGPULayers(); isSplit {
-		return false
-	}
-	if s.halKV == nil {
-		return false
-	}
-	if len(s.qwen35HAL.layers) < cfg.NumLayers {
-		return false
-	}
-	for l := 0; l < cfg.NumLayers; l++ {
-		if cfg.isLinearAttnLayer(l) {
-			st := s.qwen35HAL.layers[l]
-			if st.conv.Buf() == nil || !st.conv.Ready() || st.recurrent.Buf() == nil || !st.recurrent.Ready() {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
 		return
@@ -521,9 +462,6 @@ func (s *Session) qwen35QueryBiasHAL(layer int) (query, gate compute.Tensor) {
 }
 
 func (s *Session) readQwen35FullAttention(layer int, label string, tensor compute.Tensor) []float32 {
-	if capturer, ok := s.Backend.(interface{ IsCapturing() bool }); ok && capturer.IsCapturing() {
-		s.failBackendForward(layer, label, fmt.Errorf("cannot read tensor to host while graph capture is open"))
-	}
 	data := s.Backend.Read(tensor)
 	if data == nil {
 		s.failBackendForward(layer, label, fmt.Errorf("backend returned an unreadable tensor"))

@@ -863,7 +863,7 @@ func TestPrepushClaimHelper(t *testing.T) {
 	t.Helper()
 	mode := os.Getenv("GO_PREPUSH_CLAIM_HELPER")
 	if mode == "" {
-		t.Skip("helper process only")
+		return
 	}
 	root, tip := os.Getenv("GO_PREPUSH_CLAIM_ROOT"), os.Getenv("GO_PREPUSH_CLAIM_TIP")
 	owner, release := claimPrepushTip(root, tip, time.Now)

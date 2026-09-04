@@ -427,6 +427,8 @@ type Server struct {
 	table                   *session.Table
 	scheduler               *session.Scheduler
 	pool                    *session.Pool
+	kvEvictorMu             sync.RWMutex
+	kvEvictor               *IdleGatedEvictor
 	resetOnBudget           ResetOnBudgetFunc
 	budgetDrained           BudgetExhaustedFunc
 	defaultTraceMu          sync.RWMutex

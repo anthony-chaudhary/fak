@@ -199,8 +199,43 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 		left, right := R(86, 650, 540, 700), R(740, 650, 1194, 700)
 		centerBoxText(im, p, left, s.Action+"  42", S(26), red)
 		centerBoxText(im, p, right, s.Detail+"  13", S(26), green)
-	case "token-grid", "token-flow":
-		renderTokenScenes(s, t, yoff, fade, im, p, X, Y, S, R, C, particle)
+	case "token-grid":
+		C(78, s.Eyebrow, 26, cyan, true, false)
+		C(162+yoff, s.Title, 58, alpha(white, fade), true, false)
+		cx, cy := X(640), Y(425)
+		circle(im, cx, cy, X(92), color.RGBA{9, 46, 55, 255})
+		circleStroke(im, cx, cy, X(92), cyan, X(3))
+		centerBoxText(im, p, image.Rect(cx-X(82), cy-Y(55), cx+X(82), cy+Y(55)), "fak", S(48), white)
+		positions := [][2]int{{245, 310}, {245, 500}, {640, 625}, {1035, 500}, {1035, 310}, {640, 245}}
+		for i, item := range s.Items {
+			px, py := positions[i][0], positions[i][1]
+			lineSegment(im, cx, cy, X(px), Y(py), alpha(cyan, .35), X(2))
+			node := image.Rect(X(px-145), Y(py-48), X(px+145), Y(py+48))
+			fill(im, node, color.RGBA{13, 25, 36, 255})
+			stroke(im, node, cyan, X(2))
+			centerBoxText(im, p, node, item, S(27), white)
+			particle(px, py-63, 5, green, true)
+		}
+	case "token-flow":
+		C(78, s.Eyebrow, 26, cyan, true, false)
+		C(162+yoff, s.Title, 55, alpha(white, fade), true, false)
+		baseY := 530
+		widths := []int{390, 270, 155}
+		colors := []color.RGBA{red, cyan, green}
+		for i, item := range s.Items {
+			xc := 250 + i*390
+			h := widths[i]
+			for j := 0; j < h/15; j++ {
+				px := xc - h/2 + 12 + j*15
+				particle(px, baseY-int(24*math.Sin(float64(j)*.8+t)), 5, colors[i], true)
+			}
+			r := R(xc-165, 595, xc+165, 670)
+			centerBoxText(im, p, r, item, S(28), white)
+			if i < 2 {
+				centerFit(im, p, Y(530), X(45), "->", S(34), muted, true, true)
+			}
+		}
+		C(708, s.Verdict, 29, green, true, false)
 	case "hook":
 		C(250+yoff, s.Title, 82, alpha(white, fade), true, false)
 		C(340+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
@@ -248,48 +283,6 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 		C(675, s.Subtitle, 27, muted, false, false)
 	}
 	return im
-}
-
-func renderTokenScenes(s Scene, t float64, yoff int, fade float64, im *image.RGBA, p *painter, X, Y, S func(int) int, R func(int, int, int, int) image.Rectangle, C func(int, string, int, color.RGBA, bool, bool), particle func(int, int, int, color.RGBA, bool)) {
-	switch s.Kind {
-	case "token-grid":
-		C(78, s.Eyebrow, 26, cyan, true, false)
-		C(162+yoff, s.Title, 58, alpha(white, fade), true, false)
-		cx, cy := X(640), Y(425)
-		circle(im, cx, cy, X(92), color.RGBA{9, 46, 55, 255})
-		circleStroke(im, cx, cy, X(92), cyan, X(3))
-		centerBoxText(im, p, image.Rect(cx-X(82), cy-Y(55), cx+X(82), cy+Y(55)), "fak", S(48), white)
-		positions := [][2]int{{245, 310}, {245, 500}, {640, 625}, {1035, 500}, {1035, 310}, {640, 245}}
-		for i, item := range s.Items {
-			px, py := positions[i][0], positions[i][1]
-			lineSegment(im, cx, cy, X(px), Y(py), alpha(cyan, .35), X(2))
-			node := image.Rect(X(px-145), Y(py-48), X(px+145), Y(py+48))
-			fill(im, node, color.RGBA{13, 25, 36, 255})
-			stroke(im, node, cyan, X(2))
-			centerBoxText(im, p, node, item, S(27), white)
-			particle(px, py-63, 5, green, true)
-		}
-	case "token-flow":
-		C(78, s.Eyebrow, 26, cyan, true, false)
-		C(162+yoff, s.Title, 55, alpha(white, fade), true, false)
-		baseY := 530
-		widths := []int{390, 270, 155}
-		colors := []color.RGBA{red, cyan, green}
-		for i, item := range s.Items {
-			xc := 250 + i*390
-			h := widths[i]
-			for j := 0; j < h/15; j++ {
-				px := xc - h/2 + 12 + j*15
-				particle(px, baseY-int(24*math.Sin(float64(j)*.8+t)), 5, colors[i], true)
-			}
-			r := R(xc-165, 595, xc+165, 670)
-			centerBoxText(im, p, r, item, S(28), white)
-			if i < 2 {
-				centerFit(im, p, Y(530), X(45), "->", S(34), muted, true, true)
-			}
-		}
-		C(708, s.Verdict, 29, green, true, false)
-	}
 }
 
 func fittedTextSize(p *painter, available int, s string, size, floor float64, bold, mono bool) (float64, int) {

@@ -94,19 +94,19 @@ func gradePipeline(name, scenario string, xs []benchCase) benchMetrics {
 				pred = false
 			}
 		case "retrieval-rerank":
-			if x.Relation && idModMatches(x.ID, 2) {
+			if x.Relation && x.ID[len(x.ID)-1]%2 == 0 {
 				pred = false
 			}
 		case "long-context":
-			if rel > 300 && x.Relation && idModMatches(x.ID, 5) {
+			if rel > 300 && x.Relation && x.ID[len(x.ID)-1]%5 == 0 {
 				abstain = true
 			}
 		case "chunk-map-reduce":
-			if x.Relation && idModMatches(x.ID, 3) {
+			if x.Relation && x.ID[len(x.ID)-1]%3 == 0 {
 				pred = false
 			}
 		case "micro-context":
-			if rel > 600 && x.Relation && idModMatches(x.ID, 7) {
+			if x.Relation && rel > 600 && x.ID[len(x.ID)-1]%7 == 0 {
 				abstain = true
 			}
 		}
@@ -257,8 +257,4 @@ func verifyFalsificationArtifact(path string) error {
 		return e
 	}
 	return verifyFalsification(r)
-}
-
-func idModMatches(id string, mod byte) bool {
-	return len(id) > 0 && id[len(id)-1]%mod == 0
 }

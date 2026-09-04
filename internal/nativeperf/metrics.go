@@ -242,16 +242,9 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 		t := totals[k]
 		for i, phase := range phaseOrder {
 			labels := strings.TrimSuffix(receiptLabels(k), "}")
-			for _, item := range []struct {
-				kind string
-				val  float64
-			}{
-				{"wall", t.phaseWall[i]},
-				{"active", t.phaseActive[i]},
-				{"wait", t.phaseWait[i]},
-			} {
-				fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, item.kind, formatMetricFloat(item.val))
-			}
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "wall", formatMetricFloat(t.phaseWall[i]))
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "active", formatMetricFloat(t.phaseActive[i]))
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "wait", formatMetricFloat(t.phaseWait[i]))
 		}
 	}
 	writeReceiptHelpType(&b, "fak_native_receipt_bytes_total", "Cumulative bytes projected from native execution receipts.", "counter")

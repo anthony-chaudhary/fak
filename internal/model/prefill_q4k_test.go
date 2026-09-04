@@ -1,12 +1,14 @@
 package model
 
 import (
+	"encoding/binary"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"math"
 	"math/rand"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -494,4 +496,154 @@ func TestQ4KDecodeGroupDispatchDeclinesWithoutMetal(t *testing.T) {
 	if got := s.q4kGroupDispatch([]string{"a", "b"}, make([]float32, 8), []int{4, 4}); got != nil {
 		t.Fatalf("q4kGroupDispatch without MetalQ4K = %v, want nil (default decode path must be untouched)", got)
 	}
+}
+
+// TestPrefillBatchedQ4K_ResidentKQuantAndOnDemandQ8 pins issue #10601:
+//  1. A projection resident in kqw (e.g. self_attn.v_proj.weight loaded as Q6_K) must dispatch to
+//     kQuantGemmDispatch rather than falling through to m.q8 and panicking ("q8 tensor not built").
+//  2. Projections present in m.manifest (f32) but un-quantized (Model.Quantize was not called) must
+//     be quantized on demand into m.q8w by m.q8 rather than panicking.
+func TestPrefillBatchedQ4K_ResidentKQuantAndOnDemandQ8(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	cfg := Config{
+		HiddenSize: 256, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 64,
+		IntermediateSize: 256, VocabSize: 64, RMSNormEps: 1e-6, AttnSoftcap: 50.0, RopeTheta: 10000.0,
+	}
+	m := NewSynthetic(cfg)
+	// Crucial: do NOT call m.Quantize(). This models the FAK_Q4K=1 warmup where Quantize is skipped.
+
+	// Populate q4kw for majority projections, EXCEPT:
+	// - layer 0 self_attn.v_proj.weight (put in kqw as resident Q6_K)
+	// - layer 0 mlp.down_proj.weight (left in m.manifest as f32, neither in q4kw nor kqw)
+	projs := [][2]any{}
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		nHhd := cfg.NumHeads * cfg.HeadDim
+		nKVhd := cfg.NumKVHeads * cfg.HeadDim
+		projs = append(projs,
+			[2]any{p + "self_attn.q_proj.weight", nHhd},
+			[2]any{p + "self_attn.k_proj.weight", nKVhd},
+			[2]any{p + "self_attn.o_proj.weight", cfg.HiddenSize},
+			[2]any{p + "mlp.gate_proj.weight", cfg.IntermediateSize},
+			[2]any{p + "mlp.up_proj.weight", cfg.IntermediateSize},
+		)
+		if l != 0 {
+			projs = append(projs,
+				[2]any{p + "self_attn.v_proj.weight", nKVhd},
+				[2]any{p + "mlp.down_proj.weight", cfg.HiddenSize},
+			)
+		}
+	}
+	fillQ4KW(t, m, projs, 99)
+
+	// Layer 0 v_proj in kqw (resident Q6_K):
+	vName := layerPrefix(0) + "self_attn.v_proj.weight"
+	vMeta := m.manifest[vName]
+	vOut, vIn := vMeta.Shape[0], vMeta.Shape[len(vMeta.Shape)-1]
+	vNblk := vIn / qkK
+	vRaw := make([]byte, vOut*vNblk*q6kBlockBytes)
+	for o := 0; o < vOut; o++ {
+		for b := 0; b < vNblk; b++ {
+			blk := vRaw[(o*vNblk+b)*q6kBlockBytes:]
+			binary.LittleEndian.PutUint16(blk[q6kBlockBytes-2:], f16One)
+		}
+	}
+	if m.kqw == nil {
+		m.kqw = make(map[string]*kQuantTensor)
+	}
+	m.kqw[vName] = quantizeKQuantFromRaw(vRaw, vOut, vIn, kindQ6K)
+
+	// Layer 0 down_proj remains only in m.manifest (un-quantized f32).
+	downName := layerPrefix(0) + "mlp.down_proj.weight"
+
+	prompt := make([]int, 8)
+	for i := range prompt {
+		prompt[i] = (i*7 + 3) % cfg.VocabSize
+	}
+
+	s := m.NewSession()
+	s.Q4K = true
+
+	// Before the fix, prefillBatchedQ4K panicked:
+	// 1. If v_proj was in kqw, it fell through to m.q8(vName), which panicked ("q8 tensor not built").
+	// 2. If down_proj was in manifest, m.q8(downName) panicked ("q8 tensor not built").
+	// With the fix, prefillBatchedQ4K must succeed without panic.
+	hidden := s.prefillBatchedQ4K(prompt)
+	if len(hidden) != cfg.HiddenSize {
+		t.Fatalf("prefillBatchedQ4K returned len %d, want %d", len(hidden), cfg.HiddenSize)
+	}
+	for i, v := range hidden {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			t.Fatalf("hidden[%d] is not finite: %v", i, v)
+		}
+	}
+
+	// Verify that v_proj was dispatched to kqw and NOT quantized into q8w:
+	if m.q8w != nil && m.q8w[vName] != nil {
+		t.Fatalf("v_proj was unexpectedly quantized into q8w; should have dispatched to kqw")
+	}
+
+	// Verify that down_proj was quantized on-demand into q8w:
+	if m.q8w == nil || m.q8w[downName] == nil {
+		t.Fatalf("down_proj was not quantized on-demand into q8w")
+	}
+}
+
+// TestQ8OnDemandQuantize pins on-demand quantization in Model.q8():
+// - Unquantized 2D manifest tensors are quantized to Q8_0 on demand and cached in m.q8w.
+// - Subsequent lookups return the cached tensor.
+// - Non-existent or non-2D tensors still panic with "q8 tensor not built".
+func TestQ8OnDemandQuantize(t *testing.T) {
+	cfg := Config{
+		HiddenSize: 256, NumLayers: 1, NumHeads: 4, NumKVHeads: 2, HeadDim: 64,
+		IntermediateSize: 256, VocabSize: 64, RMSNormEps: 1e-6, AttnSoftcap: 50.0, RopeTheta: 10000.0,
+	}
+	m := NewSynthetic(cfg)
+	name := layerPrefix(0) + "mlp.down_proj.weight"
+
+	// q8 should quantize on demand from m.manifest
+	qt := m.q8(name)
+	if qt == nil {
+		t.Fatalf("m.q8(%q) returned nil", name)
+	}
+	if m.q8w == nil || m.q8w[name] != qt {
+		t.Fatalf("m.q8w[%q] not cached", name)
+	}
+	// Second call should return the exact same cached pointer
+	if qt2 := m.q8(name); qt2 != qt {
+		t.Fatalf("second m.q8 call returned different pointer: %p != %p", qt2, qt)
+	}
+
+	// Non-existent tensor should panic
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("expected panic on nonexistent tensor, got none")
+			}
+			msg, ok := r.(string)
+			if !ok || !strings.Contains(msg, "q8 tensor not built") {
+				t.Fatalf("unexpected panic message: %v", r)
+			}
+		}()
+		m.q8("nonexistent.tensor.weight")
+	}()
+
+	// 1-D tensor should panic (cannot quantize non-2D to Q8 matrix)
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("expected panic on 1D tensor, got none")
+			}
+			msg, ok := r.(string)
+			if !ok || !strings.Contains(msg, "q8 tensor not built") {
+				t.Fatalf("unexpected panic message: %v", r)
+			}
+		}()
+		normName := layerPrefix(0) + "input_layernorm.weight"
+		m.q8(normName)
+	}()
 }

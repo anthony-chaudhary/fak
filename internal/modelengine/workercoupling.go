@@ -165,14 +165,20 @@ func WorkerCouplingConfigFromEnv() WorkerCouplingConfig {
 			p.Mode = CouplingModeDynamic
 		}
 	}
-	if n, ok := envPositiveInt("FAK_WORKER_COUPLING_PREFILL_MAX"); ok {
-		p.MaxPrefillWorkers = n
+	if raw := os.Getenv("FAK_WORKER_COUPLING_PREFILL_MAX"); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			p.MaxPrefillWorkers = n
+		}
 	}
-	if n, ok := envPositiveInt("FAK_WORKER_COUPLING_DECODE_MAX"); ok {
-		p.MaxDecodeWorkers = n
+	if raw := os.Getenv("FAK_WORKER_COUPLING_DECODE_MAX"); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			p.MaxDecodeWorkers = n
+		}
 	}
-	if n, ok := envPositiveInt("FAK_WORKER_COUPLING_MIN"); ok {
-		p.MinWorkers = n
+	if raw := os.Getenv("FAK_WORKER_COUPLING_MIN"); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			p.MinWorkers = n
+		}
 	}
 	if raw := os.Getenv("FAK_WORKER_COUPLING_INTERVAL_MS"); raw != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n >= 0 {
@@ -180,15 +186,6 @@ func WorkerCouplingConfigFromEnv() WorkerCouplingConfig {
 		}
 	}
 	return p
-}
-
-func envPositiveInt(key string) (int, bool) {
-	if raw := os.Getenv(key); raw != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
-			return n, true
-		}
-	}
-	return 0, false
 }
 
 // WorkerCouplingStats reports telemetry for the active worker coupling state.
@@ -412,16 +409,43 @@ func (c *WorkerCoupler) workersForOpLocked(op WorkerOpKind) int {
 	}
 
 	score := c.lastPressureScore
+	var factor float64
 
 	switch op {
 	case OpPrefill:
-		return clampWorkers(maxW, minW, pressureFactor(score, 1.00, 0.85, 0.60, 0.35, 0.20))
+		// Compute-heavy GEMM: scales smoothly with pressure.
+		switch {
+		case score < 0.20:
+			factor = 1.00
+		case score < 0.45:
+			factor = 0.85
+		case score < 0.70:
+			factor = 0.60
+		case score < 0.85:
+			factor = 0.35
+		default:
+			factor = 0.20
+		}
+		w := int(math.Round(float64(maxW) * factor))
+		if w < minW {
+			w = minW
+		}
+		if w > maxW {
+			w = maxW
+		}
+		return w
 
 	case OpDecode:
-		if score >= 0.85 {
-			return minW
-		}
-		if score >= 0.70 {
+		// Memory-bandwidth-bound single-token GEMV: sensitive to barrier stalls, clamps aggressively.
+		switch {
+		case score < 0.20:
+			factor = 1.00
+		case score < 0.45:
+			factor = 0.75
+		case score < 0.70:
+			factor = 0.50
+		case score < 0.85:
+			// Under high contention, clamp to min(2, maxW).
 			w := 2
 			if w > maxW {
 				w = maxW
@@ -430,44 +454,68 @@ func (c *WorkerCoupler) workersForOpLocked(op WorkerOpKind) int {
 				w = minW
 			}
 			return w
+		default:
+			// Critical contention: single worker avoids parFor barrier entirely.
+			return minW
 		}
-		return clampWorkers(maxW, minW, pressureFactor(score, 1.00, 0.75, 0.50, 0.0, 0.0))
+		w := int(math.Round(float64(maxW) * factor))
+		if w < minW {
+			w = minW
+		}
+		if w > maxW {
+			w = maxW
+		}
+		return w
 
 	case OpBatch:
-		return clampWorkers(maxW, minW, pressureFactor(score, 1.00, 0.80, 0.55, 0.30, 0.15))
+		// Multi-lane StepBatch: intermediate compute intensity.
+		switch {
+		case score < 0.20:
+			factor = 1.00
+		case score < 0.45:
+			factor = 0.80
+		case score < 0.70:
+			factor = 0.55
+		case score < 0.85:
+			factor = 0.30
+		default:
+			factor = 0.15
+		}
+		w := int(math.Round(float64(maxW) * factor))
+		if w < minW {
+			w = minW
+		}
+		if w > maxW {
+			w = maxW
+		}
+		return w
 
 	case OpPipeline:
-		return clampWorkers(maxW, minW, pressureFactor(score, 1.00, 0.80, 0.50, 0.30, 0.15))
+		// Pipeline stage forward dispatch.
+		switch {
+		case score < 0.20:
+			factor = 1.00
+		case score < 0.45:
+			factor = 0.80
+		case score < 0.70:
+			factor = 0.50
+		case score < 0.85:
+			factor = 0.30
+		default:
+			factor = 0.15
+		}
+		w := int(math.Round(float64(maxW) * factor))
+		if w < minW {
+			w = minW
+		}
+		if w > maxW {
+			w = maxW
+		}
+		return w
 
 	default:
 		return maxW
 	}
-}
-
-func pressureFactor(score, f0, f1, f2, f3, f4 float64) float64 {
-	switch {
-	case score < 0.20:
-		return f0
-	case score < 0.45:
-		return f1
-	case score < 0.70:
-		return f2
-	case score < 0.85:
-		return f3
-	default:
-		return f4
-	}
-}
-
-func clampWorkers(maxW, minW int, factor float64) int {
-	w := int(math.Round(float64(maxW) * factor))
-	if w < minW {
-		w = minW
-	}
-	if w > maxW {
-		w = maxW
-	}
-	return w
 }
 
 // ActiveWorkerBudget returns the current worker budget for (prefill, decode, batch, pipeline).

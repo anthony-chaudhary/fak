@@ -65,8 +65,9 @@ description: "Canonical scoped terminology for fak, with query commands, ownersh
 <a id="abi-refusal-reason-vocabulary-abi-reason"></a>
 ## ABI refusal reason
 
-**Scope:** `vocabulary:abi-reason` · **Owner:** `abi / abi` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `vocabulary:abi-reason`  
+**Owner:** `abi / abi`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "ABI refusal reason" --scope-kind "vocabulary" --scope-value "abi-reason" --json`
 
 A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.
@@ -84,8 +85,9 @@ A closed trainable ReasonCode explaining why an adjudication refused a call; POL
 <a id="dos-decision-kind-vocabulary-dos-decision-kind"></a>
 ## DOS decision kind
 
-**Scope:** `vocabulary:dos-decision-kind` · **Owner:** `dosdecision / dos` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `vocabulary:dos-decision-kind`  
+**Owner:** `dosdecision / dos`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "DOS decision kind" --scope-kind "vocabulary" --scope-value "dos-decision-kind" --json`
 
 A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.
@@ -103,8 +105,9 @@ A persistent DOS row category identifying arbitration refusal work whose resolut
 <a id="account-seat-dispatch-account-seat"></a>
 ## account seat
 
-**Scope:** `dispatch:account-seat` · **Owner:** `fleetaccounts / accounts` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:account-seat`  
+**Owner:** `fleetaccounts / accounts`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "account seat" --scope-kind "dispatch" --scope-value "account-seat" --json`
 
 A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs.
@@ -120,8 +123,9 @@ A provider account-capacity slot with availability, session cap, leased slots, f
 <a id="activation-posture-disambiguation-activation"></a>
 ## activation posture
 
-**Scope:** `disambiguation:activation` · **Owner:** `disambiguation / disambiguation` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `disambiguation:activation`  
+**Owner:** `disambiguation / disambiguation`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "activation posture" --scope-kind "disambiguation" --scope-value "activation" --json`
 
 The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.
@@ -138,8 +142,9 @@ The normalized behavior state off, shadow, or on; it is always interpreted withi
 <a id="adjudication-verdict-policy-decision"></a>
 ## adjudication verdict
 
-**Scope:** `policy:decision` · **Owner:** `abi / abi` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `policy:decision`  
+**Owner:** `abi / abi`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "adjudication verdict" --scope-kind "policy" --scope-value "decision" --json`
 
 The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.
@@ -157,8 +162,9 @@ The typed per-call result emitted by the adjudication fold: allow, deny, transfo
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel
 
-**Scope:** `product:fak` · **Owner:** `kernel / kernel` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `product:fak`  
+**Owner:** `kernel / kernel`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "agent kernel" --scope-kind "product" --scope-value "fak" --json`
 
 The fak management boundary that governs model traffic, tool effects, context, and recovery.
@@ -174,8 +180,9 @@ The fak management boundary that governs model traffic, tool effects, context, a
 <a id="agent-session-runtime-internal-session"></a>
 ## agent session
 
-**Scope:** `runtime:internal/session` · **Owner:** `session / session` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:internal/session`  
+**Owner:** `session / session`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "agent session" --scope-kind "runtime" --scope-value "internal/session" --json`
 
 A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.
@@ -191,8 +198,9 @@ A durable, addressable agent execution record carrying drive state and pointers 
 <a id="capability-floor-policy-authority"></a>
 ## capability floor
 
-**Scope:** `policy:authority` · **Owner:** `abi / abi` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `policy:authority`  
+**Owner:** `abi / abi`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "capability floor" --scope-kind "policy" --scope-value "authority" --json`
 
 The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.
@@ -209,8 +217,9 @@ The minimum authority boundary represented by negotiated capability tokens and p
 <a id="capability-maturity-rung-capability-maturity"></a>
 ## capability maturity rung
 
-**Scope:** `capability:maturity` · **Owner:** `maturity / maturity` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `capability:maturity`  
+**Owner:** `maturity / maturity`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "capability maturity rung" --scope-kind "capability" --scope-value "maturity" --json`
 
 A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.
@@ -227,8 +236,9 @@ A capability-readiness level in the ordered proposed, prototyped, tested, dogfoo
 <a id="compute-fleet-dispatch-fleet"></a>
 ## compute fleet
 
-**Scope:** `dispatch:fleet` · **Owner:** `fleet / fleet` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:fleet`  
+**Owner:** `fleet / fleet`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "compute fleet" --scope-kind "dispatch" --scope-value "fleet" --json`
 
 A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core.
@@ -244,8 +254,9 @@ A transport-agnostic roster of uniquely identified controllable machines whose l
 <a id="compute-kernel-computing-processor"></a>
 ## compute kernel
 
-**Scope:** `computing:processor` · **Owner:** `kernel / kernel` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `computing:processor`  
+**Owner:** `kernel / kernel`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "compute kernel" --scope-kind "computing" --scope-value "processor" --json`
 
 An arithmetic routine executed by a processor.
@@ -259,8 +270,9 @@ An arithmetic routine executed by a processor.
 <a id="context-compaction-runtime-codex-context"></a>
 ## context compaction
 
-**Scope:** `runtime:codex-context` · **Owner:** `session / session` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:codex-context`  
+**Owner:** `session / session`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "context compaction" --scope-kind "runtime" --scope-value "codex-context" --json`
 
 A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.
@@ -276,8 +288,9 @@ A context-window event that replaces prior history so resident input falls while
 <a id="disambiguation-package-package-internal-disambiguation"></a>
 ## disambiguation package
 
-**Scope:** `package:internal/disambiguation` · **Owner:** `disambiguation / canon` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `package:internal/disambiguation`  
+**Owner:** `disambiguation / canon`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "disambiguation package" --scope-kind "package" --scope-value "internal/disambiguation" --json`
 
 The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry.
@@ -291,8 +304,9 @@ The internal/disambiguation package, named as a contrast target for the CLI-scop
 <a id="dispatch-lane-dispatch-lane"></a>
 ## dispatch lane
 
-**Scope:** `dispatch:lane` · **Owner:** `laneadmit / dos` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:lane`  
+**Owner:** `laneadmit / dos`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "dispatch lane" --scope-kind "dispatch" --scope-value "lane" --json`
 
 A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy.
@@ -308,8 +322,9 @@ A named taxonomy partition that maps a work request to a canonical file-tree reg
 <a id="dispatch-loop-dispatch-loop"></a>
 ## dispatch loop
 
-**Scope:** `dispatch:loop` · **Owner:** `loopmgr / loop` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:loop`  
+**Owner:** `loopmgr / loop`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "dispatch loop" --scope-kind "dispatch" --scope-value "loop" --json`
 
 A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs.
@@ -325,8 +340,9 @@ A durable recurring dispatch state machine identified by loop ID and measured th
 <a id="dispatch-ownership-lane-ownership-lane"></a>
 ## dispatch ownership lane
 
-**Scope:** `ownership:lane` · **Owner:** `disambiguation / disambiguation` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `ownership:lane`  
+**Owner:** `disambiguation / disambiguation`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "dispatch ownership lane" --scope-kind "ownership" --scope-value "lane" --json`
 
 A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.
@@ -342,8 +358,9 @@ A declared file-tree region used to arbitrate concurrent work; it may own severa
 <a id="dispatch-wave-dispatch-wave"></a>
 ## dispatch wave
 
-**Scope:** `dispatch:wave` · **Owner:** `issuecohort / dispatch` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:wave`  
+**Owner:** `issuecohort / dispatch`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "dispatch wave" --scope-kind "dispatch" --scope-value "wave" --json`
 
 An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims.
@@ -359,8 +376,9 @@ An indexed, bounded batch of dispatch members with a shared step budget and expl
 <a id="dispatch-worker-dispatch-worker"></a>
 ## dispatch worker
 
-**Scope:** `dispatch:worker` · **Owner:** `dispatchaudit / dispatch` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:worker`  
+**Owner:** `dispatchaudit / dispatch`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "dispatch worker" --scope-kind "dispatch" --scope-value "worker" --json`
 
 One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration.
@@ -376,8 +394,9 @@ One executing worker record with structured issue, lane, backend, and witnessed-
 <a id="exported-go-symbol-candidate-disambiguation-go-symbol-candidate"></a>
 ## exported Go symbol candidate
 
-**Scope:** `disambiguation:go-symbol-candidate` · **Owner:** `disambiguation / disambiguation` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `disambiguation:go-symbol-candidate`  
+**Owner:** `disambiguation / disambiguation`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "exported Go symbol candidate" --scope-kind "disambiguation" --scope-value "go-symbol-candidate" --json`
 
 A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.
@@ -393,8 +412,9 @@ A reviewed exported type, function, variable, or constant from non-test, non-gen
 <a id="fak-cli-kernel-cli-fak"></a>
 ## fak CLI kernel
 
-**Scope:** `cli:fak` · **Owner:** `disambiguation / canon` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cli:fak`  
+**Owner:** `disambiguation / canon`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "fak CLI kernel" --scope-kind "cli" --scope-value "fak" --json`
 
 The fak command-line product surface, named as a contrast target for the package-scoped kernel entry.
@@ -408,8 +428,9 @@ The fak command-line product surface, named as a contrast target for the package
 <a id="fak-commit-stamp-ownership-commit-stamp"></a>
 ## fak commit stamp
 
-**Scope:** `ownership:commit-stamp` · **Owner:** `fak / cmd` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `ownership:commit-stamp`  
+**Owner:** `fak / cmd`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "fak commit stamp" --scope-kind "ownership" --scope-value "commit-stamp" --json`
 
 The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.
@@ -425,8 +446,9 @@ The validated (fak <leaf>) commit-subject token binding one commit to its semant
 <a id="fak-measurement-arm-claims-fak-arm"></a>
 ## fak measurement arm
 
-**Scope:** `claims:fak-arm` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:fak-arm`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "fak measurement arm" --scope-kind "claims" --scope-value "fak-arm" --json`
 
 The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.
@@ -443,8 +465,9 @@ The fak-enabled treatment measured against a declared alternative; calling it a 
 <a id="fleet-supervisor-dispatch-supervisor"></a>
 ## fleet supervisor
 
-**Scope:** `dispatch:supervisor` · **Owner:** `supervisoragent / fleet` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:supervisor`  
+**Owner:** `supervisoragent / fleet`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "fleet supervisor" --scope-kind "dispatch" --scope-value "supervisor" --json`
 
 A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference.
@@ -460,8 +483,9 @@ A decision layer whose input is witnessed liveness, worker verdicts, escalations
 <a id="hook-gate-class-vocabulary-hook-gate-class"></a>
 ## hook gate class
 
-**Scope:** `vocabulary:hook-gate-class` · **Owner:** `hooks / hooks` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `vocabulary:hook-gate-class`  
+**Owner:** `hooks / hooks`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "hook gate class" --scope-kind "vocabulary" --scope-value "hook-gate-class" --json`
 
 A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.
@@ -479,8 +503,9 @@ A hook-runner classification declaring whether a gate mutates the index/worktree
 <a id="index-lifecycle-class-disambiguation-entry-authority"></a>
 ## index lifecycle class
 
-**Scope:** `disambiguation:entry-authority` · **Owner:** `disambiguation / disambiguation` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `disambiguation:entry-authority`  
+**Owner:** `disambiguation / disambiguation`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "index lifecycle class" --scope-kind "disambiguation" --scope-value "entry-authority" --json`
 
 The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.
@@ -497,8 +522,9 @@ The authority status of a disambiguation entry: current, versioned, research, or
 <a id="kernel-package-internal-disambiguation"></a>
 ## kernel
 
-**Scope:** `package:internal/disambiguation` · **Owner:** `disambiguation / canon` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `package:internal/disambiguation`  
+**Owner:** `disambiguation / canon`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "kernel" --scope-kind "package" --scope-value "internal/disambiguation" --json`
 
 The internal/disambiguation Go package that validates and queries public terminology records.
@@ -512,8 +538,9 @@ The internal/disambiguation Go package that validates and queries public termino
 <a id="kernel-cli-fak"></a>
 ## kernel
 
-**Scope:** `cli:fak` · **Owner:** `disambiguation / canon` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cli:fak`  
+**Owner:** `disambiguation / canon`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "kernel" --scope-kind "cli" --scope-value "fak" --json`
 
 The fak command-line product surface for operating the agent kernel.
@@ -527,8 +554,9 @@ The fak command-line product surface for operating the agent kernel.
 <a id="lane-lease-dispatch-lease"></a>
 ## lane lease
 
-**Scope:** `dispatch:lease` · **Owner:** `laneadmit / dos` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `dispatch:lease`  
+**Owner:** `laneadmit / dos`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "lane lease" --scope-kind "dispatch" --scope-value "lease" --json`
 
 A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission.
@@ -544,8 +572,9 @@ A live ownership claim carrying lease ID, lane or tree, holder identity, and rea
 <a id="leaf-identity-ownership-leaf"></a>
 ## leaf identity
 
-**Scope:** `ownership:leaf` · **Owner:** `disambiguation / disambiguation` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `ownership:leaf`  
+**Owner:** `disambiguation / disambiguation`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "leaf identity" --scope-kind "ownership" --scope-value "leaf" --json`
 
 The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.
@@ -561,8 +590,9 @@ The semantic package or command unit that owns a change and supplies the attribu
 <a id="model-kv-cache-cache-model-attention"></a>
 ## model KV cache
 
-**Scope:** `cache:model-attention` · **Owner:** `model / model` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cache:model-attention`  
+**Owner:** `model / model`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "model KV cache" --scope-kind "cache" --scope-value "model-attention" --json`
 
 Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes.
@@ -580,8 +610,9 @@ Kernel-owned per-layer attention key/value tensors indexed by token position and
 <a id="model-mediated-check-policy-model-mediated"></a>
 ## model-mediated check
 
-**Scope:** `policy:model-mediated` · **Owner:** `fak / cmd` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `policy:model-mediated`  
+**Owner:** `fak / cmd`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "model-mediated check" --scope-kind "policy" --scope-value "model-mediated" --json`
 
 A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.
@@ -597,8 +628,9 @@ A semantic assessment whose result depends on a model interpreting content or in
 <a id="module-revision-identity-ownership-module-revision"></a>
 ## module revision identity
 
-**Scope:** `ownership:module-revision` · **Owner:** `fak / cmd` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `ownership:module-revision`  
+**Owner:** `fak / cmd`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "module revision identity" --scope-kind "ownership" --scope-value "module-revision" --json`
 
 A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.
@@ -614,8 +646,9 @@ A history-derived identity rendered as module@r<touch-count>+g<commit>, naming w
 <a id="naive-baseline-claims-naive-baseline"></a>
 ## naive baseline
 
-**Scope:** `claims:naive-baseline` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:naive-baseline`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "naive baseline" --scope-kind "claims" --scope-value "naive-baseline" --json`
 
 A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.
@@ -632,8 +665,9 @@ A comparison arm representing the untuned or resend-everything floor; useful con
 <a id="net-true-claim-claims-net-true"></a>
 ## net-true claim
 
-**Scope:** `claims:net-true` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:net-true`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "net-true claim" --scope-kind "claims" --scope-value "net-true" --json`
 
 A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.
@@ -650,8 +684,9 @@ A scoped value statement graded against the real tuned alternative and stated ne
 <a id="package-capability-token-disambiguation-capability-token"></a>
 ## package capability token
 
-**Scope:** `disambiguation:capability-token` · **Owner:** `abi / abi` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `disambiguation:capability-token`  
+**Owner:** `abi / abi`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "package capability token" --scope-kind "disambiguation" --scope-value "capability-token" --json`
 
 A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.
@@ -667,8 +702,9 @@ A string explicitly registered by a public package as a negotiated ABI capabilit
 <a id="policy-declaration-policy-declaration"></a>
 ## policy declaration
 
-**Scope:** `policy:declaration` · **Owner:** `adjudicator / adjudicator` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `policy:declaration`  
+**Owner:** `adjudicator / adjudicator`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "policy declaration" --scope-kind "policy" --scope-value "declaration" --json`
 
 A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.
@@ -685,8 +721,9 @@ A declarative set of tool, argument, network, and resource rules loaded by the a
 <a id="policy-posture-verdict-vocabulary-policy-verdict"></a>
 ## policy posture verdict
 
-**Scope:** `vocabulary:policy-verdict` · **Owner:** `policy / policy` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `vocabulary:policy-verdict`  
+**Owner:** `policy / policy`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "policy posture verdict" --scope-kind "vocabulary" --scope-value "policy-verdict" --json`
 
 The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.
@@ -704,8 +741,9 @@ The ALLOW or DENY result of folding compiled, environment, and organization auth
 <a id="provider-prompt-cache-cache-provider-prompt-prefix"></a>
 ## provider prompt cache
 
-**Scope:** `cache:provider-prompt-prefix` · **Owner:** `gateway / gateway` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cache:provider-prompt-prefix`  
+**Owner:** `gateway / gateway`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "provider prompt cache" --scope-kind "cache" --scope-value "provider-prompt-prefix" --json`
 
 An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules.
@@ -723,8 +761,9 @@ An upstream provider-owned prompt-prefix reuse service observed as cache-read an
 <a id="radix-prefix-cache-cache-radix-prefix-snapshots"></a>
 ## radix prefix cache
 
-**Scope:** `cache:radix-prefix-snapshots` · **Owner:** `radixkv / radixkv` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cache:radix-prefix-snapshots`  
+**Owner:** `radixkv / radixkv`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "radix prefix cache" --scope-kind "cache" --scope-value "radix-prefix-snapshots" --json`
 
 A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets.
@@ -742,8 +781,9 @@ A fak-owned radix tree that longest-prefix-matches namespaced token sequences to
 <a id="recovery-checkpoint-runtime-internal-session"></a>
 ## recovery checkpoint
 
-**Scope:** `runtime:internal/session` · **Owner:** `session / session` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:internal/session`  
+**Owner:** `session / session`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "recovery checkpoint" --scope-kind "runtime" --scope-value "internal/session" --json`
 
 A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.
@@ -760,8 +800,9 @@ A typed snapshot of goal, pending turn, continuation, generation, and state revi
 <a id="runtime-runtime-guard-enforcement"></a>
 ## runtime
 
-**Scope:** `runtime:guard-enforcement` · **Owner:** `guard / guard` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:guard-enforcement`  
+**Owner:** `guard / guard`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "runtime" --scope-kind "runtime" --scope-value "guard-enforcement" --json`
 
 The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement.
@@ -777,8 +818,9 @@ The wrapper process that launches a guest command under fak policy, hook, capabi
 <a id="runtime-runtime-worker-execution"></a>
 ## runtime
 
-**Scope:** `runtime:worker-execution` · **Owner:** `dispatchworker / dispatch` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:worker-execution`  
+**Owner:** `dispatchworker / dispatch`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "runtime" --scope-kind "runtime" --scope-value "worker-execution" --json`
 
 The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet.
@@ -794,8 +836,9 @@ The dispatch worker process that selects a backend, optionally wraps it with fak
 <a id="runtime-runtime-model-serving"></a>
 ## runtime
 
-**Scope:** `runtime:model-serving` · **Owner:** `engine / engine` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:model-serving`  
+**Owner:** `engine / engine`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "runtime" --scope-kind "runtime" --scope-value "model-serving" --json`
 
 The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn.
@@ -811,8 +854,9 @@ The model-completion implementation behind an engine driver, such as an on-devic
 <a id="runtime-runtime-gateway-serving"></a>
 ## runtime
 
-**Scope:** `runtime:gateway-serving` · **Owner:** `gateway / gateway` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:gateway-serving`  
+**Owner:** `gateway / gateway`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "runtime" --scope-kind "runtime" --scope-value "gateway-serving" --json`
 
 The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability.
@@ -828,8 +872,9 @@ The configured gateway server that exposes HTTP or MCP transport, authentication
 <a id="runtime-runtime-agent-application"></a>
 ## runtime
 
-**Scope:** `runtime:agent-application` · **Owner:** `agent / agent` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:agent-application`  
+**Owner:** `agent / agent`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "runtime" --scope-kind "runtime" --scope-value "agent-application" --json`
 
 The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam.
@@ -845,8 +890,9 @@ The host-side agent application loop that turns model completions into tool call
 <a id="session-recovery-runtime-internal-session"></a>
 ## session recovery
 
-**Scope:** `runtime:internal/session` · **Owner:** `session / session` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:internal/session`  
+**Owner:** `session / session`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "session recovery" --scope-kind "runtime" --scope-value "internal/session" --json`
 
 A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.
@@ -863,8 +909,9 @@ A bounded repair or reroute response when persisted or cumulative session state 
 <a id="session-resume-runtime-internal-session"></a>
 ## session resume
 
-**Scope:** `runtime:internal/session` · **Owner:** `session / session` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `runtime:internal/session`  
+**Owner:** `session / session`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "session resume" --scope-kind "runtime" --scope-value "internal/session" --json`
 
 The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.
@@ -881,8 +928,9 @@ The paused-to-running boundary that re-admits an existing session using warm KV 
 <a id="simulated-evidence-claims-simulated"></a>
 ## simulated evidence
 
-**Scope:** `claims:simulated` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:simulated`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "simulated evidence" --scope-kind "claims" --scope-value "simulated" --json`
 
 Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.
@@ -899,8 +947,9 @@ Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be nar
 <a id="structural-preflight-policy-structural-preflight"></a>
 ## structural preflight
 
-**Scope:** `policy:structural-preflight` · **Owner:** `fak / cmd` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `policy:structural-preflight`  
+**Owner:** `fak / cmd`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "structural preflight" --scope-kind "policy" --scope-value "structural-preflight" --json`
 
 The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent.
@@ -917,8 +966,9 @@ The local pre-dispatch fold over grammar and adjudicator rungs for one tool call
 <a id="tool-result-cache-cache-tool-results"></a>
 ## tool-result cache
 
-**Scope:** `cache:tool-results` · **Owner:** `vdso / vdso` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `cache:tool-results`  
+**Owner:** `vdso / vdso`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "tool-result cache" --scope-kind "cache" --scope-value "tool-results" --json`
 
 A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs.
@@ -936,8 +986,9 @@ A fak-owned cache of completed tool-call results keyed by tool, argument hash, p
 <a id="tuned-baseline-claims-tuned-baseline"></a>
 ## tuned baseline
 
-**Scope:** `claims:tuned-baseline` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:tuned-baseline`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "tuned baseline" --scope-kind "claims" --scope-value "tuned-baseline" --json`
 
 The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.
@@ -954,8 +1005,9 @@ The best-practice alternative an operator would actually run, required as the de
 <a id="witness-provenance-claims-provenance"></a>
 ## witness provenance
 
-**Scope:** `claims:provenance` · **Owner:** `claimcheck / claims` · **Status:** `fresh` (lifecycle `current`, rollout `on`)
-
+**Scope:** `claims:provenance`  
+**Owner:** `claimcheck / claims`  
+**Status:** `fresh` (lifecycle `current`, rollout `on`)  
 **Queryable identity:** `fak disambiguation query "witness provenance" --scope-kind "claims" --scope-value "provenance" --json`
 
 The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.

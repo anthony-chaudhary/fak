@@ -204,6 +204,10 @@ func TestRunSyncPushRejectsSubMillisecondVelocityBudget(t *testing.T) {
 }
 
 func TestRunSyncPushInternalErrorStillEmitsVelocityJSON(t *testing.T) {
+	oldCapture := syncCaptureSource
+	syncCaptureSource = func(string) (string, error) { return "0f1e2d3c4b5a60718293a4b5c6d7e8f90a1b2c3d", nil }
+	t.Cleanup(func() { syncCaptureSource = oldCapture })
+
 	old := syncSafePush
 	syncSafePush = func(context.Context, safesync.PushOptions) (safesync.PushResult, error) {
 		return safesync.PushResult{

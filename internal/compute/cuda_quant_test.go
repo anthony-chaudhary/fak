@@ -273,11 +273,10 @@ func newQ4KHost(be Backend, shape []int, raw []byte) Tensor {
 // TestCUDAQ4KMatMulApproxMatchesRef — native Q4_K decode GEMV with the dequant fused into the tile,
 // vs the cpuref f32 matmul over an f32 dequant of the SAME super-block bytes. Its OWN gate instance:
 // argmax-exact (activation aligned to the dominant channel) + cosine ≥ the RECORDED cudaQ4KCosineMin
-// (0.995, looser than Q8 — see cuda.go). This tests the baseline scalar f32 activation arm
-// (cuda.scalar-f32-activation-baseline in nativeperf graph).
+// (0.995, looser than Q8 — see cuda.go). This isolates the device dequant-fused tile: a wrong
+// getScaleMinK4 / super-block port collapses the cosine.
 func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 	cb := cudaOrSkip(t)
-	t.Setenv("FAK_CUDA_Q4K_MMVQ", "0")
 	ref := Default()
 	var seed lcg = 0x4b4b
 	g := &seed
@@ -314,49 +313,8 @@ func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 	if c < cudaQ4KCosineMin {
 		t.Fatalf("Q4_K MatMul cosine %.6f < recorded Q4_K gate %.6f (cudaQ4KCosineMin)", c, cudaQ4KCosineMin)
 	}
-	t.Logf("#485 Q4_K MatMul (scalar baseline): cosine=%.8f maxAbs=%.2e gate=%.4f argmax-exact (device=%s tier=%s class=%s)",
+	t.Logf("#485 Q4_K MatMul: cosine=%.8f maxAbs=%.2e gate=%.4f argmax-exact (device=%s tier=%s class=%s)",
 		c, maxAbs, cudaQ4KCosineMin, cb.Name(), cb.Tier(), cb.Class())
-}
-
-// TestCUDAQ4KMMVQDP4AMatchesRef witnesses the signed DP4A Q4_K MMVQ decode path (#8635)
-// with Q8_1 activation quantization vs cpuref f32 reference.
-// Gates: argmax-exact and cosine >= cudaQ4KCosineMin (0.995).
-func TestCUDAQ4KMMVQDP4AMatchesRef(t *testing.T) {
-	cb := cudaOrSkip(t)
-	t.Setenv("FAK_CUDA_Q4K_MMVQ", "1")
-	ref := Default()
-	var seed lcg = 0x4b4b
-	g := &seed
-	out, in := 320, 256
-	raw := randQ4KBytes(g, out, in)
-	w := dequantQ4KWeight(raw, out, in)
-	target := dominantRow(w, out, in)
-	x := alignActToRow(w, out, in, target)
-
-	yRef := ref.Read(ref.MatMul(mkResident(ref, []int{out, in}, w), mkResident(ref, []int{in}, x)))
-
-	wQ4K := cb.Upload(newQ4KHost(cb, []int{out, in}, raw), Q4_K)
-	if wQ4K.Dtype != Q4_K {
-		t.Fatalf("Upload(_, Q4_K) produced Dtype %s, want q4_k", wQ4K.Dtype)
-	}
-	yCu := cb.Read(cb.MatMul(wQ4K, mkResident(cb, []int{in}, x)))
-	if len(yRef) != out || len(yCu) != out {
-		t.Fatalf("shape ref=%d cu=%d want %d", len(yRef), len(yCu), out)
-	}
-
-	if a := argmaxF32(yRef); a != target {
-		t.Fatalf("reference argmax %d != constructed dominant channel %d", a, target)
-	}
-	aCu := cb.Argmax(mkResident(cb, []int{out}, yCu))
-	if aCu != argmaxF32(yCu) || argmaxF32(yCu) != argmaxF32(yRef) {
-		t.Fatalf("Q4_K MMVQ argmax-exact failed: ref=%d cudaHost=%d cudaKernel=%d", argmaxF32(yRef), argmaxF32(yCu), aCu)
-	}
-	c := cosine(nonTarget(yRef, out, target), nonTarget(yCu, out, target))
-	if c < cudaQ4KCosineMin {
-		t.Fatalf("Q4_K MMVQ cosine %.6f < recorded Q4_K gate %.6f", c, cudaQ4KCosineMin)
-	}
-	t.Logf("#8635 Q4_K DP4A MMVQ MatMul: cosine=%.8f gate=%.4f argmax-exact (device=%s tier=%s)",
-		c, cudaQ4KCosineMin, cb.Name(), cb.Tier())
 }
 
 // TestCUDAQ4KBatchedMatMulApproxMatchesRef — native Q4_K prefill GEMM, dequant fused into the tile,

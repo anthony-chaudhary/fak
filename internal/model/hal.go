@@ -97,9 +97,6 @@ func (s *Session) Close() {
 		s.closeQwen35HALState()
 		if s.Backend != nil {
 			s.halClosed = true
-			if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
-				gr.GraphReset()
-			}
 			if b, ok := s.Backend.(batchBackend); ok {
 				b.FlushBatch()
 			}
@@ -224,12 +221,6 @@ func (s *Session) useHALQ4KWeights() bool {
 // reference session falls through to the f32 path and the Reference stays bit-identical.
 func (s *Session) useHALF16Weights() bool {
 	return s.F16 && s.M != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
-}
-
-// useHALKQuantWeights reports whether this session stages its resident dense k-quant weights
-// (Q5_K/Q6_K in m.kqw) directly onto a device backend that consumes quantized uploads (#9352).
-func (s *Session) useHALKQuantWeights() bool {
-	return s.M != nil && s.M.kqw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
 var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
@@ -467,11 +458,6 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 			return s.weightHALQ4K(name, qt)
 		}
 	}
-	if s.useHALKQuantWeights() {
-		if qt, ok := s.M.kqw[name]; ok && qt != nil {
-			return s.weightHALKQuant(name, qt)
-		}
-	}
 
 	if s.useHALF16Weights() {
 		return s.weightHALF16(name)
@@ -497,15 +483,6 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		name := s.M.q4kHeadName()
 		if qt, ok := s.M.q4kw[name]; ok {
 			return s.weightHALQ4K(name, qt)
-		}
-	}
-	if s.useHALKQuantWeights() {
-		name := "lm_head.weight"
-		if _, ok := s.M.kqw[name]; !ok {
-			name = "model.embed_tokens.weight"
-		}
-		if qt, ok := s.M.kqw[name]; ok && qt != nil {
-			return s.weightHALKQuant(name, qt)
 		}
 	}
 	if s.useHALF16Weights() {
@@ -663,18 +640,11 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// step is left uncaptured: its topology differs from the decode graph, and it never warms
 	// the logits path, so it must not be the step that instantiates the reused exec.
 	gr, canGraph := be.(graphBackend)
-	// Qwen hybrid decode is graph-replay safe when device-side partial RoPE and
-	// query-gate split backends are available with unscaled RoPE and pre-warmed state
-	// (s.qwen35HybridGraphSafe()). Unsafe hybrid configurations gracefully fall back
-	// to eager execution.
+	// The current CUDA GDN whole operation synchronizes before success, and the retained
+	// full-attention correctness bridge performs bounded host readback for partial RoPE /
+	// output gating. Neither is legal inside a reusable graph capture.
 	gpuLayers, isSplit := s.validateDenseGPULayers()
-	if cfg.IsQwen35Hybrid() && !s.qwen35HybridGraphSafe() {
-		if resetter, ok := be.(interface{ GraphReset() }); ok {
-			resetter.GraphReset()
-		}
-		s.halLogitsWarm = false
-	}
-	canGraph = canGraph && !isSplit && (!cfg.IsQwen35Hybrid() || s.qwen35HybridGraphSafe())
+	canGraph = canGraph && !cfg.IsQwen35Hybrid() && !isSplit
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()

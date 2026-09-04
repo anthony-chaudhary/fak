@@ -115,37 +115,33 @@ func modelCanaryLiveDependencies() (modelCanaryRunDeps, error) {
 	}, nil
 }
 
-func resolveExecutableCleanPath(name, label string) (string, error) {
-	path, err := exec.LookPath(name)
-	if err != nil {
-		return "", fmt.Errorf("%s %q: %w", label, name, err)
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s executable: %w", label, err)
-	}
-	return filepath.Clean(absolute), nil
-}
-
 func (d *darwinModelCanaryRuntime) preflight(ctx context.Context, cfg modelCanaryRunConfig) (modelCanaryPreflight, error) {
 	tools := make(map[string]string)
 	for _, name := range []string{"lsof", "ps", "footprint", "sysctl", "memory_pressure", "launchctl"} {
-		resolved, err := resolveExecutableCleanPath(name, "required Darwin executable")
+		path, err := exec.LookPath(name)
 		if err != nil {
-			return modelCanaryPreflight{}, err
+			return modelCanaryPreflight{}, fmt.Errorf("required Darwin executable %s: %w", name, err)
 		}
-		tools[name] = resolved
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return modelCanaryPreflight{}, fmt.Errorf("resolve Darwin executable %s: %w", name, err)
+		}
+		tools[name] = filepath.Clean(absolute)
 	}
 	for name, argv := range map[string][]string{
 		"candidate": cfg.Candidate.Command,
 		"request":   cfg.Request.Command,
 		"restore":   cfg.Incumbent.RestoreCommand,
 	} {
-		resolved, err := resolveExecutableCleanPath(argv[0], name+" executable")
+		path, err := exec.LookPath(argv[0])
 		if err != nil {
-			return modelCanaryPreflight{}, err
+			return modelCanaryPreflight{}, fmt.Errorf("%s executable %q: %w", name, argv[0], err)
 		}
-		tools[name] = resolved
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return modelCanaryPreflight{}, fmt.Errorf("resolve %s executable: %w", name, err)
+		}
+		tools[name] = filepath.Clean(absolute)
 	}
 	executableSHA := make(map[string]string, len(tools))
 	for name, path := range tools {

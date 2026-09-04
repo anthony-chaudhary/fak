@@ -36,7 +36,12 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is not owned by this CUDA backend"}
 	}
 	matrix := name == "in_proj_qkv" || name == "in_proj_z" || name == "in_proj_b" || name == "in_proj_a" || name == "out_proj"
-	if t.Dtype != F32 && !(matrix && t.Dtype == Q8_0) {
+	isState := name == "conv_state" || name == "recurrent_state"
+	if isState {
+		if t.Dtype != F16 && t.Dtype != F32 {
+			return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; state buffers require resident f16 or f32"}
+		}
+	} else if t.Dtype != F32 && !(matrix && t.Dtype == Q8_0) {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32 or q8_0 projection weights"}
 	}
 	if t.Layout != RowMajor {

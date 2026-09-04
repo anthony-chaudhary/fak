@@ -101,14 +101,6 @@ func checkedMul(v ...int64) (int64, bool) {
 	}
 	return r, true
 }
-
-func checkedMulInt(a, b int) (int, bool) {
-	r, ok := checkedMul(int64(a), int64(b))
-	if !ok || r > math.MaxInt {
-		return 0, false
-	}
-	return int(r), true
-}
 func checkedAdd(v ...int64) (int64, bool) {
 	var r int64
 	for _, n := range v {
@@ -227,12 +219,6 @@ func (s *Session) RebuildCacheGeometry(req CacheGeometryRequest) (report CacheRe
 		s.halKV.Free()
 		s.halKV = nil
 	}
-	if s.Backend != nil {
-		if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
-			gr.GraphReset()
-		}
-	}
-	s.halLogitsWarm = false
 	s.closeQwen35HALState()
 	s.Cache, s.expertRing = nil, nil
 

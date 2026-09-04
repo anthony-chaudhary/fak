@@ -102,3 +102,18 @@ func TestCLIJSONOutput(t *testing.T) {
 		t.Errorf("expected 1 retained, got %d", report.RetainedCount)
 	}
 }
+
+func TestCLICrossArchitectureMatrix(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"-cross",
+		"-source", "mlx",
+	})
+	if code != 0 {
+		t.Fatalf("expected 0, got %d. stderr: %s", code, stderr.String())
+	}
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "XINNOV-01") || !strings.Contains(outStr, "slotstream") {
+		t.Errorf("expected output to contain XINNOV-01 and slotstream, got:\n%s", outStr)
+	}
+}

@@ -201,7 +201,7 @@ func runDesktopConsoleSelfcheckController(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "link codex selfcheck: %v\n", err)
 		return 2
 	}
-	command := []string{codexPath, "exec", "windowgate", "--selfcheck"}
+	command := []string{codexPath, "windowgate", "--selfcheck"}
 	meta := guardChildSpawnMetadata{
 		AgentRunID:   "windowgate-selfcheck",
 		ToolCallID:   "guard-child:windowgate-selfcheck",

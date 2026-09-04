@@ -19,7 +19,6 @@ var releaseRunScript releaseScriptRunner = runReleaseScript
 var releaseRunShip = runReleaseShip
 var releaseRunStatus = runReleaseStatus
 var releaseRunReadiness = runReleaseReadiness
-var releaseRunNext = runReleaseNext
 var releaseLookPath = exec.LookPath
 
 var releaseScripts = map[string]string{
@@ -34,7 +33,6 @@ var releaseScripts = map[string]string{
 	"manifest":       "release_manifest.py",
 	"stable":         "stable_release_promote.py",
 	"stable-context": "stable_release_context.py",
-	"next":           "release_next.py",
 }
 
 func cmdRelease(argv []string) { os.Exit(runRelease(os.Stdout, os.Stderr, argv)) }
@@ -69,9 +67,6 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		}
 		if key == "readiness" || key == "release-readiness" || key == "scorecard" || key == "release-scorecard" {
 			return releaseRunReadiness(stdout, stderr, argv[1:])
-		}
-		if key == "next" {
-			return releaseRunNext(stdout, stderr, argv[1:])
 		}
 		if _, ok := releaseScripts[key]; !ok {
 			fmt.Fprintf(stderr, "fak release: unknown subcommand %q\n", argv[0])
@@ -132,18 +127,14 @@ func releaseUsage(w io.Writer) {
 
 usage:
   fak release [status flags...]
-  fak release next [--sync] [--check] [--json]
   fak release ship [--execute] [--json] [ship flags...]
   fak release dispatch [--execute] [--wait] [--timeout 30m] [--json] [--ref main] [--plan-only]
   fak release prplan [--json] [--base <ref>] [--head <ref>] [--check]
-  fak release status|staleness|release-staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|release-readiness|next [helper flags...]
+  fak release status|staleness|release-staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|release-readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
 
 examples:
   fak release --json
-  fak release next
-  fak release next --sync
-  fak release next --check
   fak release ship --execute --json
   fak release dispatch --execute --wait --json
   fak release ship --execute --json --open-pr

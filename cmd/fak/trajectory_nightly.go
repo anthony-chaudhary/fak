@@ -96,18 +96,22 @@ func runTrajectoryNightly(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		return failTrajectoryNightlyPublication(stdout, stderr, *receiptPath, &receipt, "history_append_failed", err)
 	}
-	publishErr := func() error {
-		if staged != nil {
-			return staged.commit()
+	if staged != nil {
+		if err := staged.commit(); err != nil {
+			if rollbackErr := rollbackHistory(); rollbackErr != nil {
+				fmt.Fprintln(stderr, "trajectory nightly: history rollback failed:", rollbackErr)
+			}
+			fmt.Fprintln(stderr, "trajectory nightly: receipt_publish_failed:", err)
+			return 1
 		}
-		return writeTrajectoryNightlyReceipt(stdout, "", receipt)
-	}()
-	if publishErr != nil {
-		if rollbackErr := rollbackHistory(); rollbackErr != nil {
-			fmt.Fprintln(stderr, "trajectory nightly: history rollback failed:", rollbackErr)
+	} else {
+		if err := writeTrajectoryNightlyReceipt(stdout, "", receipt); err != nil {
+			if rollbackErr := rollbackHistory(); rollbackErr != nil {
+				fmt.Fprintln(stderr, "trajectory nightly: history rollback failed:", rollbackErr)
+			}
+			fmt.Fprintln(stderr, "trajectory nightly: receipt_publish_failed:", err)
+			return 1
 		}
-		fmt.Fprintln(stderr, "trajectory nightly: receipt_publish_failed:", publishErr)
-		return 1
 	}
 	fmt.Fprintf(stderr, "trajectory nightly: corpus=%s status=%s records=%d breaches=%d\n", receipt.Corpus, receipt.Status, attributionReceiptRecords(receipt), len(receipt.Breaches))
 	switch receipt.Status {

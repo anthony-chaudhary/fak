@@ -558,20 +558,6 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertIn("HEAD changed", result["reason"])
         self.assertEqual(self._git(root, "rev-parse", "HEAD"), peer_sha)
 
-    def test_render_notes_incorporates_next_draft_upgrade_notes(self) -> None:
-        rc = load()
-        next_md = (
-            "# fak vNext: Work in Progress\n\n"
-            "## Upgrade and breaking changes\n\n"
-            "- Migration required: run `fak upgrade --migrate-db`\n"
-        )
-        commits = [{"subject": "feat(core): new capability (fak core)"}]
-        notes = rc.render_notes("0.47.0", date="2026-09-04", level="minor", themes=["core"],
-                                headline="minor update", commits=commits, next_content=next_md)
-        self.assertIn("Migration required: run `fak upgrade --migrate-db`", notes)
-        self.assertIn("## Upgrade", notes)
-        self.assertIn("## Release facts", notes)
-
     def test_live_cli_dry_run_no_mutation(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), "--json", "--limit-commits", "20"],

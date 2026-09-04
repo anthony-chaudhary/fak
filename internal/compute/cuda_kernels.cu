@@ -1326,166 +1326,6 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   return coeff;
 }
 
-// Persistent Q8_1 activation-quantization scratch for Q4_K MMVQ (#8635).
-static signed char *g_q81_qX = nullptr;
-static int g_q81_qX_cap = 0; // bytes
-static float2 *g_q81_xScaleSum = nullptr;
-static int g_q81_xScaleSum_cap = 0; // float2 elements
-
-// k_q8_1_quant_act quantizes f32 activation X[P, in] into Q8_1 on-device:
-// Per 32-element sub-block, computes scale d = amax/127, sum s = exact sum of x elements,
-// and signed int8 quantized codes q = q8round(x / d).
-__global__ void k_q8_1_quant_act(const float *X, signed char *qX, float2 *xScaleSum,
-                                 int P, int in) {
-  int warp_id = threadIdx.x >> 5;
-  int lane = threadIdx.x & 31;
-  int b = blockIdx.x * 4 + warp_id;
-  int t = blockIdx.y;
-  int nblk = in / 32;
-  if (t >= P || b >= nblk) return;
-
-  size_t act_offset = (size_t)t * in + (size_t)b * 32 + lane;
-  float val = X[act_offset];
-  float a = fabsf(val);
-
-#pragma unroll
-  for (int delta = 16; delta > 0; delta >>= 1) {
-    a = fmaxf(a, __shfl_down_sync(0xffffffff, a, delta));
-  }
-  float amax = __shfl_sync(0xffffffff, a, 0);
-  float d = amax / 127.0f;
-  float inv = d > 0.0f ? 1.0f / d : 0.0f;
-
-  signed char q = d > 0.0f ? q8round_dev(val * inv) : (signed char)0;
-  qX[act_offset] = q;
-
-  float sumVal = val;
-#pragma unroll
-  for (int delta = 16; delta > 0; delta >>= 1) {
-    sumVal += __shfl_down_sync(0xffffffff, sumVal, delta);
-  }
-
-  if (lane == 0) {
-    xScaleSum[(size_t)t * nblk + b] = make_float2(d, sumVal);
-  }
-}
-
-// k_q4k_mmvq: signed DP4A Q4_K matrix-vector decode kernel (MMVQ) with Q8_1 activations (#8635).
-// Each warp owns one output row o. The 32 lanes cooperate to load 128 bytes of nibbles coalesced,
-// evaluate signed __dp4a on 4-element vectors, reduce across chunk warps, and combine scales and mins.
-__global__ void k_q4k_mmvq(const unsigned char *Q4K, const signed char *qX,
-                           const float2 *xScaleSum, float *Y, int out, int in, int P) {
-  constexpr int warps_per_block = 8;
-  int warp = threadIdx.x >> 5;
-  int lane = threadIdx.x & 31;
-  int o = blockIdx.x * warps_per_block + warp;
-  int t = blockIdx.y;
-  if (o >= out || t >= P) return;
-
-  int nsb = in / 256;
-  const unsigned char *wrow = Q4K + (size_t)o * nsb * 144;
-  const signed char *xrow = qX + (size_t)t * in;
-  const float2 *xsc = xScaleSum + (size_t)t * (in / 32);
-
-  float row_sum = 0.0f;
-  for (int sb = 0; sb < nsb; ++sb) {
-    const unsigned char *blk = wrow + (size_t)sb * 144;
-
-    uint4 h;
-    if (lane == 0) {
-      h = *(const uint4 *)blk;
-    }
-    h.x = __shfl_sync(0xffffffff, h.x, 0);
-    h.y = __shfl_sync(0xffffffff, h.y, 0);
-    h.z = __shfl_sync(0xffffffff, h.z, 0);
-    h.w = __shfl_sync(0xffffffff, h.w, 0);
-
-    float d = __half2float(*(const __half *)&h.x);
-    float dmin = __half2float(*((const __half *)&h.x + 1));
-    const unsigned char *scales = (const unsigned char *)&h.y;
-
-    const unsigned char *q = blk + 16;
-    int v = ((const int *)q)[lane];
-
-    int k = lane >> 3;       // 0..3 (chunk)
-    int l_group = lane & 7;  // 0..7 (lane within chunk)
-    int sA = sb * 8 + 2 * k;
-    int sB = sA + 1;
-
-    int qxA = *(const int *)(xrow + sA * 32 + l_group * 4);
-    int qxB = *(const int *)(xrow + sB * 32 + l_group * 4);
-
-    int low = v & 0x0f0f0f0f;
-    int high = (v >> 4) & 0x0f0f0f0f;
-
-    int dotA = __dp4a(low, qxA, 0);
-    int dotB = __dp4a(high, qxB, 0);
-
-    dotA += __shfl_down_sync(0xffffffff, dotA, 4);
-    dotA += __shfl_down_sync(0xffffffff, dotA, 2);
-    dotA += __shfl_down_sync(0xffffffff, dotA, 1);
-
-    dotB += __shfl_down_sync(0xffffffff, dotB, 4);
-    dotB += __shfl_down_sync(0xffffffff, dotB, 2);
-    dotB += __shfl_down_sync(0xffffffff, dotB, 1);
-
-    float chunk_sum = 0.0f;
-    if (l_group == 0) {
-      unsigned char scA, mnA, scB, mnB;
-      getScaleMinK4_dev(2 * k, scales, &scA, &mnA);
-      getScaleMinK4_dev(2 * k + 1, scales, &scB, &mnB);
-
-      float2 actA = xsc[sA];
-      float2 actB = xsc[sB];
-
-      float termA = (d * (float)scA) * (actA.x * (float)dotA) - (dmin * (float)mnA) * actA.y;
-      float termB = (d * (float)scB) * (actB.x * (float)dotB) - (dmin * (float)mnB) * actB.y;
-      chunk_sum = termA + termB;
-    }
-
-    chunk_sum += __shfl_down_sync(0xffffffff, chunk_sum, 16);
-    chunk_sum += __shfl_down_sync(0xffffffff, chunk_sum, 8);
-
-    if (lane == 0) {
-      row_sum += chunk_sum;
-    }
-  }
-
-  if (lane == 0) {
-    Y[(size_t)t * out + o] = row_sum;
-  }
-}
-
-extern "C" void fcuda_q4k_mmvq_dp4a(const uint8_t *dQ4K, const float *dX, float *dY,
-                                    int out, int in, int P) {
-  int nblk = in / 32;
-  int needQX = P * in;
-  int needScaleSum = P * nblk;
-  if (needQX > g_q81_qX_cap) {
-    if (g_q81_qX) cudaFree(g_q81_qX);
-    CK(cudaMalloc(&g_q81_qX, (size_t)needQX));
-    g_q81_qX_cap = needQX;
-  }
-  if (needScaleSum > g_q81_xScaleSum_cap) {
-    if (g_q81_xScaleSum) cudaFree(g_q81_xScaleSum);
-    CK(cudaMalloc(&g_q81_xScaleSum, (size_t)needScaleSum * sizeof(float2)));
-    g_q81_xScaleSum_cap = needScaleSum;
-  }
-  dim3 quantGrid((nblk + 3) / 4, P);
-  k_q8_1_quant_act<<<quantGrid, 128, 0, g_stream>>>(dX, g_q81_qX, g_q81_xScaleSum, P, in);
-
-  constexpr int warps_per_block = 8;
-  dim3 mmvqGrid((out + warps_per_block - 1) / warps_per_block, P);
-  k_q4k_mmvq<<<mmvqGrid, warps_per_block * 32, 0, g_stream>>>(
-      (const unsigned char *)dQ4K, g_q81_qX, g_q81_xScaleSum, dY, out, in, P);
-}
-
-static bool use_q4k_mmvq(void) {
-  const char *env = getenv("FAK_CUDA_Q4K_MMVQ");
-  if (env && env[0] == '0' && env[1] == '\0') return false;
-  return true;
-}
-
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
   if (P >= 128) {
@@ -1497,10 +1337,6 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
     return;
   }
   if (P < 4) {
-    if (use_q4k_mmvq()) {
-      fcuda_q4k_mmvq_dp4a(dQ4K, dX, dY, out, in, P);
-      return;
-    }
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
@@ -2203,7 +2039,7 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
   if (!dQ || !dK || !dV || !dOut ||
-      tokens <= 0 || prefix < 0 || nH != 24 || nKV != 4 ||
+      tokens != 2 || prefix != 1 || nH != 24 || nKV != 4 ||
       hd != QWEN38_PROMPT_HEAD_DIM ||
       tokens > INT_MAX / nH || prefix > INT_MAX - tokens ||
       !isfinite(scale) || scale <= 0.f) return -1;

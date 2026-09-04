@@ -67,7 +67,7 @@ func isOutOfTreeWriteArgRule(pr *ArgPredicate) bool {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "bash", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command":
+	case "bash", "shell_command", "functions.shell_command", "exec_command":
 	default:
 		return false
 	}

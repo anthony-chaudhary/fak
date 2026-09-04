@@ -380,6 +380,19 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "caffeinate",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "macOS host-provided tool to prevent OS idle and display sleep."
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "claude",
       "consumer_domains": [
         "cmd"
@@ -660,7 +673,7 @@
       "consumer_domains": [
         "internal"
       ],
-      "status": "prospective",
+      "status": "used",
       "pin": "host_provided",
       "digest": "",
       "license_record": "none",
