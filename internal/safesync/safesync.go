@@ -22,6 +22,18 @@ const (
 	StateNoRemoteRef = "no-remote-ref"
 )
 
+// Closed sync divergence reasons (issue #10060).
+const (
+	ReasonBehindFastForwardable    = "BEHIND_FASTFORWARDABLE"
+	ReasonDivergedDisjoint         = "DIVERGED_DISJOINT"
+	ReasonDivergedOverlap          = "DIVERGED_OVERLAP"
+	ReasonMergeActivePeerOwned     = "MERGE_ACTIVE_PEER_OWNED"
+	ReasonDirtyWriteOverlap        = "DIRTY_WRITE_OVERLAP"
+	ReasonQueuedAwaitingQuiescence = "QUEUED_AWAITING_QUIESCENCE"
+	ReasonTargetMoved              = "TARGET_MOVED"
+	ReasonLeaseOwnerUnavailable    = "LEASE_OWNER_UNAVAILABLE"
+)
+
 // Runner executes a git subcommand in repo. Err is non-nil only when git could
 // not be started; a non-zero git exit is reported through Code and Stderr.
 type Runner func(ctx context.Context, repo string, args ...string) RunResult

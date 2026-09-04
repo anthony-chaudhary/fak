@@ -396,6 +396,72 @@ func TestSafePush_BehindStops(t *testing.T) {
 	}
 }
 
+func TestSafePush_DivergedDisjointStops(t *testing.T) {
+	customRunner := func(ctx context.Context, repo string, args ...string) RunResult {
+		switch {
+		case args[0] == "push":
+			return nonFF()
+		case args[0] == "fetch":
+			return RunResult{Code: 0}
+		case args[0] == "rev-parse":
+			return RunResult{Stdout: []byte("main\n")}
+		case args[0] == "merge-base" && len(args) >= 4 && args[1] == "--is-ancestor":
+			return RunResult{Code: 1} // neither is ancestor -> diverged
+		case args[0] == "merge-base":
+			return RunResult{Stdout: []byte("base123\n")}
+		case args[0] == "diff" && args[len(args)-1] == "HEAD":
+			return RunResult{Stdout: []byte("pkg/a.go\n")}
+		case args[0] == "diff" && args[len(args)-1] == "origin/main":
+			return RunResult{Stdout: []byte("pkg/b.go\n")}
+		default:
+			return RunResult{Code: 0}
+		}
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: customRunner})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != ReasonDivergedDisjoint || res.Divergence != string(PushDiverged) {
+		t.Fatalf("diverged push = %+v, want Reason=%s Divergence=%s", res, ReasonDivergedDisjoint, PushDiverged)
+	}
+	if !strings.Contains(res.Detail, "disjoint paths") {
+		t.Errorf("detail should mention disjoint paths: %q", res.Detail)
+	}
+}
+
+func TestSafePush_DivergedOverlapStops(t *testing.T) {
+	customRunner := func(ctx context.Context, repo string, args ...string) RunResult {
+		switch {
+		case args[0] == "push":
+			return nonFF()
+		case args[0] == "fetch":
+			return RunResult{Code: 0}
+		case args[0] == "rev-parse":
+			return RunResult{Stdout: []byte("main\n")}
+		case args[0] == "merge-base" && len(args) >= 4 && args[1] == "--is-ancestor":
+			return RunResult{Code: 1} // neither is ancestor -> diverged
+		case args[0] == "merge-base":
+			return RunResult{Stdout: []byte("base123\n")}
+		case args[0] == "diff" && args[len(args)-1] == "HEAD":
+			return RunResult{Stdout: []byte("pkg/a.go\n")}
+		case args[0] == "diff" && args[len(args)-1] == "origin/main":
+			return RunResult{Stdout: []byte("pkg/a.go\npkg/b.go\n")}
+		default:
+			return RunResult{Code: 0}
+		}
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: customRunner})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != ReasonDivergedOverlap || res.Divergence != string(PushDiverged) {
+		t.Fatalf("diverged push = %+v, want Reason=%s Divergence=%s", res, ReasonDivergedOverlap, PushDiverged)
+	}
+	if !strings.Contains(res.Detail, "overlapping paths") {
+		t.Errorf("detail should mention overlapping paths: %q", res.Detail)
+	}
+}
+
 func TestSafePush_NonNFFErrorSurfaces(t *testing.T) {
 	// A hook/secret rejection is NOT non-ff and must surface immediately, not retry.
 	sr := &scriptedRunner{push: []RunResult{{Code: 1, Stderr: []byte("remote rejected: PUBLIC_LEAK secret detected")}}}
