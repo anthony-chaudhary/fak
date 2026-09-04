@@ -171,6 +171,36 @@ def test_issue_288_no_position_doc_cited_and_authorities_exist() -> None:
         assert (Path(ROOT) / auth).exists(), f"cited licensing authority {auth} is missing"
 
 
+def test_dead_links_ignores_code_blocks_and_spans() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _doc(root, "a.md", "Example with `](*.md)` and ```\n[bad](bad.md)\n``` and real [good](good.md).")
+        _doc(root, "good.md", "x")
+        assert cl._dead_links(str(root), "a.md") == []
+
+
+def test_docs_notes_have_no_dead_links() -> None:
+    """Every markdown link in docs/notes/ must resolve (issue #11315)."""
+    notes_dir = Path(ROOT) / "docs" / "notes"
+    findings = []
+    for f in sorted(notes_dir.glob("*.md")):
+        rel = f.relative_to(ROOT).as_posix()
+        for link, tgt in cl._dead_links(ROOT, rel):
+            findings.append(f"{rel}: ]({link}) -> {tgt}")
+    assert not findings, "dead markdown links in docs/notes:\n" + "\n".join(findings)
+
+
+def test_include_notes_tree_mode_clean() -> None:
+    rc = cl.main(["--audit-tree", "--include-notes", "--root", ROOT])
+    assert rc == 0, f"check_links --include-notes failed with exit code {rc}"
+
+
+def test_check_docs_links_wrapper() -> None:
+    import check_docs_links
+    rc = check_docs_links.main(["--audit-tree", "--root", ROOT])
+    assert rc == 0, f"check_docs_links failed with exit code {rc}"
+
+
 def _run() -> int:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

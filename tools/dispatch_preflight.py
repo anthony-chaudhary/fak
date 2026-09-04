@@ -152,7 +152,9 @@ def required_system_commit_headroom_bytes() -> int:
 
 
 def evaluate_system_commit_headroom(*, system_bytes: int, system_limit: int,
-                                    required_bytes: int) -> dict[str, Any]:
+                                    required_bytes: int,
+                                    physical_available_bytes: int = 0,
+                                    physical_total_bytes: int = 0) -> dict[str, Any]:
     """Side-effect-free mirror of procguard.EvaluateSystemCommitHeadroom.
 
     The JSON shape is deliberately metric-named so launch receipts cannot confuse
@@ -169,10 +171,12 @@ def evaluate_system_commit_headroom(*, system_bytes: int, system_limit: int,
         "required_bytes": required_bytes,
         "system_commit_bytes": system_bytes,
         "system_commit_limit": system_limit,
+        "physical_available_bytes": physical_available_bytes,
+        "physical_total_bytes": physical_total_bytes,
     }
 
 
-def _windows_system_commit_snapshot() -> tuple[int, int]:
+def _windows_system_commit_snapshot() -> dict[str, int]:
     """Read the same GetPerformanceInfo counters as procguard's Windows guard."""
     class PerformanceInformation(ctypes.Structure):
         _fields_ = [
@@ -198,7 +202,13 @@ def _windows_system_commit_snapshot() -> tuple[int, int]:
     get_performance_info.restype = ctypes.c_int
     if not get_performance_info(ctypes.byref(info), info.cb):
         raise OSError(ctypes.get_last_error(), "GetPerformanceInfo failed")
-    return int(info.commit_total * info.page_size), int(info.commit_limit * info.page_size)
+    page_size = int(info.page_size)
+    return {
+        "system_commit_bytes": int(info.commit_total * page_size),
+        "system_commit_limit": int(info.commit_limit * page_size),
+        "physical_available_bytes": int(info.physical_available * page_size),
+        "physical_total_bytes": int(info.physical_total * page_size),
+    }
 
 
 def system_commit_headroom_check() -> dict[str, Any]:
@@ -207,15 +217,30 @@ def system_commit_headroom_check() -> dict[str, Any]:
     if os.name != "nt":
         return {"supported": False, "ok": True, "reason": "",
                 "observed_bytes": 0, "required_bytes": required,
-                "system_commit_bytes": 0, "system_commit_limit": 0}
+                "system_commit_bytes": 0, "system_commit_limit": 0,
+                "physical_available_bytes": 0, "physical_total_bytes": 0}
     try:
-        used, limit = _windows_system_commit_snapshot()
+        snap = _windows_system_commit_snapshot()
     except (OSError, AttributeError, ValueError) as exc:
         return {"supported": True, "ok": False, "error": str(exc),
                 "reason": "", "observed_bytes": 0, "required_bytes": required,
-                "system_commit_bytes": 0, "system_commit_limit": 0}
-    return evaluate_system_commit_headroom(system_bytes=used, system_limit=limit,
-                                           required_bytes=required)
+                "system_commit_bytes": 0, "system_commit_limit": 0,
+                "physical_available_bytes": 0, "physical_total_bytes": 0}
+    if isinstance(snap, tuple):
+        used, limit = snap
+        phys_avail, phys_total = 0, 0
+    else:
+        used = snap.get("system_commit_bytes", snap.get("system_bytes", 0))
+        limit = snap.get("system_commit_limit", snap.get("system_limit", 0))
+        phys_avail = snap.get("physical_available_bytes", 0)
+        phys_total = snap.get("physical_total_bytes", 0)
+    return evaluate_system_commit_headroom(
+        system_bytes=used,
+        system_limit=limit,
+        required_bytes=required,
+        physical_available_bytes=phys_avail,
+        physical_total_bytes=phys_total,
+    )
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count
@@ -2065,7 +2090,8 @@ def _gather_preflight_checks(root: Path, *, max_threads: int | None, work_kind: 
                                "error": str(exc), "reason": "",
                                "observed_bytes": 0,
                                "required_bytes": required_system_commit_headroom_bytes(),
-                               "system_commit_bytes": 0, "system_commit_limit": 0}
+                               "system_commit_bytes": 0, "system_commit_limit": 0,
+                               "physical_available_bytes": 0, "physical_total_bytes": 0}
     return {"host": host, "acct": acct, "kern": kern, "seat": seat,
             "host_res": host_res, "worker_identity": worker_identity,
             "alive_proc": alive_proc, "fak_bin": fak_bin,
@@ -2202,8 +2228,9 @@ def _evaluate_verdict(*, host: dict[str, Any], kern: dict[str, Any],
         verdict = REFUSE_SYSTEM_COMMIT_HEADROOM
         reason = (
             f"{SYSTEM_COMMIT_HEADROOM_REASON}: observed "
-            f"{commit_headroom.get('observed_bytes')} bytes is at/below required "
-            f"{commit_headroom.get('required_bytes')} bytes; run "
+            f"{commit_headroom.get('observed_bytes')} bytes commit headroom <= required "
+            f"{commit_headroom.get('required_bytes')} bytes "
+            f"(physical RAM available: {commit_headroom.get('physical_available_bytes')} bytes); run "
             "`fak recover SYSTEM_COMMIT_HEADROOM` for the bounded recovery route")
     elif not host["safe"]:
         verdict = REFUSE_HOST

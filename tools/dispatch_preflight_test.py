@@ -236,22 +236,74 @@ class SystemCommitHeadroomTest(unittest.TestCase):
         patch_checks(mod, commit_headroom={
             "supported": True, "ok": False, "reason": "SYSTEM_COMMIT_HEADROOM",
             "observed_bytes": 9, "required_bytes": 10,
-            "system_commit_bytes": 91, "system_commit_limit": 100})
+            "system_commit_bytes": 91, "system_commit_limit": 100,
+            "physical_available_bytes": 12345678, "physical_total_bytes": 87654321})
         payload = run_eval(mod)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["verdict"], mod.REFUSE_SYSTEM_COMMIT_HEADROOM)
         self.assertEqual(payload["system_commit_headroom"]["observed_bytes"], 9)
         self.assertIn("fak recover SYSTEM_COMMIT_HEADROOM", payload["reason"])
+        self.assertIn("physical RAM available: 12345678 bytes", payload["reason"])
 
     def test_high_headroom_follows_normal_spawn_path(self) -> None:
         mod = load()
         patch_checks(mod, commit_headroom={
             "supported": True, "ok": True, "reason": "",
             "observed_bytes": 11, "required_bytes": 10,
-            "system_commit_bytes": 89, "system_commit_limit": 100})
+            "system_commit_bytes": 89, "system_commit_limit": 100,
+            "physical_available_bytes": 50000000, "physical_total_bytes": 87654321})
         payload = run_eval(mod)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["verdict"], mod.OK_VERDICT)
+
+    def test_evaluate_system_commit_headroom_preserves_physical_ram(self) -> None:
+        mod = load()
+        got = mod.evaluate_system_commit_headroom(
+            system_bytes=50, system_limit=100, required_bytes=10,
+            physical_available_bytes=1234, physical_total_bytes=5678)
+        self.assertEqual(got["physical_available_bytes"], 1234)
+        self.assertEqual(got["physical_total_bytes"], 5678)
+
+    def test_windows_system_commit_snapshot_outputs_physical_available_bytes(self) -> None:
+        mod = load()
+        if os.name != "nt":
+            self.skipTest("Windows-only snapshot counters")
+        snap = mod._windows_system_commit_snapshot()
+        self.assertIsInstance(snap, dict)
+        self.assertIn("physical_available_bytes", snap)
+        self.assertIn("physical_total_bytes", snap)
+        self.assertIn("system_commit_bytes", snap)
+        self.assertIn("system_commit_limit", snap)
+        self.assertGreater(snap["physical_available_bytes"], 0)
+        self.assertGreater(snap["physical_total_bytes"], 0)
+        self.assertLessEqual(snap["physical_available_bytes"], snap["physical_total_bytes"])
+
+    def test_windows_system_commit_snapshot_mock(self) -> None:
+        mod = load()
+
+        class FakeFunc:
+            argtypes = None
+            restype = None
+
+            def __call__(self, byref_info, cb):
+                info = byref_info._obj
+                info.commit_total = 100
+                info.commit_limit = 200
+                info.physical_available = 300
+                info.physical_total = 400
+                info.page_size = 4096
+                return 1
+
+        class FakeWinDLL:
+            def __init__(self, *args, **kwargs):
+                self.GetPerformanceInfo = FakeFunc()
+
+        with unittest.mock.patch.object(mod.ctypes, "WinDLL", FakeWinDLL, create=True):
+            snap = mod._windows_system_commit_snapshot()
+            self.assertEqual(snap["system_commit_bytes"], 100 * 4096)
+            self.assertEqual(snap["system_commit_limit"], 200 * 4096)
+            self.assertEqual(snap["physical_available_bytes"], 300 * 4096)
+            self.assertEqual(snap["physical_total_bytes"], 400 * 4096)
 
 
 class HostCheckProtectedTest(unittest.TestCase):

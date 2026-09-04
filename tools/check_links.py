@@ -42,6 +42,7 @@ FRONT_DOOR = [
     "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "CLA.md",
     "LEARNING-PATH.md", "docs/index.md", "docs/FAQ.md",
 ]
+NOTES_DIR = "docs/notes"
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
 INLINE_RE = re.compile(r"`([^`]+)`")
 MD_TOKEN_RE = re.compile(r"\A[\w./-]+\.md\Z")
@@ -76,12 +77,15 @@ def _resolves(root, d, ref):
     return any(os.path.exists(os.path.join(root, c)) for c in cands)
 
 
-def _staged_frontdoor(root):
+def _staged_frontdoor(root, include_notes=False):
     r = _git(["diff", "--cached", "--name-status", "--diff-filter=ACMR"], root)
     if r.returncode != 0:
         return None
     paths = {ln.split("\t")[-1] for ln in r.stdout.splitlines() if ln.strip()}
-    return [f for f in FRONT_DOOR if f in paths]
+    targets = list(FRONT_DOOR)
+    if include_notes:
+        targets.extend([p for p in paths if p.startswith(NOTES_DIR + "/") and p.endswith(".md")])
+    return [f for f in targets if f in paths]
 
 
 def _dead_links(root, f):
@@ -91,9 +95,12 @@ def _dead_links(root, f):
             txt = fh.read()
     except OSError:
         return []  # file not present (e.g. deleted) — nothing to check
-    d = posixpath.dirname(f)
+    d = posixpath.dirname(f.replace("\\", "/"))
+    # Ignore fenced code blocks and inline code so literal syntax/regex snippets are not parsed as links
+    clean_txt = re.sub(r"```[\s\S]*?```", "", txt)
+    clean_txt = re.sub(r"`[^`\n]*`", "", clean_txt)
     out = []
-    for link in LINK_RE.findall(txt):
+    for link in LINK_RE.findall(clean_txt):
         if link.startswith(("http://", "https://", "mailto:", "#", "/", "data:")):
             continue
         path = link.split("#")[0].split("?")[0]
@@ -174,13 +181,15 @@ def _scrub_private_refs(root, f):
     return out
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--audit-staged", action="store_true")
     g.add_argument("--audit-tree", action="store_true")
+    ap.add_argument("--include-notes", action="store_true",
+                    help="include docs/notes/*.md in link checking")
     ap.add_argument("--root", default=".")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     root = os.path.abspath(a.root)
 
     if a.audit_staged and os.environ.get("ALLOW_BAD_LINK") == "1":
@@ -188,28 +197,34 @@ def main() -> int:
         return 0
 
     if a.audit_staged:
-        files = _staged_frontdoor(root)
+        files = _staged_frontdoor(root, include_notes=a.include_notes)
         if files is None:
             print("BROKEN_LINK (warn): git not available; check skipped.", file=sys.stderr)
             return 2
-        scope = "staged front-door files"
+        scope = "staged front-door files + notes" if a.include_notes else "staged front-door files"
     else:
         files = [f for f in FRONT_DOOR if os.path.exists(os.path.join(root, f))]
-        scope = "front-door set"
+        if a.include_notes:
+            notes_p = os.path.join(root, NOTES_DIR)
+            if os.path.isdir(notes_p):
+                notes_files = [posixpath.join(NOTES_DIR, nf) for nf in sorted(os.listdir(notes_p)) if nf.endswith(".md")]
+                files.extend(notes_files)
+        scope = "front-door set + docs/notes" if a.include_notes else "front-door set"
 
     findings = []
     for f in files:
         for link, tgt in _dead_links(root, f):
             findings.append((f, f"]({link})", tgt))
-        for span, ref in _dead_inline_refs(root, f):
-            findings.append((f, f"`{span}`", ref))
-        for cite, tgt in _scrub_private_refs(root, f):
-            findings.append((f, cite, tgt))
+        if f in FRONT_DOOR:
+            for span, ref in _dead_inline_refs(root, f):
+                findings.append((f, f"`{span}`", ref))
+            for cite, tgt in _scrub_private_refs(root, f):
+                findings.append((f, cite, tgt))
     if not findings:
         print(f"broken-link: clean ({scope}).")
         return 0
 
-    print(f"BROKEN_LINK: {len(findings)} dead reference(s) in front-door docs:", file=sys.stderr)
+    print(f"BROKEN_LINK: {len(findings)} dead reference(s) in {scope}:", file=sys.stderr)
     for f, cite, tgt in findings:
         print(f"  {f}: {cite}  ->  missing {tgt}", file=sys.stderr)
     print("  fix: repoint to a file that ships publicly, or remove the reference "
