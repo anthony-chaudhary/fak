@@ -51,6 +51,10 @@ type Snapshot struct {
 // a single short critical section, so behavior under any interleaving is a
 // serialization of atomic operations and the reserved <= granted invariant
 // holds at every observable point.
+// Invariant: flow credit operations are fail-closed and reserve-safe.
+// Senders cannot transmit without cumulative credit granted by the receiver,
+// and reservations are strictly bounded by unreserved capacity (reserved <= granted).
+// Guard: TryReserve refuses atomically whenever available credit is insufficient.
 type Ledger struct {
 	mu    sync.Mutex
 	lanes map[Lane]*laneState
