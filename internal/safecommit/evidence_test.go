@@ -34,6 +34,8 @@ func TestCommitEvidenceGoldenMatrix(t *testing.T) {
 		{"push unrun required", Result{Committed: true, Verified: true, BuildCheck: passed}, EvidenceContract{RequirePush: true}, false, false, EvidencePassed, EvidencePassed, EvidenceUnrun, EvidenceUnrun, 55, false},
 		{"closure bound", Result{Committed: true, Verified: true, BuildCheck: passed}, EvidenceContract{RequireClosure: true, ClosureBound: true}, true, true, EvidencePassed, EvidencePassed, EvidenceUnrun, EvidencePassed, 100, true},
 		{"closure unbound", Result{Committed: true, Verified: true, BuildCheck: passed}, EvidenceContract{RequireClosure: true}, false, false, EvidencePassed, EvidencePassed, EvidenceUnrun, EvidenceUnrun, 55, false},
+		{"dos diff-witnessed green", Result{Committed: true, Verified: true, BuildCheck: passed, DOSWitness: &DOSWitnessResult{Ran: true, Verdict: "OK", Witness: "diff-witnessed"}}, EvidenceContract{}, true, true, EvidencePassed, EvidencePassed, EvidenceUnrun, EvidenceUnrun, 100, true},
+		{"dos unwitnessed claim red", Result{Committed: true, Verified: true, BuildCheck: passed, DOSWitness: &DOSWitnessResult{Ran: true, Verdict: "CLAIM_UNWITNESSED", Witness: "subject-only"}}, EvidenceContract{}, false, false, EvidencePassed, EvidencePassed, EvidenceUnrun, EvidenceUnrun, 55, false},
 		{"record only", Result{Committed: true, Verified: true, BuildCheck: &BuildCheckResult{Outcome: BuildCheckDisabled}}, EvidenceContract{CompletionClass: CompletionRecordOnly}, true, false, EvidenceUnrun, EvidenceUnrun, EvidenceUnrun, EvidenceUnrun, 85, false},
 	}
 

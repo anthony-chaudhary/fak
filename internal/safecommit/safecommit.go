@@ -239,12 +239,27 @@ type Result struct {
 	// Delivery records only the authoring/recording transition. Compile admission, verification,
 	// integration, and release readiness remain independent receipts.
 	Delivery *workdelivery.AdapterObservation `json:"delivery,omitempty"`
+	// DOSWitness is the post-commit witness report from dos commit-audit and dos verify.
+	// Populated when the dos CLI is available at commit time.
+	DOSWitness *DOSWitnessResult `json:"dos_witness,omitempty"`
 	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
 	// push legs, each scored only after the command's authoritative effect fields
 	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is
 	// distinct from Score (outcome quality) and always populated by CommitWith; a
 	// refusal/no-op still carries it with UNSCORED legs and retained timing.
 	Velocity *CommitVelocity `json:"velocity,omitempty"`
+}
+
+// DOSWitnessResult is the post-commit witness evidence derived from dos commit-audit and dos verify.
+type DOSWitnessResult struct {
+	Ran          bool   `json:"ran"`
+	Verdict      string `json:"verdict,omitempty"`
+	Witness      string `json:"witness,omitempty"`
+	ClaimKind    string `json:"claim_kind,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	VerifyState  string `json:"verify_state,omitempty"`
+	VerifySource string `json:"verify_source,omitempty"`
+	Leaf         string `json:"leaf,omitempty"`
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory

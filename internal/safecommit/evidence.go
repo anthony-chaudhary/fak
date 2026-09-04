@@ -56,11 +56,15 @@ func FinalizeEvidence(res Result, contract EvidenceContract) Result {
 	}
 	requiresDelivery := class == CompletionVerifiedDelivery
 	compiled, tested := buildEvidence(res.BuildCheck)
+	diffWitnessed := res.Verified
+	if res.DOSWitness != nil && res.DOSWitness.Ran {
+		diffWitnessed = res.DOSWitness.Verdict == "OK" && res.DOSWitness.Witness == "diff-witnessed"
+	}
 	evidence := CommitEvidence{
 		Schema:          EvidenceSchema,
 		CompletionClass: class,
 		Recorded:        evidenceBool(res.Committed, true),
-		DiffWitnessed:   evidenceBool(res.Verified, true),
+		DiffWitnessed:   evidenceBool(diffWitnessed, true),
 		Compiled:        EvidenceAxis{Outcome: compiled, Required: requiresDelivery && compiled != EvidenceNotRequired},
 		Tested:          EvidenceAxis{Outcome: tested, Required: requiresDelivery && tested != EvidenceNotRequired},
 		Pushed:          evidenceOptionalEffect(res.Pushed, contract.RequirePush, res.Reason == ReasonPushRejected),
