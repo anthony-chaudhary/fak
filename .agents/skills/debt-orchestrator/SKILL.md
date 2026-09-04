@@ -1,6 +1,6 @@
 ---
 name: debt-orchestrator
-description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to retire large volumes of maturity debt across the repository. Queries `fak debt-lanes`, partitions the WIP backlog into pairwise tree-disjoint...
+description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to retire large volumes of maturity debt across the repository. Uses `fak debt-lanes --plan-waves` to partition WIP into pairwise tree-disjoint,...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/debt-orchestrator/SKILL.md

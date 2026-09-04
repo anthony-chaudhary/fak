@@ -126,6 +126,7 @@ type Report struct {
 	InterestSummary InterestSummary `json:"interest_summary"`
 	Lanes           []DebtLane      `json:"lanes"`
 	Hotspots        []DebtLane      `json:"hotspots"` // Top debt lanes ranked worst-first.
+	WavePlan        *WavePlan       `json:"wave_plan,omitempty"`
 }
 
 // Options parameters for scanning and evaluating debt lanes.

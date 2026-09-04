@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/debtlane"
 )
@@ -34,6 +35,15 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 	criticality := fs.String("criticality", "", "filter by criticality (core, enabling, stewardship, peripheral)")
 	minGap := fs.Float64("min-gap", 0, "filter lanes with maturity gap >= min-gap")
 	topN := fs.Int("top", 10, "number of top debt hotspots to display")
+	planWaves := fs.Bool("plan-waves", false, "plan concurrent-safe multi-wave campaign to retire debt")
+	waveSize := fs.Int("wave-size", 4, "maximum concurrent workers per wave")
+	maxWaves := fs.Int("max-waves", 0, "maximum number of waves to plan (0 = all necessary)")
+	excludeLanes := fs.String("exclude-lanes", "", "comma-separated list of lanes to exclude from wave plan")
+	noDetectHeld := fs.Bool("no-detect-held", false, "disable auto-detection of currently held leases in .dos")
+	targetGrade := fs.String("target-grade", "", "campaign target grade (e.g. 80%, 85%, 90%)")
+	var targetPoints float64
+	fs.Float64Var(&targetPoints, "target-points", 0, "campaign target points to retire")
+	fs.Float64Var(&targetPoints, "points", 0, "alias for --target-points")
 
 	if !parseFlags(fs, argv) {
 		return 2
@@ -72,6 +82,44 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		fmt.Fprintln(stdout, debtlane.Compare(report, base))
+		if *check && !report.OK {
+			return 1
+		}
+		return 0
+	}
+
+	if *planWaves {
+		var excluded []string
+		if *excludeLanes != "" {
+			for _, part := range strings.Split(*excludeLanes, ",") {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					excluded = append(excluded, trimmed)
+				}
+			}
+		}
+
+		plan := debtlane.PlanWaves(report, debtlane.WavePlanOptions{
+			WaveSize:       *waveSize,
+			MaxWaves:       *maxWaves,
+			TargetGrade:    *targetGrade,
+			TargetPoints:   targetPoints,
+			ExcludedLanes:  excluded,
+			AutoDetectHeld: !*noDetectHeld,
+		})
+
+		switch {
+		case *asJSON:
+			if err := writeIndentedJSON(stdout, plan); err != nil {
+				fmt.Fprintf(stderr, "fak debt-lanes: encode json: %v\n", err)
+				return 1
+			}
+		case *asMarkdown:
+			fmt.Fprint(stdout, debtlane.MarkdownWaves(plan, report.ProductionGrade))
+		default:
+			fmt.Fprint(stdout, debtlane.RenderWaves(plan, report.ProductionGrade))
+		}
+
 		if *check && !report.OK {
 			return 1
 		}

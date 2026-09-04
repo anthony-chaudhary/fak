@@ -89,3 +89,147 @@ func TestDebtLanesCLIMarkdown(t *testing.T) {
 		t.Errorf("expected section in markdown output: %s", out)
 	}
 }
+
+func TestDebtLanesCLIPlanWavesJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--plan-waves",
+		"--wave-size", "3",
+		"--max-waves", "2",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --plan-waves failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to parse JSON wave plan: %v; raw: %s", err, stdout.String())
+	}
+	if plan.Schema != debtlane.WavePlanSchema {
+		t.Errorf("expected schema %q, got %q", debtlane.WavePlanSchema, plan.Schema)
+	}
+	if plan.WaveSizeCap != 3 {
+		t.Errorf("expected wave size cap 3, got %d", plan.WaveSizeCap)
+	}
+	if plan.TotalWaves > 2 {
+		t.Errorf("expected at most 2 waves, got %d", plan.TotalWaves)
+	}
+	if len(plan.Waves) == 0 {
+		t.Errorf("expected at least 1 planned wave, got 0")
+	}
+	for _, w := range plan.Waves {
+		if w.WaveSize > 3 {
+			t.Errorf("wave size %d exceeds cap 3", w.WaveSize)
+		}
+		if len(w.Lanes) != w.WaveSize {
+			t.Errorf("mismatch between lane count %d and wave size %d", len(w.Lanes), w.WaveSize)
+		}
+	}
+}
+
+func TestDebtLanesCLIPlanWavesText(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--plan-waves",
+		"--wave-size", "4",
+		"--max-waves", "2",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes text wave plan failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "CONCURRENT SAFE WAVE PLAN") {
+		t.Errorf("expected wave plan header in text output: %s", out)
+	}
+	if !strings.Contains(out, "WAVE-1") {
+		t.Errorf("expected WAVE-1 in text output: %s", out)
+	}
+}
+
+func TestDebtLanesCLIPlanWavesMarkdown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--plan-waves",
+		"--wave-size", "4",
+		"--max-waves", "2",
+		"--markdown",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes markdown wave plan failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Concurrent Safe Debt Retirement Wave Plan") {
+		t.Errorf("expected markdown header: %s", out)
+	}
+	if !strings.Contains(out, "Wave-1") {
+		t.Errorf("expected Wave-1 in markdown output: %s", out)
+	}
+}
+
+func TestDebtLanesCLIPlanWavesTargetGrade(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--plan-waves",
+		"--target-grade", "80%",
+		"--wave-size", "4",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --target-grade failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode json wave plan: %v", err)
+	}
+	if plan.TargetGrade != "80%" {
+		t.Errorf("expected target grade '80%%', got %q", plan.TargetGrade)
+	}
+	if plan.ProjectedPercent < 80.0 {
+		t.Errorf("expected projected percent >= 80.0, got %.1f", plan.ProjectedPercent)
+	}
+	if plan.ProjectedGrade != "B" && plan.ProjectedGrade != "A" {
+		t.Errorf("expected projected grade B or A, got %s", plan.ProjectedGrade)
+	}
+	// Total waves should be bounded, not the entire backlog.
+	if plan.TotalWaves <= 0 || plan.TotalWaves > 50 {
+		t.Errorf("expected 1-50 planned waves for target grade 80%%, got %d", plan.TotalWaves)
+	}
+	for _, w := range plan.Waves {
+		if w.WaveSize > 4 {
+			t.Errorf("wave size %d exceeds wave size cap 4", w.WaveSize)
+		}
+	}
+}
+
+func TestDebtLanesCLIPlanWavesTargetPointsAlias(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--plan-waves",
+		"--points", "50",
+		"--wave-size", "3",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --points failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode json wave plan: %v", err)
+	}
+	if plan.TotalDebtInPlan < 50.0 && plan.PotentialPoints < 50.0 {
+		t.Errorf("expected total debt in plan or potential points >= 50.0, got debt=%.1f pot=%.1f", plan.TotalDebtInPlan, plan.PotentialPoints)
+	}
+	for _, w := range plan.Waves {
+		if w.WaveSize > 3 {
+			t.Errorf("wave size %d exceeds wave size cap 3", w.WaveSize)
+		}
+	}
+}

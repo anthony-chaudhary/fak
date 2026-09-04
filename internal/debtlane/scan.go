@@ -109,8 +109,8 @@ func Scan(opts Options) (Report, error) {
 	}
 
 	// Rank hotspots worst-first.
-	hotspots := make([]DebtLane, len(allLanes))
-	copy(hotspots, allLanes)
+	hotspots := make([]DebtLane, len(filtered))
+	copy(hotspots, filtered)
 	sort.SliceStable(hotspots, func(i, j int) bool {
 		if hotspots[i].TotalDebt != hotspots[j].TotalDebt {
 			return hotspots[i].TotalDebt > hotspots[j].TotalDebt

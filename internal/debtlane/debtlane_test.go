@@ -313,3 +313,313 @@ func TestRealWorkspaceScan(t *testing.T) {
 		t.Errorf("expected hotspots to be populated")
 	}
 }
+
+func TestTreesOverlap(t *testing.T) {
+	if !TreesOverlap("internal/foo", "internal/foo") {
+		t.Errorf("identical paths should overlap")
+	}
+	if !TreesOverlap("internal/foo", "internal/foo/sub") {
+		t.Errorf("parent and child should overlap")
+	}
+	if !TreesOverlap("internal/foo/sub", "internal/foo") {
+		t.Errorf("child and parent should overlap")
+	}
+	if TreesOverlap("internal/foo", "internal/foobar") {
+		t.Errorf("sibling prefixes with different names should not overlap")
+	}
+	if TreesOverlap("internal/pkgA", "internal/pkgB") {
+		t.Errorf("disjoint packages should not overlap")
+	}
+	if !TreesOverlap("", "internal/foo") {
+		t.Errorf("empty path should overlap conservatively")
+	}
+}
+
+func TestPlanWavesHermetic(t *testing.T) {
+	report := Report{
+		Workspace: "/test/workspace",
+		ProductionGrade: ProductionGrade{
+			DenominatorPoints: 100.0,
+			RealizedPoints:    50.0,
+			GradePercent:      50.0,
+			GradeLetter:       "F",
+		},
+		Lanes: []DebtLane{
+			{
+				Lane:           "pkgA",
+				UnitOfWork:     "internal/pkgA",
+				Criticality:    CriticalityEnabling,
+				Weight:         2.0,
+				Maturity:       0.0,
+				TargetMaturity: 8.0,
+				MaturityGap:    8.0,
+				TotalDebt:      16.0,
+			},
+			{
+				Lane:           "pkgB",
+				UnitOfWork:     "internal/pkgB",
+				Criticality:    CriticalityEnabling,
+				Weight:         2.0,
+				Maturity:       0.0,
+				TargetMaturity: 8.0,
+				MaturityGap:    8.0,
+				TotalDebt:      16.0,
+			},
+			{
+				Lane:           "pkgC",
+				UnitOfWork:     "internal/pkgC",
+				Criticality:    CriticalityEnabling,
+				Weight:         2.0,
+				Maturity:       0.0,
+				TargetMaturity: 8.0,
+				MaturityGap:    8.0,
+				TotalDebt:      16.0,
+			},
+			{
+				Lane:           "abi",
+				UnitOfWork:     "internal/abi",
+				Criticality:    CriticalityCore,
+				Weight:         3.0,
+				Maturity:       5.0,
+				TargetMaturity: 10.0,
+				MaturityGap:    5.0,
+				TotalDebt:      15.0,
+				Interest:       Interest{Band: InterestCritical},
+			},
+			{
+				Lane:           "pkgA_sub",
+				UnitOfWork:     "internal/pkgA/sub",
+				Criticality:    CriticalityEnabling,
+				Weight:         1.0,
+				Maturity:       0.0,
+				TargetMaturity: 4.0,
+				MaturityGap:    4.0,
+				TotalDebt:      4.0,
+			},
+		},
+	}
+
+	opts := WavePlanOptions{
+		WaveSize:      2,
+		ExcludedLanes: []string{"pkgC"},
+	}
+
+	plan := PlanWaves(report, opts)
+	if plan.Schema != WavePlanSchema {
+		t.Fatalf("expected schema %q, got %q", WavePlanSchema, plan.Schema)
+	}
+
+	// pkgC should be excluded.
+	for _, w := range plan.Waves {
+		for _, l := range w.Lanes {
+			if l.Lane == "pkgC" {
+				t.Fatalf("pkgC should have been excluded")
+			}
+		}
+	}
+
+	// abi should be a serial singleton.
+	var foundSerial bool
+	for _, w := range plan.Waves {
+		if w.Safety == WaveSafetySerialSingleton {
+			foundSerial = true
+			if len(w.Lanes) != 1 || w.Lanes[0].Lane != "abi" {
+				t.Fatalf("expected serial singleton to contain only abi, got %+v", w.Lanes)
+			}
+		}
+	}
+	if !foundSerial {
+		t.Fatalf("expected serial singleton wave for core critical abi")
+	}
+
+	// pkgA and pkgA_sub should NOT be in the same wave because their trees overlap.
+	for _, w := range plan.Waves {
+		hasPkgA := false
+		hasPkgASub := false
+		for _, l := range w.Lanes {
+			if l.Lane == "pkgA" {
+				hasPkgA = true
+			}
+			if l.Lane == "pkgA_sub" {
+				hasPkgASub = true
+			}
+		}
+		if hasPkgA && hasPkgASub {
+			t.Fatalf("pkgA and pkgA_sub overlap and must not be in the same wave")
+		}
+	}
+
+	// Verify text render and markdown render do not crash and contain key phrases.
+	text := RenderWaves(plan, report.ProductionGrade)
+	if !strings.Contains(text, "CONCURRENT SAFE WAVE PLAN") || !strings.Contains(text, "DISJOINT PARALLEL") {
+		t.Fatalf("unexpected text render: %s", text)
+	}
+
+	md := MarkdownWaves(plan, report.ProductionGrade)
+	if !strings.Contains(md, "Concurrent Safe Debt Retirement Wave Plan") {
+		t.Fatalf("unexpected markdown render: %s", md)
+	}
+}
+
+func TestPlanWavesImportContention(t *testing.T) {
+	report := Report{
+		ProductionGrade: ProductionGrade{DenominatorPoints: 50.0, RealizedPoints: 10.0},
+		Lanes: []DebtLane{
+			{Lane: "leafA", UnitOfWork: "internal/leafA", MaturityGap: 2.0, TotalDebt: 5.0, Weight: 2.0},
+			{Lane: "leafB", UnitOfWork: "internal/leafB", MaturityGap: 2.0, TotalDebt: 5.0, Weight: 2.0},
+		},
+	}
+
+	// leafA imports leafB
+	graph := map[string]map[string]struct{}{
+		"leafA": {"leafB": {}},
+	}
+
+	opts := WavePlanOptions{
+		WaveSize: 4,
+		Graph:    graph,
+	}
+
+	plan := PlanWaves(report, opts)
+	// Because leafA imports leafB, they must not be placed in the same wave despite having capacity.
+	for _, w := range plan.Waves {
+		if len(w.Lanes) > 1 {
+			t.Fatalf("expected leafA and leafB in separate waves due to import contention, got %d in wave", len(w.Lanes))
+		}
+	}
+	if plan.TotalWaves < 2 {
+		t.Fatalf("expected at least 2 waves, got %d", plan.TotalWaves)
+	}
+}
+
+func TestParseTargetGrade(t *testing.T) {
+	cases := []struct {
+		input       string
+		expectedPct float64
+		expectedOK  bool
+	}{
+		{"80%", 80.0, true},
+		{"85.5%", 85.5, true},
+		{"90", 90.0, true},
+		{"A", 90.0, true},
+		{"B", 80.0, true},
+		{"C", 70.0, true},
+		{"D", 60.0, true},
+		{"Grade B", 80.0, true},
+		{"grade a", 90.0, true},
+		{"0.85", 85.0, true},
+		{"", 0.0, false},
+		{"invalid", 0.0, false},
+	}
+
+	for _, tc := range cases {
+		pct, ok := ParseTargetGrade(tc.input)
+		if ok != tc.expectedOK {
+			t.Errorf("ParseTargetGrade(%q) ok = %v, expected %v", tc.input, ok, tc.expectedOK)
+		}
+		if ok && pct != tc.expectedPct {
+			t.Errorf("ParseTargetGrade(%q) pct = %.1f, expected %.1f", tc.input, pct, tc.expectedPct)
+		}
+	}
+}
+
+func TestPlanWavesTargetGrade(t *testing.T) {
+	report := Report{
+		ProductionGrade: ProductionGrade{
+			DenominatorPoints: 100.0,
+			RealizedPoints:    70.0,
+			GradePercent:      70.0,
+			GradeLetter:       "C",
+		},
+		Lanes: []DebtLane{
+			{Lane: "lane1", UnitOfWork: "internal/lane1", Maturity: 5.0, TargetMaturity: 10.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0}, // +10 realized
+			{Lane: "lane2", UnitOfWork: "internal/lane2", Maturity: 5.0, TargetMaturity: 10.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0}, // +10 realized
+			{Lane: "lane3", UnitOfWork: "internal/lane3", Maturity: 5.0, TargetMaturity: 10.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0}, // +10 realized
+			{Lane: "lane4", UnitOfWork: "internal/lane4", Maturity: 5.0, TargetMaturity: 10.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0}, // +10 realized
+		},
+	}
+
+	// Target 80% with wave size 1. Lane 1 (+10 pts) brings total from 70 to 80 (80%).
+	// Only 1 wave is required to achieve Grade B (80%).
+	plan := PlanWaves(report, WavePlanOptions{
+		WaveSize:    1,
+		TargetGrade: "80%",
+	})
+
+	if plan.TotalWaves != 1 {
+		t.Fatalf("expected exactly 1 wave to reach target grade 80%%, got %d", plan.TotalWaves)
+	}
+	if plan.ProjectedGrade != "B" {
+		t.Fatalf("expected projected grade B, got %s", plan.ProjectedGrade)
+	}
+	if plan.ProjectedPercent < 80.0 {
+		t.Fatalf("expected projected percent >= 80.0, got %.1f", plan.ProjectedPercent)
+	}
+}
+
+func TestPlanWavesTargetPoints(t *testing.T) {
+	report := Report{
+		ProductionGrade: ProductionGrade{
+			DenominatorPoints: 100.0,
+			RealizedPoints:    50.0,
+			GradePercent:      50.0,
+			GradeLetter:       "F",
+		},
+		Lanes: []DebtLane{
+			{Lane: "lane1", UnitOfWork: "internal/lane1", Maturity: 0.0, TargetMaturity: 5.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0},
+			{Lane: "lane2", UnitOfWork: "internal/lane2", Maturity: 0.0, TargetMaturity: 5.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0},
+			{Lane: "lane3", UnitOfWork: "internal/lane3", Maturity: 0.0, TargetMaturity: 5.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0},
+		},
+	}
+
+	// Target 15 points with wave size 1. Lane 1 gives 10 debt pts, Lane 2 gives 10 debt pts (total 20 >= 15).
+	plan := PlanWaves(report, WavePlanOptions{
+		WaveSize:     1,
+		TargetPoints: 15.0,
+	})
+
+	if plan.TotalWaves != 2 {
+		t.Fatalf("expected 2 waves to retire 15 points, got %d", plan.TotalWaves)
+	}
+	if plan.TotalDebtInPlan < 15.0 {
+		t.Fatalf("expected total debt in plan >= 15.0, got %.1f", plan.TotalDebtInPlan)
+	}
+}
+
+func TestPlanWavesAlreadyAtTargetGrade(t *testing.T) {
+	report := Report{
+		ProductionGrade: ProductionGrade{
+			DenominatorPoints: 100.0,
+			RealizedPoints:    85.0,
+			GradePercent:      85.0,
+			GradeLetter:       "B",
+		},
+		Lanes: []DebtLane{
+			{Lane: "lane1", UnitOfWork: "internal/lane1", Maturity: 5.0, TargetMaturity: 10.0, MaturityGap: 5.0, Weight: 2.0, TotalDebt: 10.0},
+		},
+	}
+
+	plan := PlanWaves(report, WavePlanOptions{
+		WaveSize:    2,
+		TargetGrade: "80%",
+	})
+
+	if plan.TotalWaves != 0 {
+		t.Fatalf("expected 0 waves when already at target grade, got %d", plan.TotalWaves)
+	}
+	if plan.PlannedLanes != 0 {
+		t.Fatalf("expected 0 planned lanes, got %d", plan.PlannedLanes)
+	}
+}
+
+func TestTreesOverlapWindowsSlashes(t *testing.T) {
+	if !TreesOverlap(`internal\foo\**`, `internal/foo`) {
+		t.Errorf("windows path with glob should overlap normalized path")
+	}
+	if !TreesOverlap(`internal\foo\sub`, `internal/foo`) {
+		t.Errorf("windows child path should overlap parent")
+	}
+	if TreesOverlap(`internal\foo`, `internal\bar`) {
+		t.Errorf("disjoint windows paths should not overlap")
+	}
+}
