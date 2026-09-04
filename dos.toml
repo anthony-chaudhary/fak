@@ -492,6 +492,9 @@ concurrent = [
   "servingsim",
   "control",
   "agentopt",
+  "decodemigrate",
+  "dosadapter",
+  "interactivesession",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -677,6 +680,9 @@ autopick = [
   "servingsim",
   "control",
   "agentopt",
+  "decodemigrate",
+  "dosadapter",
+  "interactivesession",
   # new-leaf:lane
 ]
 
@@ -1579,6 +1585,9 @@ promptcomp = ["internal/promptcomp/**"]
 servingsim = ["internal/servingsim/**"]
 control = ["internal/control/**"]
 agentopt = ["internal/agentopt/**"]
+decodemigrate = ["internal/decodemigrate/**"]
+dosadapter = ["internal/dosadapter/**"]
+interactivesession = ["internal/interactivesession/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
