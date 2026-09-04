@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/l3server/index"
@@ -145,6 +146,10 @@ const DefaultRDMARecvBufCount = 4
 
 // DefaultConfig returns configuration with sensible defaults.
 func DefaultConfig() Config {
+	maxMem := 512
+	if runtime.GOOS != "linux" {
+		maxMem = 1
+	}
 	return Config{
 		ListenAddrs:                []string{"0.0.0.0:18000"},
 		RDMAAddrs:                  []string{"auto"},
@@ -156,7 +161,7 @@ func DefaultConfig() Config {
 		RDMACQDepth:                32768,
 		RDMAODP:                    "auto",
 		NumShards:                  0,
-		MaxMemoryGB:                512,
+		MaxMemoryGB:                maxMem,
 		UseHugePages:               true,
 		AutoAllocHugePages:         true,
 		MaxKeys:                    10000000,

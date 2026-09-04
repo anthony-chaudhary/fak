@@ -5,7 +5,12 @@ package alloc
 import "fmt"
 
 func (r *Region) allocate() error {
-	r.data = make([]byte, r.size)
+	allocSize := r.size
+	const maxDevHeap = 1 << 30 // 1GB dev ceiling on non-Linux
+	if allocSize > maxDevHeap {
+		allocSize = maxDevHeap
+	}
+	r.data = make([]byte, allocSize)
 	r.isMapped = false
 	return nil
 }

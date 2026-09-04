@@ -33,6 +33,7 @@ func TestL3ServerLifecycle(t *testing.T) {
 		t.Fatalf("expected StatusRunning, got %v", srv.Status())
 	}
 
+	time.Sleep(5 * time.Millisecond)
 	if srv.Uptime() <= 0 {
 		t.Fatalf("expected positive uptime, got %v", srv.Uptime())
 	}
