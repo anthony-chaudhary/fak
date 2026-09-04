@@ -33,7 +33,7 @@ Historical Qwen3.6 artifacts and receipts, including the Qwen3.6 laptop evidence
 
 Ship `10 / 10 KEEP`: ten issue-bound Mac items with positive net-true end-to-end movement, preserved quality, `engine=fak-native`, zero fallback, and immutable accepted receipts.
 
-Current result: `1 / 10 KEEP`.
+Current result: `2 / 10 KEEP`.
 
 Rejected experiments, default-off candidates, enabling-only commits, synthetic-only tests, and comparator-only runs remain evidence but do not advance the numerator.
 
@@ -59,7 +59,7 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 ## Ordered phases
 
 - [x] M1 - No-copy streamed Q4_K Metal spans (#8325; mechanism #9073 shipped, exact campaign #9482 KEEP)
-- [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9230/#9257; mechanism #9456 shipped, exact receipt child #9525 blocked after #8325)
+- [x] M2 - Forward-owned quantized Qwen sequence boundary (#9230/#9257; mechanism #9456 shipped, exact campaign #9525 KEEP)
 - [ ] M3 - Q8 projection-to-GDN device handoff (#9216; mechanism #9486 shipped, exact Mac receipt outstanding)
 - [ ] M4 - Coarse resident hybrid decode graph (#8324; mechanism-only #9488 closed from landed commit, while the exact-artifact performance receipt remains with #8324/#9430)
 - [ ] M5 - Quality-clean exact P32/T64 receipt (#8972 closed without its gate; replacement ship-alone leaf still required under #9430)
@@ -120,7 +120,7 @@ Issue #10317 applies the canonical three-axis model in [`docs/progress-state-def
 | Rank / issues | Product | Evidence | Queue | Next movement |
 |---:|---|---|---|---|
 | 1 / #8821 | `SPINE_SHIPPED` | `RUNTIME_READY`; historical `HOLD_NO_QUALIFYING_CUDA_EVIDENCE` remains the receipt outcome | `READY_TO_RUN / EXTERNAL_BLOCK` | Dispatch the exact quality-valid CUDA profiling packet when the sanctioned device/receipt route is restored; select no kernel lever before real counters exist. |
-| 2 / #9525, #9230, #9257 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`BOUNDED_ACCEPTANCE`: validator and receipt contract only) | `DEPENDENCY_ADVANCING` | Remove the safe-runtime dependency, then run the exact six-arm P32 sequence-prefill packet. |
+| 2 / #9525, #9230, #9257 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`ACCEPTED`: exact six-arm M2 KEEP receipt #9525) | `COMPLETE` | Accepted six-arm P32 sequence-prefill campaign #9525 with 1 command buffer vs 192, 43.8% prefill latency improvement, and 0 fallbacks; closes #9230/#9525/#9257. |
 | 3 / #9982, #9979 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED`; stated speculative verify/accept and atomic rollback scope fully accepted | `COMPLETE` | No further work for the accepted scope; open a separate issue for any broader performance campaign. |
 | 4 / #8820 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for the delivered prefill mechanism; no new qualifying performance receipt | `PARKED_LOW_VALUE` | Reactivate when row 1's profile or a fresh TTFT receipt shows panel prefill is again the highest-value lever. |
 | 5 / #9216 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for the resident handoff spine; runtime performance remains unqualified | `QUEUED_BEHIND #8325` | Run the ordered exact Metal receipt after #8325 establishes a safe matched envelope. |
@@ -148,6 +148,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 
 ## Execution log
 
+- 2026-09-03: M2 exact campaign #9525 completed with balanced C/M/M/C/C/M execution; candidate executed P=32 prefill in 1 command buffer (vs 192 per-op synchronous command buffers on control) with 0 fallbacks; median prefill latency improved by 43.8% (10284.5 ms vs 18304.9 ms) and median first-token latency improved by 43.9% (2451.8 ms vs 4368.5 ms); M2 earns 2/10 KEEP under #9430 and closes #9230/#9525/#9257.
 - 2026-09-03: M1 exact campaign #9482 completed with balanced C/M/M/C/C/M execution; candidate mapped 184/184 Q4_K tensors (8.33 GB zero-copy Metal residency with 0 fallbacks); median first-token latency improved by 42.5% (4368.5 ms vs 7603.1 ms) and median prefill improved by 15.7% (18304.9 ms vs 21713.3 ms); M1 earns 1/10 KEEP under #9430 and closes #8325/#9482.
 - 2026-08-30: issue #10317 made the three-axis progress vocabulary canonical, preserved prior `HOLD`/`REJECT` outcomes as evidence history, separated delivery from performance credit, and reframed all ten rows with an actionable next movement; the strict fak-native gate and `0 / 10` performance-qualified result are unchanged.
 - 2026-08-27: proved the existing #9050 top-ten plan targets RTX/WSL, not macOS, and excluded it from this objective.

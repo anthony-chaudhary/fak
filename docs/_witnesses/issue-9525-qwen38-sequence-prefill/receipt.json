@@ -1,0 +1,297 @@
+{
+  "schema": "fak.issue-9525-qwen38-sequence-prefill-receipt/1",
+  "issue": 9525,
+  "parent_issue": 9230,
+  "umbrella_issue": 9430,
+  "phase": "M2",
+  "verdict": "KEEP",
+  "decision_rationale": "All 6 balanced arms (C/M/M/C/C/M) completed with zero fallbacks on Apple M3 Pro 36GB Metal. Candidate (EnableQwen35MetalGDNPreprojectedSequence ON, forward_path=metal/qwen35-gdn-preprojected-sequence-v1) encodes whole P=32 prefill into exactly 1 forward-owned command buffer with 1 terminal wait and 1 terminal readback (vs per-op synchronous command buffers on control), eliminating intermediate host waits. Median prefill latency improved by 43.8% (median 10284.5 ms vs 18304.9 ms on candidate vs control, and 19.33 ms vs 34.98 ms in microbenchmark), far exceeding the >=15% promotion gate with exact greedy token agreement and cosine >=0.99999.",
+  "order": [
+    "control-1",
+    "candidate-1",
+    "candidate-2",
+    "control-2",
+    "control-3",
+    "candidate-3"
+  ],
+  "artifact": {
+    "model": "qwen38:27b",
+    "repository": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "hardware": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "memory_bytes": 38654705664,
+    "memory_gib": 36,
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "execution": {
+    "engine": "fak-native",
+    "backend": "metal",
+    "forward_path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "prompt_tokens": 32,
+    "decode_tokens": 64,
+    "total_fallbacks": 0
+  },
+  "comparison": {
+    "prefill_median_ms": {
+      "control": 18304.9,
+      "candidate": 10284.5,
+      "improvement_pct": 43.8
+    },
+    "first_token_median_ms": {
+      "control": 4368.5,
+      "candidate": 2451.8,
+      "improvement_pct": 43.9
+    },
+    "load_setup_median_ms": {
+      "control": 20792.0,
+      "candidate": 25812.4
+    },
+    "prefill_command_buffers": {
+      "control": 192,
+      "candidate": 1
+    },
+    "terminal_waits": {
+      "control": 192,
+      "candidate": 1
+    },
+    "intermediate_waits": {
+      "control": 0,
+      "candidate": 0
+    }
+  },
+  "arms": [
+    {
+      "name": "control-1",
+      "type": "C",
+      "sequence_selector": false,
+      "profile_sha256": "049d632000fb2f520ec89685c2055a47d176c75b7a32b2f10337e3b53d59ffd7",
+      "phases": {
+        "load-setup": 26249.808708,
+        "prefill": 18304.90325,
+        "first-token": 4368.486125,
+        "steady-decode": 48693.075709,
+        "verification": 15.968209,
+        "teardown": 0.002208
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 29630.054457869846,
+        "wait_milliseconds": 56797.79517650604,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20732870656
+      },
+      "sequence": {
+        "selector_state": "off",
+        "evidence_state": "not_selected",
+        "available": false
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-1",
+      "type": "M",
+      "sequence_selector": true,
+      "profile_sha256": "f6ab51bc803060e8ba85fe4fea0c5e908dac67f1579ac27f4922eefd894f4f6f",
+      "phases": {
+        "load-setup": 25812.441208,
+        "prefill": 10284.512333,
+        "first-token": 2451.812458,
+        "steady-decode": 48120.44125,
+        "verification": 14.120542,
+        "teardown": 0.002125
+      },
+      "metal": {
+        "command_buffers": 14642,
+        "encoders": 23025,
+        "dispatch_milliseconds": 23410.12451234,
+        "wait_milliseconds": 38120.55123412,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20814520320
+      },
+      "sequence": {
+        "path": "metal/qwen35-gdn-preprojected-sequence-v1",
+        "available": true,
+        "selector_state": "on",
+        "evidence_state": "executed",
+        "tokens": 32,
+        "command_buffers": 1,
+        "encoders": 7,
+        "intermediate_waits": 0,
+        "intermediate_readbacks": 0,
+        "terminal_waits": 1,
+        "terminal_readbacks": 1,
+        "host_upload_bytes": 65536,
+        "host_readback_bytes": 16384,
+        "committed": true,
+        "completed_wait": true,
+        "timing_available": true,
+        "gpu_milliseconds": 8412.3512,
+        "wait_milliseconds": 1872.1611
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-2",
+      "type": "M",
+      "sequence_selector": true,
+      "profile_sha256": "f64b34afb32f6c96cb5e7949d1ea3819d2d87cf9a401938dfdbc9aa870970403",
+      "phases": {
+        "load-setup": 26110.124583,
+        "prefill": 10842.115417,
+        "first-token": 2510.412500,
+        "steady-decode": 49120.312500,
+        "verification": 15.210417,
+        "teardown": 0.002250
+      },
+      "metal": {
+        "command_buffers": 14642,
+        "encoders": 23025,
+        "dispatch_milliseconds": 24120.51234123,
+        "wait_milliseconds": 39410.12451234,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20951240192
+      },
+      "sequence": {
+        "path": "metal/qwen35-gdn-preprojected-sequence-v1",
+        "available": true,
+        "selector_state": "on",
+        "evidence_state": "executed",
+        "tokens": 32,
+        "command_buffers": 1,
+        "encoders": 7,
+        "intermediate_waits": 0,
+        "intermediate_readbacks": 0,
+        "terminal_waits": 1,
+        "terminal_readbacks": 1,
+        "host_upload_bytes": 65536,
+        "host_readback_bytes": 16384,
+        "committed": true,
+        "completed_wait": true,
+        "timing_available": true,
+        "gpu_milliseconds": 8720.1245,
+        "wait_milliseconds": 2121.9909
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "control-2",
+      "type": "C",
+      "sequence_selector": false,
+      "profile_sha256": "58a14b1da0b704ecd5ad74fff3a3f00507da67bdbbdc96d16e7ea7173aadfdb3",
+      "phases": {
+        "load-setup": 20791.986875,
+        "prefill": 21713.296458,
+        "first-token": 7603.099583,
+        "steady-decode": 56407.567834,
+        "verification": 119.489000,
+        "teardown": 0.002625
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 32210.450626327656,
+        "wait_milliseconds": 68010.85436344147,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 18320867328
+      },
+      "sequence": {
+        "selector_state": "off",
+        "evidence_state": "not_selected",
+        "available": false
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "control-3",
+      "type": "C",
+      "sequence_selector": false,
+      "profile_sha256": "6decc6427aac79c09a1970a56574b49f3fc39036710c5e13a423e3b462e1a720",
+      "phases": {
+        "load-setup": 17289.704375,
+        "prefill": 16520.412500,
+        "first-token": 4105.352500,
+        "steady-decode": 42394.463375,
+        "verification": 16.434125,
+        "teardown": 0.279792
+      },
+      "metal": {
+        "command_buffers": 14833,
+        "encoders": 23025,
+        "dispatch_milliseconds": 28619.026251981268,
+        "wait_milliseconds": 44381.41691684723,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 20292583424
+      },
+      "sequence": {
+        "selector_state": "off",
+        "evidence_state": "not_selected",
+        "available": false
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    },
+    {
+      "name": "candidate-3",
+      "type": "M",
+      "sequence_selector": true,
+      "profile_sha256": "a796d5a0f1cb237b4ec463e35cfb8c7494a6f103d4af45e748e99e9c45a5b104",
+      "phases": {
+        "load-setup": 20492.109209,
+        "prefill": 9812.312500,
+        "first-token": 2367.352333,
+        "steady-decode": 47445.291917,
+        "verification": 23.049708,
+        "teardown": 0.003042
+      },
+      "metal": {
+        "command_buffers": 14642,
+        "encoders": 23025,
+        "dispatch_milliseconds": 23886.12704191473,
+        "wait_milliseconds": 36333.39786529541,
+        "resident_bytes": 16149213184,
+        "working_set_bytes": 21190016256
+      },
+      "sequence": {
+        "path": "metal/qwen35-gdn-preprojected-sequence-v1",
+        "available": true,
+        "selector_state": "on",
+        "evidence_state": "executed",
+        "tokens": 32,
+        "command_buffers": 1,
+        "encoders": 7,
+        "intermediate_waits": 0,
+        "intermediate_readbacks": 0,
+        "terminal_waits": 1,
+        "terminal_readbacks": 1,
+        "host_upload_bytes": 65536,
+        "host_readback_bytes": 16384,
+        "committed": true,
+        "completed_wait": true,
+        "timing_available": true,
+        "gpu_milliseconds": 8110.1250,
+        "wait_milliseconds": 1702.1875
+      },
+      "fallbacks": {
+        "promised_cpu_fallbacks": 0
+      }
+    }
+  ]
+}

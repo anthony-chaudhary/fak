@@ -1,0 +1,73 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "fallback_count": 0
+  },
+  "phases": [
+    {
+      "name": "load-setup",
+      "start_milliseconds": 0,
+      "duration_milliseconds": 20492.109209
+    },
+    {
+      "name": "prefill",
+      "start_milliseconds": 20492.109209,
+      "duration_milliseconds": 9812.312500
+    },
+    {
+      "name": "first-token",
+      "start_milliseconds": 30304.421709,
+      "duration_milliseconds": 2367.352333
+    },
+    {
+      "name": "steady-decode",
+      "start_milliseconds": 32671.774042,
+      "duration_milliseconds": 47445.291917
+    },
+    {
+      "name": "verification",
+      "start_milliseconds": 80117.065959,
+      "duration_milliseconds": 23.049708
+    },
+    {
+      "name": "teardown",
+      "start_milliseconds": 80140.115667,
+      "duration_milliseconds": 0.003042
+    }
+  ],
+  "metal": {
+    "command_buffers": 14642,
+    "encoders": 23025,
+    "dispatch_milliseconds": 23886.12704191473,
+    "wait_milliseconds": 36333.39786529541,
+    "resident_bytes": 16149213184,
+    "working_set_bytes": 21190016256
+  },
+  "sequence": {
+    "path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "available": true,
+    "selector_state": "on",
+    "evidence_state": "executed",
+    "tokens": 32,
+    "command_buffers": 1,
+    "encoders": 7,
+    "intermediate_waits": 0,
+    "intermediate_readbacks": 0,
+    "terminal_waits": 1,
+    "terminal_readbacks": 1,
+    "host_upload_bytes": 65536,
+    "host_readback_bytes": 16384,
+    "committed": true,
+    "completed_wait": true,
+    "timing_available": true,
+    "gpu_milliseconds": 8110.1250,
+    "wait_milliseconds": 1702.1875
+  },
+  "attribution_unavailable": {
+    "reason": "capture-tool-does-not-export-dispatch-attribution",
+    "detail": "fak-native session lifecycle capture does not export per-lever dispatch attribution"
+  }
+}

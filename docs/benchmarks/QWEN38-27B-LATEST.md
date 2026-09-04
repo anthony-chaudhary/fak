@@ -72,6 +72,11 @@ The main delta is implementation maturity, not a demonstrated architectural wind
   a new end-to-end model number: [`issue-8326-metal-q4k-multivector.json`](../_witnesses/issue-8326-metal-q4k-multivector.json)
   reports **1.57–1.71×** over repeated GEMV for the measured shapes, with parity checks. Qwen3.8 must be
   remeasured end to end before attributing that gain to tokens/sec.
+- The September 3, 2026 Metal benchmark witness ([`qwen38-m3pro-metal-benchmarks-2026-09-03.json`](../_witnesses/qwen38-m3pro-metal-benchmarks-2026-09-03.json))
+  captures M2 sequence prefill at **7.80× speedup** (19.73 ms vs 153.91 ms, 87.2% latency reduction),
+  fused MLP at **1.62×** (1.962 ms vs 3.175 ms, 76.6 GB/s), and Qwen3.5-0.8B Metal decode at
+  **11.42 tok/s** with zero swap growth. These are focused sequence/kernel microbenchmarks;
+  full Qwen3.8-27B remeasurement remains awaiting a comparable end-to-end receipt.
 
 ## August 27–28 update
 

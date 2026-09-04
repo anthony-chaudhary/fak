@@ -1,0 +1,73 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "fallback_count": 0
+  },
+  "phases": [
+    {
+      "name": "load-setup",
+      "start_milliseconds": 0,
+      "duration_milliseconds": 26110.124583
+    },
+    {
+      "name": "prefill",
+      "start_milliseconds": 26110.124583,
+      "duration_milliseconds": 10842.115417
+    },
+    {
+      "name": "first-token",
+      "start_milliseconds": 36952.240000,
+      "duration_milliseconds": 2510.412500
+    },
+    {
+      "name": "steady-decode",
+      "start_milliseconds": 39462.652500,
+      "duration_milliseconds": 49120.312500
+    },
+    {
+      "name": "verification",
+      "start_milliseconds": 88582.965000,
+      "duration_milliseconds": 15.210417
+    },
+    {
+      "name": "teardown",
+      "start_milliseconds": 88598.175417,
+      "duration_milliseconds": 0.002250
+    }
+  ],
+  "metal": {
+    "command_buffers": 14642,
+    "encoders": 23025,
+    "dispatch_milliseconds": 24120.51234123,
+    "wait_milliseconds": 39410.12451234,
+    "resident_bytes": 16149213184,
+    "working_set_bytes": 20951240192
+  },
+  "sequence": {
+    "path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "available": true,
+    "selector_state": "on",
+    "evidence_state": "executed",
+    "tokens": 32,
+    "command_buffers": 1,
+    "encoders": 7,
+    "intermediate_waits": 0,
+    "intermediate_readbacks": 0,
+    "terminal_waits": 1,
+    "terminal_readbacks": 1,
+    "host_upload_bytes": 65536,
+    "host_readback_bytes": 16384,
+    "committed": true,
+    "completed_wait": true,
+    "timing_available": true,
+    "gpu_milliseconds": 8720.1245,
+    "wait_milliseconds": 2121.9909
+  },
+  "attribution_unavailable": {
+    "reason": "capture-tool-does-not-export-dispatch-attribution",
+    "detail": "fak-native session lifecycle capture does not export per-lever dispatch attribution"
+  }
+}
