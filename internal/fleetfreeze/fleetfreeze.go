@@ -130,6 +130,10 @@ type Decision struct {
 	Reason string
 }
 
+// Invariant: fleet freeze state check is fail-closed and deterministic.
+// Guard: OpSpawn is held whenever state.Frozen is true, while progress harvesting
+// (OpWitnessClose, OpStatusRefresh, OpComment) remains unconditionally allowed.
+
 // Allowed applies the freeze contract to one operation class.
 //
 // When state is not frozen, every class is allowed. When frozen, OpSpawn is
