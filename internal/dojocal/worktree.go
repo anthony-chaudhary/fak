@@ -646,3 +646,89 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(out, in)
 	return err
 }
+
+// resolveWorktreeIncludePath locates a .worktreeinclude file in worktreeDir or
+// its parent repository.
+func resolveWorktreeIncludePath(worktreeDir string) string {
+	// 1. Direct check in worktreeDir
+	direct := filepath.Join(worktreeDir, ".worktreeinclude")
+	if fi, err := os.Stat(direct); err == nil && !fi.IsDir() {
+		return direct
+	}
+
+	// 2. Check parent repository via git common-dir
+	cmd := windowgate.Command("git", "-C", worktreeDir, "rev-parse", "--git-common-dir")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	if out, err := cmd.Output(); err == nil {
+		commonDir := strings.TrimSpace(string(out))
+		if commonDir != "" {
+			if !filepath.IsAbs(commonDir) {
+				commonDir = filepath.Join(worktreeDir, commonDir)
+			}
+			commonDir = filepath.Clean(commonDir)
+			repoRoot := filepath.Dir(commonDir)
+			targetFile := filepath.Join(repoRoot, ".worktreeinclude")
+			if fi, err := os.Stat(targetFile); err == nil && !fi.IsDir() {
+				return targetFile
+			}
+		}
+	}
+
+	// 3. Fallback: check parent directory of worktreeDir
+	parentTargetFile := filepath.Join(filepath.Dir(worktreeDir), ".worktreeinclude")
+	if fi, err := os.Stat(parentTargetFile); err == nil && !fi.IsDir() {
+		return parentTargetFile
+	}
+
+	return ""
+}
+
+// ApplyWorktreeInclude applies sparse-checkout include filtering to worktreeDir
+// using the provided patterns, or by reading .worktreeinclude from worktreeDir
+// (or parent repository) if patterns is empty.
+func ApplyWorktreeInclude(worktreeDir string, patterns []string) error {
+	var effectivePatterns []string
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.HasPrefix(p, "#") {
+			continue
+		}
+		effectivePatterns = append(effectivePatterns, p)
+	}
+
+	if len(patterns) == 0 {
+		includePath := resolveWorktreeIncludePath(worktreeDir)
+		if includePath != "" {
+			data, err := os.ReadFile(includePath)
+			if err != nil {
+				return fmt.Errorf("read .worktreeinclude: %w", err)
+			}
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				effectivePatterns = append(effectivePatterns, line)
+			}
+		}
+	}
+
+	if len(effectivePatterns) == 0 {
+		return nil
+	}
+
+	cmdInit := windowgate.Command("git", "-C", worktreeDir, "sparse-checkout", "init", "--no-cone")
+	windowgate.ConfigureBackgroundCommand(cmdInit)
+	if out, err := cmdInit.CombinedOutput(); err != nil {
+		return fmt.Errorf("git sparse-checkout init: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	args := append([]string{"-C", worktreeDir, "sparse-checkout", "set"}, effectivePatterns...)
+	cmdSet := windowgate.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmdSet)
+	if out, err := cmdSet.CombinedOutput(); err != nil {
+		return fmt.Errorf("git sparse-checkout set: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	return nil
+}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/dojocal"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -204,14 +205,30 @@ func worktreeWorkerPrepare(argv []string) {
 	capacity := worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
 	out := worktreePrepareOut{Result: res, Capacity: capacity}
 	if res.OK && res.Path != "" {
-		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
-		if strings.TrimSpace(*message) != "" || len(paths) > 0 {
-			if strings.TrimSpace(*message) == "" || len(paths) == 0 {
-				res.OK, res.Reason = false, "--message and at least one --path must be supplied together"
+		hasInclude := false
+		if fi, err := os.Stat(filepath.Join(repoRoot, ".worktreeinclude")); err == nil && !fi.IsDir() {
+			hasInclude = true
+		} else if fi, err := os.Stat(filepath.Join(res.Path, ".worktreeinclude")); err == nil && !fi.IsDir() {
+			hasInclude = true
+		}
+		if hasInclude {
+			if err := dojocal.ApplyWorktreeInclude(res.Path, nil); err != nil {
+				res.OK, res.Reason = false, "apply worktree include: "+err.Error()
 				out.Result = res
-			} else if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
-				res.OK, res.Reason = false, "save worker land intent: "+err.Error()
-				out.Result = res
+			}
+		}
+		if res.OK {
+			out.Env = workerworktree.WorktreeEnv(nil, res.Path)
+			if strings.TrimSpace(*message) != "" || len(paths) > 0 {
+				if strings.TrimSpace(*message) == "" || len(paths) == 0 {
+					res.OK, res.Reason = false, "--message and at least one --path must be supplied together"
+					out.Result = res
+					out.Env = nil
+				} else if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
+					res.OK, res.Reason = false, "save worker land intent: "+err.Error()
+					out.Result = res
+					out.Env = nil
+				}
 			}
 		}
 	}
