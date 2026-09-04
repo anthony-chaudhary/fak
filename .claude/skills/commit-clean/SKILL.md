@@ -29,6 +29,14 @@ One repeatable pass that lands YOUR finished paths on `main` with a lintable, bi
 
 ## The tools (dogfood these, not raw git)
 
+**Validate in isolation first, always** — compiles, vets, and tests prospective tree:
+
+```bash
+fak validate --mine <p> [--mine <q>]
+```
+
+Isolates your owned delta against HEAD in a private checkout, runs gofmt, build, vet, and affected package tests under WSL while masking peer WIP. Do not commit if validation fails or times out.
+
 **Lint first, always** — LINT-ONLY, touches no git:
 
 ```bash
@@ -96,11 +104,11 @@ Before the split both nothing-landed classes returned 3, so a lander that (corre
 
 ## Steps
 
-1. **Confirm the tree is green for your lane** — `make ci`, or the scoped test for the packages you touched. A docs-only change touches no Go package and has no scoped test — proceed.
+1. **Validate your owned delta** — run `fak validate --mine <p>...` over the exact files you changed. Prove prospective build, vet, and affected tests pass in isolation. For non-Go/docs-only changes, verify links.
 2. **List the exact paths YOU changed** — never a peer's. On a hot tree check mtimes/`git log -- <file>` if ownership is unclear.
 3. **Lint:** `fak commit --preview -m "<subject>" --path <p> …` — fix any subject/stamp/lane issue it flags before anything lands.
 4. **Commit:** `fak commit --path <p> [--path <q>] -m "<type>(<scope>): <what> (fak <leaf>)" [--push]`.
-5. **Witness:** on success, `git show --stat <committed_sha>` (the SHA `fak commit` prints — NOT `HEAD`, which a racing peer may already have moved past your commit) shows EXACTLY your paths and your subject. To check the structured fields, run with `--json`: a clean result is `committed && verified && reason == ""`; the default human output is a prose line (`committed <sha> (N path(s)) and pushed`) instead.
+5. **Witness:** on success, `fak commit` auto-executes `dos commit-audit` (verifying diff-witnessed shape) and `dos verify` (confirming leaf registration), printing both inline. Check `git show --stat <committed_sha>` and run `dos review origin/main..HEAD` to confirm zero residual (`has_residual: false`).
 6. **On a `reason` refusal,** act per the vocabulary table above — never convert a race or refusal into a force-push or an amend.
 
 ## Never

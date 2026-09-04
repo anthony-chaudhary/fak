@@ -194,6 +194,9 @@ func classifyFileWith(fp fileProbe, p string) string {
 			return po.why
 		}
 	}
+	if why := scriptAdmissionReason(p); why != "" {
+		return why
+	}
 	if keepExceptions[p] {
 		if sz, ok := fp.Size(p); ok && sz > fileAdmissionMaxBytes {
 			return largeFileMsg(sz)

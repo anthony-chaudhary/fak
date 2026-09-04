@@ -6,12 +6,12 @@
     "url": "https://github.com/anthony-chaudhary/fak",
     "source": "github"
   },
-  "version": "0.45.0",
+  "version": "0.46.0",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/anthony-chaudhary/fak:0.45.0",
-      "version": "0.45.0",
+      "identifier": "ghcr.io/anthony-chaudhary/fak:0.46.0",
+      "version": "0.46.0",
       "transport": {
         "type": "stdio"
       },

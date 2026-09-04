@@ -131,8 +131,14 @@ concurrent = [
   "modelaccept",
   "executionroute",
   "market",
+  "marketplace",
   "tokenprofile",
   "generationctl",
+  "mtptune",
+  "mtpeval",
+  "faultlab",
+  "gcpgpu",
+  "superstream",
   "quantprov",
   "lightgapport",
   "kvquantmeta",
@@ -320,6 +326,7 @@ concurrent = [
   # Declared so the arbiter detects same-tree collisions and a `(fak <leaf>)` stamp binds.
   # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "generalizationdebt",
+  "debtlane",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
@@ -371,6 +378,7 @@ concurrent = [
   "docrender",
   "streamrules", # #5920: pure streaming rule detection primitive; see [lanes.trees].
   "archreport",
+  "archcheck",
   "fp4runtime",
   "quantpolicy",
   # #6407: internal/mixedprecision (shipped for #6254) had NO lane, so the lane-coverage
@@ -883,6 +891,12 @@ modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
+marketplace = ["internal/marketplace/**"]
+mtptune = ["internal/mtptune/**", "cmd/tunemtp/**"]
+mtpeval = ["internal/mtpeval/**"]
+faultlab = ["internal/faultlab/**"]
+gcpgpu = ["internal/gcpgpu/**"]
+superstream = ["internal/superstream/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -1028,6 +1042,7 @@ frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
 generalizationdebt = ["internal/generalizationdebt/**"]
+debtlane = ["internal/debtlane/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
@@ -1265,6 +1280,7 @@ tokenprofile = ["internal/tokenprofile/**"]
 docrender = ["internal/docrender/**"]
 streamrules = ["internal/streamrules/**"]
 archreport = ["internal/archreport/**"]
+archcheck = ["internal/archcheck/**"]
 generationctl = ["internal/generationctl/**"]
 quantprov = ["internal/quantprov/**"]
 lightgapport = ["internal/lightgapport/**"]
@@ -2514,6 +2530,13 @@ refusal  = true
 summary  = "A run's DECLARED checker/test file changed bytes between declare-time (when its content was pinned) and grade-time, so the grade is judged against a checker that MOVED and is not evidence: the 'grade the grader' hole where a red result is flipped green by editing the checker instead of the code. The pass claim is stale relative to its pinned witness."
 fix      = "Restore the checker to its declared bytes and re-grade, or -- if the checker change was intentional -- re-declare the run so its baseline is re-pinned against the new checker before grading. Producer: safecommit.GuardCheckerPin(root, baseline); an unchanged checker passes through untouched. Floor: go test ./internal/safecommit (checkerpin_test.go: changed->refused, unchanged->pass-through)."
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
+
+[reasons.TEST_TAMPER_REFUSED]
+category = "INTEGRITY_GATE"
+refusal  = true
+summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
+fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
+see_also = ["internal/adjudicator", "internal/witness"]
 
 # #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
 # issue fanout planner's own contract rejections (internal/issuefanout.Refusal,

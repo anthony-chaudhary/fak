@@ -4,6 +4,7 @@ package devhandoff
 
 var Commands = []Command{
 	{Name: "amd-gpu-facts", Owner: "dev", Handler: "devcmd.RunAMDGPUFacts", SourceOrigin: "internal/devcmd/amd_gpu_facts.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "amd-setup", Owner: "dev", Handler: "devcmd.RunAMDSetup", SourceOrigin: "internal/devcmd/amd_setup.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "backend", Owner: "dev", Handler: "devcmd.RunBackend", SourceOrigin: "internal/devcmd/backend.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "blast", Owner: "dev", Handler: "devcmd.RunBlast", SourceOrigin: "internal/devcmd/blast.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "borrow-provenance", Owner: "dev", Handler: "devcmd.RunBorrowProvenance", SourceOrigin: "internal/devcmd/borrow_provenance.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
@@ -29,6 +30,7 @@ var Commands = []Command{
 	{Name: "issue", Owner: "dev", Handler: "devcmd.RunIssue", SourceOrigin: "internal/devcmd/issue_contract.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "issue-contract-repair", Owner: "dev", Handler: "devcmd.RunIssueContractRepair", SourceOrigin: "internal/devcmd/issue_contract_repair.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "orient", Owner: "dev", Handler: "devcmd.RunOrient", SourceOrigin: "internal/devcmd/orient.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "perfscout", Owner: "dev", Handler: "devcmd.RunPerfScout", SourceOrigin: "internal/devcmd/perfscout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "plan-audit", Owner: "dev", Handler: "devcmd.RunPlanAudit", SourceOrigin: "internal/devcmd/plan_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "project", Owner: "dev", Handler: "devcmd.RunProjectCompletion", SourceOrigin: "internal/devcmd/project_completion.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "readme-visual-audit", Owner: "dev", Handler: "devcmd.RunReadmeVisualAudit", SourceOrigin: "internal/devcmd/readme_visual_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

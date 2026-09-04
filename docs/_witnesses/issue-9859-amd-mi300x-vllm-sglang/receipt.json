@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema": "fak.mi300x-execution-packet-receipt/1",
+  "issue": 9859,
+  "title": "bench(amd): package matched MI300X vLLM and SGLang run",
+  "captured_at": "2026-09-03T16:00:00Z",
+  "verdict": "OPERATOR_PACKET_PACKAGED",
+  "status": "ready_for_operator_execution",
+  "role": "matched_reference_baseline_execution_packet",
+  "evidence_class": "OPERATOR_EXECUTION_PACKET",
+  "hardware_target": {
+    "product_name": "AMD Instinct MI300X",
+    "architecture": "CDNA3",
+    "target_isa": "gfx942",
+    "vram_physical_gib": 192.0,
+    "memory_type": "HBM3",
+    "peak_memory_bandwidth_tb_s": 5.3,
+    "required_devices": [
+      "/dev/kfd",
+      "/dev/dri"
+    ],
+    "required_rocm_version": ">=6.3"
+  },
+  "fail_closed_validation": {
+    "script": "run-mi300x-baselines.sh",
+    "contract": "mi300x-packet.json",
+    "host_prerequisites": [
+      "docker present and executable",
+      "rocminfo present and exits 0",
+      "amd-smi present and exits 0",
+      "go toolchain present for cmd/loadgen",
+      "/dev/kfd present as character device",
+      "/dev/dri present as directory",
+      "ROCm version verified >= 6.3",
+      "rocminfo enumerates gfx942 target ISA",
+      "amd-smi static enumerates AMD Instinct MI300X"
+    ],
+    "container_prerequisites": [
+      "pass-through /dev/kfd and /dev/dri into container",
+      "group-add video and ipc=host",
+      "in-container rocminfo exits 0 and enumerates gfx942",
+      "HIP_VISIBLE_DEVICES=0 and empty CUDA_VISIBLE_DEVICES"
+    ],
+    "rejection_triggers": [
+      "missing device nodes /dev/kfd or /dev/dri",
+      "failed ROCm tools or ROCm version < 6.3",
+      "non-gfx942 target or non-MI300X device name",
+      "images lacking resolved repository digest",
+      "engine version mismatch against pinned 0.28.0 (vLLM) / 0.5.18 (SGLang)",
+      "server exit before readiness or readiness timeout",
+      "missing exact model revision in server logs",
+      "CPU fallback, CUDA, NVIDIA, or missing GPU markers in logs",
+      "any loadgen request error (max_error_rate = 0)"
+    ]
+  },
+  "workload": {
+    "model": {
+      "id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "access": "public_ungated"
+    },
+    "geometry": {
+      "endpoint": "/v1/chat/completions",
+      "tensor_parallel": 1,
+      "dtype": "float16",
+      "context_length": 2048,
+      "concurrency": 16,
+      "requests_per_point": 64,
+      "max_output_tokens": 128,
+      "prompt": "Explain in one sentence why matched benchmark geometry matters.",
+      "max_error_rate": 0
+    },
+    "execution_ordering": [
+      "vllm:cold",
+      "vllm:warm",
+      "sglang:cold",
+      "sglang:warm"
+    ]
+  },
+  "engines": [
+    {
+      "name": "vllm",
+      "version": "0.28.0",
+      "source_tag": "v0.28.0",
+      "source_commit": "2cf0a6915ce544dc493a0990f2ea38d81601128a",
+      "image": "vllm/vllm-openai-rocm:v0.28.0",
+      "launch_command": "docker run --name mi300x-vllm --rm --network host --device=/dev/kfd --device=/dev/dri --group-add video --ipc=host -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES='' <IMAGE_ID> Qwen/Qwen2.5-0.5B-Instruct --revision 7ae557604adf67be50417f59c2c2f167def9a775 --served-model-name Qwen/Qwen2.5-0.5B-Instruct --host 127.0.0.1 --port 18000 --tensor-parallel-size 1 --dtype float16 --max-model-len 2048"
+    },
+    {
+      "name": "sglang",
+      "version": "0.5.18",
+      "source_tag": "v0.5.18",
+      "source_commit": "71de97b264b04dcd514cf904003028aefe9775c8",
+      "image": "lmsysorg/sglang:v0.5.18-rocm700-mi30x",
+      "launch_command": "docker run --name mi300x-sglang --rm --network host --device=/dev/kfd --device=/dev/dri --group-add video --ipc=host -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES='' --entrypoint python3 <IMAGE_ID> -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --revision 7ae557604adf67be50417f59c2c2f167def9a775 --served-model-name Qwen/Qwen2.5-0.5B-Instruct --host 127.0.0.1 --port 18000 --tp-size 1 --dtype float16 --context-length 2048"
+    }
+  ],
+  "telemetry": {
+    "command": "amd-smi metric --gpu all",
+    "interval_seconds": 1,
+    "destination": "ENGINE-amd-smi.log"
+  },
+  "teardown": {
+    "signals": [
+      "INT",
+      "TERM",
+      "EXIT"
+    ],
+    "process_cleanup": "terminate telemetry background subshell, wait PID exit",
+    "container_cleanup": "docker stop mi300x-${ENGINE} with graceful timeout, then docker rm -f",
+    "guarantee": "Zero orphan server processes, zero dangling containers, zero uncollected telemetry sessions"
+  },
+  "cloud_and_safety_governance": {
+    "destructive_teardown_required": true,
+    "spend_cap_required": true,
+    "zero_credentials_policy": true,
+    "credentials_in_repo_allowed": false
+  }
+}

@@ -81,3 +81,21 @@ func TestServeNativeProfileAndVulkanFlagsReachProductionCallers(t *testing.T) {
 		t.Fatalf("production callers got prefix=%q profile=%t stage=%t slab=%t", prefix, profile, stage, slab)
 	}
 }
+
+func TestServeGPULayersFlagsReachTypedPlannerConfig(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--gpu-layers", "16"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := serveNativePlannerConfig(sf).DenseGPULayers; got != 16 {
+		t.Fatalf("--gpu-layers: DenseGPULayers = %d, want 16", got)
+	}
+
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--native-gpu-layers", "24"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := serveNativePlannerConfig(sf2).DenseGPULayers; got != 24 {
+		t.Fatalf("--native-gpu-layers: DenseGPULayers = %d, want 24", got)
+	}
+}

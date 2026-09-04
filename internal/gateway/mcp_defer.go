@@ -253,7 +253,7 @@ func (s *Server) rankToolNamesByIntent(query string) []string {
 	if err != nil {
 		return substringToolFilter(full, query)
 	}
-	resp, err := cat.Query(selfquery.Request{Query: query, Plane: selfquery.PlaneLive})
+	resp, err := cat.Query(selfquery.Request{Query: query, Plane: selfquery.PlaneLive, All: true})
 	if err != nil {
 		return substringToolFilter(full, query)
 	}

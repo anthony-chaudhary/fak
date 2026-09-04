@@ -1,0 +1,271 @@
+{
+  "schema": "fak.benchmark-non-comparability-receipt/1",
+  "issue": 9827,
+  "title": "bench(amd): capture vLLM and SGLang reference baselines on RX 7600",
+  "captured_at": "2026-09-02T23:55:00Z",
+  "verdict": "NON_COMPARABLE",
+  "decision": "HOLD_UNSUPPORTED_RUNTIME_ENVIRONMENT",
+  "evidence_class": "NON_COMPARABILITY_RECEIPT",
+  "role": "reference_baseline_investigation",
+  "comparison_intent": {
+    "target_engines": [
+      "vllm-reference",
+      "sglang-reference"
+    ],
+    "workload": {
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "target_platform": "amd_consumer_rdna3",
+      "batch": 1,
+      "concurrency": 16,
+      "prompt_tokens": 128,
+      "output_tokens": 128
+    }
+  },
+  "host": {
+    "os": "Microsoft Windows 11 Pro",
+    "version": "10.0.26200",
+    "build": "26200.9168",
+    "arch": "x86_64",
+    "cpu": {
+      "model": "AMD Ryzen 9 9950X 16-Core Processor",
+      "cores": 16,
+      "logical_processors": 32
+    },
+    "gpus": [
+      {
+        "name": "AMD Radeon RX 7600",
+        "role": "discrete",
+        "pci_device_id": "DEV_7480",
+        "vendor_id": "0x1002",
+        "subsystem_id": "0x242B1458",
+        "revision_id": "0xCF",
+        "pnp_device_id": "PCI\\VEN_1002&DEV_7480&SUBSYS_242B1458&REV_CF\\6&339F157A&0&00000009",
+        "architecture": "RDNA3",
+        "asic": "Navi 33",
+        "target_isa": "gfx1102",
+        "driver_version": "32.0.31041.1004",
+        "driver_date": "2026-08-16",
+        "inf_section": "ati2mtag_Navi33",
+        "inf_filename": "oem76.inf",
+        "vram_bytes_physical": 8589934592,
+        "adapter_ram_reported": 4293918720
+      },
+      {
+        "name": "AMD Radeon(TM) Graphics",
+        "role": "integrated",
+        "pci_device_id": "DEV_13C0",
+        "vendor_id": "0x1002",
+        "driver_version": "32.0.21045.5002"
+      }
+    ]
+  },
+  "wsl": {
+    "distro": "Ubuntu 24.04.4 LTS",
+    "codename": "noble",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "wsl_version": "2.7.12.0",
+    "wslg_version": "1.0.73.2",
+    "direct3d_version": "1.611.1-81528511",
+    "dxcore_version": "10.0.26100.1-240331-1435.ge-release",
+    "devices": {
+      "dev_dxg": {
+        "present": true,
+        "type": "character_device",
+        "major_minor": "10, 258",
+        "path": "/dev/dxg"
+      },
+      "dev_kfd": {
+        "present": false,
+        "path": "/dev/kfd",
+        "probe_error": "No such file or directory"
+      },
+      "dev_dri": {
+        "present": false,
+        "path": "/dev/dri",
+        "probe_error": "No such file or directory"
+      }
+    },
+    "userspace_libraries": {
+      "libd3d12core_so": {
+        "present": true,
+        "path": "/usr/lib/wsl/lib/libd3d12core.so",
+        "bytes": 6880344
+      },
+      "libd3d12_so": {
+        "present": true,
+        "path": "/usr/lib/wsl/lib/libd3d12.so",
+        "bytes": 801840
+      },
+      "libdxcore_so": {
+        "present": true,
+        "path": "/usr/lib/wsl/lib/libdxcore.so",
+        "bytes": 942048
+      },
+      "libcuda_so": {
+        "present": false,
+        "path": "/usr/lib/wsl/lib/libcuda.so",
+        "note": "NVIDIA-only WDDM bridge library; absent on AMD GPU system"
+      }
+    }
+  },
+  "rocm_environment": {
+    "wsl_bridge": {
+      "package": "rocdxg-roct",
+      "version": "1.2.2",
+      "library_path": "/opt/rocm/lib/librocdxg.so.1.2.2",
+      "deb_sha256": "28ded1254811192ebace1f76c0227580184af7b27ab2475fb9728295a702d541",
+      "dids_conf_path": "/opt/rocm/share/rocdxg/dids.conf",
+      "dids_conf_state": "Commented examples only (# 0x7480,11,0,2); no active un-commented override"
+    },
+    "python_sdk": {
+      "venv_path": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv",
+      "python_version": "3.12.3",
+      "packages": {
+        "rocm": "10.0.0",
+        "rocm-sdk-core": "10.0.0",
+        "rocm-sdk-device-gfx1102": "10.0.0",
+        "rocm-sdk-libraries": "10.0.0"
+      },
+      "sdk_targets_output": "gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1152;gfx1153;gfx908;gfx90a;gfx942;gfx950;gfx1250"
+    },
+    "live_probes": {
+      "rocminfo": {
+        "command": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocminfo",
+        "exit_code": 1,
+        "status": "FAILED",
+        "captured_messages": [
+          "pid:... [topology_sysfs_get_system_props] No WDDM adapters found.",
+          "WSL environment detected.",
+          "hsa_init Failed, possibly no supported GPU devices"
+        ]
+      },
+      "amd_smi": {
+        "command": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/amd-smi",
+        "exit_code": 255,
+        "status": "FAILED",
+        "captured_messages": [
+          "ERROR:root:Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
+        ]
+      },
+      "rocm_smi": {
+        "command": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocm-smi",
+        "exit_code": 0,
+        "status": "FAILED",
+        "captured_messages": [
+          "ERROR:root:Driver not initialized (amdgpu not found in modules)"
+        ]
+      },
+      "rocm_agent_enumerator": {
+        "command": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocm_agent_enumerator -name",
+        "exit_code": 0,
+        "status": "FAILED",
+        "captured_messages": [
+          "pid:... [topology_sysfs_get_system_props] No WDDM adapters found."
+        ],
+        "agents_returned": []
+      },
+      "hipconfig_all": {
+        "command": "/home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/hipconfig --all",
+        "exit_code": 2,
+        "status": "FAILED",
+        "captured_messages": [
+          "pid:... [topology_sysfs_get_system_props] No WDDM adapters found."
+        ]
+      },
+      "wsl_dmesg_dxg": {
+        "status": "FAILED",
+        "captured_ioctl_errors": [
+          "dxgkio_is_feature_enabled: Ioctl failed: -22",
+          "dxgkio_query_adapter_info: Ioctl failed: -22",
+          "dxgkio_query_adapter_info: Ioctl failed: -2"
+        ]
+      }
+    }
+  },
+  "witnessed_boundary": {
+    "wsl_driver_bridge_boundary": {
+      "summary": "WSL2 exposes /dev/dxg and /usr/lib/wsl/lib/libd3d12core.so, but lacks /dev/kfd and /dev/dri.",
+      "detail": "AMD ROCm Linux userspace driver requires /dev/kfd (Kernel Fusion Driver) and DRM render nodes (/dev/dri/renderD*), which are not bridged through standard WSL2 WDDM for AMD consumer RDNA3 gfx1102. Unlike NVIDIA NVML/CUDA which has a /dev/dxg CUDA driver translation layer (libcuda.so), AMD's experimental WSL2 bridge (librocdxg) fails adapter query IOCTLs (-22, -2) against consumer Windows driver 32.0.31041.1004, causing HSA initialization to fail with 'No WDDM adapters found'."
+    },
+    "upstream_vllm_rocm_support_matrix": {
+      "summary": "vLLM ROCm officially requires bare-metal Linux and excludes RX 7600 (gfx1102) and WSL2.",
+      "authoritative_source": "https://docs.vllm.ai/en/stable/getting_started/installation/gpu/",
+      "requirements": [
+        "Platform: Bare-metal Linux only (WSL2 ROCm is unsupported upstream).",
+        "ROCm version: ROCm >= 6.3.",
+        "Supported AMD GPU families: Datacenter accelerators (Instinct MI200, MI300, MI350 series), select client RDNA3 (RX 7900 XTX / gfx1100, RX 7900 XT / gfx1100), RDNA4 (RX 9000 / gfx1200, gfx1201), and Ryzen AI MAX / AI 300.",
+        "Unsupported: AMD Radeon RX 7600 (gfx1102 / Navi 33) is not listed in the vLLM ROCm hardware support matrix."
+      ]
+    },
+    "upstream_sglang_rocm_support_matrix": {
+      "summary": "SGLang AMD GPU platform guide is oriented exclusively around bare-metal Linux Instinct accelerators.",
+      "authoritative_source": "https://docs.sglang.ai/platforms/amd_gpu.html",
+      "requirements": [
+        "Deployment model: Official Docker images based on rocm.Dockerfile requiring direct access to /dev/kfd and /dev/dri.",
+        "Supported AMD hardware: Tuned and tested on AMD Instinct datacenter accelerators (MI210, MI250, MI300X).",
+        "Unsupported: SGLang provides no documentation, qualification, or CI for consumer RDNA3 RX 7600 (gfx1102), and does not support WSL2."
+      ]
+    },
+    "upstream_amd_wsl_compatibility_matrix": {
+      "summary": "AMD official ROCm on WSL2 matrix restricts support to select high-end and workstation cards.",
+      "authoritative_source": "https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/wsl/wsl_compatibility.html",
+      "requirements": [
+        "Official WSL2 supported GPUs: Radeon PRO W7900, Radeon RX 7900 XTX, Radeon RX 7900 XT, Radeon RX 7900 GRE.",
+        "Omitted: AMD Radeon RX 7600 / RX 7600 XT (gfx1102) is omitted from the official WSL2 ROCm compatibility table."
+      ]
+    }
+  },
+  "engine_attempts": {
+    "vllm": {
+      "engine": "vllm-reference",
+      "status": "NOT_ATTEMPTED",
+      "typed_outcome": "non_comparable_runtime_gpu_not_admitted",
+      "prerequisite_probe_passed": false,
+      "server_started": false,
+      "throughput_measured": false,
+      "reason": "vLLM server startup was blocked at the runtime GPU admission gate: WSL2 rocminfo failed to enumerate gfx1102 (exit code 1, 'No WDDM adapters found'), and upstream vLLM does not support RX 7600 or WSL2.",
+      "cpu_fallback_used": false,
+      "fak_native_substitution_used": false
+    },
+    "sglang": {
+      "engine": "sglang-reference",
+      "status": "NOT_ATTEMPTED",
+      "typed_outcome": "non_comparable_runtime_gpu_not_admitted",
+      "prerequisite_probe_passed": false,
+      "server_started": false,
+      "throughput_measured": false,
+      "reason": "SGLang server startup was blocked at the runtime GPU admission gate: WSL2 rocminfo failed to enumerate gfx1102 (exit code 1, 'No WDDM adapters found'), and upstream SGLang requires bare-metal /dev/kfd on Instinct MI200/MI300 series.",
+      "cpu_fallback_used": false,
+      "fak_native_substitution_used": false
+    }
+  },
+  "governance_and_prohibited_substitutions": {
+    "cpu_fallback_prohibited": true,
+    "cpu_fallback_used": false,
+    "fak_native_substitution_prohibited": true,
+    "fak_native_substitution_used": false,
+    "simulated_numbers_prohibited": true,
+    "simulated_numbers_used": false,
+    "unsupported_override_prohibited": true,
+    "unsupported_override_used": false,
+    "rationale": "In accordance with BENCHMARK-GOVERNANCE.md and AGENTS.md, a benchmark receipt must record true runtime execution facts. A failed runtime admission must not be converted into CPU fallback or fak-native Vulkan numbers, nor into simulated latency. The boundary is witnessed as a typed non-comparability receipt."
+  },
+  "claims": {
+    "baseline_throughput_measured": false,
+    "gpu_execution_proven": false,
+    "non_comparability_witnessed": true
+  },
+  "replay_commands": [
+    "powershell -Command \"Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, PNPDeviceID, AdapterRAM\"",
+    "powershell -Command \"wsl --version\"",
+    "powershell -Command \"wsl uname -a\"",
+    "powershell -Command \"wsl bash -c 'ls -l /dev/dxg /dev/kfd /dev/dri 2>&1'\"",
+    "powershell -Command \"wsl bash -c 'ls -la /usr/lib/wsl/lib/'\"",
+    "powershell -Command \"wsl /home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocminfo\"",
+    "powershell -Command \"wsl /home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/amd-smi\"",
+    "powershell -Command \"wsl /home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocm-smi\"",
+    "powershell -Command \"wsl /home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/rocm_agent_enumerator -name\"",
+    "powershell -Command \"wsl /home/USER/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/hipconfig --all\"",
+    "powershell -Command \"wsl bash -c 'dmesg | grep -iE dxgkio'\""
+  ]
+}

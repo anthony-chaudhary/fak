@@ -1,458 +1,807 @@
 package model
 
-import (
-	"errors"
-	"fmt"
-	"math"
-)
-
-// Default configurations for WYF chunkwise GatedDeltaNet recurrence.
-const (
-	DefaultWYFChunkSize = 32
-	DefaultWYFHeadDim   = 128
-)
-
-// WyfRecurrenceConfig defines execution geometry for GatedDeltaNet recurrence.
-type WyfRecurrenceConfig struct {
-	BatchSize int // Number of batch sequences (default: 1)
-	NumHeads  int // Number of attention heads (default: 1)
-	SeqLen    int // Sequence length N
-	HeadDim   int // Head dimension D (default: 128)
-	ChunkSize int // Chunk size C (default: 32)
-}
-
-// Validate validates and fills default parameters for WyfRecurrenceConfig.
-func (c *WyfRecurrenceConfig) Validate() error {
-	if c.BatchSize <= 0 {
-		c.BatchSize = 1
-	}
-	if c.NumHeads <= 0 {
-		c.NumHeads = 1
-	}
-	if c.SeqLen <= 0 {
-		return errors.New("wyf_recurrence: SeqLen must be positive")
-	}
-	if c.HeadDim <= 0 {
-		c.HeadDim = DefaultWYFHeadDim
-	}
-	if c.ChunkSize <= 0 {
-		c.ChunkSize = DefaultWYFChunkSize
-	}
-	return nil
-}
-
-// WyfChunkwiseRecurrence executes chunkwise parallel recurrence for GatedDeltaNet linear attention.
+// wyf_recurrence.go implements Woodbury-Yamamoto-Fernandes (WYF) chunkwise
+// parallel recurrence for GatedDeltaNet linear attention (e.g. in Qwen3.8 and GLM-5.3).
 //
-// Arguments:
-//   - q, k, v: query, key, and value tensors of dimension [totalTokens, D]
-//   - beta: input update gate tensor of length [totalTokens]
-//   - gate: decay factor tensor in (0, 1] of length [totalTokens]
-//   - n: sequence length N (tokens per sequence)
-//   - d: head dimension D (defaults to 128 if <= 0)
-//   - c: chunk size C (defaults to 32 if <= 0)
-//   - initState: optional initial recurrent state of size [numSeqs, D, D] (or nil for zero state)
+// In sequential token-by-token recurrence, the state update:
+//   S_t = diag(alpha_t) * S_{t-1} + beta_t * (v_t - S_{t-1} * k_t) * k_t^T
+// requires loading and storing the full Dim x Dim state matrix at every token,
+// creating an arithmetic intensity bottleneck (~0.5 flop/byte).
 //
-// Returns:
-//   - output: output tensor of size [totalTokens, D]
-//   - finalState: final recurrent state of size [numSeqs, D, D]
-//   - err: non-nil if input dimensions are mismatched
-func WyfChunkwiseRecurrence(
-	q, k, v, beta, gate []float32,
-	n, d, c int,
-	initState []float32,
-) ([]float32, []float32, error) {
-	if d < 0 {
-		return nil, nil, errors.New("wyf_recurrence: head dimension d cannot be negative")
-	}
-	if d == 0 {
-		d = DefaultWYFHeadDim
-	}
-	if c < 0 {
-		return nil, nil, errors.New("wyf_recurrence: chunk size c cannot be negative")
-	}
-	if c == 0 {
-		c = DefaultWYFChunkSize
-	}
-	if n < 0 {
-		return nil, nil, errors.New("wyf_recurrence: sequence length n cannot be negative")
-	}
-	if n == 0 {
-		if d > 0 && len(q) > 0 {
-			n = len(q) / d
-		} else {
-			return nil, nil, errors.New("wyf_recurrence: sequence length n must be positive")
-		}
-	}
+// Woodbury-Yamamoto-Fernandes (WYF) chunkwise parallel block processing computes
+// intra-chunk token dependencies in chunks of size C (e.g. 16 or 32 tokens) via
+// parallel triangular block substitution (A * U = V'). This converts the token loop
+// into chunked matrix operations (K^T * K Gram matrix, triangular solve, and block GEMMs),
+// raising arithmetic intensity and enabling SIMD/accelerator hardware parallelism.
 
-	totalTokens := len(beta)
-	if totalTokens == 0 {
-		return nil, nil, errors.New("wyf_recurrence: empty input tensors")
-	}
-	if totalTokens%n != 0 {
-		return nil, nil, fmt.Errorf("wyf_recurrence: total tokens %d not divisible by sequence length %d", totalTokens, n)
-	}
-	numSeqs := totalTokens / n
-
-	cfg := WyfRecurrenceConfig{
-		BatchSize: 1,
-		NumHeads:  numSeqs,
-		SeqLen:    n,
-		HeadDim:   d,
-		ChunkSize: c,
-	}
-	return WyfChunkwiseRecurrenceConfig(q, k, v, beta, gate, cfg, initState)
+// WYFChunkConfig holds chunked execution parameters for WYF recurrence.
+type WYFChunkConfig struct {
+	ChunkSize int
+	Dim       int
 }
 
-// WyfChunkwiseRecurrenceConfig executes WyfChunkwiseRecurrence using an explicit WyfRecurrenceConfig.
-func WyfChunkwiseRecurrenceConfig(
-	q, k, v, beta, gate []float32,
-	cfg WyfRecurrenceConfig,
-	initState []float32,
-) ([]float32, []float32, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, nil, err
+// NewWYFChunkConfig returns a validated WYFChunkConfig with sensible defaults.
+func NewWYFChunkConfig(chunkSize, dim int) WYFChunkConfig {
+	if chunkSize <= 0 {
+		chunkSize = 16
 	}
-
-	n := cfg.SeqLen
-	d := cfg.HeadDim
-	c := cfg.ChunkSize
-	numSeqs := cfg.BatchSize * cfg.NumHeads
-	totalTokens := numSeqs * n
-	expectedElems := totalTokens * d
-	stateSizePerSeq := d * d
-
-	if len(q) < expectedElems || len(k) < expectedElems || len(v) < expectedElems {
-		return nil, nil, fmt.Errorf("wyf_recurrence: q/k/v length (%d/%d/%d) smaller than expected %d",
-			len(q), len(k), len(v), expectedElems)
+	return WYFChunkConfig{
+		ChunkSize: chunkSize,
+		Dim:       dim,
 	}
-	if len(beta) < totalTokens || len(gate) < totalTokens {
-		return nil, nil, fmt.Errorf("wyf_recurrence: beta/gate length (%d/%d) smaller than expected %d",
-			len(beta), len(gate), totalTokens)
-	}
-
-	output := make([]float32, expectedElems)
-	finalState := make([]float32, numSeqs*stateSizePerSeq)
-
-	// Pre-allocate chunk scratch buffers
-	bScratch := make([]float32, c*d)
-	outInterScratch := make([]float32, c*d)
-	rScratch := make([]float32, c*d)
-	mScratch := make([]float32, c*c)
-	pScratch := make([]float32, c*c)
-	deltaScratch := make([]float32, c*d)
-	prefixLog := make([]float64, c)
-	gamma := make([]float32, c)
-
-	curState := make([]float32, stateSizePerSeq)
-
-	for seq := 0; seq < numSeqs; seq++ {
-		// Initialize state for this sequence
-		if len(initState) >= (seq+1)*stateSizePerSeq {
-			copy(curState, initState[seq*stateSizePerSeq:(seq+1)*stateSizePerSeq])
-		} else if len(initState) >= stateSizePerSeq && numSeqs == 1 {
-			copy(curState, initState[:stateSizePerSeq])
-		} else {
-			for i := range curState {
-				curState[i] = 0.0
-			}
-		}
-
-		qSeq := q[seq*n*d : (seq+1)*n*d]
-		kSeq := k[seq*n*d : (seq+1)*n*d]
-		vSeq := v[seq*n*d : (seq+1)*n*d]
-		betaSeq := beta[seq*n : (seq+1)*n]
-		gateSeq := gate[seq*n : (seq+1)*n]
-		outSeq := output[seq*n*d : (seq+1)*n*d]
-
-		for t0 := 0; t0 < n; t0 += c {
-			curC := c
-			if t0+curC > n {
-				curC = n - t0
-			}
-
-			// 1. Prefix scan of cumulative decays across the chunk
-			var sumLog float64
-			for t := 0; t < curC; t++ {
-				gVal := gateSeq[t0+t]
-				if gVal <= 0.0 {
-					gVal = 1e-7
-				}
-				sumLog += math.Log(float64(gVal))
-				prefixLog[t] = sumLog
-				gamma[t] = float32(math.Exp(sumLog))
-			}
-
-			// 2. Inter-chunk projection from incoming state S_0:
-			//    b_t = gamma_t * (S_0 * k_t)
-			//    out_inter_t = gamma_t * (S_0 * q_t)
-			for t := 0; t < curC; t++ {
-				kRow := kSeq[(t0+t)*d : (t0+t+1)*d]
-				qRow := qSeq[(t0+t)*d : (t0+t+1)*d]
-				bRow := bScratch[t*d : (t+1)*d]
-				oiRow := outInterScratch[t*d : (t+1)*d]
-				gT := gamma[t]
-
-				for dv := 0; dv < d; dv++ {
-					stRow := curState[dv*d : (dv+1)*d]
-					var sumK, sumQ float32
-					for dk := 0; dk < d; dk++ {
-						sumK += stRow[dk] * kRow[dk]
-						sumQ += stRow[dk] * qRow[dk]
-					}
-					bRow[dv] = gT * sumK
-					oiRow[dv] = gT * sumQ
-				}
-			}
-
-			// 3. Right-hand side: R_t = beta_t * (v_t - b_t)
-			for t := 0; t < curC; t++ {
-				betaT := betaSeq[t0+t]
-				vRow := vSeq[(t0+t)*d : (t0+t+1)*d]
-				bRow := bScratch[t*d : (t+1)*d]
-				rRow := rScratch[t*d : (t+1)*d]
-				for dv := 0; dv < d; dv++ {
-					rRow[dv] = betaT * (vRow[dv] - bRow[dv])
-				}
-			}
-
-			// 4. Lower-triangular cross-token kernel M_{t, s} and causal attention P_{t, s}
-			for t := 0; t < curC; t++ {
-				kRowT := kSeq[(t0+t)*d : (t0+t+1)*d]
-				qRowT := qSeq[(t0+t)*d : (t0+t+1)*d]
-				betaT := betaSeq[t0+t]
-				mScratch[t*curC+t] = 1.0
-
-				for s := 0; s <= t; s++ {
-					kRowS := kSeq[(t0+s)*d : (t0+s+1)*d]
-					var dotKK, dotQK float32
-					for dk := 0; dk < d; dk++ {
-						dotKK += kRowT[dk] * kRowS[dk]
-						dotQK += qRowT[dk] * kRowS[dk]
-					}
-					decayST := float32(1.0)
-					if s < t {
-						decayST = float32(math.Exp(prefixLog[t] - prefixLog[s]))
-						cTS := decayST * dotKK
-						mScratch[t*curC+s] = betaT * cTS
-					}
-					pScratch[t*curC+s] = decayST * dotQK
-				}
-			}
-
-			// 5. Triangular forward substitution: solve M * Delta = R
-			for t := 0; t < curC; t++ {
-				deltaT := deltaScratch[t*d : (t+1)*d]
-				rT := rScratch[t*d : (t+1)*d]
-				copy(deltaT, rT)
-
-				for s := 0; s < t; s++ {
-					mTS := mScratch[t*curC+s]
-					deltaS := deltaScratch[s*d : (s+1)*d]
-					for dv := 0; dv < d; dv++ {
-						deltaT[dv] -= mTS * deltaS[dv]
-					}
-				}
-			}
-
-			// 6. Chunk readout outputs: out_t = out_inter_t + sum_{s<=t} P_{t, s} * delta_s
-			for t := 0; t < curC; t++ {
-				outInterT := outInterScratch[t*d : (t+1)*d]
-				outT := outSeq[(t0+t)*d : (t0+t+1)*d]
-				copy(outT, outInterT)
-
-				for s := 0; s <= t; s++ {
-					pTS := pScratch[t*curC+s]
-					deltaS := deltaScratch[s*d : (s+1)*d]
-					for dv := 0; dv < d; dv++ {
-						outT[dv] += pTS * deltaS[dv]
-					}
-				}
-			}
-
-			// 7. Update chunk-end recurrent state with rank-1 outer products:
-			//    S_end = gamma_{C-1} * S_0 + sum_{s=0}^{C-1} delta_s * tilde_k_s^T
-			decayEnd := gamma[curC-1]
-			for i := 0; i < stateSizePerSeq; i++ {
-				curState[i] *= decayEnd
-			}
-			for s := 0; s < curC; s++ {
-				decaySK := float32(math.Exp(prefixLog[curC-1] - prefixLog[s]))
-				kRowS := kSeq[(t0+s)*d : (t0+s+1)*d]
-				deltaS := deltaScratch[s*d : (s+1)*d]
-				for dv := 0; dv < d; dv++ {
-					dVal := deltaS[dv]
-					stRow := curState[dv*d : (dv+1)*d]
-					for dk := 0; dk < d; dk++ {
-						stRow[dk] += dVal * (decaySK * kRowS[dk])
-					}
-				}
-			}
-		}
-
-		copy(finalState[seq*stateSizePerSeq:(seq+1)*stateSizePerSeq], curState)
-	}
-
-	return output, finalState, nil
 }
 
-// SequentialGatedDeltaNet executes the exact sequential reference GatedDeltaNet recurrence.
-// It processes tokens one by one for numerical verification against WyfChunkwiseRecurrence.
-//
-// Arguments:
-//   - q, k, v: query, key, and value tensors of dimension [totalTokens, D]
-//   - beta: input update gate tensor of length [totalTokens]
-//   - gate: decay factor tensor in (0, 1] of length [totalTokens]
-//   - n: sequence length N (tokens per sequence)
-//   - d: head dimension D (defaults to 128 if <= 0)
-//   - initState: optional initial recurrent state of size [numSeqs, D, D] (or nil for zero state)
-//
-// Returns:
-//   - output: output tensor of size [totalTokens, D]
-//   - finalState: final recurrent state of size [numSeqs, D, D]
-//   - err: non-nil if input dimensions are mismatched
-func SequentialGatedDeltaNet(
-	q, k, v, beta, gate []float32,
-	n, d int,
-	initState []float32,
-) ([]float32, []float32, error) {
-	if d < 0 {
-		return nil, nil, errors.New("sequential_gdn: head dimension d cannot be negative")
-	}
-	if d == 0 {
-		d = DefaultWYFHeadDim
-	}
-	if n < 0 {
-		return nil, nil, errors.New("sequential_gdn: sequence length n cannot be negative")
-	}
-	if n == 0 {
-		if d > 0 && len(q) > 0 {
-			n = len(q) / d
-		} else {
-			return nil, nil, errors.New("sequential_gdn: sequence length n must be positive")
-		}
-	}
-
-	totalTokens := len(beta)
-	if totalTokens == 0 {
-		return nil, nil, errors.New("sequential_gdn: empty input tensors")
-	}
-	if totalTokens%n != 0 {
-		return nil, nil, fmt.Errorf("sequential_gdn: total tokens %d not divisible by sequence length %d", totalTokens, n)
-	}
-	numSeqs := totalTokens / n
-
-	cfg := WyfRecurrenceConfig{
-		BatchSize: 1,
-		NumHeads:  numSeqs,
-		SeqLen:    n,
-		HeadDim:   d,
-		ChunkSize: DefaultWYFChunkSize,
-	}
-	return SequentialGatedDeltaNetConfig(q, k, v, beta, gate, cfg, initState)
+// Recurrence executes WYF chunkwise parallel recurrence with this configuration.
+func (cfg WYFChunkConfig) Recurrence(k, v, beta, alpha [][]float32, s0 [][]float32) ([][]float32, [][][]float32) {
+	return WYFChunkwiseRecurrence(k, v, beta, alpha, s0, cfg.ChunkSize)
 }
 
-// SequentialGatedDeltaNetConfig executes SequentialGatedDeltaNet using an explicit WyfRecurrenceConfig.
-func SequentialGatedDeltaNetConfig(
-	q, k, v, beta, gate []float32,
-	cfg WyfRecurrenceConfig,
-	initState []float32,
-) ([]float32, []float32, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, nil, err
+func extractAlpha(alpha [][]float32, t, dim int) (float32, []float32, bool) {
+	if alpha == nil || t >= len(alpha) || len(alpha[t]) == 0 {
+		return 1.0, nil, true
+	}
+	row := alpha[t]
+	if len(row) == 1 {
+		return row[0], nil, true
+	}
+	if len(row) >= dim {
+		val := row[0]
+		uniform := true
+		for i := 1; i < dim; i++ {
+			if row[i] != val {
+				uniform = false
+				break
+			}
+		}
+		if uniform {
+			return val, nil, true
+		}
+		return 0, row[:dim], false
+	}
+	return row[0], nil, true
+}
+
+func extractBeta(beta [][]float32, t, dim int) (float32, []float32, bool) {
+	if beta == nil || t >= len(beta) || len(beta[t]) == 0 {
+		return 1.0, nil, true
+	}
+	row := beta[t]
+	if len(row) == 1 {
+		return row[0], nil, true
+	}
+	if len(row) >= dim {
+		val := row[0]
+		uniform := true
+		for i := 1; i < dim; i++ {
+			if row[i] != val {
+				uniform = false
+				break
+			}
+		}
+		if uniform {
+			return val, nil, true
+		}
+		return 0, row[:dim], false
+	}
+	return row[0], nil, true
+}
+
+// SequentialGDN computes the reference token-by-token recurrence:
+//
+//	S_t = diag(alpha_t) * S_{t-1} + beta_t * (v_t - S_{t-1} * k_t) * k_t^T
+//
+// with token output y_t = S_t * k_t.
+// Returns outputs [T][Dim] and states [T][Dim][Dim].
+func SequentialGDN(k, v, beta, alpha [][]float32, s0 [][]float32) ([][]float32, [][][]float32) {
+	T := len(k)
+	if T == 0 {
+		return nil, nil
+	}
+	dim := len(k[0])
+	if dim == 0 {
+		return nil, nil
 	}
 
-	n := cfg.SeqLen
-	d := cfg.HeadDim
-	numSeqs := cfg.BatchSize * cfg.NumHeads
-	totalTokens := numSeqs * n
-	expectedElems := totalTokens * d
-	stateSizePerSeq := d * d
-
-	if len(q) < expectedElems || len(k) < expectedElems || len(v) < expectedElems {
-		return nil, nil, fmt.Errorf("sequential_gdn: q/k/v length (%d/%d/%d) smaller than expected %d",
-			len(q), len(k), len(v), expectedElems)
-	}
-	if len(beta) < totalTokens || len(gate) < totalTokens {
-		return nil, nil, fmt.Errorf("sequential_gdn: beta/gate length (%d/%d) smaller than expected %d",
-			len(beta), len(gate), totalTokens)
+	// Initialize S from s0 (or zeros if nil).
+	S := make([][]float32, dim)
+	for i := 0; i < dim; i++ {
+		S[i] = make([]float32, dim)
+		if s0 != nil && i < len(s0) {
+			copy(S[i], s0[i])
+		}
 	}
 
-	output := make([]float32, expectedElems)
-	finalState := make([]float32, numSeqs*stateSizePerSeq)
+	outputs := make([][]float32, T)
+	states := make([][][]float32, T)
 
-	curState := make([]float32, stateSizePerSeq)
-	kvmem := make([]float32, d)
-	delta := make([]float32, d)
+	p := make([]float32, dim)
+	u := make([]float32, dim)
 
-	for seq := 0; seq < numSeqs; seq++ {
-		// Initialize state for this sequence
-		if len(initState) >= (seq+1)*stateSizePerSeq {
-			copy(curState, initState[seq*stateSizePerSeq:(seq+1)*stateSizePerSeq])
-		} else if len(initState) >= stateSizePerSeq && numSeqs == 1 {
-			copy(curState, initState[:stateSizePerSeq])
+	for t := 0; t < T; t++ {
+		kt := k[t]
+		vt := v[t]
+		aScalar, aVec, aUniform := extractAlpha(alpha, t, dim)
+		bScalar, bVec, bUniform := extractBeta(beta, t, dim)
+
+		// 1. p = S_{t-1} * k_t
+		for i := 0; i < dim; i++ {
+			var sum float32
+			row := S[i]
+			for j := 0; j < dim; j++ {
+				sum += row[j] * kt[j]
+			}
+			p[i] = sum
+		}
+
+		// 2. Decay state: S_decayed = diag(alpha_t) * S_{t-1}
+		if aUniform {
+			for i := 0; i < dim; i++ {
+				row := S[i]
+				for j := 0; j < dim; j++ {
+					row[j] *= aScalar
+				}
+			}
 		} else {
-			for i := range curState {
-				curState[i] = 0.0
+			for i := 0; i < dim; i++ {
+				ai := aVec[i]
+				row := S[i]
+				for j := 0; j < dim; j++ {
+					row[j] *= ai
+				}
 			}
 		}
 
-		qSeq := q[seq*n*d : (seq+1)*n*d]
-		kSeq := k[seq*n*d : (seq+1)*n*d]
-		vSeq := v[seq*n*d : (seq+1)*n*d]
-		betaSeq := beta[seq*n : (seq+1)*n]
-		gateSeq := gate[seq*n : (seq+1)*n]
-		outSeq := output[seq*n*d : (seq+1)*n*d]
+		// 3. Error vector u_t = beta_t * (v_t - p)
+		if bUniform {
+			for i := 0; i < dim; i++ {
+				u[i] = bScalar * (vt[i] - p[i])
+			}
+		} else {
+			for i := 0; i < dim; i++ {
+				u[i] = bVec[i] * (vt[i] - p[i])
+			}
+		}
 
-		for t := 0; t < n; t++ {
-			gVal := gateSeq[t]
-			betaVal := betaSeq[t]
-			qRow := qSeq[t*d : (t+1)*d]
-			kRow := kSeq[t*d : (t+1)*d]
-			vRow := vSeq[t*d : (t+1)*d]
-			outRow := outSeq[t*d : (t+1)*d]
+		// 4. Update state: S_t = S_decayed + u_t * k_t^T
+		for i := 0; i < dim; i++ {
+			ui := u[i]
+			row := S[i]
+			for j := 0; j < dim; j++ {
+				row[j] += ui * kt[j]
+			}
+		}
 
-			// 1. Decay state: S'_t = g_t * S_{t-1}
-			for i := 0; i < stateSizePerSeq; i++ {
-				curState[i] *= gVal
+		// 5. Output: y_t = S_t * k_t
+		yt := make([]float32, dim)
+		for i := 0; i < dim; i++ {
+			var sum float32
+			row := S[i]
+			for j := 0; j < dim; j++ {
+				sum += row[j] * kt[j]
+			}
+			yt[i] = sum
+		}
+		outputs[t] = yt
+
+		// 6. Snapshot state
+		stCopy := make([][]float32, dim)
+		for i := 0; i < dim; i++ {
+			stCopy[i] = make([]float32, dim)
+			copy(stCopy[i], S[i])
+		}
+		states[t] = stCopy
+	}
+
+	return outputs, states
+}
+
+// WYFChunkwiseRecurrence computes the chunkwise parallel block recurrence using
+// intra-chunk triangular block substitution, matching SequentialGDN within Delta < 1e-4.
+func WYFChunkwiseRecurrence(k, v, beta, alpha [][]float32, s0 [][]float32, chunkSize int) ([][]float32, [][][]float32) {
+	T := len(k)
+	if T == 0 {
+		return nil, nil
+	}
+	dim := len(k[0])
+	if dim == 0 {
+		return nil, nil
+	}
+	if chunkSize <= 0 {
+		chunkSize = 16
+	}
+
+	// Working state S (size dim x dim)
+	S := make([][]float32, dim)
+	for i := 0; i < dim; i++ {
+		S[i] = make([]float32, dim)
+		if s0 != nil && i < len(s0) {
+			copy(S[i], s0[i])
+		}
+	}
+
+	outputs := make([][]float32, T)
+	states := make([][][]float32, T)
+
+	// Pre-allocated chunk workspace buffers to avoid GC pressure.
+	p0 := make([][]float32, chunkSize)
+	Vprime := make([][]float32, chunkSize)
+	U := make([][]float32, chunkSize)
+	for i := 0; i < chunkSize; i++ {
+		p0[i] = make([]float32, dim)
+		Vprime[i] = make([]float32, dim)
+		U[i] = make([]float32, dim)
+	}
+	G := make([][]float32, chunkSize)
+	A := make([][]float32, chunkSize)
+	AInv := make([][]float32, chunkSize)
+	for i := 0; i < chunkSize; i++ {
+		G[i] = make([]float32, chunkSize)
+		A[i] = make([]float32, chunkSize)
+		AInv[i] = make([]float32, chunkSize)
+	}
+	gamma := make([][]float32, chunkSize+1)
+	for i := 0; i <= chunkSize; i++ {
+		gamma[i] = make([]float32, chunkSize+1)
+	}
+	aScalars := make([]float32, chunkSize)
+	bScalars := make([]float32, chunkSize)
+	aVecs := make([][]float32, chunkSize)
+	bVecs := make([][]float32, chunkSize)
+
+	for offset := 0; offset < T; offset += chunkSize {
+		cLen := chunkSize
+		if offset+cLen > T {
+			cLen = T - offset
+		}
+
+		allAlphaUniform := true
+		allBetaUniform := true
+
+		for t := 0; t < cLen; t++ {
+			globalT := offset + t
+			as, av, au := extractAlpha(alpha, globalT, dim)
+			aScalars[t] = as
+			aVecs[t] = av
+			if !au {
+				allAlphaUniform = false
 			}
 
-			// 2. Compute kvmem = S'_t * k_t
-			for dv := 0; dv < d; dv++ {
-				stRow := curState[dv*d : (dv+1)*d]
+			bs, bv, bu := extractBeta(beta, globalT, dim)
+			bScalars[t] = bs
+			bVecs[t] = bv
+			if !bu {
+				allBetaUniform = false
+			}
+		}
+
+		kChunk := k[offset : offset+cLen]
+		vChunk := v[offset : offset+cLen]
+
+		// Precompute S_0 * k_t for all t in chunk
+		for i := 0; i < dim; i++ {
+			rowS := S[i]
+			for t := 0; t < cLen; t++ {
+				p0[t][i] = fdot(rowS, kChunk[t])
+			}
+		}
+
+		// Gram matrix G[j][t] = k_j^T * k_t
+		for j := 0; j < cLen; j++ {
+			kj := kChunk[j]
+			for t := j; t < cLen; t++ {
+				dot := fdot(kj, kChunk[t])
+				G[j][t] = dot
+				G[t][j] = dot
+			}
+		}
+
+		if allAlphaUniform && allBetaUniform {
+			// Fast path: uniform scalars across dim
+			// 1. Compute gamma decay table: gamma[j][t] = prod_{m=j}^{t-1} a_m
+			for j := 0; j <= cLen; j++ {
+				gamma[j][j] = 1.0
+				for t := j + 1; t <= cLen; t++ {
+					gamma[j][t] = gamma[j][t-1] * aScalars[t-1]
+				}
+			}
+
+			// 2. Compute V'[t][d] = beta_t * (v_t[d] - gamma[0][t] * p0[t][d])
+			for t := 0; t < cLen; t++ {
+				rowV := Vprime[t]
+				vt := vChunk[t]
+				pt := p0[t]
+				bt := bScalars[t]
+				g0 := gamma[0][t]
+				for d := 0; d < dim; d++ {
+					rowV[d] = bt * (vt[d] - g0*pt[d])
+				}
+			}
+
+			// 3. Construct unit upper-triangular matrix A (cLen x cLen)
+			for j := 0; j < cLen; j++ {
+				A[j][j] = 1.0
+				for t := j + 1; t < cLen; t++ {
+					A[j][t] = bScalars[t] * gamma[j+1][t] * G[j][t]
+				}
+			}
+
+			// 4. Invert unit upper-triangular A -> AInv
+			for j := 0; j < cLen; j++ {
+				AInv[j][j] = 1.0
+				for t := j + 1; t < cLen; t++ {
+					var sum float32
+					for m := j; m < t; m++ {
+						sum += AInv[j][m] * A[m][t]
+					}
+					AInv[j][t] = -sum
+				}
+			}
+
+			// 5. U = V' * AInv  (U is [cLen][dim])
+			for t := 0; t < cLen; t++ {
+				rowU := U[t]
+				for d := 0; d < dim; d++ {
+					rowU[d] = 0
+				}
+				for j := 0; j <= t; j++ {
+					aij := AInv[j][t]
+					vRow := Vprime[j]
+					for d := 0; d < dim; d++ {
+						rowU[d] += vRow[d] * aij
+					}
+				}
+			}
+
+			// 6. Compute outputs y_t
+			// y_t = gamma[0][t+1] * p0[t] + sum_{j=0}^t gamma[j+1][t+1] * G[j][t] * u_j
+			for t := 0; t < cLen; t++ {
+				globalT := offset + t
+				yt := make([]float32, dim)
+				g0 := gamma[0][t+1]
+				pt := p0[t]
+				for d := 0; d < dim; d++ {
+					yt[d] = g0 * pt[d]
+				}
+				for j := 0; j <= t; j++ {
+					coeff := gamma[j+1][t+1] * G[j][t]
+					uj := U[j]
+					for d := 0; d < dim; d++ {
+						yt[d] += coeff * uj[d]
+					}
+				}
+				outputs[globalT] = yt
+			}
+
+			// 7. Intermediate states within chunk: S_{t+1} = alpha_t * S_t + u_t * k_t^T
+			currS := S
+			for t := 0; t < cLen; t++ {
+				globalT := offset + t
+				nextS := make([][]float32, dim)
+				backing := make([]float32, dim*dim)
+				at := aScalars[t]
+				ut := U[t]
+				kt := kChunk[t]
+				for i := 0; i < dim; i++ {
+					row := backing[i*dim : (i+1)*dim]
+					currRow := currS[i]
+					ui := ut[i]
+					for d := 0; d < dim; d++ {
+						row[d] = at*currRow[d] + ui*kt[d]
+					}
+					nextS[i] = row
+				}
+				states[globalT] = nextS
+				currS = nextS
+			}
+			S = currS
+
+		} else {
+			// Per-dimension general path (handles non-uniform alpha/beta across dim)
+			U := make([][]float32, cLen)
+			for t := 0; t < cLen; t++ {
+				U[t] = make([]float32, dim)
+			}
+
+			// Solve per-dimension
+			for d := 0; d < dim; d++ {
+				// 1. gamma table for dimension d
+				gamma := make([][]float32, cLen+1)
+				for j := 0; j <= cLen; j++ {
+					gamma[j] = make([]float32, cLen+1)
+					gamma[j][j] = 1.0
+					for t := j + 1; t <= cLen; t++ {
+						ad := aScalars[t-1]
+						if aVecs[t-1] != nil {
+							ad = aVecs[t-1][d]
+						}
+						gamma[j][t] = gamma[j][t-1] * ad
+					}
+				}
+
+				// 2. Vprime for dimension d
+				vPrimeD := make([]float32, cLen)
+				for t := 0; t < cLen; t++ {
+					bd := bScalars[t]
+					if bVecs[t] != nil {
+						bd = bVecs[t][d]
+					}
+					vPrimeD[t] = bd * (vChunk[t][d] - gamma[0][t]*p0[t][d])
+				}
+
+				// 3. Matrix A for dimension d
+				A := make([][]float32, cLen)
+				for j := 0; j < cLen; j++ {
+					A[j] = make([]float32, cLen)
+					A[j][j] = 1.0
+					for t := j + 1; t < cLen; t++ {
+						bd := bScalars[t]
+						if bVecs[t] != nil {
+							bd = bVecs[t][d]
+						}
+						A[j][t] = bd * gamma[j+1][t] * G[j][t]
+					}
+				}
+
+				// 4. Invert A -> AInv
+				AInv := make([][]float32, cLen)
+				for j := 0; j < cLen; j++ {
+					AInv[j] = make([]float32, cLen)
+					AInv[j][j] = 1.0
+					for t := j + 1; t < cLen; t++ {
+						var sum float32
+						for m := j; m < t; m++ {
+							sum += AInv[j][m] * A[m][t]
+						}
+						AInv[j][t] = -sum
+					}
+				}
+
+				// 5. U for dimension d
+				for t := 0; t < cLen; t++ {
+					var sum float32
+					for j := 0; j <= t; j++ {
+						sum += vPrimeD[j] * AInv[j][t]
+					}
+					U[t][d] = sum
+				}
+			}
+
+			// 6. Compute outputs y_t
+			for t := 0; t < cLen; t++ {
+				globalT := offset + t
+				yt := make([]float32, dim)
+				for d := 0; d < dim; d++ {
+					g0 := float32(1.0)
+					for m := 0; m <= t; m++ {
+						ad := aScalars[m]
+						if aVecs[m] != nil {
+							ad = aVecs[m][d]
+						}
+						g0 *= ad
+					}
+					var yVal float32 = g0 * p0[t][d]
+					for j := 0; j <= t; j++ {
+						var gj float32 = 1.0
+						for m := j + 1; m <= t; m++ {
+							ad := aScalars[m]
+							if aVecs[m] != nil {
+								ad = aVecs[m][d]
+							}
+							gj *= ad
+						}
+						yVal += gj * G[j][t] * U[j][d]
+					}
+					yt[d] = yVal
+				}
+				outputs[globalT] = yt
+			}
+
+			// 7. Intermediate states within chunk
+			currS := S
+			for t := 0; t < cLen; t++ {
+				globalT := offset + t
+				nextS := make([][]float32, dim)
+				backing := make([]float32, dim*dim)
+				ut := U[t]
+				kt := kChunk[t]
+				for i := 0; i < dim; i++ {
+					row := backing[i*dim : (i+1)*dim]
+					currRow := currS[i]
+					ai := aScalars[t]
+					if aVecs[t] != nil {
+						ai = aVecs[t][i]
+					}
+					ui := ut[i]
+					for d := 0; d < dim; d++ {
+						row[d] = ai*currRow[d] + ui*kt[d]
+					}
+					nextS[i] = row
+				}
+				states[globalT] = nextS
+				currS = nextS
+			}
+			S = currS
+		}
+	}
+
+	return outputs, states
+}
+
+// SequentialGDNPrefill computes reference prefill outputs and the final state matrix S_T.
+func SequentialGDNPrefill(k, v, beta, alpha [][]float32, s0 [][]float32) ([][]float32, [][]float32) {
+	T := len(k)
+	if T == 0 {
+		return nil, nil
+	}
+	dim := len(k[0])
+	if dim == 0 {
+		return nil, nil
+	}
+
+	S := make([][]float32, dim)
+	for i := 0; i < dim; i++ {
+		S[i] = make([]float32, dim)
+		if s0 != nil && i < len(s0) {
+			copy(S[i], s0[i])
+		}
+	}
+
+	outputs := make([][]float32, T)
+	p := make([]float32, dim)
+	u := make([]float32, dim)
+
+	for t := 0; t < T; t++ {
+		kt := k[t]
+		vt := v[t]
+		aScalar, aVec, aUniform := extractAlpha(alpha, t, dim)
+		bScalar, bVec, bUniform := extractBeta(beta, t, dim)
+
+		for i := 0; i < dim; i++ {
+			p[i] = fdot(S[i], kt)
+		}
+
+		if aUniform {
+			for i := 0; i < dim; i++ {
+				row := S[i]
+				for j := 0; j < dim; j++ {
+					row[j] *= aScalar
+				}
+			}
+		} else {
+			for i := 0; i < dim; i++ {
+				ai := aVec[i]
+				row := S[i]
+				for j := 0; j < dim; j++ {
+					row[j] *= ai
+				}
+			}
+		}
+
+		if bUniform {
+			for i := 0; i < dim; i++ {
+				u[i] = bScalar * (vt[i] - p[i])
+			}
+		} else {
+			for i := 0; i < dim; i++ {
+				u[i] = bVec[i] * (vt[i] - p[i])
+			}
+		}
+
+		for i := 0; i < dim; i++ {
+			ui := u[i]
+			row := S[i]
+			for j := 0; j < dim; j++ {
+				row[j] += ui * kt[j]
+			}
+		}
+
+		yt := make([]float32, dim)
+		for i := 0; i < dim; i++ {
+			yt[i] = fdot(S[i], kt)
+		}
+		outputs[t] = yt
+	}
+
+	return outputs, S
+}
+
+// WYFChunkwisePrefill computes chunkwise parallel block recurrence outputs and the final state
+// matrix S_T, skipping intermediate state allocations to achieve maximal throughput.
+func WYFChunkwisePrefill(k, v, beta, alpha [][]float32, s0 [][]float32, chunkSize int) ([][]float32, [][]float32) {
+	T := len(k)
+	if T == 0 {
+		return nil, nil
+	}
+	dim := len(k[0])
+	if dim == 0 {
+		return nil, nil
+	}
+	if chunkSize <= 0 {
+		chunkSize = 16
+	}
+
+	S := make([][]float32, dim)
+	for i := 0; i < dim; i++ {
+		S[i] = make([]float32, dim)
+		if s0 != nil && i < len(s0) {
+			copy(S[i], s0[i])
+		}
+	}
+
+	outputs := make([][]float32, T)
+
+	p0 := make([][]float32, chunkSize)
+	Vprime := make([][]float32, chunkSize)
+	U := make([][]float32, chunkSize)
+	for i := 0; i < chunkSize; i++ {
+		p0[i] = make([]float32, dim)
+		Vprime[i] = make([]float32, dim)
+		U[i] = make([]float32, dim)
+	}
+	G := make([][]float32, chunkSize)
+	A := make([][]float32, chunkSize)
+	AInv := make([][]float32, chunkSize)
+	for i := 0; i < chunkSize; i++ {
+		G[i] = make([]float32, chunkSize)
+		A[i] = make([]float32, chunkSize)
+		AInv[i] = make([]float32, chunkSize)
+	}
+	gamma := make([][]float32, chunkSize+1)
+	for i := 0; i <= chunkSize; i++ {
+		gamma[i] = make([]float32, chunkSize+1)
+	}
+	aScalars := make([]float32, chunkSize)
+	bScalars := make([]float32, chunkSize)
+
+	for offset := 0; offset < T; offset += chunkSize {
+		cLen := chunkSize
+		if offset+cLen > T {
+			cLen = T - offset
+		}
+
+		allAlphaUniform := true
+		allBetaUniform := true
+		for t := 0; t < cLen; t++ {
+			globalT := offset + t
+			as, _, au := extractAlpha(alpha, globalT, dim)
+			aScalars[t] = as
+			if !au {
+				allAlphaUniform = false
+			}
+			bs, _, bu := extractBeta(beta, globalT, dim)
+			bScalars[t] = bs
+			if !bu {
+				allBetaUniform = false
+			}
+		}
+
+		if !allAlphaUniform || !allBetaUniform {
+			// Fallback to full implementation when non-uniform
+			out, states := WYFChunkwiseRecurrence(k[offset:offset+cLen], v[offset:offset+cLen],
+				beta[offset:offset+cLen], alpha[offset:offset+cLen], S, chunkSize)
+			for t := 0; t < cLen; t++ {
+				outputs[offset+t] = out[t]
+			}
+			S = states[cLen-1]
+			continue
+		}
+
+		kChunk := k[offset : offset+cLen]
+		vChunk := v[offset : offset+cLen]
+
+		// 1. S_0 * K
+		for i := 0; i < dim; i++ {
+			rowS := S[i]
+			for t := 0; t < cLen; t++ {
+				p0[t][i] = fdot(rowS, kChunk[t])
+			}
+		}
+
+		// 2. Gram matrix G = K * K^T
+		for j := 0; j < cLen; j++ {
+			kj := kChunk[j]
+			for t := j; t < cLen; t++ {
+				dot := fdot(kj, kChunk[t])
+				G[j][t] = dot
+				G[t][j] = dot
+			}
+		}
+
+		// 3. Gamma table
+		for j := 0; j <= cLen; j++ {
+			gamma[j][j] = 1.0
+			for t := j + 1; t <= cLen; t++ {
+				gamma[j][t] = gamma[j][t-1] * aScalars[t-1]
+			}
+		}
+
+		// 4. V' = beta * (v - gamma * S0*k)
+		for t := 0; t < cLen; t++ {
+			rowV := Vprime[t]
+			vt := vChunk[t]
+			pt := p0[t]
+			bt := bScalars[t]
+			g0 := gamma[0][t]
+			for d := 0; d < dim; d++ {
+				rowV[d] = bt * (vt[d] - g0*pt[d])
+			}
+		}
+
+		// 5. Matrix A
+		for j := 0; j < cLen; j++ {
+			A[j][j] = 1.0
+			for t := j + 1; t < cLen; t++ {
+				A[j][t] = bScalars[t] * gamma[j+1][t] * G[j][t]
+			}
+		}
+
+		// 6. Invert A -> AInv
+		for j := 0; j < cLen; j++ {
+			AInv[j][j] = 1.0
+			for t := j + 1; t < cLen; t++ {
 				var sum float32
-				for dk := 0; dk < d; dk++ {
-					sum += stRow[dk] * kRow[dk]
+				for m := j; m < t; m++ {
+					sum += AInv[j][m] * A[m][t]
 				}
-				kvmem[dv] = sum
-			}
-
-			// 3. Compute delta = beta_t * (v_t - kvmem)
-			for dv := 0; dv < d; dv++ {
-				delta[dv] = betaVal * (vRow[dv] - kvmem[dv])
-			}
-
-			// 4. Update state: S_t = S'_t + delta * k_t^T
-			for dv := 0; dv < d; dv++ {
-				dVal := delta[dv]
-				stRow := curState[dv*d : (dv+1)*d]
-				for dk := 0; dk < d; dk++ {
-					stRow[dk] += dVal * kRow[dk]
-				}
-			}
-
-			// 5. Readout: out_t = S_t * q_t
-			for dv := 0; dv < d; dv++ {
-				stRow := curState[dv*d : (dv+1)*d]
-				var sum float32
-				for dk := 0; dk < d; dk++ {
-					sum += stRow[dk] * qRow[dk]
-				}
-				outRow[dv] = sum
+				AInv[j][t] = -sum
 			}
 		}
 
-		copy(finalState[seq*stateSizePerSeq:(seq+1)*stateSizePerSeq], curState)
+		// 7. U = V' * AInv
+		for t := 0; t < cLen; t++ {
+			rowU := U[t]
+			for d := 0; d < dim; d++ {
+				rowU[d] = 0
+			}
+			for j := 0; j <= t; j++ {
+				aij := AInv[j][t]
+				vRow := Vprime[j]
+				for d := 0; d < dim; d++ {
+					rowU[d] += vRow[d] * aij
+				}
+			}
+		}
+
+		// 8. Outputs y_t
+		for t := 0; t < cLen; t++ {
+			globalT := offset + t
+			yt := make([]float32, dim)
+			g0 := gamma[0][t+1]
+			pt := p0[t]
+			for d := 0; d < dim; d++ {
+				yt[d] = g0 * pt[d]
+			}
+			for j := 0; j <= t; j++ {
+				coeff := gamma[j+1][t+1] * G[j][t]
+				uj := U[j]
+				for d := 0; d < dim; d++ {
+					yt[d] += coeff * uj[d]
+				}
+			}
+			outputs[globalT] = yt
+		}
+
+		// 9. End-of-chunk state update: S = gamma[0][cLen] * S0 + sum_{j=0}^{cLen-1} gamma[j+1][cLen] * (u_j * k_j^T)
+		gChunkEnd := gamma[0][cLen]
+		for i := 0; i < dim; i++ {
+			row := S[i]
+			for d := 0; d < dim; d++ {
+				row[d] *= gChunkEnd
+			}
+		}
+		for j := 0; j < cLen; j++ {
+			coeff := gamma[j+1][cLen]
+			uj := U[j]
+			kj := kChunk[j]
+			for i := 0; i < dim; i++ {
+				uScale := coeff * uj[i]
+				row := S[i]
+				for d := 0; d < dim; d++ {
+					row[d] += uScale * kj[d]
+				}
+			}
+		}
 	}
 
-	return output, finalState, nil
+	return outputs, S
 }

@@ -272,6 +272,50 @@ type alwaysFailRunner struct{}
 
 func (alwaysFailRunner) Run(string, ...string) ([]byte, error) { return nil, errors.New("boom") }
 
+type batchTestRunner struct {
+	calls []string
+}
+
+func (b *batchTestRunner) Run(dir string, args ...string) ([]byte, error) {
+	b.calls = append(b.calls, strings.Join(args, " "))
+	if strings.HasPrefix(args[0], "for-each-ref") {
+		return []byte("refs/fak/wip/c1\x00sha1\x001700000000\nrefs/fak/wip/c2\x00sha2\x001700000010\n"), nil
+	}
+	return nil, errors.New("unexpected")
+}
+
+func (b *batchTestRunner) RunWithStdin(dir string, in []byte, args ...string) ([]byte, error) {
+	b.calls = append(b.calls, strings.Join(args, " ")+" (stdin: "+strings.TrimSpace(string(in))+")")
+	if args[0] == "diff-tree" {
+		return []byte("sha1\nM\tfile1.go\nA\tfile2.go\nsha2\nM\tfile3.go\n"), nil
+	}
+	return nil, errors.New("unexpected")
+}
+
+func TestCheckpointsBatchesMultipleRefs(t *testing.T) {
+	r := &batchTestRunner{}
+	rep := &Report{}
+	cps, ok := checkpoints("/repo", r, rep)
+	if !ok || len(cps) != 2 {
+		t.Fatalf("expected 2 checkpoints, ok=%v, got: %#v", ok, cps)
+	}
+	if cps[0].Changed != 2 || cps[0].Added != 1 || len(cps[0].allPaths) != 2 {
+		t.Fatalf("c1 population mismatch: %#v", cps[0])
+	}
+	if cps[1].Changed != 1 || cps[1].Added != 0 || len(cps[1].allPaths) != 1 {
+		t.Fatalf("c2 population mismatch: %#v", cps[1])
+	}
+	diffTreeCalls := 0
+	for _, c := range r.calls {
+		if strings.HasPrefix(c, "diff-tree") {
+			diffTreeCalls++
+		}
+	}
+	if diffTreeCalls != 1 {
+		t.Fatalf("expected 1 batched diff-tree call, got %d: %v", diffTreeCalls, r.calls)
+	}
+}
+
 func treeState(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string

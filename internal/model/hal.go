@@ -643,7 +643,8 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// The current CUDA GDN whole operation synchronizes before success, and the retained
 	// full-attention correctness bridge performs bounded host readback for partial RoPE /
 	// output gating. Neither is legal inside a reusable graph capture.
-	canGraph = canGraph && !cfg.IsQwen35Hybrid()
+	gpuLayers, isSplit := s.validateDenseGPULayers()
+	canGraph = canGraph && !cfg.IsQwen35Hybrid() && !isSplit
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()
@@ -679,7 +680,12 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		}
 	}
 
-	for l := 0; l < cfg.NumLayers; l++ {
+	targetLayers := cfg.NumLayers
+	if isSplit {
+		targetLayers = gpuLayers
+	}
+
+	for l := 0; l < targetLayers; l++ {
 		p := func(str string) string { return layerName(l, str) }
 		if cfg.IsQwen35Hybrid() {
 			if cfg.isLinearAttnLayer(l) {
@@ -770,6 +776,60 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			batch.FlushBatch()
 			batch.BeginBatch()
 		}
+	}
+
+	if isSplit {
+		if batch != nil {
+			batch.FlushBatch()
+		}
+		xHost := be.Read(x)
+		be.Free(x)
+		s.halStep++
+		if mode != halNoLogits {
+			s.halLogitsWarm = true
+		}
+
+		var xf []float32
+		if cfg.usesMLAMoELayout() {
+			needLast := mode != halNoLogits
+			out, err := s.decodeBandGLMDsa(id, xHost, gpuLayers, cfg.NumLayers, pos, false, needLast)
+			if err != nil {
+				panic(err)
+			}
+			if !needLast {
+				s.Cache.appendPosition(pos, id)
+				return compute.Tensor{}, 0
+			}
+			xf = out
+		} else {
+			tap := s.activeTap()
+			if tap != nil && !tap.wants(pos) {
+				tap = nil
+			}
+			prevTap := s.tapActive
+			s.tapActive = tap
+			defer func() { s.tapActive = prevTap }()
+
+			for l := gpuLayers; l < cfg.NumLayers; l++ {
+				cos, sin := ropeRowForLayer(cfg, l, pos)
+				xHost = s.blockStep(l, pos, xHost, cos, sin, s.hostMatKernel())
+			}
+			s.Cache.appendPosition(pos, id)
+			if tap != nil {
+				tap.writeMeta(cfg, H, pos)
+			}
+			s.rememberTargetHidden(pos, id, xHost)
+			if mode == halNoLogits {
+				return compute.Tensor{}, 0
+			}
+			xf = s.M.finalNorm(xHost)
+		}
+
+		logits := s.headResident(xf)
+		if mode == halArgmax {
+			return compute.Tensor{}, argmaxF32(logits)
+		}
+		return s.uploadHostF32([]int{len(logits)}, logits, compute.MemoryActivation, "hal-split-logits"), 0
 	}
 
 	return s.halFinalLogits(x, mode, capturing, useQ8Weights, finishGraph)

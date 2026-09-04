@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "machine_id": "gcp-a2-high-a100-40gb-1g",
+  "hostname": "gcp-a2-highgpu-1g",
+  "registered_at": "2026-09-03T20:47:14.015860Z",
+  "hardware": {
+    "gpu": {
+      "model": "NVIDIA A100 40GB (Ampere)",
+      "count": 1,
+      "memory_gb": 40,
+      "compute_capability": "80"
+    },
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 12
+    },
+    "ram_gb": 85
+  },
+  "os": {
+    "name": "GCP Deep Learning VM (CUDA)"
+  },
+  "cloud": {
+    "provider": "gcp",
+    "machine_type": "a2-highgpu-1g",
+    "zone": "us-central1-f"
+  },
+  "tags": [
+    "ampere",
+    "cuda",
+    "gcp"
+  ]
+}

@@ -90,6 +90,7 @@ number moved.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -1003,7 +1004,7 @@ def package_of(rel: str) -> str:
 
 
 def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
-           dos_range: str) -> list[dict[str, Any]]:
+           dos_range: str, deterministic: bool = False) -> list[dict[str, Any]]:
     """Read disk + (optionally) shell the toolchain, then run every pure KPI."""
     # --- static reads ---
     gomod = _safe_read(root / GOMOD_REL)
@@ -1052,27 +1053,25 @@ def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
         if n_marks:
             markers.append((rel, min(HYGIENE_CAP_PER_FILE, n_marks)))
 
-    # non-trivial packages with no _test.go
-    untested: list[str] = []
-    all_pkgs = {package_of(r) for r in src_files}
-    for pkg in sorted(all_pkgs):
-        if pkg in test_pkgs:
-            continue
-        if pkg_funccount.get(pkg, 0) >= TEST_MIN_FUNCS:
-            untested.append(pkg)
+    all_pkgs = set(pkg_funccount.keys())
+    # A package is non-trivial if it defines >= TEST_MIN_FUNCS functions (the previous
+    # exported-symbol scan was half-bar: a single type with 4 methods had 5 exports).
+    non_trivial_pkgs = {p for p, n in pkg_funccount.items() if n >= TEST_MIN_FUNCS}
+    untested = sorted(non_trivial_pkgs - test_pkgs)
 
-    # --- toolchain shells ---
-    build_ok = vet_ok = None
+    # --- toolchain reads (optional; skipped on --no-toolchain) ---
+    build_ok: bool | None = None
     build_err = ""
+    vet_ok: bool | None = None
     vet_diags: list[str] = []
     unformatted: list[str] | None = None
     if run_toolchain:
         build_ok, build_err = _go_build(root)
         vet_ok, vet_diags = _go_vet(root)
-        unformatted = _gofmt_list(root)
+        unformatted = _gofmt_list(root, deterministic=deterministic)
 
     # --- dos ship-integrity ---
-    dos_payload = _dos_review(root, dos_range) if run_dos else None
+    dos_payload = _dos_review(root, dos_range) if (run_dos and not deterministic) else None
 
     return [
         kpi_build(build_ok, build_err),
@@ -1127,7 +1126,7 @@ def _go_vet(root: Path) -> tuple[bool | None, list[str]]:
     return False, diags or [err.strip().splitlines()[0] if err.strip() else "vet failed"]
 
 
-def _gofmt_list(root: Path) -> list[str] | None:
+def _gofmt_list(root: Path, *, deterministic: bool = False) -> list[str] | None:
     code, out, _err = _run(["gofmt", "-l", "."], root)
     if code == _NO_BINARY:
         return None  # gofmt not installed -> KPI skipped, not "0 unformatted"
@@ -1144,6 +1143,15 @@ def _gofmt_list(root: Path) -> list[str] | None:
             continue
         if visible is not None and ln not in visible:
             continue
+        if deterministic:
+            p = root / ln
+            try:
+                raw = p.read_bytes().replace(b"\r\n", b"\n")
+                res = subprocess.run(["gofmt"], input=raw, capture_output=True, timeout=10)
+                if res.returncode == 0 and res.stdout == raw:
+                    continue
+            except Exception:
+                pass
         files.append(ln)
     return files
 
@@ -1159,13 +1167,17 @@ def _dos_review(root: Path, rev_range: str) -> dict[str, Any]:
 
 
 def collect(workspace: Path, *, run_toolchain: bool = True, run_dos: bool = True,
-            dos_range: str = "HEAD~20..HEAD") -> dict[str, Any]:
+            dos_range: str = "HEAD~20..HEAD", deterministic: bool = False) -> dict[str, Any]:
     root = workspace.resolve()
     if not (root / GOMOD_REL).exists():
         return build_payload(workspace=str(root), kpis=[],
                              error=f"no {GOMOD_REL} at {root} — run from the repo ROOT")
-    kpis = gather(root, run_toolchain=run_toolchain, run_dos=run_dos, dos_range=dos_range)
-    return build_payload(workspace=str(root), kpis=kpis)
+    if deterministic:
+        run_dos = False
+    kpis = gather(root, run_toolchain=run_toolchain, run_dos=run_dos, dos_range=dos_range, deterministic=deterministic)
+    payload = build_payload(workspace=str(root), kpis=kpis)
+    payload["deterministic"] = deterministic
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -1287,6 +1299,99 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     return "\n".join(out)
 
 
+def filter_payload(payload: dict[str, Any], *, kpi: str = "", category: str = "",
+                   path: str = "", search: str = "", limit: int = 0,
+                   deterministic: bool = False) -> dict[str, Any]:
+    out = copy.deepcopy(payload)
+    opt_kpi = kpi.strip().lower()
+    opt_cat = category.strip().lower()
+    opt_path = path.strip().lower().replace("\\", "/")
+    opt_search = search.strip().lower()
+
+    filtered_kpis = []
+    total_matched = 0
+    cat_counts = {c: 0 for c in DEBT_CATEGORIES}
+
+    for k in out.get("kpis", []):
+        kpi_name = k.get("kpi", "")
+        if deterministic and kpi_name == "ship_integrity":
+            continue
+        if opt_kpi and kpi_name.lower() != opt_kpi:
+            continue
+        k_cats = [c.lower() for c in k.get("debt_categories", [])]
+        if opt_cat and opt_cat not in k_cats:
+            continue
+
+        matched_defects = []
+        for d in k.get("defects", []):
+            d_lower = d.lower().replace("\\", "/")
+            if opt_path and opt_path not in d_lower:
+                continue
+            if opt_search and opt_search not in d_lower:
+                continue
+            matched_defects.append(d)
+
+        k["defects"] = matched_defects
+        k["debt"] = len(matched_defects)
+        total_matched += len(matched_defects)
+        for cat in k.get("debt_categories", []):
+            cat_counts[cat] = cat_counts.get(cat, 0) + len(matched_defects)
+        if matched_defects or not (opt_kpi or opt_cat or opt_path or opt_search):
+            filtered_kpis.append(k)
+
+    if limit > 0 and total_matched > limit:
+        rem = limit
+        for k in filtered_kpis:
+            if len(k["defects"]) > rem:
+                k["defects"] = k["defects"][:rem]
+                rem = 0
+            else:
+                rem -= len(k["defects"])
+
+    out["kpis"] = filtered_kpis
+    if "corpus" in out:
+        out["corpus"]["code_debt"] = total_matched
+        out["corpus"]["debt_by_category"] = cat_counts
+    out["matched_debt"] = total_matched
+    return out
+
+
+def render_query(payload: dict[str, Any]) -> str:
+    lines = [
+        f"code-debt query: {payload.get('matched_debt', 0)} matched defect(s) (of {payload.get('total_debt', payload.get('corpus', {}).get('code_debt', 0))} total code debt)",
+    ]
+    kpis = payload.get("kpis", [])
+    any_defect = False
+    for k in sorted(kpis, key=lambda x: -len(x.get("defects", []))):
+        if not k.get("defects"):
+            continue
+        any_defect = True
+        cats = ", ".join(k.get("debt_categories", [])) or "uncategorized"
+        lines.append(f"\n  {k['kpi']} [{cats}] ({len(k['defects'])}):")
+        for d in k["defects"]:
+            lines.append(f"      - {d}")
+    if not any_defect:
+        lines.append("\n  (none — zero matching defects)")
+    return "\n".join(lines)
+
+
+def render_summary(payload: dict[str, Any]) -> str:
+    c = payload.get("corpus") or {}
+    lines = [
+        f"code debt summary: {c.get('code_debt', 0)} total debt units (score {c.get('score', 0)}/100, grade {c.get('grade', '?')})",
+        "",
+        "categories:",
+    ]
+    for cat, definition in DEBT_CATEGORIES.items():
+        cnt = c.get("debt_by_category", {}).get(cat, 0)
+        lines.append(f"  {cat:<22} : {cnt:3d} defects ({definition})")
+    lines.append("")
+    lines.append("kpis:")
+    for b in c.get("breakdown", []):
+        lines.append(f"  {b['kpi']:<20} : {b['debt']:3d} defects (score {b['score']})")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Code-quality scorecard (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
@@ -1301,6 +1406,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--range", default="HEAD~20..HEAD",
                     help="git range for the dos ship-integrity KPI")
     ap.add_argument("--since", default="", help="shift-left skip-gate: if no corpus file changed vs this git ref, report unchanged without rescanning")
+    ap.add_argument("--deterministic", action="store_true",
+                    help="tree-deterministic mode: ignore commit-range ship_integrity and normalize CRLF")
+    ap.add_argument("--kpi", default="", help="filter code debt by KPI")
+    ap.add_argument("--category", default="", help="filter code debt by structural category")
+    ap.add_argument("--path", default="", help="filter code debt by file or package path")
+    ap.add_argument("--search", default="", help="filter code debt by substring in defect text")
+    ap.add_argument("--limit", type=int, default=0, help="limit max defects returned (0 = all)")
+    ap.add_argument("--count", action="store_true", help="print matching defect count only")
+    ap.add_argument("--summary", action="store_true", help="print structural category & KPI debt summary")
     args = ap.parse_args(argv)
 
     try:
@@ -1322,16 +1436,37 @@ def main(argv: list[str] | None = None) -> int:
             return _rc
 
     payload = collect(workspace, run_toolchain=not args.no_toolchain,
-                      run_dos=not args.no_dos, dos_range=args.range)
+                      run_dos=not args.no_dos, dos_range=args.range,
+                      deterministic=args.deterministic)
+
+    total_debt = payload.get("corpus", {}).get("code_debt", 0)
+    payload["total_debt"] = total_debt
+
+    is_query = bool(args.kpi or args.category or args.path or args.search or args.limit or args.count or args.summary)
+
+    if is_query or args.deterministic:
+        payload = filter_payload(payload, kpi=args.kpi, category=args.category,
+                                 path=args.path, search=args.search, limit=args.limit,
+                                 deterministic=args.deterministic)
+
+    if args.count:
+        matched = payload.get("matched_debt", payload.get("corpus", {}).get("code_debt", 0))
+        print(matched)
+        return 0 if matched == 0 else 1
 
     if args.json:
         print(json.dumps(payload, indent=2))
     elif args.markdown:
         print(render_markdown(payload, stamp=args.stamp or None))
+    elif args.summary:
+        print(render_summary(payload))
+    elif is_query:
+        print(render_query(payload))
     else:
         print(render(payload))
 
-    return 0 if payload.get("ok") else 1
+    matched = payload.get("matched_debt", payload.get("corpus", {}).get("code_debt", 0)) if is_query else (0 if payload.get("ok") else 1)
+    return 0 if (matched == 0 if is_query else payload.get("ok")) else 1
 
 
 if __name__ == "__main__":

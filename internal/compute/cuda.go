@@ -215,8 +215,16 @@ func (c *cudaBackend) GraphEndLaunch() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	c.capturing = false
-	if C.fcuda_graph_end_launch() != 0 {
-		panic("compute: cuda graph capture/launch failed")
+	if code := C.fcuda_graph_end_launch(); code != 0 {
+		C.fcuda_graph_reset()
+		panic(&CUDALaunchError{
+			CUDAOpError: CUDAOpError{
+				Op:   "GraphEndLaunch",
+				Site: "cuda-graph-launch",
+				Msg:  "cuda graph capture/launch failed",
+				Code: int(code),
+			},
+		})
 	}
 }
 
@@ -273,7 +281,12 @@ func (c *cudaBackend) UploadConstantParam(dst Tensor, data []float32, paramKey u
 	buf := c.cudaBufForSubmit(dst)
 	nbytes := len(data) * F32.Bytes()
 	if nbytes > buf.n {
-		panic("compute: UploadConstantParam destination buffer too small")
+		panic(&CUDAOpError{
+			Op:    "UploadConstantParam",
+			Site:  "upload-constant-param",
+			Msg:   "UploadConstantParam destination buffer too small",
+			Class: buf.class,
+		})
 	}
 	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&data[0]), C.size_t(nbytes))
 	if lastUploaded != nil {
@@ -449,11 +462,21 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	defer cudaMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)
 	if !ok {
-		panic("compute: cuda Upload expects host data")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  site,
+			Msg:   "cuda Upload expects host data",
+			Class: class,
+		})
 	}
 	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K {
 		if as != t.Dtype {
-			panic("compute: cuda raw k-quant upload requires matching resident dtype")
+			panic(&CUDAOpError{
+				Op:    "Upload",
+				Site:  site,
+				Msg:   "cuda raw k-quant upload requires matching resident dtype",
+				Class: class,
+			})
 		}
 		return c.uploadRawKQuant(t, hb)
 	}
@@ -471,11 +494,21 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		return c.uploadQ8Resident(t, hb)
 	}
 	if t.Dtype != F32 {
-		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K bytes today (got " + t.Dtype.String() + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  site,
+			Msg:   "cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K bytes today (got " + t.Dtype.String() + ")",
+			Class: class,
+		})
 	}
 	if class != MemoryWeights {
 		if as != F32 {
-			panic("compute: cuda classed Upload supports only F32 activation/runtime uploads")
+			panic(&CUDAOpError{
+				Op:    "Upload",
+				Site:  site,
+				Msg:   "cuda classed Upload supports only F32 activation/runtime uploads",
+				Class: class,
+			})
 		}
 		f := hb.F32()
 		buf := c.dallocClass(t.Numel()*F32.Bytes(), class, site)
@@ -536,7 +569,12 @@ func cudaUploadQuantPayload(buf *cudaBuf, codes []int8, scales []float32) {
 
 func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr) Tensor {
 	if len(t.Shape) != 2 {
-		panic("compute: cuda Upload(_, Q8_0) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8",
+			Msg:   "cuda Upload(_, Q8_0) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")",
+			Class: MemoryWeights,
+		})
 	}
 	out, in := t.Shape[0], t.Shape[1]
 	blk := q8DeviceBlock
@@ -582,24 +620,49 @@ func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr)
 // hands a NewQ8 host tensor); the f32-narrowing uploadQ8 above is the witness/quant-at-upload path.
 func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	if len(t.Shape) != 2 {
-		panic("compute: cuda Upload(Q8_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8-resident",
+			Msg:   "cuda Upload(Q8_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")",
+			Class: MemoryWeights,
+		})
 	}
 	if t.Quant == nil || t.Quant.Scale == nil {
-		panic("compute: cuda Upload(Q8_0 host) requires QuantSpec.Scale (per-block f32 scales)")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8-resident",
+			Msg:   "cuda Upload(Q8_0 host) requires QuantSpec.Scale (per-block f32 scales)",
+			Class: MemoryWeights,
+		})
 	}
 	out, in := t.Shape[0], t.Shape[1]
 	blk := t.Quant.Block
 	if blk <= 0 || in%blk != 0 {
-		panic("compute: cuda Upload(Q8_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8-resident",
+			Msg:   "cuda Upload(Q8_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")",
+			Class: MemoryWeights,
+		})
 	}
 	codes := hb.I8()
 	scales := t.Quant.Scale
 	nblk := in / blk
 	if len(codes) != 0 && len(codes) != out*in {
-		panic("compute: cuda Upload(Q8_0 host) code length " + itoaC(len(codes)) + " != out*in")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8-resident",
+			Msg:   "cuda Upload(Q8_0 host) code length " + itoaC(len(codes)) + " != out*in",
+			Class: MemoryWeights,
+		})
 	}
 	if len(scales) != out*nblk {
-		panic("compute: cuda Upload(Q8_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q8-resident",
+			Msg:   "cuda Upload(Q8_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)",
+			Class: MemoryWeights,
+		})
 	}
 	var hp uintptr
 	if len(codes) > 0 {
@@ -626,27 +689,57 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 // unchanged. The weight stays 0.25 byte/elem in VRAM; no dequant-to-f32 round trip.
 func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 	if len(t.Shape) != 2 {
-		panic("compute: cuda Upload(Q2_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")",
+			Class: MemoryWeights,
+		})
 	}
 	if t.Quant == nil || t.Quant.Scale == nil {
-		panic("compute: cuda Upload(Q2_0 host) requires QuantSpec.Scale (per-block f32 scales)")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) requires QuantSpec.Scale (per-block f32 scales)",
+			Class: MemoryWeights,
+		})
 	}
 	out, in := t.Shape[0], t.Shape[1]
 	blk := t.Quant.Block
 	if blk <= 0 || in%blk != 0 {
-		panic("compute: cuda Upload(Q2_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")",
+			Class: MemoryWeights,
+		})
 	}
 	if in%4 != 0 {
-		panic("compute: cuda Upload(Q2_0 host) needs in divisible by 4 (2-bit codes, 4/byte)")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) needs in divisible by 4 (2-bit codes, 4/byte)",
+			Class: MemoryWeights,
+		})
 	}
 	codes := hb.I8()
 	scales := t.Quant.Scale
 	nblk := in / blk
 	if len(codes) != 0 && len(codes) != out*in/4 {
-		panic("compute: cuda Upload(Q2_0 host) code length " + itoaC(len(codes)) + " != out*in/4")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) code length " + itoaC(len(codes)) + " != out*in/4",
+			Class: MemoryWeights,
+		})
 	}
 	if len(scales) != out*nblk {
-		panic("compute: cuda Upload(Q2_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)")
+		panic(&CUDAOpError{
+			Op:    "Upload",
+			Site:  "upload-q2-resident",
+			Msg:   "cuda Upload(Q2_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)",
+			Class: MemoryWeights,
+		})
 	}
 	var hp uintptr
 	if len(codes) > 0 {
@@ -920,13 +1013,23 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
 			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
 	default:
-		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
+		panic(&CUDAOpError{
+			Op:    "MatMul",
+			Site:  "matmul-weight-dtype",
+			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
+			Class: MemoryActivation,
+		})
 	}
 	// Shape post-condition (#972): the GEMV must yield exactly `out` rows. A wrong-shaped result
 	// (the sm_80 / CUDA-13.0 witness saw a non-block-aligned out=257 come back as 64) is a launch
 	// or binding fault — fail loud at the call site naming the dtype + dims, not silently downstream.
 	if n := y.Numel(); n != out {
-		panic("compute: cuda MatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " produced " + itoaC(n) + " rows")
+		panic(&CUDAOpError{
+			Op:    "MatMul",
+			Site:  "matmul-shape-postcondition",
+			Msg:   "cuda MatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " produced " + itoaC(n) + " rows",
+			Class: MemoryActivation,
+		})
 	}
 	return y
 }
@@ -976,12 +1079,22 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
 			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
 	default:
-		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + ")")
+		panic(&CUDAOpError{
+			Op:    "BatchedMatMul",
+			Site:  "batched-matmul-weight-dtype",
+			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + ")",
+			Class: MemoryActivation,
+		})
 	}
 	// Shape post-condition (#972): the batched GEMM must yield exactly P*out elements. Catch a
 	// short/wrong-shaped device result loud at the call site rather than as silent garbage.
 	if n, want := y.Numel(), P*out; n != want {
-		panic("compute: cuda BatchedMatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " P=" + itoaC(P) + " produced " + itoaC(n) + " want " + itoaC(want))
+		panic(&CUDAOpError{
+			Op:    "BatchedMatMul",
+			Site:  "batched-matmul-shape-postcondition",
+			Msg:   "cuda BatchedMatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " P=" + itoaC(P) + " produced " + itoaC(n) + " want " + itoaC(want),
+			Class: MemoryActivation,
+		})
 	}
 	return y
 }
@@ -1031,7 +1144,12 @@ func (c *cudaBackend) PartialRoPEQK(
 // SigmoidMulInPlace applies x *= sigmoid(gate) without crossing the host boundary.
 func (c *cudaBackend) SigmoidMulInPlace(x, gate Tensor) {
 	if x.Numel() != gate.Numel() {
-		panic("compute/cuda: sigmoid gate shape mismatch")
+		panic(&CUDAOpError{
+			Op:    "SigmoidMulInPlace",
+			Site:  "sigmoid-shape-match",
+			Msg:   "sigmoid gate shape mismatch",
+			Class: MemoryActivation,
+		})
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -1041,7 +1159,12 @@ func (c *cudaBackend) SigmoidMulInPlace(x, gate Tensor) {
 // SplitQwen35QueryGate separates Qwen's per-head [query, gate] projection rows on device.
 func (c *cudaBackend) SplitQwen35QueryGate(qg Tensor, nHeads, headDim int) (Tensor, Tensor) {
 	if qg.Numel() != 2*nHeads*headDim {
-		panic("compute/cuda: Qwen query/gate projection shape mismatch")
+		panic(&CUDAOpError{
+			Op:    "SplitQwen35QueryGate",
+			Site:  "split-qg-shape-match",
+			Msg:   "Qwen query/gate projection shape mismatch",
+			Class: MemoryActivation,
+		})
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

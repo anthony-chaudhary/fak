@@ -39,6 +39,9 @@ func TestGatewayHomepageRendersDiscoverySurface(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
 		t.Fatalf("Content-Type = %q", got)
 	}
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "script-src 'unsafe-inline'") || !strings.Contains(got, "connect-src 'self'") {
+		t.Fatalf("Content-Security-Policy = %q, want script-src 'unsafe-inline' and connect-src 'self'", got)
+	}
 	for _, want := range []string{
 		"fak gateway",
 		"mock",
@@ -58,6 +61,8 @@ func TestGatewayHomepageRendersDiscoverySurface(t *testing.T) {
 		`id="live-inflight"`,
 		`fetch("/healthz"`,
 		`fetch("/metrics"`,
+		`split(/\r?\n/)`,
+		`healthBody.ok===false||healthBody.ready===false`,
 		"setInterval(refresh,5000)",
 		"last good values are preserved",
 	} {
@@ -132,6 +137,9 @@ func TestGatewayHomepageCapturedHTML(t *testing.T) {
 	}
 	// This captured response is the visual witness: it asserts the actual browser
 	// surface has live state, a title, identity, and every API + rich-dashboard route.
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "script-src 'unsafe-inline'") || !strings.Contains(got, "connect-src 'self'") {
+		t.Fatalf("captured homepage CSP = %q, want script-src 'unsafe-inline' and connect-src 'self'", got)
+	}
 	wantCards := 6 + len(richDashboardLinks)
 	if strings.Count(string(raw), `class="card`) != wantCards {
 		t.Fatalf("captured homepage card count = %d, want %d", strings.Count(string(raw), `class="card`), wantCards)

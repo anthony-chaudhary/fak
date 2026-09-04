@@ -715,6 +715,89 @@ def test_gofmt_list_holds_gofmt_to_the_same_visible_set():
             cq._run = real_run
 
 
+# --- query & deterministic tests ------------------------------------------
+
+def test_filter_payload_by_kpi_and_category():
+    payload = {
+        "kpis": [
+            {"kpi": "architecture", "debt_categories": ["modularity"], "defects": ["god-file a.go", "god-function b.go:F"]},
+            {"kpi": "format", "debt_categories": ["internal_consistency"], "defects": ["unformatted c.go"]},
+            {"kpi": "tests", "debt_categories": ["internal_coherence"], "defects": ["untested d"]},
+        ],
+        "corpus": {"code_debt": 4, "debt_by_category": {"modularity": 2, "internal_consistency": 1, "internal_coherence": 1}}
+    }
+    # 1. Filter by KPI
+    filtered_kpi = cq.filter_payload(payload, kpi="architecture")
+    assert filtered_kpi["matched_debt"] == 2
+    assert len(filtered_kpi["kpis"]) == 1
+    assert filtered_kpi["kpis"][0]["kpi"] == "architecture"
+
+    # 2. Filter by Category
+    filtered_cat = cq.filter_payload(payload, category="internal_consistency")
+    assert filtered_cat["matched_debt"] == 1
+    assert len(filtered_cat["kpis"]) == 1
+    assert filtered_cat["kpis"][0]["kpi"] == "format"
+
+
+def test_filter_payload_by_path_and_search():
+    payload = {
+        "kpis": [
+            {"kpi": "architecture", "debt_categories": ["modularity"], "defects": [
+                "god-file cmd/fak/main.go (1600 lines > 1500)",
+                "god-function internal/gateway/stream.go:handleStream (250 lines > 200)"
+            ]},
+        ],
+        "corpus": {"code_debt": 2, "debt_by_category": {"modularity": 2}}
+    }
+    # Path filter
+    filtered_path = cq.filter_payload(payload, path="internal/gateway")
+    assert filtered_path["matched_debt"] == 1
+    assert "stream.go" in filtered_path["kpis"][0]["defects"][0]
+
+    # Search filter
+    filtered_search = cq.filter_payload(payload, search="main.go")
+    assert filtered_search["matched_debt"] == 1
+    assert "main.go" in filtered_search["kpis"][0]["defects"][0]
+
+
+def test_filter_payload_deterministic():
+    payload = {
+        "kpis": [
+            {"kpi": "architecture", "debt_categories": ["modularity"], "defects": ["god-file a.go"]},
+            {"kpi": "ship_integrity", "debt_categories": ["internal_consistency"], "defects": ["residual commit abc"]},
+        ],
+        "corpus": {"code_debt": 2, "debt_by_category": {"modularity": 1, "internal_consistency": 1}}
+    }
+    filtered = cq.filter_payload(payload, deterministic=True)
+    assert filtered["matched_debt"] == 1
+    assert len(filtered["kpis"]) == 1
+    assert filtered["kpis"][0]["kpi"] == "architecture"
+
+
+def test_render_query_and_summary():
+    payload = {
+        "matched_debt": 1,
+        "total_debt": 10,
+        "kpis": [
+            {"kpi": "architecture", "debt_categories": ["modularity"], "defects": ["god-file a.go"]}
+        ],
+        "corpus": {
+            "score": 85,
+            "grade": "B",
+            "code_debt": 1,
+            "debt_by_category": {"modularity": 1},
+            "breakdown": [{"kpi": "architecture", "score": 88, "debt": 1}]
+        }
+    }
+    query_txt = cq.render_query(payload)
+    assert "matched defect(s)" in query_txt
+    assert "god-file a.go" in query_txt
+
+    summary_txt = cq.render_summary(payload)
+    assert "code debt summary:" in summary_txt
+    assert "modularity" in summary_txt
+
+
 def main() -> int:
     """Pure-stdlib runner: collects and runs every module-level test_* function so the
     suite runs in the pytest-free CI exactly like its scorecard-family siblings

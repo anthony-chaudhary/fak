@@ -539,6 +539,10 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdLoopMap(args)
 	case "superloop":
 		cmdSuperloop(args)
+	case "superstream":
+		cmdSuperstream(args)
+	case "arch":
+		cmdArch(args)
 	case "fused":
 		cmdFused(args)
 	case "experiments":
@@ -695,6 +699,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdComplain(args)
 	case "learning-debt-dispatch":
 		cmdLearningDebtDispatch(args)
+	case "code-debt":
+		cmdCodeDebt(args)
 	case "harness-debt-dispatch":
 		// The harness-strength fan-out (#4414, epic #4396, under self-ablation #607 /
 		// open ablation registry #2828): consume the sibling model-strength

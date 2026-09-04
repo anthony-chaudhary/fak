@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **64** (clarity 0 + coverage 64) |
-| **Crystal-clear concepts (and climbing)** | **1001** crystal of 2721 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2838 / 2902** (97.8% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 214 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **81** of 3850 indexed names |
+| **Disambiguation-debt (drive to 0)** | **28** (clarity 0 + coverage 28) |
+| **Crystal-clear concepts (and climbing)** | **1072** crystal of 2792 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2903 / 2931** (99.0% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 215 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **84** of 3991 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.4/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2721 concepts - score 98.6/100 (grade A) - disambiguation-debt 64
+concept-disambiguation chart - 2792 concepts - score 99.4/100 (grade A) - disambiguation-debt 28
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 1001
+  * crystal       #################........... 1072
   o defined       ############################ 1720
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,60 +39,60 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (80 concept(s); 15 crystal)
-  cache            *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (265 concept(s); 85 crystal)
-  context-ctx      *******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (224 concept(s); 67 crystal)
+  attention        ****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (81 concept(s); 16 crystal)
+  cache            **********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (274 concept(s); 94 crystal)
+  context-ctx      ***********************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 71 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            ****************oooooooooooooooooooooooooooooooo (48 concept(s); 16 crystal)
-  gateway-engine   ********************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (161 concept(s); 44 crystal)
-  guard-gate       ************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (445 concept(s); 204 crystal)
-  layout           *********ooooooooo (18 concept(s); 9 crystal)
-  loop             **********************************************oooooooooooooooooooooooooooooooooooooo (84 concept(s); 46 crystal)
-  plan             **************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (352 concept(s); 110 crystal)
-  policy-capability *****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (194 concept(s); 89 crystal)
+  evict            *****************oooooooooooooooooooooooooooooooo (49 concept(s); 17 crystal)
+  gateway-engine   ************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (165 concept(s); 48 crystal)
+  guard-gate       ****************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (449 concept(s); 208 crystal)
+  layout           **********ooooooooo (19 concept(s); 10 crystal)
+  loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
+  plan             *******************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (357 concept(s); 115 crystal)
+  policy-capability *********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (198 concept(s); 93 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
-  render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
-  score-debt       ***************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 15 crystal)
-  session-runtime  **********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 82 crystal)
-  support-maturity ***********************************oooooooooooooooooooooo (57 concept(s); 35 crystal)
+  render-materialize ******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (195 concept(s); 42 crystal)
+  score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
+  session-runtime  *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 85 crystal)
+  support-maturity ***************************************oooooooooooooooooooooo (61 concept(s); 39 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 76 crystal)
+  witness-proof    *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (159 concept(s); 79 crystal)
 
 coverage by family (positioned / discovered):
-  cache            ###########################. 311/321
-  session-runtime  ###########################. 273/283
-  gateway-engine   ###########################. 200/209
-  context-ctx      ###########################. 237/244
-  plan             ############################ 411/417
-  render-materialize ###########################. 209/214
-  loop             ###########################. 94/98
-  guard-gate       ############################ 503/506
-  policy-capability ############################ 213/216
-  witness-proof    ###########################. 163/166
-  pool             ###########################. 40/42
-  support-maturity ###########################. 64/66
-  attention        ############################ 85/86
-  evict            ############################ 55/56
-  layout           ###########################. 19/20
-  score-debt       ############################ 93/94
+  context-ctx      ###########################. 241/247
+  session-runtime  ###########################. 278/284
+  gateway-engine   ###########################. 204/209
+  plan             ############################ 415/418
+  guard-gate       ############################ 506/508
+  support-maturity ###########################. 69/71
+  attention        ############################ 86/87
+  cache            ############################ 320/321
+  pool             ###########################. 40/41
+  render-materialize ############################ 212/213
+  witness-proof    ############################ 165/166
   cross-cluster    ............................ 0/0
   decision         ############################ 60/60
   dev-tier         ............................ 0/0
+  evict            ############################ 56/56
+  layout           ############################ 20/20
+  loop             ############################ 99/99
+  policy-capability ############################ 217/217
+  score-debt       ############################ 112/112
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.8%  (2838/2902 confusable tokens positioned)
+namespace coverage  [################################] 99.0%  (2903/2931 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 214
+  mutual       ############################ 215
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 214/214
+  pairs separated   [################################] 215/215
 
-name index: 3850 lookup name(s) -> 2721 concept(s), 81 ambiguous
+name index: 3991 lookup name(s) -> 2792 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 214 |
-| **Separated from each other (drive to all)** | **214 / 214** (214 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 215 |
+| **Separated from each other (drive to all)** | **215 / 215** (215 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1882 / 4883 |
+| Boundaries drawn (mutual / total) | 1890 / 4963 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3850 over 2721 concepts |
-| Lookup names landing on several concepts | 81 |
+| Lookup names indexed | 3991 over 2792 concepts |
+| Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2721 |
+| Concepts carrying a contrast set | 2792 |
 
 ## The concepts (best verdict first)
 
@@ -138,6 +138,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 |---|---|---|---|---|
 | * | crystal | symbol | attention | **attention implementation surface for externalinvalidateattentionindex** - `ExternalInvalidateAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/external_invalidation.go:11` as `ExternalInvalidateAttentionIndex ExternalInvalidationKind = "attention_index"`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | attention | **attention implementation surface for planeattentionindex** - `PlaneAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/attention_index.go:95` as `Plane: PlaneAttentionIndex,`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | attention | **attention implementation surface for attnresidual** - `attn_residual` is the attention phase symbol at `internal/model/qwen35_prefill.go:100`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | attention | **attention implementation surface for accumulateattentiongroup** - `accumulateattentiongroup` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | attention | **attention implementation surface for accumulatepackedattentionvalues3** - `accumulatepackedattentionvalues3` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | attention | **attention implementation surface for fakprefillnoattn** - `fakprefillnoattn` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -205,6 +206,15 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **Qwen3.8 cache campaign** - Versioned exact-model workflow-cache benchmark corpus and fold for the first-class Qwen3.8 default. |
 | * | crystal | symbol | cache | **CacheGiB** - coalescebench config field: the resident expert-cache budget in GiB (the RAM tier sitting over SSD) that bounds how many routed (layer,expert) groups stay resident in the deterministic LRU the bench replays through. |
 | * | crystal | symbol | cache | **pagecachefloor** - The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier. |
+| * | crystal | symbol | cache | **cache implementation surface for codexcache** - `CodexCache` is the cache symbol declared or used at `internal/trajectory/audit.go:80`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for lasttokenusagecachedinputmax** - `LastTokenUsageCachedInputMax` is the cache symbol declared or used at `internal/trajectory/audit.go:84`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for lasttokenusagecachedinputmin** - `LastTokenUsageCachedInputMin` is the cache symbol declared or used at `internal/trajectory/audit.go:83`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for lasttokenusagecachedinputsamples** - `LastTokenUsageCachedInputSamples` is the cache symbol declared or used at `internal/trajectory/audit.go:82`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for newcachewithclock** - `NewCacheWithClock` is the cache symbol declared or used at `cmd/fak/wip_admit.go:227`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for cacheblend** - `CacheBlend` is the cache gap concept at `internal/gateway/kv_nonprefix_reuse_gap_test.go:12`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for cachepipelinephaseprefill** - CachePipelinePhasePrefill is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for lopuncachedglobalscheduler** - lopuncachedglobalscheduler is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | cache | **cache implementation surface for tolerantstickylopuncachedglobalscheduler** - tolerantstickylopuncachedglobalscheduler is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for debugcacheattributionvars** - `debugcacheattributionvars` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | cache | **cache implementation surface for debugmanagedcachevars** - `debugmanagedcachevars` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | cache | **cache implementation surface for repeatedworkflowcache** - `repeatedworkflowcache` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -267,6 +277,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | context-ctx | **contextq (materializer)** - On-demand context materializer: turns a search query into typed handles, materialization verdicts, omissions, and a render plan over CDB images. |
 | * | crystal | symbol | context-ctx | **CtxViewPlanner** - Stateless, shared context-view planner wired to the gateway: one per server, shared across all requests, disabled by default. |
 | * | crystal | symbol | context-ctx | **CompactionView** - A LOSSY compaction model: strips recovery handles off elided spans to show token savings without recoverability. |
+| * | crystal | symbol | context-ctx | **context-ctx implementation surface for dispatchprobetreebuildcontext** - `dispatchProbeTreeBuildContext` is the context-ctx symbol declared or used at `cmd/fak/dispatch_auto_budget.go:207`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | context-ctx | **context-ctx implementation surface for drainctx** - drainCtx is the context-ctx symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | context-ctx | **context-ctx implementation surface for withcontext** - WithContext is the context-ctx symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | context-ctx | **context-ctx implementation surface for ctxplanlint** - ctxplanlint is the context-ctx package declared at internal/ctxplanlint/ctxplans.go. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for turncontext** - `turncontext` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextaction** - `contextaction` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for ctxexpensegate** - `ctxexpensegate` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -356,6 +370,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | dev-tier | **fak-dev command surface** - The separately buildable `cmd/fak-dev` maintainer CLI that dispatches repository-development commands such as ci-preflight, buildcheck, plan-audit, orient, and issue tooling through internal/devcmd. |
 | * | crystal | subsystem | dev-tier | **devindex** - internal/devindex: the CATALOG that classifies every verb's tier (TierFrontdoor / TierDev / TierHidden) from the live dispatch switch - the WITNESSED source the two operator-heaviness meters read to split frontdoor_verbs from dev_verbs. |
 | * | crystal | symbol | evict | **EvictionVictim** - cacheprice.EvictionVictim(residents) returns the INDEX of the disaggregated-KV-pool prefix to evict first: the lowest retention DENSITY (DisaggregationRetentionValue per CapacityTokens), compared exactly by cross-multiplication (float-free), ties breaking toward the larger footprint. |
+| * | crystal | symbol | evict | **evict implementation surface for evictionpageaware** - `EvictionPageAware` is the evict symbol declared at `internal/radixkv/radixkv.go:135`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | evict | **PIN_EVICT_REFUSED (survival-class compaction refusal)** - The closed refusal token a history compaction names when the plan it was about to forward would have evicted a page the kernel classes PINNED - the session's active steer, its live continuation seed, or a standing system invariant (#2421). Registered in dos.toml [reasons.PIN_EVICT_REFUSED] and in the internal/agent compaction bail vocabulary; on it the outbound body is forwarded UNCHANGED rather than compacted lossily. |
 | * | crystal | symbol | evict | **ctxplan.ClassEvictable (survival class)** - The least-protected member of ctxplan's survival-class vocabulary (#2421): a context page that may be dropped and is then genuinely gone - aged transcript prose. It is the ZERO value of SurvivalClass, so an unstamped or unrecognised page falls to it and can never be silently promoted into the protected set by a kind string the model supplied. |
 | * | crystal | symbol | evict | **ctxplan.CheckEviction (survival-class adjudication)** - The verification half of the survival-class contract (#2421): given typed pages and the page IDs some other planner proposes to drop, it returns PIN_EVICT_REFUSED when any of them classes PINNED and empty otherwise. It is what makes the guarantee hold for eviction plans ctxplan did not author - a byte splicer on a wire body, say. |
@@ -371,6 +386,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | evict | **kvSpanEvict (planner KV-quarantine bridge gate)** - kvSpanEvict is the planner-scoped enablement bit set only when FAK_INKERNEL_KVMMU opts in on the CPU model path; guarded eviction code checks it before rebuilding a session and evicting a quarantined tool-result K/V span. |
 | * | crystal | symbol | evict | **INSUFFICIENT_NONEVICTING_HBM** - The #4801 typed refusal verdict returned when accelerator memory reachable WITHOUT evicting any peer workload is below the artifact size plus runtime headroom. |
 | * | crystal | doc-term | evict | **non-evicting (placement constraint)** - The #4801 placement constraint that accelerator capacity may only be counted when it is reachable WITHOUT displacing any peer workload, making eviction unavailable as a way to close a shortfall. |
+| * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for busiestengine** - `BusiestEngine` is the engine fact symbol at `internal/amdgpu/governor.go:199`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for statusgatewaytimeout** - `StatusGatewayTimeout` is the HTTP status code symbol used across gateway error paths. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for fakinkernel** - FakInKernel is the gateway-engine symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for servingengine** - ServingEngine is the gateway-engine symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for kernelerr** - `kernelerr` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginekind** - `enginekind` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginenative** - `enginenative` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -418,6 +437,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **INSUFFICIENT_AGGREGATE_HBM** - The bench.AdmissionVerdict wire value a sanctioned node earns when its AGGREGATE device HBM across every rank is below the pinned artifact size: a physical-ceiling placement refusal that no reservation, scheduler change or peer eviction can lift. Only a smaller artifact (quantization) or more nodes close the ShortfallBytes it records, and admitNode derives it before any transfer begins. |
 | * | crystal | symbol | guard-gate | **AggregateHBMBytes** - A NodeCapacity accessor returning the node's total device memory across every rank (GPUCount x HBMBytesPerGPU) — the hard physical ceiling, reachable only by evicting peers. |
 | * | crystal | symbol | guard-gate | **guardSessionStart (fak guard-sessionstart hook)** - guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_capabilities, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off). |
+| * | crystal | symbol | guard-gate | **guard-gate implementation surface for launchguard** - `launchGuard` is the guard-gate symbol declared or used at `cmd/fak/accounts.go:107`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | guard-gate | **guard-gate implementation surface for gatepolicy** - `GatePolicy` is the guard-gate symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | guard-gate | **guard-gate implementation surface for gaterequest** - `GateRequest` is the guard-gate symbol declared or used at `cmd/fak/native_performance_modes.go:19`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | guard-gate | **guard-gate implementation surface for qwen38gate** - `qwen38-ladder` is the guard-gate symbol declared or used at `cmd/fak/model.go:15`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | guard-gate | **guard-gate implementation surface for ctxexpensegate** - `ctxexpensegate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | guard-gate | **guard-gate implementation surface for dispatchwaveprelaunchgatefromaudit** - `dispatchwaveprelaunchgatefromaudit` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | guard-gate | **guard-gate implementation surface for gatecartbeforehorse** - `gatecartbeforehorse` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -619,6 +642,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **GateParkingEnabled** - GateParkingEnabled is the loop-side predicate of the out-of-band operator inbox (#2757): it reports whether EnableGateParking opened the inbox for a session trace — the check the agent dispatch seam makes before parking an ESCALATE-gated deny, so an unopened inbox falls straight through to the historical deny path. |
 | * | crystal | symbol | guard-gate | **disaggregatedStore** - Fold predicate reporting whether an artifact ref points at a disaggregated store, which makes a digest-shaped deletion witness mandatory on removal. |
 | * | crystal | symbol | guard-gate | **disaggregatedBodyRef** - Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal. |
+| * | crystal | symbol | layout | **layout implementation surface for qwen38mtptensorlayout** - `qwen38MTPTensorLayout` is the layout symbol declared or used at `internal/model/qwen35_mtp_forward.go:58`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | layout | **layout implementation surface for inputlayout** - `inputlayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | layout | **layout implementation surface for refusalunknownnativelayout** - `refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
@@ -634,6 +658,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **loop_observe.go (agent progress-observer seam)** - loop_observe.go is the agent package's OUTBOUND loop-state seam (#5148): WithProgressObserver installs a typed, nil-safe ProgressObserver that runArm emits closed-set ProgressEvent lifecycle transitions through (turn_started, tool_started, call_adjudicated, result_admitted, turn_done), which the native gateway stream renders as structured SSE. Unset, every emit is a no-op and the loop is byte-for-byte the historical loop. |
 | * | crystal | symbol | loop | **loop_midflight** - loop_midflight.go is the agent package's owned per-run MID-FLIGHT verb mailbox and tamper-evident hash-chained journal (#5158, the write half of #2403 / epic #2388): a transport enqueues interrupt / drop-pending-call / set-budget verbs that the owned loop consumes at its next CLEAN turn boundary (never mid-tool, never mid-adjudication) to stop the arm, skip one named queued call, or write a fresh budget through to the session table; nil-safe, so with no verb issued the loop is byte-for-byte the historical loop. |
 | * | crystal | symbol | loop | **loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)** - The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn. |
+| * | crystal | symbol | loop | **loop implementation surface for loopturnreceipt** - `LoopTurnReceipt` is the loop symbol declared or used at `cmd/fak/loop.go:396`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | loop | **loop implementation surface for loopturnscored** - `LoopTurnScored` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:95`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | loop | **loop implementation surface for loopturnunavailable** - `LoopTurnUnavailable` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:133`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | loop | **loop implementation surface for faklooppolicy** - `FAK_LOOP_POLICY` is the loop environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | loop | **loop implementation surface for crashloopbudget** - CrashLoopBudget is the loop symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **loop implementation surface for codexloophookhardenedenv** - `codexloophookhardenedenv` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | loop | **loop implementation surface for codexloophookoverrideenabled** - `codexloophookoverrideenabled` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | loop | **loop implementation surface for fakqwen35prefilltokenloop** - `fakqwen35prefilltokenloop` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -678,6 +707,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **RefusePagedHostPlanIfTooBig** - The demand-paged host fit guard: refuses a MemoryPlan whose host-scoped demands exceed HostBudgetForPagedWeights, the tighter of the fractional headroom budget and MemAvailable minus the absolute page-cache floor. |
 | * | crystal | symbol | plan | **refusePagedHostPlanForHostMem** - The injectable core of RefusePagedHostPlanIfTooBig: takes the host (total, free, known) triple explicitly so the demand-paged refusal is testable without a live /proc/meminfo probe. |
 | * | crystal | symbol | plan | **refuseHostScopedPlanForHostMem** - The injectable core of RefuseHostScopedPlanIfTooBig (capacity.go): given a plan and an explicit host (total, free, known), it refuses when the plan's host-scoped demands exceed BudgetAfterHeadroom — the FRACTION-only host budget. Taking the host explicitly is what makes the refusal testable without a live /proc/meminfo. |
+| * | crystal | symbol | plan | **plan implementation surface for candidatedigest** - `candidateDigest` is the plan symbol declared or used at `internal/experiments/nativeperf_transaction.go:101`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | plan | **plan implementation surface for plandigest** - `PlanDigest` is the plan symbol declared or used at `internal/contextq/tree_explore.go:69`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | plan | **plan implementation surface for planpackets** - `PlanPackets` is the plan symbol declared or used at `cmd/fak/scoreboard_packets.go:49`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | plan | **plan implementation surface for smokecandidate** - `smokeCandidate` is the plan symbol declared or used at `internal/selfinstall/artifact.go:49`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | plan | **plan implementation surface for candidatetokens** - `candidateTokens` is the plan symbol at `internal/qwen38quantrun/amd_scoreboard.go:334`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for explicitnoncandidate** - `explicitnoncandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | plan | **plan implementation surface for workflowplan** - `workflowplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | plan | **plan implementation surface for dispositionreleasemetadatanoncandidate** - `dispositionreleasemetadatanoncandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -790,6 +824,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **benchmark capability missing** - The stable benchmark preflight refusal emitted when a required environment capability is absent or incompatible with the task contract. |
 | * | crystal | symbol | policy-capability | **benchmark capability insufficient** - The stable benchmark preflight refusal emitted when a compute resource is present but its observed quantity is below the task minimum. |
 | * | crystal | symbol | policy-capability | **benchmark capability forbidden** - The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent. |
+| * | crystal | symbol | policy-capability | **policy-capability implementation surface for adjudicatereceipt** - `adjudicateReceipt` is the policy-capability symbol declared at `internal/gateway/tool_routing.go:71`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | policy-capability | **policy-capability implementation surface for gatepolicy** - `GatePolicy` is the policy-capability symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | policy-capability | **policy-capability implementation surface for faklooppolicy** - `FAK_LOOP_POLICY` is the policy-capability environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | policy-capability | **policy-capability implementation surface for leaserefsyncsurfacedispatchpreflight** - LeaseRefSyncSurfaceDispatchPreflight is the policy-capability symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for policycanaryturns** - `policycanaryturns` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for hedgepolicy** - `hedgepolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for observepolicy** - `observepolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -879,6 +917,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | pool | **mmrPoolFactor** - The multiple of the caller's k that bounds how many already-ranked recall candidates the MMR reranker considers (3x, the borrow's window). Greedy MMR is quadratic in similarity comparisons, so bounding the pool keeps the cost proportional to what the caller actually asked for; candidates past the window keep their baseline order and can only matter when the pool is the whole list. |
 | * | crystal | symbol | pool | **PoolCapEnv / FLEET_WORKER_WORKTREE_POOL (warm worktree-pool cap)** - The environment knob bounding the per-worker warm worktree pool: the maximum number of IDLE detached worktrees kept per LANE under the worktree root. Unset, unparsable or negative reads as the default; 0 disables the pool and reproduces the pre-pool create/reap behaviour byte for byte. |
 | * | crystal | symbol | pool | **PoolCap() (resolved worktree-pool cap)** - The resolver that reads PoolCapEnv and returns the effective per-lane idle-worktree cap, failing open to the default on anything unreadable so a typo'd knob can never mean unbounded. Both Prepare and Reap consult it, so the pool is on or off for the whole lifecycle rather than per call site. |
+| * | crystal | symbol | render-materialize | **render-materialize implementation surface for rendersyncpublicleak** - `renderSyncPublicLeak` is the render-materialize symbol declared or used at `cmd/fak/sync.go:216`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | render-materialize | **render-materialize implementation surface for rendermtpsweepmarkdown** - `RenderMTPSweepMarkdown` is the symbol declared at `cmd/polymodelbench/tune.go:126` for rendering MTP sweep markdown tables. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | render-materialize | **render-materialize implementation surface for rendercomparativesidebyside** - renderComparativeSideBySide is the render-materialize symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for emitjsonorrender** - `emitjsonorrender` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for emitjsonorrenderprefixed** - `emitjsonorrenderprefixed` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for renderjsonorhuman** - `renderjsonorhuman` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -918,6 +959,26 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | render-materialize | **RenderPlan** - Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults |
 | * | crystal | symbol | render-materialize | **RenderItem** - One cell materialized into context by OpRender query effect |
 | * | crystal | symbol | render-materialize | **Rendered** - One span paged into fresh history through the trust gate |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for brittlenessdebt** - BrittlenessDebt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for claimreproscorecard** - claim_repro_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for codedebt** - code_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for cudadevscorecard** - cuda_dev_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for debtbycat** - DebtByCat is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for debtbypkg** - DebtByPkg is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for debtlane** - DebtLane is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for debtprincipal** - DebtPrincipal is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for demoqualityscorecard** - demo_quality_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for intentliteralscorecard** - intent_literal_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for matcheddebt** - MatchedDebt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for orgdebt** - org_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for personadebt** - persona_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for personafitscorecard** - persona_fit_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for propagationdebt** - propagation_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for rsimaturityscorecard** - rsi_maturity_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for runscoreboarddebtpage** - runScoreboardDebtPage is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **slop debt counter in score debt** - slop_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for stabilityscorecard** - stability_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | score-debt | **score-debt implementation surface for steerabilitydebt** - steerability_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | score-debt | **score-debt implementation surface for emitscorecardcomparison** - `emitscorecardcomparison` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | score-debt | **score-debt implementation surface for collecttokendefaultsscorecard** - `collecttokendefaultsscorecard` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | score-debt | **score-debt implementation surface for harddebt** - `harddebt` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -933,6 +994,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
 | * | crystal | symbol | score-debt | **FleetDebt (fleet-product ranking key)** - FleetDebt is the superloop fleet-walk ranking key (#4958): the liveness x progress x follow-on PRODUCT minus one, so a clean live member folds to debt 0 and the ordinary worst-first sort (tier, then debt descending) ranks the fleet with no rival walker. A product, not a sum, because the axes compound — a stale loop that is also spinning pays cadence cost for zero verified output on two grains at once, and outranks either fault alone. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for closesession** - CloseSession is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionaddrexplicit** - sessionAddrExplicit is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for slotid** - SlotID is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for codexsession** - `codexsession` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionaction** - `sessionaction` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for awssessiontoken** - `awssessiontoken` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -1016,6 +1080,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **BeginProviderSessionAt** - The session-table transition that terminalizes the current fak trace and creates the fresh provider-conversation trace while carrying cumulative envelopes. |
 | * | crystal | symbol | session-runtime | **SessionKey** - The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain. |
 | * | crystal | symbol | support-maturity | **KVPrefixReuseSupported** - Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty. |
+| * | crystal | symbol | support-maturity | **support-maturity implementation surface for commitsubjectcoverage** - commit_subject_coverage is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | support-maturity | **support-maturity implementation surface for maturitygap** - MaturityGap is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | support-maturity | **support-maturity implementation surface for maturityrung** - MaturityRung is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | support-maturity | **support-maturity implementation surface for targetmaturity** - TargetMaturity is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for upstreamunsupported** - `upstreamunsupported` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for coverageincomplete** - `coverageincomplete` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for bailupstreamunsupported** - `bailupstreamunsupported` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -1063,6 +1131,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | vfs | **T5 KV-cache substrate** - The physical KV-cache substrate: where a span's key/value tensors actually sit and how they are addressed and evicted |
 | * | crystal | symbol | witness-proof | **RuntimeWitnessed** - DeepSeekInventory.RuntimeWitnessed (JSON runtime_witnessed) is the honesty fence on the provisioning inventory: it stays false until a deterministic inference has actually RUN on a real placement of the pinned artifact, and a downstream consumer must refuse to headline throughput or saving while it is false. Everything else in the record is provenance plus a derived feasibility verdict - no number in it is fak-authored or measured. |
 | * | crystal | symbol | witness-proof | **WitnessedNodes** - DeepSeekInventory.WitnessedNodes (JSON witnessed_nodes) is the scrubbed NodeCapacity population actually read back from sanctioned nodes over the private bridge - node-class label, rank counts and nominal per-rank HBM. It is the exact set every per-node AdmissionResult is derived over, and the set the NOT_SINGLE_NODE_ADMISSIBLE rollup is scoped to, so it bounds how far the refusal generalizes. |
+| * | crystal | symbol | witness-proof | **witness-proof implementation surface for landedwitnessed** - `DisplayLandedWitnessed` is the witness-proof symbol declared or used at `cmd/fak/steer_comment_test.go:237`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | witness-proof | **witness-proof implementation surface for displaylandedwitnessed** - `DisplayLandedWitnessed` is the witness-proof symbol declared or used at `cmd/fak/steer_comment_test.go:237`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | witness-proof | **witness-proof implementation surface for doswitness** - dos_witness is the witness-proof symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for witnesspolicy** - `witnesspolicy` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for witnessstate** - `witnessstate` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for twitnessed** - `twitnessed` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -2993,42 +3064,42 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3001/4883 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2721 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3073/4963 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2792 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 214 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 215 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3850 lookup name(s) resolves - 81 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3991 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| cache | 311 | 321 | 10 |
-| session-runtime | 273 | 283 | 10 |
-| gateway-engine | 200 | 209 | 9 |
-| context-ctx | 237 | 244 | 7 |
-| plan | 411 | 417 | 6 |
-| render-materialize | 209 | 214 | 5 |
-| loop | 94 | 98 | 4 |
-| guard-gate | 503 | 506 | 3 |
-| policy-capability | 213 | 216 | 3 |
-| witness-proof | 163 | 166 | 3 |
-| pool | 40 | 42 | 2 |
-| support-maturity | 64 | 66 | 2 |
-| attention | 85 | 86 | 1 |
-| evict | 55 | 56 | 1 |
-| layout | 19 | 20 | 1 |
-| score-debt | 93 | 94 | 1 |
+| context-ctx | 241 | 247 | 6 |
+| session-runtime | 278 | 284 | 6 |
+| gateway-engine | 204 | 209 | 5 |
+| plan | 415 | 418 | 3 |
+| guard-gate | 506 | 508 | 2 |
+| support-maturity | 69 | 71 | 2 |
+| attention | 86 | 87 | 1 |
+| cache | 320 | 321 | 1 |
+| pool | 40 | 41 | 1 |
+| render-materialize | 212 | 213 | 1 |
+| witness-proof | 165 | 166 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 60 | 60 | 0 |
 | dev-tier | 0 | 0 | 0 |
+| evict | 56 | 56 | 0 |
+| layout | 20 | 20 | 0 |
+| loop | 99 | 99 | 0 |
+| policy-capability | 217 | 217 | 0 |
+| score-debt | 112 | 112 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 

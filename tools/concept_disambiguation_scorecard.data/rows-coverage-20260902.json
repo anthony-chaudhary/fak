@@ -1,0 +1,642 @@
+{
+  "rows": [
+    {
+      "id": "cov-20260902-cache-codexcache",
+      "canonical": "cache implementation surface for codexcache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CodexCache` is the cache symbol declared or used at `internal/trajectory/audit.go:80`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CodexCache` for the operation evidenced at `internal/trajectory/audit.go:80`. Unlike `cov5304-billed-cache-read-share`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "codexcache"
+      ],
+      "grounding": "CodexCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-cache-lasttokenusagecachedinputmax",
+      "canonical": "cache implementation surface for lasttokenusagecachedinputmax",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`LastTokenUsageCachedInputMax` is the cache symbol declared or used at `internal/trajectory/audit.go:84`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LastTokenUsageCachedInputMax` for the operation evidenced at `internal/trajectory/audit.go:84`. Unlike `cov-20260902-cache-lasttokenusagecachedinputmin`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-cache-lasttokenusagecachedinputmin",
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "lasttokenusagecachedinputmax"
+      ],
+      "grounding": "LastTokenUsageCachedInputMax",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-cache-lasttokenusagecachedinputmin",
+      "canonical": "cache implementation surface for lasttokenusagecachedinputmin",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`LastTokenUsageCachedInputMin` is the cache symbol declared or used at `internal/trajectory/audit.go:83`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LastTokenUsageCachedInputMin` for the operation evidenced at `internal/trajectory/audit.go:83`. Unlike `cov-20260902-cache-lasttokenusagecachedinputmax`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-cache-lasttokenusagecachedinputmax",
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "lasttokenusagecachedinputmin"
+      ],
+      "grounding": "LastTokenUsageCachedInputMin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-cache-lasttokenusagecachedinputsamples",
+      "canonical": "cache implementation surface for lasttokenusagecachedinputsamples",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`LastTokenUsageCachedInputSamples` is the cache symbol declared or used at `internal/trajectory/audit.go:82`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LastTokenUsageCachedInputSamples` for the operation evidenced at `internal/trajectory/audit.go:82`. Unlike `cov5304-billed-cache-read-share`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "lasttokenusagecachedinputsamples"
+      ],
+      "grounding": "LastTokenUsageCachedInputSamples",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-cache-newcachewithclock",
+      "canonical": "cache implementation surface for newcachewithclock",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`NewCacheWithClock` is the cache symbol declared or used at `cmd/fak/wip_admit.go:227`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `NewCacheWithClock` for the operation evidenced at `cmd/fak/wip_admit.go:227`. Unlike `cov5304-billed-cache-read-share`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "newcachewithclock"
+      ],
+      "grounding": "NewCacheWithClock",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-guard-gate-launchguard",
+      "canonical": "guard-gate implementation surface for launchguard",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`launchGuard` is the guard-gate symbol declared or used at `cmd/fak/accounts.go:107`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `launchGuard` for the operation evidenced at `cmd/fak/accounts.go:107`. Unlike `x2-guard-gate-envtoggles`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-guard-gate-envtoggles"
+      ],
+      "aliases": [
+        "launchguard"
+      ],
+      "grounding": "launchGuard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-guard-gate-gatepolicy",
+      "canonical": "guard-gate implementation surface for gatepolicy",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`GatePolicy` is the guard-gate symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GatePolicy` for the operation evidenced at `cmd/fak/native_performance_test.go:594`. Unlike `cov-20260902-policy-capability-gatepolicy`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-policy-capability-gatepolicy",
+        "x2-guard-gate-envtoggles"
+      ],
+      "aliases": [],
+      "grounding": "GatePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-guard-gate-gaterequest",
+      "canonical": "guard-gate implementation surface for gaterequest",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`GateRequest` is the guard-gate symbol declared or used at `cmd/fak/native_performance_modes.go:19`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GateRequest` for the operation evidenced at `cmd/fak/native_performance_modes.go:19`. Unlike `x2-guard-gate-envtoggles`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-guard-gate-envtoggles"
+      ],
+      "aliases": [
+        "gaterequest"
+      ],
+      "grounding": "GateRequest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-guard-gate-qwen38gate",
+      "canonical": "guard-gate implementation surface for qwen38gate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`qwen38-ladder` is the guard-gate symbol declared or used at `cmd/fak/model.go:15`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `qwen38-ladder` for the operation evidenced at `cmd/fak/model.go:15`. Unlike `x2-guard-gate-envtoggles`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-guard-gate-envtoggles"
+      ],
+      "aliases": [
+        "qwen38gate"
+      ],
+      "grounding": "qwen38-ladder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-plan-candidatedigest",
+      "canonical": "plan implementation surface for candidatedigest",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidateDigest` is the plan symbol declared or used at `internal/experiments/nativeperf_transaction.go:101`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `candidateDigest` for the operation evidenced at `internal/experiments/nativeperf_transaction.go:101`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "covg-plan-buildknownbadissueplan"
+      ],
+      "aliases": [
+        "candidatedigest"
+      ],
+      "grounding": "candidateDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-plan-plandigest",
+      "canonical": "plan implementation surface for plandigest",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PlanDigest` is the plan symbol declared or used at `internal/contextq/tree_explore.go:69`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlanDigest` for the operation evidenced at `internal/contextq/tree_explore.go:69`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "covg-plan-buildknownbadissueplan"
+      ],
+      "aliases": [
+        "plandigest"
+      ],
+      "grounding": "PlanDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-plan-planpackets",
+      "canonical": "plan implementation surface for planpackets",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PlanPackets` is the plan symbol declared or used at `cmd/fak/scoreboard_packets.go:49`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlanPackets` for the operation evidenced at `cmd/fak/scoreboard_packets.go:49`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "covg-plan-buildknownbadissueplan"
+      ],
+      "aliases": [
+        "planpackets"
+      ],
+      "grounding": "PlanPackets",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-plan-smokecandidate",
+      "canonical": "plan implementation surface for smokecandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`smokeCandidate` is the plan symbol declared or used at `internal/selfinstall/artifact.go:49`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `smokeCandidate` for the operation evidenced at `internal/selfinstall/artifact.go:49`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "covg-plan-buildknownbadissueplan"
+      ],
+      "aliases": [
+        "smokecandidate"
+      ],
+      "grounding": "smokeCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-loop-loopturnreceipt",
+      "canonical": "loop implementation surface for loopturnreceipt",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopTurnReceipt` is the loop symbol declared or used at `cmd/fak/loop.go:396`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopTurnReceipt` for the operation evidenced at `cmd/fak/loop.go:396`. Unlike `cov-debt250-loop-loopts`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-debt250-loop-loopts"
+      ],
+      "aliases": [
+        "loopturnreceipt"
+      ],
+      "grounding": "LoopTurnReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-loop-loopturnscored",
+      "canonical": "loop implementation surface for loopturnscored",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopTurnScored` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:95`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopTurnScored` for the operation evidenced at `cmd/fak/loop_card_test.go:95`. Unlike `cov-debt250-loop-loopts`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-debt250-loop-loopts"
+      ],
+      "aliases": [
+        "loopturnscored"
+      ],
+      "grounding": "LoopTurnScored",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-loop-loopturnunavailable",
+      "canonical": "loop implementation surface for loopturnunavailable",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopTurnUnavailable` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:133`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopTurnUnavailable` for the operation evidenced at `cmd/fak/loop_card_test.go:133`. Unlike `cov-debt250-loop-loopts`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-debt250-loop-loopts"
+      ],
+      "aliases": [
+        "loopturnunavailable"
+      ],
+      "grounding": "LoopTurnUnavailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-policy-capability-adjudicatereceipt",
+      "canonical": "policy-capability implementation surface for adjudicatereceipt",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`adjudicateReceipt` is the policy-capability symbol declared at `internal/gateway/tool_routing.go:71`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `adjudicateReceipt` for the operation evidenced at `internal/gateway/tool_routing.go:71`. Unlike `x-policy-capability-policydenied`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-policy-capability-policydenied"
+      ],
+      "aliases": [
+        "adjudicatereceipt"
+      ],
+      "grounding": "adjudicateReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-policy-capability-gatepolicy",
+      "canonical": "policy-capability implementation surface for gatepolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`GatePolicy` is the policy-capability symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GatePolicy` for the operation evidenced at `cmd/fak/native_performance_test.go:594`. Unlike `cov-20260902-guard-gate-gatepolicy`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-guard-gate-gatepolicy",
+        "x-policy-capability-policydenied"
+      ],
+      "aliases": [],
+      "grounding": "GatePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-witness-proof-landedwitnessed",
+      "canonical": "witness-proof implementation surface for landedwitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`DisplayLandedWitnessed` is the witness-proof symbol declared or used at `cmd/fak/steer_comment_test.go:237`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `DisplayLandedWitnessed` for the operation evidenced at `cmd/fak/steer_comment_test.go:237`. Unlike `cov-20260902-witness-proof-displaylandedwitnessed`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-witness-proof-displaylandedwitnessed",
+        "covg-witness-proof-registerwitnessresolver"
+      ],
+      "aliases": [
+        "landedwitnessed"
+      ],
+      "grounding": "DisplayLandedWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-witness-proof-displaylandedwitnessed",
+      "canonical": "witness-proof implementation surface for displaylandedwitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`DisplayLandedWitnessed` is the witness-proof symbol declared or used at `cmd/fak/steer_comment_test.go:237`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `DisplayLandedWitnessed` for the operation evidenced at `cmd/fak/steer_comment_test.go:237`. Unlike `cov-20260902-witness-proof-landedwitnessed`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-20260902-witness-proof-landedwitnessed",
+        "covg-witness-proof-registerwitnessresolver"
+      ],
+      "aliases": [],
+      "grounding": "DisplayLandedWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-context-ctx-dispatchprobetreebuildcontext",
+      "canonical": "context-ctx implementation surface for dispatchprobetreebuildcontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`dispatchProbeTreeBuildContext` is the context-ctx symbol declared or used at `cmd/fak/dispatch_auto_budget.go:207`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dispatchProbeTreeBuildContext` for the operation evidenced at `cmd/fak/dispatch_auto_budget.go:207`. Unlike `cov-debt250-context-ctx-additionalcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov-debt250-context-ctx-additionalcontext"
+      ],
+      "aliases": [
+        "dispatchprobetreebuildcontext"
+      ],
+      "grounding": "dispatchProbeTreeBuildContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-layout-qwen38mtptensorlayout",
+      "canonical": "layout implementation surface for qwen38mtptensorlayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "`qwen38MTPTensorLayout` is the layout symbol declared or used at `internal/model/qwen35_mtp_forward.go:58`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `qwen38MTPTensorLayout` for the operation evidenced at `internal/model/qwen35_mtp_forward.go:58`. Unlike `x-disambig-guardformatlayout`, it names this exact implementation surface; unlike `layout`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-disambig-guardformatlayout"
+      ],
+      "aliases": [
+        "qwen38mtptensorlayout"
+      ],
+      "grounding": "qwen38MTPTensorLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-render-materialize-rendersyncpublicleak",
+      "canonical": "render-materialize implementation surface for rendersyncpublicleak",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderSyncPublicLeak` is the render-materialize symbol declared or used at `cmd/fak/sync.go:216`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderSyncPublicLeak` for the operation evidenced at `cmd/fak/sync.go:216`. Unlike `render-materialize-render-audit`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "render-materialize-render-audit"
+      ],
+      "aliases": [
+        "rendersyncpublicleak"
+      ],
+      "grounding": "renderSyncPublicLeak",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-evict-evictionpageaware",
+      "canonical": "evict implementation surface for evictionpageaware",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "`EvictionPageAware` is the evict symbol declared at `internal/radixkv/radixkv.go:135`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EvictionPageAware` for the operation evidenced at `internal/radixkv/radixkv.go:135`. Unlike `c729-eviction-strategy`, it names this exact implementation surface; unlike `evict`, it is not the umbrella domain.",
+      "distinct_from": [
+        "c729-eviction-strategy"
+      ],
+      "aliases": [
+        "evictionpageaware"
+      ],
+      "grounding": "EvictionPageAware",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-evict.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-loop-faklooppolicy",
+      "canonical": "loop implementation surface for faklooppolicy",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`FAK_LOOP_POLICY` is the loop environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_LOOP_POLICY` for the configuration evidenced at `cmd/fak/loop.go`. Unlike `cov-20260902-policy-capability-faklooppolicy`, it configures the loop admission policy.",
+      "distinct_from": [
+        "cov-20260902-policy-capability-faklooppolicy",
+        "cov-debt250-loop-loopts"
+      ],
+      "aliases": [],
+      "grounding": "FAK_LOOP_POLICY",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-policy-capability-faklooppolicy",
+      "canonical": "policy-capability implementation surface for faklooppolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`FAK_LOOP_POLICY` is the policy-capability environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_LOOP_POLICY` for the configuration evidenced at `cmd/fak/loop.go`. Unlike `cov-20260902-loop-faklooppolicy`, it defines the policy capability threshold.",
+      "distinct_from": [
+        "cov-20260902-loop-faklooppolicy",
+        "x-policy-capability-policydenied"
+      ],
+      "aliases": [],
+      "grounding": "FAK_LOOP_POLICY",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-attention-attnresidual",
+      "canonical": "attention implementation surface for attnresidual",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`attn_residual` is the attention phase symbol at `internal/model/qwen35_prefill.go:100`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `attn_residual` for the operation evidenced at `internal/model/qwen35_prefill.go:100`. Unlike `x-attention-attention`, it names this exact implementation surface; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attention"
+      ],
+      "aliases": [
+        "attnresidual"
+      ],
+      "grounding": "attn_residual",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-cache-cacheblend",
+      "canonical": "cache implementation surface for cacheblend",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CacheBlend` is the cache gap concept at `internal/gateway/kv_nonprefix_reuse_gap_test.go:12`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CacheBlend` for the concept evidenced at `internal/gateway/kv_nonprefix_reuse_gap_test.go:12`. Unlike `cov5304-billed-cache-read-share`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "cacheblend"
+      ],
+      "grounding": "CacheBlend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-gateway-engine-busiestengine",
+      "canonical": "gateway-engine implementation surface for busiestengine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`BusiestEngine` is the engine fact symbol at `internal/amdgpu/governor.go:199`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `BusiestEngine` for the operation evidenced at `internal/amdgpu/governor.go:199`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [
+        "busiestengine"
+      ],
+      "grounding": "BusiestEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-plan-candidatetokens",
+      "canonical": "plan implementation surface for candidatetokens",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidateTokens` is the plan symbol at `internal/qwen38quantrun/amd_scoreboard.go:334`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `candidateTokens` for the operation evidenced at `internal/qwen38quantrun/amd_scoreboard.go:334`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "covg-plan-buildknownbadissueplan"
+      ],
+      "aliases": [
+        "candidatetokens"
+      ],
+      "grounding": "candidateTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-gateway-engine-statusgatewaytimeout",
+      "canonical": "gateway-engine implementation surface for statusgatewaytimeout",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`StatusGatewayTimeout` is the HTTP status code symbol used across gateway error paths. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `StatusGatewayTimeout` for the status response evidenced in the gateway. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [
+        "statusgatewaytimeout"
+      ],
+      "grounding": "StatusGatewayTimeout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260902-render-materialize-rendermtpsweepmarkdown",
+      "canonical": "render-materialize implementation surface for rendermtpsweepmarkdown",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderMTPSweepMarkdown` is the symbol declared at `cmd/polymodelbench/tune.go:126` for rendering MTP sweep markdown tables. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderMTPSweepMarkdown` for rendering MTP sweep matrix tables. Unlike `x2-render-materialize-renderdist`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderdist"
+      ],
+      "aliases": [
+        "rendermtpsweepmarkdown"
+      ],
+      "grounding": "RenderMTPSweepMarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

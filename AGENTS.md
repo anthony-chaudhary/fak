@@ -243,8 +243,8 @@ At run end, dedupe and file every real leftover as an open issue; otherwise say 
 
 Promote reusable successful scratch through **scratchpad → committed Go tool → `fak` verb →
 captured knowledge**. Promote when it solved a real recurring task, records a non-obvious fact,
-or beats the committed equivalent; keep only true probes disposable. New tooling is a Go leaf,
-not `tools/*.py`, and operational facts belong in the leaf doc or dated `docs/notes/`. Allocate
+or beats the committed equivalent; keep only true probes disposable. New tooling is a Go leaf or
+nested Go sub-module, not another `tools/*.py` or shell/PowerShell script, and operational facts belong in the leaf doc or dated `docs/notes/`. Allocate
 and reap scratch through `fak tree-doctor`; see [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
 
 Close operator-facing turns with verdict-first bullets, one claim and inline evidence per line;
@@ -274,7 +274,8 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 - **Allocate and reap scratch explicitly.** Use `fak tree-doctor --scratch-dir <producer>` or `--scratch-path <producer>/<file>`, then `--reap-scratch <producer> --json`. Never use `git clean -Xdf` under `_scratch/`. Per-run prompts/transcripts belong in allocated scratch; `testdata/` is only for fixtures landed with a consuming test. See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
 - **Keep comments durable.** Explain non-obvious invariants, safety, concurrency, compatibility, or performance tradeoffs; do not narrate syntax. Preserve required exported-API, package, directive, generated, and legal comments.
 - **Keep claims and gains witnessed.** Every `CLAIMS.md` row needs its required tag. Report performance only from net-true end-to-end accounting, with quality and operating-envelope constraints; setup/recovery/verification overhead counts. Use the project claim and benchmark gates rather than hand-written “looks faster” prose.
-- **Extend through leaves and Go tooling.** Add capabilities with `fak new-leaf`; avoid editing the core registry directly. New durable tooling is a Go leaf plus a `fak` verb, not another `tools/*.py`; the Python gate permits maintenance of existing scripts, not new ones.
+- **Extend through leaves and Go tooling.** Add capabilities with `fak new-leaf`; avoid editing the core registry directly. New durable tooling is a Go leaf or nested Go sub-module plus a `fak` verb, not another `tools/*.py`, `.ps1`, or `.sh` script; the Python and script gates permit maintenance of grandfathered scripts, not new ones.
+- **Prefer Go sub-modules and applications over scripts.** Prefer making Go sub-modules (quarantined nested modules under `tools/<name>/<dep-heavy>/go.mod` with a stdlib façade) and Go applications (`cmd/` binaries or Go leaves under `internal/` registered as CLI verbs) rather than PowerShell (`.ps1`) or shell scripts (`.sh`, `.bat`, `.cmd`). Do not create random scripts; new automation, dogfood runners, harnesses, test utilities, and background tasks must be implemented in Go. The git pre-commit filter refuses un-grandfathered scripts (`FILE_ADMISSION`).
 - **Keep private control private.** GPU-server credentials, hostnames, SSH details, private paths, and raw internal logs stay in the private companion repo. Public evidence must be scrubbed and reproducible through [`docs/private-comms-channel.md`](docs/private-comms-channel.md).
 - **Respect Windows operational fences.** Never run broad `find /`, `find ~`, `find /mnt`, or `find /proc` from Git Bash. Route git and hang-sensitive commands through the guarded fak verbs. Treat low-utilization whole-machine stalls as kernel-path churn: stop launch storms, inspect process counts/handles, and use the committed diagnostics rather than adding retries.
 - **Make external writes explicit.** `OUT_OF_TREE_WRITE` records writes outside the repo. Use the operation’s declared external target and reversible preview/confirm path; never disguise an external mutation as repository scratch.

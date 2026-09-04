@@ -100,6 +100,7 @@ witness for completion claims.
 |---|---|---|
 | Existing Go package or CLI behavior | The owning package under `internal/` or `cmd/fak/` | A behavior test that fails before the fix and passes after it |
 | New subsystem capability | [`EXTENDING.md`](EXTENDING.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) | A leaf implementation, architecture gate, correctness witness, and measured gain where performance is claimed |
+| New tool or automation | Go sub-module under `tools/<name>/` or `cmd/` application | Implemented in Go (nested module or `cmd/` verb); random shell/PowerShell scripts refused by `FILE_ADMISSION` |
 | Documentation | The audience route in [`INDEX.md`](INDEX.md) | Every changed local link resolves, and an independent reader correctly restates the audience, page job, choices, and next action with no ambiguity; visual defects also require a captured render |
 | CI/CD contract | [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md) | All consumers migrated together and `fak-dev ci-preflight` on the committed tip |
 
@@ -197,11 +198,15 @@ Contributions are accepted **inbound = outbound**: your change is licensed to th
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
 
-## Dependency-heavy Go tools
+## Go sub-modules, applications, and tooling preference (no new scripts)
 
-New repository tooling is Go, not Python. If a useful tool needs dependencies outside the
-root module's reviewed budget, do not add them to the root and do not fall back to Python.
-Use a quarantined nested module:
+New repository tooling and automation is Go, not Python, PowerShell, or shell scripts. Prefer
+making Go sub-modules (quarantined nested modules) and Go applications (`cmd/` binaries or Go leaves)
+rather than PowerShell (`.ps1`) or shell scripts (`.sh`, `.bat`, `.cmd`).
+
+If a useful tool needs dependencies outside the root module's reviewed budget, do not add
+them to the root and do not fall back to Python, PowerShell, or shell scripts. Use a
+quarantined nested module:
 
 - keep a small, stdlib-only façade in `tools/<name>/` so callers retain
   `go run ./tools/<name> ...`;
@@ -210,6 +215,8 @@ Use a quarantined nested module:
 - have the façade enter/invoke that module explicitly, hiding the module boundary;
 - run `go test ./internal/dependencyquarantine` before submitting.
 
+Random ad-hoc scripts (`.ps1`, `.sh`, `.bat`, `.cmd`) are prohibited: the git file-admission
+pre-commit filter (`FILE_ADMISSION`) blocks any new, un-grandfathered scripts from being committed.
 The gate pins the root `go.mod` require set and `go.sum`, walks for nested `go.mod` files
 rather than maintaining a list, checks every `tools/` façade for non-stdlib imports, and
 builds/tests every discovered nested module in CI. Any intentional root dependency-budget

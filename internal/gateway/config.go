@@ -762,6 +762,9 @@ type Config struct {
 	// and advertises the full tool catalog on tools/list (equivalent to FAK_ABLATE_MCP_TOOL_FILTER=1).
 	// Used by clients like OpenCode that query tools/list once at startup and lack dynamic tool fault-in.
 	DisableMCPDefer bool
+	// ModelVision declares whether the active model supports multimodal vision/image inputs (#10779).
+	// When false (or unset for text-only models), image tools like view_image are omitted from advertised schemas.
+	ModelVision bool
 	// DeferColdTools, when true, defers the COLD tool tail on the OUTBOUND Anthropic
 	// Messages body (#3232, the 10x floor lever): every allowed-but-cold custom tool is
 	// marked `defer_loading:true` and one standard `tool_search_tool` is injected, so the

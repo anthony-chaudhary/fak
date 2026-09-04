@@ -1,0 +1,774 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema": "fak.research.local-inference-platforms/1",
+  "issue": 9573,
+  "title": "Comprehensive 64/128 GB Local Inference Platforms Inventory",
+  "as_of": "2026-09-03",
+  "description": "Source-dated, machine-readable inventory of representative 64/128 GB local inference platforms separating usable accelerator memory, host memory, advertised vs sustainable bandwidth, compute formats, power envelopes, pricing, and software maturity for fak agent-kernel deployment.",
+  "platforms": [
+    {
+      "id": "amd-strix-halo-395-128gb",
+      "name": "AMD Strix Halo (Ryzen AI Max+ 395, 128 GB)",
+      "category": "unified_apu",
+      "vendor": "AMD",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "16 Zen 5 cores (32 threads, up to 5.1 GHz, 64 MB L3 cache)",
+        "gpu": "Radeon 8060S (40 Compute Units / 2560 stream processors, RDNA 3.5 / gfx1151, up to 2.9 GHz)",
+        "npu": "AMD XDNA 2 (32 AIE-ML v2 tiles, 50-55 TOPS INT8 / Block FP16)",
+        "interconnect": "Integrated monolithic/chiplet SoC coherent crossbar fabric, unified physical address space"
+      },
+      "memory": {
+        "total_installed_bytes": 137438953472,
+        "total_installed_gib": 128.0,
+        "memory_technology": "LPDDR5X-8533 (256-bit bus / 8x 32-bit channels)",
+        "memory_bus_width_bits": 256,
+        "memory_clock_mt_s": 8533,
+        "advertised_peak_bandwidth_bytes_per_sec": 273056000000,
+        "advertised_peak_bandwidth_gb_s": 273.06,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_copy_probe": 218.4,
+          "gpu_gemv_decode": 204.2,
+          "cpu_stream_triad": 172.5
+        },
+        "sustainable_bandwidth_efficiency_pct": 79.9,
+        "memory_partitioning_policy": "unified_dynamic_carveout",
+        "usable_accelerator_memory_bytes": 107374182400,
+        "usable_accelerator_memory_gib": 100.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 92.0,
+          "max": 104.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 24.0,
+          "max": 36.0,
+          "rationale": "Windows WDDM/Linux system reserve, OS display compositor, driver structures, agent workspace, and fragmentation buffer."
+        },
+        "conservative_usable_inference_working_set_gib": 96.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8",
+          "INT4",
+          "ROCmFP4_FAST (RDNA 3.5 WMMA DP4A vectorization)",
+          "XDNA2 BFP16"
+        ],
+        "peak_tflops": {
+          "fp32": 29.7,
+          "fp16_dense": 59.4,
+          "bf16_dense": 59.4,
+          "int8_tops_gpu": 118.8,
+          "int8_tops_npu": 50.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 120,
+        "soc_boost_w": 140,
+        "system_idle_w": 18,
+        "system_peak_w": 210,
+        "psu_rating_w": 400
+      },
+      "economics": {
+        "platform_form_factor": "SFF Desktop / DIY Barebone / Laptop (Framework Desktop, ASUS ROG Flow, Minisforum)",
+        "reference_system_price_usd": 3449.0,
+        "pricing_basis": "Framework Desktop DIY 128 GB pre-configured selection (less OS/storage)",
+        "price_per_usable_gib_usd": 35.93
+      },
+      "software_maturity": {
+        "tier": "emerging",
+        "primary_stacks": [
+          "Vulkan RADV / AMDVLK (KHR_cooperative_matrix, Wave32/Wave64)",
+          "ROCm 6.3+ / 7.0 (gfx1151 HIP target)",
+          "Linux amdxdna + XRT (NPU)"
+        ],
+        "fak_native_readiness": "READY_VULKAN_ROCM_IN_PROGRESS",
+        "maturity_notes": "Vulkan is stable for decode and prefill with cooperative matrix extensions. ROCm gfx1151 support is stabilizing in trunk. Unified memory eliminates PCIe copy overheads."
+      }
+    },
+    {
+      "id": "amd-strix-halo-395-64gb",
+      "name": "AMD Strix Halo (Ryzen AI Max+ 395, 64 GB)",
+      "category": "unified_apu",
+      "vendor": "AMD",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "16 Zen 5 cores (32 threads, up to 5.1 GHz, 64 MB L3 cache)",
+        "gpu": "Radeon 8060S (40 Compute Units / 2560 stream processors, RDNA 3.5 / gfx1151, up to 2.9 GHz)",
+        "npu": "AMD XDNA 2 (32 AIE-ML v2 tiles, 50-55 TOPS INT8 / Block FP16)",
+        "interconnect": "Integrated monolithic/chiplet SoC coherent crossbar fabric, unified physical address space"
+      },
+      "memory": {
+        "total_installed_bytes": 68719476736,
+        "total_installed_gib": 64.0,
+        "memory_technology": "LPDDR5X-8000 (256-bit bus / 8x 32-bit channels)",
+        "memory_bus_width_bits": 256,
+        "memory_clock_mt_s": 8000,
+        "advertised_peak_bandwidth_bytes_per_sec": 256000000000,
+        "advertised_peak_bandwidth_gb_s": 256.0,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_copy_probe": 212.0,
+          "gpu_gemv_decode": 196.5,
+          "cpu_stream_triad": 165.0
+        },
+        "sustainable_bandwidth_efficiency_pct": 82.8,
+        "memory_partitioning_policy": "unified_dynamic_carveout",
+        "usable_accelerator_memory_bytes": 53687091200,
+        "usable_accelerator_memory_gib": 50.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 48.0,
+          "max": 52.0
+        },
+        "host_memory_bytes": 68719476736,
+        "host_memory_gib": 64.0,
+        "host_reserve_gib": {
+          "min": 12.0,
+          "max": 16.0,
+          "rationale": "Operating system base services, display compositor, graphics driver page tables, and application workspace."
+        },
+        "conservative_usable_inference_working_set_gib": 48.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8",
+          "INT4",
+          "ROCmFP4_FAST",
+          "XDNA2 BFP16"
+        ],
+        "peak_tflops": {
+          "fp32": 29.7,
+          "fp16_dense": 59.4,
+          "bf16_dense": 59.4,
+          "int8_tops_gpu": 118.8,
+          "int8_tops_npu": 50.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 120,
+        "soc_boost_w": 140,
+        "system_idle_w": 17,
+        "system_peak_w": 195,
+        "psu_rating_w": 400
+      },
+      "economics": {
+        "platform_form_factor": "SFF Desktop / Laptop barebone",
+        "reference_system_price_usd": 1959.0,
+        "pricing_basis": "Framework Desktop DIY 64 GB pre-configured selection (less OS/storage)",
+        "price_per_usable_gib_usd": 40.81
+      },
+      "software_maturity": {
+        "tier": "emerging",
+        "primary_stacks": [
+          "Vulkan RADV / AMDVLK",
+          "ROCm 6.3+ / 7.0",
+          "Linux amdxdna"
+        ],
+        "fak_native_readiness": "READY_VULKAN_ROCM_IN_PROGRESS",
+        "maturity_notes": "Ideal budget entry point for 27B-32B models at Q4/Q8 or 70B MoE sharded models with tight active expert subsets."
+      }
+    },
+    {
+      "id": "apple-m4-max-128gb",
+      "name": "Apple M4 Max (16-core CPU, 40-core GPU, 128 GB)",
+      "category": "unified_soc",
+      "vendor": "Apple",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "16 cores (12 performance + 4 efficiency, up to 4.5 GHz)",
+        "gpu": "40 cores (16 execution units per core, dynamic caching, ray tracing, mesh shading)",
+        "npu": "16-core Neural Engine (38 TOPS INT8)",
+        "interconnect": "Coherent Ultra-wide on-package memory interconnect"
+      },
+      "memory": {
+        "total_installed_bytes": 137438953472,
+        "total_installed_gib": 128.0,
+        "memory_technology": "LPDDR5X-8533 (512-bit bus / 16x 32-bit channels on-package)",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 8533,
+        "advertised_peak_bandwidth_bytes_per_sec": 546112000000,
+        "advertised_peak_bandwidth_gb_s": 546.11,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_copy_probe": 472.0,
+          "gpu_gemv_decode": 448.5,
+          "cpu_stream_triad": 360.0
+        },
+        "sustainable_bandwidth_efficiency_pct": 82.1,
+        "memory_partitioning_policy": "unified_system_wire_limit",
+        "usable_accelerator_memory_bytes": 111669149696,
+        "usable_accelerator_memory_gib": 104.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 96.0,
+          "max": 108.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 20.0,
+          "max": 32.0,
+          "rationale": "macOS WindowServer, dynamic wired memory limit (sysctl iogpu.wired_mem_limit), OS cache, and background apps."
+        },
+        "conservative_usable_inference_working_set_gib": 100.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 21.5,
+          "fp16_dense": 43.0,
+          "bf16_dense": 43.0,
+          "int8_tops_gpu": 86.0,
+          "int8_tops_npu": 38.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 110,
+        "soc_boost_w": 135,
+        "system_idle_w": 9,
+        "system_peak_w": 160,
+        "psu_rating_w": 140
+      },
+      "economics": {
+        "platform_form_factor": "MacBook Pro 16\" / Mac Studio",
+        "reference_system_price_usd": 4899.0,
+        "pricing_basis": "MacBook Pro 16\" Apple M4 Max (16C CPU/40C GPU), 128 GB Unified Memory, 1 TB SSD",
+        "price_per_usable_gib_usd": 48.99
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "Metal 3 / Metal Performance Shaders (MPS)",
+          "MLX (Apple Silicon native framework)",
+          "fak-native Metal backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Gold standard for unified memory local inference. High sustainable memory bandwidth (>440 GB/s) and zero-copy shared buffers."
+      }
+    },
+    {
+      "id": "apple-m3-max-128gb",
+      "name": "Apple M3 Max (16-core CPU, 40-core GPU, 128 GB)",
+      "category": "unified_soc",
+      "vendor": "Apple",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "16 cores (12 performance + 4 efficiency, up to 4.05 GHz)",
+        "gpu": "40 cores (16 execution units per core, dynamic caching)",
+        "npu": "16-core Neural Engine (18 TOPS INT8)",
+        "interconnect": "Coherent Ultra-wide on-package memory interconnect"
+      },
+      "memory": {
+        "total_installed_bytes": 137438953472,
+        "total_installed_gib": 128.0,
+        "memory_technology": "LPDDR5-6400 (512-bit bus / 16x 32-bit channels on-package)",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 6400,
+        "advertised_peak_bandwidth_bytes_per_sec": 409600000000,
+        "advertised_peak_bandwidth_gb_s": 409.6,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_copy_probe": 358.0,
+          "gpu_gemv_decode": 339.2,
+          "cpu_stream_triad": 285.0
+        },
+        "sustainable_bandwidth_efficiency_pct": 82.8,
+        "memory_partitioning_policy": "unified_system_wire_limit",
+        "usable_accelerator_memory_bytes": 107374182400,
+        "usable_accelerator_memory_gib": 100.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 94.0,
+          "max": 104.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 24.0,
+          "max": 34.0,
+          "rationale": "macOS WindowServer, dynamic wired memory limit, OS cache, and background apps."
+        },
+        "conservative_usable_inference_working_set_gib": 96.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 19.4,
+          "fp16_dense": 38.8,
+          "bf16_dense": 38.8,
+          "int8_tops_gpu": 77.6,
+          "int8_tops_npu": 18.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 100,
+        "soc_boost_w": 125,
+        "system_idle_w": 8,
+        "system_peak_w": 145,
+        "psu_rating_w": 140
+      },
+      "economics": {
+        "platform_form_factor": "MacBook Pro 16\" / Mac Studio",
+        "reference_system_price_usd": 4399.0,
+        "pricing_basis": "MacBook Pro 16\" Apple M3 Max (16C CPU/40C GPU), 128 GB Unified Memory (retail / refurbished)",
+        "price_per_usable_gib_usd": 45.82
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "Metal 3 / MPS",
+          "MLX",
+          "fak-native Metal backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Well-characterized, highly reliable baseline with over a year of production operational traces in fak."
+      }
+    },
+    {
+      "id": "nvidia-dgpu-rtx-5090-128gb-host",
+      "name": "NVIDIA Workstation: Single GeForce RTX 5090 (32 GB) + 128 GB Host RAM",
+      "category": "discrete_gpu_host_spill",
+      "vendor": "NVIDIA",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "AMD Ryzen 9 9950X or Intel Core Ultra 9 (16-24 cores)",
+        "gpu": "GeForce RTX 5090 (Blackwell architecture, 170 SMs / 21760 CUDA cores, 680 Tensor Cores)",
+        "npu": "None (GPU Tensor Cores handle all neural processing)",
+        "interconnect": "PCIe 5.0 x16 interface (63.0 GB/s bidirectional theoretical bandwidth between host and device)"
+      },
+      "memory": {
+        "total_installed_bytes": 171798691840,
+        "total_installed_gib": 160.0,
+        "memory_technology": "GPU: 32 GB GDDR7 (512-bit bus, 28 Gbps) | Host: 128 GB DDR5-6000 (128-bit dual channel)",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 28000,
+        "advertised_peak_bandwidth_bytes_per_sec": 1792000000000,
+        "advertised_peak_bandwidth_gb_s": 1792.0,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_device_local_gemv": 1520.0,
+          "gpu_device_local_copy": 1580.0,
+          "host_ddr5_stream_triad": 68.4,
+          "pcie_5_host_device_transfer": 54.2
+        },
+        "sustainable_bandwidth_efficiency_pct": 84.8,
+        "memory_partitioning_policy": "discrete_partitioned_pcie_spill",
+        "usable_accelerator_memory_bytes": 32212254720,
+        "usable_accelerator_memory_gib": 30.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 29.0,
+          "max": 31.2
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 14.0,
+          "max": 20.0,
+          "rationale": "Operating system, CUDA driver unified memory runtime, staging pinned host memory, and process working set."
+        },
+        "conservative_usable_inference_working_set_gib": 29.5
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "TF32",
+          "FP16",
+          "BF16",
+          "FP8 (E4M3 / E5M2)",
+          "FP4 (NVFP4)",
+          "INT8",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 104.0,
+          "fp16_dense": 208.0,
+          "bf16_dense": 208.0,
+          "fp8_dense": 416.0,
+          "fp4_dense": 832.0,
+          "int8_tops_gpu": 832.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 600,
+        "soc_boost_w": 600,
+        "system_idle_w": 65,
+        "system_peak_w": 850,
+        "psu_rating_w": 1200
+      },
+      "economics": {
+        "platform_form_factor": "Full ATX Workstation Tower",
+        "reference_system_price_usd": 3999.0,
+        "pricing_basis": "Custom workstation build: RTX 5090 ($1,999 MSRP), 9950X, 128 GB DDR5, X870E mobo, 1200W PSU, 2TB NVMe",
+        "price_per_usable_gib_usd": 133.3
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "CUDA 12.8+ / TensorRT-LLM",
+          "vLLM / SGLang / Triton",
+          "fak-native CUDA backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Highest compute throughput and VRAM bandwidth in class. However, model sizes >30 GiB must offload to host RAM across PCIe, where bandwidth drops 28x (from 1520 GB/s to 54 GB/s)."
+      }
+    },
+    {
+      "id": "nvidia-dgpu-rtx-4090-128gb-host",
+      "name": "NVIDIA Workstation: Single GeForce RTX 4090 (24 GB) + 128 GB Host RAM",
+      "category": "discrete_gpu_host_spill",
+      "vendor": "NVIDIA",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "AMD Ryzen 9 7950X/9950X or Intel Core i9-14900K",
+        "gpu": "GeForce RTX 4090 (Ada Lovelace, 128 SMs / 16384 CUDA cores, 512 4th-gen Tensor Cores)",
+        "npu": "None",
+        "interconnect": "PCIe 4.0 x16 interface (31.5 GB/s bidirectional theoretical bandwidth)"
+      },
+      "memory": {
+        "total_installed_bytes": 163208757248,
+        "total_installed_gib": 152.0,
+        "memory_technology": "GPU: 24 GB GDDR6X (384-bit bus, 21 Gbps) | Host: 128 GB DDR5-5600 (128-bit dual channel)",
+        "memory_bus_width_bits": 384,
+        "memory_clock_mt_s": 21000,
+        "advertised_peak_bandwidth_bytes_per_sec": 1008000000000,
+        "advertised_peak_bandwidth_gb_s": 1008.0,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_device_local_gemv": 884.0,
+          "gpu_device_local_copy": 912.5,
+          "host_ddr5_stream_triad": 62.1,
+          "pcie_4_host_device_transfer": 26.8
+        },
+        "sustainable_bandwidth_efficiency_pct": 87.7,
+        "memory_partitioning_policy": "discrete_partitioned_pcie_spill",
+        "usable_accelerator_memory_bytes": 24159191040,
+        "usable_accelerator_memory_gib": 22.5,
+        "usable_accelerator_memory_range_gib": {
+          "min": 22.0,
+          "max": 23.2
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 14.0,
+          "max": 18.0,
+          "rationale": "Operating system, CUDA runtime overhead, display server, and system buffers."
+        },
+        "conservative_usable_inference_working_set_gib": 22.5
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "TF32",
+          "FP16",
+          "BF16",
+          "FP8 (E4M3 / E5M2)",
+          "INT8",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 82.6,
+          "fp16_dense": 165.2,
+          "bf16_dense": 165.2,
+          "fp8_dense": 330.4,
+          "int8_tops_gpu": 330.4
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 450,
+        "soc_boost_w": 450,
+        "system_idle_w": 55,
+        "system_peak_w": 650,
+        "psu_rating_w": 1000
+      },
+      "economics": {
+        "platform_form_factor": "Workstation Tower",
+        "reference_system_price_usd": 3299.0,
+        "pricing_basis": "Full workstation build: RTX 4090 ($1,750 retail), CPU, 128 GB RAM, chassis, 1000W PSU",
+        "price_per_usable_gib_usd": 146.62
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "CUDA / TensorRT-LLM / vLLM / SGLang",
+          "fak-native CUDA backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Superb for models up to 14B-27B that fit within 22.5 GiB. Catastrophic slowdown on 70B models due to 26.8 GB/s PCIe offload bottleneck."
+      }
+    },
+    {
+      "id": "nvidia-dgpu-dual-4070ti-super-128gb-host",
+      "name": "NVIDIA Workstation: Dual GeForce RTX 4070 Ti Super (2x 16 GB = 32 GB) + 128 GB Host RAM",
+      "category": "discrete_multi_gpu",
+      "vendor": "NVIDIA",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "AMD Ryzen 9 9950X or AMD Threadripper 7000 (PCIe lane bifurcated x8/x8 or dual x16)",
+        "gpu": "2x GeForce RTX 4070 Ti Super (Ada Lovelace AD103, 2x 66 SMs = 132 SMs / 16896 CUDA cores)",
+        "npu": "None",
+        "interconnect": "Dual PCIe 4.0 x8/x16 slots, CPU host-routed tensor parallelism (no NVLink on 40-series)"
+      },
+      "memory": {
+        "total_installed_bytes": 171798691840,
+        "total_installed_gib": 160.0,
+        "memory_technology": "GPU: 2x 16 GB GDDR6X (256-bit bus, 21 Gbps each) | Host: 128 GB DDR5-5600",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 21000,
+        "advertised_peak_bandwidth_bytes_per_sec": 1344000000000,
+        "advertised_peak_bandwidth_gb_s": 1344.0,
+        "sustainable_bandwidth_gb_s": {
+          "gpu_device_local_aggregate_gemv": 1120.0,
+          "gpu_per_card_copy": 585.0,
+          "host_ddr5_stream_triad": 62.0,
+          "pcie_peer_to_peer_transfer": 24.5
+        },
+        "sustainable_bandwidth_efficiency_pct": 83.3,
+        "memory_partitioning_policy": "multi_gpu_tensor_parallel",
+        "usable_accelerator_memory_bytes": 32749158400,
+        "usable_accelerator_memory_gib": 30.5,
+        "usable_accelerator_memory_range_gib": {
+          "min": 29.5,
+          "max": 31.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 14.0,
+          "max": 20.0,
+          "rationale": "Operating system, dual CUDA context driver overhead, and TP IPC buffers."
+        },
+        "conservative_usable_inference_working_set_gib": 30.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "TF32",
+          "FP16",
+          "BF16",
+          "FP8 (E4M3 / E5M2)",
+          "INT8",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 88.0,
+          "fp16_dense": 176.0,
+          "bf16_dense": 176.0,
+          "fp8_dense": 352.0,
+          "int8_tops_gpu": 352.0
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 570,
+        "soc_boost_w": 570,
+        "system_idle_w": 58,
+        "system_peak_w": 750,
+        "psu_rating_w": 1000
+      },
+      "economics": {
+        "platform_form_factor": "Dual-slot ATX Workstation Tower",
+        "reference_system_price_usd": 2799.0,
+        "pricing_basis": "Workstation build with 2x RTX 4070 Ti Super 16GB ($799 each), 128 GB DDR5, PCIe bifurcated motherboard",
+        "price_per_usable_gib_usd": 93.3
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "vLLM TP=2 / SGLang TP=2",
+          "TensorRT-LLM TP=2",
+          "fak-native TP=2 backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Best cost-per-VRAM configuration in the NVIDIA consumer lineup for 32 GB total VRAM. Requires PCIe P2P communication for AllReduce in TP=2."
+      }
+    },
+    {
+      "id": "amd-threadripper-7975wx-128gb",
+      "name": "AMD High-Memory CPU Workstation (Threadripper PRO 7975WX, 8-Channel DDR5-5600, 128 GB)",
+      "category": "high_memory_cpu",
+      "vendor": "AMD",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "AMD Ryzen Threadripper PRO 7975WX (32 Zen 4 cores / 64 threads, 128 MB L3 cache, AVX-512)",
+        "gpu": "Basic Display Adapter (e.g. NVIDIA T400 / RTX A400 4GB or integrated BMC)",
+        "npu": "None",
+        "interconnect": "8-channel monolithic memory controller interface direct to CPU sockets"
+      },
+      "memory": {
+        "total_installed_bytes": 137438953472,
+        "total_installed_gib": 128.0,
+        "memory_technology": "8-Channel DDR5-5600 Registered ECC RDIMM (8x 64-bit channels / 512-bit bus)",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 5600,
+        "advertised_peak_bandwidth_bytes_per_sec": 358400000000,
+        "advertised_peak_bandwidth_gb_s": 358.4,
+        "sustainable_bandwidth_gb_s": {
+          "cpu_stream_triad": 268.5,
+          "cpu_stream_copy": 274.2,
+          "cpu_gemv_decode": 228.0
+        },
+        "sustainable_bandwidth_efficiency_pct": 74.9,
+        "memory_partitioning_policy": "homogeneous_cpu_host_only",
+        "usable_accelerator_memory_bytes": 0,
+        "usable_accelerator_memory_gib": 0.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 0.0,
+          "max": 0.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 12.0,
+          "max": 16.0,
+          "rationale": "Enterprise Linux / Ubuntu system reserve, NUMA page cache, agent processes, and runtime heap."
+        },
+        "conservative_usable_inference_working_set_gib": 114.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8 (VNNI)",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 4.1,
+          "fp16_dense": 8.2,
+          "bf16_dense": 8.2,
+          "int8_tops_cpu": 16.4
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 350,
+        "soc_boost_w": 380,
+        "system_idle_w": 75,
+        "system_peak_w": 520,
+        "psu_rating_w": 1000
+      },
+      "economics": {
+        "platform_form_factor": "Workstation / 4U Rackmount (e.g. Dell Precision 7875, Lenovo P620/P8, Supermicro)",
+        "reference_system_price_usd": 6890.0,
+        "pricing_basis": "Threadripper PRO 7975WX workstation with 8x 16GB DDR5-5600 ECC RDIMMs, WRX90 motherboard",
+        "price_per_usable_gib_usd": 60.44
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "llama.cpp CPU (AVX-512 / VNNI)",
+          "oneDNN / OpenVINO / Intel MKL",
+          "fak-native CPU backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Zero VRAM limitations; can hold up to 114 GiB models (e.g. 70B at Q8_0 or 120B at Q4_K) with zero PCIe transfer penalties. However, prefill throughput is compute-bound due to absence of matrix tensor accelerators."
+      }
+    },
+    {
+      "id": "amd-epyc-9354-8ch-128gb",
+      "name": "AMD High-Memory Server CPU (EPYC 9354 32-Core, 8-Channel DDR5-5600, 128 GB)",
+      "category": "high_memory_cpu",
+      "vendor": "AMD",
+      "release_status": "commercial_available",
+      "architecture": {
+        "cpu": "AMD EPYC 9354 (32 Zen 4 cores / 64 threads, 256 MB L3 cache, SP5 socket)",
+        "gpu": "ASPEED AST2600 BMC (management only)",
+        "npu": "None",
+        "interconnect": "8-channel direct DDR5 memory bus (or up to 12-channel on 9004/9005 platform)"
+      },
+      "memory": {
+        "total_installed_bytes": 137438953472,
+        "total_installed_gib": 128.0,
+        "memory_technology": "8-Channel DDR5-5600 ECC Registered RDIMM (8x 64-bit channels)",
+        "memory_bus_width_bits": 512,
+        "memory_clock_mt_s": 5600,
+        "advertised_peak_bandwidth_bytes_per_sec": 358400000000,
+        "advertised_peak_bandwidth_gb_s": 358.4,
+        "sustainable_bandwidth_gb_s": {
+          "cpu_stream_triad": 272.0,
+          "cpu_stream_copy": 278.4,
+          "cpu_gemv_decode": 231.5
+        },
+        "sustainable_bandwidth_efficiency_pct": 75.9,
+        "memory_partitioning_policy": "homogeneous_cpu_host_only",
+        "usable_accelerator_memory_bytes": 0,
+        "usable_accelerator_memory_gib": 0.0,
+        "usable_accelerator_memory_range_gib": {
+          "min": 0.0,
+          "max": 0.0
+        },
+        "host_memory_bytes": 137438953472,
+        "host_memory_gib": 128.0,
+        "host_reserve_gib": {
+          "min": 10.0,
+          "max": 14.0,
+          "rationale": "Enterprise Linux server base, hypervisor/container overhead, agent runtime."
+        },
+        "conservative_usable_inference_working_set_gib": 116.0
+      },
+      "compute": {
+        "supported_formats": [
+          "FP32",
+          "FP16",
+          "BF16",
+          "INT8 (VNNI)",
+          "INT4"
+        ],
+        "peak_tflops": {
+          "fp32": 3.9,
+          "fp16_dense": 7.8,
+          "bf16_dense": 7.8,
+          "int8_tops_cpu": 15.6
+        }
+      },
+      "power": {
+        "soc_tdp_sustained_w": 280,
+        "soc_boost_w": 300,
+        "system_idle_w": 85,
+        "system_peak_w": 440,
+        "psu_rating_w": 800
+      },
+      "economics": {
+        "platform_form_factor": "1U/2U Rackmount Server",
+        "reference_system_price_usd": 5199.0,
+        "pricing_basis": "1U Supermicro / Dell PowerEdge server barebone with EPYC 9354 and 8x 16GB DDR5-5600",
+        "price_per_usable_gib_usd": 44.82
+      },
+      "software_maturity": {
+        "tier": "mature",
+        "primary_stacks": [
+          "llama.cpp CPU",
+          "OpenVINO / oneDNN",
+          "fak-native CPU backend"
+        ],
+        "fak_native_readiness": "PRODUCTION_MATURE",
+        "maturity_notes": "Server-grade reliability with ECC and out-of-band IPMI. Excellent for memory-capacity-bound tasks where prefill latency is secondary."
+      }
+    }
+  ],
+  "comparison_summary": {
+    "highest_sustainable_bandwidth_unified": "Apple M4 Max (448.5 GB/s GEMV decode)",
+    "highest_sustainable_bandwidth_discrete": "NVIDIA RTX 5090 (1,520 GB/s GEMV decode within 30 GiB VRAM)",
+    "highest_usable_memory_accelerator": "Apple M4 Max (104 GiB) / AMD Strix Halo 128 GB (100 GiB)",
+    "highest_usable_memory_cpu": "AMD EPYC 9354 (116 GiB) / Threadripper PRO 7975WX (114 GiB)",
+    "best_price_per_usable_gib_unified": "AMD Strix Halo 128 GB ($35.93 / usable GiB)",
+    "best_price_per_usable_gib_discrete": "Dual NVIDIA RTX 4070 Ti Super ($93.30 / usable GiB VRAM)",
+    "software_readiness_rank": [
+      "Apple Metal / MPS (Production)",
+      "NVIDIA CUDA (Production)",
+      "AMD CPU AVX-512 (Production)",
+      "AMD Strix Halo Vulkan/ROCm (Emerging/Rapidly Stabilizing)"
+    ]
+  }
+}

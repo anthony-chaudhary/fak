@@ -14,7 +14,7 @@ import (
 const Schema = "fak-category-baselines/1"
 
 const (
-	DefaultPath = "config/category-baselines.json"
+	DefaultPath = "configs/category-baselines.json"
 	LegacyPath  = ".fak/category-baselines.json"
 )
 

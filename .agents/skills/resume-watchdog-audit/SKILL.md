@@ -1,6 +1,6 @@
 ---
 name: resume-watchdog-audit
-description: The watchdog-watchdog — one read-only pass that proves the resume watchdog (the n¹ layer that revives dead autonomous Claude sessions) is itself ALIVE, TICKING, and reviving PRODUCTIVE instances, versus silently...
+description: Audit and recover crashed Claude and Codex sessions through one dry-run-first cohort surface, with exact provider identity and post-launch transcript/thread advancement; then audit the scheduler tower that keeps...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/resume-watchdog-audit/SKILL.md
