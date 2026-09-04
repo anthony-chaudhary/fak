@@ -418,7 +418,7 @@ var verbManifest = []Verb{
 	{Name: "workflow-audit", Synopsis: "classify .github/workflows branch/tag refs against the branch-role contract; gate unclassified dev-path refs", Lane: "cmd"},
 	{Name: "workpattern", Synopsis: "mine recurring work patterns from source or recorded trajectories", Lane: "cmd"},
 	{Name: "workspin", Synopsis: "audit repository commit and issue activity to detect sustained churn without delivery", Lane: "cmd"},
-	{Name: "worktree", Synopsis: "guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main", Lane: "cmd"},
+	{Name: "worktree", Synopsis: "guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main", Lane: "cmd", Doc: "docs/managed-worker-worktrees.md"},
 	{Name: "worktype", Synopsis: "attribute session token spend and outcomes to classified work types", Lane: "cmd"},
 }
 

@@ -56,6 +56,15 @@ receipts. For newcomer Mac guidance and head-to-head Apple Silicon Metal measure
 
 Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
 
+## Default priorities & operating modes
+
+fak is organized around a focused four-tier default priority hierarchy:
+
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus — a single-binary "one touch" deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory.
+2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache/context MMU acceleration, and native model execution.
+3. **fak harness only:** Standalone agent harness and governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
+4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
+
 ## Install and configure
 
 ```bash
@@ -93,4 +102,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-03 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-03 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-04 vs VERSION 0.47.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-04 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

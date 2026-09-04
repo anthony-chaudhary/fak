@@ -99,6 +99,8 @@ fak worktree <subcommand>
               [--cleanup-remote REF] [--apply] [--allow-peer] [--worktree-name NAME]
                    List durable off-branch land candidates and their LANDED or
                    RECOVERABLE state. Cleanup refuses unlanded refs unless forced.
+
+See docs/managed-worker-worktrees.md for the complete operator guide.
 `))
 }
 

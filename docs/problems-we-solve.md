@@ -138,6 +138,19 @@ This complements the [spine-first defaults](spine-first-defaults.md), the
 capability policy, and net-true evidence standard. Those are delivery disciplines; P1-P4 are
 the persistent problem lens applied through them.
 
+## Default priority hierarchy
+
+Alongside problem centrality and the P1-P4 checklist, the repository prioritizes work across four explicit operating tiers:
+
+1. **fak all in one (serving and harness + memory — the "one touch" thing):**
+   The primary product focus: a single-binary turnkey deployment (`fak up`) uniting high-performance model serving, the agent harness with capability-floor security, and durable context memory into one frictionless developer experience.
+2. **fak serving only:**
+   High-performance model inference, disaggregated KV-cache routing, and OpenAI/MCP gateway endpoints (`fak serve`).
+3. **fak harness only:**
+   Standalone agent harness, capability floor enforcement, and tool-call interception wrapping external frontier models (`fak guard`).
+4. **other things:**
+   Peripheral utilities, benchmark harnesses, standalone tooling, and secondary integrations.
+
 ## Problem centrality: the portfolio signal
 
 Centrality asks:

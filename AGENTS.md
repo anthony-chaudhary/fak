@@ -90,8 +90,20 @@ it calls, and handles every tool call before it runs — reuse the shared setup,
 call to the right model, serve repeats locally, and shed old turns while the provider's
 cache survives. It is first a **performance gate** (do the shared setup work once, not
 every turn — cheaper, faster, longer-running sessions) and, on the very same checkpoint, a
-**security gate** (a default-deny capability floor the model can't talk past). Performance
-is the current focus; the security floor rides along for free on the same seam.
+**security gate** (a default-deny capability floor the model can't talk past).
+
+## Default priorities (portfolio hierarchy)
+
+When prioritizing design, implementation, architecture, triage, or backlog work, the repository defaults to this four-tier hierarchy:
+
+1. **fak all in one (serving and harness + memory — the "one touch" thing)**:
+   The primary focus: a turnkey, single-binary runtime (`fak up`) that bundles model serving, the agent harness, and durable memory into a seamless "one touch" deployment. Everything required to run governed, cache-accelerated agentic workflows out of the box with zero glue code.
+2. **fak serving only**:
+   High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache/context MMU acceleration, continuous batching, and native model execution.
+3. **fak harness only**:
+   Standalone agent harness and governance substrate (`fak guard`), default-deny tool capability floor, policy adjudication, and interception over external frontier models and harnesses.
+4. **other things**:
+   Peripheral utilities, standalone integrations, off-spine tooling, and secondary stewardship tasks not directly advancing tiers 1–3.
 
 ## Repo layout (where things live)
 
@@ -226,7 +238,7 @@ work began first. Do not use plans, TODOs, commit messages, or chat as substitut
 issue tracking is reasonably available.
 ## New work defaults: spine first, then fan out
 
-For every new unit, classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
+For every new unit, align with the default priority hierarchy (1: All-in-one [serving + harness + memory], 2: Serving only, 3: Harness only, 4: Other things), classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
 all P1-P4 checks in [`docs/problems-we-solve.md`](docs/problems-we-solve.md), and state **For /
 Problem / Today / Better because / Witness** against the real next-best alternative. Then:
 
@@ -270,7 +282,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 - **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.
 - **Preserve shared-tree buildability.** A tracked or untracked `.go` sibling enters every package build. Fence incomplete cross-file WIP with `//go:build wip_<feature>` until its symbols exist; validate only your explicit paths with `fak validate --mine`. Build verification never writes an in-tree binary.
 - **Migrate CI/CD contracts atomically.** Before changing workflow inputs, JSON schemas consumed by workflows, check/job names, secrets/env, runner labels, or artifact/cache names, search the whole tree for consumers and update them together. Include changed contract, migrated consumers, impact/cutover, and rollback in the commit body; prove committed tip with `fak-dev ci-preflight`. Checklist: [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md).
-- **Use only the sanctioned detached worker worktree.** Drive isolated workers through `fak worktree worker prepare|land|reap|list`; all branch worktrees remain forbidden. Reap stale scratch worktrees with `tools/worktree_doctor.py`, which preserves live sessions.
+- **Use only the sanctioned detached worker worktree.** Drive isolated workers through `fak worktree worker prepare|land|reap|list`; all branch worktrees remain forbidden. Reap stale scratch worktrees with `tools/worktree_doctor.py`, which preserves live sessions. See [`docs/managed-worker-worktrees.md`](docs/managed-worker-worktrees.md) for the operator guide, portable defaults, and remote recovery runbook.
 - **Allocate and reap scratch explicitly.** Use `fak tree-doctor --scratch-dir <producer>` or `--scratch-path <producer>/<file>`, then `--reap-scratch <producer> --json`. Never use `git clean -Xdf` under `_scratch/`. Per-run prompts/transcripts belong in allocated scratch; `testdata/` is only for fixtures landed with a consuming test. See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
 - **Keep comments durable.** Explain non-obvious invariants, safety, concurrency, compatibility, or performance tradeoffs; do not narrate syntax. Preserve required exported-API, package, directive, generated, and legal comments.
 - **Keep claims and gains witnessed.** Every `CLAIMS.md` row needs its required tag. Report performance only from net-true end-to-end accounting, with quality and operating-envelope constraints; setup/recovery/verification overhead counts. Use the project claim and benchmark gates rather than hand-written “looks faster” prose.
