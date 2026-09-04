@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// Footprint captures cumulative disk usage, total file count, and oldest timestamp
+// metrics across an evaluated set of matching session artifacts.
 type Footprint struct {
 	Files     int           `json:"files"`
 	Bytes     int64         `json:"bytes"`
@@ -20,6 +22,8 @@ type Footprint struct {
 	OldestAge time.Duration `json:"-"`
 }
 
+// Result summarizes before-and-after footprint measurements alongside the count
+// of deleted files from a completed pruning pass.
 type Result struct {
 	Before  Footprint
 	After   Footprint
@@ -31,6 +35,8 @@ type fileRow struct {
 	info os.FileInfo
 }
 
+// MeasureFootprint scans regular files in dir matching pattern and calculates their
+// aggregate byte size, count, and age relative to reference timestamp now.
 func MeasureFootprint(dir, pattern string, now time.Time) (Footprint, error) {
 	rows, err := matchingFiles(dir, pattern)
 	if err != nil {
