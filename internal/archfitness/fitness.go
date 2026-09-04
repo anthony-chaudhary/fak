@@ -6,9 +6,6 @@ import (
 	"sort"
 )
 
-// Invariant: architectural fitness evaluation is fail-closed and deterministic.
-// Guard: ratchet evaluation prevents regressions in hard debt counts across all architectural dimensions.
-
 // Finding represents an individual architectural defect or violation record.
 type Finding struct {
 	Dimension, Severity, File, Symbol, Reason, Issue, Owner, Expiry string `json:",omitempty"`
