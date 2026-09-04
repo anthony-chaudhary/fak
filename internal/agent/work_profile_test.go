@@ -82,3 +82,31 @@ func TestRunReportCapturesDefaultWorkProfileWitness(t *testing.T) {
 		t.Fatalf("planner did not receive mediated Ponytail prompt: %+v", planner.messages)
 	}
 }
+
+func TestSeedMessagesWithSystemPromptAndMemoryDigest(t *testing.T) {
+	t.Setenv(syspromptmmu.WorkProfileEnvVar, "standard")
+	cfg := resolveRunConfig([]RunOption{
+		WithSystemPrompt(CodeAgentSystemPrompt),
+		WithMemoryDigest("# Workspace memory\nFact 1"),
+		WithConversation([]Message{
+			{Role: RoleUser, Content: "turn 1"},
+			{Role: RoleAssistant, Content: "ans 1"},
+		}),
+	})
+	msgs := cfg.seedMessages("turn 2")
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 messages (sys + mem + 2 conv), got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != RoleSystem || !strings.Contains(msgs[0].Content, "software engineering agent") {
+		t.Errorf("msgs[0] expected CodeAgentSystemPrompt, got: %+v", msgs[0])
+	}
+	if msgs[1].Role != RoleSystem || !strings.Contains(msgs[1].Content, "Fact 1") {
+		t.Errorf("msgs[1] expected memory digest, got: %+v", msgs[1])
+	}
+	if msgs[2].Role != RoleUser || msgs[2].Content != "turn 1" {
+		t.Errorf("msgs[2] expected user turn 1, got: %+v", msgs[2])
+	}
+	if msgs[3].Role != RoleAssistant || msgs[3].Content != "ans 1" {
+		t.Errorf("msgs[3] expected assistant ans 1, got: %+v", msgs[3])
+	}
+}

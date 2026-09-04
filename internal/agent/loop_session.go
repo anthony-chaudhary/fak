@@ -172,6 +172,8 @@ type runConfig struct {
 	// => the historical fixed seed (system prompt + task, ToolCatalog()).
 	conversation []Message
 	toolCatalog  []ToolDef
+	systemPrompt string
+	memoryDigest string
 	// modelRequestObserver runs synchronously after directive splicing and the
 	// one context-planning pass, immediately before the Planner call.
 	modelRequestObserver    ModelRequestObserver

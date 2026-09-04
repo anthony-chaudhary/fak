@@ -36,11 +36,42 @@ func WithToolCatalog(tools []ToolDef) RunOption {
 	return func(c *runConfig) { c.toolCatalog = tools }
 }
 
+// CodeAgentSystemPrompt is the default standing instruction when repository coding tools are armed.
+const CodeAgentSystemPrompt = "You are a software engineering agent working in this repository. Use the provided tools (Read, Write, Edit, Grep, Glob, Bash) to inspect, analyze, and modify code to complete the user's request. Always verify changes and report accurate, concise outcomes."
+
+// WithSystemPrompt overrides the loop's standing system prompt for this run.
+func WithSystemPrompt(prompt string) RunOption {
+	return func(c *runConfig) { c.systemPrompt = prompt }
+}
+
+// WithMemoryDigest seeds the owned loop with a verified workspace memory digest
+// block. It is rendered into the leading system context right after the loop's
+// standing instruction, preserving cache stability while orienting the agent on
+// verified workspace knowledge.
+func WithMemoryDigest(digest string) RunOption {
+	return func(c *runConfig) { c.memoryDigest = digest }
+}
+
+func (c runConfig) seedSystemPrompt() string {
+	base := SystemPrompt
+	if c.systemPrompt != "" {
+		base = c.systemPrompt
+	}
+	block := BuildOwnedSystemBlock([][]byte{[]byte(base)}, func(syspromptmmu.BaseEdit) bool { return true })
+	if len(block.Value) == 0 {
+		return base
+	}
+	return string(block.Value)
+}
+
 // seedMessages builds the transcript the loop opens with: the loop's system prompt,
-// then either the wired conversation or the historical single task message.
+// optional memory digest, then either the wired conversation or the single task message.
 func (c runConfig) seedMessages(task string) []Message {
-	msgs := make([]Message, 0, len(c.conversation)+2)
-	msgs = append(msgs, Message{Role: RoleSystem, Content: ownedAgentSystemPrompt()})
+	msgs := make([]Message, 0, len(c.conversation)+3)
+	msgs = append(msgs, Message{Role: RoleSystem, Content: c.seedSystemPrompt()})
+	if c.memoryDigest != "" {
+		msgs = append(msgs, Message{Role: RoleSystem, Content: c.memoryDigest})
+	}
 	if len(c.conversation) > 0 {
 		return append(msgs, c.conversation...)
 	}
