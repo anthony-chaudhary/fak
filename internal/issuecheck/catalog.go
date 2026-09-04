@@ -1,5 +1,3 @@
-// Package issuecheck defines the pure contract for the agent-selected Top-5
-// review that precedes implementation of a worker-ready GitHub issue.
 package issuecheck
 
 import "strings"
