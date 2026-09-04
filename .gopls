@@ -1,0 +1,6 @@
+{
+  "directoryFilters": [
+    "-_scratch",
+    "-**/.git"
+  ]
+}

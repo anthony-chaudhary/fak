@@ -172,3 +172,23 @@ func TestRenderWIPTextShowsTypedDurableActions(t *testing.T) {
 		}
 	}
 }
+
+func TestTreeDoctorRenderScratchHygieneWarning(t *testing.T) {
+	rep := treedoctor.Report{
+		ScratchHygiene: treedoctor.ScratchHygieneReport{
+			ScratchUntrackedGoFiles: 10001,
+			Threshold:               10000,
+			Exceeded:                true,
+			Warning:                 "_scratch contains >10,000 untracked .go files (10001) without quarantine; isolate workspace scope or reap scratch to prevent LSP/gopls memory explosion",
+		},
+	}
+	var out bytes.Buffer
+	renderTreeDoctorText(&out, rep, nil, false)
+	got := out.String()
+	if !strings.Contains(got, "warning: _scratch contains >10,000 untracked .go files") {
+		t.Fatalf("output missing scratch hygiene warning:\n%s", got)
+	}
+	if !strings.Contains(got, "LSP/gopls memory explosion") {
+		t.Fatalf("output missing memory explosion mention:\n%s", got)
+	}
+}

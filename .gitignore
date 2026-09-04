@@ -886,6 +886,7 @@ docs/dispatch-status.md
 !/.gitattributes
 !/.github
 !/.gitignore
+!/.gopls
 !/.junie
 !/.mcp.json
 
