@@ -119,6 +119,9 @@ func (t *Table) trimLocked() {
 		t.lru.Remove(el)
 		delete(t.index, trace)
 		delete(t.state, trace)
+		delete(t.relayArmed, trace)
+		delete(t.resumeWaiters, trace)
+		delete(t.terminateSignals, trace)
 	}
 }
 
@@ -214,6 +217,9 @@ func (t *Table) Reset(trace string) {
 		t.lru.Remove(el)
 		delete(t.index, trace)
 	}
+	delete(t.relayArmed, trace)
+	delete(t.resumeWaiters, trace)
+	delete(t.terminateSignals, trace)
 	t.mu.Unlock()
 }
 
