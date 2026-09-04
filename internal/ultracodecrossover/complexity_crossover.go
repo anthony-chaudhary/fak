@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// ComplexityCrossoverSchema defines the canonical schema identifier for replayable crossover evaluations.
 const ComplexityCrossoverSchema = "fak-ultracode-complexity-crossover/1"
 
 // ComplexityCampaign is the replayable six-rung envelope for micro-context scoping.
@@ -22,6 +23,7 @@ type ComplexityCampaign struct {
 	Rungs                  []ComplexityRung `json:"rungs"`
 }
 
+// ComplexityRung defines an individual depth stage in the task-complexity ladder.
 type ComplexityRung struct {
 	Number          int              `json:"number"`
 	Name            string           `json:"name"`
@@ -31,6 +33,7 @@ type ComplexityRung struct {
 	Cells           []ComplexityCell `json:"cells"`
 }
 
+// ComplexityCell captures the execution metrics and acceptance status for a specific width and caching mode.
 type ComplexityCell struct {
 	Width         int    `json:"width"`
 	Context       string `json:"context"`
@@ -42,6 +45,7 @@ type ComplexityCell struct {
 	SourceReceipt string `json:"source_receipt"`
 }
 
+// ComplexityReport synthesizes the crossover boundaries and token attribution across ladder rungs.
 type ComplexityReport struct {
 	Schema                 string                 `json:"schema"`
 	CampaignVersion        string                 `json:"campaign_version"`
@@ -60,6 +64,7 @@ type ComplexityReport struct {
 	InvalidatingAssumption string                 `json:"invalidating_assumption"`
 }
 
+// ComplexityRungResult records the comparison outcome and token savings for a single complexity level.
 type ComplexityRungResult struct {
 	Number             int    `json:"number"`
 	Name               string `json:"name"`
@@ -72,6 +77,8 @@ type ComplexityRungResult struct {
 
 // EvaluateComplexityCampaign preserves each rung and abstention instead of averaging
 // across unequal outcomes. It stops after two consecutive quality failures.
+// Invariant: UltraCode crossover campaigns are fail-closed and bounded.
+// Guard: Execution halts after two consecutive failures and rejects incomplete cell envelopes.
 func EvaluateComplexityCampaign(c ComplexityCampaign) (ComplexityReport, error) {
 	if c.Schema != ComplexityCrossoverSchema {
 		return ComplexityReport{}, fmt.Errorf("schema must be %q", ComplexityCrossoverSchema)
