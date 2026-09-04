@@ -19,6 +19,10 @@
 // The dangerous-destination set is HARDWIRED (these addresses are never a legitimate
 // agent destination), so the floor needs no policy opt-in; a policy may only ever
 // extend it, never carve a hole in it.
+//
+// Invariant: egress floor evaluation is fail-closed and default-deny; unverified or link-local destinations are denied unconditionally.
+//
+// Guard: Classify and EnsureSendable guard against cloud-metadata SSRF exfiltration and unverified outbound platform delivery.
 package egressfloor
 
 import (
