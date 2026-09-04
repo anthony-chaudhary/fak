@@ -5,13 +5,6 @@ import (
 	"strings"
 )
 
-// Invariant: DeepSeek-V4 KV servable prefix calculation is fail-closed and window-bounded.
-// Any non-positive sequence length, empty kinds slice, or unrecognized cache kind must
-// fail closed to 0 hittable prefix tokens, while sliding-window attention (SWA) bounds reach.
-//
-// Guard: The tightest sub-cache group binds cross-kind prefix reuse; SWA never serves tokens
-// outside its trailing window (min(seq, SWAWindow)).
-//
 // ServablePrefixUnits answers a single cross-kind question the per-kind storage
 // accounting in this fixture does NOT: given a request of seq leading tokens over a
 // set of typed sub-caches (kinds), how many leading tokens are actually hittable in
