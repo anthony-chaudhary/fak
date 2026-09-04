@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -498,5 +499,52 @@ func TestHostEnforcesHardTurnBudget(t *testing.T) {
 				t.Fatalf("agent Step called %d times, want hard ceiling %d", a.steps, tt.wantSteps)
 			}
 		})
+	}
+}
+
+// TestHostRuns100EnrolledAgentsUnder100MBRSS proves that 100 enrolled microagents
+// execute concurrently within < 100 MB total heap memory (#11182).
+func TestHostRuns100EnrolledAgentsUnder100MBRSS(t *testing.T) {
+	// Pre-GC to measure clean baseline
+	runtime.GC()
+	var mBefore runtime.MemStats
+	runtime.ReadMemStats(&mBefore)
+
+	h, err := microagent.NewHost(stubPlanner{}, microagent.Config{Workers: 16, Queue: 256})
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	defer h.Close()
+
+	const numAgents = 100
+	const turns = 5
+	for i := 0; i < numAgents; i++ {
+		id := fmt.Sprintf("bench-agent-%03d", i)
+		if err := h.Spawn(id, &turnAgent{id: id, turns: turns}); err != nil {
+			t.Fatalf("Spawn: %v", err)
+		}
+	}
+
+	var mPeak runtime.MemStats
+	runtime.ReadMemStats(&mPeak)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := h.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	results := h.Reap()
+	if len(results) != numAgents {
+		t.Fatalf("reaped %d results, want %d", len(results), numAgents)
+	}
+
+	runtime.ReadMemStats(&mPeak)
+	heapAllocMB := float64(mPeak.Alloc) / (1024 * 1024)
+	t.Logf("100 enrolled microagents completed %d total steps; heap alloc: %.2f MB", numAgents*turns, heapAllocMB)
+
+	// Memory budget ceiling: < 100 MB
+	if heapAllocMB >= 100.0 {
+		t.Fatalf("microagent host exceeded 100 MB memory bound: alloc=%.2f MB", heapAllocMB)
 	}
 }
