@@ -13,22 +13,35 @@ import (
 	"strings"
 )
 
+// Schema identifies the versioned portability specification wire format.
 const Schema = "fak.portability/v1"
 
+// Scope defines the visibility and lifecycle boundary of a managed object.
 type Scope string
 
 const (
-	ScopePublic    Scope = "public"
+	// ScopePublic indicates an object visible across all organizations and environments.
+	ScopePublic Scope = "public"
+	// ScopeCorporate indicates an object shared across an entire enterprise organization.
 	ScopeCorporate Scope = "corporate"
-	ScopeTeam      Scope = "team"
-	ScopeProject   Scope = "project"
-	ScopeUser      Scope = "user"
-	ScopeMachine   Scope = "machine"
+	// ScopeTeam indicates an object scoped to a specific team.
+	ScopeTeam Scope = "team"
+	// ScopeProject indicates an object scoped to a single project or workspace.
+	ScopeProject Scope = "project"
+	// ScopeUser indicates an object scoped to an individual user across machines.
+	ScopeUser Scope = "user"
+	// ScopeMachine indicates host-local state that must not be transported across nodes.
+	ScopeMachine Scope = "machine"
 )
 
 var scopeRank = map[Scope]int{ScopePublic: 0, ScopeCorporate: 1, ScopeTeam: 2, ScopeProject: 3, ScopeUser: 4, ScopeMachine: 5}
 
+// CompareScope compares two scopes by precedence rank. It returns a positive integer
+// if a has higher rank than b, negative if lower, or zero if equal.
 func CompareScope(a, b Scope) int { return scopeRank[a] - scopeRank[b] }
+
+// ResolvePrecedence returns a copy of objects sorted stably by descending scope rank,
+// descending explicit precedence, and ascending stable ID.
 func ResolvePrecedence(objects []Object) []Object {
 	out := append([]Object(nil), objects...)
 	sort.SliceStable(out, func(i, j int) bool {
@@ -44,42 +57,58 @@ func ResolvePrecedence(objects []Object) []Object {
 	return out
 }
 
+// Sensitivity classifies the confidentiality level of an object for redaction during transport.
 type Sensitivity string
 
 const (
-	SensitivityPublic       Sensitivity = "public"
-	SensitivityInternal     Sensitivity = "internal"
+	// SensitivityPublic designates non-sensitive data suitable for unconstrained transport.
+	SensitivityPublic Sensitivity = "public"
+	// SensitivityInternal designates data restricted to authorized organization members.
+	SensitivityInternal Sensitivity = "internal"
+	// SensitivityConfidential designates restricted data requiring elevated authorization.
 	SensitivityConfidential Sensitivity = "confidential"
-	SensitivitySecret       Sensitivity = "secret"
+	// SensitivitySecret designates credentials and secrets that must not traverse portable exports.
+	SensitivitySecret Sensitivity = "secret"
 )
 
+// Provenance tracks the authoring agent, source artifact, creation time, and derivation lineage.
 type Provenance struct {
 	Producer    string   `json:"producer"`
 	Source      string   `json:"source,omitempty"`
 	Created     string   `json:"created"`
 	DerivedFrom []string `json:"derived_from,omitempty"`
 }
+
+// Dependency specifies a prerequisite object ID and whether it is optional.
 type Dependency struct {
 	ID        string `json:"id"`
 	ContentID string `json:"content_id,omitempty"`
 	Optional  bool   `json:"optional,omitempty"`
 }
+
+// Compatibility declares reader version requirements and supported runtime harnesses.
 type Compatibility struct {
 	MinReader string   `json:"min_reader"`
 	Harnesses []string `json:"harnesses,omitempty"`
 	Features  []string `json:"features,omitempty"`
 }
+
+// Signature provides cryptographic non-repudiation and content integrity verification.
 type Signature struct {
 	Algorithm string `json:"algorithm"`
 	KeyID     string `json:"key_id"`
 	Value     string `json:"value"`
 }
+
+// Migration defines version transition metadata and reversibility between schema revisions.
 type Migration struct {
 	From       string `json:"from"`
 	To         string `json:"to"`
 	ID         string `json:"id"`
 	Reversible bool   `json:"reversible"`
 }
+
+// Receipt records the operational audit record for a transaction mutation.
 type Receipt struct {
 	TransactionID  string `json:"transaction_id"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -89,11 +118,14 @@ type Receipt struct {
 	After          string `json:"after,omitempty"`
 	At             string `json:"at"`
 }
+
+// Extension encapsulates custom namespaced metadata, marking whether unrecognized extensions are critical.
 type Extension struct {
 	Critical bool            `json:"critical"`
 	Data     json.RawMessage `json:"data"`
 }
 
+// Object represents an atomic unit of managed agent state, policy, or configuration.
 type Object struct {
 	Schema        string               `json:"schema"`
 	Type          string               `json:"type"`
@@ -113,6 +145,7 @@ type Object struct {
 	Payload       json.RawMessage      `json:"payload"`
 }
 
+// Known reports whether the object type is recognized by the kernel runtime.
 func (o Object) Known() bool {
 	switch o.Type {
 	case "skill", "policy", "session", "loop", "model-binding", "instruction", "hook", "mcp-server", "plugin", "account", "secret-reference":
@@ -120,7 +153,11 @@ func (o Object) Known() bool {
 	}
 	return false
 }
+
+// Active reports whether the object is recognized and admitted for runtime execution.
 func (o Object) Active() bool { return o.Known() }
+
+// CanonicalContentID computes the deterministic SHA-256 hash of the normalized object payload.
 func (o Object) CanonicalContentID() (string, error) {
 	var payload any
 	if err := json.Unmarshal(o.Payload, &payload); err != nil {
@@ -136,6 +173,9 @@ func (o Object) CanonicalContentID() (string, error) {
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
 }
+
+// Validate checks schema conformance, required identifiers, scope validity, payload format,
+// content digest fidelity, and critical extension namespaces.
 func (o Object) Validate() error {
 	if o.Schema != Schema {
 		return fmt.Errorf("unsupported portability schema version: %q", o.Schema)
@@ -164,6 +204,7 @@ func (o Object) Validate() error {
 	return nil
 }
 
+// Collection groups related objects that share dependencies and lifecycle scope.
 type Collection struct {
 	Schema       string               `json:"schema"`
 	StableID     string               `json:"stable_id"`
@@ -172,6 +213,8 @@ type Collection struct {
 	Dependencies []Dependency         `json:"dependencies,omitempty"`
 	Extensions   map[string]Extension `json:"extensions,omitempty"`
 }
+
+// Context represents the active execution environment, mapping active collections and scope ordering.
 type Context struct {
 	Schema            string            `json:"schema"`
 	StableID          string            `json:"stable_id"`
@@ -180,6 +223,8 @@ type Context struct {
 	Selected          map[string]string `json:"selected,omitempty"`
 	ScopeOrder        []Scope           `json:"scope_order"`
 }
+
+// Package encapsulates a self-contained export bundle containing collections, compatibility constraints, and signatures.
 type Package struct {
 	Schema        string               `json:"schema"`
 	StableID      string               `json:"stable_id"`
@@ -190,6 +235,8 @@ type Package struct {
 	Extensions    map[string]Extension `json:"extensions,omitempty"`
 	Local         map[string]any       `json:"-"`
 }
+
+// Channel defines a communication endpoint and its transport capabilities.
 type Channel struct {
 	Schema        string               `json:"schema"`
 	StableID      string               `json:"stable_id"`
@@ -200,6 +247,7 @@ type Channel struct {
 	Extensions    map[string]Extension `json:"extensions,omitempty"`
 }
 
+// Degradation captures fidelity or capability loss encountered during harness translation.
 type Degradation struct {
 	ObjectID    string `json:"object_id"`
 	Feature     string `json:"feature"`
@@ -207,6 +255,8 @@ type Degradation struct {
 	MeaningLost string `json:"meaning_lost"`
 	Fallback    string `json:"fallback,omitempty"`
 }
+
+// TranslationReport summarizes the outcome of cross-harness translation, indicating whether conversion was exact.
 type TranslationReport struct {
 	SourceHarness string        `json:"source_harness"`
 	TargetHarness string        `json:"target_harness"`
@@ -214,6 +264,7 @@ type TranslationReport struct {
 	Degradations  []Degradation `json:"degradations"`
 }
 
+// Operation represents a single state mutation step within a transaction.
 type Operation struct {
 	Kind         string `json:"kind"`
 	CollectionID string `json:"collection_id,omitempty"`
@@ -221,6 +272,8 @@ type Operation struct {
 	To           string `json:"to,omitempty"`
 	Strategy     string `json:"strategy,omitempty"`
 }
+
+// Transaction specifies an idempotent atomic state mutation with recovery and rollback guarantees.
 type Transaction struct {
 	Schema         string               `json:"schema"`
 	StableID       string               `json:"stable_id"`
@@ -237,6 +290,8 @@ type Transaction struct {
 	Extensions     map[string]Extension `json:"extensions,omitempty"`
 }
 
+// Portable returns a sanitized copy of a package, stripping local paths, signatures,
+// receipts, machine-scoped objects, and secret references to ensure safe export.
 func Portable(p Package) Package {
 	q := p
 	q.Local = nil
@@ -257,6 +312,8 @@ func Portable(p Package) Package {
 	}
 	return q
 }
+
+// PackageIdentity computes the deterministic SHA-256 content digest of a package's portable representation.
 func PackageIdentity(p Package) (string, error) {
 	q := Portable(p)
 	q.PackageID = ""
@@ -268,6 +325,8 @@ func PackageIdentity(p Package) (string, error) {
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
 }
+
+// Validate checks the package schema version, validates all contained objects, and verifies the package identity digest.
 func (p Package) Validate() error {
 	if p.Schema != Schema {
 		return errors.New("unsupported portability schema version")
@@ -288,6 +347,8 @@ func (p Package) Validate() error {
 	}
 	return nil
 }
+
+// RoundTrip decodes package JSON and re-encodes it with consistent indentation for fidelity verification.
 func RoundTrip(data []byte) ([]byte, error) {
 	var p Package
 	if e := json.Unmarshal(data, &p); e != nil {
@@ -296,6 +357,7 @@ func RoundTrip(data []byte) ([]byte, error) {
 	return json.MarshalIndent(p, "", "  ")
 }
 
+// Preview validates transaction preconditions against the current state and computes the preview hash.
 func Preview(t Transaction, current string) (Transaction, error) {
 	if t.Mode != "apply" && t.Mode != "switch" && t.Mode != "merge" {
 		return t, errors.New("MODE_INVALID")
@@ -317,11 +379,13 @@ func Preview(t Transaction, current string) (Transaction, error) {
 	return t, nil
 }
 
+// Store maintains state continuity and records applied transaction idempotency keys.
 type Store struct {
 	State   string
 	Applied map[string]string
 }
 
+// Apply executes a previewed transaction against the store, verifying state continuity and idempotency.
 func (s *Store) Apply(t Transaction) (Receipt, error) {
 	if s.Applied == nil {
 		s.Applied = map[string]string{}
@@ -343,6 +407,8 @@ func (s *Store) Apply(t Transaction) (Receipt, error) {
 	s.Applied[t.IdempotencyKey] = after
 	return Receipt{TransactionID: t.StableID, IdempotencyKey: t.IdempotencyKey, Action: t.Mode, Status: "applied", Before: before, After: after}, nil
 }
+
+// Recover reverts the store state to the pre-transaction state specified in the receipt.
 func (s *Store) Recover(r Receipt) error {
 	if r.Status != "applied" {
 		return nil
@@ -355,6 +421,7 @@ func (s *Store) Recover(r Receipt) error {
 	return nil
 }
 
+// Explain formats a human-readable diagnostic breakdown of a package, its collections, and precedence order.
 func Explain(p Package) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Portability package %s\nSchema: %s\nIdentity: %s\n", p.StableID, p.Schema, p.PackageID)
@@ -371,6 +438,8 @@ func Explain(p Package) string {
 	fmt.Fprintf(&b, "\nTransport identity omits signatures, receipts, machine-scope and secret objects.\nPrecedence: machine > user > project > team > corporate > public; explicit precedence then stable ID break ties.\n")
 	return b.String()
 }
+
+// EqualJSON reports whether two byte slices contain semantically equivalent JSON structures.
 func EqualJSON(a, b []byte) bool {
 	var x, y any
 	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
