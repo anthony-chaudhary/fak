@@ -62,13 +62,7 @@ func BuildFrontDoorSnapshot(graph Graph, asOf time.Time) (FrontDoorSnapshot, err
 	asOf = asOf.UTC()
 	s := FrontDoorSnapshot{Schema: FrontDoorSchema, AsOf: asOf.Format(time.DateOnly)}
 
-	accepted := FrontDoorResult{
-		Class: "accepted", EnvelopeID: "q38-q4km-native-metal-m3pro-fullrun",
-		NativeTPS: 2.9, Quality: "PASS (three functional probes; accepted range 2.3-2.9 tok/s)",
-		ObservedOn: "2026-08-20", ReviewBy: "2026-08-27",
-		Provenance: "docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json",
-		Caveat:     "accepted native Metal full-run range; not a matched llama.cpp parity receipt",
-	}
+	accepted := newFrontDoorEntry("accepted", "q38-q4km-native-metal-m3pro-fullrun", 2.9, "PASS (three functional probes; accepted range 2.3-2.9 tok/s)", "2026-08-20", "2026-08-27", "docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json", "accepted native Metal full-run range; not a matched llama.cpp parity receipt")
 	addFrontDoorResult(&s, &accepted, asOf)
 
 	var witnessed *Throughput
@@ -94,12 +88,7 @@ func BuildFrontDoorSnapshot(graph Graph, asOf time.Time) (FrontDoorSnapshot, err
 	}
 	addFrontDoorResult(&s, &approx, asOf)
 
-	diagnostic := FrontDoorResult{
-		Class: "diagnostic", EnvelopeID: "q38-q4km-cuda-a100-cache-restore",
-		NativeTPS: 0.2, Quality: "0/5 exact", ObservedOn: "2026-08-25", ReviewBy: "2026-09-01",
-		Provenance: "docs/_witnesses/issue-8819-qwen38-cache-attribution/summary.json",
-		Caveat:     "failed-quality A100 cache-restore arm; diagnostic only and never a parity headline",
-	}
+	diagnostic := newFrontDoorEntry("diagnostic", "q38-q4km-cuda-a100-cache-restore", 0.2, "0/5 exact", "2026-08-25", "2026-09-01", "docs/_witnesses/issue-8819-qwen38-cache-attribution/summary.json", "failed-quality A100 cache-restore arm; diagnostic only and never a parity headline")
 	addFrontDoorResult(&s, &diagnostic, asOf)
 	return s, nil
 }
@@ -120,6 +109,19 @@ func addFrontDoorResult(s *FrontDoorSnapshot, result *FrontDoorResult, asOf time
 		s.Approximate = result
 	case "diagnostic":
 		s.Diagnostic = result
+	}
+}
+
+func newFrontDoorEntry(class, envID string, tps float64, quality, observed, review, prov, caveat string) FrontDoorResult {
+	return FrontDoorResult{
+		Class:      class,
+		EnvelopeID: envID,
+		NativeTPS:  tps,
+		Quality:    quality,
+		ObservedOn: observed,
+		ReviewBy:   review,
+		Provenance: prov,
+		Caveat:     caveat,
 	}
 }
 
