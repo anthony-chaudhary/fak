@@ -272,6 +272,9 @@ func (p Params) boostFor(wait int64) int {
 // Fold is THE deterministic anti-starvation decision: same candidates + same clock in, same Result
 // out — no clock read, no I/O. Total over any input.
 //
+// Invariant: dispatch aging calculations are fail-closed and monotonic: unknown ready timestamps never accrue boost.
+// Guard: cooldown intervals pause aging accrual without resetting previously elapsed wait duration.
+//
 // The policy, per candidate:
 //  1. wait = Now - ReadySince, minus the slice of that span inside the declared cooldown window
 //     (clamped >= 0; 0 when ReadySince is unknown). A cooling unit's wait is PAUSED: it cannot
