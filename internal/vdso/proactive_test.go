@@ -248,10 +248,13 @@ func TestProactive_StaleOrMissingFilesFallThrough(t *testing.T) {
 		}
 
 		// Update file on disk (stale)
-		time.Sleep(15 * time.Millisecond) // ensure mtime tick
 		updatedContent := "package v2 // updated\n"
 		if err := os.WriteFile(fPath, []byte(updatedContent), 0644); err != nil {
 			t.Fatalf("WriteFile update: %v", err)
+		}
+		newMtime := time.Now().Add(2 * time.Second)
+		if err := os.Chtimes(fPath, newMtime, newMtime); err != nil {
+			t.Fatalf("Chtimes: %v", err)
 		}
 
 		// Subsequent evaluate MUST detect stale disk state and fall through
