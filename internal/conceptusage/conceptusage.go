@@ -41,8 +41,14 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
+// Invariant: concept usage evaluation is fail-closed and deterministic.
+// Missing journals, absent commit histories, or unverified recall records default
+// strictly to debt rather than asserting an unearned passing scorecard state.
+
+// Schema identifies the JSON schema version emitted by the concept-usage scorecard.
+const Schema = "fak-conceptusage-scorecard/1"
+
 const (
-	Schema = "fak-conceptusage-scorecard/1"
 	// DefaultCommitWindow is how many recent commits define "agentic dev now". Wide
 	// enough to be stable across a single session, narrow enough that a long-ago lapse
 	// does not keep the score red forever.
@@ -117,6 +123,8 @@ type Evidence struct {
 	window []decClass `json:"-"`
 }
 
+// ScorecardPayload represents the structured evaluation result of concept usage,
+// capturing binary KPIs, composite scoring, and underlying disk evidence.
 type ScorecardPayload struct {
 	Schema     string         `json:"schema"`
 	OK         bool           `json:"ok"`
@@ -412,6 +420,8 @@ func witnessResults(ev Evidence) []KPIResult {
 
 // ---- fold -------------------------------------------------------------------------
 
+// Build executes the concept usage scorecard against the target workspace,
+// folding commit history and runtime journals into a verified payload.
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
 	root := scorecard.WorkspaceRoot(opts.Root)
@@ -495,6 +505,7 @@ func Build(opts Options) ScorecardPayload {
 
 // ---- render -----------------------------------------------------------------------
 
+// Render formats a concept usage scorecard payload into human-readable terminal output.
 func Render(p ScorecardPayload) string {
 	c := p.Corpus
 	lines := []string{
@@ -517,6 +528,7 @@ func Render(p ScorecardPayload) string {
 	return strings.Join(lines, "\n")
 }
 
+// Markdown renders the scorecard payload into documentation-ready markdown format.
 func Markdown(p ScorecardPayload) string {
 	c := p.Corpus
 	var b strings.Builder
@@ -550,6 +562,7 @@ func Markdown(p ScorecardPayload) string {
 	return b.String()
 }
 
+// Compare evaluates delta progress between a current scorecard payload and a baseline run.
 func Compare(current ScorecardPayload, baseline map[string]any) string {
 	bc, _ := baseline["corpus"].(map[string]any)
 	if bc == nil {
