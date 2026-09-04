@@ -1,5 +1,10 @@
 // Package geminicache adapts Google's explicit CachedContent lifecycle into
 // fak-visible, provider-witnessed cache state.
+//
+// Invariants:
+// - Invariants: gemini cache preserves prompt cache token accounting and verification boundaries.
+// - All references are fail-closed: mismatching accounts, projects, models, prefixes, or expired items refuse reuse.
+// - Guard: provider object residency requires explicit capability negotiation and positive economic admission value.
 package geminicache
 
 import (
@@ -17,15 +22,20 @@ import (
 	"time"
 )
 
+// ProvenanceSchema is the schema identifier for Gemini cached content receipts.
 const ProvenanceSchema = "fak/gemini-cached-content/v1"
 
+// Route defines the API route category for Gemini cache operations.
 type Route string
 
 const (
+	// RouteGenerateContent is the route for content generation using cached prefixes.
 	RouteGenerateContent Route = "generateContent"
+	// RouteInteractions is the route for interaction endpoints.
 	RouteInteractions    Route = "interactions"
 )
 
+// Identity uniquely identifies a cached content object across account, project, location, model, and prefix.
 type Identity struct {
 	Account      string `json:"account"`
 	Project      string `json:"project,omitempty"`
@@ -34,6 +44,7 @@ type Identity struct {
 	PrefixDigest string `json:"prefix_digest"`
 }
 
+// NewIdentity constructs a validated Identity with a SHA-256 digest of the given prefix.
 func NewIdentity(account, project, location, model string, prefix []byte) Identity {
 	sum := sha256.Sum256(prefix)
 	return Identity{Account: account, Project: project, Location: location, Model: model, PrefixDigest: hex.EncodeToString(sum[:])}
@@ -46,6 +57,7 @@ func (id Identity) validate() error {
 	return nil
 }
 
+// Admission specifies economic and policy constraints for caching content.
 type Admission struct {
 	PredictedReuseValueUSD float64       `json:"predicted_reuse_value_usd"`
 	CreationStorageCostUSD float64       `json:"creation_storage_cost_usd"`
@@ -54,6 +66,7 @@ type Admission struct {
 	PrivacyAllowed         bool          `json:"privacy_allowed"`
 }
 
+// Check verifies that admission constraints (privacy, TTL ceiling, net economic value) are satisfied.
 func (a Admission) Check() error {
 	if !a.PrivacyAllowed {
 		return errors.New("gemini cache: privacy ceiling refuses provider residency")
@@ -67,15 +80,18 @@ func (a Admission) Check() error {
 	return nil
 }
 
+// Content represents structured prompt content for caching.
 type Content struct {
 	Role  string `json:"role,omitempty"`
 	Parts []Part `json:"parts"`
 }
 
+// Part represents an individual part of a Content payload.
 type Part struct {
 	Text string `json:"text,omitempty"`
 }
 
+// CreateConfig parameters for creating a new cached content resource.
 type CreateConfig struct {
 	DisplayName string    `json:"displayName,omitempty"`
 	Contents    []Content `json:"contents,omitempty"`
@@ -83,15 +99,18 @@ type CreateConfig struct {
 	ExpireTime  time.Time `json:"expireTime,omitempty"`
 }
 
+// UpdateConfig parameters for updating TTL/expireTime on an existing cached content resource.
 type UpdateConfig struct {
 	TTL        string    `json:"ttl,omitempty"`
 	ExpireTime time.Time `json:"expireTime,omitempty"`
 }
 
+// UsageMetadata records token accounting information returned by the provider.
 type UsageMetadata struct {
 	TotalTokenCount int64 `json:"totalTokenCount,omitempty"`
 }
 
+// CachedContent represents a provider-side cached content resource and its metadata.
 type CachedContent struct {
 	Name          string         `json:"name,omitempty"`
 	DisplayName   string         `json:"displayName,omitempty"`
@@ -102,14 +121,19 @@ type CachedContent struct {
 	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
 }
 
+// State represents the lifecycle state of a cached content object.
 type State string
 
 const (
+	// StateActive indicates the cached content is active and unexpired.
 	StateActive  State = "active"
+	// StateExpired indicates the cached content has passed its expiration time.
 	StateExpired State = "expired"
+	// StateDeleted indicates the cached content has been deleted.
 	StateDeleted State = "deleted"
 )
 
+// Receipt is a provider-witnessed proof of cached content state and accounting.
 type Receipt struct {
 	Schema   string          `json:"schema"`
 	Identity Identity        `json:"identity"`
@@ -119,21 +143,25 @@ type Receipt struct {
 	Raw      json.RawMessage `json:"raw"`
 }
 
+// UnsupportedError records unsupported operations or routes with a structured explanation.
 type UnsupportedError struct {
 	Route  Route
 	Reason string
 }
 
+// Error formats the UnsupportedError into a human-readable string.
 func (e *UnsupportedError) Error() string {
 	return fmt.Sprintf("gemini cache: %s unsupported: %s", e.Route, e.Reason)
 }
 
+// Capabilities declares supported features, models, and locations for explicit caching.
 type Capabilities struct {
 	GenerateContent bool
 	Models          map[string]bool
 	Locations       map[string]bool
 }
 
+// Client interacts with Google Gemini CachedContent endpoints.
 type Client struct {
 	BaseURL      string
 	APIKey       string
@@ -242,6 +270,7 @@ func (c Client) receipt(id Identity, object CachedContent, raw json.RawMessage, 
 	return Receipt{Schema: ProvenanceSchema, Identity: id, Object: object, State: state, Observed: now, Raw: raw}
 }
 
+// Create allocates a new cached content resource at the provider and returns a witnessed Receipt.
 func (c Client) Create(ctx context.Context, route Route, id Identity, admission Admission, config CreateConfig) (Receipt, error) {
 	if err := c.requireExplicitCache(route, id); err != nil {
 		return Receipt{}, err
@@ -268,6 +297,7 @@ func (c Client) Create(ctx context.Context, route Route, id Identity, admission 
 	return c.receipt(id, object, raw, ""), nil
 }
 
+// Get retrieves an existing cached content resource by name and verifies identity matching.
 func (c Client) Get(ctx context.Context, id Identity, name string) (Receipt, error) {
 	if err := id.validate(); err != nil {
 		return Receipt{}, err
@@ -286,6 +316,7 @@ func (c Client) Get(ctx context.Context, id Identity, name string) (Receipt, err
 	return c.receipt(id, object, raw, ""), nil
 }
 
+// Update updates the TTL or expiration time of an existing cached content resource.
 func (c Client) Update(ctx context.Context, id Identity, name string, config UpdateConfig) (Receipt, error) {
 	if err := id.validate(); err != nil {
 		return Receipt{}, err
@@ -304,6 +335,7 @@ func (c Client) Update(ctx context.Context, id Identity, name string, config Upd
 	return c.receipt(id, object, raw, ""), nil
 }
 
+// Delete removes a cached content resource and returns a tombstone Receipt.
 func (c Client) Delete(ctx context.Context, id Identity, name string) (Receipt, error) {
 	if err := id.validate(); err != nil {
 		return Receipt{}, err
@@ -318,6 +350,7 @@ func (c Client) Delete(ctx context.Context, id Identity, name string) (Receipt, 
 	return c.receipt(id, CachedContent{Name: name, Model: id.Model}, raw, StateDeleted), nil
 }
 
+// List enumerates cached content resources with pagination.
 func (c Client) List(ctx context.Context, pageSize int, pageToken string) ([]CachedContent, string, json.RawMessage, error) {
 	path := fmt.Sprintf("cachedContents?pageSize=%d", pageSize)
 	if pageToken != "" {
@@ -331,6 +364,7 @@ func (c Client) List(ctx context.Context, pageSize int, pageToken string) ([]Cac
 	return response.CachedContents, response.NextPageToken, raw, err
 }
 
+// Reference verifies that an active cached content receipt matches the expected caller identity and prefix.
 func Reference(route Route, expected Identity, receipt Receipt, prefix []byte, now time.Time) (string, error) {
 	if route != RouteGenerateContent {
 		return "", &UnsupportedError{Route: route, Reason: "explicit CachedContent objects require generateContent"}
