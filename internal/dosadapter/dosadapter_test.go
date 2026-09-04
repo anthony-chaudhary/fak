@@ -269,6 +269,18 @@ func TestDecisionWitness(t *testing.T) {
 			t.Errorf("VerifyWitness() error = %v, want ErrCorruptedEvidence", err)
 		}
 	})
+
+	t.Run("witness freshness validation", func(t *testing.T) {
+		w := MintWitness("wit-fresh", validSHA, "fak/test-issuer", now, 10*time.Minute)
+		// Within valid window
+		if err := CheckFreshness(w, now.Add(5*time.Minute)); err != nil {
+			t.Errorf("CheckFreshness() inside window failed: %v", err)
+		}
+		// Past expiration boundary
+		if err := CheckFreshness(w, now.Add(15*time.Minute)); !errors.Is(err, ErrCorruptedEvidence) {
+			t.Errorf("CheckFreshness() past boundary error = %v, want ErrCorruptedEvidence", err)
+		}
+	})
 }
 
 func TestHandleFallback(t *testing.T) {
@@ -288,6 +300,9 @@ func TestHandleFallback(t *testing.T) {
 	}
 	if outcome.Lane != "gateway" {
 		t.Errorf("HandleFallback lane = %q, want gateway", outcome.Lane)
+	}
+	if outcome.Reason.Token != ReasonOperatorGate {
+		t.Errorf("HandleFallback token = %q, want %q", outcome.Reason.Token, ReasonOperatorGate)
 	}
 	if outcome.Reason.Category != CategoryOperatorGate {
 		t.Errorf("HandleFallback category = %q, want %q", outcome.Reason.Category, CategoryOperatorGate)
@@ -450,6 +465,49 @@ func TestAdapterClientLifecycle(t *testing.T) {
 	reason := client.Translate(ReasonCollisionRisk)
 	if reason.Token != ReasonCollisionRisk {
 		t.Errorf("client.Translate() token = %q, want %q", reason.Token, ReasonCollisionRisk)
+	}
+}
+
+func TestAdapterClient_ZeroValueSafety(t *testing.T) {
+	var client AdapterClient // zero-value, no constructor
+
+	// ActiveLeases should return nil or empty without panic
+	if leases := client.ActiveLeases(); len(leases) != 0 {
+		t.Errorf("zero-value client ActiveLeases() = %v, want empty", leases)
+	}
+
+	// ReleaseLease on non-existent should safely return false without panic
+	if client.ReleaseLease("any-id") {
+		t.Error("zero-value client ReleaseLease() = true, want false")
+	}
+
+	// RegisterLease should lazily allocate map without panic
+	req := LeaseRequest{
+		ID:       "zero-client-lease",
+		Lane:     "testlane",
+		LockMode: LockModeExclusive,
+		Tree:     []string{"internal/testlane/**"},
+	}
+	if err := client.RegisterLease(req); err != nil {
+		t.Fatalf("zero-value client RegisterLease() failed: %v", err)
+	}
+
+	if len(client.ActiveLeases()) != 1 {
+		t.Errorf("ActiveLeases() after register = %d, want 1", len(client.ActiveLeases()))
+	}
+
+	// Arbitrate should run safely with default clock and issuer
+	outcome, err := client.Arbitrate(LeaseRequest{
+		ID:       "zero-arb-req",
+		Lane:     "otherlane",
+		LockMode: LockModeExclusive,
+		Tree:     []string{"internal/otherlane/**"},
+	})
+	if err != nil {
+		t.Fatalf("zero-value client Arbitrate() failed: %v", err)
+	}
+	if outcome.Outcome != OutcomeAcquire {
+		t.Errorf("Arbitrate outcome = %q, want %q", outcome.Outcome, OutcomeAcquire)
 	}
 }
 

@@ -287,8 +287,15 @@ func PathMatchesPattern(pattern, targetPath string) bool {
 	normPat := normalizePath(pattern)
 	normPath := normalizePath(targetPath)
 
-	if normPat == normPath {
+	if normPat == normPath || normPat == "**" || normPat == "**/*" {
 		return true
+	}
+
+	if strings.HasPrefix(normPat, "**/") {
+		suffix := strings.TrimPrefix(normPat, "**/")
+		if matched, err := path.Match(suffix, path.Base(normPath)); err == nil && matched {
+			return true
+		}
 	}
 
 	if strings.HasSuffix(normPat, "/**") {
@@ -317,7 +324,11 @@ func PatternsOverlap(patA, patB string) bool {
 	normA := normalizePath(patA)
 	normB := normalizePath(patB)
 
-	if normA == normB {
+	if normA == normB || normA == "**" || normA == "**/*" || normB == "**" || normB == "**/*" {
+		return true
+	}
+
+	if strings.HasPrefix(normB, normA+"/") || strings.HasPrefix(normA, normB+"/") {
 		return true
 	}
 
@@ -500,6 +511,17 @@ func VerifyWitness(w DecisionWitness) error {
 	return nil
 }
 
+// CheckFreshness validates that a DecisionWitness is valid at time at.
+func CheckFreshness(w DecisionWitness, at time.Time) error {
+	if err := VerifyWitness(w); err != nil {
+		return err
+	}
+	if !w.ValidUntil.IsZero() && at.After(w.ValidUntil) {
+		return fmt.Errorf("%w: witness expired at %v (checked at %v)", ErrCorruptedEvidence, w.ValidUntil, at)
+	}
+	return nil
+}
+
 // HandleFallback produces a conservative fail-closed refusal outcome when arbitration errors occur.
 // Guard: fail-closed arbitration defaults to refusal whenever evidence, witness, or communication fails.
 func HandleFallback(req LeaseRequest, cause error) ArbitrationOutcome {
@@ -510,7 +532,7 @@ func HandleFallback(req LeaseRequest, cause error) ArbitrationOutcome {
 
 	witness := MintWitness("witness-fallback-"+req.ID, decisionSHA, "fak/dosadapter/fallback", now, 5*time.Minute)
 	reason := RefusalReason{
-		Token:       ReasonCollisionRisk,
+		Token:       ReasonOperatorGate,
 		Category:    CategoryOperatorGate,
 		Description: fmt.Sprintf("arbitration fallback triggered: %v", cause),
 		Refusal:     true,
@@ -540,7 +562,14 @@ func (c *AdapterClient) Arbitrate(req LeaseRequest) (ArbitrationOutcome, error) 
 
 	mode := normalizeLockMode(req.LockMode)
 	req.LockMode = mode
-	now := c.clock()
+	now := time.Now()
+	if c.clock != nil {
+		now = c.clock()
+	}
+	issuer := c.issuer
+	if strings.TrimSpace(issuer) == "" {
+		issuer = "fak/dosadapter"
+	}
 
 	c.mu.RLock()
 	var active []LeaseRequest
@@ -554,7 +583,7 @@ func (c *AdapterClient) Arbitrate(req LeaseRequest) (ArbitrationOutcome, error) 
 		h := sha256.Sum256([]byte(decisionStr))
 		decisionSHA := hex.EncodeToString(h[:])
 
-		witness := MintWitness("witness-refuse-"+req.ID, decisionSHA, c.issuer, now, 15*time.Minute)
+		witness := MintWitness("witness-refuse-"+req.ID, decisionSHA, issuer, now, 15*time.Minute)
 		outcome := ArbitrationOutcome{
 			Outcome:        OutcomeRefuse,
 			Lane:           req.Lane,
@@ -572,7 +601,7 @@ func (c *AdapterClient) Arbitrate(req LeaseRequest) (ArbitrationOutcome, error) 
 	h := sha256.Sum256([]byte(decisionStr))
 	decisionSHA := hex.EncodeToString(h[:])
 
-	witness := MintWitness("witness-acquire-"+req.ID, decisionSHA, c.issuer, now, req.TTL)
+	witness := MintWitness("witness-acquire-"+req.ID, decisionSHA, issuer, now, req.TTL)
 	outcome := ArbitrationOutcome{
 		Outcome:        OutcomeAcquire,
 		Lane:           req.Lane,
@@ -605,6 +634,9 @@ func (c *AdapterClient) RegisterLease(req LeaseRequest) error {
 		return err
 	}
 
+	if c.activeLeases == nil {
+		c.activeLeases = make(map[string]LeaseRequest)
+	}
 	c.activeLeases[req.ID] = req
 	return nil
 }

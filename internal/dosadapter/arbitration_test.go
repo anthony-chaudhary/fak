@@ -56,6 +56,26 @@ func TestPathMatchesPattern(t *testing.T) {
 			path:    "internal\\gateway\\mcp.go", // Windows backslash normalization
 			want:    true,
 		},
+		{
+			pattern: "**",
+			path:    "cmd/fak/main.go",
+			want:    true,
+		},
+		{
+			pattern: "**/*",
+			path:    "internal/gateway/mcp.go",
+			want:    true,
+		},
+		{
+			pattern: "**/*.go",
+			path:    "internal/gateway/mcp.go",
+			want:    true,
+		},
+		{
+			pattern: "**/*.go",
+			path:    "README.md",
+			want:    false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -122,6 +142,36 @@ func TestPatternsOverlap(t *testing.T) {
 		{
 			patA: "docs/**",
 			patB: "internal/**",
+			want: false,
+		},
+		{
+			patA: "**",
+			patB: "internal/gateway/**",
+			want: true,
+		},
+		{
+			patA: "internal/gateway/**",
+			patB: "**",
+			want: true,
+		},
+		{
+			patA: "**/*",
+			patB: "cmd/fak/main.go",
+			want: true,
+		},
+		{
+			patA: "internal/gateway",
+			patB: "internal/gateway/mcp.go",
+			want: true,
+		},
+		{
+			patA: "internal/gateway/mcp.go",
+			patB: "internal/gateway",
+			want: true,
+		},
+		{
+			patA: "internal/gateway",
+			patB: "internal/gateway-other",
 			want: false,
 		},
 	}
