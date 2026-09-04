@@ -1,19 +1,26 @@
 package tb4bench
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
 
 func TestOpenCodeAdapterInvocation(t *testing.T) {
+	port, err := FindFreePort()
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	dynamicURL := fmt.Sprintf("http://127.0.0.1:%d/v1", port)
+
 	// 1. Test configuration synthesis
-	jsonBytes, err := GenerateOpenCodeJSON("http://127.0.0.1:9090/v1", "qwen3.8-coder")
+	jsonBytes, err := GenerateOpenCodeJSON(dynamicURL, "qwen3.8-coder")
 	if err != nil {
 		t.Fatalf("failed to generate opencode.json: %v", err)
 	}
 
 	content := string(jsonBytes)
-	if !strings.Contains(content, "http://127.0.0.1:9090/v1") {
+	if !strings.Contains(content, dynamicURL) {
 		t.Errorf("config missing baseURL: %s", content)
 	}
 	if !strings.Contains(content, "qwen3.8-coder") {
@@ -25,7 +32,7 @@ func TestOpenCodeAdapterInvocation(t *testing.T) {
 
 	// 2. Test environment setup and teardown
 	adapter := NewOpenCodeAdapter(OpenCodeConfig{
-		ServerBaseURL: "http://127.0.0.1:9090/v1",
+		ServerBaseURL: dynamicURL,
 		ModelID:       "qwen3.8-coder",
 	})
 	runtimeDir, err := adapter.SetupEnvironment()

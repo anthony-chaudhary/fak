@@ -270,7 +270,11 @@ func (s *LlamaServerSupervisor) WaitReady(ctx context.Context, timeout time.Dura
 			}
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 
 	return fmt.Errorf("llama-server failed to become ready within %v", timeout)
