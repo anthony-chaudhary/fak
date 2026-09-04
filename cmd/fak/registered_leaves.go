@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	_ "github.com/anthony-chaudhary/fak/internal/advmodel"
 	_ "github.com/anthony-chaudhary/fak/internal/agentsched"
 	_ "github.com/anthony-chaudhary/fak/internal/breathgate"

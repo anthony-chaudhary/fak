@@ -18,14 +18,21 @@ import (
 )
 
 const (
+	// ReasonPatchInvalid indicates that the patch is malformed, empty, or uses forbidden diff features.
 	ReasonPatchInvalid = "PATCH_INVALID"
-	ReasonPatchPaths   = "PATCH_PATH_MISMATCH"
-	ReasonPatchStaged  = "PATCH_PATH_PRESTAGED"
-	ReasonHeadRace     = "PATCH_HEAD_RACE"
-	ReasonIndexRace    = "PATCH_INDEX_RACE"
-	ReasonVerify       = "PATCH_VERIFY_FAILED"
+	// ReasonPatchPaths indicates that the files modified by the patch differ from the explicit allowlist.
+	ReasonPatchPaths = "PATCH_PATH_MISMATCH"
+	// ReasonPatchStaged indicates that one of the target paths already has changes staged in the index.
+	ReasonPatchStaged = "PATCH_PATH_PRESTAGED"
+	// ReasonHeadRace indicates that the branch ref moved or concurrent writer collision occurred.
+	ReasonHeadRace = "PATCH_HEAD_RACE"
+	// ReasonIndexRace indicates that the shared Git index changed during patch transaction staging.
+	ReasonIndexRace = "PATCH_INDEX_RACE"
+	// ReasonVerify indicates that pre-commit hooks, commit-msg hooks, or read-back validation failed.
+	ReasonVerify = "PATCH_VERIFY_FAILED"
 )
 
+// Options configures a patch commit transaction, specifying repository path, patch input, and targets.
 type Options struct {
 	Dir       string
 	PatchFile string
@@ -35,6 +42,7 @@ type Options struct {
 	BeforeCAS func() // test seam, called after candidate commit creation
 }
 
+// Result reports the outcome of a patch commit transaction, including the commit SHA or refusal reason.
 type Result struct {
 	SHA    string   `json:"sha,omitempty"`
 	Paths  []string `json:"paths,omitempty"`
@@ -60,6 +68,7 @@ func (g gitRunner) run(ctx context.Context, args ...string) (string, error) {
 	return out.String(), nil
 }
 
+// Commit applies an explicit unified patch through an isolated temporary index and commits it to HEAD.
 func Commit(ctx context.Context, opts Options) (Result, error) {
 	var res Result
 	if strings.TrimSpace(opts.PatchFile) == "" || strings.TrimSpace(opts.Message) == "" {

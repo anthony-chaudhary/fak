@@ -14,22 +14,32 @@ import (
 type Disposition string
 
 const (
+	// AutoApprove indicates all oracles and plan steps passed verification.
 	AutoApprove Disposition = "AUTO_APPROVE"
-	AutoRefuse  Disposition = "AUTO_REFUSE"
-	Escalate    Disposition = "ESCALATE"
+	// AutoRefuse indicates an oracle check failed with a closed refusal reason.
+	AutoRefuse Disposition = "AUTO_REFUSE"
+	// Escalate indicates an irreversible unwitnessed step requiring human triage.
+	Escalate Disposition = "ESCALATE"
 )
 
 // Reason is the closed operator-gate/refusal vocabulary.
 type Reason string
 
 const (
-	ReasonApproved                Reason = "PLAN_APPROVED"
-	ReasonTreeCollision           Reason = "PLAN_TREE_COLLISION"
-	ReasonWrongDirection          Reason = "PLAN_WRONG_DIRECTION"
-	ReasonCoreLockRequired        Reason = "PLAN_CORE_LOCK_REQUIRED"
-	ReasonDoneUnverifiable        Reason = "PLAN_DONE_UNVERIFIABLE"
+	// ReasonApproved indicates all oracle checks and step classifications succeeded.
+	ReasonApproved Reason = "PLAN_APPROVED"
+	// ReasonTreeCollision indicates requested file trees overlap with active leases.
+	ReasonTreeCollision Reason = "PLAN_TREE_COLLISION"
+	// ReasonWrongDirection indicates architectural dependency rules were violated.
+	ReasonWrongDirection Reason = "PLAN_WRONG_DIRECTION"
+	// ReasonCoreLockRequired indicates modification requires an explicit core lock.
+	ReasonCoreLockRequired Reason = "PLAN_CORE_LOCK_REQUIRED"
+	// ReasonDoneUnverifiable indicates the plan done criterion cannot be verified.
+	ReasonDoneUnverifiable Reason = "PLAN_DONE_UNVERIFIABLE"
+	// ReasonIrreversibleUnwitnessed indicates an irreversible step lacks witness evidence.
 	ReasonIrreversibleUnwitnessed Reason = "PLAN_IRREVERSIBLE_UNWITNESSED"
-	ReasonOracleFailure           Reason = "PLAN_ORACLE_FAILURE"
+	// ReasonOracleFailure indicates an oracle execution error or unhandled refusal.
+	ReasonOracleFailure Reason = "PLAN_ORACLE_FAILURE"
 )
 
 // OracleResult is the typed output of one read-only plan-content oracle.

@@ -128,3 +128,121 @@ func TestLastFromTranscriptAnyPreservesCrossHarnessOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestKindValidity(t *testing.T) {
+	valid := []Kind{Clarify, ChooseApproach, PlanApproval, Permission, ConfirmIrreversible}
+	for _, k := range valid {
+		if !k.Valid() {
+			t.Errorf("expected Kind %q to be valid", k)
+		}
+	}
+	invalid := []Kind{"", "INVALID", "UNKNOWN"}
+	for _, k := range invalid {
+		if k.Valid() {
+			t.Errorf("expected Kind %q to be invalid", k)
+		}
+	}
+}
+
+func TestToSignalSeverity(t *testing.T) {
+	tests := []struct {
+		kind         Kind
+		wantSeverity string
+	}{
+		{Permission, "decision"},
+		{ConfirmIrreversible, "decision"},
+		{PlanApproval, "decision"},
+		{Clarify, "action"},
+		{ChooseApproach, "action"},
+		{Kind("OTHER"), "action"},
+	}
+	for _, tc := range tests {
+		q := OperatorQuestion{Kind: tc.kind, Harness: "claude", Question: "test"}
+		sig := q.ToSignal()
+		if sig.Severity != tc.wantSeverity {
+			t.Errorf("kind %s: want severity %q, got %q", tc.kind, tc.wantSeverity, sig.Severity)
+		}
+		if sig.Source != "operator-question:claude" {
+			t.Errorf("unexpected source: %q", sig.Source)
+		}
+	}
+}
+
+func TestNormalizeValidationAndRejection(t *testing.T) {
+	t.Run("unsupported tool on Claude", func(t *testing.T) {
+		_, err := Normalize(NativeGate{HarnessCommand: "claude", Tool: "Bash", Payload: []byte(`{}`)})
+		if err == nil {
+			t.Fatal("expected error for non-gate tool")
+		}
+	})
+
+	t.Run("unsupported tool on Codex", func(t *testing.T) {
+		_, err := Normalize(NativeGate{HarnessCommand: "codex", Tool: "execute_command", Payload: []byte(`{}`)})
+		if err == nil {
+			t.Fatal("expected error for non-gate tool")
+		}
+	})
+
+	t.Run("multiple questions rejected in Claude", func(t *testing.T) {
+		payload := []byte(`{"questions":[{"question":"Q1"},{"question":"Q2"}]}`)
+		_, err := Normalize(NativeGate{HarnessCommand: "claude", Tool: "AskUserQuestion", Payload: payload})
+		if err == nil {
+			t.Fatal("expected error for multiple questions")
+		}
+	})
+
+	t.Run("multiple questions rejected in Codex", func(t *testing.T) {
+		payload := []byte(`{"questions":[{"id":"1","header":"h","question":"Q1"},{"id":"2","header":"h","question":"Q2"}]}`)
+		_, err := Normalize(NativeGate{HarnessCommand: "codex", Tool: "request_user_input", Payload: payload})
+		if err == nil {
+			t.Fatal("expected error for multiple questions")
+		}
+	})
+
+	t.Run("single option maps to Clarify", func(t *testing.T) {
+		payload := []byte(`{"questions":[{"question":"Confirm single?","options":[{"label":"OK","description":"Proceed"}]}]}`)
+		q, err := Normalize(NativeGate{HarnessCommand: "claude", Tool: "AskUserQuestion", Payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if q.Kind != Clarify {
+			t.Fatalf("want Clarify for single option, got %s", q.Kind)
+		}
+	})
+
+	t.Run("multiple trailing JSON rejected", func(t *testing.T) {
+		payload := []byte(`{"questions":[{"question":"Valid?"}]}{"extra":true}`)
+		_, err := Normalize(NativeGate{HarnessCommand: "claude", Tool: "AskUserQuestion", Payload: payload})
+		if err == nil {
+			t.Fatal("expected error for trailing JSON tokens")
+		}
+	})
+}
+
+func TestTranscriptErrorHandling(t *testing.T) {
+	t.Run("nonexistent file", func(t *testing.T) {
+		_, _, err := LastFromTranscript("nonexistent-path.jsonl", "claude")
+		if err == nil {
+			t.Fatal("expected error on nonexistent file")
+		}
+		_, _, err = LastFromTranscriptAny("nonexistent-path.jsonl")
+		if err == nil {
+			t.Fatal("expected error on nonexistent file")
+		}
+	})
+
+	t.Run("corrupt JSON", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "corrupt.jsonl")
+		if err := os.WriteFile(path, []byte(`{not valid json}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := LastFromTranscript(path, "claude")
+		if err == nil {
+			t.Fatal("expected error on corrupt json line")
+		}
+		_, _, err = LastFromTranscriptAny(path)
+		if err == nil {
+			t.Fatal("expected error on corrupt json line")
+		}
+	})
+}
