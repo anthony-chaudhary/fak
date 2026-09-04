@@ -283,3 +283,52 @@ func TestArmbenchAndNativeBenchmarksMetadataParity(t *testing.T) {
 		t.Errorf("native-benchmarks run = %q, want 'fak native-benchmarks -json'", nb.Run)
 	}
 }
+
+func TestExecutableBenchmarkMetadataParity(t *testing.T) {
+	all := All()
+	for _, b := range all {
+		if b.Name == "" {
+			t.Error("benchmark has empty name")
+		}
+		if b.Summary == "" {
+			t.Errorf("benchmark %s has empty summary", b.Name)
+		}
+		if b.Run == "" {
+			t.Errorf("benchmark %s has empty run command", b.Name)
+		}
+		if b.Kind != KindCmd && b.Kind != KindVerb {
+			t.Errorf("benchmark %s has invalid kind: %s", b.Name, b.Kind)
+		}
+		// Provenance-typed offline fields
+		if b.Need == NeedNone {
+			prov := b.TokenProvenance()
+			if prov != "SIMULATED" && prov != "WITNESSED" {
+				t.Errorf("benchmark %s offline token provenance = %q, want SIMULATED or WITNESSED", b.Name, prov)
+			}
+			cost := b.CostBasis()
+			if cost != "MODELED" && cost != "BILLED" {
+				t.Errorf("benchmark %s offline cost basis = %q, want MODELED or BILLED", b.Name, cost)
+			}
+		}
+		// Treatment distinction
+		treatment := b.TreatmentKind()
+		if treatment != TreatmentAdditive && treatment != TreatmentReplacement {
+			t.Errorf("benchmark %s treatment kind = %q, want additive or replacement", b.Name, treatment)
+		}
+	}
+}
+
+func TestBenchCatalogResolveDocFromModuleRoot(t *testing.T) {
+	b, ok := Get("ablate")
+	if !ok {
+		t.Fatal("ablate missing from catalog")
+	}
+	resolved := b.ResolveDoc("")
+	if resolved == "" {
+		t.Fatal("expected non-empty resolved doc path")
+	}
+	// Verify treatment classification
+	if b.TreatmentKind() != TreatmentAdditive {
+		t.Errorf("ablate treatment kind = %q, want %q", b.TreatmentKind(), TreatmentAdditive)
+	}
+}

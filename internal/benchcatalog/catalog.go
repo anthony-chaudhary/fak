@@ -20,7 +20,19 @@
 // the same additive-leaf discipline the rest of the kernel uses.
 package benchcatalog
 
-import "sort"
+import (
+	"os"
+	"path/filepath"
+	"sort"
+)
+
+// TreatmentType distinguishes an additive enhancement from a replacement treatment.
+type TreatmentType string
+
+const (
+	TreatmentAdditive    TreatmentType = "additive"
+	TreatmentReplacement TreatmentType = "replacement"
+)
 
 // Need classifies the cold-start cost of a benchmark  -  the single fact a newcomer
 // most needs before typing a command.
@@ -98,6 +110,72 @@ type Bench struct {
 	// skips it instead of recording a spurious failure. The authoritative twin of a
 	// Task's Manual flag.
 	Manual bool
+	// OfflineTokenProvenance identifies the provenance class ("SIMULATED" vs "WITNESSED") for offline runs.
+	OfflineTokenProvenance string `json:"offline_token_provenance,omitempty"`
+	// OfflineCostBasis identifies the valuation basis ("MODELED" vs "BILLED") for offline cost accounting.
+	OfflineCostBasis string `json:"offline_cost_basis,omitempty"`
+	// Treatment indicates whether the benchmark measures an "additive" or "replacement" treatment.
+	Treatment TreatmentType `json:"treatment,omitempty"`
+}
+
+// TreatmentKind returns the explicit or inferred treatment type for this benchmark.
+func (b Bench) TreatmentKind() TreatmentType {
+	if b.Treatment != "" {
+		return b.Treatment
+	}
+	if b.Name == "ablate" || b.Name == "vcache" || b.Name == "bench" || b.Name == "conceptbench" || b.Name == "coalescebench" {
+		return TreatmentAdditive
+	}
+	return TreatmentReplacement
+}
+
+// TokenProvenance returns the offline token provenance class ("SIMULATED" vs "WITNESSED").
+func (b Bench) TokenProvenance() string {
+	if b.OfflineTokenProvenance != "" {
+		return b.OfflineTokenProvenance
+	}
+	if b.Need == NeedNone {
+		return "SIMULATED"
+	}
+	return "WITNESSED"
+}
+
+// CostBasis returns the valuation basis ("MODELED" vs "BILLED").
+func (b Bench) CostBasis() string {
+	if b.OfflineCostBasis != "" {
+		return b.OfflineCostBasis
+	}
+	if b.Need == NeedNone {
+		return "MODELED"
+	}
+	return "BILLED"
+}
+
+// ResolveDoc returns the absolute or module-root-relative path to the documentation.
+func (b Bench) ResolveDoc(root string) string {
+	if b.Doc == "" {
+		return ""
+	}
+	if filepath.IsAbs(b.Doc) {
+		return filepath.Clean(b.Doc)
+	}
+	clean := filepath.Clean(b.Doc)
+	if root != "" {
+		target := filepath.Join(root, clean)
+		if _, err := os.Stat(target); err == nil {
+			return target
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		target := filepath.Join(wd, clean)
+		if _, err := os.Stat(target); err == nil {
+			return target
+		}
+	}
+	if root != "" {
+		return filepath.Join(root, clean)
+	}
+	return clean
 }
 
 // Offline reports whether this benchmark runs with zero external assets  -  the
