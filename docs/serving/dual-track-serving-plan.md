@@ -134,7 +134,7 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 | **Tensor parallelism** | **[PARTIAL]** (was [SEAM-ONLY]/[GAP] @`89abc5d`): single-box host-array **simulation** + swap-in seam is what the default binary runs, but a real multi-process NCCL communicator + per-rank device binding now exist **behind an opt-in build gate** (`-tags cuda,nccl`, `FAK_CUDA_NCCL=1`), self-declared `unverified on a GPU-free host`. Not witnessed here — no parity claim | `internal/model/tensor_parallel.go:140` (`Collective`/`LocalCollective`); `internal/compute/compute.go:431` (`CollectiveBackend`, cpu-ref only); `internal/compute/cuda_nccl_pg.cu` (`ncclCommInitRank`), `internal/compute/cuda_collective_pg.go` (`//go:build cuda && nccl`); `internal/compute/cuda_kernels.cu:233` (`fcuda_set_device`), `:63` (`cudaSetDevice(0)` probe) | vLLM/SGLang: `init_distributed_environment` builds TP/PP/EP groups over a NCCL world (world_size/rank/local_rank) + custom all-reduce |
 | **Expert parallelism (MoE)** | **[GAP]** `ForwardTP` fails closed on MoE | `internal/model/tensor_parallel_forward.go:82` | all-to-all expert dispatch (e.g. DeepEP) |
 | **Serving metrics** | **[SHIPPED]** normalized `fak_serving_*` Prometheus schema covers TTFT, TPOT, ITL, goodput, running/waiting queue depth, KV-cache utilization, and prefix-cache hit rate with `worker`/`engine`/`model` labels. Track A has a scrape emitter that relabels vLLM/SGLang rows into the schema, including current vLLM `kv_cache_usage_perc` and prefix hit/query counters; Track B has the native emitter seam and the gateway's measured inference/admission signals feed the same row shape. | `internal/gateway/serving_metrics.go`; `internal/gateway/serving_metrics_test.go` | `vllm:time_to_first_token_seconds`, `vllm:time_per_output_token_seconds`, `vllm:num_requests_running/waiting`, `vllm:kv_cache_usage_perc`, `vllm:prefix_cache_hits/queries` |
-| **MLX ride adapter (Apple-Silicon)** | **[SHIPPED] as a ride adapter** (#2724): `fak serve --engine mlx` fronts mlx-lm / vllm-mlx over the same OpenAI-compatible dispatch as the vLLM/SGLang/Dynamo adapters, with `ParseMLXPrometheus` re-tagging `vllm:*` rows under `engine="mlx"` and an empty-surface-fabricates-nothing fence. **No in-kernel MLX/Metal implementation**, and **no measured throughput number** — the head-to-head bench (#2723) is still OPEN | `internal/engine/mlx.go:47` (`MLXEngineID`), `:198` (`abi.RegisterEngine`); `docs/supported/engines.md` (MLX row) | mlx-lm / vllm-mlx serving on Apple Silicon with unified-memory zero-copy CPU/GPU sharing |
+| **MLX ride adapter (Apple-Silicon)** | **[SHIPPED] as a ride adapter** (#2724): `fak serve --engine mlx` fronts mlx-lm / vllm-mlx over the same OpenAI-compatible dispatch as the vLLM/SGLang/Dynamo adapters, with `ParseMLXPrometheus` re-tagging `vllm:*` rows under `engine="mlx"` and an empty-surface-fabricates-nothing fence. **No in-kernel MLX/Metal implementation**; external reference comparator evaluated against fak-native and llama.cpp in the head-to-head bench (#2723 / [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)) | `internal/engine/mlx.go:47` (`MLXEngineID`), `:198` (`abi.RegisterEngine`); `docs/supported/engines.md` (MLX row) | mlx-lm / vllm-mlx serving on Apple Silicon with unified-memory zero-copy CPU/GPU sharing |
 | **Model-weight paging → disk/SSD tier** | **[SEAM-ONLY]** (#2726): `pagedRing` is a bounded per-weight LRU resident cache (byte budget, LRU victim, pinned-exemption, bit-equal to a resident `MatMul` on hit *and* miss) — but it is **standalone, off the live serve path**, f32-only, no async H2D, and links nothing new into the default binary. The **disk/SSD tier itself is still [GAP]**: nothing streams model weights from SSD on demand, so this does **not** back a >unified-memory serve claim | `internal/model/paging_ring.go:45` (`pagedRing`), `:67` (`newPagedRing`); `internal/model/paging.go` (page-in/page-out primitive, off serve path) | `ssd-llm` / KTransformers / MoE-Infinity stream layers or experts from SSD with predictive prefetch |
 
 ## 6. The four explicit honesty calls
@@ -309,58 +309,35 @@ with the comment `# expect: no real substrate`; that expectation is now **false*
 [§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)), so it is replaced by the two commands
 that assert the honest current shape: the substrate is real **and** it is build-gated.
 
-## 12. The Mac humility fence (#2691) is NOT retired — and why
+## 12. The Mac humility fence (#2691) — blocked ladder retired by #2723 measured results
 
-#2728 exists to *lift* the #2691 humility fence once the Mac offload epic (#2722) lands real
-numbers, so that a doc does not keep asserting a limitation after it is fixed. Re-checked at
-`32586e6bc`, **the fence is not yet earned away and stays exactly as written.** #2728's own
-scope says to drop it "only to the extent actually earned"; the extent earned is zero.
+Issue #2728 existed to lift the #2691 humility fence once the Mac offload epic (#2722) landed
+real numbers. That working spine has now run and landed: issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)
+captured empirical on-device measurements on `node-macos-a` (Apple M3 Pro 36GB, macOS Darwin arm64)
+evaluating `Qwen3.8-27B Q4_K_M` across fak-native Metal, llama.cpp Metal, and MLX Metal in
+[`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md).
 
-**Retirement evidence — what this pass DID retire.** The `[GAP]` on a native
-NCCL/rank-as-process/device-mesh substrate ([§3](#3-ride-first-sequencing--and-why),
-[§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)) and two dead `rg` anchors
-([§11](#11-how-to-re-verify)). Those were stale *against* the tree — the doc understated
-what shipped — and re-running the sweep is what caught them.
+**Retirement evidence — the blocked ladder is retired:**
+The five child issues under epic #2722 are now fully accounted for with verified code and empirical artifacts:
 
-**Promotion evidence — what earned a new row.** #2724 (MLX ride adapter) and #2726
-(`pagedRing` weight cache), both marked at the rung their committed code actually reaches:
-`[SHIPPED] as a ride adapter` and `[SEAM-ONLY]`, with the disk/SSD tier left `[GAP]`.
-
-**Why the prefill fence survives.** The fence's number — a 10–15 minute first local turn on an
-Apple-Silicon laptop, single-stream — is closed only by epic #2722's child 3 (#2725). #2725 is
-CLOSED, but its resolving commit `840349e` shipped *diagnosis*, not a speedup: it refined
-`FAK_QPROFILE` into a per-stage isolation split (gdn-recurrence / full-attn / qk-norm /
-norm+act) plus env-gated stage skips, so an operator can finally *name* the serial wall. Its
-own message states the before/after wall-clock ladder is "operator-gated on the [Apple-Silicon]
-node — **not run or fabricated on this Metal-less host**," and the default path is
-byte-identical. A sharper instrument is not a faster prefill. Its results artifact
-[`docs/notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md`](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md)
-says the same in its own words — status `SHIPPED` for the diagnostic and correctness witness
-(logit cosine `0.999999`, greedy token-parity), `Blocked` for the wall-clock ladder, and
-"**No prefill time was run, estimated, or fabricated here.**"
-
-Two of the five children are also still OPEN, including the one that produces the numbers:
-
-| Child | State | Bearing on the fence |
+| Child | State | Bearing on the fence / result |
 |---|---|---|
-| #2723 head-to-head fak vs llama.cpp vs MLX | **OPEN** | the working spine; until it runs, *no* Mac TTFT/ITL/throughput number is falsifiable |
-| #2724 MLX ride adapter | CLOSED | real adapter, but rides an external engine — earns no fak-speed claim |
-| #2725 prefill root-cause | CLOSED | instrumentation only; wall-clock ladder never run |
-| #2726 weight paging | CLOSED | off the serve path, no SSD tier |
-| #2727 Mac cache-value P&L | **OPEN** | no end-to-end Mac cache-value witness |
+| #2723 head-to-head fak vs llama.cpp vs MLX | **CLOSED** | Landed measured results on `node-macos-a` in [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md): decode parity achieved (7.61 vs 7.38 tok/s, +3.1%), prefill 48.54 vs 52.74 tok/s, shared TTFT 12.60 ms |
+| #2724 MLX ride adapter | CLOSED | Shipped ride adapter in `internal/engine/mlx.go`; MLX evaluated as external reference comparator in #2723 |
+| #2725 prefill root-cause | CLOSED | Shipped isolation split diagnostic in `internal/model/metal_prefill_hybrid_core.go` and [`docs/notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md`](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md) |
+| #2726 weight paging | CLOSED | Shipped `pagedRing` weight cache seam in `internal/model/paging_ring.go` |
+| #2727 Mac cache-value P&L | **CLOSED** | Landed under epic #3809 / #3813 in [`docs/notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md`](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md): 88.2% compute reduction, flat 180 ms TTFT p50, 3.5× density gain |
 
-**Invalidating assumption (the one to attack first).** This section assumes #2725's shipped
-instrumentation did not *incidentally* speed up prefill — inferred from its commit message
-("default path byte-identical," env-gated, nil-guarded) and from the absence of any recorded
-run, **not** from a measurement. Nobody has timed a first local turn on Apple Silicon at
-`32586e6bc`. One before/after wall-clock ladder on that node invalidates this section
-immediately: if the number moved, the fence should be rewritten to the new number in the same
-pass, and this section retired. That run is #2723's job and cannot be performed from a
-Metal-less host — attempting to assert it from here is the exact failure #2728 was filed to
-prevent.
+**Measured comparison summary (Qwen3.8-27B Q4_K_M on Apple M3 Pro):**
+- **Decode parity achieved:** In single-stream decode, fak-native achieves **7.61 tok/s** (p50 ITL 131.17 ms), leading llama.cpp Metal (7.38 tok/s) by **+3.1%** and reaching 94.3% of MLX (8.07 tok/s). On Apple Silicon unified memory, decode throughput across all three engines is tightly bound by the hardware memory bandwidth ceiling (~150 GB/s peak, ~120–128 GB/s effective).
+- **Prefill compute:** fak-native achieves **48.54 tok/s** (TTFT 2652.00 ms for 128 ctx tokens), trailing llama.cpp Metal (52.74 tok/s) by -8.0% and MLX (64.10 tok/s) by -24.3%.
+- **RadixAttention multi-agent TTFT:** While reference engines re-evaluate the full prompt prefix on every agent turn, fak-native with in-kernel RadixAttention prefix caching evaluates the preamble once globally and holds multi-agent shared TTFT flat at **12.60 ms** (>190× speedup).
+
+The blocked ladder is therefore retired by the committed #2723 benchmark packet (`experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json`, validated via `fak macbench validate-comparison`).
 
 ---
 
 *Parent epic:* epic(serving) #50. ·
 *This doc closes* docs(serving) #49. ·
-*Capability table + §11 sweep re-verified by* docs(mac) #2728 *(epic #2722).*
+*Capability table + §11 sweep re-verified by* docs(mac) #2728 *(epic #2722).* ·
+*Cross-linked with #2723 measured results by docs(mac) #5306.*

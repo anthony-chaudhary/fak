@@ -24,9 +24,11 @@ agent session. `--probe` launches Claude Code in safe mode with tools, skills, a
 session persistence disabled, so the 2026-07-04 Mac witness sent 1,889 input
 tokens and returned `pong` in 13.1 seconds through the live gateway. A full
 interactive first turn can still be much slower — expect 10–15 minutes of prefill
-on an M3 Pro — because Claude Code includes the normal agent context and tool
+on an M3 Pro for cold unshared prompts — because Claude Code includes the normal agent context and tool
 surface, and the session is single-stream. The loop stays observable the entire
-time, through the preflight panel, `--overlay`, and `--metrics` below.
+time, through the preflight panel, `--overlay`, and `--metrics` below. (For stage-by-stage
+prefill diagnosis, see [MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md);
+for measured head-to-head Metal numbers vs llama.cpp and MLX, see [MAC-THREEWAY-BENCH-2026-09-03.md](../notes/MAC-THREEWAY-BENCH-2026-09-03.md).)
 
 The shape you are building:
 
@@ -57,6 +59,37 @@ large one.
 | 16 GB | a 7B model at Q4 (~4–5 GB) | Comfortable; good for proving the loop end to end. |
 | 32 GB | a 14B model at Q4 (~9 GB) | The practical sweet spot for coding-shaped work. |
 | 48 GB+ | a 27B model at Q4 (~17 GB) | The reference deployment on this page. |
+
+### Many-agent concurrency: what fak's cache saves you on a Mac
+
+While a single-stream interactive session on a large 27B model pays 10–15 minutes of prefill latency on an M3 Pro, real agentic workflows execute multiple concurrent worker loops (investigation, implementation, test execution, and review) that share an identical system prompt, schema definitions, and repository context (a ~4k token preamble).
+
+For many-agent workloads on Apple Silicon, the resolved model pick is **Qwen2.5-7B Q8** (epic [#3809](https://github.com/anthony-chaudhary/fak/issues/3809) / [#3810](https://github.com/anthony-chaudhary/fak/issues/3810)), chosen for **many-agent cache economics** rather than single-stream speed, superseding the implicit 27B assumption. A 27B model's weight footprint leaves minimal unified memory for concurrent KV contexts, whereas Qwen2.5-7B Q8 pairs a moderate weight footprint (~7.5 GB) with GQA (4 KV heads) cache economics, low KV memory per token (~56 KB/token), and clears the dos-refereed agentic capability floor (#3812 / `internal/conceptbench`, composite 0.87).
+
+On `node-macos-a` (Apple M3 Pro 36GB), fak's shared-prefix KV caching delivers:
+- **88.2% compute reduction** at 16 concurrent agents (61,440 reused tokens out of 69,632 prompt tokens; 88.23% Track-1 WITNESSED reuse).
+- **Flat 180 ms TTFT p50 latency** across K=1..16 concurrent agents (vs 10.28x latency blowout to 1,850 ms without cache).
+- **3.5x unified memory density gain** (2.1 agents/GB vs 0.6 agents/GB), supporting up to 54 concurrent agents on a 36 GB MacBook.
+- **Runnable spine:** `./fak macbench many-agent --concurrency 4 --model Qwen3.8-27B --horizon 20 --cache=true --output summary` (and `-c 4 --json`).
+
+Note that raw serving speed ([#2691](https://github.com/anthony-chaudhary/fak/issues/2691) / [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)) remains a separate, unblended track from this cache-value track. For the showcase overview, see [claude-mac.md](claude-mac.md); for the complete numbers, see the [Cache-Value Roll-Up](../cache-value-rollup.md#macbook-many-agent-shared-prefix-result-apple-silicon-metal) and the empirical measurement notes ([MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md), [MAC-MANYAGENT-SPINE-2026-09-03.md](../notes/MAC-MANYAGENT-SPINE-2026-09-03.md)).
+
+### Measured head-to-head Apple Silicon Metal results (#2723 / epic #2722)
+
+For raw single-stream and multi-agent serving speeds, issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) landed the first empirical three-way comparison on `node-macos-a` (Apple M3 Pro 36GB) evaluating `Qwen3.8-27B Q4_K_M` across **fak-native Metal** (`inkernel`), **llama.cpp Metal** (`reference`, b3600), and **MLX Metal** (`reference`, v0.22.1):
+
+| Engine | Decode tok/s (p50) | Decode ITL (p50) | Prefill tok/s (p50) | Prefill TTFT (p50, 128 ctx) | Multi-Agent Shared TTFT |
+|---|---:|---:|---:|---:|---:|
+| **fak-native (Metal)** | **7.61** (+3.1% vs llama.cpp) | **131.17 ms** | 48.54 (-8.0% vs llama.cpp) | 2652.00 ms | **12.60 ms** (>190× speedup) |
+| **llama.cpp (Metal)** | 7.38 (baseline) | 135.43 ms | 52.74 (baseline) | 2447.00 ms | 2447.00 ms (unshared) |
+| **MLX (Metal)** | **8.07** (+9.3% vs llama.cpp) | **123.71 ms** | **64.10** (+21.5% vs llama.cpp) | **2015.00 ms** | 2015.00 ms (unshared) |
+
+- **Decode throughput:** In single-stream decode, fak-native reaches 7.61 tok/s, leading llama.cpp Metal (7.38 tok/s) by **+3.1%** and achieving 94.3% of MLX (8.07 tok/s).
+- **Prefix cache speedup:** With RadixAttention prefix caching on Metal, multi-agent turns hitting the shared preamble drop TTFT from 2,652 ms to **12.60 ms** (>190× faster), while reference engines re-evaluate the full prefix on every turn.
+- **Epic #2722 child artifacts:** These measurements fulfill the working spine of the Mac offload epic [#2722](https://github.com/anthony-chaudhary/fak/issues/2722). Newcomers can inspect the empirical evidence directly:
+  - [Head-to-head Metal benchmark: fak-native vs llama.cpp vs MLX](../notes/MAC-THREEWAY-BENCH-2026-09-03.md) — canonical three-way comparison on Apple M3 Pro (#2723).
+  - [Mac many-agent shared-prefix cache-value A/B](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md) — empirical KV reuse measurement on Metal across 1..16 concurrent agents (#3813 / #2727).
+  - [Qwen3.6-27B GDN-hybrid Metal prefill isolation split](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md) — stage decomposition and diagnostic witness (#2725).
 
 **Get `fak` on the Mac** if it is not there yet — no Go toolchain needed:
 
@@ -636,10 +669,15 @@ instead of a one-off local process.
 
 ## See also
 
+- [claude-mac.md](claude-mac.md) — the Mac local-model showcase and many-agent cache-value overview.
+- [Mac head-to-head benchmark: fak-native vs llama.cpp vs MLX](../notes/MAC-THREEWAY-BENCH-2026-09-03.md) — empirical comparison on Apple Silicon Metal (issue #2723 / epic #2722).
+- [Mac many-agent shared-prefix cache-value A/B](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md) — empirical multi-agent KV cache reuse measurement on M3 Pro Metal (issue #3813 / #2727).
+- [Mac Qwen3.6-27B prefill isolation split](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md) — stage decomposition and diagnostic witness (issue #2725).
 - [Always-On Dogfood Server](always-on-dogfood-server.md) — how the `node-macos-a`
   gateway this UI targets is stood up, measured, and kill-switched.
 - [Server quickstart](server-quickstart.md) — starting your own `fak serve` endpoint
   from scratch if you don't have an always-on gateway yet.
+- [Cache-Value Roll-Up](../cache-value-rollup.md) — Track-1 WITNESSED reuse and unified-memory density.
 - [Qwen3.6 Claude dogfood playbook](../qwen36-claude-dogfood-playbook.md) — the
   model-server layer on its own: bringing a Qwen3.6 endpoint up by hand, checking
   `/v1/models` and `/v1/chat/completions`, and where the `FAK_PROVIDER_EXTRA_BODY_JSON`

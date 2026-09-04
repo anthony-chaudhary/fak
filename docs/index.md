@@ -195,6 +195,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **When managed context should append or reconstruct the task** | [Query, not chat](query-not-chat.md) — originating-task pin and checkable reseed-versus-append rule |
 | **How to construct model-visible directives** | [Positive-state construction](positive-state-construction.md) — broadcast the target state instead of a negation operand |
 | **How negframe and managed context form one pipeline** | [Shared-workspace positive state](shared-workspace-positive-state.md) — exact gateway emit seam, wired surfaces, and current limits |
+| **Why positive workspace management beats punitive default-deny** | [Positive workspace management](positive-workspace-management.md) — immutable FROZEN safety floor vs permissive convenience surface, avoiding capability laundering and doom-loops |
 | **How new work becomes readable and dispatchable** (outcome, leaf, attempt, witness; explicit scope, dependencies, acceptance, and placement) | [Shift-left task organization](shift-left-task-organization.md) |
 | **How every new unit of work is scoped and shipped** (applied spine first, then exhaustive proof, measured optimization, and backlog fan-out) | [Spine-first + fan-out defaults](spine-first-defaults.md) |
 | **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
