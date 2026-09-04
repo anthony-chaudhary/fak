@@ -815,6 +815,8 @@ var tier = map[string]int{
 	"dosadapter":                 1,
 	"framebus":                   1,
 	"interactivesession":         1,
+	"faultlab":                   1,
+	"gcpgpu":                     1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
