@@ -267,19 +267,7 @@ func extractFileValidation(c *abi.ToolCall, args []byte) (filePath string, mtime
 	}
 	path := ExtractToolPath(args)
 	if path != "" {
-		st, err := os.Stat(path)
-		if err == nil && !st.IsDir() {
-			mtime := st.ModTime().UnixNano()
-			size := st.Size()
-			b, readErr := os.ReadFile(path)
-			var hHex string
-			if readErr == nil {
-				h := sha256.Sum256(b)
-				hHex = hex.EncodeToString(h[:])[:24]
-			}
-			return path, mtime, size, hHex, false, true
-		}
-		return path, 0, 0, "", false, true
+		return fileStatDigest(path)
 	}
 	if c.Tool == "Bash" || c.Tool == "bash" {
 		cmd := ExtractToolCommand(args)
@@ -288,22 +276,26 @@ func extractFileValidation(c *abi.ToolCall, args []byte) (filePath string, mtime
 			if len(fields) >= 2 && (fields[0] == "cat" || fields[0] == "head" || fields[0] == "tail") {
 				p := fileCanonPath(fields[len(fields)-1])
 				if p != "" {
-					st, err := os.Stat(p)
-					if err == nil && !st.IsDir() {
-						mtime := st.ModTime().UnixNano()
-						size := st.Size()
-						b, readErr := os.ReadFile(p)
-						var hHex string
-						if readErr == nil {
-							h := sha256.Sum256(b)
-							hHex = hex.EncodeToString(h[:])[:24]
-						}
-						return p, mtime, size, hHex, false, true
-					}
-					return p, 0, 0, "", false, true
+					return fileStatDigest(p)
 				}
 			}
 		}
 	}
 	return "", 0, 0, "", false, false
+}
+
+func fileStatDigest(p string) (string, int64, int64, string, bool, bool) {
+	st, err := os.Stat(p)
+	if err == nil && !st.IsDir() {
+		mtime := st.ModTime().UnixNano()
+		size := st.Size()
+		b, readErr := os.ReadFile(p)
+		var hHex string
+		if readErr == nil {
+			h := sha256.Sum256(b)
+			hHex = hex.EncodeToString(h[:])[:24]
+		}
+		return p, mtime, size, hHex, false, true
+	}
+	return p, 0, 0, "", false, true
 }
