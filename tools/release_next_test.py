@@ -146,6 +146,34 @@ class ReleaseNextTest(unittest.TestCase):
         finally:
             setattr(self.mod, "run", old_run)
 
+    def test_render_next_draft_consolidates_repeated_cleaned_subjects(self) -> None:
+        state = {
+            "projected_version": "0.49.0",
+            "projected_level": "minor",
+            "base_tag": "v0.48.0",
+            "commits": [
+                {"subject": "fix(foo): add contract benchmarks (fak foo)", "body": ""},
+                {"subject": "fix(bar): add contract benchmarks (fak bar)", "body": ""},
+                {"subject": "fix(single): unique single item (fak single)", "body": ""},
+                {"subject": "fix: repeated no scope", "body": ""},
+                {"subject": "fix: repeated no scope", "body": ""},
+                {"subject": "merge: sync trunk with origin/main", "body": ""},
+                {"subject": "Merge remote-tracking branch 'origin/main'", "body": ""},
+            ] + [
+                {"subject": f"fix(pkg{i}): wide coverage change (fak pkg{i})", "body": ""}
+                for i in range(8)
+            ],
+        }
+        rendered = self.mod.render_next_draft(state)
+        self.assertIn("- Add contract benchmarks (foo, bar).", rendered)
+        self.assertEqual(rendered.count("- Add contract benchmarks (foo, bar)."), 1)
+        self.assertNotIn("- Add contract benchmarks.\n", rendered)
+        self.assertIn("- Unique single item.", rendered)
+        self.assertIn("- Repeated no scope (2 occurrences).", rendered)
+        self.assertIn("- Wide coverage change across 8 packages (pkg0, pkg1, pkg2, pkg3, pkg4, pkg5, ...).", rendered)
+        self.assertNotIn("sync trunk with origin/main", rendered.lower())
+        self.assertNotIn("remote-tracking", rendered.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
