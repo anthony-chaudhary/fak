@@ -40,6 +40,156 @@ var objectives = [...]Objective{
 	KernelShare, MemoryPressure, EvidenceFresh, ReceiptCoverage,
 }
 
+type LifecycleEvent string
+
+const (
+	EventPromotion LifecycleEvent = "promotion"
+	EventRevert    LifecycleEvent = "revert"
+	EventRelease   LifecycleEvent = "release"
+)
+
+type LifecycleAnnotation struct {
+	Event   LifecycleEvent `json:"event"`
+	Release string         `json:"release"`
+}
+
+type SupervisionStatus string
+
+const (
+	SupervisionActive   SupervisionStatus = "active"
+	SupervisionDegraded SupervisionStatus = "degraded"
+	SupervisionFailed   SupervisionStatus = "failed"
+)
+
+type LifecycleStatus string
+
+const (
+	LifecycleGood       LifecycleStatus = "good"
+	LifecycleRegressed  LifecycleStatus = "regression"
+	LifecycleStale      LifecycleStatus = "stale"
+	LifecycleMissing    LifecycleStatus = "missing_evidence"
+	LifecycleMismatched LifecycleStatus = "mismatched_envelope"
+)
+
+type SeriesStatus string
+
+const (
+	SeriesProduced    SeriesStatus = "produced"
+	SeriesUnavailable SeriesStatus = "unavailable"
+)
+
+type UnavailableReason string
+
+const (
+	ReasonNone            UnavailableReason = "none"
+	ReasonIncomplete      UnavailableReason = "incomplete"
+	ReasonStale           UnavailableReason = "stale"
+	ReasonMismatched      UnavailableReason = "mismatched_envelope"
+	ReasonPrivate         UnavailableReason = "private"
+	ReasonUntrustedScheme UnavailableReason = "untrusted_scheme"
+)
+
+type LiveRunInput struct {
+	ObservedAt        time.Time
+	Baseline          Observation
+	Candidate         Observation
+	SupervisionStatus SupervisionStatus
+	Lifecycle         LifecycleAnnotation
+}
+
+type LiveSeriesResult struct {
+	Status            SeriesStatus        `json:"status"`
+	UnavailableReason UnavailableReason   `json:"unavailable_reason"`
+	LifecycleStatus   LifecycleStatus     `json:"lifecycle_status"`
+	Result            Result              `json:"result,omitempty"`
+	Prometheus        string              `json:"prometheus,omitempty"`
+}
+
+// ProduceLiveSeries evaluates a candidate observation against a matched baseline,
+// verifies envelope validity and freshness, and emits bounded SLO and lifecycle Prometheus series.
+func ProduceLiveSeries(now time.Time, maxAge time.Duration, evaluator *Evaluator, input LiveRunInput) LiveSeriesResult {
+	unavailable := func(reason UnavailableReason, lstatus LifecycleStatus) LiveSeriesResult {
+		return LiveSeriesResult{
+			Status:            SeriesUnavailable,
+			UnavailableReason: reason,
+			LifecycleStatus:   lstatus,
+		}
+	}
+
+	if now.IsZero() || maxAge <= 0 {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+	if input.ObservedAt.IsZero() || now.Before(input.ObservedAt) {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+	if now.Sub(input.ObservedAt) > maxAge {
+		return unavailable(ReasonStale, LifecycleStale)
+	}
+
+	if err := input.Baseline.Envelope.Validate(); err != nil {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+	if err := input.Candidate.Envelope.Validate(); err != nil {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+
+	if input.Baseline.Envelope != input.Candidate.Envelope {
+		return unavailable(ReasonMismatched, LifecycleMismatched)
+	}
+
+	if input.SupervisionStatus == SupervisionFailed {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+
+	if evaluator == nil {
+		evaluator = New(DefaultThresholds())
+	}
+
+	res, err := evaluator.Observe(now, input.Baseline, input.Candidate)
+	if err != nil {
+		return unavailable(ReasonIncomplete, LifecycleMissing)
+	}
+
+	var lstatus LifecycleStatus
+	switch res.State {
+	case StateGood:
+		lstatus = LifecycleGood
+	case StateRegression:
+		lstatus = LifecycleRegressed
+	case StateMissing:
+		lstatus = LifecycleMissing
+	default:
+		lstatus = LifecycleMissing
+	}
+
+	if res.State == StateMissing && len(res.Violations) == 0 {
+		return LiveSeriesResult{
+			Status:            SeriesUnavailable,
+			UnavailableReason: ReasonIncomplete,
+			LifecycleStatus:   LifecycleMissing,
+			Result:            res,
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(RenderPrometheus(res))
+
+	if input.Lifecycle.Event != "" && input.Lifecycle.Release != "" {
+		b.WriteString("# HELP fak_native_lifecycle_event_info Native performance lifecycle event annotation.\n")
+		b.WriteString("# TYPE fak_native_lifecycle_event_info gauge\n")
+		fmt.Fprintf(&b, "fak_native_lifecycle_event_info{engine=\"fak-native\",module_rev=%q,benchmark_envelope=%q,model=%q,backend=%q,event=%q,release=%q} 1\n",
+			res.Envelope.ModuleRev, res.Envelope.Benchmark, res.Envelope.Model, res.Envelope.Backend, input.Lifecycle.Event, input.Lifecycle.Release)
+	}
+
+	return LiveSeriesResult{
+		Status:            SeriesProduced,
+		UnavailableReason: ReasonNone,
+		LifecycleStatus:   lstatus,
+		Result:            res,
+		Prometheus:        b.String(),
+	}
+}
+
 // Envelope is the complete comparison identity. ModuleRev is intentionally a
 // module@rev value, not a bare commit SHA.
 type Envelope struct {
