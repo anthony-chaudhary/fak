@@ -70,6 +70,9 @@ type GotchaAuditReport struct {
 	Platform          string               `json:"platform"`
 	IsStrixHalo       bool                 `json:"is_strix_halo"`
 	TotalRAMGiB       float64              `json:"total_ram_gib"`
+	DistroID          string               `json:"distro_id,omitempty"`
+	IsContainer       bool                 `json:"is_container,omitempty"`
+	IsWSL2            bool                 `json:"is_wsl2,omitempty"`
 	Findings          []GotchaAuditFinding `json:"findings"`
 	DefectCount       int                  `json:"defect_count"`
 	SafeCount         int                  `json:"safe_count"`
@@ -120,18 +123,31 @@ func (r *GotchaAuditReport) ToJSON() ([]byte, error) {
 
 // GotchaProbeEnvironment supplies environmental facts to the gotcha auditor.
 type GotchaProbeEnvironment struct {
-	GOOS             string
-	KernelCmdline    string
-	ProcCPUInfo      string
-	TotalRAMBytes    uint64
-	GPUName          string
-	EnvVars          map[string]string
-	SysfsLockupVal   string
-	SysfsTTMPagesVal uint64
-	MesaVersion      string
-	KernelVersion    string
-	IsStrixHalo      bool
-	FS               FileSystem
+	GOOS                      string            `json:"goos"`
+	KernelCmdline             string            `json:"kernel_cmdline"`
+	ProcCPUInfo               string            `json:"proc_cpuinfo"`
+	TotalRAMBytes             uint64            `json:"total_ram_bytes"`
+	GPUName                   string            `json:"gpu_name"`
+	EnvVars                   map[string]string `json:"env_vars"`
+	SysfsLockupVal            string            `json:"sysfs_lockup_val"`
+	SysfsTTMPagesVal          uint64            `json:"sysfs_ttm_pages_val"`
+	SysfsVRAMTotalBytes       uint64            `json:"sysfs_vram_total_bytes"`
+	MesaVersion               string            `json:"mesa_version"`
+	KernelVersion             string            `json:"kernel_version"`
+	IsStrixHalo               bool              `json:"is_strix_halo"`
+	IsContainer               bool              `json:"is_container"`
+	IsWSL2                    bool              `json:"is_wsl2"`
+	DistroID                  string            `json:"distro_id"`
+	HasOllamaProcess          bool              `json:"has_ollama_process"`
+	HasOllamaInstalled        bool              `json:"has_ollama_installed"`
+	VulkanEngineType          string            `json:"vulkan_engine_type"`
+	SpecDraftUbatchConfigured bool              `json:"spec_draft_ubatch_configured"`
+	BatchFlagsConfigured      bool              `json:"batch_flags_configured"`
+	NPUOffloadEnabled         bool              `json:"npu_offload_enabled"`
+	DirtyRingBufferActive     bool              `json:"dirty_ring_buffer_active"`
+	DPMGovernorConfigured     bool              `json:"dpm_governor_configured"`
+	USB4Tuned                 bool              `json:"usb4_tuned"`
+	FS                        FileSystem        `json:"-"`
 }
 
 // Top20Gotchas returns the authoritative list of the top 20 gotchas with technical specs.
@@ -345,6 +361,37 @@ func AuditHostGotchas(env GotchaProbeEnvironment) *GotchaAuditReport {
 	gotchas := Top20Gotchas()
 	findings := make([]GotchaAuditFinding, 0, len(gotchas))
 
+	totalGiB := float64(env.TotalRAMBytes) / (1024 * 1024 * 1024)
+
+	// Non-Strix Halo hardware filtering: if explicit non-Strix hardware was detected,
+	// mark gotchas NOT_APPLICABLE rather than raising false defects.
+	if !env.IsStrixHalo && (env.GPUName != "" || env.ProcCPUInfo != "") {
+		nonStrixDesc := env.GPUName
+		if nonStrixDesc == "" {
+			nonStrixDesc = "Non-Strix CPU/Platform"
+		}
+		for _, g := range gotchas {
+			findings = append(findings, GotchaAuditFinding{
+				Gotcha:  g,
+				Status:  StatusNotApplicable,
+				Details: fmt.Sprintf("Host hardware is not AMD Strix Halo (detected: %s); gotcha applies specifically to AMD Ryzen AI MAX+ / gfx1151.", nonStrixDesc),
+			})
+		}
+		return &GotchaAuditReport{
+			Platform:          env.GOOS,
+			IsStrixHalo:       false,
+			TotalRAMGiB:       totalGiB,
+			DistroID:          env.DistroID,
+			IsContainer:       env.IsContainer,
+			IsWSL2:            env.IsWSL2,
+			Findings:          findings,
+			DefectCount:       0,
+			SafeCount:         0,
+			AdvisoryCount:     0,
+			ReadyForInference: true,
+		}
+	}
+
 	defectCount := 0
 	safeCount := 0
 	advisoryCount := 0
@@ -367,14 +414,15 @@ func AuditHostGotchas(env GotchaProbeEnvironment) *GotchaAuditReport {
 		})
 	}
 
-	totalGiB := float64(env.TotalRAMBytes) / (1024 * 1024 * 1024)
-
 	ready := defectCount == 0
 
 	return &GotchaAuditReport{
 		Platform:          env.GOOS,
 		IsStrixHalo:       env.IsStrixHalo,
 		TotalRAMGiB:       totalGiB,
+		DistroID:          env.DistroID,
+		IsContainer:       env.IsContainer,
+		IsWSL2:            env.IsWSL2,
 		Findings:          findings,
 		DefectCount:       defectCount,
 		SafeCount:         safeCount,
@@ -389,6 +437,12 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		if env.GOOS != "linux" {
 			return StatusNotApplicable, "Applies to Linux amdgpu kernel driver."
 		}
+		if env.IsContainer {
+			return StatusNotApplicable, "Running inside container; host kernel parameter amdgpu.lockup_timeout must be configured on host OS, not in container."
+		}
+		if env.IsWSL2 {
+			return StatusAdvisory, "Running under WSL2: GPU execution mediated by D3D12/dxgkrnl; watchdog timeouts are controlled via host Windows display driver or %USERPROFILE%\\.wslconfig."
+		}
 		if strings.Contains(env.KernelCmdline, "amdgpu.lockup_timeout=-1") ||
 			strings.Contains(env.KernelCmdline, "amdgpu.lockup_timeout=60000") ||
 			env.SysfsLockupVal == "-1" || env.SysfsLockupVal == "60000" {
@@ -400,16 +454,25 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		if env.GOOS != "linux" {
 			return StatusNotApplicable, "Applies to Linux TTM kernel memory subsystem."
 		}
+		if env.IsContainer {
+			return StatusNotApplicable, "Running inside container; host kernel parameter ttm.pages_limit must be configured on host OS, not in container."
+		}
+		if env.IsWSL2 {
+			return StatusAdvisory, "Running under WSL2: memory allocation is governed by %USERPROFILE%\\.wslconfig memory limit rather than Linux ttm.pages_limit."
+		}
 		// Scale threshold based on 128GB vs 64GB platform tier
 		expectedPages := uint64(30000000) // ~120 GiB on 128GB systems
 		targetGiB := "120 GiB"
+		targetPagesExact := "31457280"
 		if env.TotalRAMBytes > 0 && env.TotalRAMBytes < 96*1024*1024*1024 {
 			expectedPages = uint64(14000000) // ~56 GiB on 64GB systems
 			targetGiB = "56 GiB"
+			targetPagesExact = "14680064"
 		}
 		if env.SysfsTTMPagesVal >= expectedPages ||
-			strings.Contains(env.KernelCmdline, "ttm.pages_limit=31457280") ||
-			strings.Contains(env.KernelCmdline, "ttm.pages_limit=14680064") {
+			strings.Contains(env.KernelCmdline, "ttm.pages_limit="+targetPagesExact) ||
+			(env.TotalRAMBytes >= 96*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=31457280")) ||
+			(env.TotalRAMBytes < 96*1024*1024*1024 && strings.Contains(env.KernelCmdline, "ttm.pages_limit=14680064")) {
 			return StatusSafeConfigured, fmt.Sprintf("TTM pages_limit is configured for full aperture (%d pages / ~%s)", env.SysfsTTMPagesVal, targetGiB)
 		}
 		if env.SysfsTTMPagesVal == 0 {
@@ -420,6 +483,13 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 	case "GOTCHA_BIOS_UMA_GTT":
 		if env.GOOS == "windows" {
 			return StatusAdvisory, "Windows requires UEFI/BIOS UMA Frame Buffer Size set to 96GB for maximum VRAM aperture."
+		}
+		// On Linux: fixed carveout >= 64 GiB starves the host kernel
+		if env.SysfsVRAMTotalBytes >= 64*1024*1024*1024 {
+			return StatusDefectDetected, fmt.Sprintf("BIOS UMA fixed carveout is set to >=64GB on Linux (detected: %.1f GiB); starves host kernel. Reduce BIOS UMA Frame Buffer Size to 512MB/2GB and use dynamic GTT.", float64(env.SysfsVRAMTotalBytes)/(1024*1024*1024))
+		}
+		if env.SysfsVRAMTotalBytes > 0 && env.SysfsVRAMTotalBytes <= 4*1024*1024*1024 {
+			return StatusSafeConfigured, fmt.Sprintf("Linux dynamic GTT verified; BIOS UMA carveout is set to minimum (%.1f GiB) preserving host memory.", float64(env.SysfsVRAMTotalBytes)/(1024*1024*1024))
 		}
 		return StatusSafeConfigured, "Linux dynamic GTT verified; ensure BIOS UMA framebuffer is set to minimum (512MB or 2GB) to preserve host memory."
 
@@ -441,9 +511,15 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		return StatusAdvisory, fmt.Sprintf("Non-standard HSA_OVERRIDE_GFX_VERSION=%s detected.", val)
 
 	case "GOTCHA_VULKAN_3D_ENGTYPE":
+		if env.VulkanEngineType == "engtype_Compute" || env.VulkanEngineType == "Compute" {
+			return StatusDefectDetected, "Vulkan telemetry mapped to engtype_Compute; will show 0% utilization during LLM inference (configure engtype_3D or total_util_pct)."
+		}
 		return StatusSafeConfigured, "Telemetry configured: monitoring engtype_3D and total_util_pct instead of engtype_Compute for Vulkan."
 
 	case "GOTCHA_OLLAMA_IGPU_FALLBACK":
+		if !env.HasOllamaProcess && !env.HasOllamaInstalled {
+			return StatusNotApplicable, "Ollama is not installed or running on host."
+		}
 		vulkanSet := env.EnvVars["OLLAMA_VULKAN"] == "1"
 		igpuSet := env.EnvVars["OLLAMA_IGPU_ENABLE"] == "1"
 		if vulkanSet && igpuSet {
@@ -452,7 +528,10 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		return StatusDefectDetected, "Ollama environment missing OLLAMA_VULKAN=1 or OLLAMA_IGPU_ENABLE=1; will silently fall back to CPU inference."
 
 	case "GOTCHA_SPEC_GRAPH_TIMEOUT":
-		return StatusSafeConfigured, "Decoupled draft micro-batching (--spec-draft-ubatch-size 512) and power-of-2 graph bucketing enabled."
+		if env.SpecDraftUbatchConfigured {
+			return StatusSafeConfigured, "Decoupled draft micro-batching (--spec-draft-ubatch-size 512) and power-of-2 graph bucketing enabled."
+		}
+		return StatusDefectDetected, "Speculative draft micro-batch size not decoupled; dynamic token count causes Vulkan pipeline recreation and ring timeouts."
 
 	case "GOTCHA_GGML_UNIFIED_CORRUPT":
 		_, exists := env.EnvVars["GGML_CUDA_ENABLE_UNIFIED_MEMORY"]
@@ -477,7 +556,10 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		return StatusSafeConfigured, "Mesa / RADV driver version is current (supports Wave32 cooperative matrices)."
 
 	case "GOTCHA_BATCH_CLAMP_SILENT":
-		return StatusSafeConfigured, "Batch flag validation enforced: -b >= -ub in runner configurations."
+		if env.BatchFlagsConfigured {
+			return StatusSafeConfigured, "Batch flag validation enforced: -b >= -ub in runner configurations."
+		}
+		return StatusDefectDetected, "Batch flags not validated: -b < -ub triggers silent clamping to -b in llama.cpp, degrading prompt ingestion."
 
 	case "GOTCHA_VLLM_HIPBLASLT":
 		if env.EnvVars["TORCH_BLAS_PREFER_HIPBLASLT"] == "1" {
@@ -486,7 +568,10 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		return StatusAdvisory, "TORCH_BLAS_PREFER_HIPBLASLT=1 not set; vLLM FP16 batch 8+ throughput may drop by ~40% on PyTorch <2.14."
 
 	case "GOTCHA_NPU_BANDWIDTH_CONTENTION":
-		return StatusSafeConfigured, "NPU co-residency isolation enabled: auxiliary workloads routed to XDNA 2 NPU; iGPU latency penalty <3.5%."
+		if env.NPUOffloadEnabled {
+			return StatusSafeConfigured, "NPU co-residency isolation enabled: auxiliary workloads routed to XDNA 2 NPU; iGPU latency penalty <3.5%."
+		}
+		return StatusAdvisory, "Auxiliary LLM workloads (embeddings, audio, small sidecars) not offloaded to NPU; competing on iGPU causes up to 60% throughput drop."
 
 	case "GOTCHA_KERNEL7_KFD_DEADLOCK":
 		if strings.HasPrefix(env.KernelVersion, "7.0.0-28") {
@@ -501,13 +586,22 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		return StatusSafeConfigured, "Zen 5 invlpgb broadcast TLB invalidation verified or not in fine-tuning loop."
 
 	case "GOTCHA_NVME_HIGH_WAF":
-		return StatusSafeConfigured, "Write-back dirty ring buffer (2-4 GiB) active; protects client NVMe SSD from high WAF."
+		if env.DirtyRingBufferActive {
+			return StatusSafeConfigured, "Write-back dirty ring buffer (2-4 GiB) active; protects client NVMe SSD from high WAF."
+		}
+		return StatusDefectDetected, "Synchronous disk paging of KV caches active without dirty ring buffer; client NVMe SSD vulnerable to extreme WAF (>30x) wear-out."
 
 	case "GOTCHA_THERMAL_CLOCK_HUNTING":
-		return StatusSafeConfigured, "Static DPM 'high' performance governor active with clock ceiling to prevent acoustic fan hunting."
+		if env.DPMGovernorConfigured {
+			return StatusSafeConfigured, "Static DPM 'high' performance governor active with clock ceiling to prevent acoustic fan hunting."
+		}
+		return StatusDefectDetected, "DPM dynamic boost active without clock ceiling; causes thermal throttling oscillations and acoustic fan hunting."
 
 	case "GOTCHA_USB4_CLUSTER_LATENCY":
-		return StatusSafeConfigured, "USB4 cluster tuning: single-node preferred for models <=128GB; MTU 9000 & pm_qos configured for multi-node."
+		if env.USB4Tuned {
+			return StatusSafeConfigured, "USB4 cluster tuning: single-node preferred for models <=128GB; MTU 9000 & pm_qos configured for multi-node."
+		}
+		return StatusAdvisory, "USB4 link sleep states untuned; multi-node clustering on models <=128GB suffers 15-20% latency penalty over single node."
 
 	default:
 		return StatusSafeConfigured, "Verified safe."
@@ -516,10 +610,19 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 
 // BuildHostProbeEnvironment constructs a probe environment from the live host.
 func BuildHostProbeEnvironment() GotchaProbeEnvironment {
+	return BuildHostProbeEnvironmentWithFS(osFileSystem{})
+}
+
+// BuildHostProbeEnvironmentWithFS constructs a probe environment using the provided FileSystem abstraction.
+func BuildHostProbeEnvironmentWithFS(fs FileSystem) GotchaProbeEnvironment {
+	if fs == nil {
+		fs = osFileSystem{}
+	}
 	env := GotchaProbeEnvironment{
 		GOOS:        runtime.GOOS,
 		EnvVars:     make(map[string]string),
 		IsStrixHalo: false,
+		FS:          fs,
 	}
 
 	for _, e := range os.Environ() {
@@ -529,7 +632,14 @@ func BuildHostProbeEnvironment() GotchaProbeEnvironment {
 		}
 	}
 
-	if runtime.GOOS == "windows" {
+	hasLinuxFiles := false
+	if _, err := fs.Stat("/proc/version"); err == nil {
+		hasLinuxFiles = true
+	} else if _, err := fs.Stat("/proc/cmdline"); err == nil {
+		hasLinuxFiles = true
+	}
+
+	if runtime.GOOS == "windows" && !hasLinuxFiles {
 		// Probe Windows GPU facts via PowerShell
 		facts := Facts("", PowerShellRunner)
 		if facts["available"] == true {
@@ -545,72 +655,518 @@ func BuildHostProbeEnvironment() GotchaProbeEnvironment {
 			}
 		}
 	} else {
-		// Linux probing
-		if cmdData, err := os.ReadFile("/proc/cmdline"); err == nil {
+		// Linux probing (also used for mock linux filesystem on any OS)
+		if hasLinuxFiles && env.GOOS != "linux" {
+			env.GOOS = "linux"
+		}
+		if cmdData, err := fs.ReadFile("/proc/cmdline"); err == nil {
 			env.KernelCmdline = string(cmdData)
 		}
-		if cpuData, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+		if cpuData, err := fs.ReadFile("/proc/cpuinfo"); err == nil {
 			env.ProcCPUInfo = string(cpuData)
 			if strings.Contains(env.ProcCPUInfo, "Ryzen AI MAX") || strings.Contains(env.ProcCPUInfo, "Strix Halo") {
 				env.IsStrixHalo = true
 			}
 		}
-		if memData, err := os.ReadFile("/proc/meminfo"); err == nil {
+		if memData, err := fs.ReadFile("/proc/meminfo"); err == nil {
 			if ram, err := ParseMemTotalFromProcMeminfo(string(memData)); err == nil {
 				env.TotalRAMBytes = ram
 			}
 		}
-		if lockupData, err := os.ReadFile("/sys/module/amdgpu/parameters/lockup_timeout"); err == nil {
+		if lockupData, err := fs.ReadFile("/sys/module/amdgpu/parameters/lockup_timeout"); err == nil {
 			env.SysfsLockupVal = strings.TrimSpace(string(lockupData))
 		}
-		if ttmData, err := os.ReadFile("/sys/module/ttm/parameters/pages_limit"); err == nil {
+		if ttmData, err := fs.ReadFile("/sys/module/ttm/parameters/pages_limit"); err == nil {
 			if p, err := strconv.ParseUint(strings.TrimSpace(string(ttmData)), 10, 64); err == nil {
 				env.SysfsTTMPagesVal = p
 			}
 		}
-		if verData, err := os.ReadFile("/proc/version"); err == nil {
-			fields := strings.Fields(string(verData))
+		if verData, err := fs.ReadFile("/proc/version"); err == nil {
+			verStr := string(verData)
+			fields := strings.Fields(verStr)
 			if len(fields) >= 3 {
 				env.KernelVersion = fields[2]
 			}
+			lowerVer := strings.ToLower(verStr)
+			if strings.Contains(lowerVer, "microsoft") || strings.Contains(lowerVer, "wsl") {
+				env.IsWSL2 = true
+			}
+		}
+		if osReleaseData, err := fs.ReadFile("/etc/os-release"); err == nil {
+			env.DistroID = parseDistroID(string(osReleaseData))
+		}
+
+		env.IsContainer = detectContainer(fs)
+		env.MesaVersion = probeMesaVersion(fs, env.EnvVars)
+		env.SysfsVRAMTotalBytes = probeSysfsVRAMTotalBytes(fs)
+		env.HasOllamaInstalled = probeOllamaInstalled(fs)
+		env.HasOllamaProcess = probeOllamaProcess(fs)
+		if probeDPMGovernorConfigured(fs) {
+			env.DPMGovernorConfigured = true
 		}
 	}
 
 	return env
 }
 
-// GenerateFixPlan generates concrete actionable shell commands / grub adjustments for detected defects.
+func parseDistroID(content string) string {
+	lines := strings.Split(content, "\n")
+	var idLike string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ID=") {
+			val := strings.TrimPrefix(line, "ID=")
+			val = strings.ToLower(strings.Trim(val, "\"'"))
+			return val
+		}
+		if strings.HasPrefix(line, "ID_LIKE=") {
+			val := strings.TrimPrefix(line, "ID_LIKE=")
+			idLike = strings.ToLower(strings.Trim(val, "\"'"))
+		}
+	}
+	if idLike != "" {
+		fields := strings.Fields(idLike)
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+func detectContainer(fs FileSystem) bool {
+	if _, err := fs.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := fs.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+	for _, cgroupPath := range []string{"/proc/1/cgroup", "/proc/self/cgroup"} {
+		if data, err := fs.ReadFile(cgroupPath); err == nil {
+			lower := strings.ToLower(string(data))
+			if strings.Contains(lower, "docker") || strings.Contains(lower, "containerd") ||
+				strings.Contains(lower, "kubepods") || strings.Contains(lower, "container") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func probeMesaVersion(fs FileSystem, envVars map[string]string) string {
+	if envVars != nil {
+		if v, ok := envVars["MESA_VERSION"]; ok && v != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+
+	patterns := []string{
+		"/usr/share/doc/mesa*/changelog*",
+		"/usr/share/doc/*mesa*/changelog*",
+		"/usr/share/doc/mesa*/CHANGELOG*",
+	}
+	for _, pat := range patterns {
+		matches, err := fs.Glob(pat)
+		if err == nil {
+			for _, m := range matches {
+				data, err := fs.ReadFile(m)
+				if err == nil && len(data) > 0 {
+					if ver := extractMesaVersionFromChangelog(string(data)); ver != "" {
+						return ver
+					}
+				}
+			}
+		}
+	}
+
+	if data, err := fs.ReadFile("/var/lib/dpkg/status"); err == nil {
+		if ver := extractMesaVersionFromDpkgStatus(string(data)); ver != "" {
+			return ver
+		}
+	}
+
+	if matches, err := fs.Glob("/var/lib/pacman/local/mesa-*/desc"); err == nil {
+		for _, m := range matches {
+			if data, err := fs.ReadFile(m); err == nil {
+				if ver := extractMesaVersionFromPacmanDesc(string(data)); ver != "" {
+					return ver
+				}
+			}
+		}
+	}
+
+	if data, err := fs.ReadFile("/etc/os-release"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "MESA_VERSION=") {
+				val := strings.TrimPrefix(line, "MESA_VERSION=")
+				return strings.Trim(val, "\"'")
+			}
+		}
+	}
+
+	if envVars != nil {
+		if vi, ok := envVars["VULKANINFO"]; ok && vi != "" {
+			if ver := extractMesaVersionFromVulkanInfo(vi); ver != "" {
+				return ver
+			}
+		}
+	}
+
+	return ""
+}
+
+func extractMesaVersionFromChangelog(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "mesa") {
+			openIdx := strings.Index(line, "(")
+			closeIdx := strings.Index(line, ")")
+			if openIdx != -1 && closeIdx > openIdx {
+				verPart := line[openIdx+1 : closeIdx]
+				if colonIdx := strings.Index(verPart, ":"); colonIdx != -1 {
+					verPart = verPart[colonIdx+1:]
+				}
+				if dashIdx := strings.Index(verPart, "-"); dashIdx != -1 {
+					verPart = verPart[:dashIdx]
+				}
+				verPart = strings.TrimSpace(verPart)
+				if isSemverLike(verPart) {
+					return verPart
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func extractMesaVersionFromDpkgStatus(content string) string {
+	paragraphs := strings.Split(content, "\n\n")
+	for _, p := range paragraphs {
+		lines := strings.Split(p, "\n")
+		isMesaPkg := false
+		version := ""
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			if strings.HasPrefix(l, "Package:") {
+				pkg := strings.TrimSpace(strings.TrimPrefix(l, "Package:"))
+				if strings.Contains(pkg, "mesa") {
+					isMesaPkg = true
+				}
+			}
+			if strings.HasPrefix(l, "Version:") {
+				v := strings.TrimSpace(strings.TrimPrefix(l, "Version:"))
+				if colonIdx := strings.Index(v, ":"); colonIdx != -1 {
+					v = v[colonIdx+1:]
+				}
+				if dashIdx := strings.Index(v, "-"); dashIdx != -1 {
+					v = v[:dashIdx]
+				}
+				version = strings.TrimSpace(v)
+			}
+		}
+		if isMesaPkg && isSemverLike(version) {
+			return version
+		}
+	}
+	return ""
+}
+
+func extractMesaVersionFromPacmanDesc(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "%VERSION%" && i+1 < len(lines) {
+			v := strings.TrimSpace(lines[i+1])
+			if dashIdx := strings.Index(v, "-"); dashIdx != -1 {
+				v = v[:dashIdx]
+			}
+			if isSemverLike(v) {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func extractMesaVersionFromVulkanInfo(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, l := range lines {
+		if strings.Contains(l, "Mesa ") {
+			idx := strings.Index(l, "Mesa ")
+			v := strings.TrimSpace(l[idx+len("Mesa "):])
+			fields := strings.Fields(v)
+			if len(fields) > 0 && isSemverLike(fields[0]) {
+				return fields[0]
+			}
+		}
+	}
+	return ""
+}
+
+func isSemverLike(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func probeSysfsVRAMTotalBytes(fs FileSystem) uint64 {
+	matches, err := fs.Glob("/sys/class/drm/card*/device/mem_info_vram_total")
+	if err == nil {
+		for _, m := range matches {
+			if data, err := fs.ReadFile(m); err == nil {
+				valStr := strings.TrimSpace(string(data))
+				if val, err := strconv.ParseUint(valStr, 10, 64); err == nil && val > 0 {
+					return val
+				}
+			}
+		}
+	}
+	resMatches, err := fs.Glob("/sys/class/drm/card*/device/resource")
+	if err == nil {
+		for _, m := range resMatches {
+			if data, err := fs.ReadFile(m); err == nil {
+				var maxBar uint64
+				lines := strings.Split(string(data), "\n")
+				for _, line := range lines {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						start, err1 := strconv.ParseUint(strings.TrimPrefix(fields[0], "0x"), 16, 64)
+						end, err2 := strconv.ParseUint(strings.TrimPrefix(fields[1], "0x"), 16, 64)
+						if err1 == nil && err2 == nil && end > start {
+							barSize := end - start + 1
+							if barSize > maxBar {
+								maxBar = barSize
+							}
+						}
+					}
+				}
+				if maxBar > 0 {
+					return maxBar
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func probeOllamaInstalled(fs FileSystem) bool {
+	for _, p := range []string{"/usr/bin/ollama", "/usr/local/bin/ollama", "/opt/ollama/bin/ollama"} {
+		if _, err := fs.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func probeOllamaProcess(fs FileSystem) bool {
+	procs, err := fs.Glob("/proc/[0-9]*/cmdline")
+	if err == nil {
+		for _, p := range procs {
+			if data, err := fs.ReadFile(p); err == nil {
+				if strings.Contains(string(data), "ollama") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func probeDPMGovernorConfigured(fs FileSystem) bool {
+	matches, err := fs.Glob("/sys/class/drm/card*/device/power_dpm_force_performance_level")
+	if err == nil {
+		for _, m := range matches {
+			if data, err := fs.ReadFile(m); err == nil {
+				if strings.TrimSpace(string(data)) == "high" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// GenerateFixPlan generates concrete actionable shell commands / bootloader adjustments for detected defects.
 func GenerateFixPlan(report *GotchaAuditReport) []string {
 	fixes := make([]string, 0)
+
+	bootloaderCmd := "sudo update-grub"
+	distro := strings.ToLower(report.DistroID)
+	switch {
+	case strings.Contains(distro, "fedora") || strings.Contains(distro, "rhel") || strings.Contains(distro, "centos"):
+		bootloaderCmd = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg"
+	case strings.Contains(distro, "arch") || strings.Contains(distro, "manjaro"):
+		bootloaderCmd = "sudo grub-mkconfig -o /boot/grub/grub.cfg"
+	case strings.Contains(distro, "opensuse") || strings.Contains(distro, "suse"):
+		bootloaderCmd = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg"
+	case strings.Contains(distro, "nixos"):
+		bootloaderCmd = "# NixOS: add boot.kernelParams to /etc/nixos/configuration.nix and run sudo nixos-rebuild switch"
+	default:
+		bootloaderCmd = "sudo update-grub"
+	}
+
 	for _, f := range report.Findings {
 		if f.Status == StatusDefectDetected {
 			switch f.Gotcha.ID {
 			case "GOTCHA_RING_TIMEOUT":
 				fixes = append(fixes, "# Fix 1: Disable AMDGPU watchdog timeout to prevent long-context crashes")
-				fixes = append(fixes, "sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"amdgpu.lockup_timeout=-1 /' /etc/default/grub")
-				fixes = append(fixes, "sudo update-grub")
+				if report.IsContainer {
+					fixes = append(fixes, "# Container environment detected: host kernel parameter amdgpu.lockup_timeout=-1 must be configured on host OS, not in container")
+				} else if report.IsWSL2 {
+					fixes = append(fixes, "# WSL2 environment detected: configure %USERPROFILE%\\.wslconfig; update-grub is not applicable")
+				} else if strings.Contains(distro, "nixos") {
+					fixes = append(fixes, bootloaderCmd)
+				} else {
+					fixes = append(fixes, "sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"amdgpu.lockup_timeout=-1 /' /etc/default/grub")
+					fixes = append(fixes, bootloaderCmd)
+				}
+
 			case "GOTCHA_TTM_50PCT_CEILING":
-				fixes = append(fixes, "# Fix 2: Unlock full 120GB UMA aperture in Linux TTM subsystem")
-				fixes = append(fixes, "sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"ttm.pages_limit=31457280 amdgpu.gttsize=131072 /' /etc/default/grub")
-				fixes = append(fixes, "sudo update-grub")
+				ttmParam := "ttm.pages_limit=31457280 amdgpu.gttsize=131072"
+				titleDesc := "Unlock full 120GB UMA aperture in Linux TTM subsystem"
+				if report.TotalRAMGiB > 0 && report.TotalRAMGiB < 96 {
+					ttmParam = "ttm.pages_limit=14680064 amdgpu.gttsize=65536"
+					titleDesc = "Unlock full 56GB UMA aperture in Linux TTM subsystem"
+				}
+				fixes = append(fixes, "# Fix 2: "+titleDesc)
+				if report.IsContainer {
+					fixes = append(fixes, "# Container environment detected: host kernel parameter "+strings.Fields(ttmParam)[0]+" must be configured on host OS, not in container")
+				} else if report.IsWSL2 {
+					fixes = append(fixes, "# WSL2 environment detected: configure [wsl2] memory in %USERPROFILE%\\.wslconfig; update-grub is not applicable")
+				} else if strings.Contains(distro, "nixos") {
+					fixes = append(fixes, bootloaderCmd)
+				} else {
+					fixes = append(fixes, fmt.Sprintf("sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"%s /' /etc/default/grub", ttmParam))
+					fixes = append(fixes, bootloaderCmd)
+				}
+
+			case "GOTCHA_BIOS_UMA_GTT":
+				fixes = append(fixes, "# Fix: Reduce BIOS UMA Frame Buffer Size to 512MB or 2GB in UEFI/BIOS setup to prevent Linux host kernel memory starvation")
+
 			case "GOTCHA_OLLAMA_IGPU_FALLBACK":
 				fixes = append(fixes, "# Fix 3: Force Ollama to use Radeon 8060S Vulkan iGPU instead of CPU")
 				fixes = append(fixes, "sudo mkdir -p /etc/systemd/system/ollama.service.d")
 				fixes = append(fixes, "echo -e '[Service]\\nEnvironment=\"OLLAMA_VULKAN=1\"\\nEnvironment=\"OLLAMA_IGPU_ENABLE=1\"\\nEnvironment=\"HIP_VISIBLE_DEVICES=-1\"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf")
 				fixes = append(fixes, "sudo systemctl daemon-reload && sudo systemctl restart ollama")
+
 			case "GOTCHA_GFX1151_OVERRIDE":
 				fixes = append(fixes, "# Fix 4: Remove fatal HSA_OVERRIDE_GFX_VERSION=11.0.0 from environment")
 				fixes = append(fixes, "unset HSA_OVERRIDE_GFX_VERSION")
+
 			case "GOTCHA_GGML_UNIFIED_CORRUPT":
 				fixes = append(fixes, "# Fix 5: Unset GGML_CUDA_ENABLE_UNIFIED_MEMORY to prevent token corruption")
 				fixes = append(fixes, "unset GGML_CUDA_ENABLE_UNIFIED_MEMORY")
+
 			case "GOTCHA_MESA_RADV_STALE":
 				fixes = append(fixes, "# Fix 6: Upgrade Mesa for RDNA 3.5 Wave32 FlashAttention and KHR_coopmat")
-				fixes = append(fixes, "sudo add-apt-repository -y ppa:kisak/kisak-mesa && sudo apt update && sudo apt upgrade -y")
+				switch {
+				case strings.Contains(distro, "arch") || strings.Contains(distro, "manjaro"):
+					fixes = append(fixes, "sudo pacman -S mesa vulkan-radeon")
+				case strings.Contains(distro, "fedora") || strings.Contains(distro, "rhel") || strings.Contains(distro, "centos"):
+					fixes = append(fixes, "sudo dnf upgrade mesa-dri-drivers")
+				case strings.Contains(distro, "opensuse") || strings.Contains(distro, "suse"):
+					fixes = append(fixes, "sudo zypper update Mesa")
+				case strings.Contains(distro, "nixos"):
+					fixes = append(fixes, "# NixOS: add pkgs.mesa to environment.systemPackages in /etc/nixos/configuration.nix and run sudo nixos-rebuild switch")
+				default:
+					fixes = append(fixes, "sudo add-apt-repository -y ppa:kisak/kisak-mesa && sudo apt update && sudo apt upgrade -y")
+				}
+
+			case "GOTCHA_SPEC_GRAPH_TIMEOUT":
+				fixes = append(fixes, "# Fix: Configure decoupled speculative draft ubatch size to avoid Vulkan ring timeouts")
+				fixes = append(fixes, "export SPEC_DRAFT_UBATCH_SIZE=512")
+
+			case "GOTCHA_BATCH_CLAMP_SILENT":
+				fixes = append(fixes, "# Fix: Configure runner batch flags so -b >= -ub (e.g. -b 2048 -ub 512)")
+
+			case "GOTCHA_NVME_HIGH_WAF":
+				fixes = append(fixes, "# Fix: Enable host DRAM write-back dirty ring buffer for KV cache paging")
+				fixes = append(fixes, "export KV_CACHE_DIRTY_RING_BUFFER_GIB=4")
+
+			case "GOTCHA_THERMAL_CLOCK_HUNTING":
+				fixes = append(fixes, "# Fix: Lock DPM governor to high performance with clock ceiling to prevent acoustic fan hunting")
+				fixes = append(fixes, "echo high | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level")
 			}
 		}
 	}
 	return fixes
+}
+
+// GenerateRollbackScript generates shell commands to undo remediation changes and restore previous settings.
+func GenerateRollbackScript(report *GotchaAuditReport) []string {
+	rollbacks := make([]string, 0)
+	bootloaderCmd := "sudo update-grub"
+	distro := strings.ToLower(report.DistroID)
+	switch {
+	case strings.Contains(distro, "fedora") || strings.Contains(distro, "rhel") || strings.Contains(distro, "centos"):
+		bootloaderCmd = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg"
+	case strings.Contains(distro, "arch") || strings.Contains(distro, "manjaro"):
+		bootloaderCmd = "sudo grub-mkconfig -o /boot/grub/grub.cfg"
+	case strings.Contains(distro, "opensuse") || strings.Contains(distro, "suse"):
+		bootloaderCmd = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg"
+	}
+
+	needsBootloaderUpdate := false
+
+	for _, f := range report.Findings {
+		if f.Status == StatusDefectDetected {
+			switch f.Gotcha.ID {
+			case "GOTCHA_RING_TIMEOUT", "GOTCHA_TTM_50PCT_CEILING":
+				if !report.IsContainer && !report.IsWSL2 && !strings.Contains(distro, "nixos") {
+					needsBootloaderUpdate = true
+				}
+			case "GOTCHA_OLLAMA_IGPU_FALLBACK":
+				rollbacks = append(rollbacks, "# Revert Ollama service override")
+				rollbacks = append(rollbacks, "sudo rm -f /etc/systemd/system/ollama.service.d/override.conf")
+				rollbacks = append(rollbacks, "sudo systemctl daemon-reload && sudo systemctl restart ollama")
+			case "GOTCHA_THERMAL_CLOCK_HUNTING":
+				rollbacks = append(rollbacks, "# Revert DPM performance level to auto")
+				rollbacks = append(rollbacks, "echo auto | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level")
+			}
+		}
+	}
+
+	if needsBootloaderUpdate {
+		rollbacks = append(rollbacks, "# Revert kernel command line parameters in /etc/default/grub")
+		rollbacks = append(rollbacks, "sudo sed -i 's/amdgpu.lockup_timeout=[^ ]* //g' /etc/default/grub")
+		rollbacks = append(rollbacks, "sudo sed -i 's/ttm.pages_limit=[^ ]* //g' /etc/default/grub")
+		rollbacks = append(rollbacks, "sudo sed -i 's/amdgpu.gttsize=[^ ]* //g' /etc/default/grub")
+		rollbacks = append(rollbacks, bootloaderCmd)
+	}
+
+	return rollbacks
+}
+
+// ValidateTTMPagesLimit checks that the requested TTM pages limit does not exceed physical RAM
+// and leaves a safe operational reserve (at least 4 GiB) for host OS processes.
+func ValidateTTMPagesLimit(pagesLimit uint64, totalRAMBytes uint64) (bool, error) {
+	if totalRAMBytes == 0 {
+		return true, nil
+	}
+	const pageSize = 4096
+	requestedBytes := pagesLimit * pageSize
+	if requestedBytes > totalRAMBytes {
+		return false, fmt.Errorf("requested TTM allocation (%d pages / %.1f GiB) exceeds total physical RAM (%.1f GiB)",
+			pagesLimit, float64(requestedBytes)/(1024*1024*1024), float64(totalRAMBytes)/(1024*1024*1024))
+	}
+	const minOSReserve = uint64(4 * 1024 * 1024 * 1024) // 4 GiB
+	if totalRAMBytes > minOSReserve && requestedBytes > (totalRAMBytes-minOSReserve) {
+		return false, fmt.Errorf("requested TTM allocation (%d pages / %.1f GiB) leaves only %.1f GiB reserve for OS (minimum required: 4.0 GiB)",
+			pagesLimit, float64(requestedBytes)/(1024*1024*1024), float64(totalRAMBytes-requestedBytes)/(1024*1024*1024))
+	}
+	return true, nil
 }
 
 // RunGotchasCLI provides the command-line interface for the AMD Strix Halo gotchas auditor.
@@ -620,6 +1176,7 @@ func RunGotchasCLI(stdout, stderr io.Writer, argv []string) int {
 
 	jsonOut := fs.Bool("json", false, "output gotchas report as JSON")
 	fixPlan := fs.Bool("fix-plan", false, "display actionable remediation commands for detected defects")
+	rollback := fs.Bool("rollback", false, "display rollback commands to revert remediation changes")
 
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -646,6 +1203,16 @@ func RunGotchasCLI(stdout, stderr io.Writer, argv []string) int {
 			if len(fixes) > 0 {
 				fmt.Fprintln(stdout, "Actionable Remediation Commands:")
 				for _, cmd := range fixes {
+					fmt.Fprintln(stdout, "  "+cmd)
+				}
+				fmt.Fprintln(stdout, "")
+			}
+		}
+		if *rollback {
+			rollbacks := GenerateRollbackScript(report)
+			if len(rollbacks) > 0 {
+				fmt.Fprintln(stdout, "Rollback Commands:")
+				for _, cmd := range rollbacks {
 					fmt.Fprintln(stdout, "  "+cmd)
 				}
 				fmt.Fprintln(stdout, "")
