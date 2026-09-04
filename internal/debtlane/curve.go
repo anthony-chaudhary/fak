@@ -63,6 +63,11 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 		score += 1.0
 	}
 
+	// An unintegrated unit of work cannot advance past the tested ceiling (5.0).
+	if !e.Integrated && score > 5.0 {
+		score = 5.0
+	}
+
 	// Clamp to 10.0 maximum.
 	if score > 10.0 {
 		score = 10.0
@@ -70,17 +75,17 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 	score = math.Round(score*10) / 10
 
 	switch {
-	case score >= 9.5:
+	case score >= 9.5 && e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests:
 		rung = "production_grade"
-	case score >= 8.5:
+	case score >= 8.5 && e.Integrated && e.Dogfooded && e.Benchmarked:
 		rung = "hardened"
-	case score >= 7.5:
+	case score >= 7.5 && e.Integrated && e.Dogfooded && e.Benchmarked:
 		rung = "benchmarked"
-	case score >= 6.5:
+	case score >= 6.5 && e.Integrated && e.Dogfooded:
 		rung = "dogfooded"
-	case score >= 5.0:
+	case score >= 5.0 && e.Integrated:
 		rung = "integrated"
-	case score >= 3.5:
+	case score >= 3.5 && e.HasTests:
 		rung = "tested"
 	case score >= 1.5:
 		rung = "prototyped"
@@ -106,9 +111,9 @@ func NextActionForGap(lane, unit string, score, target float64, e Evidence) stri
 	case !e.Dogfooded:
 		return fmt.Sprintf("dogfood %s: execute real runtime path and capture passing proof", lane)
 	case !e.Benchmarked:
-		return fmt.Sprintf("benchmark %s: add Benchmark* functions or BENCHMARK-AUTHORITY.md entry", lane)
+		return fmt.Sprintf("benchmark %s: add substantive Benchmark* functions measuring production operations with b.N loops, or register authoritative benchmark", lane)
 	case e.ExportedSymbols > e.DocumentedExports:
-		return fmt.Sprintf("harden %s: document remaining %d exported symbol(s) in %s", lane, e.ExportedSymbols-e.DocumentedExports, unit)
+		return fmt.Sprintf("harden %s: add substantive, non-tautological documentation for remaining %d exported symbol(s) in %s", lane, e.ExportedSymbols-e.DocumentedExports, unit)
 	default:
 		return fmt.Sprintf("advance %s: complete production contracts and verified defaults to reach %.1f", lane, target)
 	}

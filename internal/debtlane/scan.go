@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -231,7 +232,7 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	reachable := scanReachableFromCmd(root, graph)
 
 	// Read benchmarks authority mentions.
-	benchDocs := readWordSet(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
+	benchDocs := readBenchmarkAuthorityLanes(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
 	runtimeProofs := readRuntimeProofs(root)
 
 	// Collect all packages in internal/.
@@ -375,12 +376,34 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		isTest := strings.HasSuffix(entry.Name(), "_test.go")
 
 		if isTest {
-			ev.TestFilesCount++
-			ev.HasTests = true
-			if !ev.Benchmarked {
-				if content, err := os.ReadFile(fullPath); err == nil && benchRe.Match(content) {
-					ev.Benchmarked = true
+			content, err := os.ReadFile(fullPath)
+			if err != nil {
+				continue
+			}
+			testNode, err := parser.ParseFile(fset, fullPath, content, 0)
+			if err != nil {
+				continue
+			}
+
+			hasRealTests := false
+			for _, decl := range testNode.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
 				}
+				if strings.HasPrefix(fn.Name.Name, "Test") && fn.Body != nil && len(fn.Body.List) > 0 {
+					hasRealTests = true
+				}
+				if strings.HasPrefix(fn.Name.Name, "Benchmark") && !ev.Benchmarked {
+					if isSubstantiveBenchmark(fn) {
+						ev.Benchmarked = true
+					}
+				}
+			}
+
+			if hasRealTests {
+				ev.HasTests = true
+				ev.TestFilesCount++
 			}
 			continue
 		}
@@ -405,7 +428,7 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 			case *ast.FuncDecl:
 				if ast.IsExported(d.Name.Name) {
 					ev.ExportedSymbols++
-					if d.Doc != nil && len(d.Doc.List) > 0 {
+					if isSubstantiveDoc(d.Name.Name, d.Doc) {
 						ev.DocumentedExports++
 					}
 				}
@@ -415,7 +438,11 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 					case *ast.TypeSpec:
 						if ast.IsExported(s.Name.Name) {
 							ev.ExportedSymbols++
-							if d.Doc != nil || s.Doc != nil {
+							doc := s.Doc
+							if doc == nil {
+								doc = d.Doc
+							}
+							if isSubstantiveDoc(s.Name.Name, doc) {
 								ev.DocumentedExports++
 							}
 						}
@@ -423,7 +450,11 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 						for _, name := range s.Names {
 							if ast.IsExported(name.Name) {
 								ev.ExportedSymbols++
-								if d.Doc != nil || s.Doc != nil {
+								doc := s.Doc
+								if doc == nil {
+									doc = d.Doc
+								}
+								if isSubstantiveDoc(name.Name, doc) {
 									ev.DocumentedExports++
 								}
 							}
@@ -433,11 +464,13 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 			}
 		}
 
-		if !ev.HasContractComments && (strings.Contains(string(content), "invariant") ||
-			strings.Contains(string(content), "assumption") ||
-			strings.Contains(string(content), "fail-closed") ||
-			strings.Contains(string(content), "guard")) {
-			ev.HasContractComments = true
+		if !ev.HasContractComments {
+			for _, cg := range node.Comments {
+				if isSubstantiveContractComment(cg) {
+					ev.HasContractComments = true
+					break
+				}
+			}
 		}
 	}
 
@@ -562,17 +595,208 @@ func scanReachableFromCmd(root string, graph map[string]map[string]struct{}) map
 	return reachable
 }
 
-func readWordSet(path string) map[string]bool {
+func isSubstantiveDoc(name string, doc *ast.CommentGroup) bool {
+	if doc == nil || len(doc.List) == 0 {
+		return false
+	}
+	text := strings.TrimSpace(doc.Text())
+	if len(text) < 12 {
+		return false
+	}
+	return !isTautologicalDoc(name, text)
+}
+
+func splitIdentifierWords(name string) map[string]bool {
+	set := make(map[string]bool)
+	set[strings.ToLower(name)] = true
+	var curr strings.Builder
+	for i, r := range name {
+		if r == '_' || r == '-' {
+			if curr.Len() > 0 {
+				set[strings.ToLower(curr.String())] = true
+				curr.Reset()
+			}
+			continue
+		}
+		if unicode.IsUpper(r) && i > 0 && curr.Len() > 0 {
+			set[strings.ToLower(curr.String())] = true
+			curr.Reset()
+		}
+		curr.WriteRune(r)
+	}
+	if curr.Len() > 0 {
+		set[strings.ToLower(curr.String())] = true
+	}
+	return set
+}
+
+func isTautologicalDoc(name string, text string) bool {
+	nameLower := strings.ToLower(name)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return true
+	}
+	firstWord := strings.Trim(strings.ToLower(fields[0]), ":,.-()")
+	if firstWord != nameLower && !strings.HasPrefix(strings.ToLower(text), nameLower) {
+		return false
+	}
+	remainder := strings.TrimSpace(text[len(firstWord):])
+	words := strings.FieldsFunc(remainder, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	})
+
+	fillers := map[string]bool{
+		"is": true, "are": true, "does": true, "do": true, "returns": true, "return": true,
+		"represents": true, "represent": true, "holds": true, "hold": true, "the": true,
+		"a": true, "an": true, "of": true, "for": true, "to": true, "that": true, "which": true,
+		"will": true, "can": true, "provides": true, "provide": true, "specifies": true,
+		"specify": true, "defines": true, "define": true, "indicates": true, "indicate": true,
+		"details": true, "detail": true, "records": true, "record": true, "encapsulates": true,
+		"encapsulate": true, "captures": true, "capture": true, "contains": true, "contain": true,
+	}
+
+	nameParts := splitIdentifierWords(name)
+	meaningfulWords := 0
+	for _, w := range words {
+		wl := strings.ToLower(w)
+		if fillers[wl] || nameParts[wl] {
+			continue
+		}
+		meaningfulWords++
+	}
+	return meaningfulWords < 2
+}
+
+func isSubstantiveBenchmark(fn *ast.FuncDecl) bool {
+	if fn.Body == nil || len(fn.Body.List) == 0 {
+		return false
+	}
+	hasLoopOrRun := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if hasLoopOrRun {
+			return false
+		}
+		switch stmt := n.(type) {
+		case *ast.ForStmt:
+			if stmt.Cond != nil && referencesName(stmt.Cond, "N") {
+				hasLoopOrRun = true
+			}
+		case *ast.RangeStmt:
+			if referencesName(stmt.X, "N") {
+				hasLoopOrRun = true
+			}
+		case *ast.CallExpr:
+			if sel, ok := stmt.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
+				hasLoopOrRun = true
+			}
+		}
+		return true
+	})
+	return hasLoopOrRun
+}
+
+func referencesName(expr ast.Expr, name string) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
+	if cg == nil {
+		return false
+	}
+	text := strings.TrimSpace(cg.Text())
+	if len(text) < 35 {
+		return false
+	}
+	lower := strings.ToLower(text)
+
+	hasContractMarker := strings.Contains(lower, "invariant:") ||
+		strings.Contains(lower, "invariants:") ||
+		strings.Contains(lower, "key invariant:") ||
+		strings.Contains(lower, "contract:") ||
+		strings.Contains(lower, "assumption:") ||
+		strings.Contains(lower, "assumptions:") ||
+		strings.Contains(lower, "fail-closed:") ||
+		strings.Contains(lower, "fail-closed guard:") ||
+		strings.Contains(lower, "precondition:") ||
+		strings.Contains(lower, "postcondition:") ||
+		strings.Contains(lower, "guard:")
+	if !hasContractMarker {
+		return false
+	}
+
+	words := strings.Fields(lower)
+	if len(words) < 6 {
+		return false
+	}
+
+	keywordCount := 0
+	for _, w := range words {
+		clean := strings.Trim(w, ":,.-*#")
+		if clean == "invariant" || clean == "invariants" || clean == "assumption" ||
+			clean == "assumptions" || clean == "guard" || clean == "fail-closed" ||
+			clean == "contract" || clean == "precondition" || clean == "postcondition" {
+			keywordCount++
+		}
+	}
+	if float64(keywordCount)/float64(len(words)) > 0.4 {
+		return false
+	}
+	return true
+}
+
+func readBenchmarkAuthorityLanes(path string) map[string]bool {
 	set := make(map[string]bool)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return set
 	}
-	words := strings.Fields(strings.ToLower(string(content)))
-	for _, w := range words {
-		cleaned := strings.Trim(w, "`,.*:;()[]\"'#")
-		if cleaned != "" {
-			set[cleaned] = true
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	backtickRe := regexp.MustCompile("`([a-zA-Z0-9_/-]+)`")
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "|") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if len(m) == 2 {
+					token := strings.ToLower(m[1])
+					token = strings.TrimPrefix(token, "internal/")
+					token = strings.TrimPrefix(token, "cmd/")
+					if token != "" {
+						set[token] = true
+					}
+				}
+			}
+			parts := strings.Split(line, "|")
+			for _, part := range parts {
+				cell := strings.TrimSpace(strings.ToLower(part))
+				cell = strings.Trim(cell, "`*_-")
+				if cell != "" && !strings.Contains(cell, " ") && len(cell) >= 3 {
+					set[cell] = true
+				}
+			}
+		} else if strings.HasPrefix(line, "#") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if len(m) == 2 {
+					token := strings.ToLower(m[1])
+					token = strings.TrimPrefix(token, "internal/")
+					if token != "" {
+						set[token] = true
+					}
+				}
+			}
 		}
 	}
 	return set
