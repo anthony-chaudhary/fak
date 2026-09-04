@@ -1,6 +1,8 @@
 package procguard
 
 import (
+	"os"
+	"os/exec"
 	"runtime"
 	"testing"
 	"time"
@@ -66,35 +68,44 @@ func TestFaultDomainBindCurrentAndUsage(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("native bind witness is Windows-specific on this host")
 	}
-	d, err := NewFaultDomain("bind-current", ResourceEnvelope{MemoryBytes: 512 << 20, ProcessCount: 32, CPUPercent: 100, CPUTime: time.Minute})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	r, err := d.BindCurrent()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.DescendantsBound || r.Primitive != "windows-job-object" {
-		t.Fatalf("receipt=%+v", r)
-	}
-	usage, err := d.Usage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if usage.Processes < 1 {
-		t.Fatalf("current process absent: %+v", usage)
-	}
-	pressure, err := d.Pressure()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pressure) != 3 {
-		t.Fatalf("pressure=%+v", pressure)
-	}
-	for _, p := range pressure {
-		if p.OwnerID != "bind-current" {
-			t.Fatalf("event lost owner: %+v", p)
+	if os.Getenv("FAK_FAULTDOMAIN_BIND_HELPER") == "1" {
+		d, err := NewFaultDomain("bind-current", ResourceEnvelope{MemoryBytes: 512 << 20, ProcessCount: 32, CPUPercent: 100, CPUTime: time.Minute})
+		if err != nil {
+			t.Fatal(err)
 		}
+		defer d.Close()
+		r, err := d.BindCurrent()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.DescendantsBound || r.Primitive != "windows-job-object" {
+			t.Fatalf("receipt=%+v", r)
+		}
+		usage, err := d.Usage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if usage.Processes < 1 {
+			t.Fatalf("current process absent: %+v", usage)
+		}
+		pressure, err := d.Pressure()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pressure) != 3 {
+			t.Fatalf("pressure=%+v", pressure)
+		}
+		for _, p := range pressure {
+			if p.OwnerID != "bind-current" {
+				t.Fatalf("event lost owner: %+v", p)
+			}
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFaultDomainBindCurrentAndUsage$")
+	cmd.Env = append(os.Environ(), "FAK_FAULTDOMAIN_BIND_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v: %s", err, out)
 	}
 }
