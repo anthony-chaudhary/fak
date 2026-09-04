@@ -7,6 +7,8 @@ import (
 )
 
 // DrainManager supervises bounded request draining, traffic withdrawal, and inflight tracking.
+// Invariant: Tracks active in-flight requests and enforces drain deadlines during lifecycle transitions.
+// Guard: Rejects new requests with ErrTrafficWithdrawn once draining begins or when phase != PhaseReady.
 type DrainManager struct {
 	mu           sync.Mutex
 	domainID     string
@@ -22,6 +24,8 @@ type DrainManager struct {
 }
 
 // NewDrainManager constructs an active DrainManager initialized in PhaseReady.
+// Invariant: Non-positive drainTimeout defaults to 5s; observedGen initialized to initialGen.
+// Guard: Initial phase is set to PhaseReady; drain channel has buffer capacity 1.
 func NewDrainManager(domainID, memberID string, role ServingRole, drainTimeout time.Duration, initialGen uint64) *DrainManager {
 	if drainTimeout <= 0 {
 		drainTimeout = 5 * time.Second
@@ -39,7 +43,8 @@ func NewDrainManager(domainID, memberID string, role ServingRole, drainTimeout t
 }
 
 // Acquire reserves capacity for an incoming request.
-// Returns ErrTrafficWithdrawn if the domain is currently draining, recovering, quarantined, or stopped.
+// Invariant: Increments inflight counter and returns a release callback that decrements it exactly once.
+// Guard: Returns ErrTrafficWithdrawn if the domain is draining or phase != PhaseReady.
 func (d *DrainManager) Acquire() (func(), error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -71,6 +76,8 @@ func (d *DrainManager) Acquire() (func(), error) {
 }
 
 // Inflight returns the current number of in-flight requests.
+// Invariant: Non-negative integer count of currently executing requests.
+// Guard: Thread-safe read protected by internal mutex.
 func (d *DrainManager) Inflight() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -78,6 +85,8 @@ func (d *DrainManager) Inflight() int {
 }
 
 // Phase returns the current serving phase.
+// Invariant: Thread-safe read of the active serving phase.
+// Guard: Protected by internal mutex.
 func (d *DrainManager) Phase() ServingPhase {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -85,6 +94,8 @@ func (d *DrainManager) Phase() ServingPhase {
 }
 
 // SetPhase changes the active serving phase.
+// Invariant: Updates phase state used by Acquire admission check.
+// Guard: Protected by internal mutex.
 func (d *DrainManager) SetPhase(phase ServingPhase) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -92,6 +103,8 @@ func (d *DrainManager) SetPhase(phase ServingPhase) {
 }
 
 // SetModelBackend updates the engine identity for receipts.
+// Invariant: Preserves engine identity in emitted receipts; ignores empty string.
+// Guard: Protected by internal mutex.
 func (d *DrainManager) SetModelBackend(engine string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -101,6 +114,8 @@ func (d *DrainManager) SetModelBackend(engine string) {
 }
 
 // ObservedGen returns the current generation counter.
+// Invariant: Reflects the active generation monitored by this drain manager.
+// Guard: Protected by internal mutex.
 func (d *DrainManager) ObservedGen() uint64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -109,6 +124,8 @@ func (d *DrainManager) ObservedGen() uint64 {
 
 // Drain withdraws incoming traffic, awaits in-flight request completion until the deadline,
 // and returns a verified ServingReceipt recording drained and lost work.
+// Invariant: Emits receipt with InflightDrained + InflightLost == initialInflight.
+// Guard: Unfinished in-flight requests after deadline are marked lost; new traffic is immediately rejected.
 func (d *DrainManager) Drain(
 	ctx context.Context,
 	causeErr error,
@@ -191,6 +208,8 @@ func (d *DrainManager) Drain(
 }
 
 // Reset clears the draining flag, advances generation, and restores PhaseReady.
+// Invariant: Clears draining state and advances observed generation if newGen > 0.
+// Guard: Drains any stale completion notification from drainCh.
 func (d *DrainManager) Reset(newGen uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

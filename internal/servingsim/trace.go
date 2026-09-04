@@ -10,6 +10,9 @@ import (
 )
 
 // TraceEvent represents an event in the Chrome / Perfetto Trace Event Format.
+//
+// Invariant: TS is non-negative timestamp in microseconds; Dur is non-negative when present.
+// Guard: Ph must match Chrome trace specification phases ("X", "B", "E", "i", "C").
 type TraceEvent struct {
 	Cat  string         `json:"cat"`
 	PID  int            `json:"pid"`
@@ -22,6 +25,8 @@ type TraceEvent struct {
 }
 
 // ChromeTraceContainer formats trace events as a top-level Perfetto / Chrome Tracing document.
+//
+// Invariant: TraceEvents contains valid Chrome trace events serializable to standard Perfetto JSON.
 type ChromeTraceContainer struct {
 	TraceEvents     []TraceEvent `json:"traceEvents"`
 	DisplayTimeUnit string       `json:"displayTimeUnit,omitempty"`
@@ -39,6 +44,9 @@ type workloadLine struct {
 }
 
 // ReadTraceJSONL reads workload traces from a JSONL stream, returning initialized RequestState objects.
+//
+// Invariant: Preserves parsed request order while populating IDs and positive token counts.
+// Guard: Empty lines and comments are skipped; negative timestamps or non-positive token counts return an error fail-closed.
 func ReadTraceJSONL(r io.Reader) ([]RequestState, error) {
 	scanner := bufio.NewScanner(r)
 	var requests []RequestState
@@ -103,6 +111,9 @@ func ReadTraceJSONL(r io.Reader) ([]RequestState, error) {
 }
 
 // WriteTraceJSONL serializes a slice of requests into JSONL format.
+//
+// Invariant: Each request is encoded as a single-line JSON record terminated by a newline.
+// Guard: I/O write or marshaling errors are returned immediately fail-closed.
 func WriteTraceJSONL(w io.Writer, requests []RequestState) error {
 	for _, req := range requests {
 		data, err := json.Marshal(struct {
@@ -127,19 +138,26 @@ func WriteTraceJSONL(w io.Writer, requests []RequestState) error {
 }
 
 // TraceCollector gathers TraceEvents in memory during simulation.
+//
+// Invariant: All mutations and reads are concurrency-safe under internal mutex locking.
+// Guard: Unbounded event streams consume memory proportional to total simulated steps.
 type TraceCollector struct {
 	mu     sync.Mutex
 	events []TraceEvent
 }
 
-// NewTraceCollector creates an empty trace collector.
+// NewTraceCollector creates an empty trace collector with pre-allocated buffer capacity.
+//
+// Invariant: Returns an initialized, non-nil collector ready for concurrent recording.
 func NewTraceCollector() *TraceCollector {
 	return &TraceCollector{
 		events: make([]TraceEvent, 0, 128),
 	}
 }
 
-// Add appends a trace event.
+// Add appends a trace event to the collector.
+//
+// Invariant: Concurrency-safe under internal mutex; preserves FIFO append order.
 func (c *TraceCollector) Add(ev TraceEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -147,6 +165,8 @@ func (c *TraceCollector) Add(ev TraceEvent) {
 }
 
 // Events returns a snapshot slice of all recorded events.
+//
+// Invariant: Returns an isolated copy preventing data races on subsequent collector mutations.
 func (c *TraceCollector) Events() []TraceEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -155,14 +175,18 @@ func (c *TraceCollector) Events() []TraceEvent {
 	return res
 }
 
-// Reset clears collected events.
+// Reset clears collected events while retaining underlying slice capacity.
+//
+// Invariant: Concurrency-safe under internal mutex; leaves zero events in the buffer.
 func (c *TraceCollector) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.events = c.events[:0]
 }
 
-// RecordStep records a hardware execution step duration.
+// RecordStep records a hardware execution step duration in microsecond units.
+//
+// Invariant: Event phase is set to "X" (complete event) with TS and Dur converted from milliseconds to microseconds.
 func (c *TraceCollector) RecordStep(name, cat string, startMS, durationMS float64, pid, tid int, args map[string]any) {
 	c.Add(TraceEvent{
 		Cat:  cat,
@@ -177,6 +201,8 @@ func (c *TraceCollector) RecordStep(name, cat string, startMS, durationMS float6
 }
 
 // RecordCounter records a counter metric value at a point in time.
+//
+// Invariant: Event phase is set to "C" with timestamp converted from milliseconds to microseconds.
 func (c *TraceCollector) RecordCounter(name, cat string, timeMS float64, pid, tid int, args map[string]any) {
 	c.Add(TraceEvent{
 		Cat:  cat,
@@ -190,6 +216,8 @@ func (c *TraceCollector) RecordCounter(name, cat string, timeMS float64, pid, ti
 }
 
 // RecordInstant records a point-in-time instant event.
+//
+// Invariant: Event phase is set to "i" with timestamp converted from milliseconds to microseconds.
 func (c *TraceCollector) RecordInstant(name, cat string, timeMS float64, pid, tid int, args map[string]any) {
 	c.Add(TraceEvent{
 		Cat:  cat,
@@ -203,6 +231,9 @@ func (c *TraceCollector) RecordInstant(name, cat string, timeMS float64, pid, ti
 }
 
 // ExportChromeTrace exports trace events wrapped in a standard Chrome / Perfetto container JSON.
+//
+// Invariant: Output JSON adheres to Perfetto/Chrome trace schema with displayTimeUnit set to "ms".
+// Guard: Encoding failures on invalid JSON writers return an error fail-closed.
 func ExportChromeTrace(w io.Writer, events []TraceEvent) error {
 	container := ChromeTraceContainer{
 		TraceEvents:     events,
@@ -217,6 +248,9 @@ func ExportChromeTrace(w io.Writer, events []TraceEvent) error {
 }
 
 // ExportTraceEventsJSON exports the raw array of trace events as JSON.
+//
+// Invariant: Output is an indented JSON array of TraceEvent objects.
+// Guard: Encoding failures return an error fail-closed.
 func ExportTraceEventsJSON(w io.Writer, events []TraceEvent) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -227,6 +261,9 @@ func ExportTraceEventsJSON(w io.Writer, events []TraceEvent) error {
 }
 
 // ExportTrace writes Chrome trace format to the given writer.
+//
+// Invariant: Forwards directly to ExportChromeTrace for standard Perfetto viewing.
+// Guard: Encoding errors are returned fail-closed.
 func ExportTrace(w io.Writer, events []TraceEvent) error {
 	return ExportChromeTrace(w, events)
 }

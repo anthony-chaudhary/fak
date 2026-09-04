@@ -189,6 +189,83 @@ func TestAMDGPUDirectHAL_SmallBARWarningAndACSConflict(t *testing.T) {
 	}
 }
 
+func TestAMDGPUDirectHAL_TopologyMatrix(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		EnableLargeBARCheck:    true,
+		EnforceACSZeroRedirect: true,
+	})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Instinct MI300X (Node 0)",
+		Architecture:   "gfx942",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     1,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to register node 0: %v", err)
+	}
+
+	err = engine.RegisterNode(AMDDeviceNode{
+		NodeID:         1,
+		GPUID:          1,
+		DeviceName:     "AMD Instinct MI300X (Node 1)",
+		Architecture:   "gfx942",
+		TotalVRAMBytes: 192 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  192 * 1024 * 1024 * 1024,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     0,
+				Fabric:           FabricXGMI,
+				BandwidthGBps:    896.0,
+				LatencyNanos:     210,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to register node 1: %v", err)
+	}
+
+	tm := engine.TopologyMatrix()
+	if len(tm.NodeIDs) != 2 {
+		t.Fatalf("expected 2 nodes in TopologyMatrix, got %d", len(tm.NodeIDs))
+	}
+
+	// 0 -> 1 route check
+	r01, ok := tm.Routes[0][1]
+	if !ok || !r01.DirectP2PCapable || r01.Fabric != FabricXGMI || r01.BandwidthGBps != 896.0 {
+		t.Errorf("unexpected route 0 -> 1: %+v", r01)
+	}
+
+	// 1 -> 0 route check
+	r10, ok := tm.Routes[1][0]
+	if !ok || !r10.DirectP2PCapable || r10.Fabric != FabricXGMI || r10.BandwidthGBps != 896.0 {
+		t.Errorf("unexpected route 1 -> 0: %+v", r10)
+	}
+
+	// Local loopback checks
+	r00, ok := tm.Routes[0][0]
+	if !ok || !r00.DirectP2PCapable || r00.Fabric != FabricXGMI {
+		t.Errorf("unexpected loopback route 0 -> 0: %+v", r00)
+	}
+
+	data, err := tm.JSON()
+	if err != nil || len(data) == 0 {
+		t.Fatalf("failed to serialize TopologyMatrix JSON: %v", err)
+	}
+}
+
 func TestAMDGPUDirectHAL_DMABUFAndRDMARegistration(t *testing.T) {
 	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
 		DefaultPageSize: 4096,
@@ -240,16 +317,55 @@ func TestAMDGPUDirectHAL_DMABUFAndRDMARegistration(t *testing.T) {
 		t.Errorf("SGE address mismatch: got 0x%x, want 0x%x", rdmaRegion.SGEs[0].Address, vramAddr)
 	}
 
+	// Verify retrieval
+	gotBuf := engine.GetDMABUF(dmabuf.FD)
+	if gotBuf == nil || gotBuf.FD != dmabuf.FD {
+		t.Errorf("GetDMABUF failed: got %+v", gotBuf)
+	}
+	gotMR := engine.GetRDMARegion(rdmaRegion.RKey)
+	if gotMR == nil || gotMR.RKey != rdmaRegion.RKey {
+		t.Errorf("GetRDMARegion failed: got %+v", gotMR)
+	}
+
 	// Deregister RDMA
 	err = engine.DeregisterRDMARegion(rdmaRegion.RKey)
 	if err != nil {
 		t.Fatalf("DeregisterRDMARegion failed: %v", err)
+	}
+	if engine.GetRDMARegion(rdmaRegion.RKey) != nil {
+		t.Errorf("expected GetRDMARegion to return nil after deregistration")
 	}
 
 	// Close DMA-BUF
 	err = engine.CloseDMABUF(dmabuf.FD)
 	if err != nil {
 		t.Fatalf("CloseDMABUF failed: %v", err)
+	}
+	if engine.GetDMABUF(dmabuf.FD) != nil {
+		t.Errorf("expected GetDMABUF to return nil after close")
+	}
+}
+
+func TestAMDGPUDirectHAL_DMABUFNotCapableRefusal(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "Legacy AMD GPU (No DMABUF)",
+		TotalVRAMBytes: 16 * 1024 * 1024 * 1024,
+		DMABUFCapable:  false, // Not capable
+	})
+	if err != nil {
+		t.Fatalf("register node failed: %v", err)
+	}
+
+	_, err = engine.ExportVRAMToDMABUF(0, uintptr(0x7f0000000000), 4096)
+	if err == nil {
+		t.Fatalf("expected error exporting DMA-BUF on non-capable node, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support kernel DMA-BUF export") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
@@ -299,9 +415,10 @@ func TestAMDGPUDirectHAL_MultiGigabyteSGEChunking(t *testing.T) {
 func TestAMDGPUDirectHAL_NVMeDirectStorageP2P(t *testing.T) {
 	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
 
-	cmd := &NVMeP2PCommand{
+	// Synchronous NVMe Read
+	cmdRead := &NVMeP2PCommand{
 		CommandID:      1,
-		Opcode:         0x02, // Read
+		Opcode:         NVMeOpcodeRead, // 0x02 = Read
 		NamespaceID:    1,
 		StartingLBA:    1024,
 		BlockCount:     8,
@@ -309,17 +426,64 @@ func TestAMDGPUDirectHAL_NVMeDirectStorageP2P(t *testing.T) {
 		ByteLength:     32 * 1024, // 32 KiB
 	}
 
-	err := engine.ExecuteNVMeP2PTransfer(cmd)
+	err := engine.ExecuteNVMeP2PTransfer(cmdRead)
 	if err != nil {
-		t.Fatalf("ExecuteNVMeP2PTransfer failed: %v", err)
+		t.Fatalf("ExecuteNVMeP2PTransfer read failed: %v", err)
 	}
 
-	if !cmd.Completed || cmd.Status != 0 {
-		t.Errorf("expected command completed with status 0, got completed=%v status=%d", cmd.Completed, cmd.Status)
+	if !cmdRead.Completed || cmdRead.Status != 0 {
+		t.Errorf("expected command completed with status 0, got completed=%v status=%d", cmdRead.Completed, cmdRead.Status)
+	}
+	if cmdRead.StagingCopyCount() != 0 {
+		t.Fatalf("expected zero staging copies, got %d", cmdRead.StagingCopyCount())
+	}
+
+	// Asynchronous NVMe Write
+	cmdWrite := &NVMeP2PCommand{
+		CommandID:      2,
+		Opcode:         NVMeOpcodeWrite, // 0x01 = Write
+		NamespaceID:    1,
+		StartingLBA:    2048,
+		BlockCount:     16,
+		TargetVRAMAddr: uintptr(0x7f8000010000),
+		ByteLength:     64 * 1024, // 64 KiB
+	}
+
+	done, err := engine.ExecuteNVMeP2PTransferAsync(cmdWrite)
+	if err != nil {
+		t.Fatalf("ExecuteNVMeP2PTransferAsync write failed: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("async write returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for async NVMe write transfer")
+	}
+
+	if !cmdWrite.Completed || cmdWrite.Status != 0 {
+		t.Errorf("expected async write completed with status 0, got completed=%v status=%d", cmdWrite.Completed, cmdWrite.Status)
+	}
+	if cmdWrite.StagingCopyCount() != 0 {
+		t.Fatalf("expected zero staging copies on async write, got %d", cmdWrite.StagingCopyCount())
+	}
+
+	// Invalid opcode test
+	cmdInvalid := &NVMeP2PCommand{
+		CommandID:      3,
+		Opcode:         0x99,
+		TargetVRAMAddr: uintptr(0x7f8000020000),
+		ByteLength:     4096,
+	}
+	err = engine.ExecuteNVMeP2PTransfer(cmdInvalid)
+	if err == nil {
+		t.Errorf("expected error for invalid opcode 0x99, got nil")
 	}
 
 	audit := engine.Audit()
-	if audit.TotalTransfers != 1 || audit.TotalBytesMoved != 32*1024 {
+	if audit.TotalTransfers != 2 || audit.TotalBytesMoved != 96*1024 {
 		t.Errorf("audit stats mismatch: transfers=%d bytes=%d", audit.TotalTransfers, audit.TotalBytesMoved)
 	}
 }
@@ -351,5 +515,38 @@ func TestAMDGPUDirectHAL_HSAMemorySignal(t *testing.T) {
 	retrieved := engine.GetSignal("sig_001")
 	if retrieved == nil || retrieved.LoadRelaxed() != 42 {
 		t.Errorf("failed to retrieve registered signal: %+v", retrieved)
+	}
+}
+
+func TestAMDGPUDirectHAL_HSADoorbellSynchronization(t *testing.T) {
+	doorbell := NewHSADoorbell("db_queue_0", uintptr(0xf5002000), 1)
+	if doorbell.ReadRelaxed() != 0 {
+		t.Errorf("expected initial doorbell packet index 0, got %d", doorbell.ReadRelaxed())
+	}
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		doorbell.Ring(128)
+	}()
+
+	ok, err := doorbell.WaitPacket(128, 500*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("WaitPacket failed: ok=%v, err=%v", ok, err)
+	}
+	if doorbell.ReadRelaxed() != 128 {
+		t.Errorf("expected doorbell value 128, got %d", doorbell.ReadRelaxed())
+	}
+
+	// Test timeout
+	ok, err = doorbell.WaitPacket(99999, 10*time.Millisecond)
+	if err == nil || ok {
+		t.Errorf("expected timeout error for unreachable packet, got ok=%v, err=%v", ok, err)
+	}
+
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+	engine.RegisterDoorbell(doorbell)
+	retrieved := engine.GetDoorbell("db_queue_0")
+	if retrieved == nil || retrieved.ReadRelaxed() != 128 {
+		t.Errorf("failed to retrieve registered doorbell: %+v", retrieved)
 	}
 }

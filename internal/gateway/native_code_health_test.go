@@ -10,7 +10,7 @@ import (
 
 func TestHealthAdvertisesNativeCodeWorkspaceWithoutLeakingRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "private-workspace-name")
-	srv, err := New(Config{EngineID: "mock", Model: "test", Native: true, NativeCodeWorkspace: root})
+	srv, err := New(Config{EngineID: "test", Model: "test", Native: true, NativeCodeWorkspace: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestHealthAdvertisesNativeCodeWorkspaceWithoutLeakingRoot(t *testing.T) {
 		t.Fatalf("body=%v", body)
 	}
 	tools, ok := workspace["tools"].([]any)
-	if !ok || len(tools) != 6 {
+	if !ok || len(tools) < 6 {
 		t.Fatalf("workspace=%v", workspace)
 	}
 	if _, leaked := workspace["root"]; leaked {

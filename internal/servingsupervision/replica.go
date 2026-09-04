@@ -8,15 +8,23 @@ import (
 )
 
 // ReadinessCheckFunc validates whether a replica is fully initialized and capable of inference.
+// Invariant: Must return nil only when model weights, memory, and device contexts are fully ready.
+// Guard: Failing readiness prevents the replica from entering PhaseReady.
 type ReadinessCheckFunc func(ctx context.Context) error
 
 // LivenessCheckFunc probes an active replica to ensure it has not deadlocked or silently hung.
+// Invariant: Probe execution is non-destructive and must complete within the check context deadline.
+// Guard: Returning an error causes the supervisor to trigger leaf-only recovery.
 type LivenessCheckFunc func(ctx context.Context) error
 
 // ReplicaRestartHook executes low-level process or model reload during recovery.
+// Invariant: Callback is invoked during PhaseRecovering prior to running the readiness check.
+// Guard: If the hook fails, the replica transitions to PhaseFailed and aborts recovery.
 type ReplicaRestartHook func(ctx context.Context, replicaID string) error
 
 // ReplicaSupervisor enforces lowest-reasonable restart isolation for a single model worker.
+// Invariant: Replicas maintain independent failure domains, generations, and restart counters.
+// Guard: Rejects incoming traffic with ErrTrafficWithdrawn unless phase is PhaseReady and replica is not quarantined.
 type ReplicaSupervisor struct {
 	mu             sync.Mutex
 	domainID       string
@@ -35,9 +43,11 @@ type ReplicaSupervisor struct {
 }
 
 // ReplicaOption configures optional behavior on a ReplicaSupervisor.
+// Invariant: Applied during constructor execution before drain manager initialization.
 type ReplicaOption func(*ReplicaSupervisor)
 
 // WithReadinessCheck attaches a custom readiness verification probe.
+// Guard: Nil probe bypasses readiness checks during startup and recovery.
 func WithReadinessCheck(fn ReadinessCheckFunc) ReplicaOption {
 	return func(r *ReplicaSupervisor) {
 		r.readinessCheck = fn
@@ -45,6 +55,7 @@ func WithReadinessCheck(fn ReadinessCheckFunc) ReplicaOption {
 }
 
 // WithLivenessCheck attaches a periodic liveness health probe.
+// Guard: Evaluated explicitly during CheckLiveness.
 func WithLivenessCheck(fn LivenessCheckFunc) ReplicaOption {
 	return func(r *ReplicaSupervisor) {
 		r.livenessCheck = fn
@@ -52,6 +63,7 @@ func WithLivenessCheck(fn LivenessCheckFunc) ReplicaOption {
 }
 
 // WithReplicaRestartHook configures a callback invoked when the replica undergoes recovery.
+// Guard: Hook errors abort restart and mark the replica PhaseFailed.
 func WithReplicaRestartHook(fn ReplicaRestartHook) ReplicaOption {
 	return func(r *ReplicaSupervisor) {
 		r.restartHook = fn
@@ -59,6 +71,7 @@ func WithReplicaRestartHook(fn ReplicaRestartHook) ReplicaOption {
 }
 
 // WithReplicaBackend sets the engine identity (default EngineNative).
+// Invariant: Preserves FAK-native engine provenance in supervision receipts.
 func WithReplicaBackend(engine string) ReplicaOption {
 	return func(r *ReplicaSupervisor) {
 		r.engine = engine
@@ -66,6 +79,8 @@ func WithReplicaBackend(engine string) ReplicaOption {
 }
 
 // NewReplicaSupervisor instantiates an isolated replica failure supervisor.
+// Invariant: Non-positive DrainTimeout defaults to 5s; non-positive RestartBudget defaults to 3.
+// Guard: Role is pinned strictly to RoleReplica; initial phase is PhaseStarting at generation 1.
 func NewReplicaSupervisor(spec ServingDomainSpec, replicaID string, opts ...ReplicaOption) *ReplicaSupervisor {
 	if spec.DrainTimeout <= 0 {
 		spec.DrainTimeout = 5 * time.Second
@@ -95,6 +110,8 @@ func NewReplicaSupervisor(spec ServingDomainSpec, replicaID string, opts ...Repl
 }
 
 // Start executes the initial readiness check and transitions the replica to PhaseReady.
+// Invariant: Transitions through PhaseStarting to PhaseReady on successful readiness verification.
+// Guard: Fails closed to PhaseFailed if readiness probe returns an error.
 func (r *ReplicaSupervisor) Start(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -116,6 +133,8 @@ func (r *ReplicaSupervisor) Start(ctx context.Context) error {
 }
 
 // Execute wraps an inference request in bounded inflight tracking and error classification.
+// Invariant: Increments inflight counter on enter, decrements on exit via DrainManager.
+// Guard: Rejects execution with ErrTrafficWithdrawn if draining or unready; handles errors via HandleError.
 func (r *ReplicaSupervisor) Execute(ctx context.Context, fn func() error) error {
 	release, err := r.drainMgr.Acquire()
 	if err != nil {
@@ -131,6 +150,8 @@ func (r *ReplicaSupervisor) Execute(ctx context.Context, fn func() error) error 
 }
 
 // HandleError processes a failure, ensuring leaf-only restart, isolation, and quarantine on budget exhaustion.
+// Invariant: ScopeNone / request application errors do not restart the replica or bump generation.
+// Guard: Quarantines replica and returns ErrBudgetExhausted when restartCount reaches RestartBudget.
 func (r *ReplicaSupervisor) HandleError(ctx context.Context, err error) (*ServingReceipt, error) {
 	if err == nil {
 		return nil, nil
@@ -219,6 +240,8 @@ func (r *ReplicaSupervisor) HandleError(ctx context.Context, err error) (*Servin
 }
 
 // CheckLiveness evaluates the replica's liveness probe, triggering recovery if it fails.
+// Invariant: No-op if no liveness probe is registered.
+// Guard: On probe failure, wraps error in ErrorKindFailedLiveness and dispatches to HandleError.
 func (r *ReplicaSupervisor) CheckLiveness(ctx context.Context) error {
 	r.mu.Lock()
 	livenessFn := r.livenessCheck
@@ -236,6 +259,8 @@ func (r *ReplicaSupervisor) CheckLiveness(ctx context.Context) error {
 }
 
 // IsHealthy reports true if the replica is in PhaseReady and not quarantined.
+// Invariant: Thread-safe boolean check for routing readiness.
+// Guard: Protected by internal mutex.
 func (r *ReplicaSupervisor) IsHealthy() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -243,6 +268,8 @@ func (r *ReplicaSupervisor) IsHealthy() bool {
 }
 
 // Phase returns current serving phase.
+// Invariant: Thread-safe read of the active serving phase.
+// Guard: Protected by internal mutex.
 func (r *ReplicaSupervisor) Phase() ServingPhase {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -250,6 +277,8 @@ func (r *ReplicaSupervisor) Phase() ServingPhase {
 }
 
 // Generation returns the current generation counter.
+// Invariant: Increments monotonically on each successful restart recovery.
+// Guard: Protected by internal mutex.
 func (r *ReplicaSupervisor) Generation() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -257,6 +286,8 @@ func (r *ReplicaSupervisor) Generation() uint64 {
 }
 
 // RestartCount returns how many times this replica has been recovered.
+// Invariant: Count is incremented on recovery; reset to zero on ResetQuarantine.
+// Guard: Protected by internal mutex.
 func (r *ReplicaSupervisor) RestartCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -264,6 +295,8 @@ func (r *ReplicaSupervisor) RestartCount() int {
 }
 
 // Quarantined reports whether the replica is locked in quarantine.
+// Invariant: True indicates the restart budget was exhausted and replica is excluded from traffic.
+// Guard: Protected by internal mutex.
 func (r *ReplicaSupervisor) Quarantined() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -271,6 +304,8 @@ func (r *ReplicaSupervisor) Quarantined() bool {
 }
 
 // ResetQuarantine clears quarantine status and resets restart accounting.
+// Invariant: Sets quarantined to false, resets restartCount to 0, and re-probes readiness.
+// Guard: Fails closed to PhaseFailed if readiness verification fails after reset.
 func (r *ReplicaSupervisor) ResetQuarantine(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -294,6 +329,8 @@ func (r *ReplicaSupervisor) ResetQuarantine(ctx context.Context) error {
 }
 
 // LastReceipt returns the most recently emitted supervision receipt.
+// Invariant: Returns nil if no supervision or drain action has occurred.
+// Guard: Thread-safe read protected by internal mutex.
 func (r *ReplicaSupervisor) LastReceipt() *ServingReceipt {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -301,11 +338,13 @@ func (r *ReplicaSupervisor) LastReceipt() *ServingReceipt {
 }
 
 // DomainID returns the failure domain ID.
+// Invariant: Immutable identifier assigned at construction.
 func (r *ReplicaSupervisor) DomainID() string {
 	return r.domainID
 }
 
 // ReplicaID returns the member replica ID.
+// Invariant: Immutable member identifier assigned at construction.
 func (r *ReplicaSupervisor) ReplicaID() string {
 	return r.replicaID
 }
