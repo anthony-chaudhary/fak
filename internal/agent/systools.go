@@ -71,7 +71,7 @@ func SysToolCatalog() []ToolDef {
 }
 
 // sysToolMeta returns the vDSO scope meta for a system tool, or (nil, false) when unarmed or not a systool.
-func sysToolMeta(tool string) (abi.ToolCallMeta, bool) {
+func sysToolMeta(tool string) (map[string]string, bool) {
 	if armedSysTools.Load() == nil {
 		return nil, false
 	}
