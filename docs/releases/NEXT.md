@@ -5,10 +5,16 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 68
+- **Commits in flight:** 75
 
 ## What changed
 
+- Wire KVStore, CompactDenySummary, and execution verification.
+- Wire GoalAnchor and StabilizePromptPrefix into loop and upstream.
+- Wire MMU compactor sliding window and positive compaction.
+- Wire TieredEvaluator convenience methods onto Manifest.
+- Wire lifecycle FSM, recovery audit, and AST write extractors.
+- Add fak self alias and harden repo discovery with version fallback.
 - Restore living release draft tracking and fresh NEXT.md.
 - Add host-wide build concurrency governor.
 - Debounce headroom exhaustion and park goals on host commit floor.
@@ -48,6 +54,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Add 13-feature-island wiring audit test (#11309).
 - Add production benchmarks for cryptographic hash chain and row verification.
 - Add benchmark suite and prune comment density.
 - Add benchmark suite and clean comment bloat.
