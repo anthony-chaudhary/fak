@@ -595,7 +595,7 @@ func (m *Manager) NotifyWarmupComplete(shardID int, dominantSize uint64, freqPer
 	}
 	// Log first, midpoint, and final
 	if n == 1 || n == total/2 || n == total {
-		log.Printf("[cama] warmup: %d/%d shards detected dominant value size %d bytes (%.1f%%) [elapsed %.1fs]",
+		log.Printf("[l3server] warmup: %d/%d shards detected dominant value size %d bytes (%.1f%%) [elapsed %.1fs]",
 			n, total, dominantSize, freqPercent, elapsed)
 	}
 }
@@ -616,7 +616,7 @@ const (
 // Deduplicates repeated calls with the same value. Rejects out-of-range values.
 func (m *Manager) SetModelPageHint(pageBytes uint64) {
 	if pageBytes < minPageHintBytes || pageBytes > maxPageHintBytes {
-		log.Printf("[cama] ignoring out-of-range page-size hint: %d bytes (valid range: %dâ€“%d)",
+		log.Printf("[l3server] ignoring out-of-range page-size hint: %d bytes (valid range: %dâ€“%d)",
 			pageBytes, minPageHintBytes, maxPageHintBytes)
 		return
 	}
@@ -624,13 +624,13 @@ func (m *Manager) SetModelPageHint(pageBytes uint64) {
 		return // already set to this value
 	}
 	m.modelPageHint.Store(pageBytes)
-	log.Printf("[cama] model page-size hint received: %d bytes â€” broadcasting to %d shards", pageBytes, m.numShards)
+	log.Printf("[l3server] model page-size hint received: %d bytes â€” broadcasting to %d shards", pageBytes, m.numShards)
 	for i := 0; i < int(m.numShards); i++ {
 		if !m.shards[i].SubmitAsync(ShardOp{
 			Type:      OpPageSizeHint,
 			HintBytes: pageBytes,
 		}) {
-			log.Printf("[cama] WARNING: PageSizeHint dropped for shard %d â€” queue full", i)
+			log.Printf("[l3server] WARNING: PageSizeHint dropped for shard %d â€” queue full", i)
 		}
 	}
 }
@@ -1220,7 +1220,7 @@ func capShardsForMemory(numShards int, totalMem uint64) int {
 	if totalMem < minPerShardMem || totalMem/uint64(numShards) >= minPerShardMem {
 		// Not capped â€” but warn if per-shard is below 16 GB recommendation
 		if totalMem >= minPerShardMem && totalMem/uint64(numShards) < warnPerShardMem {
-			log.Printf("[cama] WARNING: per-shard memory %.1f GB < 16 GB â€” consider slab_distribution=\"dedicated\" for optimal slot utilization",
+			log.Printf("[l3server] WARNING: per-shard memory %.1f GB < 16 GB â€” consider slab_distribution=\"dedicated\" for optimal slot utilization",
 				float64(totalMem/uint64(numShards))/(1<<30))
 		}
 		return numShards
@@ -1231,7 +1231,7 @@ func capShardsForMemory(numShards int, totalMem uint64) int {
 	}
 	// Round down to power of 2 for fast masking
 	capped = int(1 << uint(63-bits.LeadingZeros64(uint64(capped))))
-	log.Printf("[cama] reducing num_shards %d â†’ %d (per-shard memory %.1f GB < 8 GB minimum)",
+	log.Printf("[l3server] reducing num_shards %d â†’ %d (per-shard memory %.1f GB < 8 GB minimum)",
 		numShards, capped, float64(totalMem/uint64(numShards))/(1<<30))
 	return capped
 }

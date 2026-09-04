@@ -138,7 +138,7 @@ func applySGLang(c *Config, overrides map[string]bool) {
 func setIfNotOverridden[T comparable](overrides map[string]bool, field string, apply func(), current T, presetVal T) {
 	if overrides[field] {
 		if current != presetVal {
-			log.Printf("[cama] note: slab_preset sets %s but explicit config overrides it", field)
+			log.Printf("[l3server] note: slab_preset sets %s but explicit config overrides it", field)
 		}
 		return
 	}

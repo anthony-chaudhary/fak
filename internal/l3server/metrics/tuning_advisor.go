@@ -25,7 +25,7 @@ func (ta *TuningAdvisor) checkCacheHitRate(cs *ClientStats) {
 	}
 	if cs.CacheHitRate < 0.3 {
 		log.Printf("[TuningAdvisor] WARN conn=%d: Low SGLang cache hit rate (%.1f%%). "+
-			"Consider increasing CAMA memory or reviewing eviction policy.",
+			"Consider increasing L3 memory or reviewing eviction policy.",
 			cs.ConnID, cs.CacheHitRate*100)
 	}
 	if cs.CacheHitRate > 0.8 {

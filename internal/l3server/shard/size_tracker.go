@@ -108,7 +108,7 @@ func (t *valueSizeTracker) detect() {
 	t.justDetected = true
 
 	if t.verbose {
-		log.Printf("[cama] shard %d: auto-detect: dominant value size %d bytes (%.1f%% of SETs)",
+		log.Printf("[l3server] shard %d: auto-detect: dominant value size %d bytes (%.1f%% of SETs)",
 			t.shardID, dominant.Size, dominant.Percent)
 	}
 	if t.onWarmupComplete != nil {
@@ -121,10 +121,10 @@ func (t *valueSizeTracker) setSlotUtilization(util float64) {
 	t.slotUtilization = util
 	if t.verbose {
 		if util < 0.98 {
-			log.Printf("[cama] shard %d: auto-detect: slot utilization %.1f%% for dominant size %d â€” recommend model_page_bytes=%d",
+			log.Printf("[l3server] shard %d: auto-detect: slot utilization %.1f%% for dominant size %d â€” recommend model_page_bytes=%d",
 				t.shardID, util*100, t.optimalSize, t.optimalSize)
 		} else {
-			log.Printf("[cama] shard %d: auto-detect: slot utilization %.1f%% â€” good fit",
+			log.Printf("[l3server] shard %d: auto-detect: slot utilization %.1f%% â€” good fit",
 				t.shardID, util*100)
 		}
 	}

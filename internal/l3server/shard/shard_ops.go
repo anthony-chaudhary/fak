@@ -917,7 +917,7 @@ func (s *Shard) handleFlush(op ShardOp) OpResult {
 			newAlloc, err := alloc.NewSlabAllocator(newCfg)
 			if err != nil {
 				// Old allocator is gone â€” must create a fallback with default config
-				log.Printf("[cama] shard %d: auto-tune failed after close: %v (creating default allocator)", s.id, err)
+				log.Printf("[l3server] shard %d: auto-tune failed after close: %v (creating default allocator)", s.id, err)
 				fallbackCfg := alloc.SlabConfig{
 					MaxMemoryBytes: s.config.MaxMemoryBytes,
 					HugePageSizeKB: s.config.HugePageSizeKB,
@@ -925,7 +925,7 @@ func (s *Shard) handleFlush(op ShardOp) OpResult {
 				}
 				fallback, ferr := alloc.NewSlabAllocator(fallbackCfg)
 				if ferr != nil {
-					log.Printf("[cama] shard %d: CRITICAL â€” fallback allocator also failed: %v", s.id, ferr)
+					log.Printf("[l3server] shard %d: CRITICAL â€” fallback allocator also failed: %v", s.id, ferr)
 				} else {
 					s.allocPtr.Store(&allocBox{a: fallback})
 				}
@@ -933,7 +933,7 @@ func (s *Shard) handleFlush(op ShardOp) OpResult {
 				s.allocPtr.Store(&allocBox{a: newAlloc})
 				if s.config.VerboseShardLogging {
 					slots, classSize := newAlloc.ModelClassCapacity(s.sizeTracker.optimalSize)
-					log.Printf("[cama] shard %d: auto-tuned slabs (in-place) â€” model_page_bytes=%d, model_slots=%d (class=%d)",
+					log.Printf("[l3server] shard %d: auto-tuned slabs (in-place) â€” model_page_bytes=%d, model_slots=%d (class=%d)",
 						s.id, s.sizeTracker.optimalSize, slots, classSize)
 				}
 			}
@@ -941,13 +941,13 @@ func (s *Shard) handleFlush(op ShardOp) OpResult {
 			// RDMA listeners need both allocators to coexist during MR deregistration
 			newAlloc, err := alloc.NewSlabAllocator(newCfg)
 			if err != nil {
-				log.Printf("[cama] shard %d: auto-tune failed: %v (keeping old allocator)", s.id, err)
+				log.Printf("[l3server] shard %d: auto-tune failed: %v (keeping old allocator)", s.id, err)
 			} else {
 				s.allocPtr.Store(&allocBox{a: newAlloc})
 				s.notifyAllocListeners(oldAlloc, newAlloc)
 				if s.config.VerboseShardLogging {
 					slots, classSize := newAlloc.ModelClassCapacity(s.sizeTracker.optimalSize)
-					log.Printf("[cama] shard %d: auto-tuned slabs â€” model_page_bytes=%d, model_slots=%d (class=%d)",
+					log.Printf("[l3server] shard %d: auto-tuned slabs â€” model_page_bytes=%d, model_slots=%d (class=%d)",
 						s.id, s.sizeTracker.optimalSize, slots, classSize)
 				}
 			}
@@ -1077,7 +1077,7 @@ func (s *Shard) startMigration(weights map[uint64]float64, freezeAfter bool) boo
 		allocStart := time.Now()
 		newAlloc, err := alloc.NewSlabAllocator(newCfg)
 		if err != nil {
-			log.Printf("[cama] shard %d: async allocator construction failed: %v (keeping old allocator)", shardID, err)
+			log.Printf("[l3server] shard %d: async allocator construction failed: %v (keeping old allocator)", shardID, err)
 			s.allocBuilding.Store(false)
 			s.releaseMigrateSem()
 			return
@@ -1193,7 +1193,7 @@ func (s *Shard) migrateBatch() bool {
 		// Allocate in new allocator
 		newKeyAlloc, kerr := ms.newAlloc.Alloc(uint64(e.KeyLen))
 		if kerr != nil {
-			log.Printf("[cama] shard %d: migration batch failed on key alloc: %v (aborting)", s.id, kerr)
+			log.Printf("[l3server] shard %d: migration batch failed on key alloc: %v (aborting)", s.id, kerr)
 			return false
 		}
 		ms.newAlloc.Write(newKeyAlloc, keyCopy)
@@ -1201,7 +1201,7 @@ func (s *Shard) migrateBatch() bool {
 		newValAlloc, verr := ms.newAlloc.Alloc(uint64(e.ValueLen))
 		if verr != nil {
 			ms.newAlloc.Free(newKeyAlloc)
-			log.Printf("[cama] shard %d: migration batch failed on value alloc: %v (aborting)", s.id, verr)
+			log.Printf("[l3server] shard %d: migration batch failed on value alloc: %v (aborting)", s.id, verr)
 			return false
 		}
 		ms.newAlloc.Write(newValAlloc, valCopy)
@@ -1251,7 +1251,7 @@ func (s *Shard) migrateBatch() bool {
 	// Check if iteration stopped due to allocation failure (processed < batch but not done)
 	if !done && processed < ms.batch {
 		// Allocation failure â€” abort migration
-		log.Printf("[cama] shard %d: migration aborted at entry %d (alloc failure)", s.id, ms.migrated)
+		log.Printf("[l3server] shard %d: migration aborted at entry %d (alloc failure)", s.id, ms.migrated)
 		s.abortMigration()
 		return true // migration "complete" (aborted)
 	}
@@ -1310,7 +1310,7 @@ func (s *Shard) finalizeMigration() {
 	if s.config.UseHugePages {
 		_, _, regular := ms.newAlloc.HugepageSummary()
 		if regular > 0 {
-			log.Printf("[cama] shard %d: WARNING â€” %d region(s) fell back to regular 4KB pages (hugepage pressure?)",
+			log.Printf("[l3server] shard %d: WARNING â€” %d region(s) fell back to regular 4KB pages (hugepage pressure?)",
 				s.id, regular)
 		}
 	}
@@ -1486,7 +1486,7 @@ func (s *Shard) handlePageSizeHint(op ShardOp) OpResult {
 		}
 		newAlloc, err := alloc.NewSlabAllocator(newCfg)
 		if err != nil {
-			log.Printf("[cama] shard %d: page-size hint fast-swap failed: %v (keeping old allocator)", s.id, err)
+			log.Printf("[l3server] shard %d: page-size hint fast-swap failed: %v (keeping old allocator)", s.id, err)
 		} else {
 			oldAlloc := s.allocPtr.Load().a
 			s.allocPtr.Store(&allocBox{a: newAlloc})
@@ -1507,14 +1507,14 @@ func (s *Shard) handlePageSizeHint(op ShardOp) OpResult {
 			if isDedicated {
 				mode = "dedicated (2 classes, 95/5 split)"
 			}
-			log.Printf("[cama] shard %d: page-size hint %d bytes â€” fast-swapped allocator (%s, empty shard)", s.id, hintBytes, mode)
+			log.Printf("[l3server] shard %d: page-size hint %d bytes â€” fast-swapped allocator (%s, empty shard)", s.id, hintBytes, mode)
 			return OpResult{OK: true}
 		}
 	}
 
 	// Slow path: shard has data â€” full ZeroLatencyBalance migration
 	if s.config.VerboseShardLogging {
-		log.Printf("[cama] shard %d: page-size hint %d bytes â€” triggering slab rebuild", s.id, hintBytes)
+		log.Printf("[l3server] shard %d: page-size hint %d bytes â€” triggering slab rebuild", s.id, hintBytes)
 	}
 
 	// Compute slot utilization for the hinted size

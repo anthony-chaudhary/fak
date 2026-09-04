@@ -9,7 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/l3server/transport/protocol"
 )
 
-// Client is a CAMA TCP client.
+// Client is an L3 TCP client.
 type Client struct {
 	codec *protocol.Codec
 	reqID atomic.Uint32

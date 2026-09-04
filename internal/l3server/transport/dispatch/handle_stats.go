@@ -547,7 +547,7 @@ func (d *Dispatcher) HandleStats(msg protocol.Message) protocol.Message {
 // Returns JSON metadata about the server. Safe to call with nil Manager.
 func (d *Dispatcher) HandleInfo(msg protocol.Message) protocol.Message {
 	info := map[string]interface{}{
-		"server":             "cama",
+		"server":             "l3server",
 		"server_version":     version.ServerVersion,
 		"server_commit":      version.Commit,
 		"protocol_version":   version.ProtocolVersion,

@@ -23,7 +23,7 @@ func TestSlabAllocBasic(t *testing.T) {
 		t.Errorf("alloc size %d < requested 100", a.Size)
 	}
 
-	data := []byte("hello, cama!")
+	data := []byte("hello, l3!")
 	sa.Write(a, data)
 	readBack := sa.Read(a)
 	if string(readBack[:len(data)]) != string(data) {

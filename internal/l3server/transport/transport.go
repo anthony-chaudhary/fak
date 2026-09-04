@@ -8,7 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/l3server/transport/dispatch"
 )
 
-// Transport is the common interface for all CAMA transport servers (TCP, RDMA, CXL).
+// Transport is the common interface for all L3 transport servers (TCP, RDMA, CXL).
 // Unifies lifecycle management and endpoint advertisement across transport types.
 type Transport interface {
 	Start() error
