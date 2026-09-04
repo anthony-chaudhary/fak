@@ -436,7 +436,7 @@ concurrent = [
   "agentdescriptor", "agentic", "agentquery", "agentqueue", "amoprofpub", "archfitness",
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
-  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools",
+  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
   "codexmcpdiag", "codexsession", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
   "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
   "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
@@ -1353,6 +1353,7 @@ citeverify = ["internal/citeverify/**"]
 cloudhandoff = ["internal/cloudhandoff/**"]
 codebookmeta = ["internal/codebookmeta/**"]
 codetools = ["internal/codetools/**"]
+systools = ["internal/systools/**"]
 codexmcpdiag = ["internal/codexmcpdiag/**"]
 codexsession = ["internal/codexsession/**"]
 commitlifecycle = ["internal/commitlifecycle/**"]

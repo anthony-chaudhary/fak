@@ -669,6 +669,7 @@ var tier = map[string]int{
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
 	"armbench":              3, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
+	"systools":              2, // safe system and web search/fetch utility tools for the native harness
 	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
@@ -1421,7 +1422,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
@@ -2917,7 +2918,16 @@ var engineDriverRole = map[string]map[string]string{
 	"mlx":        {"engine": "the MLX ride-adapter fronting mlx-lm/vllm-mlx on Apple Silicon over the OpenAI-compatible wire"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
 	"sglang":     {"engine": "the SGLang EngineDriver adapter for hosted generation, metrics, and radix-cache observations"},
-	"vllm":       {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},
+	"systools.fetch_web": {
+		"systools": "safe web fetch engine with byte capping and SSRF protection",
+	},
+	"systools.get_time": {
+		"systools": "system time and timezone engine",
+	},
+	"systools.web_search": {
+		"systools": "web and documentation search engine",
+	},
+	"vllm": {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},
 }
 
 // resolveEngineIDArg returns the engine-id string a RegisterEngine call's first argument
