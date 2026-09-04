@@ -11,13 +11,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// Schema identifies the receipt format for mixed harness locks.
 const Schema = "fak.harness-mix-receipt/v1alpha1"
 
+// Limits defines resource ceilings enforced during harness mixing.
 type Limits struct {
 	ContextTokens int `json:"context_tokens,omitempty"`
 	MemoryMiB     int `json:"memory_mib,omitempty"`
 	Workers       int `json:"workers,omitempty"`
 }
+
+// Receipt records provenance, deduplicated components, and rebuild instructions for a mixed harness.
 type Receipt struct {
 	Schema       string   `json:"schema"`
 	Imports      []string `json:"imports"`
@@ -25,11 +29,15 @@ type Receipt struct {
 	Deduplicated []string `json:"deduplicated_components,omitempty"`
 	Rebuild      string   `json:"rebuild"`
 }
+
+// Result holds the combined harness lock and its verification receipt.
 type Result struct {
 	Lock    harnessresolve.Lock `json:"lock"`
 	Receipt Receipt             `json:"receipt"`
 }
 
+// Mix combines two or more verified harness locks, deduplicating shared components,
+// merging compatible policy assets, validating dependency graphs, and enforcing resource limits.
 func Mix(imports []harnessresolve.Lock, limits Limits) (Result, error) {
 	if len(imports) < 2 {
 		return Result{}, fmt.Errorf("at least two verified harness imports are required")
