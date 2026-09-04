@@ -84,6 +84,12 @@ func (k Kind) String() string {
 	}
 }
 
+// Invariant: turn kind classification is fail-closed and deterministic.
+// Guard: any unrecognized block shape, empty input, or ambiguous sequence safely
+// resolves to KindUnknown without inspecting or leaking message content.
+// Precondition: caller provides the sequence of content blocks from the latest user message.
+// Postcondition: returns a deterministic Kind based strictly on structural block types.
+//
 // Classify returns the structural kind of the last user message given its
 // content blocks. Precedence is fixed and order-independent of the slice:
 //
