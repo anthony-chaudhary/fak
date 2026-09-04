@@ -71,6 +71,9 @@ func TestContains(t *testing.T) {
 	// The pass path must return without tripping must(); the failure path
 	// exits the process, so it is covered by the demo run itself.
 	contains("ALLOW read_corp_kb", "ALLOW")
+	if !strings.Contains("ALLOW read_corp_kb", "ALLOW") {
+		t.Fatal("expected substring match")
+	}
 }
 
 func TestFloorManifestDeniesByDefaultAndGatesKBReads(t *testing.T) {
