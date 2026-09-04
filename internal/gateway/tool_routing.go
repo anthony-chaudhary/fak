@@ -155,6 +155,13 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return WireVerdict{}, nil, err
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
+
+	// In-process read optimization (#11035): promote pure read-only shell commands (cat, head, tail)
+	// directly without spawning subprocess shells.
+	if promotedEnv, promotedWv, ok := s.PromoteShellReadToInProcess(ctx, tool, rawArgs, traceID); ok {
+		return promotedWv, promotedEnv, nil
+	}
+
 	// Ensemble fan-out (issue #597): a multi-member routing Plan runs each member as
 	// its OWN adjudicated kernel call and folds the outputs. buildCall left tc.Engine
 	// unset for an ensemble (routeEngine returns "" rather than collapse to one member);

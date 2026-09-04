@@ -576,6 +576,12 @@ func WriteCheckpoint(path string, cp *Checkpoint) error {
 // Semantics match FoldEvents: events are sorted by timestamp and applied in order,
 // and the resulting sessions are sorted newest-started first.
 func FoldEventsOnSessions(base []Session, events []Event) []Session {
+	if len(events) == 0 {
+		out := make([]Session, len(base))
+		copy(out, base)
+		return out
+	}
+
 	byID := make(map[string]*Session, len(base))
 	order := make([]string, 0, len(base))
 
@@ -583,15 +589,6 @@ func FoldEventsOnSessions(base []Session, events []Event) []Session {
 		cloned := cloneSession(s)
 		byID[cloned.ID] = cloned
 		order = append(order, cloned.ID)
-	}
-
-	if len(events) == 0 {
-		out := make([]Session, 0, len(order))
-		for _, id := range order {
-			out = append(out, *byID[id])
-		}
-		sort.SliceStable(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
-		return out
 	}
 
 	sorted := append([]Event(nil), events...)

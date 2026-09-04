@@ -45,6 +45,10 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
+	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
+	"workspaceslot":      5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
+	"harnessbench":       5, // high-churn soak and thundering-herd saturation witness suite (#11183).
+	"effortbench":        5, // intra-model effort modulation and thinking budget benchmark (#11185).
 	"control":            2, // dynamic inference configuration control plane: shift-left validation, relational invariants, dry-run diff, and canary auto-rollback watchdog (#10869).
 	"agentquery":         2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
 	"bgloop":             2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.

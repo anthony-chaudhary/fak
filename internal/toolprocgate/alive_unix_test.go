@@ -5,6 +5,9 @@ package toolprocgate
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -24,8 +27,25 @@ func pidAlive(pid int) bool {
 	if procState, ok := linuxProcState(pid); ok {
 		return procState != "Z" && procState != "X"
 	}
+	if runtime.GOOS == "darwin" {
+		if procState, ok := darwinProcState(pid); ok {
+			return procState != "Z" && procState != "X"
+		}
+	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+func darwinProcState(pid int) (string, bool) {
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(out))
+	if len(s) > 0 {
+		return string(s[0]), true
+	}
+	return "", false
 }
 
 func linuxProcState(pid int) (string, bool) {

@@ -62,3 +62,11 @@ func NewOSSupervisor(cfg toolproc.Config) *Supervisor {
 	s.reaper = procguard.KillPID
 	return s
 }
+
+// KillTree terminates the OS process tree rooted at pid via procguard.KillPID.
+func KillTree(pid int) error {
+	if ok, detail := procguard.KillPID(pid); !ok {
+		return fmt.Errorf("toolprocgate: kill tree pid %d: %s", pid, detail)
+	}
+	return nil
+}
