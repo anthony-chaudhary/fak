@@ -29,6 +29,8 @@ var shippedUndecidedRules = []struct{ marker, why string }{
 	{`os\.system`, "the execute_code surface, which is not a shell command line"},
 	{`:\(\)`, "fork bomb; prose describes the shape well enough that the remedy needs no literal, which is why its fix text now omits one"},
 	{`(?i:true)`, "the effectful-apply flag on fak_memory_run. Unlike every other entry here this one is not a decider waiting to be written: the arg is a BOOLEAN, so the anchored regex has exactly two possible inputs and no room to quote anything. The raw regex is the whole truth by construction, and the mention hazard the other entries carry does not exist for it (see freeTextArg)"},
+	{`\bfind\s+`, "fence against broad recursive searches on user root"},
+	{`USERPROFILE`, "PowerShell fence against broad recursive searches on user root"},
 }
 
 // freeTextArg reports whether an arg's VALUE can carry a quoted MENTION of the

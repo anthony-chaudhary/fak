@@ -123,6 +123,30 @@ func TestAdmitAndLogPostureLoadsAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestDefaultOpenPostureLoadsAndRoundTrips(t *testing.T) {
+	p, err := Parse([]byte(`{"posture":"default_open"}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Posture != adjudicator.PostureDefaultOpen {
+		t.Fatalf("posture = %v, want PostureDefaultOpen", p.Posture)
+	}
+	a := adjudicator.New(p)
+	v := a.Adjudicate(context.Background(), &abi.ToolCall{
+		Tool: "custom_random_tool",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+	})
+	if v.Kind != abi.VerdictAllow || v.Meta["posture"] != "default_open" {
+		t.Fatalf("default_open verdict = %+v, want Allow with posture=default_open", v)
+	}
+	if got, err := FromPolicy(p).ToPolicy(); err != nil || !reflect.DeepEqual(got, p) {
+		t.Fatalf("posture round-trip mismatch err=%v got=%+v want=%+v", err, got, p)
+	}
+	if !strings.Contains(Summary(p), "default_open") {
+		t.Fatalf("Summary should surface posture:\n%s", Summary(p))
+	}
+}
+
 func TestUnknownPostureRejected(t *testing.T) {
 	_, err := Parse([]byte(`{"posture":"audit_only"}`))
 	if err == nil {

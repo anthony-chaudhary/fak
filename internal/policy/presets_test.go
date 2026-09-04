@@ -73,10 +73,11 @@ func TestLeastAgencyPresetsRoundTrip(t *testing.T) {
 			}
 
 			canon := FromPolicy(rt.Adjudicator).JSON()
-			if string(canon) != string(raw) {
+			normalizedRaw := strings.ReplaceAll(string(raw), "\r\n", "\n")
+			if string(canon) != normalizedRaw {
 				t.Fatalf("preset %s is not in canonical form (round-trip not exact).\n"+
 					"--- canonical (%d bytes) ---\n%s\n--- file (%d bytes) ---\n%s",
-					name, len(canon), string(canon), len(raw), string(raw))
+					name, len(canon), string(canon), len(normalizedRaw), normalizedRaw)
 			}
 		})
 	}

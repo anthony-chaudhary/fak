@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -52,11 +53,12 @@ func TestPresetsRoundTrip(t *testing.T) {
 
 			// (b, byte rung) the canonical re-render equals the file on disk.
 			canon := FromPolicy(rt.Adjudicator).JSON()
-			if string(canon) != string(raw) {
+			normalizedRaw := strings.ReplaceAll(string(raw), "\r\n", "\n")
+			if string(canon) != normalizedRaw {
 				t.Fatalf("%s is not in canonical form (round-trip not exact).\n"+
 					"Run `fak policy`-equivalent canonicalization: FromPolicy(Parse(bytes)).JSON().\n"+
 					"--- canonical (%d bytes) ---\n%s\n--- file (%d bytes) ---\n%s",
-					path, len(canon), string(canon), len(raw), string(raw))
+					path, len(canon), string(canon), len(normalizedRaw), normalizedRaw)
 			}
 		})
 	}

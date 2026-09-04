@@ -138,3 +138,75 @@ func TestAmendmentDeltaClassSeverity(t *testing.T) {
 		t.Fatalf("mixed delta Class() = %q, want %q", got, AmendmentWiden)
 	}
 }
+
+func TestDiffAmendmentPostureStrictnessTransitions(t *testing.T) {
+	cases := []struct {
+		name       string
+		old        adjudicator.Posture
+		next       adjudicator.Posture
+		wantClass  string
+		wantChange string
+	}{
+		{
+			name:       "fail_closed to admit_and_log widens",
+			old:        adjudicator.PostureFailClosed,
+			next:       adjudicator.PostureAdmitAndLog,
+			wantClass:  AmendmentWiden,
+			wantChange: "posture=fail_closed->admit_and_log",
+		},
+		{
+			name:       "admit_and_log to default_open widens",
+			old:        adjudicator.PostureAdmitAndLog,
+			next:       adjudicator.PostureDefaultOpen,
+			wantClass:  AmendmentWiden,
+			wantChange: "posture=admit_and_log->default_open",
+		},
+		{
+			name:       "fail_closed to default_open widens",
+			old:        adjudicator.PostureFailClosed,
+			next:       adjudicator.PostureDefaultOpen,
+			wantClass:  AmendmentWiden,
+			wantChange: "posture=fail_closed->default_open",
+		},
+		{
+			name:       "default_open to admit_and_log tightens",
+			old:        adjudicator.PostureDefaultOpen,
+			next:       adjudicator.PostureAdmitAndLog,
+			wantClass:  AmendmentTighten,
+			wantChange: "posture=default_open->admit_and_log",
+		},
+		{
+			name:       "admit_and_log to fail_closed tightens",
+			old:        adjudicator.PostureAdmitAndLog,
+			next:       adjudicator.PostureFailClosed,
+			wantClass:  AmendmentTighten,
+			wantChange: "posture=admit_and_log->fail_closed",
+		},
+		{
+			name:       "default_open to fail_closed tightens",
+			old:        adjudicator.PostureDefaultOpen,
+			next:       adjudicator.PostureFailClosed,
+			wantClass:  AmendmentTighten,
+			wantChange: "posture=default_open->fail_closed",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := DiffAmendment(adjudicator.Policy{Posture: tc.old}, adjudicator.Policy{Posture: tc.next})
+			if d.Class() != tc.wantClass {
+				t.Fatalf("Class() = %q, want %q", d.Class(), tc.wantClass)
+			}
+			var changes []AmendmentChange
+			if tc.wantClass == AmendmentWiden {
+				changes = d.Widen
+			} else {
+				changes = d.Tighten
+			}
+			got := FormatAmendmentChanges(changes)
+			if got != tc.wantChange {
+				t.Fatalf("FormatAmendmentChanges = %q, want %q", got, tc.wantChange)
+			}
+		})
+	}
+}

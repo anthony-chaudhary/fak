@@ -194,6 +194,34 @@ func amendmentDirectionCases() []amendmentDirectionCase {
 			widenOld:    adjudicator.Policy{},
 			widenNext:   adjudicator.Policy{AutoRepairSidestep: true},
 		},
+		{
+			field:       "TestLanes",
+			tightenOld:  adjudicator.Policy{},
+			tightenNext: adjudicator.Policy{TestLanes: []string{"test_a"}},
+			widenOld:    adjudicator.Policy{TestLanes: []string{"test_a"}},
+			widenNext:   adjudicator.Policy{},
+		},
+		{
+			field:       "ExemptLanes",
+			tightenOld:  adjudicator.Policy{ExemptLanes: []string{"exempt_a"}},
+			tightenNext: adjudicator.Policy{},
+			widenOld:    adjudicator.Policy{},
+			widenNext:   adjudicator.Policy{ExemptLanes: []string{"exempt_a"}},
+		},
+		{
+			field:       "DisableTestImmunity",
+			tightenOld:  adjudicator.Policy{DisableTestImmunity: true},
+			tightenNext: adjudicator.Policy{DisableTestImmunity: false},
+			widenOld:    adjudicator.Policy{DisableTestImmunity: false},
+			widenNext:   adjudicator.Policy{DisableTestImmunity: true},
+		},
+		{
+			field:       "Lane",
+			tightenOld:  adjudicator.Policy{},
+			tightenNext: adjudicator.Policy{Lane: "strict"},
+			widenOld:    adjudicator.Policy{Lane: "strict"},
+			widenNext:   adjudicator.Policy{},
+		},
 	}
 }
 
