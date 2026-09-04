@@ -1,6 +1,9 @@
 package godfileceiling
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -222,4 +225,121 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// TestGodFileCeilingMaturityContractsAndDocs asserts that internal/godfileceiling maintains
+// substantive contract comments and full exported symbol documentation.
+func TestGodFileCeilingMaturityContractsAndDocs(t *testing.T) {
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, "godfileceiling.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("failed to parse godfileceiling.go: %v", err)
+	}
+
+	contractCount := 0
+	for _, cg := range node.Comments {
+		if isSubstantiveContractComment(cg) {
+			contractCount++
+		}
+	}
+	if contractCount == 0 {
+		t.Error("godfileceiling.go: expected at least one substantive contract comment")
+	}
+
+	exported := 0
+	documented := 0
+	for _, decl := range node.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if ast.IsExported(d.Name.Name) {
+				exported++
+				if d.Doc != nil && len(strings.TrimSpace(d.Doc.Text())) > 0 {
+					documented++
+				} else {
+					t.Errorf("undocumented exported func: %s", d.Name.Name)
+				}
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					if ast.IsExported(s.Name.Name) {
+						exported++
+						doc := s.Doc
+						if doc == nil {
+							doc = d.Doc
+						}
+						if doc != nil && len(strings.TrimSpace(doc.Text())) > 0 {
+							documented++
+						} else {
+							t.Errorf("undocumented exported type: %s", s.Name.Name)
+						}
+					}
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						if ast.IsExported(name.Name) {
+							exported++
+							doc := s.Doc
+							if doc == nil {
+								doc = d.Doc
+							}
+							if doc != nil && len(strings.TrimSpace(doc.Text())) > 0 {
+								documented++
+							} else {
+								t.Errorf("undocumented exported const/var: %s", name.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if documented < exported {
+		t.Errorf("documented exports %d/%d is below 100%%", documented, exported)
+	}
+}
+
+func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
+	if cg == nil {
+		return false
+	}
+	text := strings.TrimSpace(cg.Text())
+	if len(text) < 35 {
+		return false
+	}
+	lower := strings.ToLower(text)
+
+	hasContractMarker := strings.Contains(lower, "invariant:") ||
+		strings.Contains(lower, "invariants:") ||
+		strings.Contains(lower, "key invariant:") ||
+		strings.Contains(lower, "contract:") ||
+		strings.Contains(lower, "assumption:") ||
+		strings.Contains(lower, "assumptions:") ||
+		strings.Contains(lower, "fail-closed:") ||
+		strings.Contains(lower, "fail-closed guard:") ||
+		strings.Contains(lower, "precondition:") ||
+		strings.Contains(lower, "postcondition:") ||
+		strings.Contains(lower, "guard:")
+	if !hasContractMarker {
+		return false
+	}
+
+	words := strings.Fields(lower)
+	if len(words) < 6 {
+		return false
+	}
+
+	keywordCount := 0
+	for _, w := range words {
+		clean := strings.Trim(w, ":,.-*#")
+		if clean == "invariant" || clean == "invariants" || clean == "assumption" ||
+			clean == "assumptions" || clean == "guard" || clean == "fail-closed" ||
+			clean == "contract" || clean == "precondition" || clean == "postcondition" {
+			keywordCount++
+		}
+	}
+	if float64(keywordCount)/float64(len(words)) > 0.4 {
+		return false
+	}
+	return true
 }
