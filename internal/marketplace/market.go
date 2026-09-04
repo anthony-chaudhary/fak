@@ -18,46 +18,64 @@ import (
 	"time"
 )
 
+// Schema identifies the extension descriptor document specification.
 const Schema = "fak-extension-descriptor/1"
 
+// SeamKind defines the architectural integration point targeted by an extension.
 type SeamKind string
 
 const (
-	SeamABI              SeamKind = "abi-engine"
-	SeamCompute          SeamKind = "compute-backend"
-	SeamTUIPane          SeamKind = "tui-pane"
-	SeamQuality          SeamKind = "quality-check"
+	// SeamABI binds internal/abi engine registrants.
+	SeamABI SeamKind = "abi-engine"
+	// SeamCompute binds internal/compute execution backends.
+	SeamCompute SeamKind = "compute-backend"
+	// SeamTUIPane binds internal/tuiplugin interactive panes.
+	SeamTUIPane SeamKind = "tui-pane"
+	// SeamQuality binds internal/quality validation checks.
+	SeamQuality SeamKind = "quality-check"
+	// SeamTrajectoryScorer binds internal/trajctl trajectory scoring hooks.
 	SeamTrajectoryScorer SeamKind = "trajectory-scorer"
 )
 
+// TrustClass defines the isolation and verification level required for an extension.
 type TrustClass string
 
 const (
-	TrustData      TrustClass = "data"
+	// TrustData marks declarative, non-executable data extensions.
+	TrustData TrustClass = "data"
+	// TrustUntrusted marks sandboxed, unverified extension payloads.
 	TrustUntrusted TrustClass = "untrusted"
-	TrustCompiled  TrustClass = "trusted-compiled"
+	// TrustCompiled marks audited native or compiled extension artifacts.
+	TrustCompiled TrustClass = "trusted-compiled"
 )
 
+// ErrorBehavior specifies host containment action when an extension fails.
 type ErrorBehavior string
 
 const (
-	ErrorClosed  ErrorBehavior = "closed"
-	ErrorOpen    ErrorBehavior = "open"
+	// ErrorClosed terminates the host pipeline on extension failure.
+	ErrorClosed ErrorBehavior = "closed"
+	// ErrorOpen logs the failure and continues host execution.
+	ErrorOpen ErrorBehavior = "open"
+	// ErrorIsolate quarantines the failing extension without terminating the host.
 	ErrorIsolate ErrorBehavior = "isolate"
 )
 
+// Compatibility specifies the acceptable ABI version range for an extension.
 type Compatibility struct {
 	ABI string `json:"abi"`
 	Min int    `json:"min"`
 	Max int    `json:"max"`
 }
 
+// Witness configures offline reproducibility commands and expected output checksums.
 type Witness struct {
 	Required     bool     `json:"required"`
 	Command      []string `json:"command,omitempty"`
 	ResultSHA256 string   `json:"result_sha256,omitempty"`
 }
 
+// Descriptor declares inert metadata, compatibility constraints, and verification recipes for an extension.
 type Descriptor struct {
 	Schema         string        `json:"schema"`
 	ID             string        `json:"id"`
@@ -72,6 +90,7 @@ type Descriptor struct {
 	Witness        Witness       `json:"witness"`
 }
 
+// Catalog aggregates validated extension descriptors under a unified manifest.
 type Catalog struct {
 	Schema     string       `json:"schema"`
 	Extensions []Descriptor `json:"extensions"`
@@ -106,12 +125,14 @@ func (a Adapter) Descriptor(d Descriptor) Descriptor {
 	return d
 }
 
+// VerifyOptions provides execution constraints and ABI bounds for artifact verification.
 type VerifyOptions struct {
 	ABIVersions map[string]int
 	Root        string
 	Timeout     time.Duration
 }
 
+// Report summarizes the result of descriptor and artifact verification.
 type Report struct {
 	Schema      string   `json:"schema"`
 	Valid       bool     `json:"valid"`
@@ -276,8 +297,13 @@ func rootedPath(root, name string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
-func SHA256(b []byte) string            { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+// SHA256 returns the lowercase hexadecimal SHA-256 digest of b.
+func SHA256(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+
+// Marshal serializes a Catalog into indented JSON bytes conforming to Schema.
 func Marshal(c Catalog) ([]byte, error) { return json.MarshalIndent(c, "", "  ") }
+
+// Module formats a canonical module revision string with revision count and git hash.
 func Module(name string, rev int, sha string) string {
 	return fmt.Sprintf("%s@r%d+g%s", strings.TrimSpace(name), rev, sha)
 }
