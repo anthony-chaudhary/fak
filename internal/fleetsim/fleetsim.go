@@ -255,6 +255,12 @@ func (r Report) TargetAchieved(target float64) bool {
 // synthetic ledger and counts witnessed closes — it spawns, launches, and observes
 // NOTHING. Calling Replay has no side effects: no processes, no I/O, no clock, no
 // randomness; the same Fixture always yields the same Report.
+//
+// Invariant: fleet simulation replay is fail-closed and monotonic.
+// Replay operations are pure functions of immutable configuration parameters
+// and never produce optimistic close projections when parameters are missing or degenerate.
+//
+// Guard: replay execution strictly halts without mutating shared state or claiming unverified progress.
 func Replay(f Fixture) Report {
 	events := f.Events()
 	rep := Report{WindowSeconds: f.window()}

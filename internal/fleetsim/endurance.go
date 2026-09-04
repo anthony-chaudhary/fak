@@ -44,6 +44,12 @@ type EnduranceReport struct {
 
 // ReplayEndurance composes issue backlog, residual-WIP, refusal, reset, and bounded
 // escalation rules without launching workers or mutating a repository.
+//
+// Invariant: endurance simulation replay is fail-closed and monotonic.
+// Backlog progress strictly requires witnessed issue closes; unresolved peer WIP
+// or active owner work stalls progress and triggers deterministic escalation.
+//
+// Guard: premature done state is flagged if cycles terminate while issues remain open.
 func ReplayEndurance(cfg EnduranceConfig) EnduranceReport {
 	if cfg.Workers < 1 {
 		cfg.Workers = 1
