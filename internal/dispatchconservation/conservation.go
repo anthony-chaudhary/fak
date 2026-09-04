@@ -436,6 +436,12 @@ func readWitness(log string) (map[string]any, bool) {
 // vocabulary. Precedence: a graded witness is final (the sweep only grades dead
 // pids); else an alive .pid is live; else header-only means spawn-failed; else
 // the unit leaked — dead, real work attempted, never graded.
+//
+// Invariant: sidecar witness records take absolute precedence over live process state.
+// A unit with a confirmed witness record is never classified as live or leaked.
+//
+// Guard: unscannable process tables fail open to live status to prevent
+// reporting active background workers as false-positive leaks.
 func ClassifyUnit(log string, alive AliveProbe) Unit {
 	name := filepath.Base(log)
 	m := logRE.FindStringSubmatch(name)
@@ -665,6 +671,13 @@ type LeakedUnit struct {
 
 // FoldConservation folds classified units + the issue side into the conservation
 // identity over one window. Pure: data in, report out.
+//
+// Invariant: dispatch conservation accounting is fail-closed and monotonic.
+// Over any evaluation window, total spent units must equal the exact sum of
+// witnessed, unwitnessed, no-commit refusals, spawn failures, and leaked units.
+//
+// Guard: unclassified or unparseable worker units fail closed to ensure
+// unaccounted capacity losses are never silently dropped from reports.
 func FoldConservation(units []Unit, closes Closes, holds Holds, windowH float64, nowISO string) Report {
 	var resolve, repair []Unit
 	for _, u := range units {
