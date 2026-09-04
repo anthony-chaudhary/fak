@@ -25,7 +25,16 @@ Or wrap the agent you already run with one command. In this example, fak forward
 fak guard -- codex
 ```
 
-The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
+The agent keeps working inside that boundary.
+
+To drive the native agent loop live with no local GPU, connect Google Gemini Flash:
+
+```bash
+export GEMINI_API_KEY="your-api-key"
+fak chat --provider gemini --model gemini-3.8-flash
+```
+
+See the [interactive showcase](docs/showcase.html) for the guided tour.
 
 ## Latest hardware results — 2026-09-03
 
@@ -92,4 +101,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-02 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-02 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-03 vs VERSION 0.46.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-03 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

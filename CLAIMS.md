@@ -33,6 +33,7 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 <a id="pre-flight-ladder-grammar-rung"></a>
 - [SHIPPED] [Pre-flight ladder + grammar rung](docs/claims/pre-flight-ladder-grammar-rung.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="context-mmu-write-time-result-admission"></a>
+## Context-MMU
 - [SHIPPED] [Context-MMU (write-time result admission)](docs/claims/context-mmu-write-time-result-admission.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="answer-shape-the-consumer-facing-degeneration-verbosity-witness"></a>
 - [SHIPPED] [Answer-shape: the consumer-facing degeneration/verbosity witness](docs/claims/answer-shape-the-consumer-facing-degeneration-verbosity-witness.md) [exposure: default-on]
@@ -55,6 +56,7 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 <a id="in-kernel-model-the-model-fused-into-the-kernel"></a>
 - [SHIPPED] [In-kernel model (the model fused into the kernel)](docs/claims/in-kernel-model-the-model-fused-into-the-kernel.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="security-substrate-the-kernel-stops-believing-the-model"></a>
+## Security substrate
 - [SHIPPED] [Security substrate (the kernel stops believing the model)](docs/claims/security-substrate-the-kernel-stops-believing-the-model.md) [exposure: default-on]
 <a id="gateway-fak-serve"></a>
 - [SHIPPED] [Gateway (`fak serve`)](docs/claims/gateway-fak-serve.md) [exposure: default-on]
