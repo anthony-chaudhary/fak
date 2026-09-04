@@ -16,17 +16,22 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
-const (
-	Schema        = "fleet-trend/1"
-	DefaultLedger = ".fak/nightrun/fleet-status-history.jsonl"
-	DefaultCap    = 500
-)
+// Schema is the versioned schema identifier for fleet-trend records.
+const Schema = "fleet-trend/1"
 
+// DefaultLedger is the default repository-relative path to the fleet status history JSONL ledger.
+const DefaultLedger = ".fak/nightrun/fleet-status-history.jsonl"
+
+// DefaultCap is the default maximum number of historical rows retained in the trend ledger.
+const DefaultCap = 500
+
+// MetricDef pairs a metric key with its display label.
 type MetricDef struct {
 	Key   string
 	Label string
 }
 
+// Metrics defines the default gauge metrics tracked and rendered in trend lines.
 var Metrics = []MetricDef{
 	{Key: "usable", Label: "usable"},
 	{Key: "live", Label: "live"},
@@ -54,6 +59,7 @@ const landsWitnessedKey = "lands_witnessed"
 
 var blocks = []rune("▁▂▃▄▅▆▇█")
 
+// MetricsOf extracts gauge metrics and optional throughput counters from a raw fleet status snapshot.
 func MetricsOf(snap map[string]any) map[string]float64 {
 	sessions := asMap(snap["sessions"])
 	byCategory := asMap(sessions["by_category"])
@@ -82,6 +88,7 @@ func MetricsOf(snap map[string]any) map[string]float64 {
 	return m
 }
 
+// Append records a new timestamped metric row to the ledger, capping total rows to capRows.
 func Append(path string, metrics map[string]float64, now string, capRows int) (map[string]any, error) {
 	row := map[string]any{"ts": now}
 	for _, metric := range Metrics {
@@ -119,6 +126,7 @@ func Append(path string, metrics map[string]float64, now string, capRows int) (m
 	return row, nil
 }
 
+// Tail returns the trailing n rows from the ledger, or all rows if n <= 0.
 func Tail(path string, n int) []map[string]any {
 	rows := foldedRows(path)
 	if n <= 0 || n >= len(rows) {
@@ -127,6 +135,7 @@ func Tail(path string, n int) []map[string]any {
 	return rows[len(rows)-n:]
 }
 
+// Spark renders a compact unicode sparkline string representing the trajectory of a numeric slice.
 func Spark(values []float64) string {
 	if len(values) == 0 {
 		return ""
@@ -158,6 +167,7 @@ func Spark(values []float64) string {
 	return b.String()
 }
 
+// Trend summarizes the trajectory of a single metric across a series of ledger rows.
 type Trend struct {
 	Key   string  `json:"key"`
 	First float64 `json:"first"`
@@ -167,6 +177,7 @@ type Trend struct {
 	N     int     `json:"n"`
 }
 
+// MetricTrend calculates the start value, end value, delta, and sparkline for a given metric key across rows.
 func MetricTrend(rows []map[string]any, key string) (Trend, bool) {
 	series := make([]float64, 0, len(rows))
 	for _, row := range rows {
@@ -197,6 +208,7 @@ func MetricTrend(rows []map[string]any, key string) (Trend, bool) {
 	}, true
 }
 
+// RenderLine formats a one-line summary of gauge metric trends across the provided rows.
 func RenderLine(rows []map[string]any) string {
 	if len(rows) == 0 {
 		return ""
@@ -457,6 +469,7 @@ func counterValue(v any) (float64, bool) {
 	return 0, false
 }
 
+// ISONow returns the current UTC time formatted as an RFC3339 string truncated to the second.
 func ISONow() string {
 	return time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
 }
