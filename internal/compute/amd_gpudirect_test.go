@@ -517,3 +517,36 @@ func TestAMDGPUDirectHAL_HSAMemorySignal(t *testing.T) {
 		t.Errorf("failed to retrieve registered signal: %+v", retrieved)
 	}
 }
+
+func TestAMDGPUDirectHAL_HSADoorbellSynchronization(t *testing.T) {
+	doorbell := NewHSADoorbell("db_queue_0", uintptr(0xf5002000), 1)
+	if doorbell.ReadRelaxed() != 0 {
+		t.Errorf("expected initial doorbell packet index 0, got %d", doorbell.ReadRelaxed())
+	}
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		doorbell.Ring(128)
+	}()
+
+	ok, err := doorbell.WaitPacket(128, 500*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("WaitPacket failed: ok=%v, err=%v", ok, err)
+	}
+	if doorbell.ReadRelaxed() != 128 {
+		t.Errorf("expected doorbell value 128, got %d", doorbell.ReadRelaxed())
+	}
+
+	// Test timeout
+	ok, err = doorbell.WaitPacket(99999, 10*time.Millisecond)
+	if err == nil || ok {
+		t.Errorf("expected timeout error for unreachable packet, got ok=%v, err=%v", ok, err)
+	}
+
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{})
+	engine.RegisterDoorbell(doorbell)
+	retrieved := engine.GetDoorbell("db_queue_0")
+	if retrieved == nil || retrieved.ReadRelaxed() != 128 {
+		t.Errorf("failed to retrieve registered doorbell: %+v", retrieved)
+	}
+}

@@ -191,6 +191,53 @@ func (s *HSAMemorySignal) WaitRelaxed(target int64, timeout time.Duration) (bool
 	return false, fmt.Errorf("hsa_signal %s timed out waiting for target %d (current=%d)", s.SignalID, target, s.value.Load())
 }
 
+// HSADoorbell models an aligned 64-bit hardware dispatch doorbell (AQL packet submission).
+// Host CPU or peer GPU wavefronts ring the doorbell to notify the AMD GPU Command Processor (CP)
+// of newly submitted AQL packets with sub-microsecond latency.
+type HSADoorbell struct {
+	value   atomic.Uint64
+	ID      string  `json:"doorbell_id"`
+	Address uintptr `json:"address"`
+	QueueID uint32  `json:"queue_id"`
+}
+
+// NewHSADoorbell allocates a new HSA dispatch doorbell.
+func NewHSADoorbell(id string, addr uintptr, queueID uint32) *HSADoorbell {
+	return &HSADoorbell{
+		ID:      id,
+		Address: addr,
+		QueueID: queueID,
+	}
+}
+
+// Ring atomically stores the packet write index with release memory semantics, ringing the doorbell.
+func (d *HSADoorbell) Ring(packetIndex uint64) {
+	d.value.Store(packetIndex)
+}
+
+// ReadRelaxed reads the latest packet index written to the doorbell.
+func (d *HSADoorbell) ReadRelaxed() uint64 {
+	return d.value.Load()
+}
+
+// WaitPacket polls the doorbell until the packet index reaches target or timeout expires.
+// Simulates CP doorbell polling with sub-microsecond spin before backing off.
+func (d *HSADoorbell) WaitPacket(target uint64, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	for i := 0; i < 5000; i++ {
+		if d.value.Load() >= target {
+			return true, nil
+		}
+	}
+	for time.Now().Before(deadline) {
+		if d.value.Load() >= target {
+			return true, nil
+		}
+		time.Sleep(10 * time.Microsecond)
+	}
+	return false, fmt.Errorf("hsa_doorbell %s timed out waiting for packet %d (current=%d)", d.ID, target, d.value.Load())
+}
+
 // AMDGPUDirectConfig defines configuration and topology hints for AMDGPUDirectHAL.
 type AMDGPUDirectConfig struct {
 	EnableLargeBARCheck    bool   `json:"enable_large_bar_check"`
@@ -208,6 +255,7 @@ type AMDGPUDirectHAL struct {
 	dmabufs    map[int]*DMABUFHandle
 	rdmaMRs    map[uint32]*RDMARegisteredRegion
 	signals    map[string]*HSAMemorySignal
+	doorbells  map[string]*HSADoorbell
 	transfers  int64
 	bytesMoved uint64
 	nextFD     int
@@ -220,13 +268,14 @@ func NewAMDGPUDirectHAL(cfg AMDGPUDirectConfig) *AMDGPUDirectHAL {
 		cfg.DefaultPageSize = 4096
 	}
 	return &AMDGPUDirectHAL{
-		cfg:     cfg,
-		nodes:   make(map[int]*AMDDeviceNode),
-		dmabufs: make(map[int]*DMABUFHandle),
-		rdmaMRs: make(map[uint32]*RDMARegisteredRegion),
-		signals: make(map[string]*HSAMemorySignal),
-		nextFD:  100,
-		nextKey: 0x2000,
+		cfg:       cfg,
+		nodes:     make(map[int]*AMDDeviceNode),
+		dmabufs:   make(map[int]*DMABUFHandle),
+		rdmaMRs:   make(map[uint32]*RDMARegisteredRegion),
+		signals:   make(map[string]*HSAMemorySignal),
+		doorbells: make(map[string]*HSADoorbell),
+		nextFD:    100,
+		nextKey:   0x2000,
 	}
 }
 
@@ -620,6 +669,23 @@ func (e *AMDGPUDirectHAL) GetSignal(id string) *HSAMemorySignal {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.signals[id]
+}
+
+// RegisterDoorbell registers an HSA dispatch doorbell with the coordinator.
+func (e *AMDGPUDirectHAL) RegisterDoorbell(d *HSADoorbell) {
+	if d == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.doorbells[d.ID] = d
+}
+
+// GetDoorbell retrieves a registered HSA dispatch doorbell by ID.
+func (e *AMDGPUDirectHAL) GetDoorbell(id string) *HSADoorbell {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.doorbells[id]
 }
 
 // AuditReport summarizes the configuration, hardware posture, and potential bottlenecks.
