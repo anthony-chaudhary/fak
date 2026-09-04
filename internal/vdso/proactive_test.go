@@ -533,3 +533,242 @@ func TestProactive_ConcurrencyHighChurn(t *testing.T) {
 	}
 	t.Logf("Concurrency test completed: evals=%d, hits=%d, falls=%d", evals, hits, falls)
 }
+
+// TestProactive_StrictMutationVeto verifies that proactive inline vDSO pre-interception
+// strictly vetoes mutating operations (tools, plan steps, and bash commands), ensuring
+// 0 mutations are intercepted inline and all fall through to the remote model (ok=false, res=nil).
+// It also verifies that read-only file/command calls are intercepted with 0ms model latency
+// and 0 remote tokens when fresh in vDSO.
+func TestProactive_StrictMutationVeto(t *testing.T) {
+	ctx := context.Background()
+	v := New(64)
+	interceptor := NewProactiveInterceptor(WithVDSO(v))
+
+	// Pre-populate vDSO cache with entries for both read-only and mutating targets
+	// to prove that mutating operations are vetoed by structure before cache lookup.
+	dummyContent := "package dummy\n"
+	emitComplete(v, ToolClaudeRead, `{"filePath":"internal/vdso/proactive.go"}`, dummyContent)
+	emitComplete(v, ToolClaudeRead, `{"filePath":"foo.txt"}`, "foo content")
+	emitComplete(v, ToolClaudeRead, `{"filePath":"bar.go"}`, "bar content")
+	emitComplete(v, ToolClaudeBash, `{"command":"git status"}`, "On branch main\nnothing to commit, working tree clean")
+	emitComplete(v, ToolClaudeBash, `{"command":"rm -rf scratch"}`, "deleted")
+	emitComplete(v, ToolClaudeBash, `{"command":"git commit -m 'wip'"}`, "[main 1234567] wip")
+	emitComplete(v, ToolClaudeBash, `{"command":"git push"}`, "Everything up-to-date")
+	emitComplete(v, ToolClaudeGlob, `{"pattern":"*.go","path":"."}`, `{"matches":["proactive.go"]}`)
+	emitComplete(v, ToolClaudeGrep, `{"pattern":"pattern","path":"."}`, `{"matches":[{"path":"proactive.go","line":1}]}`)
+
+	t.Run("Mutating tools vetoed", func(t *testing.T) {
+		mutatingTools := []string{"Write", "Edit", "delete", "rm", "truncate"}
+		for _, tool := range mutatingTools {
+			// Direct TargetTool
+			turn1 := TurnState{
+				TurnIndex:  1,
+				TargetTool: tool,
+				TargetPath: "foo.txt",
+			}
+			res1, ok1 := interceptor.Evaluate(ctx, turn1)
+			if ok1 || res1 != nil {
+				t.Errorf("expected mutating tool %q to be vetoed (ok=false, res=nil), got ok=%v, res=%v", tool, ok1, res1)
+			}
+
+			// Bare TargetTool without path
+			turn2 := TurnState{
+				TurnIndex:  2,
+				TargetTool: tool,
+			}
+			res2, ok2 := interceptor.Evaluate(ctx, turn2)
+			if ok2 || res2 != nil {
+				t.Errorf("expected bare mutating tool %q to be vetoed (ok=false, res=nil), got ok=%v, res=%v", tool, ok2, res2)
+			}
+
+			// JSON plan step naming mutating tool
+			turn3 := TurnState{
+				TurnIndex: 3,
+				PlanStep:  fmt.Sprintf(`{"tool":%q,"filePath":"foo.txt"}`, tool),
+			}
+			res3, ok3 := interceptor.Evaluate(ctx, turn3)
+			if ok3 || res3 != nil {
+				t.Errorf("expected JSON plan step with mutating tool %q to be vetoed, got ok=%v, res=%v", tool, ok3, res3)
+			}
+		}
+	})
+
+	t.Run("Mutating plan steps vetoed", func(t *testing.T) {
+		mutatingSteps := []string{
+			"Write file foo.txt",
+			"Edit internal/vdso/proactive.go",
+			"Delete bar.go",
+			"rm -rf scratch",
+			"git commit -m 'wip'",
+			"git push",
+			// Also verify with backticks
+			"`rm -rf scratch`",
+			"`git commit -m 'wip'`",
+			"`git push`",
+			"`Edit internal/vdso/proactive.go`",
+			"`Write file foo.txt`",
+			"`Delete bar.go`",
+		}
+		for _, step := range mutatingSteps {
+			turn := TurnState{
+				TurnIndex: 10,
+				PlanStep:  step,
+			}
+			res, ok := interceptor.Evaluate(ctx, turn)
+			if ok || res != nil {
+				t.Errorf("expected mutating plan step %q to be vetoed (ok=false, res=nil), got ok=%v, res=%v", step, ok, res)
+			}
+		}
+	})
+
+	t.Run("Mutating bash commands vetoed", func(t *testing.T) {
+		mutatingCommands := []string{
+			"rm -rf scratch",
+			"git commit -m 'wip'",
+			"git push",
+			"git push origin main",
+			"truncate -s 0 foo.txt",
+			"mv old.go new.go",
+			"cp old.go new.go",
+			"touch foo.txt",
+			"echo 'data' > out.txt",
+			"chmod +x script.sh",
+			"git checkout -b new-branch",
+			"git merge feature",
+			"git reset --hard HEAD~1",
+		}
+		for _, cmd := range mutatingCommands {
+			// Via TargetTool = "bash", TargetPath = cmd
+			turn1 := TurnState{
+				TurnIndex:  20,
+				TargetTool: "bash",
+				TargetPath: cmd,
+			}
+			res1, ok1 := interceptor.Evaluate(ctx, turn1)
+			if ok1 || res1 != nil {
+				t.Errorf("expected mutating bash command %q via TargetPath to be vetoed, got ok=%v, res=%v", cmd, ok1, res1)
+			}
+
+			// Via TargetTool = "bash", TargetPattern = cmd
+			turn2 := TurnState{
+				TurnIndex:     21,
+				TargetTool:    "bash",
+				TargetPattern: cmd,
+			}
+			res2, ok2 := interceptor.Evaluate(ctx, turn2)
+			if ok2 || res2 != nil {
+				t.Errorf("expected mutating bash command %q via TargetPattern to be vetoed, got ok=%v, res=%v", cmd, ok2, res2)
+			}
+
+			// Via PlanStep
+			turn3 := TurnState{
+				TurnIndex: 22,
+				PlanStep:  cmd,
+			}
+			res3, ok3 := interceptor.Evaluate(ctx, turn3)
+			if ok3 || res3 != nil {
+				t.Errorf("expected mutating bash command %q via PlanStep to be vetoed, got ok=%v, res=%v", cmd, ok3, res3)
+			}
+		}
+	})
+
+	t.Run("Read-only operations intercepted with 0ms latency and 0 remote tokens", func(t *testing.T) {
+		readOnlyCases := []struct {
+			name     string
+			turn     TurnState
+			wantTool string
+		}{
+			{
+				name: "Read internal/vdso/proactive.go via PlanStep",
+				turn: TurnState{
+					TurnIndex: 30,
+					PlanStep:  "Read internal/vdso/proactive.go",
+				},
+				wantTool: ToolClaudeRead,
+			},
+			{
+				name: "Read internal/vdso/proactive.go via TargetTool",
+				turn: TurnState{
+					TurnIndex:  31,
+					TargetTool: "Read",
+					TargetPath: "internal/vdso/proactive.go",
+				},
+				wantTool: ToolClaudeRead,
+			},
+			{
+				name: "git status via PlanStep",
+				turn: TurnState{
+					TurnIndex: 32,
+					PlanStep:  "git status",
+				},
+				wantTool: ToolClaudeBash,
+			},
+			{
+				name: "git status via TargetTool",
+				turn: TurnState{
+					TurnIndex:  33,
+					TargetTool: "bash",
+					TargetPath: "git status",
+				},
+				wantTool: ToolClaudeBash,
+			},
+			{
+				name: "Glob *.go via PlanStep",
+				turn: TurnState{
+					TurnIndex: 34,
+					PlanStep:  "Glob *.go",
+				},
+				wantTool: ToolClaudeGlob,
+			},
+			{
+				name: "Glob *.go via TargetTool",
+				turn: TurnState{
+					TurnIndex:     35,
+					TargetTool:    "Glob",
+					TargetPattern: "*.go",
+					TargetPath:    ".",
+				},
+				wantTool: ToolClaudeGlob,
+			},
+			{
+				name: "Grep pattern via PlanStep",
+				turn: TurnState{
+					TurnIndex: 36,
+					PlanStep:  "Grep pattern",
+				},
+				wantTool: ToolClaudeGrep,
+			},
+			{
+				name: "Grep pattern via TargetTool",
+				turn: TurnState{
+					TurnIndex:     37,
+					TargetTool:    "Grep",
+					TargetPattern: "pattern",
+					TargetPath:    ".",
+				},
+				wantTool: ToolClaudeGrep,
+			},
+		}
+
+		for _, tc := range readOnlyCases {
+			t.Run(tc.name, func(t *testing.T) {
+				res, ok := interceptor.Evaluate(ctx, tc.turn)
+				if !ok || res == nil {
+					t.Fatalf("expected read-only operation %q to be intercepted inline, got ok=%v, res=%v", tc.name, ok, res)
+				}
+				if !res.ServedInline {
+					t.Errorf("ServedInline = false, want true")
+				}
+				if res.ModelLatency != 0 {
+					t.Errorf("ModelLatency = %v, want 0", res.ModelLatency)
+				}
+				if res.RemoteTokens != 0 {
+					t.Errorf("RemoteTokens = %v, want 0", res.RemoteTokens)
+				}
+				if res.Tool != tc.wantTool {
+					t.Errorf("Tool = %q, want %q", res.Tool, tc.wantTool)
+				}
+			})
+		}
+	})
+}
