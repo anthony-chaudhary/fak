@@ -119,6 +119,7 @@ concurrent = [
   "godfileceiling",
   "microagent",
   "l3kv",
+  "l3server",
   "cvregress",
   "zaitask",
   "macfit",
@@ -608,6 +609,7 @@ autopick = [
   "godfileceiling",
   "microagent",
   "l3kv",
+  "l3server",
   "doomloop",
   "cvregress",
   "zaitask",
@@ -908,6 +910,8 @@ mtpeval = ["internal/mtpeval/**"]
 faultlab = ["internal/faultlab/**"]
 gcpgpu = ["internal/gcpgpu/**"]
 superstream = ["internal/superstream/**"]
+observability = ["internal/observability/**"]
+reflexagent = ["internal/reflexagent/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -2563,7 +2567,7 @@ fix      = "Restore the checker to its declared bytes and re-grade, or -- if the
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
 
 [reasons.TEST_TAMPER_REFUSED]
-category = "OPERATOR_GATE"
+category = "INTEGRITY_GATE"
 refusal  = true
 summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
 fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
