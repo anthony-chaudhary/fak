@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
 )
 
-func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
+func TestDynamicEffort(t *testing.T) {
 	sessionID := "sess-dyn-effort-42"
 
 	// Turn 1: User Prompt (initial planning / decomposition) -> budget 2048 / high
@@ -40,17 +40,28 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if dec1.AllocatedBudget != 2048 {
 		t.Errorf("turn 1 budget: got %d, want 2048", dec1.AllocatedBudget)
 	}
-	if dec1.Effort != agentopt.EffortHigh {
-		t.Errorf("turn 1 effort: got %s, want %s", dec1.Effort, agentopt.EffortHigh)
+	if dec1.ThinkingBudget != 2048 {
+		t.Errorf("turn 1 thinking_budget: got %d, want 2048", dec1.ThinkingBudget)
 	}
-	if dec1.Category != agentopt.CategoryPlanAndDecompose {
-		t.Errorf("turn 1 category: got %s, want %s", dec1.Category, agentopt.CategoryPlanAndDecompose)
+	if dec1.Effort != EffortHigh {
+		t.Errorf("turn 1 effort: got %s, want %s", dec1.Effort, EffortHigh)
+	}
+	if dec1.Category != CategoryPlanAndDecompose {
+		t.Errorf("turn 1 category: got %s, want %s", dec1.Category, CategoryPlanAndDecompose)
+	}
+	if dec1.VolumeMultiplier() != 1.6 {
+		t.Errorf("turn 1 volume multiplier: got %f, want 1.6", dec1.VolumeMultiplier())
 	}
 	if reqTurn1.ReasoningEffort != "high" {
 		t.Errorf("turn 1 reasoning_effort: got %s, want high", reqTurn1.ReasoningEffort)
 	}
 	if reqTurn1.AffinityKey != sessionID {
 		t.Errorf("turn 1 session identity: got %s, want %s", reqTurn1.AffinityKey, sessionID)
+	}
+
+	var thinkCfg1 map[string]int
+	if err := json.Unmarshal(reqTurn1.ThinkingConfig, &thinkCfg1); err != nil || thinkCfg1["thinkingBudget"] != 2048 {
+		t.Errorf("turn 1 thinkingConfig: got %v, want thinkingBudget=2048", thinkCfg1)
 	}
 
 	streamAfter1, _ := PromptPrefixStreamBytes(reqTurn1.Messages, "", nil)
@@ -98,17 +109,28 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if dec2.AllocatedBudget != 0 {
 		t.Errorf("turn 2 budget: got %d, want 0", dec2.AllocatedBudget)
 	}
-	if dec2.Effort != agentopt.EffortNone {
-		t.Errorf("turn 2 effort: got %s, want %s", dec2.Effort, agentopt.EffortNone)
+	if dec2.ThinkingBudget != 0 {
+		t.Errorf("turn 2 thinking_budget: got %d, want 0", dec2.ThinkingBudget)
 	}
-	if dec2.Category != agentopt.CategoryRoutineTool {
-		t.Errorf("turn 2 category: got %s, want %s", dec2.Category, agentopt.CategoryRoutineTool)
+	if dec2.Effort != EffortNone {
+		t.Errorf("turn 2 effort: got %s, want %s", dec2.Effort, EffortNone)
+	}
+	if dec2.Category != CategoryRoutineTool {
+		t.Errorf("turn 2 category: got %s, want %s", dec2.Category, CategoryRoutineTool)
+	}
+	if dec2.VolumeMultiplier() != 0.4 {
+		t.Errorf("turn 2 volume multiplier: got %f, want 0.4", dec2.VolumeMultiplier())
 	}
 	if reqTurn2.ReasoningEffort != "none" {
 		t.Errorf("turn 2 reasoning_effort: got %s, want none", reqTurn2.ReasoningEffort)
 	}
 	if reqTurn2.AffinityKey != sessionID {
 		t.Errorf("turn 2 session identity: got %s, want %s", reqTurn2.AffinityKey, sessionID)
+	}
+
+	var thinkCfg2 map[string]int
+	if err := json.Unmarshal(reqTurn2.ThinkingConfig, &thinkCfg2); err != nil || thinkCfg2["thinkingBudget"] != 0 {
+		t.Errorf("turn 2 thinkingConfig: got %v, want thinkingBudget=0", thinkCfg2)
 	}
 
 	streamAfter2, _ := PromptPrefixStreamBytes(reqTurn2.Messages, "", nil)
@@ -158,17 +180,28 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if dec3.AllocatedBudget != 0 {
 		t.Errorf("turn 3 budget: got %d, want 0", dec3.AllocatedBudget)
 	}
-	if dec3.Effort != agentopt.EffortNone {
-		t.Errorf("turn 3 effort: got %s, want %s", dec3.Effort, agentopt.EffortNone)
+	if dec3.ThinkingBudget != 0 {
+		t.Errorf("turn 3 thinking_budget: got %d, want 0", dec3.ThinkingBudget)
 	}
-	if dec3.Category != agentopt.CategoryRoutineTool {
-		t.Errorf("turn 3 category: got %s, want %s", dec3.Category, agentopt.CategoryRoutineTool)
+	if dec3.Effort != EffortNone {
+		t.Errorf("turn 3 effort: got %s, want %s", dec3.Effort, EffortNone)
+	}
+	if dec3.Category != CategoryRoutineTool {
+		t.Errorf("turn 3 category: got %s, want %s", dec3.Category, CategoryRoutineTool)
+	}
+	if dec3.VolumeMultiplier() != 0.4 {
+		t.Errorf("turn 3 volume multiplier: got %f, want 0.4", dec3.VolumeMultiplier())
 	}
 	if reqTurn3.ReasoningEffort != "none" {
 		t.Errorf("turn 3 reasoning_effort: got %s, want none", reqTurn3.ReasoningEffort)
 	}
 	if reqTurn3.AffinityKey != sessionID {
 		t.Errorf("turn 3 session identity: got %s, want %s", reqTurn3.AffinityKey, sessionID)
+	}
+
+	var thinkCfg3 map[string]int
+	if err := json.Unmarshal(reqTurn3.ThinkingConfig, &thinkCfg3); err != nil || thinkCfg3["thinkingBudget"] != 0 {
+		t.Errorf("turn 3 thinkingConfig: got %v, want thinkingBudget=0", thinkCfg3)
 	}
 
 	streamAfter3, _ := PromptPrefixStreamBytes(reqTurn3.Messages, "", nil)
@@ -220,11 +253,17 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if dec4.AllocatedBudget != 2048 {
 		t.Errorf("turn 4 budget: got %d, want 2048", dec4.AllocatedBudget)
 	}
-	if dec4.Effort != agentopt.EffortHigh {
-		t.Errorf("turn 4 effort: got %s, want %s", dec4.Effort, agentopt.EffortHigh)
+	if dec4.ThinkingBudget != 2048 {
+		t.Errorf("turn 4 thinking_budget: got %d, want 2048", dec4.ThinkingBudget)
 	}
-	if dec4.Category != agentopt.CategoryErrorRecovery {
-		t.Errorf("turn 4 category: got %s, want %s", dec4.Category, agentopt.CategoryErrorRecovery)
+	if dec4.Effort != EffortHigh {
+		t.Errorf("turn 4 effort: got %s, want %s", dec4.Effort, EffortHigh)
+	}
+	if dec4.Category != CategoryErrorRecovery {
+		t.Errorf("turn 4 category: got %s, want %s", dec4.Category, CategoryErrorRecovery)
+	}
+	if dec4.VolumeMultiplier() != 1.6 {
+		t.Errorf("turn 4 volume multiplier: got %f, want 1.6", dec4.VolumeMultiplier())
 	}
 	if reqTurn4.ReasoningEffort != "high" {
 		t.Errorf("turn 4 reasoning_effort: got %s, want high", reqTurn4.ReasoningEffort)
@@ -233,12 +272,17 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 		t.Errorf("turn 4 session identity: got %s, want %s", reqTurn4.AffinityKey, sessionID)
 	}
 
+	var thinkCfg4 map[string]int
+	if err := json.Unmarshal(reqTurn4.ThinkingConfig, &thinkCfg4); err != nil || thinkCfg4["thinkingBudget"] != 2048 {
+		t.Errorf("turn 4 thinkingConfig: got %v, want thinkingBudget=2048", thinkCfg4)
+	}
+
 	streamAfter4, _ := PromptPrefixStreamBytes(reqTurn4.Messages, "", nil)
 	if !bytes.Equal(streamBefore4, streamAfter4) {
 		t.Fatalf("turn 4: prompt prefix mutated during dynamic effort modulation")
 	}
 
-	// Turn 5: Final Synthesis prompt -> budget 1024 / medium
+	// Turn 5: Final Synthesis prompt -> budget 1024 / medium (CategoryDiagnostic)
 	msgsTurn5 := []agent.Message{
 		msgsTurn4[0],
 		msgsTurn4[1],
@@ -277,11 +321,17 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if dec5.AllocatedBudget != 1024 {
 		t.Errorf("turn 5 budget: got %d, want 1024", dec5.AllocatedBudget)
 	}
-	if dec5.Effort != agentopt.EffortMedium {
-		t.Errorf("turn 5 effort: got %s, want %s", dec5.Effort, agentopt.EffortMedium)
+	if dec5.ThinkingBudget != 1024 {
+		t.Errorf("turn 5 thinking_budget: got %d, want 1024", dec5.ThinkingBudget)
 	}
-	if dec5.Category != agentopt.CategorySynthesisReport {
-		t.Errorf("turn 5 category: got %s, want %s", dec5.Category, agentopt.CategorySynthesisReport)
+	if dec5.Effort != EffortMedium {
+		t.Errorf("turn 5 effort: got %s, want %s", dec5.Effort, EffortMedium)
+	}
+	if dec5.Category != CategoryDiagnostic {
+		t.Errorf("turn 5 category: got %s, want %s", dec5.Category, CategoryDiagnostic)
+	}
+	if dec5.VolumeMultiplier() != 1.0 {
+		t.Errorf("turn 5 volume multiplier: got %f, want 1.0", dec5.VolumeMultiplier())
 	}
 	if reqTurn5.ReasoningEffort != "medium" {
 		t.Errorf("turn 5 reasoning_effort: got %s, want medium", reqTurn5.ReasoningEffort)
@@ -290,12 +340,17 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 		t.Errorf("turn 5 session identity: got %s, want %s", reqTurn5.AffinityKey, sessionID)
 	}
 
+	var thinkCfg5 map[string]int
+	if err := json.Unmarshal(reqTurn5.ThinkingConfig, &thinkCfg5); err != nil || thinkCfg5["thinkingBudget"] != 1024 {
+		t.Errorf("turn 5 thinkingConfig: got %v, want thinkingBudget=1024", thinkCfg5)
+	}
+
 	streamAfter5, _ := PromptPrefixStreamBytes(reqTurn5.Messages, "", nil)
 	if !bytes.Equal(streamBefore5, streamAfter5) {
 		t.Fatalf("turn 5: prompt prefix mutated during dynamic effort modulation")
 	}
 
-	// Verify the overall dynamic thinkingBudget trajectory across all turns: [2048, 0, 0, 2048, 1024]
+	// Verify the exact budget sequence: [2048, 0, 0, 2048, 1024]
 	gotBudgets := []int{
 		dec1.AllocatedBudget,
 		dec2.AllocatedBudget,
@@ -308,6 +363,7 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 		t.Fatalf("thinkingBudget trajectory mismatch:\n  got:  %v\n  want: %v", gotBudgets, wantBudgets)
 	}
 
+	// Verify the exact effort sequence: [high, none, none, high, medium]
 	gotEfforts := []string{
 		string(dec1.Effort),
 		string(dec2.Effort),
@@ -318,6 +374,46 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	wantEfforts := []string{"high", "none", "none", "high", "medium"}
 	if !reflect.DeepEqual(gotEfforts, wantEfforts) {
 		t.Fatalf("effort trajectory mismatch:\n  got:  %v\n  want: %v", gotEfforts, wantEfforts)
+	}
+
+	// Verify session continuity (AffinityKey preserved across all turns)
+	turns := []*ChatRequest{reqTurn1, reqTurn2, reqTurn3, reqTurn4, reqTurn5}
+	for i, req := range turns {
+		if req.AffinityKey != sessionID {
+			t.Errorf("turn %d affinity key: got %s, want %s", i+1, req.AffinityKey, sessionID)
+		}
+	}
+
+	// Verify DynamicEffortDecision metrics across all decisions
+	decisions := []*DynamicEffortDecision{dec1, dec2, dec3, dec4, dec5}
+	for i, dec := range decisions {
+		if dec.Reason == "" {
+			t.Errorf("turn %d decision reason is empty", i+1)
+		}
+		if dec.AllocatedBudget != wantBudgets[i] {
+			t.Errorf("turn %d decision allocated budget: got %d, want %d", i+1, dec.AllocatedBudget, wantBudgets[i])
+		}
+		if dec.ThinkingBudget != wantBudgets[i] {
+			t.Errorf("turn %d decision thinking budget: got %d, want %d", i+1, dec.ThinkingBudget, wantBudgets[i])
+		}
+	}
+
+	// Verify reasoning effort overrides when caller sets an initial divergent effort
+	reqOverride := &ChatRequest{
+		Model:           "gemini-2.5-flash",
+		ReasoningEffort: "low",
+		Messages:        msgsTurn4,
+		AffinityKey:     sessionID,
+	}
+	decOverride := ApplyDynamicEffort(reqOverride)
+	if decOverride == nil {
+		t.Fatalf("override check: expected non-nil decision")
+	}
+	if reqOverride.ReasoningEffort != "high" {
+		t.Errorf("reasoning effort override: expected 'high', got %s", reqOverride.ReasoningEffort)
+	}
+	if decOverride.AllocatedBudget != 2048 {
+		t.Errorf("reasoning effort override budget: got %d, want 2048", decOverride.AllocatedBudget)
 	}
 
 	// Verify message preservation
@@ -333,6 +429,10 @@ func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
 	if !ValidateMessagesPreserved(msgsTurn4, msgsTurn5) {
 		t.Errorf("turn 4 messages not byte-preserved in turn 5")
 	}
+}
+
+func TestDynamicEffort_TurnLevelSequence(t *testing.T) {
+	TestDynamicEffort(t)
 }
 
 func TestDynamicEffort_DiagnosticVerification(t *testing.T) {

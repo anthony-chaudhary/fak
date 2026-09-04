@@ -10,6 +10,28 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
 )
 
+// DynamicEffortDecision is an alias for agentopt.TurnEffortDecision representing
+// the adjudicated effort decision and token budget for a turn.
+type DynamicEffortDecision = agentopt.TurnEffortDecision
+
+// Operational category aliases for gateway dynamic effort classification.
+const (
+	CategoryPlanAndDecompose = agentopt.CategoryPlanAndDecompose
+	CategoryRoutineTool      = agentopt.CategoryRoutineTool
+	CategoryDiagnostic       = agentopt.CategoryDiagnosticAndVerification
+	CategoryDiagnosticVerify = agentopt.CategoryDiagnosticVerify
+	CategoryErrorRecovery    = agentopt.CategoryErrorRecovery
+	CategorySynthesisReport  = agentopt.CategorySynthesisReport
+)
+
+// Reasoning effort tier aliases.
+const (
+	EffortNone   = agentopt.EffortNone
+	EffortLow    = agentopt.EffortLow
+	EffortMedium = agentopt.EffortMedium
+	EffortHigh   = agentopt.EffortHigh
+)
+
 // ModelSupportsThinking reports whether the given model name natively supports
 // reasoning/thinking effort modulation (e.g. Gemini 2.0/2.5/3.8 Flash, OpenAI o1/o3/o4,
 // Anthropic Claude 3.7+ thinking).
