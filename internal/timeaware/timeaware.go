@@ -176,6 +176,11 @@ type Rollup struct {
 
 type interval struct{ start, end int64 }
 
+// Invariant: time-aware span aggregation is fail-closed and deterministic.
+// Invalid, unparseable, or duplicate spans are excluded from duration rollups and
+// tracked in error counters. Elapsed time, active effort, and waiting durations remain
+// strictly segregated.
+//
 // Aggregate calculates order-independent rollups from spans and attribution edges.
 // Invalid and duplicate spans are counted and excluded. Effort is the sum of active,
 // speculative, and post-cancel worker spans; waiting classes remain separate and are
