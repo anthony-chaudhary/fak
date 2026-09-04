@@ -71,7 +71,7 @@ coverage by family (positioned / discovered):
   pool             #########################... 40/44
   render-materialize ###########################. 212/216
   witness-proof    ###########################. 165/169
-  policy-capability ############################ 217/219
+  policy-capability ############################ 216/218
   support-maturity ###########################. 69/71
   attention        ############################ 86/87
   cache            ############################ 320/321
@@ -3090,7 +3090,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 40 | 44 | 4 |
 | render-materialize | 212 | 216 | 4 |
 | witness-proof | 165 | 169 | 4 |
-| policy-capability | 217 | 219 | 2 |
+| policy-capability | 216 | 218 | 2 |
 | support-maturity | 69 | 71 | 2 |
 | attention | 86 | 87 | 1 |
 | cache | 320 | 321 | 1 |

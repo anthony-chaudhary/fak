@@ -6129,6 +6129,11 @@
           "category": "incidental",
           "reason": "private helper checking if any session in table is running",
           "token": "hasActiveSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache session matching predicate",
+          "token": "MatchesSession"
         }
       ],
       "exclude": [
@@ -6172,6 +6177,7 @@
         "LifecycleSessionSchema",
         "LogicalSessionID",
         "MalformedSessionRef",
+        "MatchesSession",
         "ModelSlotsDuringToolWait",
         "MoveSession",
         "NarrowsSessions",
@@ -9487,6 +9493,21 @@
           "category": "incidental",
           "reason": "servewiring plumbingField key for policy runtime",
           "token": "PolicyRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyLRU"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyFIFO"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache eviction policy field",
+          "token": "eviction_policy"
         }
       ],
       "exclude": [
@@ -9521,6 +9542,8 @@
         "DispositionMultiCapability",
         "EmptyUsageGuard",
         "ErrNotAdjudicated",
+        "EvictionPolicyFIFO",
+        "EvictionPolicyLRU",
         "EvidenceAdjudication",
         "EvidencePolicy",
         "FAK_ADMISSION_POLICY",
@@ -9609,6 +9632,7 @@
         "empty_usage_policy",
         "endpointAdjudicate",
         "endpointAdjudication",
+        "eviction_policy",
         "executeLivePipeline",
         "executeTailPolicy",
         "fak_capability",
@@ -12206,6 +12230,16 @@
           "category": "incidental",
           "reason": "Local boolean variable in lock clearance",
           "token": "shouldEvict"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyLRU"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache FIFO eviction policy constant",
+          "token": "EvictionPolicyFIFO"
         }
       ],
       "id": "evict",
@@ -12219,6 +12253,8 @@
         "EvictHotKVPrefix",
         "EvictHotSnapshot",
         "EvictedByteCount",
+        "EvictionPolicyFIFO",
+        "EvictionPolicyLRU",
         "EvictionsPerHit",
         "KVDigestEvictor",
         "KVEvictionCostHazard",
