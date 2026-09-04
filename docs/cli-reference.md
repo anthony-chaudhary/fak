@@ -614,3 +614,83 @@ When `--concurrencies` is provided, it outputs an opt-in multi-concurrency servi
 and declared batch-capacity source. Single-point evaluation continues to emit `fak.serving-parity.v1`.
 Flags include `--concurrencies`, `--batch-capacities`, `--capacity-sources`, `--engines`,
 `--engine-receipts`, `--ttft-p99-budget-ms`, and `--itl-p99-budget-ms`. See [Model observability](benchmarks/model-observability.md).
+
+## `fak worktree worker`
+
+```bash
+fak worktree worker <defaults|prepare|land|reap|gc|list|publish|recover> [flags]
+```
+
+Manages detached git worktrees for isolated worker execution under the repository's single-trunk discipline (#1334 / #3165). Workers edit and build inside private detached worktrees pinned at trunk HEAD, isolating `GOCACHE`, `GOTMPDIR`, and workspace files. Completed diffs are serialized and landed back to `main` as stamped, signed commits via an isolated index and compare-and-swap (CAS) update. See the complete operator guide and runbook in [Managed worker worktrees](managed-worker-worktrees.md).
+
+### Safety defaults
+
+All destructive or administrative operations fail open and default to dry-run or read-only modes:
+- `reap --all-cold` defaults to a dry-run reporting would-reap worktrees; requires `--apply` or `FAK_WORKTREE_COLD_COLLECT=apply` to delete.
+- `gc` defaults to `--dry-run`; requires `--apply` to force-remove dead-owner worktrees.
+- `publish` requires explicit `--dry-run` or `--apply`.
+- `recover` defaults to read-only candidate inspection; cleanup requires `--cleanup` and refuses unlanded refs unless `--force` is supplied. Remote cleanup requires default-branch ancestry proof and `--apply`.
+
+### Sub-commands
+
+- `defaults`: Inspect resolved defaults and active environment overrides without modifying repository or filesystem state (`fak.worktree.defaults.v1`).
+  - `--json`: Emit machine-readable defaults report.
+  - `--root <dir>`: Repository root (default: discovered from working directory).
+- `prepare`: Create or reuse a detached worktree pinned at trunk HEAD (or `--base-sha`), stamped with owner PID and lane lease.
+  - `--lane <name>`: Worker lane (required).
+  - `--key <id>`: Worker unique key (required; issue number, session ID, or wave ID).
+  - `--base-sha <sha>`: Commit SHA to pin the worktree at (default: trunk `HEAD`).
+  - `--wt-root <dir>`: Worktree parent directory override (default: `FLEET_WORKER_WORKTREE_ROOT` or OS fallback).
+  - `--lease-id <id>`: Lease identity for the owner stamp (default: `FAK_LEASE_ID` or `resolve-<lane>`).
+  - `--owner-pid <pid>`: Owner PID to record in stamp (default: current PID).
+  - `--capacity-reason <why>`: Advisory explanation when active worktrees exceed setpoint (50).
+  - `--message <msg>`: Intended signed commit message for lifecycle tracking.
+  - `--path <path>`: Explicit intended touch path (repeatable; required with `--message` for `LAND_READY`).
+  - `--root <dir>`: Repository root.
+- `land`: Apply the worktree diff-since-base onto trunk as a single verified commit using an isolated index and CAS update.
+  - `--worktree <dir>`: Path to worker worktree (required).
+  - `--base-sha <sha>`: Commit SHA the worktree was pinned at (diff base; default: `HEAD`).
+  - `--msg-file <file>`: Commit message file for `git commit -s -F` (default: derived from worktree tip).
+  - `--paths <path>`: Scope commit to specific paths (repeatable; default: entire diff).
+  - `--verify <hook>`: Pre-land verification inside worktree (`off` or `go-build`).
+  - `--core-lock-maintenance-witness <claim>`: Witness claim required when modifying core-locked paths.
+  - `--recovery-remote <remote>`: Remote receiving candidate recovery ref before trunk CAS.
+  - `--require-remote-recovery`: Refuse trunk CAS if remote read-back fails.
+  - `--disambiguation-timeout-ms <ms>`: Disambiguation deadline (1..900000 ms; default 120000 ms).
+  - `--unsafe-skip-symptom-witness`: Bypass mandatory fail-to-pass symptom witness for `fix(*)` commits.
+  - `--root <dir>`: Repository root.
+- `reap`: Release clean worktrees within a deadline or perform bulk cold sweeps.
+  - `--worktree <dir>`: Single worktree directory to remove (refuses dirty trees).
+  - `--superseded-by <sha>`: Authorize removal of a dirty worktree if `<sha>` is on trunk and matches bytes.
+  - `--max-wait <duration>`: Removal deadline (default: `10s`).
+  - `--all-cold`: Bulk mode: enumerate all worktrees and reap cold ones (dead lease + past age floor + clean).
+  - `--apply`: Mutate disk in bulk mode (dry-run by default).
+  - `--age-floor-min <min>`: Grace floor in minutes for dead-lease worktrees (default: `30`).
+  - `--even-if-unlanded`: In bulk mode, also delete worktrees held only by uncommitted work.
+  - `--root <dir>`: Repository root.
+- `gc`: Owner-stamped leak garbage collection for abandoned worktrees (dead owner PID + released lease).
+  - `--max-age <duration>`: Minimum owner-stamp age (default: `30m`).
+  - `--dry-run`: Report candidates without deleting (default).
+  - `--apply`: Remove eligible worktrees and prune git admin entries.
+  - `--root <dir>`: Repository root.
+- `list`: Enumerate active worker worktrees and their lifecycle states.
+  - `--json`: Emit structured lifecycle inventory (`fak-worker-worktree-lifecycle/1`).
+  - `--capacity-reason <why>`: Record reason for retained capacity above setpoint.
+  - `--remote <remote>`: Include scrubbed host snapshots from remote mirror.
+  - `--fetch`: Refresh remote mirror before listing.
+  - `--root <dir>`: Repository root.
+- `publish`: Publish a scrubbed host lifecycle snapshot to a remote Git ref for cross-host observability.
+  - `--remote <remote>`: Remote repository receiving the snapshot (required).
+  - `--dry-run`: Validate publication without pushing (default).
+  - `--apply`: Push snapshot to remote ref.
+  - `--root <dir>`: Repository root.
+- `recover`: Inspect crash-resume candidates under `refs/fak/worker-land/*` and clean up landed refs.
+  - `--remote <remote>`: Remote to inspect (default: `origin`).
+  - `--fetch`: Refresh remote recovery mirror before listing.
+  - `--cleanup <ref>`: Delete one landed recovery ref (refuses unlanded refs).
+  - `--force`: Permit deleting an unlanded recovery ref.
+  - `--cleanup-remote <ref>`: Report or delete one remote recovery ref after default-branch ancestry proof.
+  - `--apply`: Apply remote cleanup (report-only by default).
+  - `--allow-peer`: Permit cleaning a peer's remote recovery ref.
+  - `--worktree-name <name>`: Local worktree name for ownership verification.
+  - `--root <dir>`: Repository root.
