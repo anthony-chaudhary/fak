@@ -113,6 +113,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchRungLedger(stdout, stderr, argv[1:])
 	case "reap":
 		return runDispatchReap(stdout, stderr, argv[1:])
+	case "reflex":
+		return runDispatchReflex(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
@@ -292,7 +294,7 @@ func dispAge(now, recency int64) string {
 func dispatchUsage(w io.Writer) {
 	fmt.Fprint(w, `fak dispatch — deterministic dispatch helpers
 
-  fak dispatch auto  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--lane L] [--exclude-lane L] [--required-workers N] [--context-tokens N] [--live] [--json]
+  fak dispatch auto  [--workspace DIR] [--backend claude|opencode|codex|micro] [--goal throughput|high-priority] [--lane L] [--exclude-lane L] [--required-workers N] [--context-tokens N] [--live] [--json]
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
@@ -304,10 +306,10 @@ func dispatchUsage(w io.Writer) {
   fak dispatch tier-status [--in FILE] [--demo] [--json]
   fak dispatch rollout-status [--in FILE] [--demo] [--json]
   fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
-  fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
-  fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--goal throughput|high-priority] [--live] [--json]
+  fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex|micro] [--goal throughput|high-priority] [--live] [--json]
+  fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex|micro] [--goal throughput|high-priority] [--live] [--json]
   fak dispatch worktree-ab [--in two-arm.json] [--json]
-  fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
+  fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex|micro] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch status [--runs-dir DIR] [--json | --markdown]
   fak dispatch sessions [--runs-dir DIR] [--reg-dir DIR] [--now UNIX] [--json | --markdown]
