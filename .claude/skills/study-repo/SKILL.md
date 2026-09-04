@@ -193,8 +193,14 @@ anchor, platform/version context, and refresh trigger. Open work is direction, n
 **Deep is the default, and for anything past a single-file peek that means FAN OUT.**
 Dispatch parallel `Explore`/`Agent` readers — one per subsystem the README map exposes
 (e.g. the scheduler, the storage layer, the eval harness, the wire protocol) — each
-returning its load-bearing `path:line@sha` findings. A single serial skim of a
-multi-module repo is the shallow read this skill exists to kill. Then run a
+returning its load-bearing `path:line@sha` findings. When studying agent harnesses, look
+explicitly beyond inference/kernel performance to core harness engineering dimensions:
+context lifecycle (compaction, truncation, window sliding, micro-contexting), tool definition
+& execution protocol (MCP, native tools, permission/approval gates, sandboxing), session &
+trajectory persistence (turn rollbacks, checkpoints, resume semantics), orchestration & subagent
+dispatch (worktree isolation, concurrency limits, delegation primitives), and developer/operator
+ergonomics (CLI/TUI rendering, configuration schemas, plugin/skill discovery). A single
+serial skim of a multi-module repo is the shallow read this skill exists to kill. Then run a
 **completeness-critic pass**: name the subsystems/directories you did *not* open and
 justify each skip, or open it. The depth floor: you are not done reading until the critic
 finds nothing material left unopened — not when you've found "a couple of borrows".

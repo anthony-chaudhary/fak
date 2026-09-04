@@ -585,8 +585,8 @@ func readRuntimeProofs(root string) map[string]bool {
 	if err != nil {
 		return set
 	}
-	// Extract keys quickly using regex
-	re := regexp.MustCompile(`"([A-Za-z0-9_]+)":\s*\{`)
+	// Extract lanes quickly using regex across the witness registry.
+	re := regexp.MustCompile(`"lane":\s*"([A-Za-z0-9_]+)"`)
 	matches := re.FindAllStringSubmatch(string(content), -1)
 	for _, m := range matches {
 		if len(m) == 2 {

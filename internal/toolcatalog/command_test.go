@@ -100,6 +100,7 @@ func TestCommandAdapterHelperProcess(t *testing.T) {
 		}
 	}
 	if query == "" {
+		t.Skip("helper process")
 		return
 	}
 	if query == "exit-7" {

@@ -249,6 +249,14 @@ const usageCoreText = `usage:
                 [--route-manifest FILE]
                 (--native runs one kernel-mediated arm and prints its final answer;
                  without it, the command preserves the LIVE turn-count A/B report)
+  fak chat      [--provider openai|anthropic|gemini|xai] [--base-url URL]
+                [--model M] [--api-key-env VAR] [--offline] [--max-turns N]
+                [--code-tools=true|false] [--workspace DIR] [--memory=true|false]
+                [--memory-store DIR] [--policy FILE]
+                (interactive unified agent REPL: auto-connects to local fak runtime
+                 or provider environment keys, arms workspace coding tools by default,
+                 retains multi-turn context across turns, and integrates verified
+                 workspace memory)
   fak api-host  readiness|acceptance
                 (native no-spend API-host bridge probes: /models readiness and typed
                  acceptance classification over target specs, an api-host roster, or a

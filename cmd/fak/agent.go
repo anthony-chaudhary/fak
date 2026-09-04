@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -140,12 +141,12 @@ func cmdAgent(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *af.routeManifest)
 	}
 	announceAgentRouteAccounts(os.Stderr, *af.routeAccounts, loadedAccounts)
+	root := strings.TrimSpace(*af.codeWorkspace)
+	if root == "" {
+		root, err = os.Getwd()
+		must(err)
+	}
 	if *af.codeTools {
-		root := strings.TrimSpace(*af.codeWorkspace)
-		if root == "" {
-			root, err = os.Getwd()
-			must(err)
-		}
 		var extraDirs []string
 		if *af.skillsDir != "" {
 			extraDirs = append(extraDirs, *af.skillsDir)
@@ -161,8 +162,19 @@ func cmdAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 
+	providerExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "provider" {
+			providerExplicit = true
+		}
+	})
+	effectiveBaseURL := *af.baseURL
+	if effectiveBaseURL == "" && providerExplicit && !*af.offline {
+		effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
+	}
+
 	var planner agent.Planner
-	if *af.offline || *af.baseURL == "" {
+	if *af.offline || effectiveBaseURL == "" {
 		if !*af.offline {
 			fmt.Fprintln(os.Stderr, "fak agent: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
 		}
@@ -174,7 +186,7 @@ func cmdAgent(argv []string) {
 			// one will return 401, which the planner surfaces clearly. Warn, proceed.
 			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *af.apiKeyEnv)
 		}
-		p, err := agent.NewProviderHTTPPlanner(*af.provider, *af.baseURL, *af.model, key)
+		p, err := agent.NewProviderHTTPPlanner(*af.provider, effectiveBaseURL, *af.model, key)
 		must(err)
 		scheme, ok := agent.ParseAnthropicAuthScheme(*af.anthropicAuth)
 		if !ok {

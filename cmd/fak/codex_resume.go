@@ -162,70 +162,28 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 		accountPlan = &plan
 	}
 
+	inv := codexResumeInvocation{
+		absRollout:         absRollout,
+		codexHome:          *codexHome,
+		accountPlan:        accountPlan,
+		targetProvider:     *targetProvider,
+		targetWire:         *targetWire,
+		requiredCallPrefix: *requiredCallPrefix,
+		checkOnly:          *checkOnly,
+		codexExe:           *codexExe,
+		prompt:             prompt,
+		asJSON:             *asJSON,
+		dir:                dir,
+		deadline:           *deadline,
+		drain:              *drain,
+		stderr:             stderr,
+	}
 	results := make([]codexresume.Result, 0, len(threadIDs))
 	exitCode := 0
 	for _, threadID := range threadIDs {
-		checkRollout := absRollout
-		checkHome := *codexHome
-		launchThreadID := threadID
-		launchEnv := os.Environ()
-		if accountPlan != nil {
-			launchThreadID = accountPlan.ThreadID
-			threadID = accountPlan.ThreadID
-			checkRollout = accountPlan.CheckRolloutPath
-			checkHome = accountPlan.TargetHome
-			launchEnv = launchCodexEnv(launchEnv, accountPlan.TargetHome)
-		}
-		checkConfig := codexresume.CheckConfig{
-			ThreadID:                       threadID,
-			RolloutPath:                    checkRollout,
-			CodexHome:                      checkHome,
-			TargetProvider:                 *targetProvider,
-			TargetWire:                     *targetWire,
-			RequiredFunctionCallItemPrefix: *requiredCallPrefix,
-		}
-		var result codexresume.Result
-		if *checkOnly {
-			preflight := codexresume.Preflight(checkConfig)
-			result = codexresume.Result{ThreadID: threadID, Preflight: &preflight, LaunchState: codexresume.LaunchNotAttempted}
-			if preflight.Verdict == codexresume.VerdictResumable {
-				result.Outcome = codexresume.OutcomeCheckOnly
-			} else {
-				result.Outcome = codexresume.OutcomeRefused
-			}
-		} else {
-			cmd, commandEnv := buildCodexResumeLaunch(*codexExe, launchThreadID, prompt, launchEnv, "")
-			if accountPlan != nil {
-				cmd, commandEnv = buildCodexResumeLaunch(*codexExe, launchThreadID, prompt, os.Environ(), accountPlan.TargetHome)
-			}
-			var captured io.Writer = io.Discard
-			if !*asJSON {
-				captured = stderr
-			}
-			var err error
-			result, err = codexResumeRecover(context.Background(), checkConfig, codexresume.Config{
-				Command:      cmd,
-				Dir:          dir,
-				Env:          commandEnv,
-				Deadline:     *deadline,
-				Drain:        *drain,
-				Stdout:       captured,
-				Stderr:       stderr,
-				PollInterval: 100 * time.Millisecond,
-			})
-			if err != nil {
-				fmt.Fprintf(stderr, "fak codex-resume %s: %v\n", threadID, err)
-				result.ThreadID = threadID
-				if result.Outcome == "" {
-					result.Outcome = codexresume.OutcomeExited
-				}
-			}
-		}
-		if accountPlan != nil {
-			if err := saveCodexResumeBindingOnSuccess(accountPlan.Store, accountPlan.Binding, result.Outcome); err != nil {
-				fmt.Fprintf(stderr, "fak codex-resume %s: save account binding: %v\n", threadID, err)
-				return 1
-			}
+		result, err := runCodexResumeItem(threadID, inv)
+		if err != nil {
+			return 1
 		}
 		results = append(results, result)
 		if code := codexResumeResultExitCode(result); code != 0 {
@@ -252,32 +210,119 @@ func runCodexResume(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(output)
 	} else {
-		for _, result := range results {
-			preflightVerdict := codexresume.PreflightVerdict("")
-			codexHome, sessionRoot, lookup, recoveryAction := "", "", codexresume.LookupState(""), ""
-			if result.Preflight != nil {
-				preflightVerdict = result.Preflight.Verdict
-				codexHome = result.Preflight.CodexHome
-				sessionRoot = result.Preflight.SessionRoot
-				lookup = result.Preflight.LookupState
-				recoveryAction = result.Preflight.RecoveryAction
-			}
-			launch := "launch state unknown"
-			switch result.LaunchState {
-			case codexresume.LaunchNotAttempted:
-				launch = fmt.Sprintf("launch not attempted (verdict=%s recovery_action=%q)", preflightVerdict, recoveryAction)
-			case codexresume.LaunchStartFailed:
-				launch = "fresh Codex process start_failed"
-			case codexresume.LaunchStarted:
-				launch = fmt.Sprintf("fresh Codex process started (pid=%d)", result.LaunchPID)
-			case codexresume.LaunchCompleted:
-				launch = fmt.Sprintf("fresh Codex process completed (pid=%d)", result.LaunchPID)
-			}
-			fmt.Fprintf(stdout, "%s codex_home=%q session_root=%q lookup=%s launch=%q preflight=%s outcome=%s turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
-				result.ThreadID, codexHome, sessionRoot, lookup, launch, preflightVerdict, result.Outcome, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
-		}
+		printCodexResumeResults(stdout, results)
 	}
 	return exitCode
+}
+
+type codexResumeInvocation struct {
+	absRollout         string
+	codexHome          string
+	accountPlan        *codexResumeAccountPlan
+	targetProvider     string
+	targetWire         string
+	requiredCallPrefix string
+	checkOnly          bool
+	codexExe           string
+	prompt             string
+	asJSON             bool
+	dir                string
+	deadline           time.Duration
+	drain              time.Duration
+	stderr             io.Writer
+}
+
+func runCodexResumeItem(threadID string, inv codexResumeInvocation) (codexresume.Result, error) {
+	checkRollout := inv.absRollout
+	checkHome := inv.codexHome
+	launchThreadID := threadID
+	launchEnv := os.Environ()
+	if inv.accountPlan != nil {
+		launchThreadID = inv.accountPlan.ThreadID
+		threadID = inv.accountPlan.ThreadID
+		checkRollout = inv.accountPlan.CheckRolloutPath
+		checkHome = inv.accountPlan.TargetHome
+		launchEnv = launchCodexEnv(launchEnv, inv.accountPlan.TargetHome)
+	}
+	checkConfig := codexresume.CheckConfig{
+		ThreadID:                       threadID,
+		RolloutPath:                    checkRollout,
+		CodexHome:                      checkHome,
+		TargetProvider:                 inv.targetProvider,
+		TargetWire:                     inv.targetWire,
+		RequiredFunctionCallItemPrefix: inv.requiredCallPrefix,
+	}
+	var result codexresume.Result
+	if inv.checkOnly {
+		preflight := codexresume.Preflight(checkConfig)
+		result = codexresume.Result{ThreadID: threadID, Preflight: &preflight, LaunchState: codexresume.LaunchNotAttempted}
+		if preflight.Verdict == codexresume.VerdictResumable {
+			result.Outcome = codexresume.OutcomeCheckOnly
+		} else {
+			result.Outcome = codexresume.OutcomeRefused
+		}
+	} else {
+		cmd, commandEnv := buildCodexResumeLaunch(inv.codexExe, launchThreadID, inv.prompt, launchEnv, "")
+		if inv.accountPlan != nil {
+			cmd, commandEnv = buildCodexResumeLaunch(inv.codexExe, launchThreadID, inv.prompt, os.Environ(), inv.accountPlan.TargetHome)
+		}
+		var captured io.Writer = io.Discard
+		if !inv.asJSON {
+			captured = inv.stderr
+		}
+		var err error
+		result, err = codexResumeRecover(context.Background(), checkConfig, codexresume.Config{
+			Command:      cmd,
+			Dir:          inv.dir,
+			Env:          commandEnv,
+			Deadline:     inv.deadline,
+			Drain:        inv.drain,
+			Stdout:       captured,
+			Stderr:       inv.stderr,
+			PollInterval: 100 * time.Millisecond,
+		})
+		if err != nil {
+			fmt.Fprintf(inv.stderr, "fak codex-resume %s: %v\n", threadID, err)
+			result.ThreadID = threadID
+			if result.Outcome == "" {
+				result.Outcome = codexresume.OutcomeExited
+			}
+		}
+	}
+	if inv.accountPlan != nil {
+		if err := saveCodexResumeBindingOnSuccess(inv.accountPlan.Store, inv.accountPlan.Binding, result.Outcome); err != nil {
+			fmt.Fprintf(inv.stderr, "fak codex-resume %s: save account binding: %v\n", threadID, err)
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func printCodexResumeResults(stdout io.Writer, results []codexresume.Result) {
+	for _, result := range results {
+		preflightVerdict := codexresume.PreflightVerdict("")
+		codexHome, sessionRoot, lookup, recoveryAction := "", "", codexresume.LookupState(""), ""
+		if result.Preflight != nil {
+			preflightVerdict = result.Preflight.Verdict
+			codexHome = result.Preflight.CodexHome
+			sessionRoot = result.Preflight.SessionRoot
+			lookup = result.Preflight.LookupState
+			recoveryAction = result.Preflight.RecoveryAction
+		}
+		launch := "launch state unknown"
+		switch result.LaunchState {
+		case codexresume.LaunchNotAttempted:
+			launch = fmt.Sprintf("launch not attempted (verdict=%s recovery_action=%q)", preflightVerdict, recoveryAction)
+		case codexresume.LaunchStartFailed:
+			launch = "fresh Codex process start_failed"
+		case codexresume.LaunchStarted:
+			launch = fmt.Sprintf("fresh Codex process started (pid=%d)", result.LaunchPID)
+		case codexresume.LaunchCompleted:
+			launch = fmt.Sprintf("fresh Codex process completed (pid=%d)", result.LaunchPID)
+		}
+		fmt.Fprintf(stdout, "%s codex_home=%q session_root=%q lookup=%s launch=%q preflight=%s outcome=%s turn_status=%s useful_work=%t task_completed=%t process_exit=%t reclaimed=%t duration_ms=%d\n",
+			result.ThreadID, codexHome, sessionRoot, lookup, launch, preflightVerdict, result.Outcome, result.TurnStatus, result.UsefulWork, result.TaskCompleted, result.ProcessExit, result.ForcedReclaim, result.DurationMS)
+	}
 }
 
 func buildCodexResumeLaunch(codexExe, threadID, prompt string, baseEnv []string, targetHome string) ([]string, []string) {

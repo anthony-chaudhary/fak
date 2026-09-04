@@ -158,6 +158,116 @@ func absInt64(v int64) int64 {
 	return v
 }
 
+func indexWorkloadEvents(events []WorkloadEvent) ([]WorkloadEvent, map[string]WorkloadEvent, bool, bool) {
+	hasMalformedEvent := false
+	hasDuplicateEvent := false
+	eventIDSeen := make(map[string]bool, len(events))
+	validEventsByID := make(map[string]WorkloadEvent, len(events))
+	validEvents := make([]WorkloadEvent, 0, len(events))
+
+	for _, ev := range events {
+		if ev.ID == "" || ev.Timestamp <= 0 || ev.Name == "" {
+			hasMalformedEvent = true
+			continue
+		}
+		if eventIDSeen[ev.ID] {
+			hasDuplicateEvent = true
+			continue
+		}
+		eventIDSeen[ev.ID] = true
+		validEventsByID[ev.ID] = ev
+		validEvents = append(validEvents, ev)
+	}
+	return validEvents, validEventsByID, hasMalformedEvent, hasDuplicateEvent
+}
+
+func matchProximityEvent(sMS int64, validEvents []WorkloadEvent, maxSkew int64, opts CorrelationOptions) (*WorkloadEvent, string, int64, AccountingBucket) {
+	if len(validEvents) == 0 {
+		return nil, "", 0, BucketUnmatched
+	}
+
+	var minDelta int64 = math.MaxInt64
+	for _, ev := range validEvents {
+		evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
+		d := absInt64(sMS - evMS)
+		if d < minDelta {
+			minDelta = d
+		}
+	}
+
+	if minDelta > maxSkew {
+		return nil, "", minDelta, BucketSkewRejected
+	}
+
+	var nearestEvents []WorkloadEvent
+	for _, ev := range validEvents {
+		evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
+		d := absInt64(sMS - evMS)
+		if d == minDelta {
+			nearestEvents = append(nearestEvents, ev)
+		}
+	}
+
+	if len(nearestEvents) == 1 {
+		return &nearestEvents[0], MatchRuleProximity, minDelta, BucketAccepted
+	}
+
+	// Multiple equidistant candidates: apply TieBreakRule
+	if opts.TieBreakRule == TieBreakEarliest {
+		var earliestEv WorkloadEvent
+		var earliestTS int64 = math.MaxInt64
+		tieCount := 0
+		for _, ev := range nearestEvents {
+			evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
+			if evMS < earliestTS {
+				earliestTS = evMS
+				earliestEv = ev
+				tieCount = 1
+			} else if evMS == earliestTS {
+				tieCount++
+			}
+		}
+		if tieCount == 1 {
+			return &earliestEv, MatchRuleProximityTieBreakEarliest, minDelta, BucketAccepted
+		}
+	} else if opts.TieBreakRule == TieBreakLatest {
+		var latestEv WorkloadEvent
+		var latestTS int64 = math.MinInt64
+		tieCount := 0
+		for _, ev := range nearestEvents {
+			evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
+			if evMS > latestTS {
+				latestTS = evMS
+				latestEv = ev
+				tieCount = 1
+			} else if evMS == latestTS {
+				tieCount++
+			}
+		}
+		if tieCount == 1 {
+			return &latestEv, MatchRuleProximityTieBreakLatest, minDelta, BucketAccepted
+		}
+	}
+
+	return nil, "", minDelta, BucketAmbiguous
+}
+
+func enforceDisposition(rcpt *CorrelationReceipt, opts CorrelationOptions, hasMalformedEvent, hasDuplicateEvent bool) {
+	if hasMalformedEvent || rcpt.MalformedCount > opts.MaxMalformedAllowed {
+		rcpt.Disposition = DispositionRefused
+		rcpt.RefusalReason = ReasonMalformedTelemetry
+	} else if rcpt.SkewRejectedCount > opts.MaxSkewAllowed {
+		rcpt.Disposition = DispositionRefused
+		rcpt.RefusalReason = ReasonSkewThresholdExceeded
+	} else if rcpt.AmbiguousCount > opts.MaxAmbiguousAllowed {
+		rcpt.Disposition = DispositionRefused
+		rcpt.RefusalReason = ReasonExcessiveAmbiguity
+	} else if opts.RefuseOnDuplicate && (hasDuplicateEvent || rcpt.DuplicateCount > 0) {
+		rcpt.Disposition = DispositionRefused
+		rcpt.RefusalReason = ReasonDuplicateTelemetry
+	}
+}
+
 // Correlate correlates workload events with external telemetry samples, enforcing exact conservation accounting
 // and evaluating claim eligibility against closed refusal criteria.
 func Correlate(events []WorkloadEvent, samples []TelemetrySample, opts CorrelationOptions) (*CorrelationReceipt, error) {
@@ -175,25 +285,7 @@ func Correlate(events []WorkloadEvent, samples []TelemetrySample, opts Correlati
 	}
 
 	// 1. Validate and index events.
-	hasMalformedEvent := false
-	hasDuplicateEvent := false
-	eventIDSeen := make(map[string]bool)
-	validEventsByID := make(map[string]WorkloadEvent)
-	validEvents := make([]WorkloadEvent, 0, len(events))
-
-	for _, ev := range events {
-		if ev.ID == "" || ev.Timestamp <= 0 || ev.Name == "" {
-			hasMalformedEvent = true
-			continue
-		}
-		if eventIDSeen[ev.ID] {
-			hasDuplicateEvent = true
-			continue
-		}
-		eventIDSeen[ev.ID] = true
-		validEventsByID[ev.ID] = ev
-		validEvents = append(validEvents, ev)
-	}
+	validEvents, validEventsByID, hasMalformedEvent, hasDuplicateEvent := indexWorkloadEvents(events)
 
 	// 2. Classify each sample into exactly one terminal bucket.
 	sampleIDSeen := make(map[string]bool)
@@ -251,102 +343,24 @@ func Correlate(events []WorkloadEvent, samples []TelemetrySample, opts Correlati
 		}
 
 		// Case B: Missing EventID key -> Fallback to timestamp proximity
-		if len(validEvents) == 0 {
+		ev, matchRule, delta, bucket := matchProximityEvent(sMS, validEvents, maxSkew, opts)
+		switch bucket {
+		case BucketUnmatched:
 			rcpt.UnmatchedCount++
-			continue
-		}
-
-		var minDelta int64 = math.MaxInt64
-		for _, ev := range validEvents {
-			evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
-			d := absInt64(sMS - evMS)
-			if d < minDelta {
-				minDelta = d
-			}
-		}
-
-		if minDelta > maxSkew {
+		case BucketSkewRejected:
 			rcpt.SkewRejectedCount++
-			continue
-		}
-
-		var nearestEvents []WorkloadEvent
-		for _, ev := range validEvents {
-			evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
-			d := absInt64(sMS - evMS)
-			if d == minDelta {
-				nearestEvents = append(nearestEvents, ev)
-			}
-		}
-
-		if len(nearestEvents) == 1 {
-			ev := nearestEvents[0]
+		case BucketAccepted:
 			rcpt.AcceptedCount++
 			rcpt.CorrelationPairs = append(rcpt.CorrelationPairs, CorrelationPair{
 				EventID:          ev.ID,
 				SampleID:         s.ID,
-				ProximityDeltaMS: minDelta,
-				MatchRule:        MatchRuleProximity,
+				ProximityDeltaMS: delta,
+				MatchRule:        matchRule,
 			})
 			eventMatchedCount[ev.ID]++
-			continue
+		default:
+			rcpt.AmbiguousCount++
 		}
-
-		// Multiple equidistant candidates: apply TieBreakRule
-		if opts.TieBreakRule == TieBreakEarliest {
-			var earliestEv WorkloadEvent
-			var earliestTS int64 = math.MaxInt64
-			tieCount := 0
-			for _, ev := range nearestEvents {
-				evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
-				if evMS < earliestTS {
-					earliestTS = evMS
-					earliestEv = ev
-					tieCount = 1
-				} else if evMS == earliestTS {
-					tieCount++
-				}
-			}
-			if tieCount == 1 {
-				rcpt.AcceptedCount++
-				rcpt.CorrelationPairs = append(rcpt.CorrelationPairs, CorrelationPair{
-					EventID:          earliestEv.ID,
-					SampleID:         s.ID,
-					ProximityDeltaMS: minDelta,
-					MatchRule:        MatchRuleProximityTieBreakEarliest,
-				})
-				eventMatchedCount[earliestEv.ID]++
-				continue
-			}
-		} else if opts.TieBreakRule == TieBreakLatest {
-			var latestEv WorkloadEvent
-			var latestTS int64 = math.MinInt64
-			tieCount := 0
-			for _, ev := range nearestEvents {
-				evMS := normalizeTimestamp(ev.Timestamp, opts.TimestampUnit)
-				if evMS > latestTS {
-					latestTS = evMS
-					latestEv = ev
-					tieCount = 1
-				} else if evMS == latestTS {
-					tieCount++
-				}
-			}
-			if tieCount == 1 {
-				rcpt.AcceptedCount++
-				rcpt.CorrelationPairs = append(rcpt.CorrelationPairs, CorrelationPair{
-					EventID:          latestEv.ID,
-					SampleID:         s.ID,
-					ProximityDeltaMS: minDelta,
-					MatchRule:        MatchRuleProximityTieBreakLatest,
-				})
-				eventMatchedCount[latestEv.ID]++
-				continue
-			}
-		}
-
-		// Unresolved ambiguity
-		rcpt.AmbiguousCount++
 	}
 
 	// 3. Compute MissingCount: valid events with zero accepted samples
@@ -357,19 +371,7 @@ func Correlate(events []WorkloadEvent, samples []TelemetrySample, opts Correlati
 	}
 
 	// 4. Enforce claim eligibility & disposition
-	if hasMalformedEvent || rcpt.MalformedCount > opts.MaxMalformedAllowed {
-		rcpt.Disposition = DispositionRefused
-		rcpt.RefusalReason = ReasonMalformedTelemetry
-	} else if rcpt.SkewRejectedCount > opts.MaxSkewAllowed {
-		rcpt.Disposition = DispositionRefused
-		rcpt.RefusalReason = ReasonSkewThresholdExceeded
-	} else if rcpt.AmbiguousCount > opts.MaxAmbiguousAllowed {
-		rcpt.Disposition = DispositionRefused
-		rcpt.RefusalReason = ReasonExcessiveAmbiguity
-	} else if opts.RefuseOnDuplicate && (hasDuplicateEvent || rcpt.DuplicateCount > 0) {
-		rcpt.Disposition = DispositionRefused
-		rcpt.RefusalReason = ReasonDuplicateTelemetry
-	}
+	enforceDisposition(rcpt, opts, hasMalformedEvent, hasDuplicateEvent)
 
 	// 5. Invariant assertion before return
 	if err := rcpt.Validate(); err != nil {

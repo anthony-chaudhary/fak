@@ -275,6 +275,47 @@ preflights a C compiler, refusing rather than building a race-blind binary on a 
 (the same contract as `make test-race`). `TAGS=cuda` (the GPU image's delta from `release`)
 and future `dev`/`race` build tags layer on top of the profile, not beside it.
 
+## Feature-tag variant taxonomy
+
+The codebase maintains a strict taxonomy of supported build-tag combinations, distinguishing
+pure-Go / GPU-free reproducible artifacts from cgo / hardware-accelerated backends and in-flight
+work-in-progress fences (#3712, epic #3708). The single source of truth is declared in
+[`docs/build-variants.json`](build-variants.json) (mirrored in `.github/build-variants.json`).
+
+The matrix is split into two primary classes:
+- **Pure-Go / GPU-free rows**: compile with `CGO_ENABLED=0` across all release targets without
+  any external C compiler or GPU toolchain. These form the default shipped binaries and advisory
+  WIP fences.
+- **cgo / toolchain-linked rows**: compile with `CGO_ENABLED=1` and require external headers, C/C++
+  compilers, and platform/accelerator SDKs (CUDA, NCCL, Vulkan, Metal).
+
+| Variant | Build tags | `CGO_ENABLED` | Default inclusion | Target GOOS/GOARCH | Toolchain requirements | Gate / Class |
+|---|---|:---:|---|---|---|---|
+| `default` | `""` | `0` | default | `all` (`linux/*`, `darwin/*`, `windows/*`) | Go 1.26+ (pure Go, CGO_ENABLED=0) | `matrix` (trunk-gating) |
+| `darwin-arm64` | `""` | `0` | default | `darwin/arm64` | Go 1.26+ cross-compiler (pure Go) | `matrix` (trunk-gating) |
+| `linux-amd64` | `""` | `0` | default | `linux/amd64` | Go 1.26+ (pure Go) | `matrix` (trunk-gating) |
+| `windows-amd64` | `""` | `0` | default | `windows/amd64` | Go 1.26+ cross-compiler (pure Go) | `matrix` (trunk-gating) |
+| `wip_sessionfleet` | `wip_sessionfleet` | `0` | opt-in | `all` | Go 1.26+ (pure Go) | `advisory` (continue-on-error) |
+| `cuda` | `cuda` | `1` | opt-in | `linux/amd64` | Go 1.26+, C compiler, CUDA Toolkit (nvcc, cudart, cublas) | `external` (`cuda-build.yml`) |
+| `cuda-nccl` | `cuda nccl` | `1` | opt-in | `linux/amd64` | Go 1.26+, CUDA Toolkit, NVIDIA NCCL headers/libs | `none` (unwitnessed) |
+| `cuda-windows` | `cuda` | `1` | opt-in | `windows/amd64` | Go 1.26+, MSVC C++, CUDA Toolkit for Windows | `manual` (`windows-cuda.yml`) |
+| `vulkan-windows` | `vulkan` | `1` | opt-in | `windows/amd64` | Go 1.26+, C compiler, Vulkan SDK, AMD driver | `none` (unwitnessed) |
+| `metal` | `""` | `1` | opt-in | `darwin/arm64` | macOS 14+, Apple Clang, Metal / MPS frameworks | `none` (unwitnessed) |
+
+### Validating the variant matrix
+
+Validate the build matrix locally with `fak-dev`:
+
+```bash
+fak-dev build-matrix                      # test pure-Go variants for release targets
+fak-dev build-matrix --target linux/amd64 # narrow to a single target
+fak-dev build-matrix --dry-run            # inspect planned compile matrix commands
+fak-dev build-matrix --json               # machine-readable fak.build_matrix_report.v1 envelope
+```
+
+In CI, `.github/workflows/build-matrix.yml` validates all declared pure-Go variants across all release
+targets on every push and PR.
+
 ## The test runner
 
 `fak test` is the host-aware runner: it resolves the right `go test` invocation for

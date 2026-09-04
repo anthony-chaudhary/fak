@@ -247,6 +247,17 @@ func TestRunDispatchesBuildcheckUsage(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesBuildMatrixUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"build-matrix", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of fak-dev build-matrix:") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
 func TestRunDispatchesBuildWithArgvAndExitPassthrough(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"build", "--profile", "not-a-profile"})
