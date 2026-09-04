@@ -167,3 +167,64 @@ func TestCapacityRefusalDoesNotFetch(t *testing.T) {
 		t.Fatalf("err=%v fetch_called=%v", err, called)
 	}
 }
+
+func BenchmarkVerify(b *testing.B) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		b.Fatal(err)
+	}
+	payload := []byte("benchmark-model-payload")
+	sum := sha256.Sum256(payload)
+	m := Manifest{
+		Schema:   Schema,
+		PackID:   "bench-model",
+		Revision: "v1",
+		Chunks:   []Chunk{{Digest: hex.EncodeToString(sum[:]), Size: int64(len(payload))}},
+		Fixtures: []Fixture{{Name: "test", Input: "in", Expected: "out"}},
+	}
+	if err := Sign(&m, priv); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := Verify(m, pub); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkInstallAndForecast(b *testing.B) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		b.Fatal(err)
+	}
+	payload := []byte("benchmark-install-data")
+	sum := sha256.Sum256(payload)
+	m := Manifest{
+		Schema:   Schema,
+		PackID:   "bench-pack",
+		Revision: "v1",
+		Chunks:   []Chunk{{Digest: hex.EncodeToString(sum[:]), Size: int64(len(payload))}},
+	}
+	if err := Sign(&m, priv); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		root := b.TempDir()
+		mgr, err := Open(root)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+
+		_ = mgr.Forecast(m)
+		_, err = mgr.Install(m, pub, 1024, source(payload), nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
