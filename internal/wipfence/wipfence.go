@@ -6,6 +6,11 @@
 // default `go build` stays green while the WIP lives on disk. This package is
 // the pure text engine behind that convention: callers hand it file content
 // and a slug and get transformed content back. No git, no filesystem, no I/O.
+//
+// Invariant: WIP fence transformations are fail-closed and idempotent. Existing
+// non-WIP build constraints and mismatched WIP tags are refused rather than clobbered.
+// Guard: Any malformed or conflicting constraint state causes operations to fail-closed
+// with an explicit error to prevent silent data or build tag loss.
 package wipfence
 
 import (
