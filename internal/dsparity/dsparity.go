@@ -137,6 +137,13 @@ func RequiredFields() []string {
 	}
 }
 
+// Invariant: DeepSeek parity checks are fail-closed and deterministic.
+// All parity rows must strictly validate against closed axes and tolerance sets;
+// any unmodeled axis, invalid tolerance class, or missing seam definition
+// fails closed with a structured error before kernel comparisons can run.
+// Guard: bitwise comparisons require zero tolerances, while bounded modes
+// strictly require positive tolerances.
+//
 // Validate checks one row against the closed vocabularies and the internal
 // consistency rules (bitwise <=> zero tolerance; bounded <=> positive tolerance;
 // >= 2 variants). It returns a descriptive error so a table edit that violates the
