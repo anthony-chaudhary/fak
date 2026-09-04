@@ -248,3 +248,68 @@ func TestRecoverResolvesFrequentLiveRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoverBehindFastForwardableIsExecutable(t *testing.T) {
+	old := recoverRunStep
+	t.Cleanup(func() { recoverRunStep = old })
+	var ran [][]string
+	recoverRunStep = func(dir string, argv []string, stdout, stderr io.Writer) int {
+		ran = append(ran, append([]string(nil), argv...))
+		return 0
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"behind-fast-forwardable", "--execute", "--trunk", "main"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	want := [][]string{
+		{"fak", "sync", "apply", "--fetch", "--remote", "origin", "--branch", "main"},
+	}
+	if !reflect.DeepEqual(ran, want) {
+		t.Fatalf("ran = %v, want %v", ran, want)
+	}
+}
+
+func TestRecoverTargetMovedIsExecutable(t *testing.T) {
+	old := recoverRunStep
+	t.Cleanup(func() { recoverRunStep = old })
+	var ran [][]string
+	recoverRunStep = func(dir string, argv []string, stdout, stderr io.Writer) int {
+		ran = append(ran, append([]string(nil), argv...))
+		return 0
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"target-moved", "--execute", "--trunk", "main"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s stdout=%s", rc, errb.String(), out.String())
+	}
+	want := [][]string{
+		{"fak", "sync", "check", "--fetch", "--remote", "origin", "--branch", "main"},
+	}
+	if !reflect.DeepEqual(ran, want) {
+		t.Fatalf("ran = %v, want %v", ran, want)
+	}
+}
+
+func TestRecoverSyncManualPlansRefuseExecute(t *testing.T) {
+	manualTokens := []string{
+		"diverged-overlap",
+		"diverged-disjoint",
+		"merge-active-peer-owned",
+		"dirty-write-overlap",
+		"queued-awaiting-quiescence",
+		"lease-owner-unavailable",
+		"behind",
+	}
+	for _, token := range manualTokens {
+		t.Run(token, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if rc := runRecover(&out, &errb, []string{token, "--execute"}); rc != 3 {
+				t.Fatalf("rc = %d, want 3; stdout=%s stderr=%s", rc, out.String(), errb.String())
+			}
+			if !strings.Contains(errb.String(), "no safe executable recovery") {
+				t.Fatalf("stderr missing refusal: %s", errb.String())
+			}
+		})
+	}
+}

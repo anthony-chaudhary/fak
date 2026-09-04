@@ -75,13 +75,15 @@ const DefaultPushVelocityBudget = 5 * time.Second
 
 // Push reason constants for PushResult.Reason ("" means pushed).
 const (
-	PushReasonBehind      = "BEHIND"             // genuinely behind/diverged — integrate then re-push
-	PushReasonError       = "PUSH_ERROR"         // a rejection that is NOT non-fast-forward or transient network (hook/auth)
-	PushReasonExhausted   = "RETRIES_EXHAUSTED"  // still racing after MaxRetries — the trunk is moving fast
-	PushReasonGitMissing  = "GIT_UNAVAILABLE"    // git/fetch could not run
-	PushReasonUnreachable = "REMOTE_UNREACHABLE" // a transient network failure persisted through every retry
-	PushReasonCancelled   = "CANCELLED"          // the caller's ctx was cancelled mid-backoff; no further attempt was made
-	PushReasonInternal    = "INTERNAL_ERROR"     // a read-only Git classification/query failed; effect is indeterminate
+	// PushReasonBehind is a compatibility alias for ReasonBehindFastForwardable.
+	// Deprecated: use ReasonBehindFastForwardable or the matching typed divergence reason.
+	PushReasonBehind      = ReasonBehindFastForwardable // genuinely behind/diverged — integrate then re-push
+	PushReasonError       = "PUSH_ERROR"                // a rejection that is NOT non-fast-forward or transient network (hook/auth)
+	PushReasonExhausted   = "RETRIES_EXHAUSTED"         // still racing after MaxRetries — the trunk is moving fast
+	PushReasonGitMissing  = "GIT_UNAVAILABLE"           // git/fetch could not run
+	PushReasonUnreachable = "REMOTE_UNREACHABLE"        // a transient network failure persisted through every retry
+	PushReasonCancelled   = "CANCELLED"                 // the caller's ctx was cancelled mid-backoff; no further attempt was made
+	PushReasonInternal    = "INTERNAL_ERROR"            // a read-only Git classification/query failed; effect is indeterminate
 )
 
 // PushResult is the structured outcome of SafePush.
@@ -244,8 +246,21 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 		}
 		res.Divergence = string(div)
 		if DecidePush(div) == PushStop {
-			res.Reason = PushReasonBehind
-			res.Detail = "behind " + remoteRef + "; run `fak sync apply --fetch --remote " + remote + " --branch " + branch + "` to fast-forward only when the write set is clean, then re-run `fak sync push`; never force-push, stash, reset, or raw-merge peer work"
+			switch div {
+			case PushBehind:
+				res.Reason = ReasonBehindFastForwardable
+				res.Detail = "behind " + remoteRef + "; run `fak sync apply --fetch --remote " + remote + " --branch " + branch + "` to fast-forward only when the write set is clean, then re-run `fak sync push`; never force-push, stash, reset, or raw-merge peer work"
+			case PushDiverged:
+				res.Reason = classifyDivergedPaths(ctx, run, repo, compareRef, remoteRef)
+				if res.Reason == ReasonDivergedDisjoint {
+					res.Detail = "diverged from " + remoteRef + " with disjoint paths; run `fak sync check --fetch --remote " + remote + " --branch " + branch + "` to preview integration"
+				} else {
+					res.Detail = "diverged from " + remoteRef + " with overlapping paths; resolve conflicting changes in place before pushing"
+				}
+			default:
+				res.Reason = ReasonBehindFastForwardable
+				res.Detail = "behind " + remoteRef + "; run `fak sync apply --fetch --remote " + remote + " --branch " + branch + "` to fast-forward only when the write set is clean, then re-run `fak sync push`; never force-push, stash, reset, or raw-merge peer work"
+			}
 			return res, nil
 		}
 		// PushRetry: the rejection was a race (HEAD already contains the remote).
@@ -471,6 +486,53 @@ func classifyPushDivergence(ctx context.Context, run Runner, repo, localRef, rem
 		return PushBehind, nil
 	}
 	return PushDiverged, nil
+}
+
+// DivergenceReason maps a PushDivergence to its corresponding closed typed sync reason.
+func DivergenceReason(div PushDivergence) string {
+	switch div {
+	case PushBehind:
+		return ReasonBehindFastForwardable
+	case PushDiverged:
+		return ReasonDivergedOverlap
+	default:
+		return ""
+	}
+}
+
+// classifyDivergedPaths inspects changes between localRef and remoteRef to determine
+// whether their modified file sets are disjoint (DIVERGED_DISJOINT) or overlap (DIVERGED_OVERLAP).
+func classifyDivergedPaths(ctx context.Context, run Runner, repo, localRef, remoteRef string) string {
+	mbRes := run(ctx, repo, "merge-base", localRef, remoteRef)
+	if mbRes.Err != nil || mbRes.Code != 0 {
+		return ReasonDivergedOverlap
+	}
+	mb := strings.TrimSpace(string(mbRes.Stdout))
+	if mb == "" {
+		return ReasonDivergedOverlap
+	}
+	localDiff := run(ctx, repo, "diff", "--name-only", mb, localRef)
+	if localDiff.Err != nil || localDiff.Code != 0 {
+		return ReasonDivergedOverlap
+	}
+	remoteDiff := run(ctx, repo, "diff", "--name-only", mb, remoteRef)
+	if remoteDiff.Err != nil || remoteDiff.Code != 0 {
+		return ReasonDivergedOverlap
+	}
+	localFiles := make(map[string]bool)
+	for _, f := range strings.Split(strings.TrimSpace(string(localDiff.Stdout)), "\n") {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			localFiles[f] = true
+		}
+	}
+	for _, f := range strings.Split(strings.TrimSpace(string(remoteDiff.Stdout)), "\n") {
+		f = strings.TrimSpace(f)
+		if f != "" && localFiles[f] {
+			return ReasonDivergedOverlap
+		}
+	}
+	return ReasonDivergedDisjoint
 }
 
 // isNonFastForward reports whether git push output is a non-fast-forward rejection (a
