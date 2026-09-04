@@ -34,7 +34,7 @@ import (
 	"sort"
 )
 
-// Schema is the stable id of the reconstruction artifact.
+// Schema is the stable identifier and version tag for the eveimport reconstruction artifact.
 const Schema = "fak.eve-import.v1"
 
 // LedgerRowSchema is the stable id of the joined session-ledger row shape. It mirrors
@@ -42,53 +42,52 @@ const Schema = "fak.eve-import.v1"
 // status-card) read: ids, lineage, model, counters — never prose.
 const LedgerRowSchema = "fak.eve-import.session-ledger-row.v1"
 
-// Issue is the GitHub issue this importer answers.
+// Issue is the GitHub issue number tracking the read-only Eve observability importer contract.
 const Issue = 2606
 
-// Observation is the closed partial-observation vocabulary. "complete" means every
-// best-effort tag the reconstruction wanted was present; "partial" means the tree was
-// reconstructed but at least one diagnostic fired (a missing tag, a bad line — the
-// artifact says exactly which); "INDETERMINATE" means no root session could be
-// reconstructed at all, so no counter in the artifact may be quoted as a fact.
+// Observation status values defining the closed partial-observation vocabulary.
 const (
-	ObservationComplete      = "complete"
-	ObservationPartial       = "partial"
+	// ObservationComplete indicates that every framework tag requested for reconstruction was present.
+	ObservationComplete = "complete"
+	// ObservationPartial indicates that session trees were reconstructed but non-fatal diagnostics fired.
+	ObservationPartial = "partial"
+	// ObservationIndeterminate indicates that no root session could be determined from the evidence.
 	ObservationIndeterminate = "INDETERMINATE"
 )
 
-// Diagnostic codes: the closed reasons an import degrades. Every code is a
+// Diagnostic codes define the closed vocabulary of reasons an import degrades. Every code is a
 // partial-observation fact, not a fabricated success and not a hard error.
 const (
-	// DiagBadInput: the artifact as a whole was structurally unreadable.
+	// DiagBadInput indicates that the artifact as a whole was structurally unreadable.
 	DiagBadInput = "BAD_INPUT"
-	// DiagBadLine: one NDJSON line was not valid JSON; the line is skipped.
+	// DiagBadLine indicates that one NDJSON line was not valid JSON; the line is skipped.
 	DiagBadLine = "BAD_LINE"
-	// DiagUnknownEvent: an NDJSON event type outside the modeled vocabulary.
+	// DiagUnknownEvent indicates an NDJSON event type outside the modeled vocabulary.
 	DiagUnknownEvent = "UNKNOWN_EVENT"
-	// DiagOrphanEvent: a turn-scoped event for a session no session.start declared.
+	// DiagOrphanEvent indicates a turn-scoped event for a session no session.start declared.
 	DiagOrphanEvent = "ORPHAN_EVENT"
-	// DiagOrphanSpan: an OTel span carrying no eve.session.id — it cannot join.
+	// DiagOrphanSpan indicates an OTel span carrying no eve.session.id — it cannot join.
 	DiagOrphanSpan = "ORPHAN_SPAN"
-	// DiagMissingTag: a best-effort tag (model id, usage counters) was absent.
+	// DiagMissingTag indicates a best-effort tag (model id, usage counters) was absent.
 	DiagMissingTag = "MISSING_TAG"
-	// DiagDuplicateSession: a second session.start for an already-known id.
+	// DiagDuplicateSession indicates a second session.start for an already-known id.
 	DiagDuplicateSession = "DUPLICATE_SESSION"
-	// DiagMultipleRoots: more than one parentless session; the first-seen one is root.
+	// DiagMultipleRoots indicates more than one parentless session; the first-seen one is root.
 	DiagMultipleRoots = "MULTIPLE_ROOTS"
-	// DiagNoRoot: no session could be reconstructed; the run is INDETERMINATE.
+	// DiagNoRoot indicates no session could be reconstructed; the run is INDETERMINATE.
 	DiagNoRoot = "NO_ROOT"
 )
 
-// Options is the explicit redaction switch. The zero value is the DEFAULT and the
-// safe posture: message/reasoning bodies are dropped (sha256 + byte count kept as a
-// witness). IncludeBodies exists so a fixture/test can explicitly opt in — nothing
-// else should.
+// Options specifies execution settings and explicit redaction controls during reconstruction.
+// The zero value is the DEFAULT and the safe posture: message/reasoning bodies are dropped
+// (sha256 + byte count kept as a witness). IncludeBodies exists so a fixture/test can
+// explicitly opt in — nothing else should.
 type Options struct {
 	IncludeBodies bool
 }
 
-// Usage is the framework-owned token counters, including the cache-read counter fak's
-// cost ledgers price separately.
+// Usage records framework-owned token counters, including prompt, completion, and cache reads
+// that cost ledgers price separately.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
@@ -192,10 +191,12 @@ type Run struct {
 	Diagnostics    []Diagnostic `json:"diagnostics,omitempty"`
 }
 
-// LedgerRow is the join target: one fak session-ledger-shaped row per reconstructed
-// session. Deliberately, the type has NO free-text field — the only strings are
-// framework-owned ids, the model id, the closed observation vocabulary, and the
-// evidence path — so free-form assistant text structurally cannot reach the ledger.
+// LedgerRow represents a normalized session row suitable for joining into fak's cost ledger.
+// Deliberately, the type has NO free-text field — the only strings are framework-owned ids,
+// the model id, the closed observation vocabulary, and the evidence path — so free-form
+// assistant text structurally cannot reach the ledger.
+//
+// Invariant: LedgerRow contains only framework-owned identifiers, model tags, and counters; free-form prose is structurally excluded.
 type LedgerRow struct {
 	Schema           string `json:"schema"`
 	SessionID        string `json:"session_id"`
@@ -215,10 +216,13 @@ type LedgerRow struct {
 	EvidencePath     string `json:"evidence_path"`
 }
 
-// JoinLedger projects a reconstruction into session-ledger rows, root first, then
-// children depth-first in first-seen order — a deterministic flattening of the tree.
-// An INDETERMINATE run yields no rows: a run the evidence could not establish must
+// JoinLedger projects a reconstructed Run into session-ledger rows using deterministic preorder traversal.
+// Projects root first, then children depth-first in first-seen order — a deterministic flattening
+// of the tree. An INDETERMINATE run yields no rows: a run the evidence could not establish must
 // not mint ledger rows that look like facts.
+//
+// Precondition: r.Observation must be evaluated prior to projection; INDETERMINATE runs yield a nil slice to prevent unverified ledger entries.
+// Postcondition: reconstructed rows are emitted root-first and children depth-first in deterministic first-seen traversal order.
 func JoinLedger(r Run) []LedgerRow {
 	if r.Root == nil {
 		return nil
@@ -252,9 +256,11 @@ func JoinLedger(r Run) []LedgerRow {
 	return rows
 }
 
-// Summary renders the compact operator readout #2606 asks for: root session, turns,
-// subagents, failed steps, token totals (tree-wide rollups), and the evidence source.
-// Pure string building — the caller decides where to print it.
+// Summary generates a compact operator-facing text overview of reconstructed sessions and token totals.
+// Renders root session, turns, subagents, failed steps, token totals (tree-wide rollups), and
+// the evidence source. Pure string building — the caller decides where to print it.
+//
+// Postcondition: returns an operator summary containing non-empty status details matching the run observation state.
 func Summary(r Run) string {
 	head := fmt.Sprintf("eve-import %s %s", r.Source.Kind, r.Source.Path)
 	if r.Root == nil {
