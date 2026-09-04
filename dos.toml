@@ -131,6 +131,7 @@ concurrent = [
   "modelaccept",
   "executionroute",
   "market",
+  "marketplace",
   "tokenprofile",
   "generationctl",
   "quantprov",
@@ -320,6 +321,7 @@ concurrent = [
   # Declared so the arbiter detects same-tree collisions and a `(fak <leaf>)` stamp binds.
   # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "generalizationdebt",
+  "debtlane",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
@@ -371,6 +373,7 @@ concurrent = [
   "docrender",
   "streamrules", # #5920: pure streaming rule detection primitive; see [lanes.trees].
   "archreport",
+  "archcheck",
   "fp4runtime",
   "quantpolicy",
   # #6407: internal/mixedprecision (shipped for #6254) had NO lane, so the lane-coverage
@@ -881,6 +884,7 @@ modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
+marketplace = ["internal/marketplace/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -1026,6 +1030,7 @@ frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
 generalizationdebt = ["internal/generalizationdebt/**"]
+debtlane = ["internal/debtlane/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
@@ -1262,6 +1267,7 @@ tokenprofile = ["internal/tokenprofile/**"]
 docrender = ["internal/docrender/**"]
 streamrules = ["internal/streamrules/**"]
 archreport = ["internal/archreport/**"]
+archcheck = ["internal/archcheck/**"]
 generationctl = ["internal/generationctl/**"]
 quantprov = ["internal/quantprov/**"]
 lightgapport = ["internal/lightgapport/**"]

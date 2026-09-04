@@ -1,0 +1,26 @@
+{
+  "schema": "fak-extension-descriptor/1",
+  "extensions": [
+    {
+      "schema": "fak-extension-descriptor/1",
+      "id": "example.org/echo",
+      "seam": "compute-backend",
+      "module": "internal/compute@r3+gabcdef0",
+      "compatibility": {
+        "abi": "fak-compute",
+        "min": 1,
+        "max": 1
+      },
+      "artifact": "fixture.bin",
+      "artifact_sha256": "b08f046939ec15514068fc7d3741e1cdb06cb5c87a1e9cbc6ca7e3194cd6611d",
+      "trust": "trusted-compiled",
+      "on_error": "closed",
+      "capabilities": [
+        "gpu.execute"
+      ],
+      "witness": {
+        "required": false
+      }
+    }
+  ]
+}
