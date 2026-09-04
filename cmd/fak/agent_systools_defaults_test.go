@@ -1,3 +1,5 @@
+//go:build wip_agent_systools
+
 package main
 
 import (

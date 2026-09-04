@@ -106,7 +106,7 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 
 	graph := opts.Graph
 	if graph == nil && report.Workspace != "" {
-		graph, _ = buildInternalImportGraph(report.Workspace)
+		graph, _ = BuildInternalImportGraph(report.Workspace)
 	}
 
 	// Gather candidates: lanes with active maturity debt not excluded or held.
