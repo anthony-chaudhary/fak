@@ -169,7 +169,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	freshStartCap := fs.Int("fresh-start-cap", dispatchWaveDefaultFreshCap, "maximum never-attempted issues admitted this wave (attempted WIP is not counted)")
 	finishFirstOverride := fs.Bool("finish-first-override", false, "explicitly admit the configured fresh-start cap despite a finish-first progress hold")
-	backend := fs.String("backend", "codex", "worker backend (claude|opencode|codex); default codex")
+	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "codex"), "worker backend (claude|opencode|codex|micro); default follows $FLEET_WORKER_BACKEND, else codex")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to each tick")
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")

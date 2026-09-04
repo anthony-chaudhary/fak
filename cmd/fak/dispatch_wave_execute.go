@@ -168,7 +168,8 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 		payload["wave_rank"] = row.Rank
 		payload["wave_target"] = row.Target
 		ticks = append(ticks, payload)
-		if dispatchMapString(payload, "action") == "spawned" {
+		action := dispatchMapString(payload, "action")
+		if action == "spawned" || action == "enrolled" {
 			spawned++
 			if *settleS > 0 {
 				time.Sleep(time.Duration(*settleS * float64(time.Second)))

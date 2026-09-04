@@ -1,0 +1,69 @@
+{
+  "schema": "fanrun/1",
+  "provenance": {
+    "app_version": "dev",
+    "command": "cmd/fanrun",
+    "go_version": "go1.26.7",
+    "os": "linux",
+    "arch": "amd64",
+    "generated_by": "fak/internal/bench (fanrun: live one-goal→N-subagent capstone)"
+  },
+  "host": {
+    "cpu_count": 12,
+    "go_threads": 12,
+    "has_gpu": false
+  },
+  "profile": {
+    "version": "fak.benchmark-concept.v1",
+    "name": "research-goal",
+    "goal_pool": 8,
+    "plan_reads": 4,
+    "p_shared": 0.55,
+    "p_private": 0.15,
+    "p_alias": 0.06,
+    "p_pure": 0.06,
+    "p_static": 0.04,
+    "p_write": 0
+  },
+  "shared_goal": true,
+  "prefix_len": 2048,
+  "sub_turns": 2,
+  "trials": 1,
+  "reps": 0,
+  "seed": 1592652270,
+  "task": "Customer mia_li_3668 wants to book the cheapest direct flight from SFO to JFK on 2026-07-01. First look up their account, then check the refund policy, then find the flights, tell them the cheapest price converted to EUR, and finally book that flight.",
+  "agent_grid": [
+    1
+  ],
+  "prefill_timing_model": "remote endpoint: http://127.0.0.1:8155 (Qwen3.8-27B-Q4_K_M)",
+  "endpoint": "http://127.0.0.1:8155",
+  "model": "Qwen3.8-27B-Q4_K_M",
+  "provider": "openai",
+  "workers": 1,
+  "cells": [
+    {
+      "agents": 1,
+      "agents_wall_serial_ms": 33363.7127,
+      "per_agent_ms_mean": 33363.7127,
+      "agents_per_sec_serial": 0.029972683465770287,
+      "wave_hits": 0,
+      "cross_hits": 0,
+      "cross_hits_stable": true,
+      "vdso_lookups": 2,
+      "vdso_fills": 0,
+      "turns_total": 2,
+      "prompt_tokens_total": 2438,
+      "completion_tokens_total": 353,
+      "tool_errors_total": 0,
+      "tasks_completed": 1,
+      "receipts_count": 1,
+      "ttft_p50_ms": 10374.996833,
+      "ttft_p95_ms": 10374.996833,
+      "latency_p50_ms": 10375.04107,
+      "latency_p95_ms": 10375.04107,
+      "cached_prompt_tokens": 2438,
+      "prefix_cache_hit_rate": 1,
+      "prefix_tokens_elided": 0
+    }
+  ]
+}

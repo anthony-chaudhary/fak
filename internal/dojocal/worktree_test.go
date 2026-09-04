@@ -9,7 +9,9 @@ package dojocal
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
@@ -261,4 +263,143 @@ func shardRootCount(t *testing.T, parent string) int {
 		t.Fatalf("glob: %v", err)
 	}
 	return len(m)
+}
+
+func createTestRepoWithFiles(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	gitRun("init", "-q")
+	gitRun("config", "user.name", "Tester")
+	gitRun("config", "user.email", "tester@test.com")
+
+	if err := os.MkdirAll(filepath.Join(repo, "pkg", "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "pkg", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "pkg", "a", "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "pkg", "b", "b.go"), []byte("package b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs", "readme.md"), []byte("# docs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun("add", ".")
+	gitRun("commit", "-q", "-m", "initial commit")
+
+	return repo
+}
+
+func createTestWorktree(t *testing.T, repo string) string {
+	t.Helper()
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	cmd := exec.Command("git", "-C", repo, "worktree", "add", "--detach", wtDir, "HEAD")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", wtDir).Run()
+	})
+	return wtDir
+}
+
+func TestApplyWorktreeIncludePatterns(t *testing.T) {
+	repo := createTestRepoWithFiles(t)
+	wtDir := createTestWorktree(t, repo)
+
+	if err := ApplyWorktreeInclude(wtDir, []string{"pkg/a/"}); err != nil {
+		t.Fatalf("ApplyWorktreeInclude: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "a", "a.go")); err != nil {
+		t.Errorf("expected pkg/a/a.go to exist, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "b", "b.go")); !os.IsNotExist(err) {
+		t.Errorf("expected pkg/b/b.go to be excluded, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "docs", "readme.md")); !os.IsNotExist(err) {
+		t.Errorf("expected docs/readme.md to be excluded, got err: %v", err)
+	}
+}
+
+func TestApplyWorktreeIncludeFromFile(t *testing.T) {
+	repo := createTestRepoWithFiles(t)
+	wtDir := createTestWorktree(t, repo)
+
+	includeContent := "# Comments should be ignored\n\n  pkg/a/  \n# trailing comment\n"
+	if err := os.WriteFile(filepath.Join(wtDir, ".worktreeinclude"), []byte(includeContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ApplyWorktreeInclude(wtDir, nil); err != nil {
+		t.Fatalf("ApplyWorktreeInclude: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "a", "a.go")); err != nil {
+		t.Errorf("expected pkg/a/a.go to exist, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "b", "b.go")); !os.IsNotExist(err) {
+		t.Errorf("expected pkg/b/b.go to be excluded, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "docs", "readme.md")); !os.IsNotExist(err) {
+		t.Errorf("expected docs/readme.md to be excluded, got err: %v", err)
+	}
+}
+
+func TestApplyWorktreeIncludeFromParentRepo(t *testing.T) {
+	repo := createTestRepoWithFiles(t)
+	if err := os.WriteFile(filepath.Join(repo, ".worktreeinclude"), []byte("pkg/a/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtDir := createTestWorktree(t, repo)
+
+	if err := ApplyWorktreeInclude(wtDir, nil); err != nil {
+		t.Fatalf("ApplyWorktreeInclude: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "a", "a.go")); err != nil {
+		t.Errorf("expected pkg/a/a.go to exist, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "b", "b.go")); !os.IsNotExist(err) {
+		t.Errorf("expected pkg/b/b.go to be excluded, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "docs", "readme.md")); !os.IsNotExist(err) {
+		t.Errorf("expected docs/readme.md to be excluded, got err: %v", err)
+	}
+}
+
+func TestApplyWorktreeIncludeEmptyNoop(t *testing.T) {
+	repo := createTestRepoWithFiles(t)
+	wtDir := createTestWorktree(t, repo)
+
+	if err := ApplyWorktreeInclude(wtDir, nil); err != nil {
+		t.Fatalf("ApplyWorktreeInclude: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "a", "a.go")); err != nil {
+		t.Errorf("expected pkg/a/a.go to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "pkg", "b", "b.go")); err != nil {
+		t.Errorf("expected pkg/b/b.go to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "docs", "readme.md")); err != nil {
+		t.Errorf("expected docs/readme.md to exist: %v", err)
+	}
 }

@@ -3632,6 +3632,11 @@
           "category": "incidental",
           "reason": "sync.Once guard for systools registration",
           "token": "sysToolGateOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "turn pacing jitter and burst cooldown gate",
+          "token": "breathgate"
         }
       ],
       "exclude": [
@@ -3740,6 +3745,7 @@
         "baseAggregates",
         "beginGuardProviderBoundary",
         "bindGuardRegistration",
+        "breathgate",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
         "callGateProvider",
@@ -6123,6 +6129,11 @@
           "category": "incidental",
           "reason": "private helper checking if any session in table is running",
           "token": "hasActiveSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache session matching predicate",
+          "token": "MatchesSession"
         }
       ],
       "exclude": [
@@ -6166,6 +6177,7 @@
         "LifecycleSessionSchema",
         "LogicalSessionID",
         "MalformedSessionRef",
+        "MatchesSession",
         "ModelSlotsDuringToolWait",
         "MoveSession",
         "NarrowsSessions",
@@ -9481,6 +9493,21 @@
           "category": "incidental",
           "reason": "servewiring plumbingField key for policy runtime",
           "token": "PolicyRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyLRU"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyFIFO"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache eviction policy field",
+          "token": "eviction_policy"
         }
       ],
       "exclude": [
@@ -9515,6 +9542,8 @@
         "DispositionMultiCapability",
         "EmptyUsageGuard",
         "ErrNotAdjudicated",
+        "EvictionPolicyFIFO",
+        "EvictionPolicyLRU",
         "EvidenceAdjudication",
         "EvidencePolicy",
         "FAK_ADMISSION_POLICY",
@@ -9603,6 +9632,7 @@
         "empty_usage_policy",
         "endpointAdjudicate",
         "endpointAdjudication",
+        "eviction_policy",
         "executeLivePipeline",
         "executeTailPolicy",
         "fak_capability",
@@ -12200,6 +12230,16 @@
           "category": "incidental",
           "reason": "Local boolean variable in lock clearance",
           "token": "shouldEvict"
+        },
+        {
+          "category": "incidental",
+          "reason": "kv cache eviction policy constant",
+          "token": "EvictionPolicyLRU"
+        },
+        {
+          "category": "incidental",
+          "reason": "KV cache FIFO eviction policy constant",
+          "token": "EvictionPolicyFIFO"
         }
       ],
       "id": "evict",
@@ -12213,6 +12253,8 @@
         "EvictHotKVPrefix",
         "EvictHotSnapshot",
         "EvictedByteCount",
+        "EvictionPolicyFIFO",
+        "EvictionPolicyLRU",
         "EvictionsPerHit",
         "KVDigestEvictor",
         "KVEvictionCostHazard",
@@ -14901,12 +14943,30 @@
           "category": "incidental",
           "reason": "ROCmFP4 layout validator function",
           "token": "ValidateROCmFP4Layout"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE memory layout descriptor",
+          "token": "ExpertStorageLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE storage layout constructor",
+          "token": "LayoutExpertStorage"
+        },
+        {
+          "category": "incidental",
+          "reason": "DeepSeek V4 MoE storage layout constructor alias",
+          "token": "NewExpertStorageLayout"
         }
       ],
       "id": "layout",
       "ignore": [
+        "ExpertStorageLayout",
         "ExportLayout",
         "ImportLayout",
+        "LayoutExpertStorage",
+        "NewExpertStorageLayout",
         "ROCmFP4LayoutName",
         "ReplayOutcome",
         "ValidateROCmFP4Layout",
