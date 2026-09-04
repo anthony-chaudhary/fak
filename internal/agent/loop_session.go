@@ -134,6 +134,19 @@ func WithGracefulDrain(enabled bool) RunOption {
 	return func(c *runConfig) { c.gracefulDrain = enabled }
 }
 
+// WithRunReasoningEffort configures the reasoning effort tier for the run.
+func WithRunReasoningEffort(effort string) RunOption {
+	return func(c *runConfig) { c.reasoningEffort = strings.TrimSpace(effort) }
+}
+
+// WithRunThinkingBudget sets an explicit reasoning token budget ceiling for the run.
+func WithRunThinkingBudget(budget int) RunOption {
+	return func(c *runConfig) {
+		v := budget
+		c.thinkingBudget = &v
+	}
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -181,6 +194,9 @@ type runConfig struct {
 	interruptedTurnObserver InterruptedTurnObserver
 	inputClaims             *InputClaimLifecycle
 	promptAssembler         PromptAssembler
+
+	reasoningEffort string
+	thinkingBudget  *int
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal

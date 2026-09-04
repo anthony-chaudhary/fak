@@ -211,7 +211,22 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 			return nil
 		}
 	}
-	comp, err := r.complete(ctx, planned, r.tools, turnSink, sampleOptsFor(perTurnCap)...)
+	sampleOpts := sampleOptsFor(perTurnCap)
+	if r.cfg != nil && (r.cfg.reasoningEffort != "" || r.cfg.thinkingBudget != nil) {
+		if r.cfg.reasoningEffort == EffortTierBalanced || r.cfg.reasoningEffort == EffortTierAdaptive {
+			ta, _ := AssessTranscriptTurn(planned)
+			b := ResolveEffortBudget(r.cfg.reasoningEffort, r.cfg.thinkingBudget, ta)
+			sampleOpts = append(sampleOpts, WithThinkingBudget(b), WithReasoningEffort(r.cfg.reasoningEffort))
+		} else {
+			if r.cfg.reasoningEffort != "" {
+				sampleOpts = append(sampleOpts, WithReasoningEffort(r.cfg.reasoningEffort))
+			}
+			if r.cfg.thinkingBudget != nil {
+				sampleOpts = append(sampleOpts, WithThinkingBudget(*r.cfg.thinkingBudget))
+			}
+		}
+	}
+	comp, err := r.complete(ctx, planned, r.tools, turnSink, sampleOpts...)
 	if err != nil {
 		completionErr := err
 		err = releaseClaim("MODEL_DISPATCH_FAILED", err)

@@ -537,6 +537,13 @@ type SampleParams struct {
 	// UNIONED with any scheme-required beta the adapter already set (e.g. the OAuth
 	// flag), deduped, so neither clobbers the other. A no-op off the Anthropic wire.
 	UpstreamBeta string
+	// ReasoningEffort carries an explicit reasoning effort tier (e.g. "none",
+	// "low", "medium", "balanced", "adaptive", "high"). Empty string keeps the
+	// default.
+	ReasoningEffort string
+	// ThinkingBudget carries an explicit token budget for reasoning. A nil pointer
+	// means unset / fall back to effort tier resolution.
+	ThinkingBudget *int
 }
 
 // Planner is the seam both the live HTTP client and the offline mock satisfy. One

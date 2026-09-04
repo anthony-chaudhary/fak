@@ -82,6 +82,7 @@ type landConfig struct {
 	now             func() time.Time
 	resources       func() landResourceSample
 	tracker         *landProgressTracker
+	queue           *LandingQueue
 }
 
 // WithCoreLockWitness supplies the hard-self core-lock maintenance witness claim
@@ -101,6 +102,11 @@ func WithRecoveryRemote(remote string, require bool) LandOption {
 
 func WithCoreLockWitness(claim string) LandOption {
 	return func(c *landConfig) { c.coreLockWitness = strings.TrimSpace(claim) }
+}
+
+// WithLandingQueue configures a custom LandingQueue coordinator for Land operations.
+func WithLandingQueue(q *LandingQueue) LandOption {
+	return func(c *landConfig) { c.queue = q }
 }
 
 func newLandConfig(opts []LandOption) landConfig {

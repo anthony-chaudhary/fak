@@ -56,11 +56,20 @@ func TestAuditHostGotchas_SafeEnvironment(t *testing.T) {
 			"HIP_VISIBLE_DEVICES":         "-1",
 			"TORCH_BLAS_PREFER_HIPBLASLT": "1",
 		},
-		SysfsLockupVal:   "-1",
-		SysfsTTMPagesVal: 31457280,
-		MesaVersion:      "26.1.7",
-		KernelVersion:    "6.17.0-35-generic",
-		IsStrixHalo:      true,
+		SysfsLockupVal:            "-1",
+		SysfsTTMPagesVal:          31457280,
+		SysfsVRAMTotalBytes:       2 * 1024 * 1024 * 1024,
+		MesaVersion:               "26.1.7",
+		KernelVersion:             "6.17.0-35-generic",
+		IsStrixHalo:               true,
+		HasOllamaProcess:          true,
+		VulkanEngineType:          "engtype_3D",
+		SpecDraftUbatchConfigured: true,
+		BatchFlagsConfigured:      true,
+		NPUOffloadEnabled:         true,
+		DirtyRingBufferActive:     true,
+		DPMGovernorConfigured:     true,
+		USB4Tuned:                 true,
 	}
 
 	report := AuditHostGotchas(env)
@@ -213,5 +222,592 @@ func TestRunGotchasCLI_Invocation(t *testing.T) {
 	code = RunGotchasCLI(&stdout, &stderr, []string{"--nonexistent-flag"})
 	if code != 2 {
 		t.Errorf("expected code 2 for invalid flag, got %d", code)
+	}
+}
+
+func TestAuditHostGotchas_StrixHalo64GB_TTM(t *testing.T) {
+	// Issue #11249: Verify dynamic 64GB vs 128GB memory threshold scaling for TTM
+	env64Safe := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    64 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 14680064, // ~56 GiB
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report64Safe := AuditHostGotchas(env64Safe)
+	foundTTM := false
+	for _, f := range report64Safe.Findings {
+		if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+			foundTTM = true
+			if f.Status != StatusSafeConfigured {
+				t.Fatalf("expected 64GB system with 14.6M pages to be SAFE_CONFIGURED, got %s: %s", f.Status, f.Details)
+			}
+			if !strings.Contains(f.Details, "56 GiB") {
+				t.Errorf("expected details to cite 56 GiB, got: %s", f.Details)
+			}
+		}
+	}
+	if !foundTTM {
+		t.Fatal("GOTCHA_TTM_50PCT_CEILING not evaluated")
+	}
+
+	// 64GB system with default 50% limit (0 or low) should flag defect and suggest 56GB/14680064
+	env64Defect := GotchaProbeEnvironment{
+		GOOS:             "linux",
+		TotalRAMBytes:    64 * 1024 * 1024 * 1024,
+		SysfsTTMPagesVal: 0,
+		IsStrixHalo:      true,
+		EnvVars:          map[string]string{},
+	}
+	report64Defect := AuditHostGotchas(env64Defect)
+	for _, f := range report64Defect.Findings {
+		if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+			if f.Status != StatusDefectDetected {
+				t.Fatalf("expected 64GB system with 0 pages limit to be DEFECT_DETECTED, got %s", f.Status)
+			}
+			if !strings.Contains(f.Details, "56 GiB") {
+				t.Errorf("expected defect details to cite 56 GiB target, got: %s", f.Details)
+			}
+		}
+	}
+	fixes := GenerateFixPlan(report64Defect)
+	fixText := strings.Join(fixes, "\n")
+	if !strings.Contains(fixText, "ttm.pages_limit=14680064") {
+		t.Errorf("expected 64GB fix plan to target 14680064 pages, got: %s", fixText)
+	}
+}
+
+func TestAuditHostGotchas_LiveGotchasEvaluations(t *testing.T) {
+	// Issue #11250: Test live/falsifiable evaluation for the 8 gotchas
+
+	t.Run("GOTCHA_OLLAMA_IGPU_FALLBACK", func(t *testing.T) {
+		// Not installed/running -> NOT_APPLICABLE
+		envNoOllama := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true}
+		rep := AuditHostGotchas(envNoOllama)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_OLLAMA_IGPU_FALLBACK" {
+				if f.Status != StatusNotApplicable {
+					t.Errorf("expected NOT_APPLICABLE when Ollama not installed/running, got %s", f.Status)
+				}
+			}
+		}
+
+		// Ollama running but missing env vars -> DEFECT_DETECTED
+		envOllamaDefect := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsStrixHalo:      true,
+			HasOllamaProcess: true,
+			EnvVars:          map[string]string{},
+		}
+		rep = AuditHostGotchas(envOllamaDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_OLLAMA_IGPU_FALLBACK" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when Ollama running without env vars, got %s", f.Status)
+				}
+			}
+		}
+
+		// Ollama running with env vars -> SAFE_CONFIGURED
+		envOllamaSafe := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsStrixHalo:      true,
+			HasOllamaProcess: true,
+			EnvVars: map[string]string{
+				"OLLAMA_VULKAN":      "1",
+				"OLLAMA_IGPU_ENABLE": "1",
+			},
+		}
+		rep = AuditHostGotchas(envOllamaSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_OLLAMA_IGPU_FALLBACK" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when Ollama properly exported, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_VULKAN_3D_ENGTYPE", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsStrixHalo:      true,
+			VulkanEngineType: "engtype_Compute",
+		}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_VULKAN_3D_ENGTYPE" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED for engtype_Compute, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsStrixHalo:      true,
+			VulkanEngineType: "engtype_3D",
+		}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_VULKAN_3D_ENGTYPE" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED for engtype_3D, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_SPEC_GRAPH_TIMEOUT", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, SpecDraftUbatchConfigured: false}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_SPEC_GRAPH_TIMEOUT" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when SpecDraftUbatchConfigured=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, SpecDraftUbatchConfigured: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_SPEC_GRAPH_TIMEOUT" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when SpecDraftUbatchConfigured=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_BATCH_CLAMP_SILENT", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, BatchFlagsConfigured: false}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_BATCH_CLAMP_SILENT" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when BatchFlagsConfigured=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, BatchFlagsConfigured: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_BATCH_CLAMP_SILENT" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when BatchFlagsConfigured=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_NPU_BANDWIDTH_CONTENTION", func(t *testing.T) {
+		envAdvisory := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, NPUOffloadEnabled: false}
+		rep := AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_NPU_BANDWIDTH_CONTENTION" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY when NPUOffloadEnabled=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, NPUOffloadEnabled: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_NPU_BANDWIDTH_CONTENTION" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when NPUOffloadEnabled=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_NVME_HIGH_WAF", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, DirtyRingBufferActive: false}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_NVME_HIGH_WAF" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when DirtyRingBufferActive=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, DirtyRingBufferActive: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_NVME_HIGH_WAF" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when DirtyRingBufferActive=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_THERMAL_CLOCK_HUNTING", func(t *testing.T) {
+		envDefect := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, DPMGovernorConfigured: false}
+		rep := AuditHostGotchas(envDefect)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_THERMAL_CLOCK_HUNTING" {
+				if f.Status != StatusDefectDetected {
+					t.Errorf("expected DEFECT_DETECTED when DPMGovernorConfigured=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, DPMGovernorConfigured: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_THERMAL_CLOCK_HUNTING" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when DPMGovernorConfigured=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+
+	t.Run("GOTCHA_USB4_CLUSTER_LATENCY", func(t *testing.T) {
+		envAdvisory := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, USB4Tuned: false}
+		rep := AuditHostGotchas(envAdvisory)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_USB4_CLUSTER_LATENCY" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected ADVISORY when USB4Tuned=false, got %s", f.Status)
+				}
+			}
+		}
+
+		envSafe := GotchaProbeEnvironment{GOOS: "linux", IsStrixHalo: true, USB4Tuned: true}
+		rep = AuditHostGotchas(envSafe)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_USB4_CLUSTER_LATENCY" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when USB4Tuned=true, got %s", f.Status)
+				}
+			}
+		}
+	})
+}
+
+func TestAuditHostGotchas_ContainerAndWSL2(t *testing.T) {
+	// Issue #11247: Container and WSL2 detection and remediation isolation
+
+	t.Run("ContainerEnvironment", func(t *testing.T) {
+		env := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsContainer:      true,
+			IsStrixHalo:      true,
+			SysfsLockupVal:   "10", // would be defect on bare metal
+			SysfsTTMPagesVal: 0,    // would be defect on bare metal
+		}
+		rep := AuditHostGotchas(env)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_RING_TIMEOUT" {
+				if f.Status != StatusNotApplicable {
+					t.Errorf("expected GOTCHA_RING_TIMEOUT to be NOT_APPLICABLE in container, got %s", f.Status)
+				}
+				if !strings.Contains(f.Details, "container") {
+					t.Errorf("expected details to cite container, got: %s", f.Details)
+				}
+			}
+			if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+				if f.Status != StatusNotApplicable {
+					t.Errorf("expected GOTCHA_TTM_50PCT_CEILING to be NOT_APPLICABLE in container, got %s", f.Status)
+				}
+				if !strings.Contains(f.Details, "container") {
+					t.Errorf("expected details to cite container, got: %s", f.Details)
+				}
+			}
+		}
+
+		// Fix plan must not emit update-grub for container
+		fixes := GenerateFixPlan(rep)
+		fixText := strings.Join(fixes, "\n")
+		if strings.Contains(fixText, "update-grub") {
+			t.Errorf("fix plan emitted update-grub inside container environment")
+		}
+	})
+
+	t.Run("WSL2Environment", func(t *testing.T) {
+		env := GotchaProbeEnvironment{
+			GOOS:             "linux",
+			IsWSL2:           true,
+			IsStrixHalo:      true,
+			SysfsLockupVal:   "10",
+			SysfsTTMPagesVal: 0,
+		}
+		rep := AuditHostGotchas(env)
+		for _, f := range rep.Findings {
+			if f.Gotcha.ID == "GOTCHA_RING_TIMEOUT" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected GOTCHA_RING_TIMEOUT to be ADVISORY in WSL2, got %s", f.Status)
+				}
+				if !strings.Contains(f.Details, "WSL2") || !strings.Contains(f.Details, ".wslconfig") {
+					t.Errorf("expected details to explain WSL2 and .wslconfig, got: %s", f.Details)
+				}
+			}
+			if f.Gotcha.ID == "GOTCHA_TTM_50PCT_CEILING" {
+				if f.Status != StatusAdvisory {
+					t.Errorf("expected GOTCHA_TTM_50PCT_CEILING to be ADVISORY in WSL2, got %s", f.Status)
+				}
+				if !strings.Contains(f.Details, "WSL2") || !strings.Contains(f.Details, ".wslconfig") {
+					t.Errorf("expected details to explain WSL2 and .wslconfig, got: %s", f.Details)
+				}
+			}
+		}
+
+		fixes := GenerateFixPlan(rep)
+		fixText := strings.Join(fixes, "\n")
+		if strings.Contains(fixText, "update-grub") {
+			t.Errorf("fix plan emitted update-grub in WSL2 environment")
+		}
+	})
+}
+
+func TestAuditHostGotchas_MultiDistroBootloaderAndPackageManager(t *testing.T) {
+	// Issue #11248: Multi-distro bootloader and package manager support
+
+	testCases := []struct {
+		distro        string
+		bootloaderCmd string
+		mesaCmd       string
+	}{
+		{distro: "arch", bootloaderCmd: "grub-mkconfig -o /boot/grub/grub.cfg", mesaCmd: "pacman -S mesa vulkan-radeon"},
+		{distro: "fedora", bootloaderCmd: "grub2-mkconfig -o /boot/grub2/grub.cfg", mesaCmd: "dnf upgrade mesa-dri-drivers"},
+		{distro: "opensuse", bootloaderCmd: "grub2-mkconfig -o /boot/grub2/grub.cfg", mesaCmd: "zypper update Mesa"},
+		{distro: "nixos", bootloaderCmd: "nixos-rebuild", mesaCmd: "pkgs.mesa"},
+		{distro: "ubuntu", bootloaderCmd: "update-grub", mesaCmd: "ppa:kisak/kisak-mesa"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.distro, func(t *testing.T) {
+			rep := &GotchaAuditReport{
+				Platform: "linux",
+				DistroID: tc.distro,
+				Findings: []GotchaAuditFinding{
+					{
+						Gotcha: StrixGotcha{ID: "GOTCHA_RING_TIMEOUT"},
+						Status: StatusDefectDetected,
+					},
+					{
+						Gotcha: StrixGotcha{ID: "GOTCHA_MESA_RADV_STALE"},
+						Status: StatusDefectDetected,
+					},
+				},
+			}
+			fixes := GenerateFixPlan(rep)
+			joined := strings.Join(fixes, "\n")
+			if !strings.Contains(joined, tc.bootloaderCmd) {
+				t.Errorf("distro %s: expected bootloader command %q in fix plan, got: %s", tc.distro, tc.bootloaderCmd, joined)
+			}
+			if !strings.Contains(joined, tc.mesaCmd) {
+				t.Errorf("distro %s: expected mesa command %q in fix plan, got: %s", tc.distro, tc.mesaCmd, joined)
+			}
+		})
+	}
+}
+
+func TestAuditHostGotchas_LinuxVRAMCarveout(t *testing.T) {
+	// Issue #11246: Linux VRAM BAR probing & BIOS UMA evaluation
+
+	// Fixed carveout of 96 GiB on Linux should trigger defect
+	envLargeCarveout := GotchaProbeEnvironment{
+		GOOS:                "linux",
+		IsStrixHalo:         true,
+		SysfsVRAMTotalBytes: 96 * 1024 * 1024 * 1024,
+	}
+	rep := AuditHostGotchas(envLargeCarveout)
+	for _, f := range rep.Findings {
+		if f.Gotcha.ID == "GOTCHA_BIOS_UMA_GTT" {
+			if f.Status != StatusDefectDetected {
+				t.Fatalf("expected >=64GB VRAM carveout on Linux to be DEFECT_DETECTED, got %s", f.Status)
+			}
+			if !strings.Contains(f.Details, ">=64GB") {
+				t.Errorf("expected details to mention >=64GB, got: %s", f.Details)
+			}
+		}
+	}
+
+	// Small carveout of 2 GiB on Linux should evaluate SAFE_CONFIGURED
+	envSmallCarveout := GotchaProbeEnvironment{
+		GOOS:                "linux",
+		IsStrixHalo:         true,
+		SysfsVRAMTotalBytes: 2 * 1024 * 1024 * 1024,
+	}
+	rep = AuditHostGotchas(envSmallCarveout)
+	for _, f := range rep.Findings {
+		if f.Gotcha.ID == "GOTCHA_BIOS_UMA_GTT" {
+			if f.Status != StatusSafeConfigured {
+				t.Fatalf("expected 2GB VRAM carveout on Linux to be SAFE_CONFIGURED, got %s", f.Status)
+			}
+		}
+	}
+}
+
+func TestAuditHostGotchas_NonStrixHostFiltering(t *testing.T) {
+	// Issue #11250: Non-Strix host filtering
+	envNonStrix := GotchaProbeEnvironment{
+		GOOS:        "linux",
+		IsStrixHalo: false,
+		GPUName:     "NVIDIA GeForce RTX 4090",
+		ProcCPUInfo: "model name: 13th Gen Intel(R) Core(TM) i9-13900K",
+	}
+	rep := AuditHostGotchas(envNonStrix)
+	if rep.DefectCount != 0 {
+		t.Errorf("expected 0 defects on non-Strix host, got %d", rep.DefectCount)
+	}
+	for _, f := range rep.Findings {
+		if f.Status != StatusNotApplicable {
+			t.Errorf("expected all gotchas to be NOT_APPLICABLE on non-Strix host, got %s for %s", f.Status, f.Gotcha.ID)
+		}
+		if !strings.Contains(f.Details, "not AMD Strix Halo") {
+			t.Errorf("expected non-Strix explanation in details, got: %s", f.Details)
+		}
+	}
+}
+
+func TestBuildHostProbeEnvironmentWithMockFS(t *testing.T) {
+	// Issues #11246, #11247, #11248, #11250: Host probing using mock filesystem
+	mockFS := NewMockFS()
+	mockFS.files["/proc/version"] = []byte("Linux version 6.17.0-35-generic (buildd@lcy02-amd64-010) (gcc version 13.2.0) #35-Ubuntu SMP\n")
+	mockFS.files["/proc/cmdline"] = []byte("BOOT_IMAGE=/vmlinuz root=/dev/nvme0n1p2 amdgpu.lockup_timeout=-1 ttm.pages_limit=31457280\n")
+	mockFS.files["/proc/cpuinfo"] = []byte("model name: AMD Ryzen AI MAX+ 395 w/ Radeon 8060S\nflags: avx512f invlpgb\n")
+	mockFS.files["/proc/meminfo"] = []byte("MemTotal:      134217728 kB\n")
+	mockFS.files["/etc/os-release"] = []byte("ID=fedora\nVERSION_ID=41\n")
+	mockFS.files["/sys/module/amdgpu/parameters/lockup_timeout"] = []byte("-1\n")
+	mockFS.files["/sys/module/ttm/parameters/pages_limit"] = []byte("31457280\n")
+	mockFS.files["/sys/class/drm/card0/device/mem_info_vram_total"] = []byte("2147483648\n")
+	mockFS.files["/sys/class/drm/card0/device/power_dpm_force_performance_level"] = []byte("high\n")
+	mockFS.files["/usr/share/doc/mesa-vulkan-drivers/changelog.Debian.gz"] = []byte("mesa (25.3.1-1ubuntu1) noble; urgency=medium\n")
+	mockFS.files["/.dockerenv"] = []byte("")
+	mockFS.files["/usr/bin/ollama"] = []byte("")
+	mockFS.files["/proc/1234/cmdline"] = []byte("ollama\x00serve\x00")
+
+	env := BuildHostProbeEnvironmentWithFS(mockFS)
+	if env.KernelVersion != "6.17.0-35-generic" {
+		t.Errorf("expected KernelVersion '6.17.0-35-generic', got %q", env.KernelVersion)
+	}
+	if env.DistroID != "fedora" {
+		t.Errorf("expected DistroID 'fedora', got %q", env.DistroID)
+	}
+	if env.SysfsVRAMTotalBytes != 2147483648 {
+		t.Errorf("expected SysfsVRAMTotalBytes 2147483648, got %d", env.SysfsVRAMTotalBytes)
+	}
+	if env.MesaVersion != "25.3.1" {
+		t.Errorf("expected MesaVersion '25.3.1', got %q", env.MesaVersion)
+	}
+	if !env.IsContainer {
+		t.Errorf("expected IsContainer=true")
+	}
+	if !env.HasOllamaInstalled {
+		t.Errorf("expected HasOllamaInstalled=true")
+	}
+	if !env.HasOllamaProcess {
+		t.Errorf("expected HasOllamaProcess=true")
+	}
+	if !env.DPMGovernorConfigured {
+		t.Errorf("expected DPMGovernorConfigured=true")
+	}
+	if !env.IsStrixHalo {
+		t.Errorf("expected IsStrixHalo=true")
+	}
+}
+
+func TestAuditHostGotchas_RollbackScriptAndBoundaryChecking(t *testing.T) {
+	// Issue #11243: Rollback script generation & TTM page limit boundary checking
+
+	rep := &GotchaAuditReport{
+		Platform: "linux",
+		DistroID: "ubuntu",
+		Findings: []GotchaAuditFinding{
+			{Gotcha: StrixGotcha{ID: "GOTCHA_RING_TIMEOUT"}, Status: StatusDefectDetected},
+			{Gotcha: StrixGotcha{ID: "GOTCHA_TTM_50PCT_CEILING"}, Status: StatusDefectDetected},
+			{Gotcha: StrixGotcha{ID: "GOTCHA_OLLAMA_IGPU_FALLBACK"}, Status: StatusDefectDetected},
+			{Gotcha: StrixGotcha{ID: "GOTCHA_THERMAL_CLOCK_HUNTING"}, Status: StatusDefectDetected},
+		},
+	}
+	rollbacks := GenerateRollbackScript(rep)
+	if len(rollbacks) == 0 {
+		t.Fatal("expected rollback commands, got none")
+	}
+	joined := strings.Join(rollbacks, "\n")
+	if !strings.Contains(joined, "amdgpu.lockup_timeout") {
+		t.Errorf("expected lockup_timeout removal in rollback, got: %s", joined)
+	}
+	if !strings.Contains(joined, "ttm.pages_limit") {
+		t.Errorf("expected ttm.pages_limit removal in rollback, got: %s", joined)
+	}
+	if !strings.Contains(joined, "ollama.service.d/override.conf") {
+		t.Errorf("expected ollama override removal in rollback, got: %s", joined)
+	}
+	if !strings.Contains(joined, "power_dpm_force_performance_level") {
+		t.Errorf("expected DPM auto restore in rollback, got: %s", joined)
+	}
+
+	// Boundary check on 128GB system
+	total128GB := uint64(128 * 1024 * 1024 * 1024)
+	valid, err := ValidateTTMPagesLimit(31457280, total128GB) // ~120 GiB (valid)
+	if !valid || err != nil {
+		t.Errorf("expected 120 GiB on 128 GiB to be valid, got valid=%t, err=%v", valid, err)
+	}
+
+	valid, err = ValidateTTMPagesLimit(39321600, total128GB) // 150 GiB (> physical RAM)
+	if valid || err == nil {
+		t.Errorf("expected 150 GiB on 128 GiB to be invalid, got valid=%t, err=%v", valid, err)
+	}
+
+	valid, err = ValidateTTMPagesLimit(33030144, total128GB) // 126 GiB (leaves only 2 GiB reserve < 4 GiB)
+	if valid || err == nil {
+		t.Errorf("expected 126 GiB on 128 GiB (leaving 2GB reserve) to be invalid, got valid=%t, err=%v", valid, err)
+	}
+
+	// Boundary check on 64GB system
+	total64GB := uint64(64 * 1024 * 1024 * 1024)
+	valid, err = ValidateTTMPagesLimit(14680064, total64GB) // ~56 GiB (valid)
+	if !valid || err != nil {
+		t.Errorf("expected 56 GiB on 64 GiB to be valid, got valid=%t, err=%v", valid, err)
+	}
+
+	valid, err = ValidateTTMPagesLimit(18350080, total64GB) // ~70 GiB (> physical RAM)
+	if valid || err == nil {
+		t.Errorf("expected 70 GiB on 64 GiB to be invalid, got valid=%t, err=%v", valid, err)
+	}
+}
+
+func TestRunGotchasCLI_RollbackAndOutput(t *testing.T) {
+	// Issue #11241 & #11243: Verify CLI --rollback and --fix-plan flags
+	var stdout, stderr strings.Builder
+
+	code := RunGotchasCLI(&stdout, &stderr, []string{"--rollback"})
+	// Should execute and produce output
+	if stdout.Len() == 0 && stderr.Len() == 0 {
+		t.Errorf("expected CLI output with --rollback")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGotchasCLI(&stdout, &stderr, []string{"--json"})
+	if code != 0 && code != 1 {
+		t.Errorf("expected code 0 or 1, got %d", code)
+	}
+	var reportMap map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &reportMap); err != nil {
+		t.Errorf("expected valid JSON output from CLI --json, err: %v", err)
+	}
+}
+
+func TestAuditHostGotchas_ReadOnlySysfs(t *testing.T) {
+	// Issue #11250: Mock sysfs handling read-only or empty files
+	mockFS := NewMockFS()
+	// No files created in mockFS; all ReadFile calls will fail with os.ErrNotExist
+	env := BuildHostProbeEnvironmentWithFS(mockFS)
+	rep := AuditHostGotchas(env)
+	if rep == nil {
+		t.Fatal("expected non-nil report for empty/read-only sysfs")
+	}
+	if len(rep.Findings) != 20 {
+		t.Errorf("expected 20 findings, got %d", len(rep.Findings))
 	}
 }

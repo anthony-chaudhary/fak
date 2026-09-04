@@ -16,54 +16,103 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/nativeperfcorrelation"
 )
 
+// Invariant: Native performance artifact indexing provides deterministic locator resolution by correlation key without cross-engine fallback.
+// Fail-Closed Guard: Unresolved, expired, private, or redacted locators return explicit typed errors and never disclose secret paths.
+// Precondition: Correlation keys must conform to the bounded 37-character npc1_ hex string format before admission.
+// Postcondition: Artifact records returned by index resolution contain only public-safe HTTPS endpoints with verified digests.
+
 const (
-	Schema       = "fak-native-performance-artifacts/1"
+	// Schema defines the canonical schema identifier string for native performance artifact payloads.
+	Schema = "fak-native-performance-artifacts/1"
+
+	// MaxArtifacts defines the strict upper bound on artifact entries retained per correlation record.
 	MaxArtifacts = 5
 )
 
 var moduleRevRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*@r[1-9][0-9]*\+g[0-9a-f]{7,64}$`)
 
 var (
-	ErrNotFound        = errors.New("native performance artifact not found")
-	ErrExpired         = errors.New("native performance artifact expired")
-	ErrBroken          = errors.New("native performance artifact is broken")
-	ErrPrivate         = errors.New("native performance artifact locator is private")
+	// ErrNotFound indicates that the requested artifact key or kind does not exist in the index.
+	ErrNotFound = errors.New("native performance artifact not found")
+
+	// ErrExpired indicates that the resolved artifact has exceeded its scheduled validity duration.
+	ErrExpired = errors.New("native performance artifact expired")
+
+	// ErrBroken indicates that the artifact was recorded in a damaged or unreadable state.
+	ErrBroken = errors.New("native performance artifact is broken")
+
+	// ErrPrivate indicates that the artifact locator contains confidential endpoints or credentials.
+	ErrPrivate = errors.New("native performance artifact locator is private")
+
+	// ErrUntrustedScheme indicates that the artifact locator scheme does not use secure HTTPS transport.
 	ErrUntrustedScheme = errors.New("native performance artifact locator uses an untrusted scheme")
-	ErrRedacted        = errors.New("native performance artifact is redacted")
+
+	// ErrRedacted indicates that the artifact contents were intentionally withheld for sanitization.
+	ErrRedacted = errors.New("native performance artifact is redacted")
 )
 
+// Kind defines the classification of performance evidence stored in an artifact.
 type Kind string
 
 const (
-	KindReceipt          Kind = "benchmark_receipt"
-	KindMetalProfile     Kind = "metal_profile_bundle"
-	KindCUDAProfile      Kind = "cuda_profile_bundle"
-	KindKernelTrace      Kind = "kernel_trace"
+	// KindReceipt classifies an execution receipt containing benchmark measurements and validation data.
+	KindReceipt Kind = "benchmark_receipt"
+
+	// KindMetalProfile classifies Apple Metal performance capture bundles and shader traces.
+	KindMetalProfile Kind = "metal_profile_bundle"
+
+	// KindCUDAProfile classifies NVIDIA CUDA profiler captures and device memory snapshots.
+	KindCUDAProfile Kind = "cuda_profile_bundle"
+
+	// KindKernelTrace classifies structured execution timing traces from agent kernel operations.
+	KindKernelTrace Kind = "kernel_trace"
+
+	// KindComparisonReport classifies differential analysis reports comparing benchmark baselines.
 	KindComparisonReport Kind = "comparison_report"
 )
 
+// State defines the availability and redaction lifecycle state of an artifact.
 type State string
 
 const (
-	StateReady    State = "ready"
-	StateBroken   State = "broken"
+	// StateReady indicates that an artifact is verified, immutable, and accessible for retrieval.
+	StateReady State = "ready"
+
+	// StateBroken indicates that an artifact could not be generated or has corrupted data.
+	StateBroken State = "broken"
+
+	// StateRedacted indicates that an artifact contains scrubbed confidential values.
 	StateRedacted State = "redacted"
 )
 
+// SeriesStatus indicates whether a Prometheus metric series was successfully generated.
 type SeriesStatus string
 
 const (
-	SeriesProduced    SeriesStatus = "produced"
+	// SeriesProduced indicates that the live Prometheus metric series was emitted successfully.
+	SeriesProduced SeriesStatus = "produced"
+
+	// SeriesUnavailable indicates that the metric series could not be rendered from evidence.
 	SeriesUnavailable SeriesStatus = "unavailable"
 )
 
+// UnavailableReason identifies the specific cause when artifact metrics cannot be emitted.
 type UnavailableReason string
 
 const (
-	ReasonNone            UnavailableReason = "none"
-	ReasonIncomplete      UnavailableReason = "incomplete"
-	ReasonStale           UnavailableReason = "stale"
-	ReasonPrivate         UnavailableReason = "private"
+	// ReasonNone indicates that the observation is fully available and valid.
+	ReasonNone UnavailableReason = "none"
+
+	// ReasonIncomplete indicates that required observation fields or revisions are absent.
+	ReasonIncomplete UnavailableReason = "incomplete"
+
+	// ReasonStale indicates that the observation or artifact expiration time has passed.
+	ReasonStale UnavailableReason = "stale"
+
+	// ReasonPrivate indicates that the observation contained non-public locator addresses.
+	ReasonPrivate UnavailableReason = "private"
+
+	// ReasonUntrustedScheme indicates that the observation used a non-HTTPS locator URI.
 	ReasonUntrustedScheme UnavailableReason = "untrusted_scheme"
 )
 
@@ -148,6 +197,8 @@ type Record struct {
 	Artifacts      []Artifact `json:"artifacts"`
 }
 
+// Invariant: An Index retains at most capacity records, evicting the oldest record in FIFO order upon insertion overflow.
+// Index provides a bounded, concurrent, public-safe registry mapping correlation keys to records.
 type Index struct {
 	mu       sync.RWMutex
 	capacity int
@@ -155,6 +206,8 @@ type Index struct {
 	order    []string
 }
 
+// Precondition: Capacity must be strictly positive or NewIndex returns an error.
+// NewIndex constructs a bounded artifact index holding at most capacity entries.
 func NewIndex(capacity int) (*Index, error) {
 	if capacity <= 0 {
 		return nil, errors.New("native performance artifact index capacity must be positive")
@@ -162,6 +215,8 @@ func NewIndex(capacity int) (*Index, error) {
 	return &Index{capacity: capacity, records: make(map[string]Record, capacity)}, nil
 }
 
+// Postcondition: Add stores the scrubbed record or returns an error without mutating index state on validation failure.
+// Add inserts or updates a scrubbed record, evicting the oldest key when capacity is reached.
 func (i *Index) Add(record Record) error {
 	record, err := scrub(record)
 	if err != nil {
@@ -184,6 +239,7 @@ func (i *Index) Add(record Record) error {
 	return nil
 }
 
+// Guard: Resolve returns ErrNotFound, ErrBroken, ErrRedacted, or ErrExpired without cross-engine redirection.
 // Resolve returns one exact artifact or an honest typed failure. It never
 // redirects to another engine, correlation key, or artifact kind.
 func (i *Index) Resolve(correlationKey string, kind Kind, now time.Time) (Artifact, error) {
@@ -218,6 +274,7 @@ func (i *Index) Resolve(correlationKey string, kind Kind, now time.Time) (Artifa
 	return artifact, nil
 }
 
+// Snapshot returns an isolated copy of all stored records in insertion order.
 func (i *Index) Snapshot() []Record {
 	i.mu.RLock()
 	defer i.mu.RUnlock()

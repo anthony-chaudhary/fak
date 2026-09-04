@@ -79,69 +79,67 @@ func TestSelectDueIsBoundedAndPriorityAware(t *testing.T) {
 	}
 }
 
-func BenchmarkRefreshSource(b *testing.B) {
-	data := []byte("benchmark sample source content payload for studydrift evaluation")
-	digest := DigestSource(data)
+func BenchmarkStudyDrift(b *testing.B) {
+	oldBytes := []byte("module github.com/example/lib\n\ngo 1.26\n")
+	oldDigest := DigestSource(oldBytes)
 	pin := PinnedSource{
-		Repository:    "owner/bench-repo",
-		URL:           "https://example.com/repo",
+		Repository:    "example/lib",
+		URL:           "https://github.com/example/lib",
 		Revision:      "v1.0.0",
-		Bytes:         data,
-		Digest:        digest,
-		ObservationID: "obs-pin",
-		DecisionID:    "dec-pin",
+		Bytes:         oldBytes,
+		Digest:        oldDigest,
+		ObservationID: "obs-100",
+		DecisionID:    "dec-100",
 	}
+
+	newBytes := []byte("module github.com/example/lib\n\ngo 1.26\n\nrequire github.com/pkg/errors v0.9.1\n")
+	newDigest := DigestSource(newBytes)
 	obs := SourceObservation{
-		ObservedAt:    "2026-09-01T12:00:00Z",
-		URL:           "https://example.com/repo",
-		Revision:      "v1.0.1",
-		Bytes:         data,
-		Digest:        digest,
-		ObservationID: "obs-live",
-		DecisionID:    "dec-live",
+		ObservedAt:    "2026-09-04T12:00:00Z",
+		URL:           "https://github.com/example/lib",
+		Revision:      "v1.1.0",
+		Bytes:         newBytes,
+		Digest:        newDigest,
+		ObservationID: "obs-101",
+		DecisionID:    "dec-101",
 	}
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		receipt := RefreshSource(pin, obs)
-		if receipt.Status != RefreshMoved {
-			b.Fatalf("unexpected status: %v", receipt.Status)
+	b.Run("RefreshSourceChanged", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			receipt := RefreshSource(pin, obs)
+			if receipt.Status != RefreshChanged {
+				b.Fatalf("unexpected status: %s", receipt.Status)
+			}
 		}
-	}
-}
+	})
 
-func BenchmarkDigestSource(b *testing.B) {
-	data := []byte("benchmark digest source payload with sixty-four bytes of data inside")
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		d := DigestSource(data)
-		if len(d) == 0 {
-			b.Fatal("empty digest")
+	b.Run("DigestSource", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = DigestSource(newBytes)
 		}
-	}
-}
+	})
 
-func BenchmarkSelectDue(b *testing.B) {
 	registry := studymonitor.Registry{
 		Repositories: []studymonitor.Repository{
-			{Repository: "r1", Status: "active", Priority: 3, LastChecked: "2026-01-01"},
-			{Repository: "r2", Status: "active", Priority: 1, LastChecked: "2026-08-25"},
-			{Repository: "r3", Status: "active", Priority: 1, LastChecked: "2026-02-01"},
-			{Repository: "r4", Status: "paused", Priority: 0, LastChecked: "2026-01-01"},
-			{Repository: "r5", Status: "active", Priority: 2, LastChecked: "2026-03-01"},
-			{Repository: "r6", Status: "active", Priority: 2, LastChecked: "2026-05-01"},
+			{Repository: "repo-a", Status: "active", Priority: 2, LastChecked: "2026-08-01"},
+			{Repository: "repo-b", Status: "active", Priority: 1, LastChecked: "2026-07-15"},
+			{Repository: "repo-c", Status: "active", Priority: 3, LastChecked: "2026-06-01"},
+			{Repository: "repo-d", Status: "paused", Priority: 1, LastChecked: "2026-05-01"},
 		},
 	}
-	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		due := SelectDue(registry, now, 30, 3)
-		if len(due) != 3 {
-			b.Fatalf("expected 3 repositories due, got %d", len(due))
+	now := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	b.Run("SelectDue", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			due := SelectDue(registry, now, 14, 2)
+			if len(due) != 2 {
+				b.Fatalf("unexpected count: %d", len(due))
+			}
 		}
-	}
+	})
 }

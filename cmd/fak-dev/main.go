@@ -50,6 +50,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunAMDGotchas(stdout, stderr, argv[1:])
 	case "amd-sim":
 		return devcmd.RunAMDStrixSim(stdout, stderr, argv[1:])
+	case "amd-gpudirect":
+		return devcmd.RunAMDGPUDirect(stdout, stderr, argv[1:])
 	case "commit-subject-coverage":
 		return devcmd.RunCommitSubjectCoverage(stdout, stderr, argv[1:])
 	case "readme-visual-audit":
@@ -156,6 +158,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  amd-setup [--apply] [--json] [flags]  diagnose/configure AMD GPU governor and TTM limits")
 	fmt.Fprintln(w, "  amd-gotchas [--fix-plan] [--json]     audit host for AMD Strix Halo top 20 gotchas & mitigations")
 	fmt.Fprintln(w, "  amd-sim [--json] [flags]              simulate & verify multi-agent workloads on AMD Strix Halo")
+	fmt.Fprintln(w, "  amd-gpudirect [inspect|audit|bench]   AMD GPU Direct topology, ReBAR/ACS audit, & zero-copy bench")
 	fmt.Fprintln(w, "  commit-subject-coverage [flags]       audit repository commit subject grammar")
 	fmt.Fprintln(w, "  readme-visual-audit [flags]           audit repository README visual health")
 	fmt.Fprintln(w, "  plan-audit [flags]                   audit repository plan-document drift")

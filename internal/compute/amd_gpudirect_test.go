@@ -550,3 +550,90 @@ func TestAMDGPUDirectHAL_HSADoorbellSynchronization(t *testing.T) {
 		t.Errorf("failed to retrieve registered doorbell: %+v", retrieved)
 	}
 }
+
+func TestAMDGPUDirectHAL_LocalHostRadeonTopology(t *testing.T) {
+	engine := NewAMDGPUDirectHAL(AMDGPUDirectConfig{
+		EnableLargeBARCheck:    true,
+		EnforceACSZeroRedirect: true,
+	})
+
+	// Local Host Discrete GPU: AMD Radeon RX 7600
+	// Hardware facts verified from Win32_VideoController / Vulkan on this physical machine:
+	// PCIe BDF: 0000:03:00.0, VRAM: 8 GiB, ReBAR enabled (Host-visible heap: 8 GiB)
+	err := engine.RegisterNode(AMDDeviceNode{
+		NodeID:         0,
+		GPUID:          0,
+		DeviceName:     "AMD Radeon RX 7600 (Local Discrete GPU)",
+		Architecture:   "gfx1102",
+		PCIeBDF:        "0000:03:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 8573157376, // 7.98 GiB actual Vulkan device-local heap
+		BAR1SizeBytes:  8573157376, // ReBAR enabled: full 8GB host-visible aperture
+		ACSEnabled:     false,
+		ACSRedirect:    false,
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     1,
+				Fabric:           FabricPCIeHostBridge,
+				BandwidthGBps:    32.0, // PCIe Gen4 x8/x16 to root complex
+				LatencyNanos:     650,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register local RX 7600 failed: %v", err)
+	}
+
+	// Local Host Integrated GPU: AMD Radeon(TM) Graphics (APU)
+	// PCIe BDF: 0000:7b:00.0, NUMA: 0
+	err = engine.RegisterNode(AMDDeviceNode{
+		NodeID:         1,
+		GPUID:          1,
+		DeviceName:     "AMD Radeon(TM) Graphics (Local APU)",
+		Architecture:   "gfx1103",
+		PCIeBDF:        "0000:7b:00.0",
+		NUMANode:       0,
+		TotalVRAMBytes: 2 * 1024 * 1024 * 1024,
+		BAR1SizeBytes:  2 * 1024 * 1024 * 1024,
+		ACSEnabled:     false,
+		ACSRedirect:    false,
+		KeepVRAMMapped: true,
+		DMABUFCapable:  true,
+		Peers: []PeerLink{
+			{
+				TargetNodeID:     0,
+				Fabric:           FabricPCIeHostBridge,
+				BandwidthGBps:    32.0,
+				LatencyNanos:     650,
+				DirectP2PCapable: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register local APU failed: %v", err)
+	}
+
+	nodes := engine.DiscoverTopology()
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+
+	for _, n := range nodes {
+		if !n.IsLargeBAR {
+			t.Errorf("expected node %s to have IsLargeBAR=true under active ReBAR", n.DeviceName)
+		}
+	}
+
+	ok, fabric, reason := engine.ValidateP2PRoute(0, 1)
+	if !ok || fabric != FabricPCIeHostBridge {
+		t.Fatalf("expected route 0 -> 1 to succeed over PCIe Host Bridge, got ok=%v fabric=%s reason=%s", ok, fabric, reason)
+	}
+
+	audit := engine.Audit()
+	if !audit.Healthy || audit.NodesWithLargeBAR != 2 || audit.NodesWithSmallBAR != 0 {
+		t.Errorf("expected healthy audit with 2 Large BAR nodes, got: %+v", audit)
+	}
+}

@@ -92,6 +92,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipLatency(stdout, stderr, argv[1:])
 	case "drill":
 		return runWipDrill(stdout, stderr, argv[1:])
+	case "pr-cohort", "prcohort":
+		return runWorkflowOutcomeStudyPRCohort(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -282,6 +284,10 @@ func wipUsage(w io.Writer) {
       Drill checkpoint recovery in detached isolation. Verifies that checkpointed
       trees restore byte-for-byte in a throwaway scratch directory without mutating
       the main checkout or index.
+
+  fak wip pr-cohort [--input <arm-data.json>] [--json]
+      Run the matched PR isolation cohort study (#7332) evaluating WIP safety and
+      workflow outcome metrics between DetachedWorker and PRLane arms.
 
   fak wip selfcheck [--json]
       Prove checkpoint -> git checkout -- . -> restore reproduces the delta

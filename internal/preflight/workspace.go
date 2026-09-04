@@ -17,46 +17,46 @@ import (
 )
 
 const (
-	// WorkspacePreflightSchema identifies version 1 of the workspace preflight report structure.
+	// WorkspacePreflightSchema identifies the schema version for workspace preflight inspection plans.
 	WorkspacePreflightSchema = "fak.preflight.workspace/1"
 
-	// WorkspaceVerdictReady indicates that all workspace preflight checks passed and execution may proceed.
+	// WorkspaceVerdictReady indicates that the workspace plan is clear to execute side effects.
 	WorkspaceVerdictReady = "READY"
-	// WorkspaceVerdictBlockedByLease indicates that a conflicting live lease prevents workspace execution.
+	// WorkspaceVerdictBlockedByLease indicates that a conflicting live lease blocks execution.
 	WorkspaceVerdictBlockedByLease = "BLOCKED_BY_LEASE"
-	// WorkspaceVerdictWouldBeRed indicates a missing test route, broken build, or unviable preparation step.
+	// WorkspaceVerdictWouldBeRed indicates an unusable test route or a failed prewarm step.
 	WorkspaceVerdictWouldBeRed = "WOULD_BE_RED"
 
-	// ReasonCollisionRisk names a concurrency collision against another active worker tree.
+	// ReasonCollisionRisk indicates that declared write globs overlap another worker's lease.
 	ReasonCollisionRisk = dispatchorder.ReasonCollisionRisk
-	// ReasonTestRouteUnavailable indicates no suitable test harness or runner is reachable on the host.
+	// ReasonTestRouteUnavailable indicates no executable test runner is available on this host.
 	ReasonTestRouteUnavailable = "TEST_ROUTE_UNAVAILABLE"
-	// ReasonGoBuildFailed indicates that invoking go build failed with a non-zero exit status.
+	// ReasonGoBuildFailed indicates that a compilation command exited with a non-zero status.
 	ReasonGoBuildFailed = "GO_BUILD_FAILED"
-	// ReasonGoBuildRunnerMissing indicates that no implementation of GoBuildRunner was supplied.
+	// ReasonGoBuildRunnerMissing indicates that the injected GoBuildRunner instance was nil.
 	ReasonGoBuildRunnerMissing = "GO_BUILD_RUNNER_MISSING"
-	// ReasonGoBuildWarmThreshold indicates that a warm go build invocation exceeded the target time threshold.
+	// ReasonGoBuildWarmThreshold indicates that warm compilation latency exceeded the configured threshold.
 	ReasonGoBuildWarmThreshold = "GO_BUILD_WARM_THRESHOLD_EXCEEDED"
-	// ReasonLeaseAcquireFailed indicates that the workspace preparer failed to acquire the requested write lease.
+	// ReasonLeaseAcquireFailed indicates that the workspace write lease could not be claimed.
 	ReasonLeaseAcquireFailed = "LEASE_ACQUIRE_FAILED"
-	// ReasonWorkspacePreparerMissing indicates that nil was passed where a WorkspacePreparer was required.
+	// ReasonWorkspacePreparerMissing indicates that the injected WorkspacePreparer instance was nil.
 	ReasonWorkspacePreparerMissing = "WORKSPACE_PREPARER_MISSING"
-	// ReasonDevIndexWarmFailed indicates that warming the developer search index timed out or failed.
+	// ReasonDevIndexWarmFailed indicates that warming the developer search index failed.
 	ReasonDevIndexWarmFailed = "DEVINDEX_WARM_FAILED"
-	// ReasonBuildCacheWarmFailed indicates that warming the compiler build cache encountered an error.
+	// ReasonBuildCacheWarmFailed indicates that warming the Go build cache failed.
 	ReasonBuildCacheWarmFailed = "BUILD_CACHE_WARM_FAILED"
-	// DefaultWarmBuildThresholdMS is the default latency limit in milliseconds for a warm go build invocation.
+	// DefaultWarmBuildThresholdMS defines the default upper bound in milliseconds for warm compilation.
 	DefaultWarmBuildThresholdMS int64 = 2000
 )
 
 const (
-	// StepAcquireWriteLease identifies the workspace preparation step for acquiring exclusive write access.
+	// StepAcquireWriteLease names the workspace preparation step that claims an exclusive write lease.
 	StepAcquireWriteLease = "acquire_write_lease"
-	// StepWarmGoBuildCache identifies the workspace preparation step for populating the compiler build cache.
+	// StepWarmGoBuildCache names the workspace preparation step that prewarms the Go build cache.
 	StepWarmGoBuildCache = "warm_go_build_cache"
-	// StepResolveTestRoute identifies the workspace preparation step for locating an executable test command.
+	// StepResolveTestRoute names the workspace preparation step that resolves the targeted test command.
 	StepResolveTestRoute = "resolve_test_route"
-	// StepWarmDevIndex identifies the workspace preparation step for warming file indexers and search caches.
+	// StepWarmDevIndex names the workspace preparation step that prewarms the developer search index.
 	StepWarmDevIndex = "warm_devindex"
 )
 
@@ -102,12 +102,12 @@ type LeaseRequest struct {
 	TTLSeconds int64    `json:"ttl_seconds,omitempty"`
 }
 
-// DevIndexWarmRequest specifies directory globs to prime in the search indexing layer.
+// DevIndexWarmRequest specifies the filesystem globs to prewarm in the developer index.
 type DevIndexWarmRequest struct {
 	Globs []string `json:"globs"`
 }
 
-// GoBuildWarmRequest configures a compiler cache warming pass for a set of Go packages.
+// GoBuildWarmRequest specifies the compilation parameters and latency threshold for cache warming.
 type GoBuildWarmRequest struct {
 	Packages        []string `json:"packages"`
 	Command         []string `json:"command"`
@@ -116,7 +116,7 @@ type GoBuildWarmRequest struct {
 	WarmThresholdMS int64    `json:"warm_threshold_ms,omitempty"`
 }
 
-// PreparationStep represents a single discrete setup action planned during workspace preflight.
+// PreparationStep describes a single discrete action scheduled during workspace initialization.
 type PreparationStep struct {
 	Kind     string               `json:"kind"`
 	Lease    *LeaseRequest        `json:"lease,omitempty"`
@@ -156,6 +156,9 @@ type WorkspacePreflight struct {
 	Steps        []PreparationStep    `json:"steps,omitempty"`
 }
 
+// Invariant: Preflight planning is pure computation with no external side effects or clock reads.
+// Precondition: Package graph and test probe must represent consistent host environment state.
+// Postcondition: Returns WorkspacePreflight with populated preparation steps and deterministic readiness verdict.
 // PlanWorkspacePreflight folds declared read/write globs, package graph
 // evidence, live lease observations, and host test-route facts into one stable
 // preparation plan. It never shells out or reads the filesystem. A live lease
@@ -238,7 +241,9 @@ func PlanWorkspacePreflight(in WorkspacePreflightInput) WorkspacePreflight {
 	return out
 }
 
-// PlanGoBuildWarm constructs a compilation warmup plan and argument list for targeted packages.
+// Invariant: Package arguments are normalized to a sorted unique set to guarantee reproducible compiler invocations.
+// Postcondition: Returns a GoBuildWarmRequest with formatted command arguments and positive warm threshold.
+// PlanGoBuildWarm constructs a compilation warm request for the specified packages using default compiler flags.
 func PlanGoBuildWarm(packages []string, verify bool, thresholdMS int64) GoBuildWarmRequest {
 	pkgs := sortedUnique(packages)
 	if thresholdMS <= 0 {
@@ -254,7 +259,7 @@ func PlanGoBuildWarm(packages []string, verify bool, thresholdMS int64) GoBuildW
 	}
 }
 
-// GoBuildRun records timing, output tail, and exit status metrics from a single compiler execution.
+// GoBuildRun captures execution telemetry including exit code and latency from a go build invocation.
 type GoBuildRun struct {
 	Command    []string `json:"command,omitempty"`
 	ExitCode   int      `json:"exit_code"`
@@ -262,7 +267,7 @@ type GoBuildRun struct {
 	OutputTail string   `json:"output_tail,omitempty"`
 }
 
-// GoBuildWarmReport summarizes cold vs warm build latencies and evaluates against cache targets.
+// GoBuildWarmReport documents the measurements, cold vs warm delta, and outcome of build cache warming.
 type GoBuildWarmReport struct {
 	Request         GoBuildWarmRequest `json:"request"`
 	Verdict         string             `json:"verdict"`
@@ -276,11 +281,13 @@ type GoBuildWarmReport struct {
 	Warm            bool               `json:"warm"`
 }
 
-// GoBuildRunner abstracts external compiler invocations so testing remains shell-free and deterministic.
+// GoBuildRunner defines the abstract execution interface for running go build commands against host compilers.
 type GoBuildRunner interface {
 	RunGoBuild(context.Context, GoBuildWarmRequest) (GoBuildRun, error)
 }
 
+// Precondition: runner must be non-nil when packages slice is non-empty, otherwise returns WouldBeRed.
+// Postcondition: Returns GoBuildWarmReport detailing elapsed timings and warm status verification.
 // WarmGoBuildCache executes the planned go-build cache warm through an injected
 // runner. With VerifyWarm set it runs a second build to witness the warm-cache
 // elapsed time and reports the cold-vs-warm delta without reading a clock itself.
@@ -341,7 +348,7 @@ func WarmGoBuildCache(ctx context.Context, runner GoBuildRunner, req GoBuildWarm
 	return rep
 }
 
-// LeaseAcquireResult details whether a requested write lock was granted or refused.
+// LeaseAcquireResult records whether a requested workspace write lease was successfully acquired.
 type LeaseAcquireResult struct {
 	Held     bool              `json:"held"`
 	Reason   string            `json:"reason,omitempty"`
@@ -350,7 +357,7 @@ type LeaseAcquireResult struct {
 	Conflict *LeaseObservation `json:"conflict,omitempty"`
 }
 
-// WarmStepResult conveys the success or failure status and duration of an index warming action.
+// WarmStepResult conveys the status, latency, and diagnostics from an individual warm step execution.
 type WarmStepResult struct {
 	OK        bool   `json:"ok"`
 	Reason    string `json:"reason,omitempty"`
@@ -358,14 +365,14 @@ type WarmStepResult struct {
 	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
 }
 
-// WorkspacePreparer defines lifecycle methods for coordinating lease acquisition and cache warming.
+// WorkspacePreparer executes workspace preparation side effects including lease acquisition and cache warming.
 type WorkspacePreparer interface {
 	AcquireWriteLease(context.Context, LeaseRequest) (LeaseAcquireResult, error)
 	WarmGoBuild(context.Context, GoBuildWarmRequest) (GoBuildWarmReport, error)
 	WarmDevIndex(context.Context, DevIndexWarmRequest) (WarmStepResult, error)
 }
 
-// WorkspacePreparationReport captures step-by-step outcomes from executing workspace preparation hooks.
+// WorkspacePreparationReport summarizes the cumulative outcomes from running all planned workspace preparation steps.
 type WorkspacePreparationReport struct {
 	Schema   string                 `json:"schema"`
 	Verdict  string                 `json:"verdict"`
@@ -378,7 +385,7 @@ type WorkspacePreparationReport struct {
 	Steps    []WorkspaceStepOutcome `json:"steps,omitempty"`
 }
 
-// WorkspaceStepOutcome provides granular status, timing, and error information for an individual setup step.
+// WorkspaceStepOutcome records the execution verdict, elapsed time, and diagnostics of a single preparation step.
 type WorkspaceStepOutcome struct {
 	Kind      string `json:"kind"`
 	OK        bool   `json:"ok"`
@@ -387,6 +394,9 @@ type WorkspaceStepOutcome struct {
 	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
 }
 
+// Invariant: Lease acquisition must precede build cache warming to prevent unleased side effects on shared trees.
+// Precondition: prep must be non-nil when plan verdict is READY to allow executing scheduled steps.
+// Postcondition: Returns WorkspacePreparationReport reflecting step outcomes or early termination on refusal.
 // PrepareWorkspace runs the side-effectful part of a READY workspace preflight
 // through injected seams. Lease acquisition happens before build/devindex warming,
 // so tests can prove the first edit would see an already-held lease.

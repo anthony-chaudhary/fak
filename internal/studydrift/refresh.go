@@ -10,26 +10,30 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
-// RefreshReceiptSchema defines the schema identifier for studydrift refresh receipt payloads.
+// RefreshReceiptSchema defines the canonical schema version identifier for study refresh receipts.
 const RefreshReceiptSchema = "fak-study-refresh-receipt/1"
 
-// RefreshStatus classifies the outcome of validating and refreshing a pinned source against new evidence.
+// RefreshStatus represents the lifecycle classification of an observed external source against its pinned baseline.
 type RefreshStatus string
 
 const (
-	// RefreshUnchanged indicates the observed source content and metadata match the pinned source.
+	// RefreshUnchanged indicates that both the source content digest and metadata match the pinned version exactly.
 	RefreshUnchanged RefreshStatus = "unchanged"
-	// RefreshMoved indicates content digest is identical but repository location or revision changed.
+
+	// RefreshMoved indicates that the content digest is identical but the location URL or VCS revision tag has shifted.
 	RefreshMoved RefreshStatus = "moved"
-	// RefreshChanged indicates content digest modified, requiring superseded observation and decision tracking.
+
+	// RefreshChanged indicates that the content payload has drifted, requiring superseding observation and decision records.
 	RefreshChanged RefreshStatus = "changed"
-	// RefreshUnavailable indicates observation was explicitly marked unavailable upstream.
+
+	// RefreshUnavailable indicates that the upstream source could not be accessed or retrieved by the observer.
 	RefreshUnavailable RefreshStatus = "unavailable"
-	// RefreshUnverifiable indicates content digest mismatch, corrupted timestamps, or missing tracking IDs.
+
+	// RefreshUnverifiable indicates that cryptographic integrity verification failed or required audit identifiers were omitted.
 	RefreshUnverifiable RefreshStatus = "unverifiable"
 )
 
-// PinnedSource is the immutable source material and decisions a study used.
+// PinnedSource records the immutable baseline snapshot, content digest, and governing audit decisions for a study dependency.
 type PinnedSource struct {
 	Repository    string `json:"repository"`
 	URL           string `json:"url"`
@@ -40,7 +44,7 @@ type PinnedSource struct {
 	DecisionID    string `json:"decision_id"`
 }
 
-// SourceObservation is caller-provided evidence. RefreshSource performs no network access.
+// SourceObservation carries caller-supplied audit evidence gathered during an external probe for offline evaluation.
 type SourceObservation struct {
 	ObservedAt    string `json:"observed_at"`
 	URL           string `json:"url,omitempty"`
@@ -52,7 +56,7 @@ type SourceObservation struct {
 	Unavailable   bool   `json:"unavailable,omitempty"`
 }
 
-// Supersession records prior observation and decision IDs replaced by an updated source.
+// Supersession links a superseded observation identifier and decision identifier when content drift is accepted.
 type Supersession struct {
 	Observation string `json:"observation"`
 	Decision    string `json:"decision"`
@@ -71,16 +75,17 @@ type RefreshReceipt struct {
 	Supersedes  *Supersession     `json:"supersedes,omitempty"`
 }
 
-// DigestSource computes a deterministic sha256 hex digest prefixed with "sha256:" for byte slices.
+// DigestSource computes the deterministic lowercase hex-encoded SHA-256 checksum prefixed with "sha256:".
 func DigestSource(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// RefreshSource evaluates an observed source against an immutable pinned source pin.
-// Contract:
-// - Invariant: inputs are cloned deeply so caller slices and pinned sources are never mutated in place.
-// - Fail-closed guard: missing timestamps, digest mismatches, or missing supersede IDs immediately yield RefreshUnverifiable with nil Canonical.
+// RefreshSource evaluates caller-provided observation evidence against an existing pinned source without network access.
+// Contract: RefreshSource performs pure, deterministic offline reconciliation without network I/O.
+// Precondition: Caller must supply concrete byte slices and hex-encoded SHA-256 digests.
+// Invariant: Input PinnedSource and SourceObservation are never mutated; returned structures use fresh byte allocations.
+// Fail-closed: Corrupt digests, malformed timestamps, or missing audit identifiers return RefreshUnverifiable with nil Canonical.
 func RefreshSource(pin PinnedSource, observation SourceObservation) RefreshReceipt {
 	pin = clonePinnedSource(pin)
 	observation = cloneSourceObservation(observation)
@@ -129,6 +134,9 @@ func cloneSourceObservation(observation SourceObservation) SourceObservation {
 // SelectDue returns at most limit active repositories needing refresh, ordered
 // by monitored-repository priority and then oldest check. A non-positive limit
 // deliberately selects nothing.
+// Contract: Non-positive limit values immediately yield a nil slice; inactive repositories are strictly excluded.
+// Invariant: Repositories with invalid last_checked dates are treated as immediately due for inspection.
+// Guard: Output slice length never exceeds the specified limit parameter.
 func SelectDue(registry studymonitor.Registry, now time.Time, dueDays, limit int) []studymonitor.Repository {
 	if limit <= 0 {
 		return nil

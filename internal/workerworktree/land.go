@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/wipfence"
 )
 
 // LandRefusalRetryable reports whether a refused Land is worth re-attempting on
@@ -26,7 +28,36 @@ func LandRefusalRetryable(reason string) bool {
 // colliding landers spread out instead of re-contending the ref in lockstep.
 // Package var so unit tests stub it to a no-op (#3570).
 var casRetrySleep = func(attempt int) {
-	time.Sleep(time.Duration(rand.Intn(15*attempt)+1) * time.Millisecond)
+	// randomized jitter backoff between CAS attempts (100ms–500ms) (#11235)
+	ms := 100 + rand.Intn(401)
+	time.Sleep(time.Duration(ms) * time.Millisecond)
+}
+
+// mergeTreeRebase performs an in-memory 3-way merge using git merge-tree --write-tree
+// to rebase workerCommit (built on baseSHA) onto targetHEAD (#11235).
+// Returns the resulting tree SHA or an error if there are conflicts or git failures.
+func mergeTreeRebase(root, baseSHA, targetHEAD, workerCommit string, git GitRunner) (string, error) {
+	if baseSHA == "" || targetHEAD == "" || workerCommit == "" {
+		return "", fmt.Errorf("mergeTreeRebase: baseSHA, targetHEAD, and workerCommit must not be empty")
+	}
+	rc, out := run(git, root, []string{"merge-tree", "--write-tree", "--merge-base", baseSHA, targetHEAD, workerCommit})
+	if rc != 0 {
+		return "", fmt.Errorf("mergeTreeRebase: 3-way merge conflict or git error (rc=%d): %s", rc, tail(out, 200))
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) == 0 {
+		return "", fmt.Errorf("mergeTreeRebase: no output from git merge-tree")
+	}
+	treeSHA := strings.TrimSpace(lines[0])
+	if len(treeSHA) != 40 && len(treeSHA) != 64 {
+		return "", fmt.Errorf("mergeTreeRebase: invalid tree SHA %q", treeSHA)
+	}
+	return treeSHA, nil
+}
+
+// MergeTreeRebase is the exported form of mergeTreeRebase.
+func MergeTreeRebase(root, baseSHA, targetHEAD, workerCommit string, git GitRunner) (string, error) {
+	return mergeTreeRebase(root, baseSHA, targetHEAD, workerCommit, git)
 }
 
 // isolatedLandRetryCap reads IsolatedLandRetryEnv: the total bounded CAS attempts
@@ -165,6 +196,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 			return Result{OK: false, Reason: err.Error()}
 		}
 	}
+	stripWorktreeWIPFences(wtPath, paths)
 	rc, diff := run(git, wtPath, []string{"diff", "--binary", diffRef})
 	if rc != 0 {
 		return Result{OK: false, Reason: "could not read worktree diff vs " + diffRef + " (git error) — fail open"}
@@ -231,48 +263,58 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 	phaseDone()
 
-	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
-	// index so the shared index is never a sweep target. handled=false means it could
-	// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
-	// to the baseline shared path below — so enabling it only ever reduces the #3547
-	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
-	// safe isolated form here).
-	if isolatedLandEnabled() && len(paths) > 0 {
-		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
-			res.DroppedOutOfLane = droppedOutOfLane
-			return res
-		}
+	queue := cfg.queue
+	if queue == nil {
+		queue = DefaultLandingQueue
 	}
 
-	tracker.setCache("shared-index-fallback", false)
-	finishApply := beginLandPhase(tracker, "trunk-apply", 0)
-	applied := gitApply(root, diff, git)
-	finishApply()
-	if !applied.OK {
-		return Result{OK: false, Applied: false, Committed: false,
-			Reason: "git apply to trunk failed", Detail: applied.Detail}
-	}
-	commitArgs := []string{"commit", "-s", "-F", msgFile}
-	if len(paths) > 0 {
-		commitArgs = append(commitArgs, "--")
-		commitArgs = append(commitArgs, paths...)
-	}
-	finishCommit := beginLandPhase(tracker, "commit", 0)
-	rc, out := run(git, root, commitArgs)
-	finishCommit()
-	res = Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
-	// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
-	// actually carries our intended paths. A missing path means our staged change
-	// was swept into a concurrent commit on the shared index (#3547); refuse rather
-	// than return a false success. FAIL-OPEN — only a positive mismatch flips OK.
-	if rc == 0 && len(paths) > 0 && landReadbackEnabled() {
-		finishReadback := beginLandPhase(tracker, "land-readback", 0)
-		if ok, reason := landReadbackVerify(root, paths, git); !ok {
-			res.OK = false
-			res.Reason = reason
+	landingOp := func() Result {
+		// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
+		// index so the shared index is never a sweep target. handled=false means it could
+		// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
+		// to the baseline shared path below — so enabling it only ever reduces the #3547
+		// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
+		// safe isolated form here).
+		if isolatedLandEnabled() && len(paths) > 0 {
+			if r, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
+				r.DroppedOutOfLane = droppedOutOfLane
+				return r
+			}
 		}
-		finishReadback()
+
+		tracker.setCache("shared-index-fallback", false)
+		finishApply := beginLandPhase(tracker, "trunk-apply", 0)
+		applied := gitApply(root, diff, git)
+		finishApply()
+		if !applied.OK {
+			return Result{OK: false, Applied: false, Committed: false,
+				Reason: "git apply to trunk failed", Detail: applied.Detail}
+		}
+		commitArgs := []string{"commit", "-s", "-F", msgFile}
+		if len(paths) > 0 {
+			commitArgs = append(commitArgs, "--")
+			commitArgs = append(commitArgs, paths...)
+		}
+		finishCommit := beginLandPhase(tracker, "commit", 0)
+		rc, out := run(git, root, commitArgs)
+		finishCommit()
+		r := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
+		// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
+		// actually carries our intended paths. A missing path means our staged change
+		// was swept into a concurrent commit on the shared index (#3547); refuse rather
+		// than return a false success. FAIL-OPEN — only a positive mismatch flips OK.
+		if rc == 0 && len(paths) > 0 && landReadbackEnabled() {
+			finishReadback := beginLandPhase(tracker, "land-readback", 0)
+			if ok, reason := landReadbackVerify(root, paths, git); !ok {
+				r.OK = false
+				r.Reason = reason
+			}
+			finishReadback()
+		}
+		return r
 	}
+
+	res = queue.Coordinate(root, landingOp)
 	return res
 }
 
@@ -434,7 +476,10 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	// falls back immediately, exactly as before.
 	attempts := isolatedLandRetryCap()
 	var disambiguation *DisambiguationWitnesses
+	var lastCommit string
+	var lastBase string
 	for attempt := 1; attempt <= attempts; attempt++ {
+		var treeSHA string
 		if attempt > 1 {
 			// A peer is actively landing: back off briefly, then re-resolve the base
 			// the peer just moved so this attempt re-builds on the NEW HEAD.
@@ -442,32 +487,70 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			finishRebase := beginLandPhase(tracker, "cas-rebase", attempt)
 			rc, head := run(git, root, []string{"rev-parse", "HEAD"})
 			finishRebase()
-			oldHEAD = strings.TrimSpace(head)
-			if rc != 0 || oldHEAD == "" {
+			newHEAD := strings.TrimSpace(head)
+			if rc != 0 || newHEAD == "" {
 				return Result{}, false
 			}
-		}
-		// Seed the throwaway index with the current trunk HEAD's tree.
-		finishIndex := beginLandPhase(tracker, "index-construction", attempt)
-		if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+
+			// In-memory 3-way merge tree resolution for CAS landing retry (#11235).
+			// If we already constructed an isolated index commit in a previous attempt,
+			// rebase it onto moved HEAD in memory when CAS landing encounters divergence.
+			rebased := false
+			if lastCommit != "" && lastBase != "" && lastBase != newHEAD {
+				if rTree, err := mergeTreeRebase(root, lastBase, newHEAD, lastCommit, git); err == nil && rTree != "" {
+					treeSHA = rTree
+					oldHEAD = newHEAD
+					rebased = true
+				}
+			}
+
+			if !rebased {
+				oldHEAD = newHEAD
+				// Seed the throwaway index with the current trunk HEAD's tree.
+				finishIndex := beginLandPhase(tracker, "index-construction", attempt)
+				if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+					finishIndex()
+					return Result{}, false
+				}
+				// Stage the worker diff into the throwaway index ONLY (--cached never touches
+				// the working tree). A conflict here — first try or re-apply after a lost CAS —
+				// means a concurrent change to the SAME paths; let the baseline path adjudicate
+				// it exactly as today rather than force it.
+				if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+					finishIndex()
+					return Result{}, false
+				}
+				rc, tree := runEnv(genv, root, env, []string{"write-tree"})
+				treeSHA = strings.TrimSpace(tree)
+				if rc != 0 || treeSHA == "" {
+					finishIndex()
+					return Result{}, false
+				}
+				finishIndex()
+			}
+		} else {
+			// Seed the throwaway index with the current trunk HEAD's tree.
+			finishIndex := beginLandPhase(tracker, "index-construction", attempt)
+			if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+				finishIndex()
+				return Result{}, false
+			}
+			// Stage the worker diff into the throwaway index ONLY (--cached never touches
+			// the working tree). A conflict here — first try or re-apply after a lost CAS —
+			// means a concurrent change to the SAME paths; let the baseline path adjudicate
+			// it exactly as today rather than force it.
+			if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+				finishIndex()
+				return Result{}, false
+			}
+			rc, tree := runEnv(genv, root, env, []string{"write-tree"})
+			treeSHA = strings.TrimSpace(tree)
+			if rc != 0 || treeSHA == "" {
+				finishIndex()
+				return Result{}, false
+			}
 			finishIndex()
-			return Result{}, false
 		}
-		// Stage the worker diff into the throwaway index ONLY (--cached never touches
-		// the working tree). A conflict here — first try or re-apply after a lost CAS —
-		// means a concurrent change to the SAME paths; let the baseline path adjudicate
-		// it exactly as today rather than force it.
-		if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
-			finishIndex()
-			return Result{}, false
-		}
-		rc, tree := runEnv(genv, root, env, []string{"write-tree"})
-		treeSHA := strings.TrimSpace(tree)
-		if rc != 0 || treeSHA == "" {
-			finishIndex()
-			return Result{}, false
-		}
-		finishIndex()
 		disambiguation = nil
 		if disambiguationRelevant(paths) {
 			finishAnalysis := beginLandPhase(tracker, "whole-tree-disambiguation", attempt)
@@ -485,6 +568,8 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		if rc != 0 || newCommit == "" {
 			return Result{}, false
 		}
+		lastCommit = newCommit
+		lastBase = oldHEAD
 		// Name the off-branch commit before trunk CAS. A process crash from here on
 		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
 		finishRecovery := beginLandPhase(tracker, "recovery-ref-publication", attempt)
@@ -625,4 +710,39 @@ func landReadbackVerify(root string, paths []string, git GitRunner) (bool, strin
 			" after commit — shared-index race, land not trusted (#3547)"
 	}
 	return true, ""
+}
+
+// stripWorktreeWIPFences removes ephemeral //go:build wip_<slug> build constraints from
+// files in wtPath prior to capturing the landing diff.
+func stripWorktreeWIPFences(wtPath string, paths []string) {
+	if len(paths) > 0 {
+		for _, p := range paths {
+			target := filepath.Join(wtPath, filepath.FromSlash(p))
+			if fi, err := os.Stat(target); err == nil {
+				if fi.IsDir() {
+					_ = filepath.Walk(target, func(sub string, info os.FileInfo, werr error) error {
+						if werr == nil && !info.IsDir() && strings.HasSuffix(sub, ".go") {
+							_ = wipfence.Strip(sub)
+						}
+						return nil
+					})
+				} else if strings.HasSuffix(target, ".go") {
+					_ = wipfence.Strip(target)
+				}
+			}
+		}
+		return
+	}
+	_ = filepath.Walk(wtPath, func(sub string, info os.FileInfo, werr error) error {
+		if werr != nil {
+			return nil
+		}
+		if info.IsDir() && (info.Name() == ".git" || info.Name() == "vendor") {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() && strings.HasSuffix(sub, ".go") {
+			_ = wipfence.Strip(sub)
+		}
+		return nil
+	})
 }

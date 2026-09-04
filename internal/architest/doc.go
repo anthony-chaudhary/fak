@@ -45,4 +45,8 @@
 // kernel (internal/registrations) — it is an off-path test harness. It uses only
 // the standard library (go/parser, go/token) so it never adds a module dependency,
 // holding the module's external set at the two golang.org/x modules go.mod pins.
+//
+// Invariant: architectural boundaries and layer checks are fail-closed and deterministic.
+// Guard: internal packages must never introduce upward dependencies or unreviewed execution seams;
+// any undeclared tier, unmapped leaf, or upward import fails verification closed.
 package architest

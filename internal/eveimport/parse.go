@@ -32,12 +32,15 @@ type ndjsonEvent struct {
 	CacheReadTokens  int    `json:"cache_read_tokens"`
 }
 
-// ImportNDJSON reconstructs a Run from a saved Eve NDJSON session stream. sourcePath
-// is recorded verbatim as the evidence path (never opened). The modeled event
-// vocabulary: session.start, turn.start, message, reasoning, tool.call, usage,
-// failure, session.end. Unknown event types and unparseable lines become diagnostics;
-// turn-scoped events for a session no session.start declared are ORPHAN_EVENT and are
-// dropped rather than guessed into a tree.
+// ImportNDJSON reconstructs an execution Run from a saved Eve newline-delimited JSON stream.
+// sourcePath is recorded verbatim as the evidence path (never opened). The modeled event
+// vocabulary: session.start, turn.start, message, reasoning, tool.call, usage, failure,
+// session.end. Unknown event types and unparseable lines become diagnostics; turn-scoped
+// events for a session no session.start declared are ORPHAN_EVENT and are dropped rather
+// than guessed into a tree.
+//
+// Invariant: parsing never fabricates success; malformed records degrade to partial observations or INDETERMINATE without raising panics.
+// Postcondition: returns a deterministic Run containing session lineage and usage reconstructed strictly from framework tags.
 func ImportNDJSON(sourcePath string, data []byte, opt Options) Run {
 	b := newBuilder(Source{Kind: "eve-ndjson", Path: sourcePath}, opt)
 	for n, raw := range bytes.Split(data, []byte("\n")) {
@@ -144,13 +147,15 @@ func (a attrs) num(key string) (int, bool) {
 	return 0, false
 }
 
-// ImportOTelSpans reconstructs a Run from a saved OpenTelemetry span export whose
-// spans carry `eve.*` / `$eve.*` attributes. Span classification is by attribute,
-// not span name: eve.tool.name marks a tool-call span, eve.turn.index (without a tool
-// name) marks a turn span carrying usage counters and optional bodies, and a span
-// with neither is session-scoped (model id, subagent lineage). A span with status
-// ERROR contributes a failure event. Spans with no eve.session.id cannot join and
-// degrade to ORPHAN_SPAN diagnostics.
+// ImportOTelSpans reconstructs an execution Run from OpenTelemetry span exports with eve attributes.
+// Spans carry `eve.*` / `$eve.*` attributes. Span classification is by attribute, not span name:
+// eve.tool.name marks a tool-call span, eve.turn.index (without a tool name) marks a turn span
+// carrying usage counters and optional bodies, and a span with neither is session-scoped (model id,
+// subagent lineage). A span with status ERROR contributes a failure event. Spans with no
+// eve.session.id cannot join and degrade to ORPHAN_SPAN diagnostics.
+//
+// Precondition: data contains JSON span export bytes; unreadable inputs degrade to DiagBadInput with an INDETERMINATE run outcome.
+// Postcondition: returns a deterministic Run tree where sessions and turns reflect framework-owned tags while redacting payload bodies.
 func ImportOTelSpans(sourcePath string, data []byte, opt Options) Run {
 	b := newBuilder(Source{Kind: "eve-otel-spans", Path: sourcePath}, opt)
 	var doc otelDoc

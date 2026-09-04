@@ -1,6 +1,3 @@
-// Package edittx applies a batch of full-file edits as one working-tree
-// transaction: every target is snapshotted first, checks run against the applied
-// set, and any failure restores the touched files before returning.
 package edittx
 
 import (
@@ -21,29 +18,41 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
+// Schema is the schema version identifier for edit transaction records.
 const Schema = "fak-edit-tx/1"
 
+// Reason codes returned in Result when an edit transaction fails or is refused.
 const (
-	ReasonNoEdits        = "NO_EDITS"
-	ReasonInvalidPath    = "INVALID_PATH"
-	ReasonDuplicatePath  = "DUPLICATE_PATH"
-	ReasonReadFailed     = "READ_FAILED"
-	ReasonApplyFailed    = "APPLY_FAILED"
-	ReasonCheckFailed    = "CHECK_FAILED"
+	// ReasonNoEdits indicates that the transaction spec contained no file edits.
+	ReasonNoEdits = "NO_EDITS"
+	// ReasonInvalidPath indicates an escaping, malformed, or invalid target file path.
+	ReasonInvalidPath = "INVALID_PATH"
+	// ReasonDuplicatePath indicates that multiple edits targeted the same file path.
+	ReasonDuplicatePath = "DUPLICATE_PATH"
+	// ReasonReadFailed indicates that pre-transaction target snapshotting failed.
+	ReasonReadFailed = "READ_FAILED"
+	// ReasonApplyFailed indicates that writing or deleting a target file failed.
+	ReasonApplyFailed = "APPLY_FAILED"
+	// ReasonCheckFailed indicates that one of the post-apply verification checks failed.
+	ReasonCheckFailed = "CHECK_FAILED"
+	// ReasonRollbackFailed indicates that restoring files after a failure was unsuccessful.
 	ReasonRollbackFailed = "ROLLBACK_FAILED"
 )
 
+// Spec defines the desired set of file modifications and post-apply check commands.
 type Spec struct {
 	Edits  []Edit   `json:"edits"`
 	Checks []string `json:"checks,omitempty"`
 }
 
+// Edit specifies a single file mutation, either updating content or deleting the file.
 type Edit struct {
 	Path    string  `json:"path"`
 	Content *string `json:"content,omitempty"`
 	Delete  bool    `json:"delete,omitempty"`
 }
 
+// Options configures the root directory, edit specification, and execution runner for Apply.
 type Options struct {
 	Root   string
 	Spec   Spec
@@ -52,8 +61,10 @@ type Options struct {
 	Run    Runner
 }
 
+// Runner executes a verification command in the context of the transaction root.
 type Runner func(context.Context, string, string) CheckResult
 
+// CheckResult captures the outcome and process output of a verification check command.
 type CheckResult struct {
 	Command  string `json:"command"`
 	ExitCode int    `json:"exit_code"`
@@ -61,6 +72,7 @@ type CheckResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// Result records the full outcome, rollback status, and diagnostic details of an edit transaction.
 type Result struct {
 	Schema     string        `json:"schema"`
 	OK         bool          `json:"ok"`
@@ -82,6 +94,12 @@ type snapshot struct {
 	mode    os.FileMode
 }
 
+// Apply applies a batch of full-file edits to the workspace root inside an atomic transaction.
+//
+// Invariant: edit transactions are fail-closed and rollback-atomic. Any validation,
+// snapshot, apply, or check failure triggers a full rollback to prior disk state.
+//
+// Guard: target paths must remain strictly under the workspace root and cannot escape via symlinks.
 func Apply(ctx context.Context, opts Options) Result {
 	res := Result{Schema: Schema}
 	root := opts.Root
@@ -344,6 +362,7 @@ func pruneEmptyParents(dir, root string) {
 	}
 }
 
+// DefaultRunner executes a verification command with process tree cancellation support.
 func DefaultRunner(ctx context.Context, root, command string) CheckResult {
 	var c *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -385,6 +404,7 @@ func refuse(res Result, reason, detail string) Result {
 	return res
 }
 
+// DigestTree computes SHA-256 digests for all specified relative paths within root.
 func DigestTree(root string, paths []string) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
 	for _, p := range paths {

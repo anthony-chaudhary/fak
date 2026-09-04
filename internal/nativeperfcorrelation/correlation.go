@@ -23,24 +23,30 @@ import (
 )
 
 const (
-	// Schema identifies the wire format version of native performance correlation records.
+	// Schema defines the canonical JSON schema identifier for native performance correlation records.
 	Schema = "fak/native-performance-correlation/v1"
-	// NativeEngine defines the required engine identity name for native execution traces.
+
+	// NativeEngine identifies the required in-tree fak-native model execution runtime.
 	NativeEngine = "fak-native"
-	// DefaultMaxArtifact bounds the maximum streamable artifact size to sixty-four megabytes.
+
+	// DefaultMaxArtifact sets the default upper bound (64 MiB) for streaming artifact digest verification.
 	DefaultMaxArtifact = int64(64 << 20)
 )
 
 var (
-	// ErrNotFound reports that a requested correlation key does not exist in the index.
+	// ErrNotFound indicates that the requested opaque correlation key is not present in the index.
 	ErrNotFound = errors.New("native performance correlation not found")
-	// ErrCollision reports that a distinct record produced an identical correlation key.
+
+	// ErrCollision indicates that distinct execution records produced an identical correlation key.
 	ErrCollision = errors.New("native performance correlation key collision")
-	// ErrArtifactMissing reports that an expected artifact kind or locator file is absent.
+
+	// ErrArtifactMissing indicates that an expected receipt, trace, or profile artifact file is absent from the filesystem.
 	ErrArtifactMissing = errors.New("native performance correlation artifact missing")
-	// ErrDigestMismatch reports that the streamed artifact payload does not match expected sha256.
+
+	// ErrDigestMismatch indicates that the computed artifact SHA-256 does not match the recorded manifest digest.
 	ErrDigestMismatch = errors.New("native performance correlation artifact digest mismatch")
-	// ErrArtifactTooLarge reports that artifact payload exceeds the permitted byte size limit.
+
+	// ErrArtifactTooLarge indicates that an artifact stream exceeded the allocated byte safety threshold.
 	ErrArtifactTooLarge = errors.New("native performance correlation artifact exceeds size limit")
 
 	hexDigestRE  = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -80,15 +86,17 @@ type Artifact struct {
 	SHA256  string       `json:"sha256"`
 }
 
-// ArtifactKind enumerates recognized categories of scrubbed performance artifacts.
+// ArtifactKind enumerates the closed set of verifiable evidence categories tracked by the index.
 type ArtifactKind string
 
 const (
-	// ArtifactReceipt denotes execution receipts proving native invocation parameters.
+	// ArtifactReceipt designates execution receipt artifacts containing admission and pricing telemetry.
 	ArtifactReceipt ArtifactKind = "receipt"
-	// ArtifactTrace denotes timing and span traces proving native runtime execution.
+
+	// ArtifactTrace designates session trace artifacts capturing tool call execution sequences.
 	ArtifactTrace ArtifactKind = "trace"
-	// ArtifactProfile denotes serialized profiler captures witnessing kernel hotspots.
+
+	// ArtifactProfile designates performance profiling artifacts containing runtime memory and CPU samples.
 	ArtifactProfile ArtifactKind = "profile"
 )
 
@@ -115,8 +123,14 @@ type Exemplar struct {
 	CorrelationKey string `json:"correlation_key"`
 }
 
-// Index retains at most Capacity records. When full, inserting a new record
-// evicts the oldest insertion. Re-inserting an identical record is idempotent.
+// Contract: Index bounds in-memory retention strictly to capacity, evicting the oldest
+// entry on overflow while maintaining exact idempotency for identical inputs.
+//
+// Invariant: Records never retain raw high-cardinality IDs; all request, run, receipt,
+// trace, and profile identifiers are cryptographically fingerprinted using SHA-256 before admission.
+//
+// Index provides a concurrency-safe, bounded in-memory cache retaining at most Capacity records.
+// When full, inserting a new record evicts the oldest insertion. Re-inserting an identical record is idempotent.
 type Index struct {
 	mu       sync.RWMutex
 	capacity int
@@ -125,7 +139,7 @@ type Index struct {
 	order    []string
 }
 
-// Option configures mutable parameters when initializing a new Index instance.
+// Option configures optional parameters during Index initialization, such as custom key derivation.
 type Option func(*Index)
 
 // WithKeyFunc exists for deterministic collision testing and specialized
@@ -138,7 +152,10 @@ func WithKeyFunc(fn func(Record) string) Option {
 	}
 }
 
-// NewIndex constructs a thread-safe bounded correlation cache with specified capacity.
+// Precondition: NewIndex requires capacity to be strictly positive (capacity > 0)
+// to prevent zero-capacity indexes or unbounded memory growth.
+//
+// NewIndex constructs a thread-safe correlation index bounded by the specified positive capacity.
 func NewIndex(capacity int, options ...Option) (*Index, error) {
 	if capacity <= 0 {
 		return nil, errors.New("native performance correlation capacity must be positive")
@@ -154,7 +171,10 @@ func NewIndex(capacity int, options ...Option) (*Index, error) {
 	return index, nil
 }
 
-// Add scrubs and inserts an input record into the bounded eviction ring.
+// Postcondition: Add returns either an admitted immutable clone of the Record with a
+// deterministic npc1_ correlation key, or an explicit validation error without mutating state.
+//
+// Add scrubs and admits execution input into the bounded index, evicting the oldest record if capacity is reached.
 func (i *Index) Add(input Input) (Record, error) {
 	record, err := scrub(input)
 	if err != nil {
@@ -182,7 +202,7 @@ func (i *Index) Add(input Input) (Record, error) {
 	return cloneRecord(record), nil
 }
 
-// Lookup retrieves a defensively cloned copy of a record by opaque key.
+// Lookup retrieves a defensively cloned Record by its opaque correlation key, or returns ErrNotFound.
 func (i *Index) Lookup(key string) (Record, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -204,7 +224,7 @@ func (i *Index) Snapshot() []Record {
 	return out
 }
 
-// Exemplar constructs a metric-attaching exemplar value containing only the opaque key.
+// Exemplar generates an OpenTelemetry-compatible metric exemplar referencing the indexed correlation key.
 func (i *Index) Exemplar(key string) (Exemplar, error) {
 	if _, err := i.Lookup(key); err != nil {
 		return Exemplar{}, err
@@ -212,6 +232,9 @@ func (i *Index) Exemplar(key string) (Exemplar, error) {
 	return Exemplar{CorrelationKey: key}, nil
 }
 
+// Guard: VerifyArtifact inspects artifact content streams bounded by maxBytes and enforces
+// constant-time hex SHA-256 verification against the pre-indexed manifest digest.
+//
 // VerifyArtifact streams one indexed artifact from fsys, bounded by maxBytes,
 // and verifies that it is the exact content named by the record.
 func (i *Index) VerifyArtifact(key string, kind ArtifactKind, fsys fs.FS, maxBytes int64) error {
@@ -248,6 +271,8 @@ func (i *Index) VerifyArtifact(key string, kind ArtifactKind, fsys fs.FS, maxByt
 	return nil
 }
 
+// Fail-closed: Any unscrubbed engine backend, traversal path, non-relative locator,
+// or missing required artifact kind immediately halts admission and returns an explicit error.
 func scrub(input Input) (Record, error) {
 	for name, value := range map[string]string{
 		"request ID": input.RequestID,

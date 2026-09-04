@@ -7,6 +7,8 @@ package workerworktree
 // silently disable the re-land.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,5 +64,25 @@ func TestLandReadbackRefusalReasonGradesRetryable(t *testing.T) {
 	}
 	if !LandRefusalRetryable(reason) {
 		t.Fatalf("the emitted readback refusal must grade retryable at the dispatch seam (#3613), got %q", reason)
+	}
+}
+
+func TestStripWorktreeWIPFences(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "feature.go")
+	const original = "package feature\n\nfunc Run() {}\n"
+	fenced := "//go:build wip_test\n\n" + original
+	if err := os.WriteFile(f, []byte(fenced), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stripWorktreeWIPFences(dir, []string{"feature.go"})
+
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("stripWorktreeWIPFences did not unfence: got %q, want %q", string(got), original)
 	}
 }

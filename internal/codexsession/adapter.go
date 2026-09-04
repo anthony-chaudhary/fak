@@ -20,8 +20,11 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
+// Engine identifies the execution engine descriptor used across harness runs.
 const Engine = "codex"
 
+// Config specifies runtime options, workspace root paths, event sink callbacks,
+// and compatibility constraints for launching a Codex session adapter.
 type Config struct {
 	Command          string
 	Args             []string
@@ -41,6 +44,8 @@ type Config struct {
 	AuthorityMethods []string
 }
 
+// Adapter coordinates Codex app-server child process execution, translating
+// bidirectional JSON-RPC notifications into structured fak harness protocol events.
 type Adapter struct {
 	cfg      Config
 	mu       sync.Mutex
@@ -67,6 +72,9 @@ type rpcMessage struct {
 	} `json:"error,omitempty"`
 }
 
+// New validates configuration parameters and constructs an initialized Codex
+// app-server adapter ready for session execution.
+// Precondition: RunID and Sink must be non-empty, and Workspace must resolve to a valid absolute filesystem path.
 func New(cfg Config) (*Adapter, error) {
 	if cfg.Command == "" {
 		cfg.Command = "codex"
@@ -94,6 +102,7 @@ func New(cfg Config) (*Adapter, error) {
 	return &Adapter{cfg: cfg}, nil
 }
 
+// Fail-closed: CompatibilityEnvelope and TestedReceipt must both be supplied or both omitted; partial configuration is rejected immediately.
 func (a *Adapter) checkCompatibility() error {
 	if a.cfg.Compatibility != nil || a.cfg.TestedReceipt != nil {
 		if a.cfg.Compatibility == nil || a.cfg.TestedReceipt == nil {
@@ -186,6 +195,9 @@ func (a *Adapter) startTurn(threadID string, text string, write func(int64, stri
 	return nil
 }
 
+// Run starts the Codex app-server subprocess, completes initial protocol handshakes,
+// begins a turn, and streams projected harness events until turn completion.
+// Contract: Raw provider wire messages are projected into typed harness events; provider internal identities never escape to the event sink.
 func (a *Adapter) Run(ctx context.Context, text string) error {
 	if err := a.checkCompatibility(); err != nil {
 		return err
@@ -304,6 +316,7 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 			}
 			continue
 		}
+		// Guard: Additive server requests and unrecognized approval notifications fail closed by routing to structural policy checks.
 		if len(m.ID) != 0 { // Additive server requests fail closed and stay visible.
 			if err := a.handleApprovalRequest(m); err != nil {
 				return err
@@ -392,6 +405,9 @@ func (a *Adapter) notification(emit func(harnesskit.EventType, string, string, a
 	return false, nil
 }
 
+// Interrupt transmits a cooperative cancellation request for the active turn
+// through the underlying JSON-RPC protocol stream.
+// Invariant: Interrupt requires an active turn ID and live stdin stream under lock, rejecting invocation once disconnected.
 func (a *Adapter) Interrupt() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

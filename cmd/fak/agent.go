@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/systools"
 )
 
 type agentFlags struct {
@@ -17,6 +18,8 @@ type agentFlags struct {
 	outputStyle           *string
 	consoleConfig         *string
 	workProfile           *string
+	effort                *string
+	thinkingBudget        *int
 	provider              *string
 	baseURL               *string
 	model                 *string
@@ -30,6 +33,7 @@ type agentFlags struct {
 	policyPath            *string
 	codeTools             *bool
 	codeWorkspace         *string
+	sysTools              *bool
 	routeManifest         *string
 	routeAccounts         *string
 	keepAwake             *string
@@ -48,6 +52,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.outputStyle = fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
 	af.consoleConfig = fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	af.workProfile = fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
+	af.effort = fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
+	af.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
 	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	af.baseURL = fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	af.model = fs.String("model", "gemini-2.5-flash", "model id")
@@ -61,6 +67,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
+	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
 	af.routeManifest = fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	af.routeAccounts = fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	af.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
@@ -159,12 +166,13 @@ func cmdAgent(argv []string) {
 		root, err = os.Getwd()
 		must(err)
 	}
+	var catalog []agent.ToolDef
 	if *af.codeTools {
 		var extraDirs []string
 		if *af.skillsDir != "" {
 			extraDirs = append(extraDirs, *af.skillsDir)
 		}
-		catalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
+		codeCatalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
 			Root:         root,
 			Focused:      true,
 			EnableSkills: *af.skills,
@@ -172,8 +180,22 @@ func cmdAgent(argv []string) {
 		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
+		catalog = append(catalog, codeCatalog...)
+	}
+	if *af.sysTools {
+		sysCatalog, sysErr := agent.ArmSysTools(systools.Config{})
+		must(sysErr)
+		defer agent.DisarmSysTools()
+		if *af.codeTools {
+			catalog = append(catalog, sysCatalog...)
+			runOpts = append(runOpts, agent.WithToolCatalog(catalog))
+		} else {
+			runOpts = append(runOpts, agent.WithToolCatalog(sysCatalog))
+		}
+	} else if *af.codeTools {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
+	runOpts = append(runOpts, agentEffortRunOptions(af)...)
 
 	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
@@ -253,4 +275,18 @@ func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption
 		return nil, nil, fmt.Errorf("fak agent: --route-manifest: %w", err)
 	}
 	return &manifest, []agent.RunOption{agent.WithRouteManifest(&manifest)}, nil
+}
+
+func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
+	var opts []agent.RunOption
+	if af == nil {
+		return opts
+	}
+	if af.effort != nil && *af.effort != "" {
+		opts = append(opts, agent.WithRunReasoningEffort(*af.effort))
+	}
+	if af.thinkingBudget != nil && *af.thinkingBudget >= 0 {
+		opts = append(opts, agent.WithRunThinkingBudget(*af.thinkingBudget))
+	}
+	return opts
 }

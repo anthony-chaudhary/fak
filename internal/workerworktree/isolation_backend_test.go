@@ -54,6 +54,7 @@ func TestIsolationBackendsPreserveBaseDiff(t *testing.T) {
 			git(repo, "init", "-q", "-b", "main")
 			git(repo, "config", "user.email", "backend@test")
 			git(repo, "config", "user.name", "backend")
+			git(repo, "config", "core.autocrlf", "false")
 			if err := os.WriteFile(filepath.Join(repo, "known.txt"), []byte("before\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}

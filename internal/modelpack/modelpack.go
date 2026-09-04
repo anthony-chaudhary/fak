@@ -1,4 +1,7 @@
 // Package modelpack manages signed, resumable model artifacts and fixture-gated activation.
+//
+// Contract: All modelpack installations verify cryptographic signatures prior to disk staging or chunk retrieval.
+// Invariant: At most one revision per PackID is active at any time, and uncorrupted chunks are content-addressed by SHA-256 digest.
 package modelpack
 
 import (
@@ -16,23 +19,23 @@ import (
 	"time"
 )
 
-// Schema specifies the canonical metadata format identifier for signed model packs.
+// Schema defines the canonical schema URI identifying model artifact pack manifests in version 1.
 const Schema = "fak.model-pack-manifest/1"
 
-// Chunk describes a content-addressed storage slice verified by its SHA-256 digest.
+// Chunk represents a discrete cryptographic content-addressed file slice identified by SHA-256 digest and byte size.
 type Chunk struct {
 	Digest string `json:"digest"`
 	Size   int64  `json:"size"`
 }
 
-// Fixture defines a verification test vector executed during activation canary evaluation.
+// Fixture specifies an end-to-end task verification pair with input prompt and deterministic expected output.
 type Fixture struct {
 	Name     string `json:"name"`
 	Input    string `json:"input"`
 	Expected string `json:"expected"`
 }
 
-// Manifest defines the complete specification of an installable model pack revision.
+// Manifest provides the signed metadata specification containing pack identity, revision, chunk inventory, and canary fixtures.
 type Manifest struct {
 	Schema    string    `json:"schema"`
 	PackID    string    `json:"pack_id"`
@@ -42,7 +45,7 @@ type Manifest struct {
 	Signature string    `json:"signature,omitempty"`
 }
 
-// Event captures an immutable state transition recorded in the pack lifecycle history.
+// Event records an operational lifecycle state transition with sequence number and deterministic execution timestamp.
 type Event struct {
 	Sequence uint64    `json:"sequence"`
 	At       time.Time `json:"at"`
@@ -52,7 +55,7 @@ type Event struct {
 	Detail   string    `json:"detail,omitempty"`
 }
 
-// Receipt acknowledges a verified state change witnessed by cryptographic digest and sequence.
+// Receipt represents a cryptographic execution receipt confirming state changes with a SHA-256 event digest.
 type Receipt struct {
 	Schema   string `json:"schema"`
 	PackID   string `json:"pack_id"`
@@ -69,34 +72,34 @@ type state struct {
 	Events        []Event           `json:"events"`
 }
 
-// Manager orchestrates local model pack storage, download resumption, canary validation, and eviction.
+// Manager coordinates artifact acquisition, storage reservations, atomic staging, verification, and rollbacks on local disk.
 type Manager struct {
 	root string
 	now  func() time.Time
 	s    state
 }
 
-// Fetch represents a pluggable content-addressed chunk retrieval callback with byte offset support.
+// Fetch defines the chunk transfer closure streaming payload bytes from a remote source into a destination writer starting at an offset.
 type Fetch func(digest string, offset int64, dst io.Writer) error
 
-// Canary represents an evaluation hook invoked prior to promoting staged revisions to active state.
+// Canary represents a task-validation callback that evaluates staged model files against declared test fixtures before activation.
 type Canary func(packDir string, fixtures []Fixture) error
 
-// ErrSignature indicates that the manifest cryptographic signature could not be verified against the public key.
+// ErrSignature indicates that the manifest cryptographic signature is missing, invalid, or forged.
 var ErrSignature = errors.New("modelpack: invalid manifest signature")
 
-// ErrCorrupt indicates that a downloaded chunk payload failed hash verification against its declared digest.
+// ErrCorrupt indicates that fetched chunk content does not match its expected SHA-256 digest or declared size.
 var ErrCorrupt = errors.New("modelpack: chunk digest mismatch")
 
-// ErrCapacity indicates that remaining storage budget is insufficient to satisfy the forecasted download size.
+// ErrCapacity indicates that local disk storage is insufficient to satisfy the forecasted byte reservation.
 var ErrCapacity = errors.New("modelpack: insufficient reserved storage")
 
-// ErrRevoked indicates that the requested pack revision has been marked invalid and must not be activated.
+// ErrRevoked indicates that the target model pack revision has been explicitly marked as revoked and cannot be activated.
 var ErrRevoked = errors.New("modelpack: revision revoked")
 
 func canonical(m Manifest) ([]byte, error) { m.Signature = ""; return json.Marshal(m) }
 
-// Sign serializes the manifest canonical structure and attaches an Ed25519 signature.
+// Sign computes an Ed25519 signature over canonicalized manifest JSON and sets the hex-encoded signature field.
 func Sign(m *Manifest, key ed25519.PrivateKey) error {
 	b, e := canonical(*m)
 	if e != nil {
@@ -106,9 +109,8 @@ func Sign(m *Manifest, key ed25519.PrivateKey) error {
 	return nil
 }
 
-// Verify enforces cryptographic signature validity and schema correctness for a manifest.
-//
-// Key invariant: any manifest with an invalid signature or malformed chunk digest is rejected before storage is modified.
+// Verify authenticates the manifest Ed25519 signature against the public key and validates chunk integrity constraints.
+// Contract: Any schema mismatch, empty pack identity, invalid digest length, or forged signature results in ErrSignature.
 func Verify(m Manifest, key ed25519.PublicKey) error {
 	if m.Schema != Schema || m.PackID == "" || m.Revision == "" {
 		return fmt.Errorf("%w: invalid identity", ErrSignature)
@@ -132,7 +134,7 @@ func Verify(m Manifest, key ed25519.PublicKey) error {
 	return nil
 }
 
-// Open loads or initializes persistent model pack management state from the specified root directory.
+// Open initializes or loads a persistent model pack manager backed by the specified storage root directory.
 func Open(root string) (*Manager, error) {
 	if err := os.MkdirAll(filepath.Join(root, "chunks"), 0755); err != nil {
 		return nil, err
@@ -183,15 +185,13 @@ func (m *Manager) emit(man Manifest, stateName, detail string) (Receipt, error) 
 	return Receipt{Schema: "fak.model-pack-receipt/1", PackID: man.PackID, Revision: man.Revision, State: stateName, Sequence: e.Sequence, Digest: hex.EncodeToString(sum[:])}, nil
 }
 
-// Events returns a defensive copy of the sequential audit history recorded by the manager.
+// Events returns an ordered snapshot slice of all recorded lifecycle transitions from the manager journal.
 func (m *Manager) Events() []Event { return append([]Event(nil), m.s.Events...) }
 
-// Active returns the currently activated revision identifier for the given pack ID.
+// Active returns the currently activated revision string for the specified pack identifier, or empty if none.
 func (m *Manager) Active(id string) string { return m.s.Active[id] }
 
-// Forecast calculates the additional unacquired storage bytes required to complete pack acquisition.
-//
-// Assumption: partial download files accurately reflect already received byte counts on disk.
+// Forecast calculates the remaining net byte download required to fetch all missing or partial chunks for a manifest.
 func (m *Manager) Forecast(man Manifest) int64 {
 	var n int64
 	for _, c := range man.Chunks {
@@ -213,7 +213,9 @@ func (m *Manager) Forecast(man Manifest) int64 {
 // Install verifies authority before fetching, resumes partial chunks, stages atomically,
 // and activates only after the caller's task-fixture canary passes.
 //
-// Fail-closed guard: if verification fails, capacity is exceeded, or canary evaluation errors, staging is aborted cleanly.
+// Contract: Install executes fail-closed; invalid signatures, corrupt chunks, or canary failures abort without partial activation.
+// Precondition: Available capacity must be greater than or equal to forecasted missing bytes.
+// Postcondition: On successful activation, the previous active revision becomes the last-known-good fallback.
 func (m *Manager) Install(man Manifest, pub ed25519.PublicKey, capacity int64, fetch Fetch, canary Canary) (Receipt, error) {
 	if err := Verify(man, pub); err != nil {
 		r, _ := m.emit(man, "refused", "signature")
@@ -310,9 +312,9 @@ func validFile(path string, c Chunk) bool {
 	return e == nil && n == c.Size && hex.EncodeToString(h.Sum(nil)) == strings.ToLower(c.Digest)
 }
 
-// Revoke disables the designated pack revision and restores last-known-good state if active.
+// Revoke marks a revision as permanently untrusted, deactivates it if active, and falls back to last-known-good.
 //
-// Invariant: revoked revisions can never be activated, reinstalled, or retained as active state.
+// Contract: Revoked revisions cannot be installed or rolled back to, preserving fail-closed isolation against compromised artifacts.
 func (m *Manager) Revoke(id, rev string) (Receipt, error) {
 	man := Manifest{PackID: id, Revision: rev}
 	m.s.Revoked[key(id, rev)] = true
@@ -326,7 +328,9 @@ func (m *Manager) Revoke(id, rev string) (Receipt, error) {
 	return m.emit(man, "revoked", "")
 }
 
-// Rollback reactivates the recorded last-known-good revision for the given pack identifier.
+// Rollback switches the active revision back to the last-known-good revision when available and unrevoked.
+//
+// Contract: Rollback swaps active and last-known-good state atomically, failing if no valid fallback exists.
 func (m *Manager) Rollback(id string) (Receipt, error) {
 	rev := m.s.LastKnownGood[id]
 	if rev == "" || m.s.Revoked[key(id, rev)] {
@@ -340,7 +344,7 @@ func (m *Manager) Rollback(id string) (Receipt, error) {
 
 // Evict removes inactive revisions oldest-name-first while retaining active and last-known-good revisions.
 //
-// Postcondition: active and last-known-good revisions remain untouched regardless of the byte eviction quota.
+// Invariant: Active and last-known-good revisions are strictly protected from eviction regardless of byte targets.
 func (m *Manager) Evict(bytes int64) (int64, error) {
 	root := filepath.Join(m.root, "packs")
 	var paths []string

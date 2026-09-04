@@ -51,6 +51,12 @@
 // — so two operators issuing concurrently can never double-apply or clobber each
 // other. Issuer is attribution, not authority: the capability floor on publish is a
 // declared follow-on of epic #5599, not a fence this package pretends to hold.
+//
+// Contract:
+//   - Invariant: fleetbus operations are fail-closed and bounded across all instances and directives.
+//   - Guard: publishing a directive is never its own witness; application requires a signed Ack from the consuming instance.
+//   - Precondition: directives, instances, and acks must validate schema tokens, monotonic sequences, and RFC3339 timestamps.
+//   - Postcondition: fold aggregates partition targeted instances into applied, refused, expired, or outstanding without dropping unacknowledged targets.
 package fleetbus
 
 import (

@@ -274,6 +274,7 @@ func TestLiveCoreLockRefusesUnwitnessedKernelLand(t *testing.T) {
 	git("config", "user.email", "corelock@test")
 	git("config", "user.name", "corelock")
 	git("config", "commit.gpgsign", "false")
+	git("config", "core.fscache", "false")
 	kernel := filepath.Join(repo, "internal", "adjudicator")
 	if err := os.MkdirAll(kernel, 0o755); err != nil {
 		t.Fatal(err)
@@ -344,7 +345,14 @@ func TestLiveCoreLockRefusesUnwitnessedKernelLand(t *testing.T) {
 	if !strings.Contains(string(body), "return true") {
 		t.Fatalf("witnessed land did not carry the kernel edit:\n%s", body)
 	}
-	_ = Reap(repo, prep.Path, nil)
+	_ = filepath.Walk(prep.Path, func(p string, info os.FileInfo, err error) error {
+		if err == nil {
+			t.Logf("file in prep.Path: %s (mode: %v)", p, info.Mode())
+		}
+		return nil
+	})
+	reapRes := Reap(repo, prep.Path, nil)
+	t.Logf("Reap result: %+v", reapRes)
 }
 
 // TestLiveCoreLockOrdinaryLeafLandsWithoutWitness is the live control: the same

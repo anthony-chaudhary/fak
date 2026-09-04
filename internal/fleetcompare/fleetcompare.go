@@ -1,7 +1,9 @@
 // Package fleetcompare provides utilities for slicing and comparing multi-node fleet metrics.
 //
+// Invariant: fleet comparison slicing is fail-closed and deterministic.
 // Invariants: fleet comparison ensures consistent multi-node metric comparisons without drift.
 // Assumptions: columns map contains matching slice lengths for referenced keys.
+// Guard: missing keys or mismatched observation lengths produce fail-closed, safe zero slices.
 // Fail-closed guard: unaligned or missing metric columns produce empty slices rather than corrupt comparisons.
 package fleetcompare
 
