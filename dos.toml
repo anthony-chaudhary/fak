@@ -433,7 +433,7 @@ concurrent = [
   # Creation history already used the matching `(fak <package>)` stamp for 191/228
   # leaves; keeping the other independent package APIs at the same boundary avoids a
   # broader topic lane, catch-all, or package move. Every path is explicit below.
-  "agentdescriptor", "agentic", "agentquery", "agentqueue", "amoprofpub", "archfitness",
+  "agentdescriptor", "agentic", "agentquery", "agentqueue", "archfitness",
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
   "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
@@ -887,6 +887,7 @@ microagent = ["internal/microagent/**"]
 microharnessdemo = ["cmd/microharnessdemo/**"] # bounded harness demo and its privacy-safe usage/health evidence
 microcontextdemo = ["cmd/microcontextdemo/**"]
 l3kv = ["internal/l3kv/**"]
+l3server = ["internal/l3server/**"]
 doomloop = ["internal/doomloop/**"]
 cvregress = ["internal/cvregress/**"]
 wiki = ["internal/wiki/**"] # #4277 deepwiki-study: witness-verified repo-wiki structure (L1 #4278) + Sources:[path:line] citation resolver (L3 #4280); cmd/fak/wiki.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
@@ -1346,7 +1347,6 @@ agentdescriptor = ["internal/agentdescriptor/**"]
 agentic = ["internal/agentic/**"]
 agentquery = ["internal/agentquery/**"]
 agentqueue = ["internal/agentqueue/**"]
-amoprofpub = ["internal/amoprofpub/**"]
 archfitness = ["internal/archfitness/**"]
 archrank = ["internal/archrank/**"]
 armbench = ["internal/armbench/**"]
