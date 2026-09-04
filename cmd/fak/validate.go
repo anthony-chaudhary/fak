@@ -456,6 +456,10 @@ func normalizeMinePathsWithin(ctx context.Context, root string, raw []string) ([
 	if err != nil {
 		return nil, err
 	}
+	realRoot := rootAbs
+	if resolved, rootErr := filepath.EvalSymlinks(rootAbs); rootErr == nil {
+		realRoot = resolved
+	}
 	for _, value := range raw {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -473,7 +477,19 @@ func normalizeMinePathsWithin(ctx context.Context, root string, raw []string) ([
 		}
 		rel, err := filepath.Rel(rootAbs, p)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("--mine path %q escapes repo root", value)
+			// If containment fails with raw paths, try with canonicalized paths
+			// (handles symlinked roots such as macOS /var -> /private/var).
+			realP := p
+			if resolved, evalErr := filepath.EvalSymlinks(p); evalErr == nil {
+				realP = resolved
+			} else if parent, evalErr := filepath.EvalSymlinks(filepath.Dir(p)); evalErr == nil {
+				realP = filepath.Join(parent, filepath.Base(p))
+			}
+			inside, relErr := filepath.Rel(realRoot, realP)
+			if relErr != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("--mine path %q escapes repo root", value)
+			}
+			rel = inside
 		}
 		rel = filepath.ToSlash(filepath.Clean(rel))
 		if rel == "." {
@@ -498,6 +514,9 @@ func normalizeMinePathsWithin(ctx context.Context, root string, raw []string) ([
 					return nil
 				}
 				childRel, err := filepath.Rel(rootAbs, child)
+				if (err != nil || childRel == ".." || strings.HasPrefix(childRel, ".."+string(filepath.Separator))) && realRoot != rootAbs {
+					childRel, err = filepath.Rel(realRoot, child)
+				}
 				if err != nil {
 					return err
 				}
