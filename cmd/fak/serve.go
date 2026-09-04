@@ -170,6 +170,7 @@ type serveFlags struct {
 	vulkanQ4KProfile             *bool
 	vulkanStageQ4K               *bool
 	metal                        *bool
+	gpudirectOverflow            *bool
 	expertParallel               *int
 	tensorParallel               *int
 	budgetWebhook                *string
@@ -272,6 +273,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeGPULayers = fs.Int("gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU; alias for --native-gpu-layers")
 	fs.IntVar(sf.nativeGPULayers, "native-gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU (alias for --gpu-layers)")
 	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
+	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", true, "enable AMD GPU Direct / NVMe P2PDMA zero-copy storage for KV cache and layer overflow handling (bypasses CPU bounce buffers on VRAM saturation; default on)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Also carries the --spend-cap breach event (kind:\"spend_breach\", #4859) when a scope crosses its token/USD budget. Empty = off. Needs --context-budget-tokens to have a budget to watch.")
