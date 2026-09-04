@@ -1,8 +1,6 @@
 package archrank
 
 import (
-	"bytes"
-	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -555,75 +553,5 @@ func TestDatasetEmptyAndDuplicateCandidates(t *testing.T) {
 	dupDS := validDataset(c1, c2)
 	if err := dupDS.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate id") {
 		t.Errorf("expected error for duplicate candidate ID, got %v", err)
-	}
-}
-
-// BenchmarkArchRank measures the throughput of ranking candidate datasets.
-func BenchmarkArchRank(b *testing.B) {
-	c1 := measuredCandidate("bench-cand-1")
-	c2 := measuredCandidate("bench-cand-2")
-	c3 := measuredCandidate("bench-cand-3")
-	c4 := measuredCandidate("bench-cand-4")
-	dataset := validDataset(c1, c2, c3, c4)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		res, err := Rank(dataset)
-		if err != nil {
-			b.Fatalf("Rank failed: %v", err)
-		}
-		if len(res.Groups) == 0 {
-			b.Fatal("unexpected empty groups in benchmark")
-		}
-	}
-}
-
-// BenchmarkDatasetValidate measures the cost of schema, formula, and candidate invariant validation.
-func BenchmarkDatasetValidate(b *testing.B) {
-	c1 := measuredCandidate("bench-val-1")
-	c2 := measuredCandidate("bench-val-2")
-	dataset := validDataset(c1, c2)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		if err := dataset.Validate(); err != nil {
-			b.Fatalf("Validate failed: %v", err)
-		}
-	}
-}
-
-// BenchmarkActiveBytes measures active-byte accounting formula calculation and overflow bounds.
-func BenchmarkActiveBytes(b *testing.B) {
-	cand := measuredCandidate("bench-active-bytes")
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		bytes, err := cand.ActiveBytes()
-		if err != nil || bytes == 0 {
-			b.Fatalf("ActiveBytes failed: %v", err)
-		}
-	}
-}
-
-// BenchmarkLoadJSON measures JSON deserialization with strict unknown-field checking.
-func BenchmarkLoadJSON(b *testing.B) {
-	c1 := measuredCandidate("bench-load-1")
-	c2 := measuredCandidate("bench-load-2")
-	dataset := validDataset(c1, c2)
-	data, err := json.Marshal(dataset)
-	if err != nil {
-		b.Fatalf("json.Marshal failed: %v", err)
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_, err := LoadJSON(bytes.NewReader(data))
-		if err != nil {
-			b.Fatalf("LoadJSON failed: %v", err)
-		}
 	}
 }

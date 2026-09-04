@@ -14,42 +14,26 @@ import (
 )
 
 const (
-	// ActiveBytesFormula is the only active-byte accounting formula accepted by
-	// this package. Keeping the spelling canonical makes fixture drift visible.
-	//
-	// Invariant: formula string must be "active_bytes = active_weight_bytes + state_bytes + kv_bytes_at_envelope".
-	// Guard: validation fails closed with an error if this formula does not match.
+	// ActiveBytesFormula specifies the required active-byte accounting formula.
 	ActiveBytesFormula = "active_bytes = active_weight_bytes + state_bytes + kv_bytes_at_envelope"
-	// ScoreFormula is the only ranking formula accepted by this package.
-	//
-	// Invariant: formula string must be "quality_per_active_byte = quality / active_bytes".
-	// Guard: validation fails closed with an error if this formula does not match.
+	// ScoreFormula specifies the required quality per active byte ranking formula.
 	ScoreFormula = "quality_per_active_byte = quality / active_bytes"
 )
 
-// Dataset is the versioned input to Rank.
-//
-// Invariant: SchemaVersion must be "archrank.candidates/v1", Formulas must be canonical, and Candidates must be non-empty with unique IDs.
-// Guard: Validate fails closed on schema mismatches, unknown formulas, empty candidate slices, or invalid candidates.
+// Dataset holds architecture candidate observations and evaluation formulas.
 type Dataset struct {
 	SchemaVersion string      `json:"schema_version"`
 	Formulas      Formulas    `json:"formulas"`
 	Candidates    []Candidate `json:"candidates"`
 }
 
-// Formulas declares the accounting performed by the dataset.
-//
-// Invariant: ActiveBytes and Score must match ActiveBytesFormula and ScoreFormula respectively.
-// Guard: non-matching formula strings are rejected during validation.
+// Formulas declares the active byte and score accounting equations.
 type Formulas struct {
 	ActiveBytes string `json:"active_bytes"`
 	Score       string `json:"score"`
 }
 
-// Candidate is one architecture observation or hypothesis.
-//
-// Invariant: Quality must be finite and non-negative; ActiveBytes must sum without uint64 overflow and exceed zero.
-// Guard: accepted status requires measured provenance with a locator; estimated status requires literature provenance with an http(s) URL.
+// Candidate models a single architecture observation or evaluation hypothesis.
 type Candidate struct {
 	ID                string     `json:"id"`
 	Architecture      string     `json:"architecture"`
@@ -65,32 +49,21 @@ type Candidate struct {
 	Provenance        Provenance `json:"provenance"`
 }
 
-// Provenance records whether a row is a measured observation or an estimate
-// and where its evidence can be inspected.
-//
-// Invariant: Kind must be "synthetic_control_measurement" or "measured_artifact" for accepted status, or "literature_hypothesis" for estimated status.
-// Guard: accepted rows require non-empty Locator; estimated rows require an absolute http(s) URL.
+// Provenance tracks measurement methodology and supporting artifact locators.
 type Provenance struct {
 	Kind    string `json:"kind"`
 	URL     string `json:"url,omitempty"`
 	Locator string `json:"locator,omitempty"`
 }
 
-// ComparabilityKey is deliberately exact: Rank never coerces or normalizes any
-// of these fields when deciding whether two rows may be compared.
-//
-// Invariant: exact tuple matching over EnvelopeID, QualityMetric, and QualitySourceKind.
-// Guard: rows differing in any field are placed in separate groups or marked unranked.
+// ComparabilityKey defines the exact dimension tuple required for fair candidate comparison.
 type ComparabilityKey struct {
 	EnvelopeID        string `json:"envelope_id"`
 	QualityMetric     string `json:"quality_metric"`
 	QualitySourceKind string `json:"quality_source_kind"`
 }
 
-// RankedRow is a computed, comparable result.
-//
-// Invariant: Rank is 1-based, ActiveBytes is greater than zero, and QualityPerActiveByte is finite.
-// Guard: deterministic tie-break orders rows with identical scores by ID ascending.
+// RankedRow represents a scored candidate with its rank and efficiency metrics.
 type RankedRow struct {
 	ID                   string  `json:"id"`
 	Rank                 int     `json:"rank"`
@@ -98,37 +71,25 @@ type RankedRow struct {
 	QualityPerActiveByte float64 `json:"quality_per_active_byte"`
 }
 
-// RankedGroup contains rows sharing one exact ComparabilityKey.
-//
-// Invariant: Key is shared by all rows; Rows contains at least two rows sorted descending by QualityPerActiveByte.
-// Guard: keys with fewer than two rows fail closed to Unranked instead of emitting singleton groups.
+// RankedGroup aggregates candidates evaluated within the same comparability key.
 type RankedGroup struct {
 	Key  ComparabilityKey `json:"key"`
 	Rows []RankedRow      `json:"rows"`
 }
 
-// UnrankedRow records why a valid input row did not participate in a ranking.
-//
-// Invariant: ID identifies the candidate and Reason explains the non-ranking cause.
-// Guard: reasons distinguish estimated hypotheses from unmatched comparability keys.
+// UnrankedRow records why an individual candidate was excluded from comparative ranking.
 type UnrankedRow struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
 }
 
-// Result separates comparable rankings from explicit non-ranking decisions.
-//
-// Invariant: every valid candidate appears in either Groups or Unranked, never both.
-// Guard: candidates are never silently dropped or double-counted.
+// Result contains partitioned groups of ranked candidates alongside unranked items.
 type Result struct {
 	Groups   []RankedGroup `json:"groups"`
 	Unranked []UnrankedRow `json:"unranked"`
 }
 
-// LoadJSON decodes and validates a candidate dataset.
-//
-// Invariant: stream must contain exactly one valid JSON object complying with the Dataset schema.
-// Guard: unknown fields are disallowed, trailing content is rejected, and validation runs before returning.
+// LoadJSON parses and validates a candidate dataset from an input reader.
 func LoadJSON(r io.Reader) (*Dataset, error) {
 	decoder := json.NewDecoder(r)
 	decoder.DisallowUnknownFields()
@@ -150,10 +111,7 @@ func LoadJSON(r io.Reader) (*Dataset, error) {
 	return &dataset, nil
 }
 
-// LoadFile loads and validates a candidate dataset from path.
-//
-// Invariant: file at path must exist, be readable, and contain a valid Dataset.
-// Guard: closes the open file descriptor and fails closed on I/O or validation errors.
+// LoadFile reads and validates an architecture candidate dataset from disk.
 func LoadFile(path string) (*Dataset, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -163,10 +121,7 @@ func LoadFile(path string) (*Dataset, error) {
 	return LoadJSON(file)
 }
 
-// Validate checks schema, formula, provenance, and arithmetic invariants.
-//
-// Invariant: SchemaVersion, Formulas, and each Candidate must satisfy integrity checks; IDs must be unique.
-// Guard: returns an error on the first violated invariant to fail closed.
+// Validate verifies schema conformance, formula strings, and candidate constraints.
 func (d Dataset) Validate() error {
 	if d.SchemaVersion != "archrank.candidates/v1" {
 		return fmt.Errorf("schema_version: got %q, want %q", d.SchemaVersion, "archrank.candidates/v1")
@@ -247,10 +202,7 @@ func validateSourceURL(raw string) error {
 	return nil
 }
 
-// ActiveBytes applies the canonical active-byte accounting formula.
-//
-// Invariant: returns active_weight_bytes + state_bytes + kv_bytes_at_envelope.
-// Guard: fails closed with an error on uint64 overflow or if total active bytes equals zero.
+// ActiveBytes calculates total memory footprint according to the active byte formula.
 func (c Candidate) ActiveBytes() (uint64, error) {
 	if math.MaxUint64-c.ActiveWeightBytes < c.StateBytes {
 		return 0, errors.New("active_bytes overflows uint64")
@@ -266,12 +218,7 @@ func (c Candidate) ActiveBytes() (uint64, error) {
 	return total, nil
 }
 
-// Rank ranks accepted measured rows only when at least two rows share the
-// exact envelope, metric, and source-kind key. All other valid rows receive an
-// explicit unranked reason.
-//
-// Invariant: only accepted rows sharing an exact ComparabilityKey with at least one peer are ranked.
-// Guard: estimated rows and unmatched singleton keys fail closed into Unranked with explicit reasons.
+// Rank evaluates accepted candidates and sorts comparable groups by quality efficiency.
 func Rank(dataset Dataset) (Result, error) {
 	if err := dataset.Validate(); err != nil {
 		return Result{}, err
