@@ -10,7 +10,53 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+	"github.com/anthony-chaudhary/fak/internal/systools"
 )
+
+type chatFlags struct {
+	provider              *string
+	baseURL               *string
+	model                 *string
+	apiKeyEnv             *string
+	anthropicAuth         *string
+	offline               *bool
+	maxTurns              *int
+	policyPath            *string
+	task                  *string
+	tools                 *string
+	codeTools             *bool
+	codeWorkspace         *string
+	sysTools              *bool
+	skills                *bool
+	skillsDir             *string
+	workflow              *string
+	workflowStep          *bool
+	workflowCheckpointDir *string
+}
+
+func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
+	fs := flag.NewFlagSet("chat", flag.ExitOnError)
+	cf := &chatFlags{}
+	cf.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
+	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
+	cf.model = fs.String("model", "gemini-2.5-flash", "model id")
+	cf.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
+	cf.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
+	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
+	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
+	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
+	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
+	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
+	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
+	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
+	cf.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
+	cf.skills = fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
+	cf.skillsDir = fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
+	cf.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
+	cf.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
+	cf.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	return fs, cf
+}
 
 // cmdChat is the minimal native TUI/REPL on the internal/agent seam (#1320, child
 // of the #1315 native-harness program): the Apache-clean, single-binary operator
@@ -24,34 +70,17 @@ import (
 // RunArm in-process, with no upstream required (the offline mock planner is the
 // default, matching `fak agent`). --base-url swaps in a live provider planner.
 func cmdChat(argv []string) {
-	fs := flag.NewFlagSet("chat", flag.ExitOnError)
-	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
-	baseURL := fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
-	model := fs.String("model", "gemini-2.5-flash", "model id")
-	apiKeyEnv := fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
-	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
-	offline := fs.Bool("offline", false, "force the deterministic mock planner (no network)")
-	maxTurns := fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
-	task := fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
-	tools := fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
-	codeTools := fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
-	codeWorkspace := fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
-	skills := fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
-	skillsDir := fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
-	workflow := fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
-	workflowStep := fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
-	workflowCheckpointDir := fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
 
-	if *workflow != "" {
-		if err := runWorkflowCLI(*workflow, *workflowStep, *workflowCheckpointDir); err != nil {
+	if *cf.workflow != "" {
+		if err := runWorkflowCLI(*cf.workflow, *cf.workflowStep, *cf.workflowCheckpointDir); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
 
-	applyPolicy(*policyPath)
+	applyPolicy(*cf.policyPath)
 
 	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
@@ -59,45 +88,58 @@ func cmdChat(argv []string) {
 			providerExplicit = true
 		}
 	})
-	effectiveBaseURL := *baseURL
-	if effectiveBaseURL == "" && providerExplicit && !*offline {
-		effectiveBaseURL = dropin.DefaultBaseURL(*provider)
+	effectiveBaseURL := *cf.baseURL
+	if effectiveBaseURL == "" && providerExplicit && !*cf.offline {
+		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
 	}
 
 	var runOpts []agent.RunOption
-	useCodeTools := *codeTools && *tools != "demo" && *tools != "none"
-	if *tools == "code" || useCodeTools {
-		root := strings.TrimSpace(*codeWorkspace)
+	var catalog []agent.ToolDef
+	hasCustomCatalog := false
+	useCodeTools := *cf.codeTools && *cf.tools != "demo" && *cf.tools != "none"
+	if *cf.tools == "code" || useCodeTools {
+		root := strings.TrimSpace(*cf.codeWorkspace)
 		if root == "" {
 			var err error
 			root, err = os.Getwd()
 			must(err)
 		}
 		var extraDirs []string
-		if *skillsDir != "" {
-			extraDirs = append(extraDirs, *skillsDir)
+		if *cf.skillsDir != "" {
+			extraDirs = append(extraDirs, *cf.skillsDir)
 		}
-		catalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
+		codeCat, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
 			Root:         root,
 			Focused:      true,
-			EnableSkills: *skills,
+			EnableSkills: *cf.skills,
 			ExtraDirs:    extraDirs,
 		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
+		catalog = append(catalog, codeCat...)
+		hasCustomCatalog = true
+	}
+	if *cf.sysTools && *cf.tools != "demo" && *cf.tools != "none" {
+		sysCatalog, sysErr := agent.ArmSysTools(systools.Config{})
+		must(sysErr)
+		defer agent.DisarmSysTools()
+		catalog = append(catalog, sysCatalog...)
+		hasCustomCatalog = true
+	}
+	if hasCustomCatalog {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
-	} else if *tools == "none" {
+	} else if *cf.tools == "none" {
 		runOpts = append(runOpts, agent.WithToolCatalog(nil))
 	}
 
-	planner := chatPlanner(*offline, effectiveBaseURL, *provider, *model, *apiKeyEnv, *anthropicAuth)
-	if *task != "" {
-		if err := runChatHeadless(os.Stdout, planner, *task, *maxTurns, runOpts...); err != nil {
+	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)
+	if *cf.task != "" {
+		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, runOpts...); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
-	runChat(os.Stdin, os.Stdout, planner, *maxTurns, runOpts...)
+	runChat(os.Stdin, os.Stdout, planner, *cf.maxTurns, runOpts...)
 }
 
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)

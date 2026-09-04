@@ -630,6 +630,10 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdAntipatternScorecard(args)
 	case "debt-lanes":
 		cmdDebtLanes(args)
+	case "issue-orchestrator":
+		cmdIssueOrchestrator(args)
+	case "bench-effort":
+		cmdBenchEffort(args)
 	case "maturity":
 		cmdMaturity(args)
 	case "balance":
@@ -1049,6 +1053,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchLocal(os.Stdout, os.Stderr, argv[1:]))
 		case "tb4":
 			os.Exit(runBenchTB4(os.Stdout, os.Stderr, argv[1:]))
+		case "effort":
+			os.Exit(runBenchEffort(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
