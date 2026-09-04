@@ -517,6 +517,10 @@ func TestWorkerCouplerConcurrentAccessRace(t *testing.T) {
 	}()
 
 	wg.Wait()
+	stats := coupler.Stats()
+	if stats.PrefillWorkers < 0 {
+		t.Fatalf("prefill workers cannot be negative: %d", stats.PrefillWorkers)
+	}
 }
 
 // Benchmarks
