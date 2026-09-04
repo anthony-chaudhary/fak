@@ -1,13 +1,3 @@
-// Package breathgate provides turn pacing, pause control, debounce, and cooldown
-// mechanisms for autonomous agent loops.
-//
-// In multi-turn agent execution, runaway loops can rapidly exhaust API rate limits,
-// deplete token spend, or cause destructive thrashing. A breath gate introduces
-// deliberate "breathing room" between autonomous operations, enforcing minimum
-// intervals, bounded jitter to avoid thundering-herd synchronization, and automatic
-// or explicit cooldown periods.
-//
-// All methods on Gate are safe for concurrent use by multiple goroutines.
 package breathgate
 
 import (
@@ -96,6 +86,9 @@ type Stats struct {
 // Gate manages pacing intervals, pause control, debounce, and cooldowns.
 // It enforces minimum breathing intervals between autonomous tool turns,
 // serializes bursts, and protects against runaway thrashing.
+//
+// Invariant: breathgate pacing decisions are fail-closed and bounded.
+// Guard: Check and Wait prevent runaway loops by enforcing minimum intervals and burst cooldowns.
 //
 // Contract:
 //   - Safe for concurrent use across multiple goroutines.
