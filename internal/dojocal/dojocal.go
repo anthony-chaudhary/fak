@@ -25,6 +25,7 @@
 // and dojo.FoldCalibrable refuses to fold an UNMEASURED episode — so the ways the
 // loop could optimise itself into dishonesty are closed by construction, the same
 // way guardrsi can only ever repair an honesty hole and never invent a row.
+// Invariant: dojo calibration is fail-closed and shard-checked.
 package dojocal
 
 import (
