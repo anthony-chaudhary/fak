@@ -1,4 +1,7 @@
 // Package edgequal validates the physical low-resource offline witness for issue #8600.
+// Invariants: receipts must specify valid sha256 and conform to Schema.
+// Invariants: fail-closed validation requires physical device evidence without network calls.
+// Assumption: offline execution is guaranteed when network calls are disabled and verified.
 package edgequal
 
 import (
@@ -12,19 +15,28 @@ import (
 )
 
 const (
-	Schema                  = "fak.edgequal.receipt.v1"
-	PackVersion             = "issue-8600/v1"
-	ModelRepository         = "bartowski/Qwen2.5-1.5B-Instruct-GGUF"
+	// Schema defines the canonical schema version for edgequal receipts.
+	Schema = "fak.edgequal.receipt.v1"
+	// PackVersion defines the expected pack fixture version for issue #8600.
+	PackVersion = "issue-8600/v1"
+	// ModelRepository defines the canonical Hugging Face model repository.
+	ModelRepository = "bartowski/Qwen2.5-1.5B-Instruct-GGUF"
+	// ModelRepositoryRevision defines the pinned commit revision for the model repository.
 	ModelRepositoryRevision = "d6f592509429a0f25fc337a6d05065356c40d2b2"
-	ModelFile               = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
-	ModelSHA256             = "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370"
-	Runtime                 = "llama.cpp/server"
-	RuntimeRevision         = "2e92ecd0247d25f09797f8fdb044a166522fc05d"
+	// ModelFile defines the quantized GGUF model filename.
+	ModelFile = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
+	// ModelSHA256 defines the expected SHA-256 digest of the model file.
+	ModelSHA256 = "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370"
+	// Runtime defines the offline inference runtime server name.
+	Runtime = "llama.cpp/server"
+	// RuntimeRevision defines the pinned git commit hash of the inference runtime.
+	RuntimeRevision = "2e92ecd0247d25f09797f8fdb044a166522fc05d"
 )
 
 //go:embed testdata/pack.json
 var files embed.FS
 
+// PackBytes returns the embedded raw JSON bytes of the test pack fixture.
 func PackBytes() []byte {
 	b, err := files.ReadFile("testdata/pack.json")
 	if err != nil {
@@ -33,11 +45,13 @@ func PackBytes() []byte {
 	return b
 }
 
+// PackSHA256 returns the hex-encoded SHA-256 digest of the test pack fixture.
 func PackSHA256() string {
 	s := sha256.Sum256(PackBytes())
 	return hex.EncodeToString(s[:])
 }
 
+// Receipt records the offline execution evidence and verification status of an edge run.
 type Receipt struct {
 	Schema      string        `json:"schema"`
 	Status      string        `json:"status"` // pass or refused
@@ -52,30 +66,43 @@ type Receipt struct {
 	RawArtifact Artifact      `json:"raw_artifact"`
 }
 
+// Device specifies the physical hardware attributes and identity.
 type Device struct {
 	Class                                  string `json:"class"` // android_arm64_phone or laptop_8gib
 	Physical                               bool   `json:"physical"`
 	Extrapolated                           bool   `json:"extrapolated"`
 	Name, OS, SoC, RAM, Storage, PowerMode string
 }
+
+// Model specifies the pinned model repository, file, revision, and digest.
 type Model struct{ Repository, Revision, File, SHA256, Quantization string }
+
+// RuntimeConfig details the execution engine, version, and generation hyperparameters.
 type RuntimeConfig struct {
 	Name, Revision, Template string
 	ContextTokens, Threads   int
 	Sampling                 string
 }
+
+// Artifact describes a pinned immutable artifact with version, URL, and SHA-256 digest.
 type Artifact struct{ Version, URL, SHA256 string }
+
+// Execution details the execution conditions, network isolation, stage, and duration.
 type Execution struct {
 	AcquisitionVerified, NetworkDisabled bool
 	UndeclaredNetworkCalls               int
 	Stage                                string
 	DurationSeconds                      int
 }
+
+// Metrics tracks empirical latency, memory usage, energy consumption, and quality score.
 type Metrics struct {
 	QualityScore, QualityFloor                                                   float64
 	ColdP50MS, ColdP95MS, WarmP50MS, WarmP95MS, PeakRSSMiB, StorageMiB, EnergyWh float64
 	ThermalObservation                                                           string
 }
+
+// CaseResult holds the output verification and safety evaluation for a single test case.
 type CaseResult struct {
 	ID, Language, Tool, OutputSHA256       string
 	QualityPass, SchemaPass, InjectionSafe bool
@@ -83,6 +110,7 @@ type CaseResult struct {
 
 var refusalCodes = map[string]bool{"OOM": true, "UNSAFE_TOOL": true, "QUALITY_FLOOR": true, "LATENCY_FLOOR": true, "THERMAL_LIMIT": true}
 
+// Parse unmarshals raw JSON bytes into a Receipt, disallowing unknown fields.
 func Parse(raw []byte) (Receipt, error) {
 	var r Receipt
 	d := json.NewDecoder(strings.NewReader(string(raw)))
@@ -180,6 +208,7 @@ func Validate(r Receipt) error {
 	return nil
 }
 
+// ValidatePair validates that both a phone receipt and a laptop receipt are valid and run against identical fixtures.
 func ValidatePair(phone, laptop Receipt) error {
 	if err := Validate(phone); err != nil {
 		return fmt.Errorf("phone: %w", err)
