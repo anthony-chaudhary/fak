@@ -197,6 +197,19 @@ type runConfig struct {
 
 	reasoningEffort string
 	thinkingBudget  *int
+	goalAnchor      *GoalAnchor
+}
+
+// WithGoalAnchor installs an immutable primary objective anchor across recovery turns.
+func WithGoalAnchor(anchor *GoalAnchor) RunOption {
+	return func(c *runConfig) {
+		c.goalAnchor = anchor
+	}
+}
+
+// GoalAnchor returns the active GoalAnchor for this run configuration, if any.
+func (c runConfig) GoalAnchor() *GoalAnchor {
+	return c.goalAnchor
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal
