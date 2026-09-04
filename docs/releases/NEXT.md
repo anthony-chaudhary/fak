@@ -5,10 +5,12 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 39
+- **Commits in flight:** 46
 
 ## What changed
 
+- Restore living release draft tracking and fresh NEXT.md.
+- Add host-wide build concurrency governor.
 - Debounce headroom exhaustion and park goals on host commit floor.
 - Add sweep auto-archive, gpt-6-astra codex defaults, and terminal headroom recovery.
 - Support WIP fence tag isolation in buildcheck.
@@ -30,6 +32,10 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Reliability and correctness
 
+- Enforce conflict banner and silent drop merge gates (#11306).
+- Bound launcher and orgdebt subprocesses with context cancellation.
+- Preserve active posture during floor reload.
+- Reject conflict banners and silent drop merges (#11306).
 - Update active benchmark tasks from Qwen3.6 to Qwen3.8 (#11226).
 - Bound helper subprocess execution with timeout and procguard kill.
 - Fix hook test branch and recover refusal constant.
@@ -40,6 +46,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Make headroom debounce test synchronization deterministic.
 - Verify conflict templates, conflict markers, and silent drop merges (#11306).
 - Add substantive benchmarks for milestone doc operations.
 - Add substantive benchmarks for recovery planning.
