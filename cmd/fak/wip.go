@@ -58,6 +58,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipRemoteDrain(stdout, stderr, argv[1:])
 	case "restore":
 		return runWipRestore(stdout, stderr, argv[1:])
+	case "park":
+		return runWipPark(stdout, stderr, argv[1:])
 	case "land":
 		return runWipLand(stdout, stderr, argv[1:])
 	case "fence":
@@ -163,6 +165,12 @@ func wipUsage(w io.Writer) {
   fak wip restore <session> [-C <repo>] [--apply]
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
       re-materialize it onto the current working tree.
+
+  fak wip park <session> --path <p>... [-C <repo>] [--target <ref>] [--apply] [--json]
+      Suspend owner-authorized dirty paths across in-place integration (#10076):
+      mint a durable path-scoped recovery checkpoint at refs/fak/wip/<session>/park,
+      clear selected paths to HEAD, integrate target in-place, and reapply unique
+      effects without clobbering unrelated dirty paths. Default is dry-run preview.
 
   fak wip land [<session>] [-C <repo>] [-m <subject>] [--path <p>]... [--all] [--push] [--json]
       Turn a session's checkpoint into a real commit: materialize its delta into the
