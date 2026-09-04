@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "l3-vllm-connector"
+version = "0.1.0"
+description = "vLLM KV connector that uses L3 cache as an external prefix cache"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "L3 Team" }]
+dependencies = [
+    "vllm>=0.9",
+    "l3-client>=0.0.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+]
+bloom = [
+    "pyroaring>=1.0",
+]
+
+[project.entry-points."vllm.kv_connector_v1"]
+L3Connector = "l3_vllm.connector:register"
+CamaConnector = "l3_vllm.connector:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+l3_vllm = ["py.typed"]
+cama_vllm = ["py.typed"]

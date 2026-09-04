@@ -1,0 +1,55 @@
+{
+  "_README": [
+    "Canonical list of SGLang source files that CAMA patches (full-file replacements).",
+    "Single source of truth for: deploy.py, upgrade-sglang.py, scripts/find_cama_patches.py,",
+    "scripts/sync_patches.py, scripts/check_drift.py, and the CI drift gate.",
+    "",
+    "Source of truth for FILE CONTENT is the in-tree pre-packaged tree:",
+    "  sglang-with-cama-connector/<path>",
+    "cama-connector/patches/<leaf> is a GENERATED mirror (regenerate via scripts/sync_patches.py).",
+    "deploy.py ships in the standalone connector zip, which has patches/ but NOT the full tree,",
+    "so patches/ must stay a real on-disk copy -- the CI drift gate guarantees it matches in-tree.",
+    "",
+    "To verify this list is COMPLETE (no untracked patches), run scripts/find_cama_patches.py;",
+    "it diffs the in-tree tree against the pinned upstream base (UPSTREAM.txt) and flags any",
+    "differing file not listed here. That check is how schedule_policy / scheduler_metrics_mixin /",
+    "hicache_storage / hiradix_cache were discovered missing from the old hardcoded PATCH_MAP."
+  ],
+  "base_pin": "sglang-with-cama-connector/UPSTREAM.txt",
+  "source_of_truth_tree": "sglang-with-cama-connector",
+  "generated_mirror": "cama-connector/patches",
+  "patches": [
+    {
+      "path": "python/sglang/srt/environ.py",
+      "why": "+CAMA env vars (Envs entries consumed by the CAMA backend)."
+    },
+    {
+      "path": "python/sglang/srt/server_args.py",
+      "why": "+CAMA CLI args / storage-backend wiring."
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/storage/backend_factory.py",
+      "why": "Register the 'cama' hicache storage backend."
+    },
+    {
+      "path": "python/sglang/srt/managers/cache_controller.py",
+      "why": "ThreadPoolExecutor zero-copy prefetch I/O + load-back backpressure (device headroom, load_tokens_pending). See docs/load-back-backpressure-audit.md."
+    },
+    {
+      "path": "python/sglang/srt/managers/schedule_policy.py",
+      "why": "Wire mem_quota into init_load_back() -- activates the load-back OOM guard. Change 4 of docs/load-back-backpressure-audit.md."
+    },
+    {
+      "path": "python/sglang/srt/managers/scheduler_metrics_mixin.py",
+      "why": "Push scheduler metrics (cache_hit_rate, token_usage, num_running_reqs, gen_throughput) to cache_controller.push_scheduler_metrics() for connector observability."
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/hicache_storage.py",
+      "why": "Add pp_rank/pp_size fields; fix upstream HiCacheStorageConfig prefix_keys default (None,) -> None (connector v1.14.1 coalesced prefix_keys fix)."
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/hiradix_cache.py",
+      "why": "HiRadix reconnect crash fix. See docs/hiradix-reconnect-crash-fix.md."
+    }
+  ]
+}
