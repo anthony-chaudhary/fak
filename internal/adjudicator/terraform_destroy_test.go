@@ -253,7 +253,7 @@ func TestTerraformRecogniserMatchesShippedPolicy(t *testing.T) {
 			t.Errorf("tool %q: fix text no longer names the plan remedy this test pins: %q", r.Tool, r.Fix)
 		}
 	}
-	for _, tool := range []string{"bash", "powershell", "shell_command", "functions.shell_command", "exec_command"} {
+	for _, tool := range []string{"bash", "powershell", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command"} {
 		if !seen[tool] {
 			t.Errorf("shipped policy has no terraform rule for tool %q — the recogniser's surface list is stale", tool)
 		}

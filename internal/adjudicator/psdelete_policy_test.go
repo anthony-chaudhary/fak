@@ -106,14 +106,14 @@ func TestDeleteRefusalNamesTheAdmittedRoute(t *testing.T) {
 			root:     "/tmp/claude",
 			admitted: remove + " -rf /tmp/claude/session-123/clone",
 			escape:   remove + " -rf /tmp/claude-evil/clone",
-			surfaces: []string{"bash", "shell_command", "functions.shell_command", "exec_command"},
+			surfaces: []string{"bash", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command"},
 		},
 		"powershell": {
 			regex:    defaultPSDeleteDenyRegex,
 			root:     winScratchRoot(),
 			admitted: psDeleteCommand(` ` + winScratchRoot() + `\session-123\clone -Recurse -Force`),
 			escape:   psDeleteCommand(` ` + winScratchRoot() + `-evil\clone -Recurse -Force`),
-			surfaces: []string{"powershell", "shell_command", "functions.shell_command", "exec_command"},
+			surfaces: []string{"powershell", "shell_command", "functions.shell_command", "exec_command", "functions.exec_command"},
 		},
 	}
 

@@ -158,6 +158,15 @@ type Policy struct {
 	// test lives at the producer, not here. Operators set it with
 	// FAK_GUARD_AUTOREPAIR=sidestep (internal/policy, AutoRepairEnv).
 	AutoRepairSidestep bool
+
+	// Lane specifies the active execution lane for test immunity checks.
+	Lane string
+	// TestLanes lists lanes designated as test/QA lanes exempt from test immunity.
+	TestLanes []string
+	// ExemptLanes lists lanes explicitly exempt from test immunity.
+	ExemptLanes []string
+	// DisableTestImmunity turns off the test-immunity gate.
+	DisableTestImmunity bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -459,6 +468,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		// recognized as a synth-tool. Placed AFTER the self-modify deny rung, so a
 		// write into a guarded tree (already denied above) never lands in the ledger.
 		noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
+	}
+
+	// TEST_IMMUNITY: refuses write, edit, or delete proposals targeting gating test suites
+	// under an implementation lane (#10923).
+	if v, ok := a.testImmunityVerdict(ctx, p, c, lowerTool, args); ok {
+		return v
 	}
 
 	// ARG-LEVEL value predicates (issue #9): the floor gates argument VALUES, not
