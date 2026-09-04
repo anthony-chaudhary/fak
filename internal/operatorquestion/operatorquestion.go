@@ -15,13 +15,19 @@ import (
 type Kind string
 
 const (
-	Clarify             Kind = "CLARIFY"
-	ChooseApproach      Kind = "CHOOSE_APPROACH"
-	PlanApproval        Kind = "PLAN_APPROVAL"
-	Permission          Kind = "PERMISSION"
+	// Clarify indicates an interrupt requesting clarification when an instruction is ambiguous or underspecified.
+	Clarify Kind = "CLARIFY"
+	// ChooseApproach indicates an interrupt requesting a choice between multiple architectural or execution approaches.
+	ChooseApproach Kind = "CHOOSE_APPROACH"
+	// PlanApproval indicates an interrupt requesting approval of a concrete plan before exiting plan mode.
+	PlanApproval Kind = "PLAN_APPROVAL"
+	// Permission indicates an interrupt requesting explicit authorization before performing a guarded action.
+	Permission Kind = "PERMISSION"
+	// ConfirmIrreversible indicates an interrupt requesting confirmation before performing an irreversible action.
 	ConfirmIrreversible Kind = "CONFIRM_IRREVERSIBLE"
 )
 
+// Valid reports whether k is one of the recognized operator question kinds.
 func (k Kind) Valid() bool {
 	switch k {
 	case Clarify, ChooseApproach, PlanApproval, Permission, ConfirmIrreversible:
