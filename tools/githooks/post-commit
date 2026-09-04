@@ -24,6 +24,29 @@
 # trip never stalls the committer's shell) and swallows all errors — a marketing failure must
 # never disrupt development. The `fak` binary not being on PATH is a silent no-op.
 
+# On-device DOS post-commit audit and follow-on ticketing reminder
+# Mode (env FLEET_POSTCOMMIT_PROOF): on (default) | off
+case "$(printf '%s' "${FLEET_POSTCOMMIT_PROOF:-on}" | tr '[:upper:]' '[:lower:]')" in
+  off|0|false|no) ;;
+  *)
+    if command -v dos >/dev/null 2>&1; then
+      _head_sha="$(git rev-parse --short HEAD 2>/dev/null)"
+      _head_subj="$(git log -1 --format=%s 2>/dev/null)"
+      echo "[dos post-commit] Landed $_head_sha: $_head_subj" >&2
+      _audit="$(dos commit-audit HEAD 2>&1)"
+      case "$_audit" in
+        *"diff-witnessed"*)
+          echo "  witness: diff-witnessed (OK)" >&2
+          ;;
+        *"subject-only"*|*"CLAIM_UNWITNESSED"*)
+          echo "  witness (warning): diff did not witness claim; pre-push review will block." >&2
+          ;;
+      esac
+      echo "  proof checklist: (1) on-device test run; (2) subagent cross-validation; (3) file follow-on tickets by default" >&2
+    fi
+    ;;
+esac
+
 case "$(printf '%s' "${FLEET_MARKETING_HOOK:-off}" | tr '[:upper:]' '[:lower:]')" in
   on|1|true|yes) ;;
   *) exit 0 ;;
