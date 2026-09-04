@@ -83,6 +83,8 @@ const (
 	DeepSeekOpenAIBaseURL = "https://api.deepseek.com"
 	// DeepSeekAnthropicBaseURL is DeepSeek's Anthropic-compatible API root.
 	DeepSeekAnthropicBaseURL = "https://api.deepseek.com/anthropic"
+	// GPT6AstraModel is the OpenAI GPT-6 Astra flagship model id.
+	GPT6AstraModel = "gpt-6-astra"
 	// DeepSeekV4ProModel is the DeepSeek V4 Pro API model id.
 	DeepSeekV4ProModel = "deepseek-v4-pro"
 	// DeepSeekV4FlashModel is the DeepSeek V4 Flash API model id.
@@ -846,6 +848,9 @@ func DefaultRoster() Roster {
 			{Model: "small", Account: "local", UpstreamModel: "llama3.2"},
 			{Model: "medium", Account: "openai-personal", UpstreamModel: "gpt-5.5"},
 			{Model: "large", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
+			{Model: "gpt-6-astra", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
+			{Model: "gpt-6", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
+			{Model: "astra", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
 			{Model: OpenCodeGoOxAlphaModel, Account: OpenCodeGoProviderKey, UpstreamModel: OpenCodeGoOxAlphaModel},
 			{Model: "guard-a", Account: "openai-work", UpstreamModel: "gpt-5.5"},
 			{Model: "guard-b", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
