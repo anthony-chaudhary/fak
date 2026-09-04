@@ -5,7 +5,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 - **Projected version:** `0.49.0` (`minor` bump)
 - **Base release tag:** `v0.48.0`
-- **Commits in flight:** 46
+- **Commits in flight:** 48
 
 ## What changed
 
@@ -32,6 +32,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Reliability and correctness
 
+- Ignore NEXT.md sync commits in release_next filter.
 - Enforce conflict banner and silent drop merge gates (#11306).
 - Bound launcher and orgdebt subprocesses with context cancellation.
 - Preserve active posture during floor reload.
@@ -46,6 +47,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ## Engineering quality and evidence
 
+- Isolate Windows fault domain job object binding in subprocess.
 - Make headroom debounce test synchronization deterministic.
 - Verify conflict templates, conflict markers, and silent drop merges (#11306).
 - Add substantive benchmarks for milestone doc operations.
