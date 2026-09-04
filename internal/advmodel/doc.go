@@ -2,6 +2,7 @@
 // harvest LabelRow corpus and the closing edge of the kernel's self-improvement
 // loop (issue #580).
 //
+// Invariant: advanced model router maintains deterministic model selection without latency regressions.
 // Invariant: The advisory adjudicator may only emit VerdictDeny or VerdictDefer, never VerdictAllow.
 // Contract: An unconfigured, empty, or nil artifact defers on all evaluations (fail-closed no-op).
 // Precondition: Artifact schema must match ArtifactSchema exactly during unmarshaling or load.

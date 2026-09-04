@@ -94,6 +94,10 @@ func FloorPolicy() adjudicator.Policy {
 	return p
 }
 
+// Invariant: advanced model router maintains deterministic model selection without latency regressions.
+// Invariant: FloorLabel preserves exact parity with the frozen reference capability floor.
+// Contract: CorpusRow encapsulates the raw tool call payload alongside ground-truth floor labels.
+
 // CorpusRow is one labeled training example: the call (tool + raw args JSON) and
 // the floor's verdict on it. deny=true means the floor returned a non-Allow
 // verdict (the deny-worthy positive class); reason is the floor's ReasonCode
@@ -101,9 +105,13 @@ func FloorPolicy() adjudicator.Policy {
 // (call, verdict) stream internal/harvest folds into abi.LabelRow, with the call
 // content retained (harvest hashes it away for de-dup identity).
 type CorpusRow struct {
-	Tool   string `json:"tool"`
-	Args   string `json:"args"`
-	Deny   bool   `json:"deny"`
+	// Tool names the target tool invocation.
+	Tool string `json:"tool"`
+	// Args contains the serialized tool argument JSON payload.
+	Args string `json:"args"`
+	// Deny indicates whether the invocation was rejected by the floor policy.
+	Deny bool `json:"deny"`
+	// Reason identifies the rejection rationale code emitted by the floor policy.
 	Reason string `json:"reason,omitempty"`
 }
 

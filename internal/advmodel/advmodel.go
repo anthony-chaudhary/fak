@@ -11,6 +11,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+// Invariant: advanced model router maintains deterministic model selection without latency regressions.
+// Invariant: The advisory adjudicator may only emit VerdictDeny or VerdictDefer, never VerdictAllow.
+// Contract: Fail-closed evaluation guarantees that misconfigured or uninitialized models default to VerdictDefer.
+// Precondition: Serialized model artifact must have schema identifier matching ArtifactSchema.
+
 // ArtifactSchema is the JSON schema marker the loader requires. Bumping it is an
 // additive version gate (a future trainer writes v2; this loader still reads v1).
 const ArtifactSchema = "fak-advmodel/v1"
@@ -20,11 +25,16 @@ const ArtifactSchema = "fak-advmodel/v1"
 // Python trainer share one on-disk shape. It is produced by train.py over the
 // frozen harvest corpus (testdata/corpus.jsonl).
 type Artifact struct {
-	Schema    string             `json:"schema"`
-	Bias      float64            `json:"bias"`
-	Threshold float64            `json:"threshold"` // decision boundary on the logit; 0 == sigmoid 0.5
-	Features  map[string]float64 `json:"features"`  // token -> learned weight
-	Meta      ArtifactMeta       `json:"meta"`
+	// Schema specifies the JSON schema marker required for artifact compatibility.
+	Schema string `json:"schema"`
+	// Bias specifies the baseline intercept term added to token feature weight sums.
+	Bias float64 `json:"bias"`
+	// Threshold specifies the logit decision boundary for emitting VerdictDeny; 0 == sigmoid 0.5.
+	Threshold float64 `json:"threshold"`
+	// Features maps individual lowercased call tokens to their learned classification weights.
+	Features map[string]float64 `json:"features"`
+	// Meta encapsulates training provenance, dataset partition counts, and evaluation metrics.
+	Meta ArtifactMeta `json:"meta"`
 }
 
 // ArtifactMeta carries the reproducibility witness: the held-out eval vs the
@@ -32,15 +42,24 @@ type Artifact struct {
 // produced by train.py and re-checkable by re-running it; nothing here is
 // self-asserted at load time.
 type ArtifactMeta struct {
-	TrainRows  int     `json:"train_rows"`
-	HeldRows   int     `json:"held_rows"`
-	Precision  float64 `json:"precision"`
-	Recall     float64 `json:"recall"`
-	F1         float64 `json:"f1"`
-	StockF1    float64 `json:"stock_ref_f1"` // stock reference (untrained) F1 on the same held split
-	MajorityF1 float64 `json:"majority_f1"`  // majority-class (deny-all) baseline F1, for context
-	TrainF1    float64 `json:"train_f1"`     // train-split fit (sanity, not a generalization claim)
-	Trained    string  `json:"trained"`      // UTC stamp train.py wrote the artifact
+	// TrainRows indicates the count of examples utilized during model training.
+	TrainRows int `json:"train_rows"`
+	// HeldRows indicates the count of examples evaluated in the held-out validation set.
+	HeldRows int `json:"held_rows"`
+	// Precision records the positive predictive value on held-out validation data.
+	Precision float64 `json:"precision"`
+	// Recall records the true positive sensitivity on held-out validation data.
+	Recall float64 `json:"recall"`
+	// F1 records the harmonic mean of precision and recall on the validation set.
+	F1 float64 `json:"f1"`
+	// StockF1 records the baseline reference F1 score for the untrained model on the held split.
+	StockF1 float64 `json:"stock_ref_f1"`
+	// MajorityF1 records the baseline F1 score achievable by constant deny prediction.
+	MajorityF1 float64 `json:"majority_f1"`
+	// TrainF1 records the fitted F1 score measured over the training partition.
+	TrainF1 float64 `json:"train_f1"`
+	// Trained specifies the UTC timestamp when the model artifact was generated.
+	Trained string `json:"trained"`
 }
 
 // tokenRe is the shared featurizer: a call is lower-cased (tool + args JSON) and
@@ -67,7 +86,7 @@ func Tokens(tool string, args []byte) []string {
 	return out
 }
 
-// Score is the raw logit (pre-sigmoid): bias + sum of the learned weights of the
+// Score computes the raw logit (pre-sigmoid): bias + sum of the learned weights of the
 // call's tokens. Unseen tokens (absent from Features) contribute nothing. A nil
 // or featureless artifact scores 0 — the inert baseline.
 func (a *Artifact) Score(tool string, args []byte) float64 {
@@ -156,14 +175,22 @@ func (d *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 // Descriptor summarizes the operational parameters, feature volume, and
 // evaluation metrics of an advisory adjudication model.
 type Descriptor struct {
-	Schema       string  `json:"schema"`
-	FeatureCount int     `json:"feature_count"`
-	Bias         float64 `json:"bias"`
-	Threshold    float64 `json:"threshold"`
-	Precision    float64 `json:"precision"`
-	Recall       float64 `json:"recall"`
-	F1           float64 `json:"f1"`
-	Trained      string  `json:"trained,omitempty"`
+	// Schema specifies the model format specification version identifier.
+	Schema string `json:"schema"`
+	// FeatureCount indicates the total number of learned feature weights.
+	FeatureCount int `json:"feature_count"`
+	// Bias specifies the classification intercept value.
+	Bias float64 `json:"bias"`
+	// Threshold specifies the logit threshold for classification.
+	Threshold float64 `json:"threshold"`
+	// Precision records validation positive predictive value.
+	Precision float64 `json:"precision"`
+	// Recall records validation sensitivity.
+	Recall float64 `json:"recall"`
+	// F1 records validation harmonic mean score.
+	F1 float64 `json:"f1"`
+	// Trained records the generation timestamp.
+	Trained string `json:"trained,omitempty"`
 }
 
 // Valid reports whether the descriptor represents a valid, non-empty model specification.
