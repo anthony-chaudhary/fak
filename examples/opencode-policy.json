@@ -23,7 +23,8 @@
     "search_",
     "list_",
     "lookup_",
-    "find_"
+    "find_",
+    "fak_"
   ],
   "deny": {
     "delete_file": "POLICY_BLOCK"

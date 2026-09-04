@@ -69,13 +69,13 @@ Add a local MCP server to OpenCode's config (`opencode.json`):
   "mcp": {
     "fak": {
       "type": "local",
-      "command": ["fak", "serve", "--stdio", "--defer-tools=false", "--policy", "examples/opencode-policy.json"]
+      "command": ["fak", "serve", "--stdio", "--policy", "examples/opencode-policy.json"]
     }
   }
 }
 ```
 
-> **Note on Tool Advertisement (`--defer-tools=false`):** By default, `fak serve` uses progressive disclosure on MCP `tools/list` (returning only a minimal bootstrap tool set and deferring cold tools). Because OpenCode queries `tools/list` once at session start and does not support dynamic client-side tool discovery via `fak_tools_search`, specify `--defer-tools=false` (or set `FAK_ABLATE_MCP_TOOL_FILTER=1`) so the full tool registry is advertised immediately at startup.
+> **Progressive Disclosure & Deferral:** By default, `fak serve` uses progressive disclosure on MCP `tools/list` (`--defer-tools=true`), advertising the lean 4-tool bootstrap set (`fak_adjudicate`, `fak_syscall`, `fak_read`, `fak_tools_search`). In OpenCode, tools are exposed under the `fak_fak_*` prefix. The model discovers deferred capabilities on demand via `fak_tools_search` and routes execution through `fak_syscall`. If eager full advertisement of all 20+ tools is ever desired, pass `--defer-tools=false` (or set `FAK_ABLATE_MCP_TOOL_FILTER=1`).
 
 ## Path 4 — OpenAI-compatible gateway
 
