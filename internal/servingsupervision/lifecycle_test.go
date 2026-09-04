@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -638,7 +640,9 @@ func TestDrainManagerConcurrencyAndDeadlines(t *testing.T) {
 
 		// Release remaining requests concurrently
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			for dm.Phase() != servingsupervision.PhaseDraining {
+				runtime.Gosched()
+			}
 			for i := workers / 2; i < workers; i++ {
 				releases[i]()
 			}
@@ -908,7 +912,14 @@ func BenchmarkProxySupervisorRoute(b *testing.B) {
 		}
 	}
 
-	proxy := servingsupervision.NewProxySupervisor(spec, "bench-proxy", "http://127.0.0.1:9090")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("listen: %v", err)
+	}
+	endpoint := "http://" + ln.Addr().String()
+	ln.Close()
+
+	proxy := servingsupervision.NewProxySupervisor(spec, "bench-proxy", endpoint)
 	if err := proxy.Start(ctx); err != nil {
 		b.Fatalf("start proxy: %v", err)
 	}

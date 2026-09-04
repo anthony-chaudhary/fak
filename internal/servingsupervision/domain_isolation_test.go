@@ -4,12 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/servingsupervision"
 )
+
+func dynamicEndpoint(t testing.TB) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("dynamic endpoint listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	return "http://" + addr
+}
 
 // TestProxyFailureIsolation verifies that a proxy crash/restart restarts only the proxy domain;
 // registered model replicas retain their in-memory model weights and remain in PhaseReady.
@@ -78,7 +90,7 @@ func TestProxyFailureIsolation(t *testing.T) {
 	proxy := servingsupervision.NewProxySupervisor(
 		proxySpec,
 		"proxy-main",
-		"http://127.0.0.1:9090",
+		dynamicEndpoint(t),
 		servingsupervision.WithProxyRestartHook(func(ctx context.Context) error {
 			atomic.AddInt32(&proxyRestarts, 1)
 			return nil
@@ -590,7 +602,7 @@ func TestQuarantineOnBudgetExhaustion(t *testing.T) {
 		RestartBudget: 3,
 		Role:          servingsupervision.RoleProxy,
 	}
-	proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-q", "http://127.0.0.1:9090")
+	proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-q", dynamicEndpoint(t))
 	if err := proxy.Start(ctx); err != nil {
 		t.Fatalf("proxy start: %v", err)
 	}
@@ -734,7 +746,7 @@ func TestServingReceiptNativeContract(t *testing.T) {
 		}
 
 		proxySpec := servingsupervision.ServingDomainSpec{DomainID: "proxy-receipt-domain", DrainTimeout: 20 * time.Millisecond, RestartBudget: 3}
-		proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-receipt", "http://127.0.0.1:9090", servingsupervision.WithProxyBackend(servingsupervision.EngineNative))
+		proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-receipt", dynamicEndpoint(t), servingsupervision.WithProxyBackend(servingsupervision.EngineNative))
 		if err := proxy.Start(ctx); err != nil {
 			t.Fatalf("start proxy: %v", err)
 		}
