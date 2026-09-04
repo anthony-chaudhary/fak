@@ -18,6 +18,9 @@ import (
 // the trust gate enforced on every page-in) and adds the debugger's inspection +
 // demand-paging surface. Construct it with Attach.
 //
+// Invariant: context database page operations are fail-closed and sealed-safe.
+// Demand-paged bytes are re-screened through trust gates and tampered swap devices fail closed.
+//
 // Everything below is read-mostly: the only mutation is Clear (a witness clearance),
 // which is exactly as load-bearing here as in recall — necessary but not sufficient,
 // because Examine still re-screens the bytes through a fresh gate on the way in.
