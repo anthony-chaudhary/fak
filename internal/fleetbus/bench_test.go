@@ -15,7 +15,7 @@ func BenchmarkFleetBus(b *testing.B) {
 	}
 
 	for i := 0; i < 8; i++ {
-		inst, ref := NewInstance(fmt.Sprintf("node-%d", i), "box-1", "worker", 1000+i, "127.0.0.1:8080", []Op{"steer", "pause"}, now)
+		inst, ref := NewInstance(fmt.Sprintf("node-%d", i), "box-1", "worker", 1000+i, "127.0.0.1:0", []Op{"steer", "pause"}, now)
 		if ref != nil {
 			b.Fatalf("NewInstance: %v", ref)
 		}
