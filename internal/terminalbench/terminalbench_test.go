@@ -165,7 +165,7 @@ func testPolicy() policy.Manifest {
 		Version: "fak-policy/v1",
 		Allow:   []string{"terminal.exec"},
 		ArgRules: []policy.ArgRule{
-			{Tool: "terminal.exec", Arg: "command", DenyRegex: `(?i)(rm\s+-rf\s+/|curl\s+[^|]+\|\s*sh|cat\s+/etc/shadow)`, Reason: "POLICY_BLOCK"},
+			{Tool: "terminal.exec", Arg: "command", DenyRegex: `(?i)(rm\s+-rf\s+/|curl\b[^|]*\|\s*sh|cat\s+/etc/shadow)`, Reason: "POLICY_BLOCK"},
 		},
 	}
 }
