@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workdelivery"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // commitFn is the seam the CLI shim calls; it defaults to the real safecommit.Commit and
@@ -249,8 +250,12 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// solely because origin is behind/unavailable. The advisory gives agents who skipped preview
 	// the same early integration signal while preserving the local commit needed for recovery.
 	renderCommitSyncAdvisory(context.Background(), stderr, root, safecommit.ExpectedTrunk(root, *trunk))
+	commitDir := *dir
+	if commitDir == "" && root != "" && workerworktree.IsWorkerWorktree(root) {
+		commitDir = root
+	}
 	res, err := commitFn(context.Background(), safecommit.Options{
-		Dir:                        *dir,
+		Dir:                        commitDir,
 		Paths:                      paths,
 		Message:                    message,
 		Trunk:                      *trunk,
