@@ -729,12 +729,23 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
 
-	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice)
+	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {
 		return nil, err
 	}
 	stops := StopIDs(p.tok, p.m.Cfg)
+
+	var turnContext []TurnAssessment
+	if ta, ok := AssessTranscriptTurn(messages); ok {
+		turnContext = append(turnContext, ta)
+	}
+	effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
+	startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
+	var tb *ThinkBudget
+	if effectiveBudget > 0 {
+		tb = NewThinkBudget(effectiveBudget, startInSpan)
+	}
 
 	// emit runs per generated token: decode the piece, accumulate the text, and apply the
 	// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true
@@ -746,6 +757,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	emit := func(next int) bool {
 		if piece, derr := p.tok.Decode([]int{next}); derr == nil {
 			sb.WriteString(piece)
+			if tb != nil && tb.Observe(piece) {
+				sb.WriteString("\n</think>\n\n")
+			}
 		}
 		if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
 			sb.Reset()
@@ -794,6 +808,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
 		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 			sb.Reset()
+			if effectiveBudget > 0 {
+				tb = NewThinkBudget(effectiveBudget, startInSpan)
+			}
 			measurement.reset()
 		}, measurement)
 	}
@@ -876,6 +893,25 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// returns the decoded text untouched, so this is byte-identical to today for any
 	// model that does not emit <think>.
 	reasoning, content := splitReasoning(sb.String())
+	for strings.Contains(content, thinkClose) {
+		idx := strings.Index(content, thinkClose)
+		residual := strings.TrimSpace(content[:idx])
+		if strings.HasPrefix(strings.ToLower(residual), thinkOpen) {
+			residual = residual[len(thinkOpen):]
+		}
+		residual = strings.TrimSpace(residual)
+		if residual != "" {
+			if reasoning != "" {
+				reasoning = strings.TrimSpace(reasoning + "\n" + residual)
+			} else {
+				reasoning = residual
+			}
+		}
+		content = strings.TrimSpace(content[idx+len(thinkClose):])
+	}
+	if tb != nil && tb.Forced() {
+		content = StripReasoning(content)
+	}
 	comp = &Completion{
 		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason:  finishReason,

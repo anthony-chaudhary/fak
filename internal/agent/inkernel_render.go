@@ -69,7 +69,7 @@ func renderInKernelChatMLTools(messages []Message, tools []ToolDef, cfg model.Co
 // same ChatML prompt the in-kernel model sees. Generic provider adapters carry
 // response_format upstream on the wire; the in-kernel path has no such second
 // channel, so dropping it here silently turns strict JSON into unconstrained prose.
-func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.Config, responseFormat, toolChoice json.RawMessage) string {
+func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.Config, responseFormat, toolChoice json.RawMessage, sp ...SampleParams) string {
 	instruction := inKernelResponseFormatInstruction(responseFormat)
 	if forced := inKernelForcedToolInstruction(toolChoice, tools); forced != "" {
 		if instruction != "" {
@@ -84,10 +84,11 @@ func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.
 		tools = nil
 	}
 	if inKernelUsesOrnithQwen35Template(cfg) {
-		return renderOrnithQwen35ChatMLTools(messages, tools, os.Getenv("FAK_INKERNEL_ENABLE_THINKING") == "1")
+		enableThinking := !inKernelSuppressQwenThinking(cfg, sp...)
+		return renderOrnithQwen35ChatMLTools(messages, tools, enableThinking)
 	}
 	chat := renderChatMLTools(messages, tools)
-	if inKernelSuppressQwenThinking(cfg) {
+	if inKernelSuppressQwenThinking(cfg, sp...) {
 		chat += qwenNoThinkAssistantSeed
 	}
 	return chat
@@ -322,7 +323,17 @@ func ornithToolArgumentValue(raw json.RawMessage) string {
 	}
 }
 
-func inKernelSuppressQwenThinking(cfg model.Config) bool {
+func inKernelSuppressQwenThinking(cfg model.Config, sp ...SampleParams) bool {
+	if len(sp) > 0 {
+		p := sp[0]
+		effort := strings.ToLower(strings.TrimSpace(p.ReasoningEffort))
+		if effort == EffortTierNone || (p.ThinkingBudget != nil && *p.ThinkingBudget == 0) {
+			return true
+		}
+		if p.ReasoningEffort != "" || (p.ThinkingBudget != nil && *p.ThinkingBudget > 0) || os.Getenv("FAK_INKERNEL_ENABLE_THINKING") == "1" {
+			return false
+		}
+	}
 	return cfg.IsQwen35Hybrid() && os.Getenv("FAK_INKERNEL_ENABLE_THINKING") != "1"
 }
 

@@ -103,6 +103,18 @@ func TestRunSampleOpts(t *testing.T) {
 	if sp.PresencePenalty == nil || *sp.PresencePenalty != 1.5 {
 		t.Errorf("PresencePenalty not applied: %v", sp.PresencePenalty)
 	}
+
+	// Extra effort and thinking budget opts.
+	var effortSP agent.SampleParams
+	for _, o := range runSampleOpts(256, 0, 0, 0, 0, 0, agent.WithReasoningEffort("balanced"), agent.WithThinkingBudget(512)) {
+		o(&effortSP)
+	}
+	if effortSP.ReasoningEffort != "balanced" {
+		t.Errorf("ReasoningEffort not applied: %q", effortSP.ReasoningEffort)
+	}
+	if effortSP.ThinkingBudget == nil || *effortSP.ThinkingBudget != 512 {
+		t.Errorf("ThinkingBudget not applied: %v", effortSP.ThinkingBudget)
+	}
 }
 
 // TestCacheValueLine pins the WITNESSED per-turn cache-value summary `fak run` prints by

@@ -289,3 +289,20 @@ func applySampleOpts(opts ...SampleOpt) SampleParams {
 func WithServiceTier(mode modelroute.ServiceMode) SampleOpt {
 	return func(sp *SampleParams) { sp.ServiceTier = mode }
 }
+
+// WithReasoningEffort sets the reasoning effort tier (e.g. "none", "low", "medium", "balanced", "adaptive", "high").
+func WithReasoningEffort(effort string) SampleOpt {
+	return func(sp *SampleParams) {
+		if effort != "" {
+			sp.ReasoningEffort = effort
+		}
+	}
+}
+
+// WithThinkingBudget sets the explicit reasoning token budget.
+func WithThinkingBudget(budget int) SampleOpt {
+	return func(sp *SampleParams) {
+		v := budget
+		sp.ThinkingBudget = &v
+	}
+}
