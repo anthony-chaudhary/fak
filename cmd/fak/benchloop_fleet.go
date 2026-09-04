@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchloop"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 const benchFleetSchema = "fak.bench-loop.fleet.v1"
@@ -265,7 +267,16 @@ func loadBenchFleetPlan(root, stamp, python, path string) ([]byte, error) {
 	if path != "" {
 		return os.ReadFile(path)
 	}
-	cmd := exec.Command(python, filepath.Join(root, "tools", "bench_plan.py"), "--workspace", root, "--now", stamp, "--json")
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, filepath.Join(root, "tools", "bench_plan.py"), "--workspace", root, "--now", stamp, "--json")
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("planner: %w: %s", err, strings.TrimSpace(string(out)))
@@ -405,11 +416,20 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 // inherited, which is all a deletion needs. Both the install and the --remove path refuse
 // through this one rule.
 func runBenchFleetSchtasks(stderr io.Writer, dir string, args ...string) bool {
-	cmd := exec.Command("schtasks.exe", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "schtasks.exe", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))

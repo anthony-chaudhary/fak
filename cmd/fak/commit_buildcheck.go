@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/buildwitness"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -330,9 +333,18 @@ func commitProspectiveTree(root string, paths []string) (string, error) {
 // GIT_INDEX_FILE); on failure the error carries the git output so the fail-open warn is
 // diagnosable.
 func gitWithEnv(root, envKV string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), envKV)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))

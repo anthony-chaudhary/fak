@@ -61,7 +61,68 @@ func guardHandleResourceReceiptFailure(stderr io.Writer, session *guardRSISessio
 // failures use the same resource event transport so their typed reason remains
 // visible, but Stop is false because missing telemetry proves no runaway.
 func guardChildResourceNeedsContainment(event guardChildWaitEvent) bool {
-	return event.Kind == guardChildResourceLimit && event.Resource != nil && event.Resource.Stop && guardResourceContainmentReason(event.Resource.Reason)
+	if event.Kind != guardChildResourceLimit || event.Resource == nil || !event.Resource.Stop {
+		return false
+	}
+	reason := strings.TrimSpace(event.Resource.Reason)
+	return reason == "SYSTEM_COMMIT_HEADROOM" || guardResourceContainmentReason(reason)
+}
+
+func guardReportChildResourceReaped(stderr io.Writer, event guardChildWaitEvent) {
+	if stderr == nil {
+		return
+	}
+	if event.Resource != nil && strings.TrimSpace(event.Resource.Reason) == "SYSTEM_COMMIT_HEADROOM" {
+		fmt.Fprintf(stderr, "fak guard: host operating system commit reserve breached safety floor: %s; child stopped to preserve host stability\n", event.Reason)
+		return
+	}
+	fmt.Fprintf(stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
+}
+
+func isGuardSystemCommitHeadroom(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "SYSTEM_COMMIT_HEADROOM")
+}
+
+func isGuardGoalOrSessionSupervised() bool {
+	if strings.TrimSpace(os.Getenv("FAK_GOAL_ID")) != "" ||
+		strings.TrimSpace(os.Getenv("DISPATCH_GOAL")) != "" ||
+		strings.TrimSpace(os.Getenv("FAK_SESSION_ID")) != "" ||
+		strings.TrimSpace(os.Getenv("FAK_GOAL_LOOP")) != "" ||
+		strings.TrimSpace(os.Getenv("FAK_GOAL_SPEC")) != "" ||
+		strings.TrimSpace(os.Getenv("FAK_GOAL_RUN")) != "" ||
+		strings.TrimSpace(os.Getenv("FAK_LOOP_ID")) != "" {
+		return true
+	}
+	_, parked := guardGoalParked()
+	return parked
+}
+
+func guardParkGoalOnHeadroom(goal, account, agentName string) bool {
+	if goal == "" {
+		return false
+	}
+	now := time.Now()
+	cmd := []string{agentName}
+	if contFlag, ok := guardContinueFlagForAgent(agentName); ok {
+		cmd = append(cmd, contFlag)
+	}
+	if len(cmd) == 0 || cmd[0] == "" {
+		cmd = []string{"claude"}
+	}
+	rec := goalpark.Record{
+		Goal:        goal,
+		Lane:        os.Getenv("DISPATCH_LANE"),
+		Account:     account,
+		Reason:      "SYSTEM_COMMIT_HEADROOM",
+		ParkedAt:    now.Unix(),
+		ParkedUntil: now.Add(15 * time.Minute).Unix(),
+		Command:     cmd,
+	}
+	_ = goalParkStore().Park(rec)
+	return true
 }
 
 func guardReportChildResourceMonitorFailure(stderr io.Writer, event guardChildWaitEvent) {
@@ -221,7 +282,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			lifecycle.finish(false)
 			terminalGuardChild(child, runErr, "resource_limit")
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
-			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
+			guardReportChildResourceReaped(os.Stderr, event)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason, spawnMeta.PromptFuel)
 			if receiptErr != nil {
@@ -465,7 +526,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			_ = job.Close()
 			_ = stopGuardChild(child, wait, 0)
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
-			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
+			guardReportChildResourceReaped(os.Stderr, event)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason, spawnMeta.PromptFuel)
 			if receiptErr != nil {
@@ -1077,6 +1138,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	if runErr != nil {
 		if ee, isExit := runErr.(*exec.ExitError); isExit {
 			guardExitCode = ee.ExitCode()
+		} else if isGuardSystemCommitHeadroom(runErr) {
+			if isGuardGoalOrSessionSupervised() {
+				guardExitCode = 0
+			} else {
+				guardExitCode = recoverExitRefusal
+			}
 		} else {
 			guardExitCode = 1
 		}
@@ -1090,7 +1157,16 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	resumeCommand := formatGuardSessionResumeCommand(agentName, srv.DefaultTraceID())
 	emitResumeCommand := func() {
 		if !quiet {
-			fmt.Fprint(os.Stderr, resumeCommand)
+			if resumeCommand != "" {
+				fmt.Fprint(os.Stderr, resumeCommand)
+			} else if isGuardSystemCommitHeadroom(runErr) {
+				provider := guardAgentBaseName(agentName)
+				if provider == "claude" {
+					fmt.Fprintf(os.Stderr, "\nfak guard: resume this session with:\n  fak guard -- claude --continue\n")
+				} else if provider == "codex" {
+					fmt.Fprintf(os.Stderr, "\nfak guard: resume this session with:\n  fak guard -- codex resume\n")
+				}
+			}
 		}
 	}
 	recordGuardUsage(guardExitCode)
@@ -1113,9 +1189,28 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 			emitResumeCommand()
 			os.Exit(ee.ExitCode())
 		}
-		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", agentName, runErr)
+		exitCode := 1
+		if isGuardSystemCommitHeadroom(runErr) {
+			status := guardResourceRestartGiveUpStatus(guardResourceRetryVerdict{ResourceType: "SYSTEM_COMMIT_HEADROOM"}, guardTraceID)
+			fmt.Fprintln(os.Stderr, status)
+			if goal, account := parkGoalIdentity(); goal != "" {
+				if guardParkGoalOnHeadroom(goal, account, agentName) {
+					fmt.Fprintf(os.Stderr, "fak guard: system commit headroom exhausted; goal %q parked; yielding cleanly (exit 0)\n", goal)
+				}
+			}
+			if goalPath := strings.TrimSpace(os.Getenv("FAK_GOAL_SPEC")); goalPath != "" {
+				_ = appendGoalScratch(goalPath, "SYSTEM_COMMIT_HEADROOM: host commit capacity reached the safety floor; yielded to preserve host stability")
+			}
+			if isGuardGoalOrSessionSupervised() {
+				exitCode = 0
+			} else {
+				exitCode = recoverExitRefusal
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", agentName, runErr)
+		}
 		emitResumeCommand()
-		os.Exit(1)
+		os.Exit(exitCode)
 	}
 	// The child succeeded — but if the gateway itself failed mid-session (Serve returned
 	// something other than a clean shutdown), the adjudication boundary was down for part

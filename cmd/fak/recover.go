@@ -16,7 +16,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
-const recoverSchema = "fak.recover.v1"
+const (
+	recoverSchema      = "fak.recover.v1"
+	recoverExitRefusal = 3
+)
 
 type recoveryStep struct {
 	Argv    []string `json:"argv"`
@@ -129,7 +132,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 			_ = encodeJSONOrFail(stdout, stderr, result, "fak recover")
 		}
 		fmt.Fprintf(stderr, "fak recover: %s has no safe executable recovery; use the dry-run notes\n", token)
-		return 3
+		return recoverExitRefusal
 	}
 	// A placeholder is legible in a dry run and unrunnable in an execute: shelling
 	// out a literal <path> passes an argument the operator never chose. Refuse and

@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,8 +16,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/disambiguation"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 func cmdDisambiguation(args []string) {
@@ -741,8 +744,17 @@ func probeCommittedDisambiguation() ([]byte, error) {
 	}
 	defer os.RemoveAll(temp)
 	archivePath := filepath.Join(temp, "tip.zip")
-	archive := exec.Command("git", "archive", "--format=zip", "-o", archivePath, "HEAD")
+	ctxArchive, cancelArchive := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelArchive()
+	archive := exec.CommandContext(ctxArchive, "git", "archive", "--format=zip", "-o", archivePath, "HEAD")
 	configureDispatchHelperCommand(archive)
+	archive.WaitDelay = 5 * time.Second
+	archive.Cancel = func() error {
+		if archive.Process != nil && archive.Process.Pid > 0 {
+			procguard.KillPID(archive.Process.Pid)
+		}
+		return nil
+	}
 	if output, err := archive.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("archive committed tip: %w: %s", err, bytes.TrimSpace(output))
 	}
@@ -750,9 +762,18 @@ func probeCommittedDisambiguation() ([]byte, error) {
 	if err := extractDisambiguationArchive(archivePath, root); err != nil {
 		return nil, err
 	}
-	check := exec.Command("go", "run", "./cmd/fak", "disambiguation", "generate", "--check", "--json")
+	ctxCheck, cancelCheck := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelCheck()
+	check := exec.CommandContext(ctxCheck, "go", "run", "./cmd/fak", "disambiguation", "generate", "--check", "--json")
 	check.Dir = root
 	configureDispatchHelperCommand(check)
+	check.WaitDelay = 5 * time.Second
+	check.Cancel = func() error {
+		if check.Process != nil && check.Process.Pid > 0 {
+			procguard.KillPID(check.Process.Pid)
+		}
+		return nil
+	}
 	if output, err := check.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("committed-tip regenerate check: %w: %s", err, bytes.TrimSpace(output))
 	}

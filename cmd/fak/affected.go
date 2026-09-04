@@ -28,6 +28,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -645,8 +647,17 @@ func gitChangedFiles(root, base string) ([]string, error) {
 }
 
 func gitOut(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard
@@ -698,9 +709,18 @@ type goPkg struct {
 // `-e` tolerates a package that does not compile (a peer's mid-edit tree) so the gate
 // still selects sensibly instead of erroring out.
 func goListGraph(root string) (fileToPkg map[string]string, edges map[string][]string, total int, err error) {
-	cmd := exec.Command("go", "list", "-e", "-json", "./...")
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "list", "-e", "-json", "./...")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
