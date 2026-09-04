@@ -10,13 +10,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// Schema identifies the harness preview schema format.
 const Schema = "fak.harness-preview/v1alpha1"
 
 const (
-	VerdictQuiet    = "quiet"
+	// VerdictQuiet indicates no operator decision is required before execution.
+	VerdictQuiet = "quiet"
+	// VerdictDecision indicates changes require explicit operator choice or confirmation.
 	VerdictDecision = "decision-required"
 )
 
+// Input captures current and candidate lock state along with classification diagnostics.
 type Input struct {
 	Current         *harnessresolve.Lock
 	Candidate       *harnessresolve.Lock
@@ -26,6 +30,7 @@ type Input struct {
 	Conflict        string
 }
 
+// Change describes an individual risk or behavioral difference between locks.
 type Change struct {
 	Reason           string `json:"reason"`
 	Layer            string `json:"layer"`
@@ -34,11 +39,13 @@ type Change struct {
 	ReversibleChoice string `json:"reversible_choice"`
 }
 
+// Action represents an operator option to resolve a harness decision requirement.
 type Action struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
 }
 
+// Preview holds the evaluation verdict, delta details, and recovery choices.
 type Preview struct {
 	Schema           string   `json:"schema"`
 	Verdict          string   `json:"verdict"`
@@ -49,6 +56,8 @@ type Preview struct {
 	Recovery         []Action `json:"recovery,omitempty"`
 }
 
+// Compare assesses current and proposed harness configurations to detect authority widening,
+// conflicts, novel domains, and low-confidence classifications.
 func Compare(in Input) Preview {
 	p := Preview{Schema: Schema, Verdict: VerdictQuiet}
 	if in.Current != nil {
@@ -248,7 +257,10 @@ func reasonRank(reason string) int {
 	}
 }
 
+// RenderCLI formats the preview as concise plain text suitable for terminal output.
 func RenderCLI(p Preview) string { return render(p, false) }
+
+// RenderTUI formats the preview for text user interfaces without ANSI sequences.
 func RenderTUI(p Preview) string { return render(p, true) }
 
 func render(p Preview, tui bool) string {
