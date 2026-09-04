@@ -17,10 +17,14 @@ import (
 type Status string
 
 const (
-	Supports    Status = "supports"
+	// Supports indicates the cited line resolves, is non-empty, and contains a claimed symbol.
+	Supports Status = "supports"
+	// Contradicts indicates the citation is out of bounds, or resolves without containing any claimed symbol.
 	Contradicts Status = "contradicts"
-	Unknown     Status = "unknown"
-	Mixed       Status = "mixed"
+	// Unknown indicates the citation is ambiguous, unreadable, or cannot be resolved safely.
+	Unknown Status = "unknown"
+	// Mixed indicates evidence contains a mixture of supporting and contradicting citations.
+	Mixed Status = "mixed"
 )
 
 const maxSourceBytes int64 = 1 << 20
@@ -31,6 +35,9 @@ var (
 	identRE    = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_.-]*`)
 )
 
+// Invariant: citation verification is deterministic and fail-closed across all citation evaluations.
+// Guard: fail-closed on unreadable or out-of-bounds citations to prevent spurious validation.
+//
 // Verify opens every path:line citation in evidence under root and compares the
 // cited line with symbols named by claim. Strong answers are deliberately
 // asymmetric: an out-of-range line or a resolved, non-empty line containing no
@@ -74,6 +81,7 @@ func Verify(claim string, evidence []string, root string) Status {
 	return Unknown
 }
 
+// Guard: fail-closed on unreadable or out-of-bounds citations by returning Contradicts or Unknown.
 func readCitation(root, cited string, lineNo int) (string, Status) {
 	if lineNo < 1 {
 		return "", Contradicts
