@@ -57,3 +57,36 @@ func BenchmarkLocalAppUX(b *testing.B) {
 		_, _ = PreviewDiagnostic(diag)
 	}
 }
+
+func BenchmarkRender(b *testing.B) {
+	v := View{
+		State:        StateFirstRun,
+		Mode:         ModeAutomatic,
+		AssetBytes:   6 << 30,
+		FreeBytes:    20 << 30,
+		PendingTasks: []string{"draft", "summarize"},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Render(v)
+	}
+}
+
+func BenchmarkPreviewDiagnostic(b *testing.B) {
+	diag := Diagnostic{
+		AppVersion: "1.2",
+		State:      StateHelperRestart,
+		Mode:       ModeLocalOnly,
+		Engine:     "fak-native",
+		ErrorCode:  "HELPER_EXIT",
+		Paths:      []string{"/example/path/private"},
+		Prompt:     "sensitive query",
+		Token:      "secret-token",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = PreviewDiagnostic(diag)
+	}
+}
