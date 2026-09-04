@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManageAndGuardUsageExposeSameSurface(t *testing.T) {
@@ -97,5 +100,59 @@ func TestManageCodexWithExplicitArgumentsStaysGeneric(t *testing.T) {
 				t.Fatalf("dedicated = %v, generic = %v, want %v", dedicated, generic, argv)
 			}
 		})
+	}
+}
+
+func TestExecOpencodeLaunchChildContextCancelsChild(t *testing.T) {
+	var argv []string
+	if runtime.GOOS == "windows" {
+		argv = []string{"cmd", "/c", "ping -n 30 127.0.0.1 >NUL"}
+	} else {
+		argv = []string{"sh", "-c", "sleep 30"}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := execOpencodeLaunchChildContext(ctx, &stdout, &stderr, argv, os.Environ())
+	dur := time.Since(start)
+
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code on cancelled context, got %d", code)
+	}
+	if dur >= 10*time.Second {
+		t.Fatalf("child process did not terminate promptly on context cancel, took %v", dur)
+	}
+}
+
+func TestExecCodexLaunchChildContextCancelsChild(t *testing.T) {
+	var argv []string
+	if runtime.GOOS == "windows" {
+		argv = []string{"cmd", "/c", "ping -n 30 127.0.0.1 >NUL"}
+	} else {
+		argv = []string{"sh", "-c", "sleep 30"}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := execCodexLaunchChildContext(ctx, &stdout, &stderr, argv, os.Environ())
+	dur := time.Since(start)
+
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code on cancelled context, got %d", code)
+	}
+	if dur >= 10*time.Second {
+		t.Fatalf("child process did not terminate promptly on context cancel, took %v", dur)
 	}
 }
