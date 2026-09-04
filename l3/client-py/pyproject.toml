@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "pybind11>=2.11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "l3-client"
+dynamic = ["version"]
+description = "Python client for L3 / CAMA KV cache — PrisKV-compatible API shim with RDMA support"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+l3-bench = "bench:main"
+cama-bench = "bench:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["bench", "bench_worker"]
+packages = {find = {include = ["l3_client", "l3_client.*", "cama_client", "cama_client.*"], exclude = ["l3_client.csrc", "cama_client.csrc"]}}
+
+[tool.setuptools.dynamic]
+version = {attr = "l3_client._version.__version__"}
+
+[tool.setuptools.package-data]
+l3_client = ["csrc/*.cpp", "csrc/*.h"]
+
+[project.optional-dependencies]
+rdma = ["pybind11>=2.11"]
+cxl = ["pybind11>=2.11"]
+dev = ["pytest"]

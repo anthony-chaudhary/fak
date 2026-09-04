@@ -285,3 +285,183 @@ func TestAgentQueueUsageAndErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentQueueReconcileRestartSubcommand(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "queue.json")
+	store := agentqueue.FileStore(statePath)
+
+	currentPID := os.Getpid()
+	deadPID := 999999
+
+	snapshot := agentqueue.Snapshot{
+		Schema:     agentqueue.Schema,
+		Generation: "g0",
+		Pool:       agentqueue.PoolSpec{ID: "pool-restart", Min: 1, Desired: 2, Max: 2},
+		Intents: []agentqueue.Intent{
+			{
+				ID:     "intent-alive",
+				State:  agentqueue.IntentRunning,
+				Launch: agentqueue.LaunchSpec{Issue: 1, Lane: "agentqueue"},
+			},
+			{
+				ID:     "intent-dead",
+				State:  agentqueue.IntentRunning,
+				Launch: agentqueue.LaunchSpec{Issue: 2, Lane: "agentqueue"},
+			},
+		},
+		Attempts: []agentqueue.Attempt{
+			{
+				ID:       "att-alive",
+				IntentID: "intent-alive",
+				State:    agentqueue.AttemptRunning,
+				PID:      currentPID,
+			},
+			{
+				ID:       "att-dead",
+				IntentID: "intent-dead",
+				State:    agentqueue.AttemptRunning,
+				PID:      deadPID,
+			},
+		},
+	}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Text output without --apply (dry run)
+	{
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"reconcile-restart",
+			"--state", statePath,
+		})
+		if code != 0 {
+			t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "adopted=1") || !strings.Contains(out, "replaced=1") {
+			t.Fatalf("unexpected stdout: %s", out)
+		}
+		// Since --apply was not specified, file should still be at g0
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Generation != "g0" {
+			t.Fatalf("expected generation g0, got %s", loaded.Generation)
+		}
+	}
+
+	// 2. JSON output with --apply
+	{
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"reconcile-restart",
+			"--state", statePath,
+			"--json",
+			"--apply",
+		})
+		if code != 0 {
+			t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+		}
+		var rec agentqueue.RestartReconciliation
+		if err := json.Unmarshal(stdout.Bytes(), &rec); err != nil {
+			t.Fatalf("decode rec json: %v", err)
+		}
+		if len(rec.Adopted) != 1 || rec.Adopted[0].IntentID != "intent-alive" {
+			t.Fatalf("unexpected adopted: %+v", rec.Adopted)
+		}
+		if len(rec.Replaced) != 1 || rec.Replaced[0].IntentID != "intent-dead" {
+			t.Fatalf("unexpected replaced: %+v", rec.Replaced)
+		}
+
+		// Verify file was updated on disk
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Generation == "g0" {
+			t.Fatalf("expected updated generation, got g0")
+		}
+		if loaded.Intents[1].State != agentqueue.IntentQueued {
+			t.Fatalf("dead intent state = %v, want queued", loaded.Intents[1].State)
+		}
+	}
+}
+
+func TestAgentQueueRunReconcileRestartFlag(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "queue.json")
+	store := agentqueue.FileStore(statePath)
+
+	currentPID := os.Getpid()
+	deadPID := 999999
+
+	snapshot := agentqueue.Snapshot{
+		Schema:     agentqueue.Schema,
+		Generation: "g0",
+		Pool:       agentqueue.PoolSpec{ID: "pool-flag", Min: 1, Desired: 2, Max: 2},
+		Intents: []agentqueue.Intent{
+			{
+				ID:     "intent-alive",
+				State:  agentqueue.IntentRunning,
+				Launch: agentqueue.LaunchSpec{Issue: 1, Lane: "agentqueue"},
+			},
+			{
+				ID:     "intent-dead",
+				State:  agentqueue.IntentRunning,
+				Launch: agentqueue.LaunchSpec{Issue: 2, Lane: "agentqueue"},
+			},
+		},
+		Attempts: []agentqueue.Attempt{
+			{
+				ID:       "att-alive",
+				IntentID: "intent-alive",
+				State:    agentqueue.AttemptRunning,
+				PID:      currentPID,
+			},
+			{
+				ID:       "att-dead",
+				IntentID: "intent-dead",
+				State:    agentqueue.AttemptRunning,
+				PID:      deadPID,
+			},
+		},
+	}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+		"run",
+		"--state", statePath,
+		"--fak", os.Args[0],
+		"--reconcile-restart",
+		"--once",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+	}
+
+	var receipt agentqueue.TickReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt json: %v, raw: %s", err, stdout.String())
+	}
+
+	if receipt.Restart == nil {
+		t.Fatal("expected receipt.Restart to be populated")
+	}
+	if len(receipt.Restart.Adopted) != 1 || receipt.Restart.Adopted[0].IntentID != "intent-alive" {
+		t.Fatalf("unexpected adopted: %+v", receipt.Restart.Adopted)
+	}
+	if len(receipt.Restart.Replaced) != 1 || receipt.Restart.Replaced[0].IntentID != "intent-dead" {
+		t.Fatalf("unexpected replaced: %+v", receipt.Restart.Replaced)
+	}
+	// Only replaced intent was launched!
+	if len(receipt.Launches) != 1 || receipt.Launches[0].IntentID != "intent-dead" {
+		t.Fatalf("launches = %+v, want only intent-dead", receipt.Launches)
+	}
+}

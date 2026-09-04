@@ -364,7 +364,7 @@ func TestShardCountCappedByMemory(t *testing.T) {
 func TestNewManagerDefaultShards(t *testing.T) {
 	mgr, err := NewManager(ManagerConfig{
 		NumShards:      0, // should default to 16
-		MaxMemoryGB:    128,
+		MaxMemoryGB:    1,
 		EvictionPolicy: "wtinylfu",
 		IndexCapacity:  4096,
 	})

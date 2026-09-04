@@ -40,7 +40,7 @@ func TestDecideGuardResourceRSSIsMetricHonest(t *testing.T) {
 func TestDecideGuardResourceSystemHeadroom(t *testing.T) {
 	p := guardResourcePolicy{Metric: procguard.MemoryMetricCommit, MaxTreeBytes: 1000, MinSystemHeadroom: 100}
 	d := decideGuardResource(p, procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, TreeBytes: 10, SystemBytes: 950, SystemLimit: 1000})
-	if !d.Stop || d.Reason != "SYSTEM_COMMIT_HEADROOM" || d.HeadroomBytes != 50 {
+	if !d.Stop || d.Reason != "SYSTEM_COMMIT_HEADROOM" || d.HeadroomBytes != 50 || d.ThresholdBytes != p.MinSystemHeadroom {
 		t.Fatalf("decision=%+v", d)
 	}
 }
@@ -139,6 +139,9 @@ func TestGuardResourceMeasuredBreachesKeepLimitReasons(t *testing.T) {
 			d := decideGuardResource(tt.policy, tt.snapshot)
 			if !d.Stop || d.Reason != tt.reason {
 				t.Fatalf("decision=%+v", d)
+			}
+			if tt.reason == "SYSTEM_COMMIT_HEADROOM" && d.ThresholdBytes != tt.policy.MinSystemHeadroom {
+				t.Fatalf("SYSTEM_COMMIT_HEADROOM threshold=%d want %d", d.ThresholdBytes, tt.policy.MinSystemHeadroom)
 			}
 			if got := newGuardResourceReceipt("trace", "codex", 42, d); got.Reason != tt.reason {
 				t.Fatalf("receipt=%+v", got)
@@ -323,6 +326,9 @@ func TestDecideGuardResourceEdgeAndAdversarialSnapshots(t *testing.T) {
 			d := decideGuardResource(tt.policy, tt.snapshot)
 			if d.Stop != tt.wantStop || d.Reason != tt.wantReason || d.Offender.PID != tt.wantPID || d.HeadroomBytes != tt.wantHead {
 				t.Fatalf("decision=%+v", d)
+			}
+			if tt.wantReason == "SYSTEM_COMMIT_HEADROOM" && d.ThresholdBytes != tt.policy.MinSystemHeadroom {
+				t.Fatalf("SYSTEM_COMMIT_HEADROOM threshold=%d want %d", d.ThresholdBytes, tt.policy.MinSystemHeadroom)
 			}
 			if len(d.OwnedPIDs) != len(tt.snapshot.Processes) {
 				t.Fatalf("owned pids=%v, processes=%v", d.OwnedPIDs, tt.snapshot.Processes)

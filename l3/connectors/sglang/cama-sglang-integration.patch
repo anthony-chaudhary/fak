@@ -1,0 +1,435 @@
+# Combined CAMA Integration Patch for SGLang
+# Base: v0.5.9 (commit bbe9c7e)
+# Version: cama-connector v1.8.0
+# Generated: 2026-03-03
+#
+# This patch modifies 5 existing SGLang files to integrate the CAMA backend.
+# The CAMA module files (cama_module/) must be copied separately — see CHANGELIST.md.
+#
+# Files modified:
+# 1. environ.py         — +13 lines: 8 SGLANG_CAMA_* config + 3 profiling env vars
+# 2. cache_controller.py — "cama" in zero-copy backend list + ThreadPoolExecutor prefetch I/O
+# 3. backend_factory.py  — "cama" backend registration in factory
+# 4. server_args.py      — "cama" in --hicache-storage-backend choices + preflight call
+# 5. metrics/collector.py — Storage metrics debug logging
+#
+# Apply with:
+#   cd /path/to/sglang
+#   git apply cama-sglang-integration.patch
+#
+# Or use deploy.py for automated deployment:
+#   python deploy.py /path/to/sglang
+
+# ================================================================
+# PART 1: Changes to existing SGLang files (modifications)
+# ================================================================
+
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 8293796..4d76efa 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -298,6 +298,19 @@ class Envs:
+     MOONCAKE_CHECK_SERVER = EnvBool(False)
+     MOONCAKE_STANDALONE_STORAGE = EnvBool(False)
+ 
++    # Cama PrisKV Store
++    SGLANG_CAMA_CONFIG_PATH = EnvStr(None)
++    SGLANG_CAMA_REMOTE_ADDR = EnvStr("127.0.0.1")
++    SGLANG_CAMA_REMOTE_PORT = EnvInt(6379)
++    SGLANG_CAMA_PASSWORD = EnvStr("")
++    SGLANG_CAMA_USE_MPUT_MGET = EnvBool(True)
++    SGLANG_CAMA_CHECK_SERVER = EnvBool(False)
++
++    # Cama Profiling (Pyroscope + NVTX)
++    SGLANG_CAMA_PROFILING_ENABLED = EnvBool(False)
++    SGLANG_CAMA_PROFILING_SERVER_ADDRESS = EnvStr("http://0.0.0.0:4040")
++    SGLANG_CAMA_PROFILING_SERVICE_NAME = EnvStr("cama-connector")
++
+     # AMD & ROCm
+     SGLANG_USE_AITER = EnvBool(False)
+     SGLANG_ROCM_FUSED_DECODE_MLA = EnvBool(False)
+diff --git a/python/sglang/srt/managers/cache_controller.py b/python/sglang/srt/managers/cache_controller.py
+index 34f78c8..6523f40 100644
+--- a/python/sglang/srt/managers/cache_controller.py
++++ b/python/sglang/srt/managers/cache_controller.py
+@@ -16,6 +16,7 @@ limitations under the License.
+ import logging
+ import threading
+ import time
++from concurrent.futures import ThreadPoolExecutor
+ from queue import Empty, Full, Queue
+ from typing import TYPE_CHECKING, List, NamedTuple, Optional
+ 
+@@ -368,19 +369,17 @@ class HiCacheController:
+                 self.prefetch_queue.put_nowait(None)
+             if hasattr(self, "backup_queue"):
+                 self.backup_queue.put_nowait(None)
+-            if hasattr(self, "prefetch_buffer"):
+-                self.prefetch_buffer.put_nowait(None)
+         except Exception:
+             pass
+ 
+         # Best-effort joins (threads are daemon, but join keeps state clean).
++        # NOTE: prefetch I/O executor threads are managed by prefetch_thread_func
++        # and shut down via executor.shutdown(wait=True) when it exits.
+         threads = []
+         if hasattr(self, "prefetch_thread"):
+             threads.append(self.prefetch_thread)
+         if hasattr(self, "backup_thread"):
+             threads.append(self.backup_thread)
+-        if hasattr(self, "prefetch_io_aux_thread"):
+-            threads.append(self.prefetch_io_aux_thread)
+ 
+         for t in threads:
+             try:
+@@ -453,6 +452,56 @@ class HiCacheController:
+             )
+             # granularity of batch storage IO operations, in number of pages
+             self.storage_batch_size = 128
++
++            # ---- Prefetch I/O concurrency ----
++            #
++            # prefetch_io_workers controls how many prefetch *operations* (one
++            # per incoming request) can perform page-transfer I/O concurrently.
++            # This is a **per-rank** setting: each GPU rank runs its own
++            # HiCacheController with its own prefetch thread and I/O executor.
++            #
++            # Threading topology (per rank):
++            #
++            #   prefetch_thread  (1 thread — hit-query + dispatch)
++            #     └─ ThreadPoolExecutor "prefetch_io"  (prefetch_io_workers threads)
++            #          └─ _prefetch_io_task(operation)
++            #               └─ _page_transfer → batch_get_v1
++            #                    └─ CamaStorage._io_pool  (io_workers threads, default 16)
++            #                         └─ conn.get(key, sgl, size)  [shared RDMA conn]
++            #
++            # So the two pools are *nested*:
++            #   • prefetch_io_workers  — # of requests doing I/O in parallel
++            #   • io_workers (CAMA)    — # of keys fetched in parallel *within*
++            #                            a single batch_get_v1 call
++            #
++            # Peak concurrent RDMA ops ≈ prefetch_io_workers × io_workers, all
++            # funnelled through a single PriskvClient connection per rank (which
++            # is thread-safe but serialises at the transport level).
++            #
++            # Why the default is 2:
++            #   • The prefetch_thread itself is single-threaded and alternates
++            #     between hit-query (CPU + exists RPCs) and dispatching I/O.
++            #     With workers=1, hit-query and I/O are fully serial — the
++            #     thread blocks on _page_transfer before it can query the next
++            #     request.  workers=2 lets the next hit-query overlap with the
++            #     previous request's page transfer, roughly doubling throughput
++            #     when the prefetch queue is busy.
++            #   • Higher values (3–4) help only if the RDMA link or PrisKV
++            #     server can sustain the extra concurrency.  Because all workers
++            #     share one RDMA connection and one CamaStorage._io_pool, adding
++            #     more prefetch_io_workers mostly adds contention on the same
++            #     transport without improving bandwidth.
++            #   • The backup_thread (writes) is *not* affected — it runs in its
++            #     own thread and calls batch_set_v1 serially, sharing the same
++            #     CamaStorage._io_pool.  Raising prefetch_io_workers too high
++            #     can starve backup I/O of io_pool slots.
++            #
++            # To tune: monitor "prefetch_thread_func: shutdown complete" log for
++            # io_completed vs io_failed, and CAMA I/O stats for avg_latency.
++            # If avg_latency rises with more workers, the link is saturated.
++            self.prefetch_io_workers = int(
++                (storage_backend_extra_config or {}).get("prefetch_io_workers", 2)
++            )
+             # tracking the number of tokens locked in prefetching, updated by the main scheduler thread
+             self.prefetch_tokens_occupied = 0
+ 
+@@ -472,7 +521,7 @@ class HiCacheController:
+             self.page_get_func = self._generic_page_get
+             self.page_set_func = self._generic_page_set
+ 
+-            if (self.storage_backend_type in ["hf3fs", "mooncake", "eic", "nixl"]) or (
++            if (self.storage_backend_type in ["hf3fs", "mooncake", "eic", "nixl", "cama"]) or (
+                 self.storage_backend_type == "dynamic"
+                 and bool(self.storage_config.extra_config.get("interface_v1", 0))
+             ):
+@@ -848,22 +897,32 @@ class HiCacheController:
+             if prefix_keys and len(prefix_keys) > 0:
+                 prefix_keys += batch_hashes
+ 
+-    def prefetch_io_aux_func(self):
+-        """
+-        Auxiliary function conducting IO operations for prefetching.
++    def _prefetch_io_task(self, operation):
++        """Execute a single prefetch I/O operation (runs in executor thread).
++
++        Calls ``_page_transfer`` which iterates over the operation's hash
++        values in batches of ``storage_batch_size``, issuing
++        ``batch_get_v1`` for each batch.  Each ``batch_get_v1`` call fans
++        out to ``CamaStorage._io_pool`` (``io_workers`` threads) for
++        per-key RDMA reads.
++
++        The ``finally`` block guarantees that host memory for any pages
++        *not* successfully transferred is released back to the host pool,
++        preventing memory leaks even if the storage backend raises.
+         """
+-        while not self.storage_stop_event.is_set():
+-            try:
+-                operation = self.prefetch_buffer.get(block=True, timeout=1)
+-                if operation is None:
+-                    continue
+-                self._page_transfer(operation)
+-                # operation terminated by controller, release pre-allocated memory
+-                self.append_host_mem_release(
+-                    operation.host_indices[operation.completed_tokens :]
+-                )
+-            except Empty:
+-                continue
++        try:
++            self._page_transfer(operation)
++        except Exception:
++            logger.exception(
++                "_prefetch_io_task: unhandled exception during page transfer for request %s",
++                operation.request_id,
++            )
++            operation.mark_terminate()
++        finally:
++            # Release host memory for pages beyond what was successfully transferred
++            self.append_host_mem_release(
++                operation.host_indices[operation.completed_tokens :]
++            )
+ 
+     def prefetch_rate_limited(self) -> bool:
+         """
+@@ -908,54 +967,117 @@ class HiCacheController:
+         return hash_value, storage_query_count
+ 
+     def prefetch_thread_func(self):
++        """Manage prefetching operations from storage backend to host memory.
++
++        Architecture
++        ------------
++        This method runs on a single daemon thread (``self.prefetch_thread``)
++        that is spawned per rank by ``_start_storage_threads``.  It owns:
++
++        1. **Hit-query loop** — pops operations from ``self.prefetch_queue``,
++           calls ``_storage_hit_query`` (batch-exists RPCs) and optionally
++           ``all_reduce`` across TP ranks to agree on the hit count.
++
++        2. **I/O executor** — a ``ThreadPoolExecutor`` with
++           ``self.prefetch_io_workers`` threads that run
++           ``_prefetch_io_task`` for actual page transfer (RDMA reads).
++
++        The two stages pipeline: while the executor is transferring pages for
++        request N, the main loop can already be running hit-queries for request
++        N+1.  With ``prefetch_io_workers=2`` (default) two transfers can
++        overlap; the main loop is the bottleneck only if hit-queries are
++        faster than transfers, which is typical since exists RPCs are much
++        cheaper than bulk RDMA reads.
++
++        Shutdown
++        --------
++        When ``storage_stop_event`` is set *and* the prefetch queue drains,
++        the loop exits.  ``executor.shutdown(wait=True)`` in the ``finally``
++        block ensures all in-flight page transfers complete before the thread
++        dies.  Counters ``io_completed`` / ``io_failed`` are logged at exit.
+         """
+-        Manage prefetching operations from storage backend to host memory.
+-        """
+-        self.prefetch_buffer = Queue()
+-        self.prefetch_io_aux_thread = threading.Thread(
+-            target=self.prefetch_io_aux_func, daemon=True
++        io_completed = 0
++        io_failed = 0
++        executor = ThreadPoolExecutor(
++            max_workers=self.prefetch_io_workers,
++            thread_name_prefix="prefetch_io",
+         )
+-        self.prefetch_io_aux_thread.start()
+-        while (not self.storage_stop_event.is_set()) or not self.prefetch_queue.empty():
+-            try:
+-                operation = self.prefetch_queue.get(block=True, timeout=1)
+-                if operation is None:
++        futures = []
++        try:
++            while (not self.storage_stop_event.is_set()) or not self.prefetch_queue.empty():
++                # Reap completed futures
++                still_pending = []
++                for f in futures:
++                    if f.done():
++                        exc = f.exception()
++                        if exc is not None:
++                            io_failed += 1
++                            logger.error("prefetch_thread_func: I/O future raised: %s", exc)
++                        else:
++                            io_completed += 1
++                    else:
++                        still_pending.append(f)
++                futures = still_pending
++
++                operation = None
++                try:
++                    operation = self.prefetch_queue.get(block=True, timeout=1)
++                    if operation is None:
++                        continue
++                    hash_value, storage_hit_count = self._storage_hit_query(operation)
++                    if self.tp_world_size > 1:
++                        storage_hit_count_tensor = torch.tensor(
++                            storage_hit_count, dtype=torch.int
++                        )
++                        torch.distributed.all_reduce(
++                            storage_hit_count_tensor,
++                            op=torch.distributed.ReduceOp.MIN,
++                            group=self.prefetch_tp_group,
++                        )
++                        storage_hit_count = storage_hit_count_tensor.item()
++
++                    if storage_hit_count < self.prefetch_threshold:
++                        # not to prefetch if not enough benefits
++                        self.prefetch_revoke_queue.put(operation.request_id)
++                        self.append_host_mem_release(operation.host_indices)
++                        logger.debug(
++                            f"Revoking prefetch for request {operation.request_id} due to insufficient hits ({storage_hit_count})."
++                        )
++                    else:
++                        operation.hash_value = hash_value[
++                            : (storage_hit_count // self.page_size)
++                        ]
++                        # free the pre-allocated memory for pages that are not hit
++                        self.append_host_mem_release(
++                            operation.host_indices[storage_hit_count:]
++                        )
++                        operation.host_indices = operation.host_indices[:storage_hit_count]
++                        logger.debug(
++                            f"Prefetching {len(operation.hash_value)} pages for request {operation.request_id}."
++                        )
++                        futures.append(executor.submit(self._prefetch_io_task, operation))
++
++                except Empty:
+                     continue
+-                hash_value, storage_hit_count = self._storage_hit_query(operation)
+-                if self.tp_world_size > 1:
+-                    storage_hit_count_tensor = torch.tensor(
+-                        storage_hit_count, dtype=torch.int
+-                    )
+-                    torch.distributed.all_reduce(
+-                        storage_hit_count_tensor,
+-                        op=torch.distributed.ReduceOp.MIN,
+-                        group=self.prefetch_tp_group,
+-                    )
+-                    storage_hit_count = storage_hit_count_tensor.item()
+-
+-                if storage_hit_count < self.prefetch_threshold:
+-                    # not to prefetch if not enough benefits
+-                    self.prefetch_revoke_queue.put(operation.request_id)
+-                    self.append_host_mem_release(operation.host_indices)
+-                    logger.debug(
+-                        f"Revoking prefetch for request {operation.request_id} due to insufficient hits ({storage_hit_count})."
+-                    )
+-                else:
+-                    operation.hash_value = hash_value[
+-                        : (storage_hit_count // self.page_size)
+-                    ]
+-                    # free the pre-allocated memory for pages that are not hit
+-                    self.append_host_mem_release(
+-                        operation.host_indices[storage_hit_count:]
+-                    )
+-                    operation.host_indices = operation.host_indices[:storage_hit_count]
+-                    logger.debug(
+-                        f"Prefetching {len(operation.hash_value)} pages for request {operation.request_id}."
++                except Exception:
++                    logger.exception(
++                        "prefetch_thread_func: unhandled exception during hit query for request %s",
++                        operation.request_id if operation else "unknown",
+                     )
+-                    self.prefetch_buffer.put(operation)
+-
+-            except Empty:
+-                continue
++                    try:
++                        if operation is not None:
++                            self.prefetch_revoke_queue.put(operation.request_id)
++                            self.append_host_mem_release(operation.host_indices)
++                    except Exception:
++                        logger.exception(
++                            "prefetch_thread_func: failed to revoke/release after error"
++                        )
++        finally:
++            executor.shutdown(wait=True)
++            logger.info(
++                "prefetch_thread_func: shutdown complete — io_completed=%d, io_failed=%d, io_in_flight=%d",
++                io_completed, io_failed, len(futures),
++            )
+ 
+     def write_storage(
+         self,
+diff --git a/python/sglang/srt/mem_cache/storage/backend_factory.py b/python/sglang/srt/mem_cache/storage/backend_factory.py
+index 2eb6afe..06f66f8 100644
+--- a/python/sglang/srt/mem_cache/storage/backend_factory.py
++++ b/python/sglang/srt/mem_cache/storage/backend_factory.py
+@@ -183,6 +183,9 @@ class StorageBackendFactory:
+             return backend_class.from_env_config(bytes_per_page, dtype, storage_config)
+         elif backend_name == "eic":
+             return backend_class(storage_config, mem_pool_host)
++        elif backend_name == "cama":
++            backend = backend_class(storage_config, mem_pool_host)
++            return backend
+         else:
+             raise ValueError(f"Unknown built-in backend: {backend_name}")
+ 
+@@ -221,3 +224,9 @@ StorageBackendFactory.register_backend(
+     "sglang.srt.mem_cache.storage.eic.eic_storage",
+     "EICStorage",
+ )
++
++StorageBackendFactory.register_backend(
++    "cama",
++    "sglang.srt.mem_cache.storage.cama.cama_storage",
++    "CamaStorage",
++)
+diff --git a/python/sglang/srt/metrics/collector.py b/python/sglang/srt/metrics/collector.py
+index 255d41c..d834d50 100644
+--- a/python/sglang/srt/metrics/collector.py
++++ b/python/sglang/srt/metrics/collector.py
+@@ -1489,6 +1489,15 @@ class StorageMetricsCollector:
+ 
+         assert isinstance(storage_metrics, StorageMetrics)
+ 
++        if storage_metrics.prefetch_pgs or storage_metrics.backup_pgs:
++            print(
++                f"[StorageMetrics] prefetch_pgs={storage_metrics.prefetch_pgs} "
++                f"backup_pgs={storage_metrics.backup_pgs} "
++                f"prefetch_bw={storage_metrics.prefetch_bandwidth} "
++                f"backup_bw={storage_metrics.backup_bandwidth}",
++                flush=True,
++            )
++
+         for v in storage_metrics.prefetch_pgs:
+             self._log_histogram(self.histogram_prefetch_pgs, v)
+         for v in storage_metrics.backup_pgs:
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index b080aeb..2cfbb8a 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -2327,6 +2327,13 @@ class ServerArgs:
+                     f"switching to {self.hicache_mem_layout} layout for {self.hicache_io_backend} io backend"
+                 )
+ 
++        if self.hicache_storage_backend == "cama":
++            from sglang.srt.mem_cache.storage.cama.preflight import (
++                check_cama_preflight,
++            )
++
++            check_cama_preflight(self.hicache_storage_backend_extra_config)
++
+     def _handle_speculative_decoding(self):
+         if (
+             self.speculative_draft_model_path is not None
+@@ -4303,10 +4310,10 @@ class ServerArgs:
+         parser.add_argument(
+             "--hicache-storage-backend",
+             type=str,
+-            choices=["file", "mooncake", "hf3fs", "nixl", "aibrix", "dynamic", "eic"],
++            choices=["file", "mooncake", "hf3fs", "nixl", "aibrix", "dynamic", "eic", "cama"],
+             default=ServerArgs.hicache_storage_backend,
+             help="The storage backend for hierarchical KV cache. "
+-            "Built-in backends: file, mooncake, hf3fs, nixl, aibrix. "
++            "Built-in backends: file, mooncake, hf3fs, nixl, aibrix, cama. "
+             "For dynamic backend, use --hicache-storage-backend-extra-config to specify: "
+             "backend_name (custom name), module_path (Python module path), class_name (backend class name).",
+         )

@@ -22,7 +22,8 @@ func TestParkAheadBehindUniqueRetainedIdenticalSuppressed(t *testing.T) {
 	git(t, origin, "commit", "-m", "base")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")
 
@@ -158,7 +159,8 @@ func TestParkRefusalOnUnownedCollidingPaths(t *testing.T) {
 	git(t, origin, "commit", "-m", "base")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")
 
@@ -219,7 +221,8 @@ func TestParkRefusalOnConflictingChanges(t *testing.T) {
 	git(t, origin, "commit", "-m", "base")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")
 
@@ -269,7 +272,8 @@ func TestParkUpstreamIdenticalSuppressed(t *testing.T) {
 	git(t, origin, "commit", "-m", "base")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")
 

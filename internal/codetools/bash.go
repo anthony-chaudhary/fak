@@ -95,9 +95,12 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	name, args := shellCommand(a.Command)
+	gotmpDir := t.ensureGoTmpDir()
+	command := t.rewriteCommandForContainment(a.Command, cwd, gotmpDir)
+	name, args := shellCommand(command)
 	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Dir = cwd
+	cmd.Env = enforceGoTmpEnv(os.Environ(), gotmpDir)
 	var stdout, stderr boundedBuffer
 	stdout.max = t.limits.MaxOutputBytes
 	stderr.max = t.limits.MaxOutputBytes
@@ -111,6 +114,7 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if err == nil {
 		err = cmd.Wait()
 	}
+	t.containmentCleanup(gotmpDir)
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
 	exitCode := 0
 	if err != nil {

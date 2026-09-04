@@ -23,7 +23,7 @@ func setupTestOriginAndClone(t *testing.T) (string, string) {
 	git(t, origin, "commit", "-m", "initial")
 
 	clone := filepath.Join(tmp, "clone")
-	git(t, tmp, "clone", origin, clone)
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", origin, clone)
 	git(t, clone, "config", "core.autocrlf", "false")
 	git(t, clone, "config", "user.name", "test")
 	git(t, clone, "config", "user.email", "test@example.com")

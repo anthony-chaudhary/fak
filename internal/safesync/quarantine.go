@@ -3,6 +3,7 @@ package safesync
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,13 +13,17 @@ import (
 )
 
 // QuarantineReceipt records the witnessed outcome of a pre-sync quarantine
-// transaction across a fast-forward sync (#10913).
+// transaction across a fast-forward sync (#10913, #11233).
 type QuarantineReceipt struct {
-	QuarantinedCount int      `json:"quarantined_count"`
-	RestoredCount    int      `json:"restored_count"`
-	IdenticalCount   int      `json:"identical_count"`
-	RelocatedCount   int      `json:"relocated_count,omitempty"`
-	Paths            []string `json:"paths,omitempty"`
+	QuarantinedCount int               `json:"quarantined_count"`
+	RestoredCount    int               `json:"restored_count"`
+	IdenticalCount   int               `json:"identical_count"`
+	RelocatedCount   int               `json:"relocated_count,omitempty"`
+	Paths            []string          `json:"paths,omitempty"`
+	Files            []QuarantinedFile `json:"files,omitempty"`
+	Preserved        map[string]string `json:"preserved,omitempty"`
+	SHA256           string            `json:"sha256,omitempty"`
+	ReceiptPath      string            `json:"receipt_path,omitempty"`
 }
 
 // QuarantinedFile records one preserved untracked artifact and its cryptographic digest.
@@ -57,12 +62,21 @@ func FileSHA256(path string) (string, int64, error) {
 }
 
 // PrepareQuarantine isolates declared untracked files before fast-forward sync.
-func PrepareQuarantine(repo string, paths []string, targetIdentical map[string]bool) (*QuarantineTransaction, error) {
+func PrepareQuarantine(repo string, paths []string, targetIdentical map[string]bool, sessionOrTS ...string) (*QuarantineTransaction, error) {
 	if len(paths) == 0 {
 		return &QuarantineTransaction{Repo: repo}, nil
 	}
 
-	stashDir := filepath.Join(repo, ".git", fmt.Sprintf("fak-quarantine-%d", time.Now().UnixNano()))
+	gitDir, err := worktreeGitDir(repo)
+	if err != nil {
+		gitDir = filepath.Join(repo, ".git")
+	}
+
+	tag := fmt.Sprintf("%d", time.Now().UnixNano())
+	if len(sessionOrTS) > 0 && strings.TrimSpace(sessionOrTS[0]) != "" {
+		tag = strings.TrimSpace(sessionOrTS[0])
+	}
+	stashDir := filepath.Join(gitDir, "fak-quarantine", tag)
 	if err := os.MkdirAll(stashDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create quarantine stash dir: %w", err)
 	}
@@ -115,28 +129,28 @@ func PrepareQuarantine(repo string, paths []string, targetIdentical map[string]b
 // Commit finalizes the quarantine transaction post fast-forward:
 // - Verifies byte-identical files were populated by git with matching hashes.
 // - Restores non-colliding scratch files.
-// - Relocates genuinely colliding scratch to .fak/quarantine/ to guarantee zero data loss.
+// - Relocates genuinely colliding scratch to .git/fak-quarantine/<session_or_ts>/ and .fak/quarantine/
+//   to guarantee zero data loss, and writes a quarantine receipt to disk (#11233).
 func (tx *QuarantineTransaction) Commit() (QuarantineReceipt, error) {
 	receipt := QuarantineReceipt{
 		QuarantinedCount: len(tx.Files),
+		Preserved:        make(map[string]string),
 	}
 	if len(tx.Files) == 0 {
 		return receipt, nil
 	}
-	defer func() {
-		if tx.StashDir != "" {
-			_ = os.RemoveAll(tx.StashDir)
-		}
-	}()
 
+	hasDivergentPreserved := false
 	for _, f := range tx.Files {
 		receipt.Paths = append(receipt.Paths, f.RelPath)
+		receipt.Files = append(receipt.Files, f)
 		destPath := filepath.Join(tx.Repo, filepath.FromSlash(f.RelPath))
 
 		if f.TargetIdentical {
 			// File should have been placed by fast-forward merge. Verify hash.
 			if hash, _, err := FileSHA256(destPath); err == nil && hash == f.SHA256 {
 				receipt.IdenticalCount++
+				_ = os.Remove(f.StashPath)
 				continue
 			}
 		}
@@ -151,12 +165,38 @@ func (tx *QuarantineTransaction) Commit() (QuarantineReceipt, error) {
 			}
 		}
 
-		// If destination exists and differs from stashed file, preserve in .fak/quarantine
+		// If destination exists and differs from stashed file, preserve in quarantine stash
+		hasDivergentPreserved = true
+		receipt.RelocatedCount++
+		receipt.Preserved[f.RelPath] = f.SHA256
+		if receipt.SHA256 == "" {
+			receipt.SHA256 = f.SHA256
+		}
+
+		// Also preserve copy in .fak/quarantine for backward compatibility
 		relocDir := filepath.Join(tx.Repo, ".fak", "quarantine")
 		_ = os.MkdirAll(relocDir, 0o755)
 		relocPath := filepath.Join(relocDir, filepath.Base(f.RelPath))
-		if copyErr := copyFile(f.StashPath, relocPath); copyErr == nil {
-			receipt.RelocatedCount++
+		_ = copyFile(f.StashPath, relocPath)
+	}
+
+	if !hasDivergentPreserved {
+		if tx.StashDir != "" {
+			_ = os.RemoveAll(tx.StashDir)
+		}
+	} else {
+		receiptData, err := json.MarshalIndent(receipt, "", "  ")
+		if err == nil {
+			receiptFile := filepath.Join(tx.StashDir, "receipt.json")
+			_ = os.WriteFile(receiptFile, receiptData, 0o644)
+			_ = os.WriteFile(filepath.Join(tx.StashDir, "quarantine-receipt.json"), receiptData, 0o644)
+			receipt.ReceiptPath = receiptFile
+
+			gitDir, err := worktreeGitDir(tx.Repo)
+			if err == nil {
+				_ = os.WriteFile(filepath.Join(gitDir, "fak-quarantine", "receipt.json"), receiptData, 0o644)
+				_ = os.WriteFile(filepath.Join(gitDir, "fak-quarantine", "latest-receipt.json"), receiptData, 0o644)
+			}
 		}
 	}
 

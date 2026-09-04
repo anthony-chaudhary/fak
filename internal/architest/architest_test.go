@@ -421,7 +421,6 @@ var tier = map[string]int{
 	"milestonedoc":        4, // the freshness-checked milestone status doc (#1441): renders the maturity CLIMB (covmatrix grid -> M0-M7 ladder via milestonereport.InterpretMaturity) into a committed docs/milestones/STATUS.md block with the --write-doc/--check-doc seam (twin of supportmaturityscore's matrix block). Forced to tier 3 by its milestonereport(3) import; also imports covmatrix(1)+supportmaturity(2), off the hot path.
 	"dispatchorder":       1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchauto":        1, // pure dispatch wave auto-sizing fold: live ceilings + node roster + context budget -> target/refill/placement; stdlib-only, off the hot path.
-	"amoprofpub":          1, // pure analysis-report publication tree construction; stdlib-only, off the hot path.
 	"categorybaseline":    1, // explicit category-layer completion registry + pure hold decision; stdlib-only, off the hot path.
 	"dispatchcache":       2, // pure stdlib-only TTL/content-hash cache for routed dispatch payloads.
 	"dispatchtick":        2, // pure issue-resolution dispatch tick contract: backend argv, guard wrap, wave/account sidecars + the tier-aware account chooser (#3042); imports modelroute(1) for the WorkTier vocabulary, else stdlib-only, off the hot path.
@@ -478,7 +477,7 @@ var tier = map[string]int{
 	"terminalrelief":      1, // pure pressure/cooldown decision and durable state; Windows actuation stays in cmd/fak.
 	"hostresurrect":       3, // composes host-fault signals with durable guard-session inventory into bounded relaunch requests.
 	"issuestriage":        2, // pure issue-action triage classifier; stdlib-only, off hot path.
-	"wipfence":            3, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.
+	"wipfence":            2, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.
 	"usagelog":            2, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
 	"promptaudit":         1, // scans system/developer/context prompt text for hidden control markers (apostrophe-alphabet / date-separator channels) before they cross a model or cache boundary; stdlib-only, imports nothing internal, off the hot path.
 	"corelocks":           2, // parses + validates the declarative core-lock taxonomy (#1681): classes hard-self/serial-core/soft-contract/shadow-learn/open-leaf and reason tokens, classifying a path to its lock class from an embedded fixture; data + validation only, stdlib-only, imports nothing internal, off the hot path.
@@ -542,6 +541,7 @@ var tier = map[string]int{
 	"taskgraph":             3, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
 	"toolshape":             4, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
 	"l3kv":                  3, // durable off-box L3 KV residency backend (#1472): routes span content through the storedrv(2) router (blobfs local stand-in + the FAK_BLOB_HTTP_URL remote pool) behind a durable span→content manifest, so it declares alongside storedrv; imports abi(0)+model(1)+blob/blobfs/blobhttp(1)+storedrv(2), off the hot path.
+	"l3server":              2, // pure L3 slab-allocated storage engine and protocol server (#11077); stdlib-only, off the hot path.
 	"worklog":               1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	"conformance":           3, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
 	"sessionreplay":         3, // per-turn regime-conditioned replay-regression fixture (#4425, epic #4107): the fak.sessionreplay.v1 golden format + a pure Replay that re-adjudicates a captured (turn, active_regime) through the REAL adjudicator(2) over an internal/policy(2) regime floor, freezing a mode/regime-conditioned verdict for regression. Composes abi(0)+adjudicator(2)+policy(2) (like conformance), so it declares tier 2; test-time only, mutates nothing, off the hot path.
@@ -1649,6 +1649,7 @@ var interpreterExecAllow = map[string]string{
 	"procguard":   "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
 	"accounts":    "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
 	"modelroute":  "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
+	"compute":     "host hardware topology probe queries the Windows display subsystem for AMD GPUs via Win32_VideoController in ProbeWindowsDisplayTopology; host-observation seam, not a tool-call adjudication dependency",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
