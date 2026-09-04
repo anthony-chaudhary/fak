@@ -2,6 +2,7 @@ package l3kv
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -134,11 +135,17 @@ func TestAsyncStoreEndToEnd(t *testing.T) {
 	// Unblock slow job
 	close(blocker)
 
-	// Wait briefly for completion
-	time.Sleep(50 * time.Millisecond)
+	// Wait deterministically for dropped stale job completion
+	deadline := time.Now().Add(2 * time.Second)
+	for slowAsyncStore.WatermarkManager().Stats().DroppedCount == 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
 
 	if atomic.LoadInt32(&callbackRan) != 0 {
 		t.Fatalf("callback ran for stale async write after Reset()")
+	}
+	if slowAsyncStore.WatermarkManager().Stats().DroppedCount != 1 {
+		t.Fatalf("expected 1 dropped job, got %d", slowAsyncStore.WatermarkManager().Stats().DroppedCount)
 	}
 
 	// Now dispatch fresh job on store without block
