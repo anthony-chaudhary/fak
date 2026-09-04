@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	_ "github.com/anthony-chaudhary/fak/internal/advmodel"
 	_ "github.com/anthony-chaudhary/fak/internal/agentsched"
 	_ "github.com/anthony-chaudhary/fak/internal/breathgate"
@@ -134,4 +135,9 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/workerenvelope"
 	_ "github.com/anthony-chaudhary/fak/internal/worklog"
 	_ "github.com/anthony-chaudhary/fak/internal/workspaceslot"
+	"os"
 )
+
+func cmdL3Serve(args []string) {
+	fmt.Fprintln(os.Stdout, "fak l3-serve: disaggregated l3 tier server")
+}
