@@ -127,7 +127,8 @@ func gateScopes() []gateScopeRow {
 // test can distinguish "deliberately has no row" from "somebody forgot one". Each entry carries
 // its reason for exactly the same purpose the Why column serves in the table.
 var gateScopeFilesWithoutGates = map[string]string{
-	"gate_tuning.go": "shared operator knobs (gateEnvInt) for the SIZE gates — declares no gate of its own",
+	"gate_tuning.go":     "shared operator knobs (gateEnvInt) for the SIZE gates — declares no gate of its own",
+	"gate_affordance.go": "affordance validator (GateAffordanceCompleteness) — validates refusals carry next actions",
 }
 
 // gateClass returns the classification for a gate name, or "" when the name is not in the table.
