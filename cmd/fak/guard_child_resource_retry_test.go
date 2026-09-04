@@ -50,8 +50,8 @@ func TestGuardResourceRetryAdmission(t *testing.T) {
 	t.Run("SYSTEM_COMMIT_HEADROOM", func(t *testing.T) {
 		state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
 		got := state.decide(resourceRetryEvent("SYSTEM_COMMIT_HEADROOM"), "claude", "sha-a")
-		if got.Action != guardResourceRetryTerminal || got.ResourceType != "SYSTEM_COMMIT_HEADROOM" || state.restarts != 0 {
-			t.Fatalf("SYSTEM_COMMIT_HEADROOM admitted retry or burned restarts: verdict=%+v state=%+v", got, state)
+		if got.Action != guardResourceRetryRelaunch || got.ResourceType != "SYSTEM_COMMIT_HEADROOM" || got.Attempt != 1 || got.Delay != 5*time.Second || state.restarts != 1 {
+			t.Fatalf("SYSTEM_COMMIT_HEADROOM verdict=%+v state=%+v", got, state)
 		}
 	})
 
@@ -135,6 +135,64 @@ func TestGuardResourceRetryNoProgressExhaustsEarly(t *testing.T) {
 	state = guardResourceRetryState{limit: 5, progressHead: "sha-a", noProgress: 1, noProgressLimit: 2}
 	if got := state.decide(event, "claude", "sha-b"); got.Action != guardResourceRetryRelaunch || got.NoProgress != 0 || state.progressHead != "sha-b" {
 		t.Fatalf("HEAD progress did not reset pressure=%+v state=%+v", got, state)
+	}
+}
+
+func TestGuardResourceRetrySystemCommitHeadroomExemptFromNoProgress(t *testing.T) {
+	state := guardResourceRetryState{limit: 5, noProgressLimit: 2}
+	event := resourceRetryEvent("SYSTEM_COMMIT_HEADROOM")
+	for i := 1; i <= 4; i++ {
+		got := state.decide(event, "claude", "sha-a")
+		if got.Action != guardResourceRetryRelaunch {
+			t.Fatalf("attempt %d: got action %v, want %v (verdict=%+v)", i, got.Action, guardResourceRetryRelaunch, got)
+		}
+		if got.NoProgress != 0 || state.noProgress != 0 {
+			t.Fatalf("attempt %d: got NoProgress %d (state.noProgress %d), want 0", i, got.NoProgress, state.noProgress)
+		}
+		if got.Attempt != i {
+			t.Fatalf("attempt %d: got attempt %d, want %d", i, got.Attempt, i)
+		}
+	}
+}
+
+func TestGuardResourceRetrySystemCommitHeadroomYields(t *testing.T) {
+	state := guardResourceRetryState{limit: 3, noProgressLimit: 2}
+	event := resourceRetryEvent("SYSTEM_COMMIT_HEADROOM")
+	for i := 1; i <= 3; i++ {
+		got := state.decide(event, "claude", "sha-a")
+		if got.Action != guardResourceRetryRelaunch || got.Attempt != i {
+			t.Fatalf("relaunch attempt %d: verdict=%+v", i, got)
+		}
+	}
+	got := state.decide(event, "claude", "sha-a")
+	if got.Action != guardResourceRetryYield {
+		t.Fatalf("got action %v, want %v (verdict=%+v)", got.Action, guardResourceRetryYield, got)
+	}
+	if got.Cause != guardResourceRestartCauseHeadroomExhausted {
+		t.Fatalf("got cause %q, want %q", got.Cause, guardResourceRestartCauseHeadroomExhausted)
+	}
+	if got.Attempt != 3 || got.Limit != 3 {
+		t.Fatalf("verdict attempt/limit = %d/%d, want 3/3", got.Attempt, got.Limit)
+	}
+}
+
+func TestGuardHeadroomRestartDelay(t *testing.T) {
+	cases := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{0, 0},
+		{-1, 0},
+		{1, 5 * time.Second},
+		{2, 10 * time.Second},
+		{3, 20 * time.Second},
+		{4, 20 * time.Second},
+		{10, 20 * time.Second},
+	}
+	for _, tc := range cases {
+		if got := guardHeadroomRestartDelay(tc.attempt); got != tc.want {
+			t.Fatalf("attempt %d: delay=%v, want %v", tc.attempt, got, tc.want)
+		}
 	}
 }
 

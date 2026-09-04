@@ -227,8 +227,8 @@ func TestGuardCodexEnvKey(t *testing.T) {
 
 func TestGuardCodexGatewayModel(t *testing.T) {
 	// #10669: the shared Codex default effort is the user-configured high; xhigh is opt-in.
-	if guardCodexDefaultModelID != "gpt-5.6-sol" || guardCodexDefaultReasoningEffort != "high" {
-		t.Fatalf("Codex defaults = model %q effort %q, want gpt-5.6-sol/high",
+	if guardCodexDefaultModelID != "gpt-6-astra" || guardCodexDefaultReasoningEffort != "high" {
+		t.Fatalf("Codex defaults = model %q effort %q, want gpt-6-astra/high",
 			guardCodexDefaultModelID, guardCodexDefaultReasoningEffort)
 	}
 	if got := guardCodexGatewayModel([]string{"codex"}, "", "openai-responses"); got != guardCodexDefaultModelID {
@@ -236,6 +236,12 @@ func TestGuardCodexGatewayModel(t *testing.T) {
 	}
 	if got := guardCodexGatewayModel([]string{"codex"}, "gpt-custom", "openai-responses"); got != "gpt-custom" {
 		t.Fatalf("explicit Codex gateway model = %q, want gpt-custom", got)
+	}
+	if got := guardCodexGatewayModel([]string{"codex"}, "gpt 6 astra", "openai-responses"); got != "gpt-6-astra" {
+		t.Fatalf("aliased Codex gateway model = %q, want gpt-6-astra", got)
+	}
+	if got := guardCodexGatewayModel([]string{"codex"}, "astra", "openai-responses"); got != "gpt-6-astra" {
+		t.Fatalf("bare astra gateway model = %q, want gpt-6-astra", got)
 	}
 	if got := guardCodexGatewayModel([]string{"claude"}, "", "anthropic"); got != "" {
 		t.Fatalf("non-Codex gateway model = %q, want empty passthrough default", got)
@@ -321,7 +327,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 	got := guardCodexConfigArgs("http://127.0.0.1:8137", "", "")
 	want := []string{
 		"-c", "model_provider=fak",
-		"-c", `model="gpt-5.6-sol"`,
+		"-c", `model="gpt-6-astra"`,
 		"-c", `model_providers.fak.name="fak (kernel-adjudicated)"`,
 		"-c", `model_providers.fak.base_url="http://127.0.0.1:8137/v1"`,
 		"-c", `model_providers.fak.wire_api="responses"`,
@@ -485,8 +491,8 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 		// The struct the banner reads is fully populated (#10669: the resolved effort, and
 		// that it is the configured default rather than an operator opt-in).
 		if info.ProviderID != "fak" || info.EnvKey != "OPENAI_API_KEY" || info.BaseURL != gw+"/v1" ||
-			info.Model != "gpt-5.6-sol" || info.Reasoning != "high" || info.ReasoningOptIn {
-			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-5.6-sol effort=high not-opt-in", info, gw)
+			info.Model != "gpt-6-astra" || info.Reasoning != "high" || info.ReasoningOptIn {
+			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-6-astra effort=high not-opt-in", info, gw)
 		}
 	})
 

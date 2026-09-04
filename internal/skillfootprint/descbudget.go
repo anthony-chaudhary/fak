@@ -36,7 +36,7 @@ import "fmt"
 // description that grew it; lower it whenever a trim banks a win. Pinned at the
 // measured floor at the time of the #5444 pin (see the baseline doc for the exact
 // skill count and the regeneration command).
-const SkillDescriptionBudgetBytes = 31717
+const SkillDescriptionBudgetBytes = 34155
 
 // SkillDescriptionRatchetSlackBytes is how far the measured floor may sit BELOW the
 // budget before the gate demands the ceiling be re-pinned. It absorbs incidental

@@ -4369,7 +4369,6 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Portability formats: reuse the package, registry, sync, and context layers](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-PORTABILITY-FORMATS-2026-08-13.md) -- auto-indexed dated note.
 - [Native desktop command center for durable coding sessions](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/NATIVE-DESKTOP-DURABLE-SESSION-COMMAND-CENTER-2026-08-13.md) -- auto-indexed dated note.
 - [Fleet repository-targeting incident — 2026-08-13](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/FLEET-REPOSITORY-TARGETING-INCIDENT-2026-08-13.md) -- auto-indexed dated note.
-- [Deterministic AMOProf-to-Confluence publication rerun — 2026-08-12](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md) -- auto-indexed dated note.
 - [NVIDIA-hosted Nemo API demo fleet audit — 2026-08-11..12](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/NVIDIA-NEMO-API-DEMO-FLEET-AUDIT-2026-08-12.md) -- auto-indexed dated note.
 - [Terminal relief runs inside a managed pause barrier](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/TERMINAL-RELIEF-PAUSE-BARRIER-2026-08-12.md) -- auto-indexed dated note.
 - [Context as variable vs addressable context](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-AS-VARIABLE-RLM-STUDY-2026-08-12.md) -- auto-indexed dated note.

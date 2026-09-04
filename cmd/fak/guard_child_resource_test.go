@@ -43,6 +43,42 @@ func TestDecideGuardResourceSystemHeadroom(t *testing.T) {
 	if !d.Stop || d.Reason != "SYSTEM_COMMIT_HEADROOM" || d.HeadroomBytes != 50 || d.ThresholdBytes != p.MinSystemHeadroom {
 		t.Fatalf("decision=%+v", d)
 	}
+	if d.Offender.PID != 0 || d.Offender.PPID != 0 || d.Offender.Name != "host" {
+		t.Fatalf("offender=%+v, want host with PID 0", d.Offender)
+	}
+	if reason := guardResourceReason(d); !strings.Contains(reason, "offender_pid=0") {
+		t.Fatalf("reason missing offender_pid=0: %s", reason)
+	}
+
+	// Verify that even with existing large child processes, offender is attributed to host (PID 0)
+	snapshotWithProcs := procguard.MemorySnapshot{
+		Metric:      procguard.MemoryMetricCommit,
+		TreeBytes:   10,
+		SystemBytes: 950,
+		SystemLimit: 1000,
+		Processes: []procguard.MemoryProcess{
+			{PID: 42, PPID: 1, Name: "child", Bytes: 500},
+			{PID: 99, PPID: 42, Name: "grandchild", Bytes: 100},
+		},
+	}
+	d2 := decideGuardResource(p, snapshotWithProcs)
+	if !d2.Stop || d2.Reason != "SYSTEM_COMMIT_HEADROOM" {
+		t.Fatalf("decision=%+v", d2)
+	}
+	if d2.Offender.PID != 0 || d2.Offender.PPID != 0 || d2.Offender.Name != "host" {
+		t.Fatalf("offender=%+v, want host with PID 0 (did not attribute child's largest PID)", d2.Offender)
+	}
+	reason2 := guardResourceReason(d2)
+	if !strings.Contains(reason2, "offender_pid=0") {
+		t.Fatalf("guardResourceReason formatted child PID instead of offender_pid=0: %s", reason2)
+	}
+	if strings.Contains(reason2, "offender_pid=42") {
+		t.Fatalf("guardResourceReason contained child PID 42: %s", reason2)
+	}
+	receipt := newGuardResourceReceipt("trace", "codex", 42, d2)
+	if receipt.OffenderPID != 0 || receipt.OffenderName != "host" {
+		t.Fatalf("receipt offender=%d (%s), want 0 (host)", receipt.OffenderPID, receipt.OffenderName)
+	}
 }
 
 func TestDecideGuardResourceAllowsHealthyTree(t *testing.T) {
@@ -543,4 +579,164 @@ func TestFoldGuardResourceReceiptsByWeek(t *testing.T) {
 	if counts["2026-W35"] != 1 {
 		t.Errorf("counts[2026-W35] = %d, want 1", counts["2026-W35"])
 	}
+}
+
+func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
+	t.Run("debounce grace period delays headroom intervention and invokes yield", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		var yieldCalled bool
+		var yieldPIDs []int
+		oldYield := guardYieldMemory
+		guardYieldMemory = func(pids ...int) {
+			yieldCalled = true
+			yieldPIDs = append(yieldPIDs, pids...)
+		}
+		t.Cleanup(func() { guardYieldMemory = oldYield })
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  60 * time.Millisecond,
+			Stop:              stop,
+		}
+		snapshot := procguard.MemorySnapshot{
+			Metric:      procguard.MemoryMetricCommit,
+			RootPID:     42,
+			TreeBytes:   10,
+			SystemBytes: 950,
+			SystemLimit: 1000,
+			Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+		}
+
+		started := time.Now()
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-debounce", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			return snapshot, true, ""
+		})
+
+		// At 25ms (halfway into 60ms debounce window), no event should be emitted yet
+		time.Sleep(25 * time.Millisecond)
+		select {
+		case ev := <-ch:
+			t.Fatalf("event emitted prematurely during debounce grace window: %+v", ev)
+		default:
+		}
+
+		if !yieldCalled {
+			t.Fatal("expected procguard.YieldMemory to be invoked on headroom refusal")
+		}
+		if len(yieldPIDs) == 0 || yieldPIDs[0] != 42 {
+			t.Fatalf("expected YieldMemory to receive rootPID 42, got %v", yieldPIDs)
+		}
+
+		// Wait for event after debounce window expires
+		select {
+		case ev := <-ch:
+			elapsed := time.Since(started)
+			if elapsed < 50*time.Millisecond {
+				t.Fatalf("event emitted too early (%v < 50ms)", elapsed)
+			}
+			if ev.Kind != guardChildResourceLimit || ev.Resource == nil {
+				t.Fatalf("unexpected event: %+v", ev)
+			}
+			if ev.Resource.Reason != "SYSTEM_COMMIT_HEADROOM" {
+				t.Fatalf("reason = %q, want SYSTEM_COMMIT_HEADROOM", ev.Resource.Reason)
+			}
+			if ev.Resource.Offender.PID != 0 || ev.Resource.Offender.Name != "host" {
+				t.Fatalf("offender = %+v, want PID 0 (host)", ev.Resource.Offender)
+			}
+			if !strings.Contains(ev.Reason, "offender_pid=0") {
+				t.Fatalf("reason missing offender_pid=0: %s", ev.Reason)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("timed out waiting for debounced headroom event")
+		}
+	})
+
+	t.Run("headroom recovery resets grace timer without interrupting child", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  60 * time.Millisecond,
+			Stop:              stop,
+		}
+
+		tickCount := 0
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-recovery", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			tickCount++
+			systemBytes := uint64(500) // healthy (500 headroom >= 100)
+			if tickCount <= 3 {
+				// ticks 1, 2, 3: deficit (50 headroom < 100)
+				systemBytes = 950
+			}
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: systemBytes,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		// Wait 120ms (well beyond 60ms debounce window)
+		time.Sleep(120 * time.Millisecond)
+
+		select {
+		case ev := <-ch:
+			t.Fatalf("child was interrupted despite recovering: %+v", ev)
+		default:
+			// Child was not interrupted!
+		}
+	})
+
+	t.Run("child tree limit does not debounce", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      100,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  500 * time.Millisecond,
+			Stop:              stop,
+		}
+
+		started := time.Now()
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-tree-limit", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   150, // exceeds MaxTreeBytes 100
+				SystemBytes: 500,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 150}},
+			}, true, ""
+		})
+
+		select {
+		case ev := <-ch:
+			elapsed := time.Since(started)
+			if elapsed > 100*time.Millisecond {
+				t.Fatalf("tree limit was delayed (%v > 100ms)", elapsed)
+			}
+			if ev.Resource.Reason != "CHILD_TREE_COMMIT_LIMIT" {
+				t.Fatalf("reason = %q, want CHILD_TREE_COMMIT_LIMIT", ev.Resource.Reason)
+			}
+			if ev.Resource.Offender.PID != 42 {
+				t.Fatalf("offender PID = %d, want 42", ev.Resource.Offender.PID)
+			}
+		case <-time.After(300 * time.Millisecond):
+			t.Fatal("timed out waiting for immediate tree limit")
+		}
+	})
 }

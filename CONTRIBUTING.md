@@ -313,10 +313,17 @@ change must update the allowlist in the same reviewed change.
 ## Good first issues — where to start
 
 New here? Browse the [`good first issue`](https://github.com/anthony-chaudhary/fak/labels/good%20first%20issue)
-label for scoped, well-defined starter work. If nothing's open, these are the standing
-on-ramps — each is additive, ships green through `make ci`, and touches no enforced
-guard:
+label for scoped, well-defined starter work. If the GitHub label queue is empty or undergoing triage,
+head directly to the **[good-first popularization board](docs/adoption/good-first-tasks.md)** — a standing,
+curated roster of self-contained starter tasks (glossary terms, objection answers, comparison rows, translation stubs,
+and integration recipes) where each entry names the exact file to edit and its difficulty, allowing anyone to
+contribute in an afternoon without waiting on issue triage.
 
+Additionally, here are standing on-ramps across the codebase — each is additive, ships green through `make ci`,
+and touches no enforced guard:
+
+- **Pick a starter task from the [good-first popularization board](docs/adoption/good-first-tasks.md)** — the fastest
+  no-setup on-ramp: edit a single doc or content file in an afternoon, sign off with `git commit -s`, and open a PR.
 - **Add a per-agent integration recipe** under [`docs/integrations/`](docs/integrations/)
   for a harness that doesn't have one yet (the pattern is in the existing
   `claude.md` / `cursor.md` recipes). The lowest-friction first PR.
@@ -340,8 +347,9 @@ Pick one, read the entry doc it points to, and ship it small and by explicit pat
 > queue is a dead link that returns no error. Check it with
 > `gh issue list --label "good first issue" --state open` during triage
 > and top it up from the *product* backlog, not only from documentation epics — a queue
-> stocked entirely out of one meta-epic drains the moment that epic closes. An issue is ready
-> for the label when its body names the file to touch, the expected result, and how to verify,
+> stocked entirely out of one meta-epic drains the moment that epic closes. When the label queue
+> is drained or undergoing triage, newcomers are directed to the [good-first popularization board](docs/adoption/good-first-tasks.md).
+> An issue is ready for the label when its body names the file to touch, the expected result, and how to verify,
 > and a contributor can finish it with a fork and a pull request — no shared checkout, no
 > fleet tooling.
 

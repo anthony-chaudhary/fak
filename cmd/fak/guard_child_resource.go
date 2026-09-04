@@ -26,6 +26,7 @@ const (
 	guardTreeRSSFallback        = uint64(4) << 30
 	guardTreeRSSMinimum         = uint64(1) << 30
 	guardResourceDetailMaxBytes = 512
+	guardHeadroomDebounceDefault = 15 * time.Second
 )
 
 var (
@@ -40,6 +41,7 @@ type guardResourcePolicy struct {
 	Metric            procguard.MemoryMetric
 	MaxTreeBytes      uint64
 	MinSystemHeadroom uint64
+	HeadroomDebounce  time.Duration
 	Stop              <-chan struct{}
 }
 
@@ -88,16 +90,29 @@ type guardResourceReceipt struct {
 }
 
 type guardResourceConfig struct {
-	MaxMemoryMB  uint64
-	PollInterval time.Duration
-	ReceiptPath  string
-	UsagePath    string
+	MaxMemoryMB      uint64
+	PollInterval     time.Duration
+	ReceiptPath      string
+	UsagePath        string
+	HeadroomDebounce time.Duration
 }
 
 var guardResourceConfigured guardResourceConfig
 
 func setGuardResourceConfig(config guardResourceConfig) {
 	guardResourceConfigured = config
+}
+
+func resolveGuardHeadroomDebounce(flagVal time.Duration, envVal string) time.Duration {
+	if flagVal > 0 {
+		return flagVal
+	}
+	if v := strings.TrimSpace(envVal); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return flagVal
 }
 
 func guardResourcePolicyConfigured() guardResourcePolicy {
@@ -110,12 +125,21 @@ func guardResourcePolicyConfigured() guardResourcePolicy {
 		maxTree = guardTreeRSSDefault(hostBytes)
 		headroom = 0 // physical capacity is not a current system-RSS pressure sample.
 	}
-	p := guardResourcePolicy{PollInterval: guardResourcePollDefault, Metric: metric, MaxTreeBytes: maxTree, MinSystemHeadroom: headroom}
+	p := guardResourcePolicy{
+		PollInterval:      guardResourcePollDefault,
+		Metric:            metric,
+		MaxTreeBytes:      maxTree,
+		MinSystemHeadroom: headroom,
+		HeadroomDebounce:  guardHeadroomDebounceDefault,
+	}
 	if guardResourceConfigured.MaxMemoryMB > 0 && guardResourceConfigured.MaxMemoryMB <= ^uint64(0)>>20 {
 		p.MaxTreeBytes = guardResourceConfigured.MaxMemoryMB << 20
 	}
 	if guardResourceConfigured.PollInterval >= 100*time.Millisecond {
 		p.PollInterval = guardResourceConfigured.PollInterval
+	}
+	if guardResourceConfigured.HeadroomDebounce > 0 {
+		p.HeadroomDebounce = guardResourceConfigured.HeadroomDebounce
 	}
 	return p
 }
@@ -162,6 +186,11 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 		d.Stop = true
 		d.Reason = headroom.Reason
 		d.ThresholdBytes = p.MinSystemHeadroom
+		d.Offender = procguard.MemoryProcess{
+			PID:  0,
+			PPID: 0,
+			Name: "host",
+		}
 	}
 	return d
 }
@@ -319,12 +348,16 @@ func guardResourceReason(d guardResourceDecision) string {
 	if metric == "" {
 		metric = procguard.MemoryMetricCommit
 	}
+	offenderPID := d.Offender.PID
+	if d.Reason == procguard.SystemCommitHeadroomReason {
+		offenderPID = 0
+	}
 	if metric == procguard.MemoryMetricCommit {
 		// Preserve the Windows v1 reason text byte-for-byte for existing journal
 		// consumers while Darwin gets an RSS-honest label below.
-		return fmt.Sprintf("%s tree_commit=%d threshold=%d system_commit=%d limit=%d headroom=%d offender_pid=%d", d.Reason, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, d.Offender.PID)
+		return fmt.Sprintf("%s tree_commit=%d threshold=%d system_commit=%d limit=%d headroom=%d offender_pid=%d", d.Reason, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, offenderPID)
 	}
-	return fmt.Sprintf("%s metric=%s tree_bytes=%d threshold=%d system_bytes=%d limit=%d headroom=%d offender_pid=%d", d.Reason, metric, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, d.Offender.PID)
+	return fmt.Sprintf("%s metric=%s tree_bytes=%d threshold=%d system_bytes=%d limit=%d headroom=%d offender_pid=%d", d.Reason, metric, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, offenderPID)
 }
 
 // scrubGuardResourceDetail makes collector diagnostics safe for the durable
@@ -354,6 +387,12 @@ func scrubGuardResourceDetail(detail string) string {
 	return strings.TrimSpace(detail) + "..."
 }
 
+var (
+	guardYieldMemory    = procguard.YieldMemory
+	guardSuspendProcess = procguard.SuspendProcess
+	guardResumeProcess  = procguard.ResumeProcess
+)
+
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
 	return startGuardChildResourceMonitorWithCollector(rootPID, traceID, agent, policy, procguard.CollectMemorySnapshot)
 }
@@ -361,9 +400,22 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
 	recordGuardChildResourceUsage(traceID, agent, rootPID, policy)
 	out := make(chan guardChildWaitEvent, 1)
+	debounceWindow := policy.HeadroomDebounce
+	if debounceWindow == 0 {
+		debounceWindow = guardHeadroomDebounceDefault
+	} else if debounceWindow < 0 {
+		debounceWindow = 0
+	}
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
 		defer ticker.Stop()
+		var headroomFirstSeen time.Time
+		var childSuspended bool
+		defer func() {
+			if childSuspended {
+				_ = guardResumeProcess(rootPID)
+			}
+		}()
 		for {
 			select {
 			case <-policy.Stop:
@@ -399,7 +451,26 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 			}
 			decision := decideGuardResource(policy, snapshot)
 			if !decision.Stop {
+				if childSuspended {
+					_ = guardResumeProcess(rootPID)
+					childSuspended = false
+				}
+				headroomFirstSeen = time.Time{}
 				continue
+			}
+			if decision.Reason == procguard.SystemCommitHeadroomReason {
+				if !childSuspended {
+					_ = guardSuspendProcess(rootPID)
+					childSuspended = true
+				}
+				guardYieldMemory(rootPID)
+				now := time.Now()
+				if headroomFirstSeen.IsZero() {
+					headroomFirstSeen = now
+				}
+				if debounceWindow > 0 && now.Sub(headroomFirstSeen) < debounceWindow {
+					continue
+				}
 			}
 			out <- guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: guardResourceReason(decision), Resource: &decision}
 			return

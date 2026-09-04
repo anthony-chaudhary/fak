@@ -11,7 +11,8 @@ wants to understand the system, not evaluate it ([README](README.md)), install i
 a page up by name ([INDEX](INDEX.md)). Nothing here is required to run fak.*
 
 fak is a lot of ideas stacked into one binary: an addressable KV cache that keeps long
-sessions cheap to hold warm, right-model-per-call routing, and a pure-Go in-kernel model —
+sessions cheap to hold warm, right-model-per-call routing, and a pure-Go in-kernel model
+(preferring Qwen3.8 for native-performance work per AGENTS.md) —
 and, riding along on the same write-time checkpoint, a default-deny capability floor, a
 write-time result quarantine, and the honesty discipline that keeps every claim checkable.
 This page turns all of it into one **linear, prerequisite-ordered curriculum** — a course
@@ -190,7 +191,7 @@ checkpoints, you are qualified to start there.
 | **L200 — Foundations** | The handful of mechanisms every later claim rests on: the KV cache, context-vs-memory durability, the four memory layers, content addressing, the frozen ABI, and the proofs method. | FAK 101, FAK 102, FAK 103, FAK 104, FAK 105 |
 | **L300 — The Security Core** | The reference monitor, the policy lifecycle, the rungs (preflight, plan-CFI, witness, stewards, rate-limit, escalation), the write-time result gate, canonicalization, IFC, provenance, durability, and code-linting at the same boundary. | FAK 105, FAK 207 |
 | **L400 — The Performance Core** | Why agents stress the cache, prefill-elimination economics, the addressable/bijective KV-MMU, RadixAttention reuse, the vDSO, durable session recall, and the first-order scaling law (incl. cache legality and residency). | FAK 201, FAK 205, FAK 310 |
-| **L500 — Serving, Integration, and the In-Kernel Model** | Running and hardening the gateway, the gateway drop guarantee, repointing existing agents at one base URL, the framework cookbook, the pure-Go in-kernel model + compute HAL with oracle parity, and the GPU lease. | FAK 105, FAK 301, FAK 304, FAK 310 |
+| **L500 — Serving, Integration, and the In-Kernel Model** | Running and hardening the gateway (`fak serve`, `fak l3-serve` / `fak l3serve`), the gateway drop guarantee, repointing existing agents at one base URL, the framework cookbook, the pure-Go in-kernel model + compute HAL with oracle parity (preferring Qwen3.8 for native performance per AGENTS.md), and the GPU lease. | FAK 105, FAK 301, FAK 304, FAK 310 |
 | **L600 — Mastery** | Honest baselines and the benchmark authority, the fleet/web/parity results, the AgentDojo red-team, the claims ledger and status gates, the additive ABI + architest, the RSI ship-gate, the three-gate leaf pattern, and the dispatch loop. | FAK 207, FAK 208, FAK 209, FAK 210 |
 
 ---
@@ -518,7 +519,7 @@ prerequisites, and checkpoints are continuous across the parts:
 
 - [L300 — The Security Core](docs/learning/security-core.md) — the reference monitor, the policy lifecycle, and the enforcement rungs.
 - [L400 — The Performance Core](docs/learning/performance-core.md) — why agents stress the cache and the addressable-eviction answer.
-- [L500 — Serving, Integration, and the In-Kernel Model](docs/learning/serving-integration.md) — running and hardening `fak serve`, repointing real agents, the in-kernel model.
+- [L500 — Serving, Integration, and the In-Kernel Model](docs/learning/serving-integration.md) — running and hardening `fak serve` (and `fak l3-serve` / `fak l3serve`), repointing real agents, and the in-kernel model (preferring Qwen3.8 per AGENTS.md).
 - [L600 — Mastery](docs/learning/mastery.md) — benchmarks, honesty discipline, and extending the kernel.
 - [The shipped-surface appendix](docs/learning/appendix-shipped-surface.md) — the wrap-up plus the full operator/contributor/package map.
 

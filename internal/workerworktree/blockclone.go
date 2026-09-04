@@ -124,7 +124,7 @@ func (b blockClone) materialize(root, lane, key, baseSHA, wtRoot string, git Git
 }
 
 func (blockClone) Release(root, wtPath string, git GitRunner) Result {
-	return ForceReap(root, wtPath, git)
+	return gitWorktree{}.Release(root, wtPath, git)
 }
 
 func gitBlobSHA1(path string) string {

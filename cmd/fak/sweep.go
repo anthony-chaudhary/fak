@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 )
 
 // sweep.go — `fak sweep`: drive a dirty multi-session working tree TOWARD zero, honestly.
@@ -46,6 +47,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the plan as JSON")
 	census := fs.Bool("census", false, "render the rev-pinned working-tree WIP census and preview-only candidate paths")
 	cleanJunk := fs.Bool("clean-junk", false, "remove only paths freshly classified as junk files, then report what changed")
+	autoArchive := fs.Bool("auto-archive", false, "with --clean-junk: snapshot orphan junk into refs/fak/quarantine/* before removing")
 	apply := fs.Bool("apply", false, "commit one lane group (requires --lane and -m); default is plan-only")
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
 	unit := fs.Int("unit", 0, "with --apply: commit only sub-unit N of the lane (from groups[].units[].index; 0 = the whole lane)")
@@ -90,7 +92,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	plan.Parked = collectSweepParked(root)
 
 	if *cleanJunk {
-		res := cleanSweepJunk(root, plan)
+		res := cleanSweepJunk(root, plan, *autoArchive)
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, res); err != nil {
 				fmt.Fprintf(stderr, "fak sweep --clean-junk: %v\n", err)
@@ -115,11 +117,15 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 }
 
 type sweepCleanJunkResult struct {
-	OK         bool                    `json:"ok"`
-	Removed    []string                `json:"removed,omitempty"`
-	Skipped    []string                `json:"skipped,omitempty"`
-	Refused    []sweepCleanJunkRefusal `json:"refused,omitempty"`
-	NextAction string                  `json:"next_action,omitempty"`
+	OK            bool                    `json:"ok"`
+	QuarantineRef string                  `json:"quarantine_ref,omitempty"`
+	QuarantineSHA string                  `json:"quarantine_sha,omitempty"`
+	ArchivedCount int                     `json:"archived_count,omitempty"`
+	ArchivedBytes int64                   `json:"archived_bytes,omitempty"`
+	Removed       []string                `json:"removed,omitempty"`
+	Skipped       []string                `json:"skipped,omitempty"`
+	Refused       []sweepCleanJunkRefusal `json:"refused,omitempty"`
+	NextAction    string                  `json:"next_action,omitempty"`
 }
 
 type sweepCleanJunkRefusal struct {
@@ -128,12 +134,69 @@ type sweepCleanJunkRefusal struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-func cleanSweepJunk(root string, plan sweepPlan) sweepCleanJunkResult {
+func cleanSweepJunk(root string, plan sweepPlan, autoArchives ...bool) sweepCleanJunkResult {
+	autoArchive := len(autoArchives) > 0 && autoArchives[0]
 	res := sweepCleanJunkResult{OK: true}
 	if len(plan.Junk) == 0 {
 		res.NextAction = "no junk paths classified; run `fak sweep --json` to inspect remaining work"
 		return res
 	}
+
+	if autoArchive {
+		var targets []string
+		for _, e := range plan.Junk {
+			full, ok, reason := sweepCleanPath(root, e.Path)
+			if !ok {
+				res.Refused = append(res.Refused, sweepCleanJunkRefusal{Path: e.Path, Reason: "unsafe_path", Detail: reason})
+				continue
+			}
+			st, err := os.Lstat(full)
+			if err != nil {
+				if os.IsNotExist(err) {
+					res.Skipped = append(res.Skipped, e.Path)
+					continue
+				}
+				res.Refused = append(res.Refused, sweepCleanJunkRefusal{Path: e.Path, Reason: "stat_failed", Detail: err.Error()})
+				continue
+			}
+			if st.IsDir() {
+				res.Refused = append(res.Refused, sweepCleanJunkRefusal{
+					Path:   e.Path,
+					Reason: "directory_refused",
+					Detail: "sweep only deletes junk files; inspect and remove directories by hand",
+				})
+				continue
+			}
+			targets = append(targets, e.Path)
+		}
+		if len(targets) > 0 {
+			qref, err := wipinventory.EvictOrphans(context.Background(), root, wipinventory.GitRunner{}, wipinventory.EvictOptions{
+				Targets: targets,
+				Reason:  "fak sweep --clean-junk --auto-archive",
+			})
+			if err != nil {
+				res.Refused = append(res.Refused, sweepCleanJunkRefusal{
+					Path:   "quarantine",
+					Reason: "auto_archive_failed",
+					Detail: err.Error(),
+				})
+			} else if qref != nil {
+				res.QuarantineRef = qref.Ref
+				res.QuarantineSHA = qref.SHA
+				res.ArchivedCount = qref.Count
+				res.ArchivedBytes = qref.ByteTotal
+				res.Removed = qref.Files
+			}
+		}
+		res.OK = len(res.Refused) == 0
+		if res.OK {
+			res.NextAction = "rerun `fak sweep --json` to inspect remaining work"
+		} else {
+			res.NextAction = "inspect refused junk paths, then rerun `fak sweep --json`"
+		}
+		return res
+	}
+
 	for _, e := range plan.Junk {
 		full, ok, reason := sweepCleanPath(root, e.Path)
 		if !ok {
@@ -195,6 +258,9 @@ func sweepCleanPath(root, path string) (string, bool, string) {
 }
 
 func renderSweepCleanJunk(w io.Writer, res sweepCleanJunkResult) {
+	if res.QuarantineRef != "" {
+		fmt.Fprintf(w, "quarantined %d path(s) (%d bytes) to %s (%s)\n", res.ArchivedCount, res.ArchivedBytes, res.QuarantineRef, res.QuarantineSHA)
+	}
 	if len(res.Removed) == 0 && len(res.Skipped) == 0 && len(res.Refused) == 0 {
 		fmt.Fprintln(w, "no junk paths classified")
 	} else {
