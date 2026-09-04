@@ -5,6 +5,9 @@
       "2026-06-27": [
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
       ],
+      "2026-09-03": [
+        "node-macos-a-macbench-threeway-20260903T050000Z"
+      ],
       "unknown": [
         "node-agent-live-offline-mock-20260617",
         "workstation-a-unknown-unknown-20260617",
@@ -16,7 +19,7 @@
         "workstation-a-parity-reference-front-20260618",
         "workstation-a-turn-tax-turntax-happy-20260618",
         "node-agent-live-production-workload-20260618",
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-fanbench-research-goal-20260618",
         "workstation-a-fanout-csv-fanbench-resear-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
@@ -71,6 +74,9 @@
       ],
       "Qwen2.5-1.5B-Instruct": [
         "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623"
+      ],
+      "Qwen3.8-27B": [
+        "node-macos-a-macbench-threeway-20260903T050000Z"
       ],
       "SmolLM2-135M": [
         "workstation-a-smollm2-135m-q8_0-20260618"
@@ -155,8 +161,8 @@
         "workstation-a-fanbench-research-goal-20260618",
         "workstation-a-fanbench-research-goal-20260619"
       ],
-      "synthetic-llama (64h/4L/8q-2kv, vocab 256) — WIRING witness; numerics proven by internal/model oracle": [
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618"
+      "synthetic-llama (64h/4L/8q-2kv, vocab 256) \u2014 WIRING witness; numerics proven by internal/model oracle": [
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618"
       ],
       "unknown": [
         "workstation-a-unknown-unknown-20260617"
@@ -166,6 +172,9 @@
       ]
     },
     "by_precision": {
+      "Q4_K_M": [
+        "node-macos-a-macbench-threeway-20260903T050000Z"
+      ],
       "Q8_0": [
         "workstation-a-gpu-qwen2.5-3b-(qwen2)-[lean]-20260619",
         "gcp-g2-l4-nvidia-l4-20260620T155017Z",
@@ -210,7 +219,7 @@
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
       ],
       "q8": [
-        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
+        "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
         "workstation-a-smollm2-135m-q8-batch-20260618T145635Z"
       ],
@@ -238,7 +247,7 @@
       ]
     }
   },
-  "last_updated": "2026-07-15T02:19:11Z",
+  "last_updated": "2026-09-03T05:30:00Z",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -315,10 +324,10 @@
       "gpu": "Apple M3 Pro 18-core GPU",
       "hostname": "node-macos-a",
       "id": "node-macos-a",
-      "last_run": "20260625T050017Z",
+      "last_run": "20260903T050000Z",
       "os": "macOS",
       "role": "bench-node",
-      "runs": 10
+      "runs": 11
     },
     "workstation-a": {
       "arch": "x86_64",
@@ -486,11 +495,11 @@
     {
       "baseline_tok_per_sec": null,
       "machine_id": "workstation-a",
-      "model": "synthetic-llama (64h/4L/8q-2kv, vocab 256) — WIRING witness; numerics proven by internal/model oracle",
+      "model": "synthetic-llama (64h/4L/8q-2kv, vocab 256) \u2014 WIRING witness; numerics proven by internal/model oracle",
       "path": "experiments\\benchmark\\runs\\by-machine\\workstation-a\\20260618T070405Z-radix",
       "peak_tok_per_sec": null,
       "precision": "q8",
-      "run_id": "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-—-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
+      "run_id": "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
       "speedup": null,
       "tags": [
         "radix-benchmark",
@@ -1744,6 +1753,26 @@
         "turn-tax"
       ],
       "timestamp": "20260715T021911Z"
+    },
+    {
+      "baseline_tok_per_sec": 7.38,
+      "machine_id": "node-macos-a",
+      "model": "Qwen3.8-27B",
+      "path": "experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway",
+      "peak_tok_per_sec": 7.61,
+      "precision": "Q4_K_M",
+      "provenance": "measured",
+      "run_id": "node-macos-a-macbench-threeway-20260903T050000Z",
+      "speedup": 1.0312,
+      "tags": [
+        "parity",
+        "macbench",
+        "darwin",
+        "arm64",
+        "metal",
+        "model-benchmark"
+      ],
+      "timestamp": "20260903T050000Z"
     }
   ],
   "version": "1.0",

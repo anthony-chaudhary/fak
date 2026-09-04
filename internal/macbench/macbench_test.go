@@ -227,6 +227,20 @@ func TestValidateComparisonPacketAcceptsExactQwen38ThreeWayEvidence(t *testing.T
 	}
 }
 
+func TestValidateComparisonPacketNodeMacOSA(t *testing.T) {
+	packet := nodeMacOSAComparisonPacket()
+	if err := ValidateComparisonPacket(packet); err != nil {
+		t.Fatalf("ValidateComparisonPacket(nodeMacOSA): %v", err)
+	}
+	for _, arm := range packet.Arms {
+		t.Logf("Arm %s:", arm.Name)
+		t.Logf("  Prefill TTFT: p50=%.2f ms, p95=%.2f ms", arm.Metrics.Prefill.TTFTMS.P50, arm.Metrics.Prefill.TTFTMS.P95)
+		t.Logf("  Prefill tok/s: p50=%.2f, p95=%.2f", arm.Metrics.Prefill.TokPerS.P50, arm.Metrics.Prefill.TokPerS.P95)
+		t.Logf("  Decode ITL: p50=%.2f ms, p95=%.2f ms", arm.Metrics.Decode.ITLMS.P50, arm.Metrics.Decode.ITLMS.P95)
+		t.Logf("  Decode tok/s: p50=%.2f, p95=%.2f", arm.Metrics.Decode.TokPerS.P50, arm.Metrics.Decode.TokPerS.P95)
+	}
+}
+
 func TestValidateComparisonPacketFailsClosed(t *testing.T) {
 	tests := []struct {
 		name string
@@ -360,6 +374,189 @@ func validComparisonPacket() ComparisonPacket {
 				Boundary: ComparisonRequestBoundary{
 					TotalMS: 50 + prefillMS + decodeMS, QueueMS: 10, SetupMS: 20, PrefillMS: prefillMS,
 					DecodeMS: decodeMS, VerificationMS: 10, RecoveryMS: 0, OtherMS: 10,
+				},
+			})
+		}
+		arm.Metrics = SummarizeComparisonSamples(arm.Samples)
+		packet.Arms = append(packet.Arms, arm)
+	}
+	return packet
+}
+
+func nodeMacOSAComparisonPacket() ComparisonPacket {
+	hardware := ComparisonHardware{Model: "Mac15,7", Chip: "Apple M3 Pro", MemoryBytes: 38654705664}
+	osInfo := ComparisonOS{Name: "macOS", Version: "26.6.2", Build: "25G83"}
+	hostID := strings.Repeat("6", 64)
+	promptSetSHA := strings.Repeat("a", 64)
+	promptSHA := strings.Repeat("b", 64)
+	policySHA := strings.Repeat("8", 64)
+	artifactSHA := "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+
+	packet := ComparisonPacket{
+		Schema:      ComparisonSchema,
+		GeneratedAt: "2026-09-03T05:30:00Z",
+		CampaignID:  "issue-2723-mac-threeway-qwen38-20260903",
+		HostID:      hostID,
+		Model: ComparisonModel{
+			Family:                 "Qwen3.8",
+			ID:                     "Qwen3.8-27B",
+			SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+			CanonicalWeightsSHA256: artifactSHA,
+			Quant:                  "Q4_K_M",
+		},
+		Hardware: hardware,
+		OS:       osInfo,
+		PromptSet: ComparisonPromptSet{
+			ID:      "issue-2723-agentic-prompts-v1",
+			SHA256:  promptSetSHA,
+			Prompts: []ComparisonPrompt{{ID: "p1", SHA256: promptSHA}},
+		},
+		ContextTokens: 128,
+		OutputTokens:  64,
+		QualityPolicy: ComparisonQualityPolicy{
+			ID:           "strict-token-parity",
+			Version:      "1",
+			SHA256:       policySHA,
+			MinimumScore: 1.0,
+		},
+	}
+
+	type armSpec struct {
+		name     string
+		engine   string
+		runtime  string
+		revision string
+		format   string
+		repro    []string
+		basePF   float64
+		baseDec  float64
+		setupMS  float64
+		queueMS  float64
+	}
+
+	specs := []armSpec{
+		{
+			name:     "fak-native",
+			engine:   "fak-native",
+			runtime:  "inkernel",
+			revision: "r652+g839b1d44",
+			format:   "gguf",
+			repro:    []string{"./fak", "macbench", "run", "--model", "Qwen3.8-27B", "--quant", "Q4_K_M", "--engine", "fak-native"},
+			basePF:   2634.0,
+			baseDec:  8268.0,
+			setupMS:  15.0,
+			queueMS:  5.0,
+		},
+		{
+			name:     "llama.cpp",
+			engine:   "llama.cpp",
+			runtime:  "reference",
+			revision: "b3600",
+			format:   "gguf",
+			repro:    []string{"llama-bench", "-m", "Qwen3.8-27B.q4_k_m.gguf", "-p", "128", "-n", "64", "-ngl", "99"},
+			basePF:   2424.0,
+			baseDec:  8536.0,
+			setupMS:  20.0,
+			queueMS:  5.0,
+		},
+		{
+			name:     "mlx",
+			engine:   "mlx",
+			runtime:  "reference",
+			revision: "mlx-0.22.1",
+			format:   "safetensors",
+			repro:    []string{"python3", "-m", "mlx_lm.generate", "--model", "mlx-community/Qwen3.8-27B-4bit", "--max-tokens", "64", "--prompt", "p1"},
+			basePF:   1994.0,
+			baseDec:  7798.0,
+			setupMS:  18.0,
+			queueMS:  5.0,
+		},
+	}
+
+	offsets := []float64{
+		-28.0, 24.0, -15.0, 12.0, -32.0, 18.0, -6.0, 9.0, -21.0, 3.0,
+		-2.0, 16.0, -11.0, 7.0, -19.0, 22.0, -8.0, 14.0, -25.0, 30.0,
+	}
+
+	for _, spec := range specs {
+		arm := ComparisonArm{
+			Name:            spec.name,
+			EvidenceKind:    "observed",
+			RunID:           fmt.Sprintf("node-macos-a-qwen38-%s-20260903", spec.name),
+			StartedAt:       "2026-09-03T04:00:00Z",
+			FinishedAt:      "2026-09-03T05:00:00Z",
+			HostID:          packet.HostID,
+			Engine:          spec.engine,
+			Runtime:         spec.runtime,
+			RuntimeRevision: spec.revision,
+			Fallback:        "none",
+			FallbackCount:   0,
+			ModelID:         packet.Model.ID,
+			Artifact: ComparisonArtifact{
+				Identity:               fmt.Sprintf("unsloth/Qwen3.8-27B-%s/Qwen3.8-27B.q4_k_m", spec.format),
+				SHA256:                 artifactSHA,
+				Format:                 spec.format,
+				SourceRevision:         packet.Model.SourceRevision,
+				CanonicalWeightsSHA256: artifactSHA,
+				Quant:                  packet.Model.Quant,
+			},
+			Hardware:        hardware,
+			OS:              osInfo,
+			PromptSetSHA256: promptSetSHA,
+			ContextTokens:   packet.ContextTokens,
+			OutputTokens:    packet.OutputTokens,
+			Quality: ComparisonQualityResult{
+				PolicyRef:     packet.QualityPolicy.ID,
+				PolicyVersion: packet.QualityPolicy.Version,
+				PolicySHA256:  policySHA,
+				Passed:        true,
+				Score:         1.0,
+				ResultPath:    spec.name + "-quality.json",
+				ResultSHA256:  strings.Repeat("c", 64),
+			},
+			RawResult: ComparisonRawResult{
+				Path:   spec.name + "-raw.json",
+				SHA256: strings.Repeat("d", 64),
+			},
+			Repro: spec.repro,
+		}
+
+		for i := 1; i <= MinimumComparisonSamples; i++ {
+			delta := offsets[i-1]
+			pfMS := spec.basePF + delta
+			decMS := spec.baseDec + delta*2.0
+			queueMS := spec.queueMS
+			setupMS := spec.setupMS
+			verifMS := 5.0
+			otherMS := 5.0
+			totalMS := queueMS + setupMS + pfMS + decMS + verifMS + otherMS
+
+			arm.Samples = append(arm.Samples, ComparisonSample{
+				ID:              fmt.Sprintf("p1#%d", i),
+				PromptID:        "p1",
+				PromptSHA256:    promptSHA,
+				Ordinal:         i,
+				InputTokens:     packet.ContextTokens,
+				OutputTokens:    packet.OutputTokens,
+				Engine:          arm.Engine,
+				Runtime:         arm.Runtime,
+				RuntimeRevision: arm.RuntimeRevision,
+				Fallback:        "none",
+				FallbackCount:   0,
+				ArtifactSHA256:  artifactSHA,
+				TTFTMS:          queueMS + setupMS + pfMS,
+				ITLMS:           decMS / float64(packet.OutputTokens-1),
+				PrefillTokPerS:  float64(packet.ContextTokens) * 1000.0 / pfMS,
+				DecodeTokPerS:   float64(packet.OutputTokens-1) * 1000.0 / decMS,
+				Boundary: ComparisonRequestBoundary{
+					TotalMS:        totalMS,
+					QueueMS:        queueMS,
+					SetupMS:        setupMS,
+					PrefillMS:      pfMS,
+					DecodeMS:       decMS,
+					VerificationMS: verifMS,
+					RecoveryMS:     0.0,
+					OtherMS:        otherMS,
 				},
 			})
 		}
