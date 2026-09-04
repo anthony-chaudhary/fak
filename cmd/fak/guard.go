@@ -80,6 +80,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
+	postureFlag := fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; overrides policy manifest posture; env: FAK_GUARD_POSTURE)")
 	var allowTools launchToolFlag
 	fs.Var(&allowTools, "allow-tool", "grant one exact tool name for THIS guard process only (repeatable). The grant re-admits DEFAULT_DENY tools but cannot bypass explicit denies, dangerous-argument rules, self-modification, or later tightening.")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
@@ -92,6 +93,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// The internal noAudit seam stays — guardAuditPlan/runGuardReplay are still exercised
 	// with it directly — but nothing on the CLI sets it any more.
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
+	dumpStrictPolicy := fs.Bool("dump-strict-policy", false, "print the strict fail-closed policy manifest to stdout and exit")
 	probeMode := fs.Bool("probe", false, "local one-shot smoke mode: keep the normal guarded gateway but default the task-handoff Stop gate OFF, so `fak guard --probe -- claude -p \"say pong\"` proves the wire without demanding a fleet handoff. Explicit --task-handoff still wins.")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	bannerFlag := fs.String("banner", guardBannerAuto, "startup surface before handing the terminal to the agent: auto|full|compact|animate|off. AUTO (default) emits only delayed loading progress for healthy interactive and noninteractive launches: no guard report, profiles, identity/configuration, animation, or persistent settle lines. Explicit full, compact, and animate retain those displays; off suppresses the startup surface. The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars), and it is spilled to the terminal in full when the launch itself fails. --quiet still silences everything.")
@@ -299,6 +301,10 @@ func cmdManageCommand(commandName string, argv []string) {
 		os.Stdout.Write(guardDefaultPolicyJSON)
 		return
 	}
+	if *dumpStrictPolicy {
+		os.Stdout.Write(guardStrictPolicyJSON)
+		return
+	}
 
 	// --replay-trace runs the guard end to end over a recorded fixture instead of
 	// wrapping a live agent: it is the observable, no-API-key way to watch the floor
@@ -424,7 +430,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		effectiveWorkProfile = responseProfileCapture.WorkProfile
 	}
 
-	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath)
+	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath, *postureFlag)
 	configureGuardPromotionLedger(rt.Adjudicator.Complain, guardPromotionDefaultThreshold)
 	var err error
 

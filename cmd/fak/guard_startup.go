@@ -240,7 +240,7 @@ func writeGuardStartupBanner(w io.Writer, v guardStartupView, report string, std
 // tool and the wrapped agent can do nothing — so guard ALWAYS loads one, fail-loud. It unions the
 // operator allow overlay, digests the floor, and applies the runtime before returning the runtime,
 // the floor-source label (banner), the policy digest (spawn metadata), and the load duration.
-func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource, policyDigest string, dur time.Duration) {
+func loadGuardCapabilityFloor(policyPath string, postureOverrides ...string) (rt policy.Runtime, floorSource, policyDigest string, dur time.Duration) {
 	var (
 		err         error
 		policyBytes []byte
@@ -263,6 +263,27 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		floorSource = "built-in guard floor (--dump-policy to see it)"
 	}
 	must(err)
+
+	effectivePosture := rt.Adjudicator.Posture
+	var postureStr string
+	if len(postureOverrides) > 0 && postureOverrides[0] != "" {
+		p, pErr := policy.ParsePosture(postureOverrides[0])
+		must(pErr)
+		effectivePosture = p
+		postureStr = postureOverrides[0]
+	} else if env := strings.TrimSpace(os.Getenv("FAK_GUARD_POSTURE")); env != "" {
+		p, pErr := policy.ParsePosture(env)
+		must(pErr)
+		effectivePosture = p
+		postureStr = env
+	} else if policyPath == "" {
+		effectivePosture = adjudicator.PostureDefaultOpen
+		postureStr = "default_open"
+	}
+	if postureStr != "" {
+		floorSource += "; posture=" + postureStr
+	}
+	rt.Adjudicator.Posture = effectivePosture
 	// Union the OPERATOR allow overlay (`fak guard allow`) on top of whichever floor
 	// loaded. It only widens Allow / AllowPrefix — the danger arg-rules and explicit
 	// denies below stay intact — so an operator can re-admit a DEFAULT_DENY'd tool

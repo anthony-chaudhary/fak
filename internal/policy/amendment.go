@@ -174,6 +174,18 @@ var PolicyKnobRegistry = []PolicyKnob{
 	{Field: "AutoRepairSidestep", Class: AmendGatedWiden, Direction: DirectionWidenOnly,
 		Channels: []string{ChannelOperatorOverlay, ChannelCentral},
 		Doc:      "Opts the reversibility rung into in-flight safe-subset TRANSFORM instead of the preview-confirm HOLD (AutoRepairSidestep)."},
+	{Field: "TestLanes", Class: AmendRatchet, Direction: DirectionTightenOnly,
+		Channels: []string{ChannelOperatorOverlay, ChannelCentral},
+		Doc:      "Test lane names explicitly designated as test lanes."},
+	{Field: "ExemptLanes", Class: AmendGatedWiden, Direction: DirectionWidenOnly,
+		Channels: []string{ChannelOperatorOverlay, ChannelCentral},
+		Doc:      "Lanes exempt from test immunity."},
+	{Field: "DisableTestImmunity", Class: AmendGatedWiden, Direction: DirectionWidenOnly,
+		Channels: []string{ChannelOperatorOverlay, ChannelCentral},
+		Doc:      "Disables the test-immunity gate entirely."},
+	{Field: "Lane", Class: AmendRatchet, Direction: DirectionTightenOnly,
+		Channels: []string{ChannelOperatorOverlay, ChannelCentral},
+		Doc:      "Active policy lane name."},
 }
 
 // KnobByField returns the registry entry backed by the named

@@ -527,6 +527,43 @@ fak guard [flags] [--] <agent command...>
 
 Fronts an interactive or autonomous agent with the in-process capability floor, audit journal, and result quarantine. Proposed tool calls are checked before execution.
 
+### Adjudication posture and policy configuration
+
+`fak guard` defaults to `default_open` posture, allowing benign everyday development tools to run unhindered while blocking dangerous commands and frozen safety invariants. Strict default-deny is available for enterprise and compliance environments:
+
+- `--posture default_open|fail_closed|admit_and_log`: adjudication posture (default `default_open`; overrides policy manifest posture; env: `FAK_GUARD_POSTURE`).
+  - `default_open`: admits unlisted benign tools without requiring explicit allowlisting in manifests, while blocking dangerous gotchas, explicit deny rules, arg predicates, and frozen invariants.
+  - `fail_closed`: strict default-deny floor; unlisted tools are refused with `DEFAULT_DENY`.
+  - `admit_and_log`: telemetry/audit mode; admits read-shaped default-denied calls while logging `would_deny=DEFAULT_DENY`.
+- `FAK_GUARD_POSTURE`: environment variable fallback for `--posture` (`default_open`, `fail_closed`, `admit_and_log`).
+- `--policy <path>`: capability-floor manifest to enforce (default: built-in guard floor).
+- `--dump-policy`: print the built-in guard capability floor (an editable manifest) to stdout and exit.
+- `--dump-strict-policy`: print the strict fail-closed capability floor manifest (`posture: fail_closed`) to stdout and exit.
+
+### Dangerous Gotchas catalog and carveouts
+
+Under `default_open`, `fak guard` evaluates command arguments against the fail-closed Dangerous Gotchas catalog (`internal/adjudicator/gotchas.go`), denying matching calls with `POLICY_BLOCK` (`by: monitor/gotchas`):
+
+- **Destructive file deletions** (`destructive_deletion`): blocks recursive/forced deletions (`rm -rf`, `Remove-Item -Recurse -Force`, `shred`, `truncate`, `srm`) targeting workspace roots or project directories.
+- **Raw disk/volume destruction** (`raw_disk`): blocks block device formatting or partition table manipulation (`mkfs.*`, `fdisk`, `dd` writing directly to `/dev/sd*` or raw storage).
+- **Host/shell evasion** (`host_shell_evasion`): blocks pipe-to-shell remote code execution (`curl ... | sh`, `wget ... | bash`), fork bombs (`:(){ :|:& };:`), and subshell evasions.
+- **Privilege escalation** (`privilege_escalation`): blocks local privilege escalation (`sudo`, `doas`, `su`, `Start-Process -Verb RunAs`).
+- **Cloud/infra teardown** (`infra_teardown`): blocks destructive cloud/cluster operations (`terraform destroy`, `kubectl delete all`, `aws s3 rb --force`).
+- **Critical system disruption** (`system_disruption`): blocks terminating system init (`kill -9 1`) or supervisor services (`pkill/killall systemd`).
+
+#### Battle-tested carveouts
+
+Legitimate developer workflows are preserved through precise carveouts:
+- **Scratchpad roots (`FAK_GUARD_SCRATCHPAD_ROOTS`)**: recursive deletions strictly below declared scratchpad roots are permitted without prompting the operator.
+- **Remote SSH sudo (`ssh host 'sudo ...'`)**: running sudo over remote SSH is permitted as it targets an explicitly designated remote system rather than escalating local workstation privileges.
+- **Read-only terraform plan (`terraform plan -destroy`)**: permitted as a speculative read-only dry run.
+- **Single literal file degradation**: force-only delete (no `-r`) of an explicit literal file falls through to the reversibility preview gate (`REQUIRE_WITNESS`) rather than hitting a blanket gotcha denial.
+
+#### DOS verification & bytes-not-authored protection
+
+- **Self-authored untracked files (`trace-authored-git-untracked`)**: files authored during the session carry write receipts and can be deleted without hold (`by: monitor/reversibility`).
+- **Tracked / external files**: deletions of files not authored by the agent in this session require operator confirmation via the reversibility preview token (`REQUIRE_WITNESS`). See [`POLICY.md`](../POLICY.md) and [`docs/positive-workspace-management.md`](positive-workspace-management.md) for full architectural specifications.
+
 ### Child process-tree memory containment
 
 On macOS (resident RSS) and Windows (commit charge), `fak guard` monitors and bounds wrapped agent child process trees to prevent runaway memory usage from impacting host stability. Default memory thresholds are host-sized: on macOS, derived from physical memory as `clamp(physical/4, 1GiB, 64GiB)` resident RSS; on Windows, a 64 GiB commit charge limit.
