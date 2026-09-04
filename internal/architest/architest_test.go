@@ -806,6 +806,15 @@ var tier = map[string]int{
 	"agentopt":                   1,
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
+	"ctxplanlint":                1,
+	"debtlane":                   1,
+	"marketplace":                1,
+	"mtpeval":                    1,
+	"mtptune":                    1,
+	"decodemigrate":              1,
+	"dosadapter":                 1,
+	"framebus":                   1,
+	"interactivesession":         1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
