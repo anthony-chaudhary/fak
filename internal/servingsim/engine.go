@@ -9,10 +9,19 @@ import (
 )
 
 // EventQueue is a min-heap priority queue of SimEvents ordered by TimeMS and Seq.
+//
+// Invariant: Root element holds the lowest TimeMS, breaking ties by lowest Seq.
+// Guard: Implements heap.Interface; index tracking maintains heap integrity under Push and Pop.
 type EventQueue []*SimEvent
 
+// Len returns the number of events in the queue.
+//
+// Invariant: Non-negative count of enqueued simulation events.
 func (eq EventQueue) Len() int { return len(eq) }
 
+// Less reports whether event at index i sorts before event at index j.
+//
+// Invariant: Primary ordering is TimeMS ascending; secondary ordering is Seq ascending.
 func (eq EventQueue) Less(i, j int) bool {
 	if eq[i].TimeMS == eq[j].TimeMS {
 		return eq[i].Seq < eq[j].Seq
@@ -20,12 +29,18 @@ func (eq EventQueue) Less(i, j int) bool {
 	return eq[i].TimeMS < eq[j].TimeMS
 }
 
+// Swap exchanges the events at indices i and j, updating their internal index fields.
+//
+// Invariant: Maintains index field tracking for container/heap operations.
 func (eq EventQueue) Swap(i, j int) {
 	eq[i], eq[j] = eq[j], eq[i]
 	eq[i].index = i
 	eq[j].index = j
 }
 
+// Push appends an event item to the queue.
+//
+// Guard: Panics if x is not of type *SimEvent.
 func (eq *EventQueue) Push(x any) {
 	n := len(*eq)
 	item := x.(*SimEvent)
@@ -33,6 +48,9 @@ func (eq *EventQueue) Push(x any) {
 	*eq = append(*eq, item)
 }
 
+// Pop removes and returns the minimum event item from the queue.
+//
+// Invariant: Resets the popped event's index to -1.
 func (eq *EventQueue) Pop() any {
 	old := *eq
 	n := len(old)
@@ -56,6 +74,9 @@ type activeStep struct {
 }
 
 // Engine implements the discrete-event continuous-batching simulation kernel.
+//
+// Invariant: currentTimeMS advances monotonically; allocated KV blocks never exceed TotalKVBlocks.
+// Guard: Requests are validated at admission and scheduled strictly within batch and token limits.
 type Engine struct {
 	config SimulatorConfig
 	hw     HardwareLatencyTable
@@ -90,6 +111,9 @@ type Engine struct {
 }
 
 // NewServingSimulator initializes a simulation engine with validated configuration and latency model.
+//
+// Invariant: Default fallback values are applied for unspecified block tokens (16), KV blocks (4096), and batch size (32).
+// Guard: Rejects invalid AcceptanceRate (< 0 or > 1.0) or negative SpeculativeHorizon fail-closed.
 func NewServingSimulator(config SimulatorConfig, hw HardwareLatencyTable) (*Engine, error) {
 	if config.KVBlockTokens <= 0 {
 		config.KVBlockTokens = 16
@@ -130,6 +154,10 @@ func NewServingSimulator(config SimulatorConfig, hw HardwareLatencyTable) (*Engi
 }
 
 // Run executes the discrete-event simulation over the given requests workload.
+//
+// Invariant: Requests are sorted by ArrivalTimeMS; virtual clock advances through all arrivals and execution steps.
+// Guard: Returns an error fail-closed if any request has non-positive PromptTokens, non-positive OutputTarget, or negative ArrivalTimeMS.
+// Guard: An empty request slice returns a zero-valued SimulationMetrics immediately without error.
 func (e *Engine) Run(requests []RequestState) (*SimulationMetrics, error) {
 	if len(requests) == 0 {
 		return &SimulationMetrics{}, nil
@@ -794,6 +822,9 @@ func (e *Engine) finalizeMetrics() *SimulationMetrics {
 }
 
 // Run executes a trace simulation with the provided configuration, requests, and latency model.
+//
+// Invariant: Initializes a fresh Engine and executes the workload end-to-end.
+// Guard: Configuration validation errors or invalid request parameters are returned fail-closed.
 func Run(config SimulatorConfig, requests []RequestState, hw HardwareLatencyTable) (*SimulationMetrics, error) {
 	engine, err := NewServingSimulator(config, hw)
 	if err != nil {
