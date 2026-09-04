@@ -1,3 +1,5 @@
+// Package bitnetmeta describes BitNet-family model artifacts without conflating
+// weight semantics with their storage, conversion recipe, runtime, or benchmark.
 package bitnetmeta
 
 import (
@@ -9,57 +11,88 @@ import (
 	"slices"
 )
 
+// SchemaV1 is the canonical schema identifier for BitNet metadata v1.
 const SchemaV1 = "bitnetmeta/v1"
 
+// Outcome represents the high-level adjudication verdict.
 type Outcome string
 
 const (
-	OutcomeAccept   Outcome = "accept"
-	OutcomeAbstain  Outcome = "abstain"
-	OutcomeRefuse   Outcome = "refuse"
+	// OutcomeAccept indicates the descriptor is valid and supported.
+	OutcomeAccept Outcome = "accept"
+	// OutcomeAbstain indicates the descriptor cannot be evaluated by this environment.
+	OutcomeAbstain Outcome = "abstain"
+	// OutcomeRefuse indicates the descriptor is invalid or unsupported.
+	OutcomeRefuse Outcome = "refuse"
+	// OutcomeDelegate indicates evaluation must be delegated to an external runtime.
 	OutcomeDelegate Outcome = "delegate"
 )
 
+// ReasonCode represents structured machine-readable adjudication rationale.
 type ReasonCode string
 
 const (
-	ReasonSupported             ReasonCode = "supported"
-	ReasonMalformed             ReasonCode = "malformed_metadata"
-	ReasonUnknownSchema         ReasonCode = "unknown_schema"
+	// ReasonSupported indicates all artifact dimensions match capabilities.
+	ReasonSupported ReasonCode = "supported"
+	// ReasonMalformed indicates JSON parsing or structure failure.
+	ReasonMalformed ReasonCode = "malformed_metadata"
+	// ReasonUnknownSchema indicates an unhandled metadata schema.
+	ReasonUnknownSchema ReasonCode = "unknown_schema"
+	// ReasonUnknownWeightSemantic indicates an unrecognized weight semantic.
 	ReasonUnknownWeightSemantic ReasonCode = "unknown_weight_semantic"
+	// ReasonUnknownArtifactFormat indicates an unrecognized artifact storage format.
 	ReasonUnknownArtifactFormat ReasonCode = "unknown_artifact_format"
-	ReasonInconsistentArtifact  ReasonCode = "inconsistent_artifact"
-	ReasonUnsupportedRecipe     ReasonCode = "unsupported_recipe"
+	// ReasonInconsistentArtifact indicates conflicting metadata declarations.
+	ReasonInconsistentArtifact ReasonCode = "inconsistent_artifact"
+	// ReasonUnsupportedRecipe indicates an unsupported conversion recipe.
+	ReasonUnsupportedRecipe ReasonCode = "unsupported_recipe"
+	// ReasonUnsupportedActivation indicates an unsupported activation format or precision.
 	ReasonUnsupportedActivation ReasonCode = "unsupported_activation"
-	ReasonUnsupportedPacking    ReasonCode = "unsupported_packing"
-	ReasonRuntimeDelegation     ReasonCode = "runtime_delegation_required"
-	ReasonHardwareUnverified    ReasonCode = "hardware_envelope_unverified"
+	// ReasonUnsupportedPacking indicates an unsupported weight packing scheme.
+	ReasonUnsupportedPacking ReasonCode = "unsupported_packing"
+	// ReasonRuntimeDelegation indicates an external runtime is required.
+	ReasonRuntimeDelegation ReasonCode = "runtime_delegation_required"
+	// ReasonHardwareUnverified indicates unverified hardware measurement witness.
+	ReasonHardwareUnverified ReasonCode = "hardware_envelope_unverified"
 )
 
+// WeightSemantic specifies the mathematical weight quantization semantic.
 type WeightSemantic string
 
 const (
-	WeightNativeBinary  WeightSemantic = "native-binary"
+	// WeightNativeBinary represents native 1-bit {-1, 1} binary weights.
+	WeightNativeBinary WeightSemantic = "native-binary"
+	// WeightNativeTernary represents native 1.58-bit {-1, 0, 1} ternary weights.
 	WeightNativeTernary WeightSemantic = "native-ternary-1.58bit"
-	WeightPostTernary   WeightSemantic = "post-training-ternary"
-	WeightInteger2Bit   WeightSemantic = "integer-2bit"
+	// WeightPostTernary represents post-training ternary converted weights.
+	WeightPostTernary WeightSemantic = "post-training-ternary"
+	// WeightInteger2Bit represents 2-bit integer weights.
+	WeightInteger2Bit WeightSemantic = "integer-2bit"
 )
 
+// ArtifactOrigin specifies whether weights were natively trained or converted.
 type ArtifactOrigin string
 
 const (
+	// OriginNativeTrained indicates weights were trained natively with low bits.
 	OriginNativeTrained ArtifactOrigin = "native-trained"
-	OriginPostTraining  ArtifactOrigin = "post-training-converted"
+	// OriginPostTraining indicates weights were converted post-training.
+	OriginPostTraining ArtifactOrigin = "post-training-converted"
 )
 
+// RecipeKind specifies the training or conversion recipe category.
 type RecipeKind string
 
 const (
+	// RecipeNativeTraining indicates native low-bit training recipe.
 	RecipeNativeTraining RecipeKind = "native-training"
-	RecipeTernarization  RecipeKind = "post-training-ternarization"
-	RecipeQuantization   RecipeKind = "post-training-quantization"
+	// RecipeTernarization indicates post-training ternarization.
+	RecipeTernarization RecipeKind = "post-training-ternarization"
+	// RecipeQuantization indicates post-training quantization.
+	RecipeQuantization RecipeKind = "post-training-quantization"
 )
 
+// Artifact describes the storage container and origin of the model weights.
 type Artifact struct {
 	ID      string         `json:"id"`
 	Format  string         `json:"format"`
@@ -67,29 +100,34 @@ type Artifact struct {
 	Origin  ArtifactOrigin `json:"origin"`
 }
 
+// Weights describes the discrete levels and quantization semantics of the weights.
 type Weights struct {
 	Semantic WeightSemantic `json:"semantic"`
 	Label    string         `json:"label"`
 	Levels   []int          `json:"levels"`
 }
 
+// ActivationPrecision describes the activation numeric format and bit width.
 type ActivationPrecision struct {
 	Format string `json:"format"`
 	Bits   int    `json:"bits"`
 }
 
+// Packing describes the bit packing scheme and layout in memory/storage.
 type Packing struct {
 	Scheme        string `json:"scheme"`
 	StorageBits   int    `json:"storage_bits"`
 	ValuesPerUnit int    `json:"values_per_unit"`
 }
 
+// Recipe identifies the training or conversion procedure used.
 type Recipe struct {
 	ID      string     `json:"id"`
 	Version string     `json:"version"`
 	Kind    RecipeKind `json:"kind"`
 }
 
+// Runtime identifies an external runtime requirement or delegate.
 type Runtime struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
@@ -107,6 +145,7 @@ type HardwareEnvelope struct {
 	Witness      string  `json:"witness,omitempty"`
 }
 
+// Descriptor is the complete specification of a BitNet model artifact.
 type Descriptor struct {
 	Schema     string              `json:"schema"`
 	Artifact   Artifact            `json:"artifact"`
@@ -118,6 +157,7 @@ type Descriptor struct {
 	Hardware   HardwareEnvelope    `json:"hardware"`
 }
 
+// Capabilities defines the supported schemas, formats, activations, packings, and environments.
 type Capabilities struct {
 	Schemas     []string `json:"schemas"`
 	Formats     []string `json:"formats"`     // format@version
@@ -128,6 +168,7 @@ type Capabilities struct {
 	Hardware    []string `json:"hardware"` // vendor/architecture
 }
 
+// Result captures the outcome, machine reason code, and details of an adjudication.
 type Result struct {
 	Outcome    Outcome     `json:"outcome"`
 	Reason     ReasonCode  `json:"reason"`
@@ -155,6 +196,7 @@ func ParseAndAdjudicate(raw []byte, capabilities Capabilities) Result {
 	return adjudication
 }
 
+// Adjudicate evaluates a parsed Descriptor against declared Capabilities.
 func Adjudicate(descriptor Descriptor, capabilities Capabilities) Result {
 	if descriptor.Schema == "" || !slices.Contains(capabilities.Schemas, descriptor.Schema) {
 		return result(OutcomeAbstain, ReasonUnknownSchema, fmt.Sprintf("schema %q is not recognized", descriptor.Schema), nil)
@@ -190,10 +232,12 @@ func Adjudicate(descriptor Descriptor, capabilities Capabilities) Result {
 	return result(OutcomeAccept, ReasonSupported, "artifact metadata and declared capability envelope are supported", nil)
 }
 
+// MarshalCanonical serializes a Descriptor into canonical indented JSON.
 func MarshalCanonical(descriptor Descriptor) ([]byte, error) {
 	return json.MarshalIndent(descriptor, "", "  ")
 }
 
+// SemanticID returns the composite identifier of weight semantic and artifact origin.
 func SemanticID(descriptor Descriptor) string {
 	return string(descriptor.Weights.Semantic) + "/" + string(descriptor.Artifact.Origin)
 }

@@ -1,6 +1,11 @@
 package ggufload
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestClassifyTensorQuantUsesActualInventory(t *testing.T) {
 	for _, tc := range []struct {
@@ -28,5 +33,23 @@ func TestClassifyTensorQuantUsesActualInventory(t *testing.T) {
 				t.Fatalf("ClassifyTensorQuant() = %#v, want name=%q inventory=%q q4k=%v", got, tc.wantName, tc.inventory, tc.wantQ4K)
 			}
 		})
+	}
+}
+
+func TestClassifyQ2XLRealHeader(t *testing.T) {
+	path := filepath.Join("..", "..", "_scratch", "qwen38-ud-q2xl", "header.gguf")
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("real header fixture not present in scratch")
+	}
+	gg, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	quant := ClassifyTensorQuant(gg.Tensors)
+	if !quant.Q4KResident {
+		t.Errorf("expected Q4KResident = true in Q2_K_XL mixture")
+	}
+	if !strings.Contains(quant.Name, "Q2_K") || !strings.Contains(quant.Name, "IQ2_XXS") {
+		t.Errorf("quant.Name = %q, want Q2_K and IQ2_XXS present", quant.Name)
 	}
 }

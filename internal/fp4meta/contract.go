@@ -1,4 +1,8 @@
 // Package fp4meta defines neutral metadata and capability decisions for FP4 artifacts.
+//
+// Invariants: fp4 metadata contracts ensure deterministic quantization encoding and decoding bounds.
+// Metadata parsing and capability adjudication are fail-closed: unknown schemas, unverified hardware,
+// and malformed bit patterns are strictly rejected or abstained upon.
 package fp4meta
 
 import (
@@ -10,59 +14,90 @@ import (
 	"math"
 )
 
+// SchemaV1 is the canonical schema identifier for version 1 of the FP4 metadata contract.
 const SchemaV1 = "fak.fp4meta/v1"
 
+// Outcome represents the coarse adjudication result of an FP4 artifact evaluation.
 type Outcome string
 
 const (
-	OutcomeAccept   Outcome = "accept"
+	// OutcomeAccept indicates the descriptor is valid and supported by local capabilities.
+	OutcomeAccept Outcome = "accept"
+	// OutcomeDelegate indicates the descriptor requires an external or specialized runtime.
 	OutcomeDelegate Outcome = "delegate"
-	OutcomeAbstain  Outcome = "abstain"
-	OutcomeRefuse   Outcome = "refuse"
+	// OutcomeAbstain indicates the descriptor cannot be judged locally due to unknown schemas or unverified hardware.
+	OutcomeAbstain Outcome = "abstain"
+	// OutcomeRefuse indicates the descriptor is malformed or violates format invariants.
+	OutcomeRefuse Outcome = "refuse"
 )
 
+// ReasonCode provides a fine-grained, closed-set explanation for an adjudication outcome.
 type ReasonCode string
 
 const (
-	ReasonSupported               ReasonCode = "supported"
-	ReasonRuntimeDelegation       ReasonCode = "runtime_delegation_required"
-	ReasonUnknownSchema           ReasonCode = "unknown_schema"
-	ReasonUnknownVariant          ReasonCode = "unknown_variant"
-	ReasonInvalidDescriptor       ReasonCode = "invalid_descriptor"
-	ReasonIncompatibleEncoding    ReasonCode = "incompatible_encoding"
-	ReasonIncompatibleScale       ReasonCode = "incompatible_scale"
+	// ReasonSupported indicates full support for the metadata and capability envelope.
+	ReasonSupported ReasonCode = "supported"
+	// ReasonRuntimeDelegation indicates delegation to a runtime is required.
+	ReasonRuntimeDelegation ReasonCode = "runtime_delegation_required"
+	// ReasonUnknownSchema indicates an unrecognised schema version.
+	ReasonUnknownSchema ReasonCode = "unknown_schema"
+	// ReasonUnknownVariant indicates an unrecognised FP4 variant.
+	ReasonUnknownVariant ReasonCode = "unknown_variant"
+	// ReasonInvalidDescriptor indicates semantic or structural validation failure.
+	ReasonInvalidDescriptor ReasonCode = "invalid_descriptor"
+	// ReasonIncompatibleEncoding indicates the float encoding is not locally supported.
+	ReasonIncompatibleEncoding ReasonCode = "incompatible_encoding"
+	// ReasonIncompatibleScale indicates the scale encoding format is not locally supported.
+	ReasonIncompatibleScale ReasonCode = "incompatible_scale"
+	// ReasonIncompatibleAccumulator indicates the accumulator precision is not locally supported.
 	ReasonIncompatibleAccumulator ReasonCode = "incompatible_accumulator"
-	ReasonHardwareUnverified      ReasonCode = "hardware_unverified"
+	// ReasonHardwareUnverified indicates lack of a recognized witness for measured hardware.
+	ReasonHardwareUnverified ReasonCode = "hardware_unverified"
 )
 
+// Variant identifies the specific FP4 quantization and microscaling specification.
 type Variant string
 
 const (
-	VariantE2M1  Variant = "e2m1"
+	// VariantE2M1 represents standard 4-bit float with 1 sign bit, 2 exponent bits, and 1 mantissa bit.
+	VariantE2M1 Variant = "e2m1"
+	// VariantNVFP4 represents NVIDIA NVFP4 with 16-element block scaling using E4M3.
 	VariantNVFP4 Variant = "nvfp4"
+	// VariantMXFP4 represents OCP MXFP4 microscaling with 32-element blocks using UE8M0.
 	VariantMXFP4 Variant = "mxfp4"
 )
 
+// ScaleEncoding identifies the numerical representation used for block or tensor scales.
 type ScaleEncoding string
 
 const (
-	ScaleNone     ScaleEncoding = "none"
-	ScaleE4M3     ScaleEncoding = "e4m3"
-	ScaleUE8M0    ScaleEncoding = "ue8m0"
+	// ScaleNone indicates no scaling factor is applied.
+	ScaleNone ScaleEncoding = "none"
+	// ScaleE4M3 indicates 8-bit FP format with 4 exponent bits and 3 mantissa bits.
+	ScaleE4M3 ScaleEncoding = "e4m3"
+	// ScaleUE8M0 indicates 8-bit unsigned exponent-only power-of-two scaling.
+	ScaleUE8M0 ScaleEncoding = "ue8m0"
+	// ScaleBinary32 indicates IEEE 754 single-precision 32-bit floating point.
 	ScaleBinary32 ScaleEncoding = "binary32"
 )
 
+// ScaleScope defines the granularity at which a scale factor applies.
 type ScaleScope string
 
 const (
+	// ScalePerTensor indicates a single scale factor applies to the entire tensor.
 	ScalePerTensor ScaleScope = "per_tensor"
-	ScalePerBlock  ScaleScope = "per_block"
+	// ScalePerBlock indicates scale factors are shared across small fixed-size blocks.
+	ScalePerBlock ScaleScope = "per_block"
 )
 
+// Accumulator specifies the target precision for intermediate dot-product accumulations.
 type Accumulator string
 
 const (
+	// AccumulatorFP16 specifies half-precision 16-bit floating point accumulation.
 	AccumulatorFP16 Accumulator = "fp16"
+	// AccumulatorFP32 specifies single-precision 32-bit floating point accumulation.
 	AccumulatorFP32 Accumulator = "fp32"
 )
 
@@ -87,22 +122,26 @@ type BlockScale struct {
 	ExponentOnly bool          `json:"exponent_only,omitempty"`
 }
 
+// Artifact records container and packaging metadata for the quantized weights.
 type Artifact struct {
 	Format  string `json:"format"`
 	Version string `json:"version"`
 	Digest  string `json:"digest,omitempty"`
 }
 
+// Recipe identifies the quantization pipeline or transformation recipe used.
 type Recipe struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 }
 
+// Runtime identifies the execution engine required when delegation is needed.
 type Runtime struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 }
 
+// HardwareEnvelope records target device vendor, architecture, and verification witness.
 type HardwareEnvelope struct {
 	Vendor       string `json:"vendor"`
 	Architecture string `json:"architecture"`
@@ -110,6 +149,7 @@ type HardwareEnvelope struct {
 	Witness      string `json:"witness,omitempty"`
 }
 
+// Descriptor represents the complete self-describing metadata of an FP4 artifact.
 type Descriptor struct {
 	Schema      string           `json:"schema"`
 	Variant     Variant          `json:"variant"`
@@ -122,6 +162,7 @@ type Descriptor struct {
 	Hardware    HardwareEnvelope `json:"hardware"`
 }
 
+// Capabilities declares the local host or engine feature set against which descriptors are evaluated.
 type Capabilities struct {
 	Variants     []Variant       `json:"variants"`
 	ScaleFormats []ScaleEncoding `json:"scale_formats"`
@@ -130,6 +171,7 @@ type Capabilities struct {
 	Runtime      bool            `json:"runtime"`
 }
 
+// Result contains the adjudication outcome, reason code, and diagnostic detail.
 type Result struct {
 	Outcome Outcome    `json:"outcome"`
 	Reason  ReasonCode `json:"reason"`
@@ -208,6 +250,7 @@ func DecodeE2M1(bits byte) (float64, error) {
 	return sign * math.Ldexp(1+float64(mantissa)/2, int(exponent)-1), nil
 }
 
+// MarshalCanonical serializes a Descriptor to formatted JSON adhering to the canonical schema indentation.
 func MarshalCanonical(d Descriptor) ([]byte, error) { return json.MarshalIndent(d, "", "  ") }
 
 func validate(d Descriptor) error {

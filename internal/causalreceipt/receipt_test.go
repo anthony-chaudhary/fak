@@ -47,3 +47,109 @@ func TestRejectsContentAndOrphans(t *testing.T) {
 		t.Fatal("leaked lifecycle admitted")
 	}
 }
+
+func TestMissingCausalIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Receipt)
+	}{
+		{"wrong schema", func(r *Receipt) { r.Schema = "wrong" }},
+		{"missing work", func(r *Receipt) { r.IDs.Work = "" }},
+		{"missing turn", func(r *Receipt) { r.IDs.Turn = "" }},
+		{"missing graph", func(r *Receipt) { r.IDs.Graph = "" }},
+		{"missing request", func(r *Receipt) { r.IDs.Request = "" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := fixture("completed")
+			tc.mutate(&r)
+			if err := Validate(r); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("expected ErrInvalid, got %v", err)
+			}
+			if _, err := DeriveMetrics(r); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("DeriveMetrics: expected ErrInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+func TestNativeEngineIntegrity(t *testing.T) {
+	r := fixture("completed")
+	r.Phases[0].Engine = "llama-native" // ambiguous native engine
+	if err := Validate(r); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for ambiguous native engine, got %v", err)
+	}
+
+	r = fixture("completed")
+	r.Phases[0].Engine = "" // empty engine
+	if err := Validate(r); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty engine, got %v", err)
+	}
+}
+
+func TestDecisionValidation(t *testing.T) {
+	r := fixture("completed")
+	r.Decisions = append(r.Decisions, Decision{ID: "", Kind: "policy", Actual: "denied"})
+	if err := Validate(r); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty decision ID, got %v", err)
+	}
+
+	r = fixture("completed")
+	r.Decisions = append(r.Decisions, Decision{ID: "d-1", Kind: "", Actual: "denied"})
+	if err := Validate(r); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty decision Kind, got %v", err)
+	}
+
+	r = fixture("completed")
+	r.Decisions = append(r.Decisions, Decision{ID: "d-1", Kind: "policy", Actual: ""})
+	if err := Validate(r); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty decision Actual, got %v", err)
+	}
+}
+
+func TestSensitiveAttributePatterns(t *testing.T) {
+	sensitiveKeys := []string{
+		"prompt", "Prompt", "PROMPT_TEXT",
+		"output", "turn_output",
+		"argument", "tool_argument",
+		"result", "call_result",
+		"content", "body_content",
+		"screenshot", "screenShot_png",
+		"filepath", "file_path", "FILE-PATH",
+	}
+	for _, k := range sensitiveKeys {
+		r := fixture("completed")
+		r.Attributes = map[string]string{k: "value"}
+		if err := Validate(r); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("expected ErrInvalid for sensitive key %q, got %v", k, err)
+		}
+	}
+}
+
+func TestIncidentAnswersAndMetricLabels(t *testing.T) {
+	r := fixture("completed")
+	r.Phases[1].TransferNS = 100
+	r.Resources = append(r.Resources, Resource{
+		ID:       "old-kv",
+		Kind:     "kv_cache",
+		State:    "evicted",
+		Released: true,
+	})
+	answers := IncidentAnswers(r)
+	wantSubstrings := []string{"evicted:old-kv", "reason:policy_block", "reload:serve", "transfer:serve"}
+	if len(answers) != len(wantSubstrings) {
+		t.Fatalf("expected %d answers, got %d: %v", len(wantSubstrings), len(answers), answers)
+	}
+	for i, want := range wantSubstrings {
+		if answers[i] != want {
+			t.Errorf("answer[%d] = %q, want %q", i, answers[i], want)
+		}
+	}
+
+	// Test empty phases for MetricLabels
+	emptyR := Receipt{Schema: Schema}
+	labels := MetricLabels(emptyR)
+	if len(labels) != 1 || labels["schema"] != Schema {
+		t.Fatalf("unexpected labels for empty receipt: %v", labels)
+	}
+}

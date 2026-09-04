@@ -121,6 +121,16 @@ type Capability struct {
 	RoutedRuntimes []string
 }
 
+// DefaultCapability returns the baseline recognized packing schemes, decode features,
+// and routed runtime environments for codebook metadata adjudication.
+func DefaultCapability() Capability {
+	return Capability{
+		PackingIDs:     []string{"nibble-lsb@1", "bitpack-lsb@1"},
+		DecodeFeatures: []string{"per-block-scale", "explicit-codebook"},
+		RoutedRuntimes: []string{"lab-runtime@2.4.1"},
+	}
+}
+
 type Result struct {
 	Outcome    Outcome     `json:"outcome"`
 	Reason     ReasonCode  `json:"reason"`

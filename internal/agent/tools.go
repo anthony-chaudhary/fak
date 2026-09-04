@@ -228,6 +228,9 @@ func metaFor(tool string) map[string]string {
 	if m, ok := sysToolMeta(tool); ok {
 		return m
 	}
+	if m, ok := todoToolMeta(tool); ok {
+		return m
+	}
 	if readOnlyTools[tool] {
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 	}
@@ -309,6 +312,9 @@ func Configure() {
 		allow[name] = true
 	}
 	for _, name := range sysToolAllow() {
+		allow[name] = true
+	}
+	for _, name := range todoToolAllow() {
 		allow[name] = true
 	}
 

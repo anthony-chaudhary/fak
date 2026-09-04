@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -164,10 +165,10 @@ func TestResetClearsBudget(t *testing.T) {
 	mustDefer(t, r.Adjudicate(ctx, call("t", "x", "{}")), "after reset")
 }
 
-// TestBoundedKeysFailOpen proves state is bounded: past the key ceiling a NEW key
-// is not tracked (fail-open Defer) rather than evicting a live budget, and the drop
-// is accounted. Existing keys keep enforcing.
-func TestBoundedKeysFailOpen(t *testing.T) {
+// TestBoundedKeysLRUEviction (formerly TestBoundedKeysFailOpen) proves state is bounded:
+// past the key ceiling the least recently touched key is evicted via LRU rather than
+// dropping tracking and failing open.
+func TestBoundedKeysLRUEviction(t *testing.T) {
 	ctx := context.Background()
 	r := New()
 	r.SetLimit(Limit{MaxCalls: 1}, KeyPerTrace)
@@ -176,13 +177,104 @@ func TestBoundedKeysFailOpen(t *testing.T) {
 	// Fill the two key slots and exhaust both.
 	mustDefer(t, r.Adjudicate(ctx, call("k0", "x", "{}")), "k0")
 	mustDefer(t, r.Adjudicate(ctx, call("k1", "x", "{}")), "k1")
-	// A third, new key cannot be tracked -> fail-open Defer, counted as dropped.
-	mustDefer(t, r.Adjudicate(ctx, call("k2", "x", "{}")), "k2 past ceiling")
-	if _, _, dropped := r.Stats(); dropped != 1 {
-		t.Fatalf("dropped=%d, want 1 (the untracked over-ceiling key)", dropped)
+	// A third key evicts the least recently touched key (k0) instead of failing open.
+	mustDefer(t, r.Adjudicate(ctx, call("k2", "x", "{}")), "k2 evicts k0")
+	if _, _, dropped := r.Stats(); dropped != 0 {
+		t.Fatalf("dropped=%d, want 0 (LRU eviction, zero fail-open drops)", dropped)
 	}
-	// An EXISTING key still enforces its cap (not bypassed by the ceiling).
-	mustRateLimited(t, r.Adjudicate(ctx, call("k0", "x", "{}")), "existing key still capped")
+	// The retained key (k1) still enforces its cap (not evicted).
+	mustRateLimited(t, r.Adjudicate(ctx, call("k1", "x", "{}")), "retained key still capped")
+	// The evicted key (k0) starts fresh upon re-entry.
+	mustDefer(t, r.Adjudicate(ctx, call("k0", "x", "{}")), "evicted key k0 starts fresh")
+}
+
+func TestBoundedKeysFailOpen(t *testing.T) {
+	TestBoundedKeysLRUEviction(t)
+}
+
+// TestHighKeyChurnLRUEviction verifies that high key churn evicts cold keys via LRU
+// while actively enforcing rate limits on hot keys with zero fail-open drops.
+func TestHighKeyChurnLRUEviction(t *testing.T) {
+	ctx := context.Background()
+	r := New()
+	r.maxKeys = 10
+	r.SetLimit(Limit{MaxCalls: 5}, KeyPerTrace)
+
+	hotKey := "hot-trace"
+	// Exhaust the hot key quota (5 calls)
+	for i := 0; i < 5; i++ {
+		mustDefer(t, r.Adjudicate(ctx, call(hotKey, "tool", "{}")), "hotKey under cap call "+strconv.Itoa(i))
+	}
+	// Hot key is now rate limited
+	mustRateLimited(t, r.Adjudicate(ctx, call(hotKey, "tool", "{}")), "hotKey over cap initially")
+
+	// High churn: 10,000 cold keys
+	const numChurn = 10000
+	for i := 0; i < numChurn; i++ {
+		coldKey := "cold-" + strconv.Itoa(i)
+		mustDefer(t, r.Adjudicate(ctx, call(coldKey, "tool", "{}")), "cold key under cap")
+
+		// Interleave touches to the hot key every 5 iterations to keep it hot
+		if i%5 == 0 {
+			mustRateLimited(t, r.Adjudicate(ctx, call(hotKey, "tool", "{}")), "hotKey kept hot and actively rate limited")
+		}
+	}
+
+	// Hot key is STILL rate-limited despite 10,000 cold keys churning through
+	mustRateLimited(t, r.Adjudicate(ctx, call(hotKey, "tool", "{}")), "hotKey still rate-limited after churn")
+
+	// Zero fail-open drops
+	admits, denies, dropped := r.Stats()
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0 (zero fail-open drops)", dropped)
+	}
+	if admits == 0 || denies == 0 {
+		t.Fatalf("expected admits > 0 and denies > 0, got admits=%d denies=%d", admits, denies)
+	}
+
+	// Verify that table size is bounded by maxKeys
+	if len(r.byKey) > r.maxKeys {
+		t.Fatalf("len(byKey) = %d exceeds maxKeys %d", len(r.byKey), r.maxKeys)
+	}
+
+	// Verify cold keys from the beginning of churn were evicted:
+	// cold-0 was evicted long ago, so a fresh call to cold-0 will be admitted (count 1)
+	mustDefer(t, r.Adjudicate(ctx, call("cold-0", "tool", "{}")), "cold-0 was evicted and starts fresh")
+}
+
+// TestHighKeyChurnLRUEvictionConcurrent verifies thread safety under high concurrency.
+func TestHighKeyChurnLRUEvictionConcurrent(t *testing.T) {
+	ctx := context.Background()
+	r := New()
+	r.maxKeys = 20
+	r.SetLimit(Limit{MaxCalls: 10}, KeyPerTrace)
+
+	const goroutines = 8
+	const perGoroutine = 2000
+	var wg sync.WaitGroup
+
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(gid int) {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				key := "k-" + strconv.Itoa(gid) + "-" + strconv.Itoa(i)
+				r.Adjudicate(ctx, call(key, "tool", "{}"))
+				if i%10 == 0 {
+					r.Adjudicate(ctx, call("shared-hot", "tool", "{}"))
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	_, _, dropped := r.Stats()
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	if len(r.byKey) > r.maxKeys {
+		t.Fatalf("len(byKey) = %d exceeds maxKeys %d", len(r.byKey), r.maxKeys)
+	}
 }
 
 // TestLimiterDenyCarriesRetryAfter is the issue-#699 retry-after witness: an

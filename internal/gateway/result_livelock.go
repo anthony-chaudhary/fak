@@ -84,5 +84,6 @@ func resultAdmissionIsLowInfoReceipt(a ResultAdmission) bool {
 
 func isUpdatePlanTool(tool string) bool {
 	tool = strings.ToLower(strings.TrimSpace(tool))
-	return tool == "update_plan" || tool == "functions.update_plan"
+	return tool == "update_plan" || tool == "functions.update_plan" ||
+		tool == "todowrite" || tool == "agent.todowrite" || tool == "functions.todowrite"
 }

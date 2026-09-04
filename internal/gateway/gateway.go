@@ -45,6 +45,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -218,6 +219,7 @@ func New(cfg Config) (*Server, error) {
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,
 		readBearer:                   cfg.ReadBearer,
+		policyRuntime:                cfg.PolicyRuntime,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
 		denialRecoveryOff:            cfg.DenialRecoveryOff,
@@ -846,6 +848,22 @@ func (s *Server) AdjudicationSummary() AdjudicationSummary {
 // (was the call avoided, and how much further did the agent get per real dispatch?),
 // read straight from the same kernel.Counters the fak_kernel_* metrics expose. Safe
 // on a nil Server (returns the zero Counters).
+// SetPolicyRuntime updates the active policy runtime used for tool normalization.
+func (s *Server) SetPolicyRuntime(pr *policy.Runtime) {
+	if s == nil {
+		return
+	}
+	s.policyRuntime = pr
+}
+
+// PolicyRuntime returns the active policy runtime used for tool normalization.
+func (s *Server) PolicyRuntime() *policy.Runtime {
+	if s == nil {
+		return nil
+	}
+	return s.policyRuntime
+}
+
 func (s *Server) KernelCounters() kernel.Counters {
 	if s == nil {
 		return kernel.Counters{}

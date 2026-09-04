@@ -1,3 +1,12 @@
+// Package kvquantquality provides evaluation kernels for version-pinned KV-cache
+// quantization quality against unquantized baselines.
+//
+// Invariants: kv quantization quality evaluator enforces minimum perplexity and cosine similarity thresholds.
+// Key invariant: quality budgets, attention drift, and output drift bounds must be satisfied.
+// Contract and guard invariants:
+// 1. fail-closed: malformed JSON, invalid baseline precisions, or non-finite inputs fail closed or delegate cleanly.
+// 2. Determinism: identical distributions yield identical Jensen-Shannon divergence metrics.
+// 3. Provenance: observed evidence requires complete hardware envelope; modeled evidence requires valid pins.
 package kvquantquality
 
 import (
@@ -10,35 +19,54 @@ import (
 	"strings"
 )
 
+// ContractVersion defines the schema and evaluation contract version for KV quantization quality.
 const ContractVersion = "kvquantquality/v1"
 
+// Outcome represents the qualitative decision reached by the evaluation kernel.
 type Outcome string
 
 const (
+	// OutcomeSupported indicates all quality budgets and provenance requirements are satisfied.
 	OutcomeSupported Outcome = "supported"
+	// OutcomeRefused indicates the candidate was explicitly evaluated and failed quality budgets.
 	OutcomeRefused   Outcome = "unsupported"
+	// OutcomeDelegate indicates unknown contracts, missing hardware, or incomplete evidence delegated upstream.
 	OutcomeDelegate  Outcome = "delegate"
 )
 
+// ReasonCode represents the deterministic reason for the evaluation outcome.
 type ReasonCode string
 
 const (
+	// ReasonWithinBudget indicates all drift and task metrics stayed within tolerance.
 	ReasonWithinBudget          ReasonCode = "within_quality_budget"
+	// ReasonQualityBudgetExceeded indicates drift or task degradation exceeded the requested budget.
 	ReasonQualityBudgetExceeded ReasonCode = "quality_budget_exceeded"
+	// ReasonUnknownContract indicates the request declared an unsupported contract version.
 	ReasonUnknownContract       ReasonCode = "unknown_contract_version"
+	// ReasonUnknownEvidence indicates the request used an unclassified evidence kind.
 	ReasonUnknownEvidence       ReasonCode = "unknown_evidence_kind"
+	// ReasonIncompletePin indicates one or more artifact, recipe, or runtime pins were incomplete.
 	ReasonIncompletePin         ReasonCode = "incomplete_provenance_pin"
+	// ReasonInvalidBaseline indicates the unquantized baseline precision was not fp16 or bf16.
 	ReasonInvalidBaseline       ReasonCode = "invalid_unquantized_baseline"
+	// ReasonSamePrecision indicates the candidate did not specify a distinct quantized precision.
 	ReasonSamePrecision         ReasonCode = "same_precision"
+	// ReasonMalformedData indicates inconsistent vectors, non-finite values, or missing required fields.
 	ReasonMalformedData         ReasonCode = "malformed_data"
+	// ReasonMissingHardware indicates observed evidence lacked required platform, accelerator, or driver details.
 	ReasonMissingHardware       ReasonCode = "missing_hardware"
+	// ReasonMalformedJSON indicates failure to parse the incoming request JSON payload.
 	ReasonMalformedJSON         ReasonCode = "malformed_json"
 )
 
+// EvidenceKind designates whether evaluation is modeled mathematically or observed on real hardware.
 type EvidenceKind string
 
 const (
+	// EvidenceModeled indicates evidence generated from synthetic or modeled attention/output distributions.
 	EvidenceModeled          EvidenceKind = "modeled"
+	// EvidenceObservedHardware indicates evidence collected directly from benchmark runs on physical accelerators.
 	EvidenceObservedHardware EvidenceKind = "observed_hardware"
 )
 
@@ -51,12 +79,14 @@ type Pin struct {
 	SHA256     string `json:"sha256"`
 }
 
+// HardwareEnvelope describes the physical execution platform, accelerator, and driver versions.
 type HardwareEnvelope struct {
 	Platform    string `json:"platform"`
 	Accelerator string `json:"accelerator"`
 	Driver      string `json:"driver"`
 }
 
+// Measurement contains precision details, attention/output distributions, and aggregate task scores.
 type Measurement struct {
 	Precision string      `json:"precision"`
 	Attention [][]float64 `json:"attention"`
@@ -64,12 +94,14 @@ type Measurement struct {
 	TaskScore float64     `json:"task_score"`
 }
 
+// Budget specifies upper bounds on allowable attention drift, output drift, and task score degradation.
 type Budget struct {
 	MaxRowJSD    float64 `json:"max_row_jsd"`
 	MaxOutputJSD float64 `json:"max_output_jsd"`
 	MaxTaskDrop  float64 `json:"max_task_drop"`
 }
 
+// Request encapsulates the baseline and candidate measurements against a requested quality budget.
 type Request struct {
 	ContractVersion string           `json:"contract_version"`
 	FixtureID       string           `json:"fixture_id"`
@@ -85,12 +117,14 @@ type Request struct {
 	Budget          Budget           `json:"budget"`
 }
 
+// Metrics captures the computed divergence metrics and task drop between baseline and candidate.
 type Metrics struct {
 	RowJSD    float64 `json:"row_jsd"`
 	OutputJSD float64 `json:"output_jsd"`
 	TaskDrop  float64 `json:"task_drop"`
 }
 
+// Report details the evaluation outcome, reason code, measured metrics, and metadata.
 type Report struct {
 	Contract           string           `json:"contract"`
 	FixtureID          string           `json:"fixture_id"`

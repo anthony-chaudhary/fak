@@ -2907,6 +2907,12 @@ var engineDriverRole = map[string]map[string]string{
 	"agent.skill": {
 		"agent": "dynamic agent skill loader engine",
 	},
+	"agent.todoread": {
+		"agent": "native harness task list query engine",
+	},
+	"agent.todowrite": {
+		"agent": "native harness task list mutation and planning engine",
+	},
 	"codetools.bash": {
 		"codetools": "bounded coding Bash engine",
 	},

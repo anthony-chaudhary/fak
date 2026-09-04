@@ -43,14 +43,14 @@
 // guaranteed admission time — advisory back-off like HTTP Retry-After, not a
 // reservation (windowed/decaying budgets stay the lifecycle leaf's job).
 //
-// BOUNDED STATE. The per-key counters live in a map capped at maxKeys entries.
-// Past the ceiling a NEW key is not tracked (fail-open) rather than evicting a live
-// budget — eviction would let a caller cycle keys to reset its own cap. Existing
-// keys keep enforcing. (Eviction/TTL for very-long-lived processes is the
-// lifecycle leaf's job, issue #12; Reset/ResetAll below is its hook.)
+// BOUNDED STATE. The per-key counters live in a bounded LRU cache capped at maxKeys
+// entries. When maxKeys is reached, the least recently touched key's counter is evicted
+// rather than dropping tracking and failing open. Hot keys actively touched remain
+// enforced without fail-open drops. (Reset/ResetAll below is the lifecycle reset hook.)
 package ratelimit
 
 import (
+	"container/list"
 	"context"
 	"os"
 	"strconv"
@@ -120,6 +120,8 @@ type Limiter struct {
 	lim     Limit
 	mode    KeyMode
 	byKey   map[string]*counter
+	lru     *list.List
+	index   map[string]*list.Element
 	maxKeys int
 
 	// forensics / KPI (read via Stats).
@@ -131,7 +133,49 @@ type Limiter struct {
 // New returns an inert limiter (no cap; KeyPerTrace). It Defers on every call
 // until SetLimit (or env, for Default) configures a cap.
 func New() *Limiter {
-	return &Limiter{mode: KeyPerTrace, byKey: map[string]*counter{}, maxKeys: defaultMaxKeys}
+	return &Limiter{
+		mode:    KeyPerTrace,
+		byKey:   map[string]*counter{},
+		lru:     list.New(),
+		index:   map[string]*list.Element{},
+		maxKeys: defaultMaxKeys,
+	}
+}
+
+func (r *Limiter) ensureLocked() {
+	if r.maxKeys <= 0 {
+		r.maxKeys = defaultMaxKeys
+	}
+	if r.byKey == nil {
+		r.byKey = map[string]*counter{}
+	}
+	if r.lru == nil {
+		r.lru = list.New()
+	}
+	if r.index == nil {
+		r.index = map[string]*list.Element{}
+	}
+}
+
+func (r *Limiter) touchLocked(key string) {
+	if el := r.index[key]; el != nil {
+		r.lru.MoveToFront(el)
+		return
+	}
+	r.index[key] = r.lru.PushFront(key)
+}
+
+func (r *Limiter) evictOldestLocked() {
+	for r.maxKeys > 0 && len(r.byKey) >= r.maxKeys {
+		el := r.lru.Back()
+		if el == nil {
+			return
+		}
+		oldKey := el.Value.(string)
+		r.lru.Remove(el)
+		delete(r.index, oldKey)
+		delete(r.byKey, oldKey)
+	}
 }
 
 // SetLimit installs a new cap and key dimension. It does NOT clear existing
@@ -148,7 +192,12 @@ func (r *Limiter) SetLimit(l Limit, mode KeyMode) {
 func (r *Limiter) Reset(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.ensureLocked()
 	delete(r.byKey, key)
+	if el := r.index[key]; el != nil {
+		r.lru.Remove(el)
+		delete(r.index, key)
+	}
 }
 
 // ResetAll clears every key's consumption (a fresh window).
@@ -156,6 +205,8 @@ func (r *Limiter) ResetAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.byKey = map[string]*counter{}
+	r.lru = list.New()
+	r.index = map[string]*list.Element{}
 }
 
 // Caps satisfies abi.Adjudicator. The negotiable token is registered in init();
@@ -178,19 +229,15 @@ func (r *Limiter) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 		return defer_()
 	}
 
+	r.ensureLocked()
 	key := r.keyLocked(c)
 	st := r.byKey[key]
 	if st == nil {
-		// Bounded state: past the key ceiling, do not track a new key (fail-open)
-		// rather than evict a live budget (which would let a caller reset its cap by
-		// cycling keys). Existing keys still enforce.
-		if len(r.byKey) >= r.maxKeys {
-			r.dropped++
-			return defer_()
-		}
+		r.evictOldestLocked()
 		st = &counter{}
 		r.byKey[key] = st
 	}
+	r.touchLocked(key)
 
 	cost := costOf(c)
 
