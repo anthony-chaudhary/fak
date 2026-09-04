@@ -1,3 +1,9 @@
+// Package issueownerprompt validates that issue resolver goal prompts faithfully
+// compose the canonical issue owner lifecycle without drift or private copies.
+//
+// Invariant: issue owner prompt resolution is fail-closed and deterministic.
+// Precondition: the target directory must exist and contain the canonical lifecycle file.
+// Guard: missing lifecycle files, unapproved resolvers, or drifted invariants fail validation immediately.
 package issueownerprompt
 
 import (
@@ -9,6 +15,7 @@ import (
 )
 
 const (
+	// LifecycleFile is the canonical filename defining the binding issue owner lifecycle.
 	LifecycleFile = "issue-owner-lifecycle.md"
 	includeLine   = "Read `.claude/goal-prompts/issue-owner-lifecycle.md` now and obey it as the binding `ISSUE_OWNER` / `LEAF_CHILD` lifecycle."
 )
