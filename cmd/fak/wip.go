@@ -233,8 +233,9 @@ func wipUsage(w io.Writer) {
       SET, never one file's mtime, so the stale half of a live set is never offered.
       With --landable, print only the LAND rows (exit 3 if any exist).
 
-  fak wip inventory [--json] [--root DIR] [--max-untracked-age DURATION]
+  fak wip inventory [--json] [--reconcile] [--repo DIR] [--root DIR] [--max-untracked-age DURATION]
       Read-only census of main WIP, ignored files, worktrees, stale residue, and checkpoints.
+      With --reconcile, reports raw surfaces, conserved logical units, and unresolved join debt.
 
   fak wip queue [--json] [-C DIR]
       Prioritize every sanctioned worktree and local-only checkpoint into one

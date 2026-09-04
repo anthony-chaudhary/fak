@@ -11,15 +11,30 @@ import (
 )
 
 func runWIPInventory(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "reconcile" || args[0] == "--reconcile" || args[0] == "-reconcile") {
+		return runWIPInventoryReconcile(args, stdout, stderr)
+	}
+	for _, a := range args {
+		if a == "--reconcile" || a == "-reconcile" {
+			return runWIPInventoryReconcile(args, stdout, stderr)
+		}
+	}
+
 	fs := flag.NewFlagSet("wip inventory", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit schema-versioned JSON")
 	root := fs.String("root", ".", "repository root")
+	repo := fs.String("repo", "", "repository root (alias for --root)")
+	_ = fs.Bool("reconcile", false, "report raw surfaces, logical units, and unresolved join debt")
 	maxUntrackedAge := fs.Duration("max-untracked-age", 0, "fail when the oldest untracked source path exceeds this age (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	abs, err := filepath.Abs(*root)
+	targetRoot := *root
+	if targetRoot == "." && *repo != "" {
+		targetRoot = *repo
+	}
+	abs, err := filepath.Abs(targetRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak wip inventory: %v\n", err)
 		return 1
