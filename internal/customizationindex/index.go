@@ -10,8 +10,13 @@ import (
 	"time"
 )
 
+// Invariant: customization index checks are fail-closed and deterministic.
+// Guard: malformed schema versions, unknown fields, or missing evidence reject the entire index.
+
+// Schema identifies the supported agent customization index schema version.
 const Schema = "fak-agent-customization-index/1"
 
+// Index contains the complete structured specification of customization layers, sources, and axes.
 type Index struct {
 	Schema      string      `json:"schema"`
 	UpdatedAt   string      `json:"updated_at"`
@@ -22,6 +27,7 @@ type Index struct {
 	Axes        []Axis      `json:"axes"`
 }
 
+// Maintenance specifies review schedules, validation keys, and accepted lifecycle status values.
 type Maintenance struct {
 	ReviewIntervalDays int      `json:"review_interval_days"`
 	DedupeKey          string   `json:"dedupe_key"`
@@ -31,11 +37,13 @@ type Maintenance struct {
 	DispositionValues  []string `json:"disposition_values"`
 }
 
+// Layer represents an architectural concern or customization dimension in the agent pipeline.
 type Layer struct {
 	ID       string `json:"id"`
 	Question string `json:"question"`
 }
 
+// Source records an external or repository reference providing evidence for customization support.
 type Source struct {
 	ID              string   `json:"id"`
 	Kind            string   `json:"kind"`
@@ -46,6 +54,7 @@ type Source struct {
 	Evidence        []string `json:"evidence"`
 }
 
+// Axis maps a user need within a layer to concrete evidence, tracking current disposition and status.
 type Axis struct {
 	ID          string   `json:"axis_id"`
 	Layer       string   `json:"layer"`
@@ -56,6 +65,7 @@ type Axis struct {
 	Disposition string   `json:"disposition"`
 }
 
+// SourceFreshness summarizes evidence review age and signals whether re-validation is due.
 type SourceFreshness struct {
 	ID         string `json:"id"`
 	ObservedAt string `json:"observed_at"`
@@ -63,12 +73,14 @@ type SourceFreshness struct {
 	Due        bool   `json:"due"`
 }
 
+// Group tallies axes partitioned by layer and status for portfolio reporting.
 type Group struct {
 	Layer  string `json:"layer"`
 	Status string `json:"status"`
 	Count  int    `json:"count"`
 }
 
+// Report provides the evaluated freshness, grouping, and contract validation results for an index.
 type Report struct {
 	Schema     string            `json:"schema"`
 	AsOf       string            `json:"as_of"`
@@ -81,6 +93,7 @@ type Report struct {
 	ReviewDays int               `json:"review_interval_days"`
 }
 
+// Read decodes an index from JSON, enforcing strict field checking to reject unknown properties.
 func Read(r io.Reader) (Index, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
@@ -91,6 +104,7 @@ func Read(r io.Reader) (Index, error) {
 	return index, nil
 }
 
+// Check audits an index for consistency, evidence validity, and freshness relative to an evaluation date.
 func Check(index Index, asOf time.Time) Report {
 	report := Report{Schema: Schema, AsOf: asOf.Format(time.DateOnly), Valid: true, Axes: len(index.Axes), ReviewDays: index.Maintenance.ReviewIntervalDays}
 	addError := func(format string, args ...any) {
@@ -188,6 +202,7 @@ func stringSet(values []string) map[string]struct{} {
 	return out
 }
 
+// ParseAsOf parses a date string in YYYY-MM-DD format or falls back to the current UTC timestamp.
 func ParseAsOf(value string, now time.Time) (time.Time, error) {
 	if value == "" {
 		return now.UTC(), nil
