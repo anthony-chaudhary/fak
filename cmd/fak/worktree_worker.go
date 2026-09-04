@@ -87,6 +87,7 @@ fak worktree <subcommand>
                    owner PID is dead AND stamped lease is released. DRY-RUN by default;
                    --apply force-removes selected worktrees and prunes git admin entries.
       list [--json] [--capacity-reason WHY] [--remote R] [--fetch]
+           [--worker NAME|PATH] [--session SESS] [--timeout D]
                    List the live per-worker worktrees. The default preserves the
                    existing {count, paths, inventory} output; --json emits the
                    typed association/liveness/cleanliness/lifecycle inventory.
@@ -988,6 +989,8 @@ type worktreeWorkerListOut struct {
 	Paths     []string                        `json:"paths"`
 	Inventory []workerworktree.InventoryRow   `json:"inventory"`
 	Capacity  workerworktree.CapacityAdvisory `json:"capacity"`
+	Partial   bool                            `json:"partial,omitempty"`
+	Timeout   bool                            `json:"timeout,omitempty"`
 }
 
 type worktreeWorkerRecoverOut struct {

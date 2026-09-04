@@ -2,6 +2,7 @@ package workerworktree
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -264,8 +265,25 @@ func Inventory(root string, git GitRunner) ([]InventoryRow, error) {
 		git = defaultGit
 	}
 	_, paths := Count(root, git)
+	return InventoryForPaths(root, paths, git)
+}
+
+// InventoryForPaths inspects the provided managed worktree paths without writing refs, indexes, or worktree bytes.
+func InventoryForPaths(root string, paths []string, git GitRunner) ([]InventoryRow, error) {
+	rows, _, err := InventoryForPathsContext(context.Background(), root, paths, git)
+	return rows, err
+}
+
+// InventoryForPathsContext inspects the provided managed worktree paths bounded by ctx.
+func InventoryForPathsContext(ctx context.Context, root string, paths []string, git GitRunner) ([]InventoryRow, bool, error) {
+	if git == nil {
+		git = defaultGit
+	}
 	rows := make([]InventoryRow, 0, len(paths))
 	for _, wt := range paths {
+		if ctx != nil && ctx.Err() != nil {
+			return rows, true, nil
+		}
 		wt = filepath.Clean(wt)
 		row := InventoryRow{Path: wt, State: "NEEDS_OPERATOR", NeedsOperator: true}
 		in, err := LoadIntent(wt)
@@ -336,5 +354,8 @@ func Inventory(root string, git GitRunner) ([]InventoryRow, error) {
 		}
 		rows = append(rows, row)
 	}
-	return rows, nil
+	if ctx != nil && ctx.Err() != nil {
+		return rows, true, nil
+	}
+	return rows, false, nil
 }

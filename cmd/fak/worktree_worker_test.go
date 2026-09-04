@@ -1666,3 +1666,196 @@ func TestWorkerLandSymptom(t *testing.T) {
 		}
 	})
 }
+
+func newTwoWorkerFixture(t *testing.T) (repo string, wt1, wt2 string, base string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv(workerworktree.PoolCapEnv, "0")
+	root := t.TempDir()
+	repo = filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "owned.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "owned.txt")
+	git("commit", "-qm", "base")
+	base = git("rev-parse", "HEAD")
+	prep1 := workerworktree.Prepare(repo, "cmd", "10447-a", base, filepath.Join(root, "workers"), nil)
+	if !prep1.OK {
+		t.Fatalf("prepare wt1: %+v", prep1)
+	}
+	prep2 := workerworktree.Prepare(repo, "tools", "10447-b", base, filepath.Join(root, "workers"), nil)
+	if !prep2.OK {
+		t.Fatalf("prepare wt2: %+v", prep2)
+	}
+	t.Cleanup(func() {
+		_ = workerworktree.ForceReap(repo, prep1.Path, nil)
+		_ = workerworktree.ForceReap(repo, prep2.Path, nil)
+	})
+	return repo, prep1.Path, prep2.Path, base
+}
+
+func TestWorktreeWorkerListWorkerFilter(t *testing.T) {
+	repo, wt1, wt2, _ := newTwoWorkerFixture(t)
+
+	// Filter by directory basename
+	base1 := filepath.Base(wt1)
+	raw := captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--worker", base1})
+	})
+	var got worktreeWorkerLifecycleOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 1 || len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], wt1) {
+		t.Fatalf("filter by basename: expected only wt1 (%s), got: %+v", wt1, got)
+	}
+
+	// Filter by full path
+	raw = captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--worker", wt2})
+	})
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 1 || len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], wt2) {
+		t.Fatalf("filter by full path: expected only wt2 (%s), got: %+v", wt2, got)
+	}
+
+	// Filter non-existent worker
+	raw = captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--worker", "nonexistent-worker"})
+	})
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 0 || len(got.Paths) != 0 {
+		t.Fatalf("filter nonexistent: expected 0 results, got: %+v", got)
+	}
+
+	// Legacy mode filter by basename
+	raw = captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--worker", base1})
+	})
+	var legacyGot worktreeWorkerListOut
+	if err := json.Unmarshal(raw, &legacyGot); err != nil {
+		t.Fatalf("decode legacy: %v\noutput: %s", err, raw)
+	}
+	if legacyGot.Count != 1 || len(legacyGot.Paths) != 1 || !sameResolvedPath(legacyGot.Paths[0], wt1) {
+		t.Fatalf("legacy filter by basename: expected only wt1, got: %+v", legacyGot)
+	}
+}
+
+func TestWorktreeWorkerListSessionFilter(t *testing.T) {
+	repo, wt1, wt2, _ := newTwoWorkerFixture(t)
+
+	// Write lease.json with session IDs
+	if err := workerworktree.WriteWorkerLease(wt1, workerworktree.WorkerLease{
+		PID:       os.Getpid(),
+		SessionID: "sess-alpha-10447",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workerworktree.WriteWorkerLease(wt2, workerworktree.WorkerLease{
+		PID:       os.Getpid(),
+		SessionID: "sess-beta-10447",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Filter for sess-alpha
+	raw := captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--session", "sess-alpha-10447"})
+	})
+	var got worktreeWorkerLifecycleOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 1 || len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], wt1) {
+		t.Fatalf("filter by session alpha: expected only wt1, got: %+v", got)
+	}
+
+	// Filter for sess-beta
+	raw = captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--session", "sess-beta-10447"})
+	})
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 1 || len(got.Paths) != 1 || !sameResolvedPath(got.Paths[0], wt2) {
+		t.Fatalf("filter by session beta: expected only wt2, got: %+v", got)
+	}
+
+	// Filter for nonexistent session
+	raw = captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--session", "sess-none-10447"})
+	})
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, raw)
+	}
+	if got.Count != 0 || len(got.Paths) != 0 {
+		t.Fatalf("filter nonexistent session: expected 0 results, got: %+v", got)
+	}
+}
+
+func TestWorktreeWorkerListTimeoutReturnsPartialResultWithoutHanging(t *testing.T) {
+	repo, wt1, wt2, _ := newTwoWorkerFixture(t)
+
+	oldProbes := worktreeWorkerListProbes
+	defer func() { worktreeWorkerListProbes = oldProbes }()
+
+	// Stub Inspect so wt1 completes quickly and wt2 sleeps
+	worktreeWorkerListProbes = worktreeWorkerLifecycleProbes{
+		Inspect: func(repoRoot, path string) (worktreeWorkerRevisionEvidence, error) {
+			if sameResolvedPath(path, wt2) {
+				time.Sleep(3 * time.Second)
+			}
+			return worktreeWorkerRevisionEvidence{
+				HeadSHA:     "head-" + filepath.Base(path),
+				BaseSHA:     "base",
+				Cleanliness: worktreeEvidenceClean,
+				DirtyPaths:  []string{},
+			}, nil
+		},
+	}
+
+	start := time.Now()
+	raw := captureWorktreeWorkerStdout(t, func() {
+		worktreeWorkerList([]string{"--root", repo, "--json", "--timeout", "50ms"})
+	})
+	elapsed := time.Since(start)
+
+	if elapsed >= 2*time.Second {
+		t.Fatalf("command hung for %s, want timeout around 50ms", elapsed)
+	}
+
+	var got worktreeWorkerLifecycleOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode timeout output: %v\noutput: %s", err, raw)
+	}
+	if !got.Partial || !got.Timeout {
+		t.Fatalf("expected partial=true and timeout=true, got partial=%v timeout=%v", got.Partial, got.Timeout)
+	}
+	if got.Count != 1 || len(got.Inventory) != 1 || !sameResolvedPath(got.Inventory[0].Path, wt1) {
+		t.Fatalf("expected partial results containing only wt1, got: %+v", got)
+	}
+}
