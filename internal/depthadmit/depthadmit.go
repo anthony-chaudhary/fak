@@ -278,6 +278,8 @@ type Decision struct {
 
 // Admit adjudicates a terminal transition against witnessed depth.
 //
+// Invariant: depth admission decisions are fail-closed and monotonic.
+//
 // The rule, in one line: `met` costs a carried plan; `abandoned` costs nothing but
 // still records what was left.
 //
