@@ -72,22 +72,10 @@ func New(cfg Config) (*Server, error) {
 	if !engineRegistered(engineID) {
 		return nil, fmt.Errorf("gateway: engine %q is not registered (have: %s)", engineID, strings.Join(abi.EngineIDs(), ", "))
 	}
-	// A misconfigured routing policy is a security boundary (it decides which model
-	// — local or remote — a tenant payload reaches), so validate it at New and fail
-	// loud rather than fall through to a silent default model at dispatch time.
-	if cfg.RouteManifest != nil {
-		if err := cfg.RouteManifest.Validate(); err != nil {
-			return nil, fmt.Errorf("gateway: route manifest: %w", err)
-		}
-	}
-	// A misconfigured account roster is the SAME class of security boundary: it decides
-	// which provider/account (local or remote) a routed model — and thus a tenant payload
-	// — reaches. Validate at New and fail loud rather than fall through to a silent
-	// mis-bind or a residency-floor bypass at dispatch time (#2528).
-	if cfg.RouteAccounts != nil {
-		if err := cfg.RouteAccounts.Validate(); err != nil {
-			return nil, fmt.Errorf("gateway: route accounts: %w", err)
-		}
+	// Validate and normalize gateway configuration. If InKernelModel is non-nil
+	// and cfg.Model is empty or "mock", it defaults to "inkernel-unspecified".
+	if err := validateNewGatewayConfig(&cfg); err != nil {
+		return nil, err
 	}
 	// The MCP tool-exposure allowlist (--expose) narrows which tools are advertised
 	// AND callable. It is the same class of boundary as the route manifest — it
@@ -393,11 +381,34 @@ func (s *Server) installRichDashboardManager(cfg RichDashboardConfig) {
 	}
 }
 
+// validateNewGatewayConfig validates and normalizes the server configuration for New.
+// If InKernelModel is configured and cfg.Model is empty or "mock", it defaults to
+// "inkernel-unspecified" rather than "mock" to disambiguate real-weight serving state.
+func validateNewGatewayConfig(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("gateway: nil config")
+	}
+	if cfg.InKernelModel != nil && (cfg.Model == "" || cfg.Model == "mock") {
+		cfg.Model = "inkernel-unspecified"
+	}
+	if cfg.RouteManifest != nil {
+		if err := cfg.RouteManifest.Validate(); err != nil {
+			return fmt.Errorf("gateway: route manifest: %w", err)
+		}
+	}
+	if cfg.RouteAccounts != nil {
+		if err := cfg.RouteAccounts.Validate(); err != nil {
+			return fmt.Errorf("gateway: route accounts: %w", err)
+		}
+	}
+	return nil
+}
+
 // selectChatPlanner picks the chat backend for the /v1/chat/completions and
 // /v1/messages surfaces from the wired configuration — a dual (local-alongside-API)
-// planner, a proxy planner, the in-kernel chat planner, or the deterministic mock —
+// planner, a proxy planner, the in-kernel chat planner, or the deterministic synthetic planner —
 // records the planner-init startup phase, and reports whether real weights are loaded
-// for syscalls but chat still falls back to the mock (missing tokenizer, #1115).
+// for syscalls but chat still falls back to synthetic (missing tokenizer, #1115).
 func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, servingLocality, *servingLocality, bool, error) {
 	var planner agent.Planner
 	var err error
@@ -449,27 +460,27 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		// Serve the model fused into the kernel as the chat backend on BOTH
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
-		// into a Planner. Falls through to MockPlanner if the host didn't preload.
+		// into a Planner. Falls through to SyntheticPlanner if the host didn't preload.
 		planner = newInKernelChatPlanner(cfg, model, logf)
 		// Every turn decodes on this box against weights we host.
 		side = localitySelfHosted
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
-		// chat surface silently fell back to the deterministic offline mock. Warn
+		// chat surface silently fell back to the deterministic offline synthetic planner. Warn
 		// LOUDLY so an operator never mistakes scripted demo text for real model
-		// output — the /healthz planner:"mock" field carries the same signal to a
+		// output — the /healthz planner:"synthetic" field carries the same signal to a
 		// liveness probe.
 		if cfg.InKernelModel != nil && cfg.Tokenizer == nil {
 			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
-			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
+			// falls back to synthetic due to missing tokenizer. Flag for witness fidelity.
 			inKernelModelButChatIsMock = true
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC SYNTHETIC planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
 		} else {
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC SYNTHETIC planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the synthetic planner.")
 		}
-		planner = agent.NewMockPlanner(model)
+		planner = agent.NewSyntheticPlanner(model)
 		// Scripted text is not inference, from here or from a vendor. It stays
-		// UNCLASSIFIED so a mock run can never pad the self-hosted share with turns
+		// UNCLASSIFIED so a synthetic run can never pad the self-hosted share with turns
 		// no hardware ever served.
 	}
 	startup.phase("planner-init", time.Since(t))
