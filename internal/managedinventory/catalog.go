@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	Schema           = "fak-managed-agent-object-inventory/v1"
+	// Schema identifies the versioned managed-agent object inventory format.
+	Schema = "fak-managed-agent-object-inventory/v1"
+	// DefaultSourceRel is the repository-relative path to the canonical JSON inventory source.
 	DefaultSourceRel = "docs/portability/managed-agent-objects.json"
+	// DefaultReportRel is the repository-relative path to the generated Markdown report.
 	DefaultReportRel = "docs/portability/managed-agent-object-inventory.md"
 )
 
@@ -36,6 +39,7 @@ type Discovery struct {
 	Queries  []DiscoveryQuery `json:"queries"`
 }
 
+// DiscoveryQuery records one reproducible repository search query and its expected matches.
 type DiscoveryQuery struct {
 	ID            string   `json:"id"`
 	Pattern       string   `json:"pattern"`
@@ -44,6 +48,7 @@ type DiscoveryQuery struct {
 	ExpectedFiles int      `json:"expected_files"`
 }
 
+// RepresentativeCollection records the minimal reference subset of managed object types.
 type RepresentativeCollection struct {
 	IDs       []string `json:"ids"`
 	Rationale string   `json:"rationale"`
@@ -95,12 +100,14 @@ var registrations = []Registration{
 	{ID: "workflow"},
 }
 
+// Registrations returns a copy of the registered managed object types.
 func Registrations() []Registration {
 	out := make([]Registration, len(registrations))
 	copy(out, registrations)
 	return out
 }
 
+// Load reads and parses a Catalog from a JSON file, rejecting unknown or trailing data.
 func Load(path string) (Catalog, error) {
 	var c Catalog
 	b, err := os.ReadFile(path)
@@ -122,6 +129,7 @@ func Load(path string) (Catalog, error) {
 	return c, nil
 }
 
+// Diagnostic describes a validation failure or structural inconsistency in a catalog.
 type Diagnostic struct {
 	Code   string
 	Object string
@@ -129,6 +137,7 @@ type Diagnostic struct {
 	Detail string
 }
 
+// Error formats the diagnostic code, location, and detail.
 func (d Diagnostic) Error() string {
 	where := d.Field
 	if d.Object != "" {
