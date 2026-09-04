@@ -46,7 +46,7 @@ func RunAMDGPUDirect(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	// Probe host topology or construct representative dual MI300X topology
-	nodes, err := compute.ProbeKFDTopology(*sysfsRoot)
+	nodes, err := compute.ProbeHostTopology(*sysfsRoot)
 	if err != nil || len(nodes) == 0 {
 		// Populate representative dual Instinct MI300X topology (192 GB VRAM, 896 GB/s xGMI mesh)
 		_ = engine.RegisterNode(compute.AMDDeviceNode{
