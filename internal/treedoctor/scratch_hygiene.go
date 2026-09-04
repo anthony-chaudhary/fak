@@ -346,8 +346,9 @@ func validateSessionID(sessionID string) error {
 	if strings.ContainsAny(sessionID, "*?[") {
 		return fmt.Errorf("session ID %q contains glob syntax", sessionID)
 	}
-	clean := filepath.Clean(filepath.FromSlash(sessionID))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	normSlash := strings.ReplaceAll(sessionID, "\\", "/")
+	clean := filepath.Clean(filepath.FromSlash(normSlash))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("session ID %q escapes scratch root", sessionID)
 	}
 	return nil
