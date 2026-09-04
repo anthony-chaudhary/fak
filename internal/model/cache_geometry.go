@@ -219,6 +219,12 @@ func (s *Session) RebuildCacheGeometry(req CacheGeometryRequest) (report CacheRe
 		s.halKV.Free()
 		s.halKV = nil
 	}
+	if s.Backend != nil {
+		if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
+			gr.GraphReset()
+		}
+	}
+	s.halLogitsWarm = false
 	s.closeQwen35HALState()
 	s.Cache, s.expertRing = nil, nil
 
