@@ -116,18 +116,6 @@ func benchValue(b benchcatalog.Bench) Value {
 func witnessTasks() []Task {
 	return []Task{
 		{
-			ID:          "witness-qwen36-27b-metal-auto-gateway-sweep",
-			Title:       "auto-collect the Mac Qwen3.6-27B gateway sweep: long decode, prefill TTFT, and 2-stream concurrency against the already-running fak serve gateway",
-			Source:      SourceWitness,
-			Value:       ValueFrontier,
-			Requires:    []Requirement{ReqMetal, ReqWeights},
-			Run:         "fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json",
-			Acceptance:  "a fak.macbench.result.v1 artifact with observed tok/s rows for decode-longgen, prefill-sweep, and 2stream; gateway reported only as loopback/remote-sanitized and bearer never printed",
-			RecheckDays: 14,
-			TimeoutSec:  7200,
-			Doc:         "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md",
-		},
-		{
 			ID:          "witness-qwen38-27b-metal-auto-gateway-sweep",
 			Title:       "auto-collect the Mac Qwen3.8-27B Metal serving curve sweep: decode, longgen, prefill sweep, and 2-stream concurrency against the fak serve gateway",
 			Source:      SourceWitness,
@@ -206,14 +194,14 @@ func witnessTasks() []Task {
 		},
 		{
 			ID:     "witness-a100-qwen-serve-first-run",
-			Title:  "collect the first-ever Qwen3.6-27B-on-one-A100 pure-fak-kernel serve numbers (tok/s + correctness) via the gcp-qwen-serve path",
+			Title:  "collect the first-ever Qwen3.8-27B-on-one-A100 pure-fak-kernel serve numbers (tok/s + correctness) via the gcp-qwen-serve path",
 			Source: SourceWitness,
 			Value:  ValueFrontier,
-			// A pure-fak-kernel serve must load the Qwen3.6-27B weights to collect tok/s +
+			// A pure-fak-kernel serve must load the model weights to collect tok/s +
 			// correctness — ReqWeights ANDed with the GPU requirement, so a weightless A100 box
 			// reports it infeasible ("needs local model weights") rather than feasible-failing (#990).
 			Requires:    []Requirement{ReqCUDA, ReqWeights},
-			Run:         "experiments/benchmark gcp-qwen-serve.sh  →  fak serve + fak agent (qwen3.6-27b)",
+			Run:         "experiments/benchmark gcp-qwen-serve.sh  →  fak serve + fak agent (qwen38:27b)",
 			Acceptance:  "a recorded tok/s and a correctness cosine in an experiments/benchmark/runs/by-machine/a100 artifact",
 			RecheckDays: 30,
 			// A cold 27B load + serve + a correctness/throughput pass needs a large budget; 1h
