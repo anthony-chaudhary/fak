@@ -45,6 +45,7 @@ const (
 	SoftScore
 )
 
+// String converts the CheckKind enum value into its canonical JSON tag representation.
 func (k CheckKind) String() string {
 	if k == SoftScore {
 		return "soft_score"
@@ -72,6 +73,8 @@ func (k *CheckKind) UnmarshalJSON(b []byte) error {
 
 // SoftSpec declares a case's single soft score. Score is the deterministic fixture
 // value the scorer would return (no model sampling), Threshold is the --strict cutoff.
+//
+// Precondition: Threshold must be defined within the inclusive normalized range of zero to one.
 type SoftSpec struct {
 	Name      string  `json:"name"`
 	Score     float64 `json:"score"`
@@ -97,7 +100,7 @@ type Case struct {
 	Soft *SoftSpec `json:"soft,omitempty"`
 }
 
-// Suite is the fixture eval suite.
+// Suite represents an ordered collection of eval test cases validated across execution arms.
 type Suite struct {
 	Name  string `json:"name"`
 	Cases []Case `json:"cases"`
@@ -146,6 +149,9 @@ type CaseOutcome struct {
 // passes AND, under strict, every soft score is at least its threshold. This is the
 // single scorer both arms share — the hard/soft distinction lives here and nowhere
 // else, so it cannot be silently blurred per-arm.
+//
+// Invariant: Evaluation ordering is strictly monotonic across gates to prevent unhandled early exits.
+// Postcondition: CaseOutcome records deterministic gate verdicts without mutating the supplied transcript.
 func Evaluate(c Case, tr Transcript, strict bool) CaseOutcome {
 	out := CaseOutcome{CaseID: c.ID, Passed: true}
 	record := func(cr CheckResult) {
@@ -250,6 +256,9 @@ type Witness struct {
 // byte-identical reason AND no hard-gate failure was downgraded. Any disagreement or
 // downgrade yields "divergent" — a fak result that turned a hard gate FAIL into a pass
 // or a soft score is caught here, not waved through.
+//
+// Precondition: Both raw and fak arm results must be evaluated under the same strictness configuration.
+// Postcondition: Returns a pass verdict only when every case agrees and no hard gate was downgraded.
 func Compare(suite string, strict bool, raw, fak ArmResult) Witness {
 	w := Witness{
 		Schema: WitnessSchema, Issue: Issue, Suite: suite, Strict: strict,

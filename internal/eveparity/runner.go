@@ -14,6 +14,8 @@ import (
 // t.calledTool, an exact content gate, a soft score, PLUS a deliberately-failing hard
 // gate and a soft score that only fails under --strict. Every assertion is satisfiable
 // by a fixed scripted response (fixtureModelReply), so no external model key is needed.
+//
+// Postcondition: Returns an immutable suite containing all five canonical test cases with deterministic expectations.
 func FixtureSuite() Suite {
 	return Suite{
 		Name: "eve-fixture-parity",
@@ -142,6 +144,9 @@ func extractCaseTag(messages []struct {
 // scorer, and folds the run into an ArmResult. command is the human-facing command line
 // recorded in the witness. Any per-case transport error surfaces as a failed t.succeeded
 // gate rather than aborting the run, so a broken arm is a visible divergence, not a panic.
+//
+// Precondition: Target base URL must expose an active completions endpoint responding to chat completions.
+// Postcondition: ArmResult captures execution outcomes along with session and token metadata preservation flags.
 func RunArm(arm, command, baseURL string, suite Suite, strict bool, client *http.Client) ArmResult {
 	if client == nil {
 		// A bounded default so a hung fixture server (or a real gateway that stalls)
