@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/archcheck"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
@@ -314,6 +315,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	switch p.Name {
 	case "fak_syscall":
 		req := decodeSyscallArgs(p.Arguments)
+		if (req.Tool == "view_image" || req.Tool == "functions.view_image") && !s.supportsVision() {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "view_image is not allowed because active model does not support image inputs"}
+		}
 		req.TraceID = s.traceFor(req.TraceID)
 		ctx = WithPrincipal(ctx, req.Principal)
 		// The brokered call is a tool process (seam 3): spawn/exit rows in the
@@ -461,6 +465,35 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ResumeHistoryRequest](p.Arguments, "fak_resume_history", func(req ResumeHistoryRequest) (any, error) {
 			return s.ResumeHistoryFor(req), nil
 		})
+	case "view_image", "functions.view_image":
+		if !s.supportsVision() {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "view_image is not allowed because active model does not support image inputs"}
+		}
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		return mcpToolResult(map[string]any{"status": "ok", "path": args.Path}), nil
+	case "fak_arch_check":
+		var args struct {
+			Package string `json:"package"`
+			Mine    bool   `json:"mine"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		root := "."
+		var res *archcheck.CheckResult
+		var err error
+		if args.Package != "" {
+			res, err = archcheck.CheckPackage(root, args.Package)
+		} else if args.Mine {
+			res, err = archcheck.CheckMine(root)
+		} else {
+			res, err = archcheck.CheckAll(root)
+		}
+		if err != nil {
+			return nil, &rpcError{Code: rpcInternalError, Message: err.Error()}
+		}
+		return mcpToolResult(res), nil
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -869,6 +902,16 @@ func toolDescriptors() []map[string]any {
 			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
 			"inputSchema": capabilitiesInputSchema,
 		},
+		{
+			"name":        "view_image",
+			"description": "Inspect an image file or visual artifact when the active model supports multimodal vision inputs. Omitted from tool declarations when model vision is unsupported.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"path to the image file to inspect"}},"required":["path"]}`),
+		},
+		{
+			"name":        "fak_arch_check",
+			"description": "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}}}`),
+		},
 	}
 	// The scoped trajectory-query surface (#3550): trajquery over MCP with the same
 	// validate -> rewrite -> execute scope enforcement the CLI runs.
@@ -1069,22 +1112,43 @@ func compileToolExposeAllow(raw []string) (func(string) bool, error) {
 	}, nil
 }
 
+func (s *Server) supportsVision() bool {
+	if s == nil {
+		return false
+	}
+	if s.modelVision {
+		return true
+	}
+	if envEnabled("FAK_MODEL_VISION") {
+		return true
+	}
+	m := strings.ToLower(s.model)
+	if m != "" && (strings.Contains(m, "vision") || strings.Contains(m, "-vl") || strings.Contains(m, "4o") || strings.Contains(m, "claude") || strings.Contains(m, "gemini")) {
+		return true
+	}
+	return false
+}
+
 // exposedToolDescriptors is toolDescriptors filtered by the optional --expose
-// allowlist. It is the SINGLE choke point every discovery view routes through
+// allowlist and model capability constraints (e.g. vision support for view_image).
+// It is the SINGLE choke point every discovery view routes through
 // (tools/list, fak_tools_search, the capabilities resource + self-feature
 // catalog, fak_feature_query, fak_capabilities), so a hidden tool never appears
 // in any of them. When no allowlist is in force (s.exposeAllow == nil) it
-// returns the full registry unchanged — byte-for-byte the pre-allowlist surface.
+// returns the eligible registry filtered by model capabilities.
 func (s *Server) exposedToolDescriptors() []map[string]any {
 	all := toolDescriptors()
-	if s == nil || s.exposeAllow == nil {
-		return all
-	}
+	hasVision := s.supportsVision()
 	out := make([]map[string]any, 0, len(all))
 	for _, td := range all {
-		if n, _ := td["name"].(string); s.exposeAllow(n) {
-			out = append(out, td)
+		name, _ := td["name"].(string)
+		if !hasVision && (name == "view_image" || name == "functions.view_image") {
+			continue
 		}
+		if s != nil && s.exposeAllow != nil && !s.exposeAllow(name) {
+			continue
+		}
+		out = append(out, td)
 	}
 	return out
 }

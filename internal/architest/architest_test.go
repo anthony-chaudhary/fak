@@ -252,7 +252,6 @@ var tier = map[string]int{
 	"benchauthority":   1, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); stdlib-only, imports nothing internal, off the hot path.
 	"closureaudit":     1, // pure stdlib-only port of the issue_closure_audit grader (#1406): binds commits to issue numbers and grades each issue's closure; imports nothing internal, off the hot path.
 	"ctxplans":         1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
-	"ctxplanlint":      1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
 	"fleetverify":      2, // throwaway compile-witness isolating the operator.go fleet helpers' loopfleet/loopmgr API usage from the churning cmd/fak; imports loopfleet(1)+loopmgr(1), off the hot path.
 	"issueownerprompt": 1, // stdlib-only canonical resolver lifecycle and drift validator (#6848).
 	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
@@ -804,11 +803,6 @@ var tier = map[string]int{
 	"agentopt":                   1,
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
-	"debtlane":                   1,
-	"mtptune":                    1,
-	"mtpeval":                    1,
-	"faultlab":                   1,
-	"gcpgpu":                     1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -912,6 +912,7 @@ type Server struct {
 	// the full registry regardless.
 	deferMCPTools   bool
 	disableMCPDefer bool
+	modelVision     bool
 
 	// capabilitiesReuse is the bounded, success-only reuse entry for the MCP
 	// fak_capabilities discovery operation. Its zero value is ready for use.

@@ -36,6 +36,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/guard"
@@ -543,6 +544,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdSuperloop(args)
 	case "superstream":
 		cmdSuperstream(args)
+	case "arch":
+		cmdArch(args)
 	case "fused":
 		cmdFused(args)
 	case "experiments":
@@ -1235,8 +1238,19 @@ func cmdAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 
+	providerExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "provider" {
+			providerExplicit = true
+		}
+	})
+	effectiveBaseURL := *baseURL
+	if effectiveBaseURL == "" && providerExplicit && !*offline {
+		effectiveBaseURL = dropin.DefaultBaseURL(*provider)
+	}
+
 	var planner agent.Planner
-	if *offline || *baseURL == "" {
+	if *offline || effectiveBaseURL == "" {
 		if !*offline {
 			fmt.Fprintln(os.Stderr, "fak agent: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
 		}
@@ -1248,7 +1262,7 @@ func cmdAgent(argv []string) {
 			// one will return 401, which the planner surfaces clearly. Warn, proceed.
 			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *apiKeyEnv)
 		}
-		p, err := agent.NewProviderHTTPPlanner(*provider, *baseURL, *model, key)
+		p, err := agent.NewProviderHTTPPlanner(*provider, effectiveBaseURL, *model, key)
 		must(err)
 		scheme, ok := agent.ParseAnthropicAuthScheme(*anthropicAuth)
 		if !ok {
