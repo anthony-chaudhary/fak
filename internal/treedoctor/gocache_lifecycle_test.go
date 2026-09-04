@@ -364,7 +364,7 @@ func TestSweepGoCacheProtectedRootAndSymlinkContainment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, filepath.Join(root, "aa")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	rep := SweepGoCache(GoCacheOptions{Root: root, HighBytes: 1, LowBytes: 1, MinAge: time.Hour}, false)
 	if len(rep.Candidates) != 0 {
