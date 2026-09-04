@@ -29,6 +29,8 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	s.Q4K = p.q4k
 	s.Q4KGateUpOutputSlab = p.q4kGateUpOutputSlab
 	s.CPUOffloadExperts = p.cpuOffloadExperts
+	s.DenseGPULayers = p.denseGPULayers
+	s.GPULayers = p.denseGPULayers
 	p.applyExpertSpill(s)
 	if p.backend == nil && p.metal {
 		s.Metal = true

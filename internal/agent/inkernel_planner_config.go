@@ -30,6 +30,7 @@ type InKernelPlannerConfig struct {
 	QwenQ4KPrefillChunkTokens int
 	Qwen35MetalGDNSequence    bool
 	Q4KGateUpOutputSlab       bool
+	DenseGPULayers            int
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -44,6 +45,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		backend:                      backend,
 		metal:                        metal,
 		cpuOffloadExperts:            cfg.CPUOffloadExperts,
+		denseGPULayers:               cfg.DenseGPULayers,
 		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
 		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
 		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
@@ -100,6 +102,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
 		Q4KGateUpOutputSlab:       p.q4kGateUpOutputSlab,
+		DenseGPULayers:            p.denseGPULayers,
 	}
 }
 

@@ -66,6 +66,7 @@ type InKernelPlanner struct {
 	qwenQ4KPrefillChunkConfigErr *model.InKernelQwenQ4KPrefillChunkConfigError
 	qwen35MetalGDNSequence       bool
 	q4kGateUpOutputSlab          bool
+	denseGPULayers               int
 	qwen35MetalGDNExecuted       atomic.Bool
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the

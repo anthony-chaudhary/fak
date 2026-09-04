@@ -76,11 +76,16 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 	if sf == nil {
 		return nativeControlConfig{}
 	}
+	gpuLayers := 0
+	if sf.nativeGPULayers != nil {
+		gpuLayers = *sf.nativeGPULayers
+	}
 	return nativeControlConfig{
 		Planner: agent.InKernelPlannerConfig{
 			QwenQ4KPrefillChunkTokens: *sf.nativeQwenQ4KPrefillChunk,
 			Qwen35MetalGDNSequence:    *sf.nativeQwen35MetalGDNSequence,
 			Q4KGateUpOutputSlab:       *sf.nativeQ4KGateUpOutputSlab,
+			DenseGPULayers:            gpuLayers,
 		},
 		PrefixProfile:    *sf.nativePrefixProfile,
 		VulkanQ4KProfile: *sf.vulkanQ4KProfile,
