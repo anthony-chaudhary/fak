@@ -157,6 +157,14 @@ type Annotation struct {
 	Line    string `json:"line"`
 }
 
+// Invariant: known environment matching is fail-closed and deterministic. An empty
+// or unmatchable signature is strictly rejected by Matchable, guaranteeing that
+// ordinary failures without an explicit environment fingerprint are never classified
+// as environmental flakes.
+//
+// Guard condition: Annotate returns an empty slice whenever no signature matches,
+// ensuring the caller fails closed and never suppresses agent responsibility.
+//
 // Annotate scans the output + exit code a tool just produced against a registry
 // and returns every signature that matches, each rendered as a not-your-fault
 // banner, in registry order. An EMPTY result is the important negative signal:
