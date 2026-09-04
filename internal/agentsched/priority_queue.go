@@ -7,6 +7,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+// Invariant: agent scheduler enforces priority queue ordering and shedder admission fail-closed.
+// Invariant: priority queue strictly isolates P0 system, P1 interactive, P2 batch, and P3 speculative tiers.
+// Invariant: queue capacity is strictly bounded with non-blocking fail-closed rejection on overflow.
+
 // Task represents a unit of work submitted to the agent thread scheduler.
 type Task struct {
 	ID           string             `json:"id"`
