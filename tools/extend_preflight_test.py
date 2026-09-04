@@ -27,6 +27,7 @@ EXPECTED_NAMES = {
     "gate2-prove-correct",
     "gate3-prove-faster",
     "golden-path-docs",
+    "opencode-snapshot-disabled",
     "test-path",
 }
 
@@ -61,7 +62,7 @@ def test_required_gate_entry_points_present_in_this_repo():
     # regression guard for the golden path itself.
     by_name = {c["name"]: c for c in ep.run_checks()}
     for gate in ("gate1-plug-in", "gate2-prove-correct", "gate3-prove-faster",
-                 "golden-path-docs", "git-guards-installed"):
+                 "golden-path-docs", "git-guards-installed", "opencode-snapshot-disabled"):
         assert by_name[gate]["ok"], f"{gate} failed: {by_name[gate]['detail']}"
 
 

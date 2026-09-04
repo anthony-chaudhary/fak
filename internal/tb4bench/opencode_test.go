@@ -19,6 +19,9 @@ func TestOpenCodeAdapterInvocation(t *testing.T) {
 	if !strings.Contains(content, "qwen3.8-coder") {
 		t.Errorf("config missing model name: %s", content)
 	}
+	if !strings.Contains(content, `"snapshot": false`) {
+		t.Errorf("config missing snapshot: false: %s", content)
+	}
 
 	// 2. Test environment setup and teardown
 	adapter := NewOpenCodeAdapter(OpenCodeConfig{

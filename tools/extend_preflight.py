@@ -114,7 +114,7 @@ def run_checks() -> list[dict]:
     ))
 
     # --- Gate 2: prove correct (the witness pattern + Reference/Approx contract) -------
-    witnesses = sorted((ROOT / "fak" / "internal").glob("*/proofs_witness_test.go"))
+    witnesses = sorted((ROOT / "internal").glob("*/proofs_witness_test.go")) or sorted((ROOT / "fak" / "internal").glob("*/proofs_witness_test.go"))
     g2 = len(witnesses) > 0 and _file_has("internal/compute/compute.go", "CorrectnessClass")
     checks.append(_check(
         "gate2-prove-correct", ERROR, g2,
@@ -135,14 +135,33 @@ def run_checks() -> list[dict]:
     # --- the golden-path docs themselves ----------------------------------------------
     checks.append(_check(
         "golden-path-docs", ERROR,
-        _exists("fak/EXTENDING.md") and _exists("CONTRIBUTING.md"),
-        "fak/EXTENDING.md (on-ramp) + CONTRIBUTING.md (landing flow) present",
+        (_exists("EXTENDING.md") or _exists("fak/EXTENDING.md")) and _exists("CONTRIBUTING.md"),
+        "EXTENDING.md (on-ramp) + CONTRIBUTING.md (landing flow) present",
         "git pull --no-rebase  # fetch the contributor docs",
+    ))
+
+    # --- opencode configuration check -------------------------------------------------
+    opencode_json_path = ROOT / "opencode.json"
+    snapshot_disabled = False
+    if opencode_json_path.exists():
+        try:
+            with open(opencode_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            snapshot_disabled = data.get("snapshot") is False
+        except Exception:
+            snapshot_disabled = False
+    checks.append(_check(
+        "opencode-snapshot-disabled", ERROR,
+        snapshot_disabled,
+        "opencode.json has 'snapshot': false (prevents disk and SQLite bloat in large repos)"
+        if snapshot_disabled else
+        "opencode.json missing 'snapshot': false (risk of disk and SQLite bloat in large repos)",
+        "set '\"snapshot\": false' in opencode.json",
     ))
 
     # --- test path (informational: Windows hosts run the Go suite through WSL) ---------
     has_wsl = shutil.which("wsl") is not None
-    has_testsh = _exists("fak/test.sh")
+    has_testsh = _exists("test.sh") or _exists("fak/test.sh")
     if sys.platform == "win32":
         checks.append(_check(
             "test-path", INFO,

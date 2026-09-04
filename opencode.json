@@ -1,8 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "snapshot": false,
   "instructions": ["CONTRIBUTING.md", "AGENTS.md"],
   "skills": {
     "paths": [".agents/skills"]
+  },
+  "agent": {
+    "general": {
+      "variant": "default"
+    },
+    "explore": {
+      "variant": "default"
+    },
+    "deep-reason": {
+      "variant": "high",
+      "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
+    }
   },
   "mcp": {
     "dos": {
@@ -15,12 +28,15 @@
     },
     "fak": {
       "type": "local",
-      "command": ["fak", "serve", "--stdio", "--defer-tools=false", "--policy", "examples/opencode-policy.json"],
+      "command": ["fak", "serve", "--stdio", "--defer-tools=true", "--policy", "examples/opencode-policy.json"],
       "environment": {},
       "enabled": true
     }
   },
   "lsp": {
+    "gopls": {
+      "disabled": true
+    },
     "fak-go": {
       "command": ["fak", "lsp"],
       "extensions": [".go"]
