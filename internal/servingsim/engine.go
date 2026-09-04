@@ -346,12 +346,41 @@ func (e *Engine) tryScheduleStep() {
 	tokenBudget := e.config.MaxTokensPerStep
 	useTokenBudget := tokenBudget > 0
 
-	var scheduledDecodes []*RequestState
-	var scheduledPrefills []prefillTask
-
 	// Phase 1: Schedule active decodes (highest priority in continuous batching)
+	scheduledDecodes, freeBlocks := e.scheduleActiveDecodes(freeBlocks, maxBatch)
+
+	freeBatchCapacity := maxBatch - len(scheduledDecodes)
+	remainingTokens := tokenBudget
+	if useTokenBudget {
+		// Decodes consume compute budget (1 token or draft length)
+		decodeTokenConsumption := len(scheduledDecodes) * (1 + e.config.SpeculativeHorizon)
+		remainingTokens -= decodeTokenConsumption
+		if remainingTokens < 0 {
+			remainingTokens = 0
+		}
+	}
+
+	// Phase 2: Schedule in-progress chunked prefills
+	scheduledPrefills, freeBlocks, freeBatchCapacity, remainingTokens := e.scheduleActivePrefills(
+		freeBlocks, freeBatchCapacity, remainingTokens, useTokenBudget,
+	)
+
+	// Phase 3: Admit waiting requests from arrival queue
+	admittedPrefills := e.admitWaitingRequests(freeBlocks, freeBatchCapacity, remainingTokens, useTokenBudget)
+	scheduledPrefills = append(scheduledPrefills, admittedPrefills...)
+
+	// If no work scheduled, remain idle until next event
+	if len(scheduledDecodes) == 0 && len(scheduledPrefills) == 0 {
+		return
+	}
+
+	e.executeScheduledStep(scheduledDecodes, scheduledPrefills)
+}
+
+func (e *Engine) tryAllocateDecodes(freeBlocks, maxBatch int) ([]*RequestState, int) {
+	var scheduled []*RequestState
 	for _, req := range e.activeDecode {
-		if len(scheduledDecodes) >= maxBatch {
+		if len(scheduled) >= maxBatch {
 			break
 		}
 		draftK := e.config.SpeculativeHorizon
@@ -367,12 +396,18 @@ func (e *Engine) tryScheduleStep() {
 			if additionalBlocks > 0 {
 				e.allocateBlocks(req, targetBlocks)
 			}
-			scheduledDecodes = append(scheduledDecodes, req)
+			scheduled = append(scheduled, req)
 		}
 	}
+	return scheduled, freeBlocks
+}
+
+func (e *Engine) scheduleActiveDecodes(freeBlocks, maxBatch int) ([]*RequestState, int) {
+	var scheduled []*RequestState
+	scheduled, freeBlocks = e.tryAllocateDecodes(freeBlocks, maxBatch)
 
 	// If no decode could get a block due to memory exhaustion, preempt the newest decode
-	if len(scheduledDecodes) == 0 && len(e.activeDecode) > 1 {
+	if len(scheduled) == 0 && len(e.activeDecode) > 1 {
 		preemptIdx := len(e.activeDecode) - 1
 		preempted := e.activeDecode[preemptIdx]
 		e.activeDecode = e.activeDecode[:preemptIdx]
@@ -383,39 +418,13 @@ func (e *Engine) tryScheduleStep() {
 		e.waitingQueue = append([]*RequestState{preempted}, e.waitingQueue...)
 		freeBlocks = e.config.TotalKVBlocks - e.usedKVBlocks
 
-		for _, req := range e.activeDecode {
-			if len(scheduledDecodes) >= maxBatch {
-				break
-			}
-			draftK := e.config.SpeculativeHorizon
-			nextTokens := req.PromptTokens + req.TokensGenerated + (draftK + 1)
-			targetBlocks := e.blocksForTokens(nextTokens)
-			additionalBlocks := targetBlocks - req.AllocatedKVBlocks
-			if additionalBlocks < 0 {
-				additionalBlocks = 0
-			}
-			if freeBlocks >= additionalBlocks {
-				freeBlocks -= additionalBlocks
-				if additionalBlocks > 0 {
-					e.allocateBlocks(req, targetBlocks)
-				}
-				scheduledDecodes = append(scheduledDecodes, req)
-			}
-		}
+		scheduled, freeBlocks = e.tryAllocateDecodes(freeBlocks, maxBatch)
 	}
+	return scheduled, freeBlocks
+}
 
-	freeBatchCapacity := maxBatch - len(scheduledDecodes)
-	remainingTokens := tokenBudget
-	if useTokenBudget {
-		// Decodes consume compute budget (1 token or draft length)
-		decodeTokenConsumption := len(scheduledDecodes) * (1 + e.config.SpeculativeHorizon)
-		remainingTokens -= decodeTokenConsumption
-		if remainingTokens < 0 {
-			remainingTokens = 0
-		}
-	}
-
-	// Phase 2: Schedule in-progress chunked prefills
+func (e *Engine) scheduleActivePrefills(freeBlocks, freeBatchCapacity, remainingTokens int, useTokenBudget bool) ([]prefillTask, int, int, int) {
+	var scheduledPrefills []prefillTask
 	for _, req := range e.activePrefill {
 		if freeBatchCapacity <= 0 || (useTokenBudget && remainingTokens <= 0) {
 			break
@@ -446,8 +455,10 @@ func (e *Engine) tryScheduleStep() {
 			}
 		}
 	}
+	return scheduledPrefills, freeBlocks, freeBatchCapacity, remainingTokens
+}
 
-	// Phase 3: Admit waiting requests from arrival queue
+func (e *Engine) admitWaitingRequests(freeBlocks, freeBatchCapacity, remainingTokens int, useTokenBudget bool) []prefillTask {
 	runningCommitted := 0
 	for _, r := range e.activeDecode {
 		runningCommitted += e.blocksForTokens(r.PromptTokens + r.OutputTarget)
@@ -456,6 +467,7 @@ func (e *Engine) tryScheduleStep() {
 		runningCommitted += e.blocksForTokens(r.PromptTokens + r.OutputTarget)
 	}
 
+	var scheduledPrefills []prefillTask
 	var admittedIndices []int
 	for i, req := range e.waitingQueue {
 		if freeBatchCapacity <= 0 || (useTokenBudget && remainingTokens <= 0) {
@@ -501,12 +513,10 @@ func (e *Engine) tryScheduleStep() {
 		idx := admittedIndices[i]
 		e.waitingQueue = append(e.waitingQueue[:idx], e.waitingQueue[idx+1:]...)
 	}
+	return scheduledPrefills
+}
 
-	// If no work scheduled, remain idle until next event
-	if len(scheduledDecodes) == 0 && len(scheduledPrefills) == 0 {
-		return
-	}
-
+func (e *Engine) executeScheduledStep(scheduledDecodes []*RequestState, scheduledPrefills []prefillTask) {
 	totalPrefillTokens := 0
 	for _, p := range scheduledPrefills {
 		totalPrefillTokens += p.tokens
