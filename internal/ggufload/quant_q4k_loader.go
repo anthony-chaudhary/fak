@@ -353,182 +353,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	// state (TensorBytes copies; dequantF32 allocates fresh; the helpers are pure over the
 	// read-only Config), so it is safe to run from many workers at once.
 	computeFn := func(info TensorInfo) tensorWork {
-		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
-		// Normally unused text sidecars are dropped before canonical mapping. Under an
-		// explicit W3 request, an IQ3 sidecar is instead a forbidden partial selection:
-		// fail closed rather than silently accepting IQ3 vision/MTP bytes outside MLP.
-		if w3Requested && info.Type == TensorIQ3_XXS &&
-			archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
-			tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)
-			return tw
-		}
-		// Drop the MTP ("nextn") head + any vision tower the text forward never reads, for every
-		// arch that ships them as sidecars (GLM-5.2, DeepSeek, Qwen3.5/3.6). Ungated union: the
-		// MTP head has no canonical slot to materialize into yet even under model.RetainMTP, so
-		// drop it from materialization while the estimators count its bytes.
-		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
-			return tw
-		}
-		if archUsesMLAMoELayout(cfg.ModelType) {
-			// MLA KV-b half: dequant it; the collector buffers + merges the pair in order.
-			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-				shape, data, err := s.dequantGGUFShapeF32(info)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
-				return tw
-			}
-		}
-		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
-			// Batched routed experts: split the [E,out,in] blob 1->E. A block-aligned raw-quant
-			// blob splits as RAW bytes -> resident (no dequant): the experts are the MoE bulk,
-			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
-			// Any other type falls to the f32 dequant-split.
-			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
-				// R5/#5616: the tier owns this slab. Return before shapeAndBytes — reading the
-				// payload here is exactly the cost the rung removes, and on a GLM-5.2-shaped
-				// checkpoint it is the whole expert bulk. Nothing is tallied on the load-path
-				// breakdown (acctType stays ""), because these bytes were neither held resident nor
-				// round-tripped through f32: they were not loaded at all, and the tier's own Stats
-				// is where their reads show up.
-				if streamed[info.Name] {
-					return tw
-				}
-				shape, raw, okShape := s.shapeAndBytesOrFail(info, &tw)
-				if !okShape {
-					return tw
-				}
-				tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
-				if blockWeights, blockBytes, residentable := residentExpertBlockGeometry(info.Type); residentable {
-					kqExperts, aligned, err := splitGLMMoeDsaExpertsRawQuant(layer, proj, shape, raw, blockWeights, blockBytes)
-					if err != nil {
-						tw.err = err
-						return tw
-					}
-					if aligned && model.ResidentKQuantEligible(cfg, kqExperts[0].Name) {
-						kept := loadOpts.keptExperts(len(kqExperts))
-						tw.pending = make([]pendingTensor, 0, kept)
-						for i, ex := range kqExperts {
-							if !loadOpts.keepExpert(i) {
-								continue
-							}
-							tw.pending = append(tw.pending, pendingTensor{resident: true, residentType: info.Type, name: ex.Name, shape: ex.Shape, raw: ex.Raw})
-						}
-						tw.acctResident, tw.acctTensors = true, kept
-						if loadOpts.expertShardSet {
-							if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(kqExperts)); err == nil {
-								tw.acctBytes = int64(b)
-							}
-						}
-						return tw
-					}
-				}
-				data, err := dequantF32(info, raw)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				kept := loadOpts.keptExperts(len(experts))
-				tw.pending = make([]pendingTensor, 0, kept)
-				for i, ex := range experts {
-					if !loadOpts.keepExpert(i) {
-						continue
-					}
-					tw.pending = append(tw.pending, pendingTensor{resident: false, name: ex.Name, shape: ex.Shape, f32: ex.Data})
-				}
-				tw.acctResident, tw.acctTensors = false, kept
-				if loadOpts.expertShardSet {
-					if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(experts)); err == nil {
-						tw.acctBytes = int64(b)
-					}
-				}
-				return tw
-			}
-		}
-		canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
-		if !ok {
-			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
-			return tw
-		}
-		if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
-			return s.lazyDenseQ4KTensorWork(info, canon, tw.tickBytes)
-		}
-		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
-		if !ok {
-			return tw
-		}
-		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1
-		w3Eligible := info.Type == TensorIQ3_XXS && model.ResidentW3MLPEligible(cfg, canon)
-		switch {
-		case w3Eligible && w3Requested:
-			// The source artifact is already IQ3_XXS. Tag only the exact dense MLP
-			// gate/up/down band; there is no encoder or runtime Q4->IQ3 conversion.
-			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
-			tw.acctResident = true
-			return tw
-		case info.Type == TensorIQ3_XXS && w3Requested:
-			tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", canon)
-			return tw
-		}
-		// Direct-resident-Q4_K fast path: an eligible Q4_K matmul weight is wrapped raw,
-		// skipping dequantF32 (Q4→f32) and the f32→Q8 re-quant entirely. raw is a fresh
-		// TensorBytes copy, so handing it straight to the builder is safe.
-		if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
-			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
-			tw.acctResident = true
-			return tw
-		}
-		// Direct-resident-k-quant fast path for a DENSE (non-expert) matmul weight whose GGUF type
-		// is a residentable k-quant — the q4_k_m dense down_proj and lm_head load Q6_K, which the
-		// Q4_K-only fast path above skips. Without this they take the dequant→Q8 path and miss BOTH
-		// the resident int8 kQuantMatRows (Stage A) and the fused Metal Q6_K MLP (Stage B,
-		// FusedMLPQ6Down) — the per-token weight traffic for ~4 GB of Q6_K weights stays on the
-		// slowest route. ResidentKQuantEligible is the SAME identity-normalization gate as the Q4_K
-		// path (it refuses the normalize-sensitive q/k/qkv/linear_attn projections), so skipping
-		// normalizeCanonicalTensorData here is safe for exactly the identity weights (ffn_down,
-		// o_proj, lm_head) it admits. The expert k-quants take the batched resident path above.
-		// This is also the arm a NATIVE Q4_0 checkpoint takes (#5497), since the type test is the
-		// shared geometry table: such a checkpoint is published BECAUSE it is the small artifact,
-		// and the dequant→Q8 route left it resident at Q8_0 density — larger than the file it came
-		// from — having held the f32 expansion and the Q8 result live at once, so the load PEAK,
-		// not merely the steady state, is what broke the fit. Routing it here rather than through
-		// its own branch is deliberate: Q4_0 then inherits the same two safety gates as its
-		// siblings, so a backend that disables dense raw residency, or the GLM device layout
-		// below, still sends it down the proven path instead of leaving it unreachable at decode.
-		// EXCEPTION — glm_moe_dsa: its device serve (glmDsaWeightHAL) uploads every DENSE weight
-		// from the f32/q8/q4kw stores and has no kqw kernels, so a dense weight held here panics
-		// the first request ("got resident raw expert-quant weight ... on the device path" — the
-		// GLM-5.2 cpu-offload serve regression, 2026-07-01). GLM dense non-Q4_K k-quants keep the
-		// dequant→Q8 route (the 2026-06-27-witnessed layout); only the routed experts, which run
-		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
-		if _, _, residentable := residentExpertBlockGeometry(info.Type); loadOpts.residentDenseKQuant && residentable &&
-			info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
-			model.ResidentKQuantEligible(cfg, canon) {
-			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
-			tw.acctResident = true
-			return tw
-		}
-		// Everything else (normalize-sensitive projections, embedding, norms, biases, fused qkv)
-		// follows the standard dequant → normalize → builder path.
-		data, err := dequantF32(info, raw)
-		if err != nil {
-			tw.err = err
-			return tw
-		}
-		data, err = normalizeCanonicalTensorData(canon, data, cfg)
-		if err != nil {
-			tw.err = err
-			return tw
-		}
-		tw.pending = []pendingTensor{{resident: false, name: canon, shape: shape, f32: data}}
-		return tw
+		return s.computeQ4KTensorWork(info, cfg, w3Requested, streamed, loadOpts)
 	}
 
 	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
@@ -697,6 +522,10 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				if err := builder.AddResidentQ4_0(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
+			case TensorQ2_K:
+				if err := builder.AddResidentQ2K(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
 			default: // TensorQ4_K
 				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
 					return err
@@ -709,4 +538,135 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 		}
 	}
 	return nil
+}
+
+func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w3Requested bool, streamed map[string]bool, loadOpts q4kLoadOptions) tensorWork {
+	tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
+	if w3Requested && info.Type == TensorIQ3_XXS &&
+		archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)
+		return tw
+	}
+	if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+		return tw
+	}
+	if archUsesMLAMoELayout(cfg.ModelType) {
+		if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
+			shape, data, err := s.dequantGGUFShapeF32(info)
+			if err != nil {
+				tw.err = err
+				return tw
+			}
+			tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
+			return tw
+		}
+	}
+	if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
+		if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+			if streamed[info.Name] {
+				return tw
+			}
+			shape, raw, okShape := s.shapeAndBytesOrFail(info, &tw)
+			if !okShape {
+				return tw
+			}
+			tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
+			if blockWeights, blockBytes, residentable := residentExpertBlockGeometry(info.Type); residentable {
+				kqExperts, aligned, err := splitGLMMoeDsaExpertsRawQuant(layer, proj, shape, raw, blockWeights, blockBytes)
+				if err != nil {
+					tw.err = err
+					return tw
+				}
+				if aligned && model.ResidentKQuantEligible(cfg, kqExperts[0].Name) {
+					kept := loadOpts.keptExperts(len(kqExperts))
+					tw.pending = make([]pendingTensor, 0, kept)
+					for i, ex := range kqExperts {
+						if !loadOpts.keepExpert(i) {
+							continue
+						}
+						tw.pending = append(tw.pending, pendingTensor{resident: true, residentType: info.Type, name: ex.Name, shape: ex.Shape, raw: ex.Raw})
+					}
+					tw.acctResident, tw.acctTensors = true, kept
+					if loadOpts.expertShardSet {
+						if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(kqExperts)); err == nil {
+							tw.acctBytes = int64(b)
+						}
+					}
+					return tw
+				}
+			}
+			data, err := dequantF32(info, raw)
+			if err != nil {
+				tw.err = err
+				return tw
+			}
+			experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+			if err != nil {
+				tw.err = err
+				return tw
+			}
+			kept := loadOpts.keptExperts(len(experts))
+			tw.pending = make([]pendingTensor, 0, kept)
+			for i, ex := range experts {
+				if !loadOpts.keepExpert(i) {
+					continue
+				}
+				tw.pending = append(tw.pending, pendingTensor{resident: false, name: ex.Name, shape: ex.Shape, f32: ex.Data})
+			}
+			tw.acctResident, tw.acctTensors = false, kept
+			if loadOpts.expertShardSet {
+				if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(experts)); err == nil {
+					tw.acctBytes = int64(b)
+				}
+			}
+			return tw
+		}
+	}
+	canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
+	if !ok {
+		tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+		return tw
+	}
+	if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+		return s.lazyDenseQ4KTensorWork(info, canon, tw.tickBytes)
+	}
+	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
+	if !ok {
+		return tw
+	}
+	tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1
+	w3Eligible := info.Type == TensorIQ3_XXS && model.ResidentW3MLPEligible(cfg, canon)
+	switch {
+	case w3Eligible && w3Requested:
+		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+		tw.acctResident = true
+		return tw
+	case info.Type == TensorIQ3_XXS && w3Requested:
+		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", canon)
+		return tw
+	}
+	if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+		tw.acctResident = true
+		return tw
+	}
+	if _, _, residentable := residentExpertBlockGeometry(info.Type); loadOpts.residentDenseKQuant && residentable &&
+		info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
+		model.ResidentKQuantEligible(cfg, canon) {
+		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+		tw.acctResident = true
+		return tw
+	}
+	data, err := dequantF32(info, raw)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	data, err = normalizeCanonicalTensorData(canon, data, cfg)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	tw.pending = []pendingTensor{{resident: false, name: canon, shape: shape, f32: data}}
+	return tw
 }

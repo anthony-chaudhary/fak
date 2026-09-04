@@ -36,6 +36,7 @@ const (
 	kindIQ1M
 	kindQ8_0
 	kindQ4_0
+	kindQ2K
 )
 
 // Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes),
@@ -73,6 +74,7 @@ const (
 	q8_0BlockBytes   = 2 + q8_0BlockWeights
 	q4_0BlockWeights = 32
 	q4_0BlockBytes   = 2 + q4_0BlockWeights/2
+	q2kBlockBytes    = qkK/16 + qkK/4 + 2 + 2
 )
 
 func (k kQuantKind) blockBytes() int {
@@ -97,6 +99,8 @@ func (k kQuantKind) blockBytes() int {
 		return q8_0BlockBytes
 	case kindQ4_0:
 		return q4_0BlockBytes
+	case kindQ2K:
+		return q2kBlockBytes
 	default:
 		return q5kBlockBytes
 	}
@@ -134,6 +138,8 @@ func (k kQuantKind) String() string {
 		return "Q8_0"
 	case kindQ4_0:
 		return "Q4_0"
+	case kindQ2K:
+		return "Q2_K"
 	default:
 		return "Q5_K"
 	}
@@ -215,6 +221,38 @@ func q6kDequantSuperBlock(dst []float32, blk []byte) {
 	}
 }
 
+// q2kDequantSuperBlock writes the 256 weights of one 84-byte Q2_K super-block into dst
+// (len >= 256). Byte-for-byte ggufload.dequantQ2KScalar factored to one super-block.
+func q2kDequantSuperBlock(dst []float32, blk []byte) {
+	scales := blk[:qkK/16]
+	q := blk[qkK/16 : qkK/16+qkK/4]
+	dm := qkK/16 + qkK/4
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[dm:])))
+	min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[dm+2:])))
+	qi := 0
+	is := 0
+	for n := 0; n < qkK; n += 128 {
+		shift := uint(0)
+		for j := 0; j < 4; j++ {
+			sc := scales[is]
+			is++
+			dl, ml := d*float32(sc&0x0f), min*float32(sc>>4)
+			for l := 0; l < 16; l++ {
+				dst[n+j*32+l] = dl*float32((q[qi+l]>>shift)&3) - ml
+			}
+
+			sc = scales[is]
+			is++
+			dl, ml = d*float32(sc&0x0f), min*float32(sc>>4)
+			for l := 0; l < 16; l++ {
+				dst[n+j*32+16+l] = dl*float32((q[qi+16+l]>>shift)&3) - ml
+			}
+			shift += 2
+		}
+		qi += 32
+	}
+}
+
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	switch kind {
 	case kindQ6K:
@@ -239,6 +277,8 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 		q8_0DequantBlock(dst, blk)
 	case kindQ4_0:
 		q4_0DequantBlock(dst, blk)
+	case kindQ2K:
+		q2kDequantSuperBlock(dst, blk)
 	default:
 		q5kDequantSuperBlock(dst, blk)
 	}
@@ -497,6 +537,12 @@ func (b *QuantBuilder) AddResidentQ8_0(canon string, shape []int, raw []byte) er
 // unconditionally on a Q4_0 tensor.
 func (b *QuantBuilder) AddResidentQ4_0(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindQ4_0)
+}
+
+// AddResidentQ2K stores a raw legacy GGUF Q2_K payload verbatim, avoiding f32/Q8 round-trip
+// inflation (84 B / 256 w = 0.328 B/w vs Q8_0's 1.0625 B/w).
+func (b *QuantBuilder) AddResidentQ2K(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindQ2K)
 }
 
 func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, kind kQuantKind) error {

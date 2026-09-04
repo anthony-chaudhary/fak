@@ -62,7 +62,7 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		kind kQuantKind
-	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}, {"Q4_0", kindQ4_0}} {
+	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}, {"Q4_0", kindQ4_0}, {"Q2_K", kindQ2K}} {
 		t.Run(tc.name, func(t *testing.T) {
 			nblk := in / tc.kind.blockWeights()
 			bb := tc.kind.blockBytes()
@@ -170,6 +170,9 @@ func pinResidentQuantScales(raw []byte, out, nblk int, kind kQuantKind) {
 			switch kind {
 			case kindQ6K:
 				binary.LittleEndian.PutUint16(blk[q6kBlockBytes-2:], f16One)
+			case kindQ2K:
+				binary.LittleEndian.PutUint16(blk[80:], f16One) // d = 1.0
+				binary.LittleEndian.PutUint16(blk[82:], 0)      // min = 0
 			default:
 				binary.LittleEndian.PutUint16(blk[0:], f16One)
 				if kind == kindQ5K {
@@ -299,6 +302,24 @@ func TestKQuantDequantGolden(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Q2_K", func(t *testing.T) {
+		blk := make([]byte, q2kBlockBytes)
+		for i := 0; i < qkK/16; i++ {
+			blk[i] = 1 // sc = 1 (sc&0xf = 1, sc>>4 = 0)
+		}
+		for i := 0; i < qkK/4; i++ {
+			blk[qkK/16+i] = 0xff // all 4 2-bit codes = 3
+		}
+		binary.LittleEndian.PutUint16(blk[80:], f16Two()) // d = 2.0
+		binary.LittleEndian.PutUint16(blk[82:], 0)        // min = 0
+		dst := make([]float32, qkK)
+		q2kDequantSuperBlock(dst, blk)
+		for i := 0; i < qkK; i++ {
+			if dst[i] != 6 {
+				t.Fatalf("Q2_K[%d]=%v, want 6 (d=2, scale=1, code=3)", i, dst[i])
+			}
+		}
+	})
 }
 
 // f16Two returns the IEEE-754 half encoding of 2.0 (0x4000).
@@ -356,6 +377,7 @@ func TestResidentMatRowsDispatchesIQAndQ8RawExperts(t *testing.T) {
 		{"IQ4_XS", kindIQ4XS, (*QuantBuilder).AddResidentIQ4XS},
 		{"Q8_0", kindQ8_0, (*QuantBuilder).AddResidentQ8_0},
 		{"Q4_0", kindQ4_0, (*QuantBuilder).AddResidentQ4_0},
+		{"Q2_K", kindQ2K, (*QuantBuilder).AddResidentQ2K},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nblk := in / tc.kind.blockWeights()
