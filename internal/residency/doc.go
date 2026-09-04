@@ -39,10 +39,9 @@
 //
 // # Off by default until ready (two safety layers)
 //
-// This leaf is NOT blank-imported in the defconfig (internal/registrations), so the fak
-// binary never even links it — the strongest gate, byte-unchanged kernel. It registers
-// nothing with the ABI from init() (it is a library type a caller constructs, exactly
-// like internal/polymodel), so it reaches a live request path only when a future rung
-// constructs a Manager behind polymodel.Enabled() (FAK_POLYMODEL, default off). The
+// This leaf is registered in cmd/fak/registered_leaves.go for production command
+// reachability. It registers nothing with the ABI from init() (it is a library type a
+// caller constructs, exactly like internal/polymodel), so it reaches a live request path
+// only when constructed behind polymodel.Enabled() (FAK_POLYMODEL, default off). The
 // pure helpers here are deterministic and safe to call directly.
 package residency
