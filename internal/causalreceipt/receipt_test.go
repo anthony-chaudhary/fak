@@ -47,3 +47,23 @@ func TestRejectsContentAndOrphans(t *testing.T) {
 		t.Fatal("leaked lifecycle admitted")
 	}
 }
+
+func BenchmarkValidate(b *testing.B) {
+	r := fixture("completed")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := Validate(r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSummarize(b *testing.B) {
+	r := fixture("completed")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Summarize(r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
