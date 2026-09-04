@@ -12,9 +12,9 @@ import "strings"
 //	                  inferred from task text and is never an auto-escalation
 //	                  fallback target. This is the durable encoding of "use Fable 5
 //	                  only in the clear cases where it is needed".
-//	TierFrontier (1)  the max-quality frontier set (Opus-class, GPT-5.6 Sol/Terra,
-//	                  GPT-5.5, DeepSeek V4 Pro, Kimi K2.6) — the default target for a
-//	                  hard task.
+//	TierFrontier (1)  the max-quality frontier set (Opus-class, GPT-6 Astra,
+//	                  GPT-5.6 Sol/Terra, GPT-5.5, DeepSeek V4 Pro, Kimi K2.6) — the
+//	                  default target for a hard task.
 //	TierLight    (2)  the lightweight-work set (GPT-5.6 Luna, GLM-5.2, Gemini 3.5 Flash).
 //	TierOther    (3)  everything else (local, unknown).
 //

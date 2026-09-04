@@ -229,10 +229,10 @@ func modelTierFromName(model string) int {
 	if names("gpt-5.6-luna", "gpt56luna") {
 		return 2
 	}
-	// GPT-5.6 Sol (the flagship, aliased by the bare `gpt-5.6` id) and GPT-5.6 Terra
-	// (≈ GPT-5.5) are the current OpenAI frontier seats; GPT-5.5 stays classified
-	// alongside them.
-	if names("gpt-5.6", "gpt56") || names("gpt-5.5", "gpt55") {
+	// GPT-6 Astra (the flagship, aliased by bare `gpt-6` and `astra`), GPT-5.6 Sol
+	// (aliased by bare `gpt-5.6`), and GPT-5.6 Terra (≈ GPT-5.5) are OpenAI frontier
+	// seats; GPT-5.5 stays classified alongside them.
+	if names("gpt-6", "gpt6") || names("astra", "astra") || names("gpt-5.6", "gpt56") || names("gpt-5.5", "gpt55") {
 		return 1
 	}
 	// The Opus FAMILY is the Claude frontier class in every generation — opus-5 (the

@@ -181,6 +181,13 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 		{"glm-5.2", 2},
 		{"zai-coding-plan/glm-5.2", 2},
 		{"gpt-5.5", 1},
+		// GPT-6 generation: Astra (flagship, bare gpt-6 and astra aliases) ranks frontier.
+		{"gpt-6", 1},
+		{"gpt-6-astra", 1},
+		{"gpt 6 astra", 1},
+		{"gpt6astra", 1},
+		{"astra", 1},
+		{"openai/gpt-6-astra", 1},
 		// GPT-5.6 generation: Sol (bare alias) and Terra rank frontier; Luna is the
 		// fast/cheap lightweight seat.
 		{"gpt-5.6", 1},
