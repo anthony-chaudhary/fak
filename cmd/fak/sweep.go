@@ -11,6 +11,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/flowmetrics"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -43,6 +44,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "sweep")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the plan as JSON")
+	census := fs.Bool("census", false, "render the rev-pinned working-tree WIP census and preview-only candidate paths")
 	cleanJunk := fs.Bool("clean-junk", false, "remove only paths freshly classified as junk files, then report what changed")
 	apply := fs.Bool("apply", false, "commit one lane group (requires --lane and -m); default is plan-only")
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
@@ -65,6 +67,14 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	if *cleanJunk && *apply {
 		fmt.Fprintln(stderr, "fak sweep: --clean-junk and --apply are separate actions; run one at a time")
 		return 2
+	}
+	if *census && (*cleanJunk || *apply) {
+		fmt.Fprintln(stderr, "fak sweep: --census is preview-only and cannot be combined with --clean-junk or --apply")
+		return 2
+	}
+
+	if *census {
+		return runSweepCensus(stdout, stderr, root, *asJSON)
 	}
 
 	entries, err := gitStatusDirty(ctx(), root)
@@ -543,4 +553,133 @@ func sweepAgeLabel(seconds int64) string {
 	default:
 		return fmt.Sprintf("%dd", seconds/86400)
 	}
+}
+
+// sweepCensusResult models the structured JSON payload for `fak sweep --census --json`.
+type sweepCensusResult struct {
+	Schema        string              `json:"schema"`
+	Rev           string              `json:"rev"`
+	Census        flowmetrics.TreeWIP `json:"census"`
+	LitterPaths   []string            `json:"litter_paths"`
+	UnlandedPaths []string            `json:"unlanded_paths"`
+	RemovedCount  int                 `json:"removed_count"`
+}
+
+// runSweepCensus implements the preview-only rev-pinned working tree WIP census and candidate classification.
+func runSweepCensus(stdout, stderr io.Writer, root string, asJSON bool) int {
+	treeWIP, err := flowmetrics.GatherTree(context.Background(), root, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak sweep --census: %v\n", err)
+		return 1
+	}
+
+	out, err := runSweepGit(context.Background(), root, "status", "status", "--porcelain", "-z")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak sweep --census: %v\n", err)
+		return 1
+	}
+
+	entries := parsePorcelainZ(out)
+	litter, unlanded := classifyCandidatePaths(entries)
+
+	if asJSON {
+		res := sweepCensusResult{
+			Schema:        "fak-sweep-census/1",
+			Rev:           treeWIP.Rev,
+			Census:        treeWIP,
+			LitterPaths:   litter,
+			UnlandedPaths: unlanded,
+			RemovedCount:  0,
+		}
+		if err := writeIndentedJSON(stdout, res); err != nil {
+			fmt.Fprintf(stderr, "fak sweep --census --json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	renderSweepCensus(stdout, treeWIP, litter, unlanded)
+	return 0
+}
+
+func classifyCandidatePaths(entries []dirtyEntry) (litter []string, unlanded []string) {
+	for _, e := range entries {
+		norm := normSweepPath(e.Path)
+		if isCandidateLitter(e) {
+			litter = append(litter, norm)
+		} else {
+			unlanded = append(unlanded, norm)
+		}
+	}
+	return litter, unlanded
+}
+
+func isCandidateLitter(e dirtyEntry) bool {
+	norm := normSweepPath(e.Path)
+	base := filepath.Base(filepath.FromSlash(norm))
+	rootLevel := !strings.Contains(norm, "/")
+
+	// Scratch probes zz_-prefixed
+	if strings.HasPrefix(base, "zz_") {
+		return true
+	}
+	// Hidden dot-prefixed .go
+	if strings.HasPrefix(base, ".") && strings.HasSuffix(base, ".go") {
+		return true
+	}
+	// Root throwaway files
+	if rootLevel && isSweepJunk(e) {
+		return true
+	}
+	return false
+}
+
+func formatCensusVerdict(count, ceiling int) string {
+	if count <= ceiling {
+		return "PASS"
+	}
+	return "DEFECT"
+}
+
+func formatUntrackedAge(hours float64) string {
+	if hours <= 0 {
+		return "0.0h"
+	}
+	if hours < 24 {
+		return fmt.Sprintf("%.1fh", hours)
+	}
+	days := hours / 24.0
+	return fmt.Sprintf("%.1fd (%.1fh)", days, hours)
+}
+
+func renderSweepCensus(w io.Writer, tree flowmetrics.TreeWIP, litter, unlanded []string) {
+	fmt.Fprintln(w, "Rev-pinned working tree census:")
+	if !tree.Measured {
+		fmt.Fprintln(w, "  Working-tree WIP: NOT MEASURED")
+	} else {
+		fmt.Fprintf(w, "  HEAD rev: %s\n", tree.Rev)
+		fmt.Fprintf(w, "  Untracked source files: %d (ceiling: %d) -> %s\n",
+			tree.UntrackedGo, flowmetrics.UntrackedGoCeiling, formatCensusVerdict(tree.UntrackedGo, flowmetrics.UntrackedGoCeiling))
+		fmt.Fprintf(w, "  Scratch probe files: %d (ceiling: %d) -> %s\n",
+			tree.ScratchLitter, flowmetrics.ScratchLitterCeiling, formatCensusVerdict(tree.ScratchLitter, flowmetrics.ScratchLitterCeiling))
+		fmt.Fprintf(w, "  Recent writers (last 10m): %d (ceiling: %d) -> %s\n",
+			tree.RecentWriters, flowmetrics.RecentWritersCeiling, formatCensusVerdict(tree.RecentWriters, flowmetrics.RecentWritersCeiling))
+		fmt.Fprintf(w, "  Modified source files: %d\n", tree.ModifiedGo)
+		fmt.Fprintf(w, "  Added/Deleted lines churn: +%d/-%d\n", tree.AddedLines, tree.DeletedLines)
+		fmt.Fprintf(w, "  Oldest untracked file age: %s\n", formatUntrackedAge(tree.OldestUntrackedHours))
+		if tree.StatFailures > 0 {
+			fmt.Fprintf(w, "  Stat failures: %d file(s) could not be stat'd (mtimes and ages understated)\n", tree.StatFailures)
+		}
+	}
+
+	fmt.Fprintln(w, "\nCandidate paths preview:")
+	fmt.Fprintf(w, "  Litter candidate paths (%d):\n", len(litter))
+	for _, p := range litter {
+		fmt.Fprintf(w, "    %s\n", p)
+	}
+	fmt.Fprintf(w, "  Unlanded candidate paths (%d):\n", len(unlanded))
+	for _, p := range unlanded {
+		fmt.Fprintf(w, "    %s\n", p)
+	}
+	fmt.Fprintln(w, "\nPreview only: removed nothing. Run with --clean-junk or explicit fak commit to actuate.")
 }
