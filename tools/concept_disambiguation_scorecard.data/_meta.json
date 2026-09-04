@@ -3604,6 +3604,16 @@
           "category": "incidental",
           "reason": "attempt lineage accumulator function",
           "token": "ComputeAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "private adjudicator link for systools",
+          "token": "sysToolGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "sync.Once guard for systools registration",
+          "token": "sysToolGateOnce"
         }
       ],
       "exclude": [
@@ -4026,6 +4036,8 @@
         "startGuardRegistration",
         "summarizeGates",
         "summarizeguardstops",
+        "sysToolGate",
+        "sysToolGateOnce",
         "tailAggregate",
         "terminalGuardChild",
         "terminalGuardRegistration",
@@ -8212,6 +8224,36 @@
           "category": "incidental",
           "reason": "constructor for speculative tool execution engine in agentopt",
           "token": "NewSpeculativeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "systools engine id for get_time",
+          "token": "EngineGetTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "systools engine id for fetch_web",
+          "token": "EngineFetchWeb"
+        },
+        {
+          "category": "incidental",
+          "reason": "systools engine id for web_search",
+          "token": "EngineWebSearch"
+        },
+        {
+          "category": "incidental",
+          "reason": "driver for get_time",
+          "token": "getTimeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "driver for fetch_web",
+          "token": "fetchWebEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "driver for web_search",
+          "token": "webSearchEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8224,10 +8266,13 @@
         "EngineBash",
         "EngineEdit",
         "EngineEvidence",
+        "EngineFetchWeb",
+        "EngineGetTime",
         "EngineGlob",
         "EngineGrep",
         "EngineRead",
         "EngineReductionPct",
+        "EngineWebSearch",
         "EngineWrite",
         "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
@@ -8278,12 +8323,14 @@
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "fak_gateway_kv_prefix_tier_transfer_faults_total",
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
+        "fetchWebEngine",
         "forcedtoolargumentsfrommessages",
         "gatewayLink",
         "gatewayOverview",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
+        "getTimeEngine",
         "globEngine",
         "grepEngine",
         "inKernelCoalesceContextKey",
@@ -8322,6 +8369,7 @@
         "revokeVDSOWitness",
         "selectorGateway",
         "shrinkWireInKernel",
+        "webSearchEngine",
         "writeEngine"
       ],
       "known_tokens": [],
@@ -9387,6 +9435,11 @@
           "category": "incidental",
           "reason": "parser completeness count of records ignored by ingest policy",
           "token": "IgnoredByPolicyRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "systools refusal reason code",
+          "token": "CodePolicyBlock"
         }
       ],
       "exclude": [
@@ -9410,6 +9463,7 @@
         "CapabilityID",
         "CapabilityRemoved",
         "CapabilitySnapshot",
+        "CodePolicyBlock",
         "CombinedPolicy",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
