@@ -1,0 +1,785 @@
+{
+  "rows": [
+    {
+      "id": "cov-20260903-score-debt-brittlenessdebt",
+      "canonical": "score-debt implementation surface for brittlenessdebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "BrittlenessDebt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use BrittlenessDebt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "brittlenessdebt"
+      ],
+      "grounding": "BrittlenessDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-cache-cachepipelinephaseprefill",
+      "canonical": "cache implementation surface for cachepipelinephaseprefill",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "CachePipelinePhasePrefill is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use CachePipelinePhasePrefill for the operation evidenced in the repository. Unlike cov5304-billed-cache-read-share, it names this exact implementation surface; unlike cache, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "cachepipelinephaseprefill"
+      ],
+      "grounding": "CachePipelinePhasePrefill",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-claimreproscorecard",
+      "canonical": "score-debt implementation surface for claimreproscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "claim_repro_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use claim_repro_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "claimreproscorecard"
+      ],
+      "grounding": "claim_repro_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-session-runtime-closesession",
+      "canonical": "session-runtime implementation surface for closesession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "CloseSession is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use CloseSession for the operation evidenced in the repository. Unlike cov5303-wt-session, it names this exact implementation surface; unlike session-runtime, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5303-wt-session"
+      ],
+      "aliases": [
+        "closesession"
+      ],
+      "grounding": "CloseSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-codedebt",
+      "canonical": "score-debt implementation surface for codedebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "code_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use code_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "codedebt"
+      ],
+      "grounding": "code_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-support-maturity-commitsubjectcoverage",
+      "canonical": "support-maturity implementation surface for commitsubjectcoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "commit_subject_coverage is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use commit_subject_coverage for the operation evidenced in the repository. Unlike cov8145-defaultcoverage, it names this exact implementation surface; unlike support-maturity, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov8145-defaultcoverage"
+      ],
+      "aliases": [
+        "commitsubjectcoverage"
+      ],
+      "grounding": "commit_subject_coverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-loop-crashloopbudget",
+      "canonical": "loop implementation surface for crashloopbudget",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "CrashLoopBudget is the loop symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use CrashLoopBudget for the operation evidenced in the repository. Unlike loop-doomloop, it names this exact implementation surface; unlike loop, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-doomloop"
+      ],
+      "aliases": [
+        "crashloopbudget"
+      ],
+      "grounding": "CrashLoopBudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-cudadevscorecard",
+      "canonical": "score-debt implementation surface for cudadevscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "cuda_dev_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use cuda_dev_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "cudadevscorecard"
+      ],
+      "grounding": "cuda_dev_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-debtbycat",
+      "canonical": "score-debt implementation surface for debtbycat",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "DebtByCat is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use DebtByCat for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "debtbycat"
+      ],
+      "grounding": "DebtByCat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-debtbypkg",
+      "canonical": "score-debt implementation surface for debtbypkg",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "DebtByPkg is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use DebtByPkg for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "debtbypkg"
+      ],
+      "grounding": "DebtByPkg",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-debtlane",
+      "canonical": "score-debt implementation surface for debtlane",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "DebtLane is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use DebtLane for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "debtlane"
+      ],
+      "grounding": "DebtLane",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-debtprincipal",
+      "canonical": "score-debt implementation surface for debtprincipal",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "DebtPrincipal is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use DebtPrincipal for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "debtprincipal"
+      ],
+      "grounding": "DebtPrincipal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-demoqualityscorecard",
+      "canonical": "score-debt implementation surface for demoqualityscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "demo_quality_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use demo_quality_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "demoqualityscorecard"
+      ],
+      "grounding": "demo_quality_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-witness-proof-doswitness",
+      "canonical": "witness-proof implementation surface for doswitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "dos_witness is the witness-proof symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use dos_witness for the operation evidenced in the repository. Unlike witness-proof-witnessdosverify, it names this exact implementation surface; unlike witness-proof, it is not the umbrella domain.",
+      "distinct_from": [
+        "witness-proof-witnessdosverify"
+      ],
+      "aliases": [
+        "doswitness"
+      ],
+      "grounding": "dos_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-context-ctx-drainctx",
+      "canonical": "context-ctx implementation surface for drainctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "drainCtx is the context-ctx symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use drainCtx for the operation evidenced in the repository. Unlike x2-context-ctx-commandcontext, it names this exact implementation surface; unlike context-ctx, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [
+        "drainctx"
+      ],
+      "grounding": "drainCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-gateway-engine-fakinkernel",
+      "canonical": "gateway-engine implementation surface for fakinkernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "FakInKernel is the gateway-engine symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use FakInKernel for the operation evidenced in the repository. Unlike x2-gateway-engine-enginesglang, it names this exact implementation surface; unlike gateway-engine, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginesglang"
+      ],
+      "aliases": [
+        "fakinkernel"
+      ],
+      "grounding": "FakInKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-intentliteralscorecard",
+      "canonical": "score-debt implementation surface for intentliteralscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "intent_literal_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use intent_literal_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "intentliteralscorecard"
+      ],
+      "grounding": "intent_literal_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-policy-capability-leaserefsyncsurfacedispatchpreflight",
+      "canonical": "policy-capability implementation surface for leaserefsyncsurfacedispatchpreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "LeaseRefSyncSurfaceDispatchPreflight is the policy-capability symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use LeaseRefSyncSurfaceDispatchPreflight for the operation evidenced in the repository. Unlike x-policy-capability-setpolicy, it names this exact implementation surface; unlike policy-capability, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-policy-capability-setpolicy"
+      ],
+      "aliases": [
+        "leaserefsyncsurfacedispatchpreflight"
+      ],
+      "grounding": "LeaseRefSyncSurfaceDispatchPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-cache-lopuncachedglobalscheduler",
+      "canonical": "cache implementation surface for lopuncachedglobalscheduler",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "lopuncachedglobalscheduler is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use lopuncachedglobalscheduler for the operation evidenced in the repository. Unlike cov5304-billed-cache-read-share, it names this exact implementation surface; unlike cache, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "lopuncachedglobalscheduler"
+      ],
+      "grounding": "lopuncachedglobalscheduler",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-matcheddebt",
+      "canonical": "score-debt implementation surface for matcheddebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "MatchedDebt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use MatchedDebt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "matcheddebt"
+      ],
+      "grounding": "MatchedDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-support-maturity-maturitygap",
+      "canonical": "support-maturity implementation surface for maturitygap",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "MaturityGap is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use MaturityGap for the operation evidenced in the repository. Unlike cov8145-defaultcoverage, it names this exact implementation surface; unlike support-maturity, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov8145-defaultcoverage"
+      ],
+      "aliases": [
+        "maturitygap"
+      ],
+      "grounding": "MaturityGap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-support-maturity-maturityrung",
+      "canonical": "support-maturity implementation surface for maturityrung",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "MaturityRung is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use MaturityRung for the operation evidenced in the repository. Unlike cov8145-defaultcoverage, it names this exact implementation surface; unlike support-maturity, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov8145-defaultcoverage"
+      ],
+      "aliases": [
+        "maturityrung"
+      ],
+      "grounding": "MaturityRung",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-orgdebt",
+      "canonical": "score-debt implementation surface for orgdebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "org_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use org_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "orgdebt"
+      ],
+      "grounding": "org_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-personadebt",
+      "canonical": "score-debt implementation surface for personadebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "persona_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use persona_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "personadebt"
+      ],
+      "grounding": "persona_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-personafitscorecard",
+      "canonical": "score-debt implementation surface for personafitscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "persona_fit_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use persona_fit_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "personafitscorecard"
+      ],
+      "grounding": "persona_fit_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-propagationdebt",
+      "canonical": "score-debt implementation surface for propagationdebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "propagation_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use propagation_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "propagationdebt"
+      ],
+      "grounding": "propagation_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-render-materialize-rendercomparativesidebyside",
+      "canonical": "render-materialize implementation surface for rendercomparativesidebyside",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderComparativeSideBySide is the render-materialize symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use renderComparativeSideBySide for the operation evidenced in the repository. Unlike render-materialize-tui-guard-render-style, it names this exact implementation surface; unlike render-materialize, it is not the umbrella domain.",
+      "distinct_from": [
+        "render-materialize-tui-guard-render-style"
+      ],
+      "aliases": [
+        "rendercomparativesidebyside"
+      ],
+      "grounding": "renderComparativeSideBySide",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-rsimaturityscorecard",
+      "canonical": "score-debt implementation surface for rsimaturityscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "rsi_maturity_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use rsi_maturity_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "rsimaturityscorecard"
+      ],
+      "grounding": "rsi_maturity_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-runscoreboarddebtpage",
+      "canonical": "score-debt implementation surface for runscoreboarddebtpage",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "runScoreboardDebtPage is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use runScoreboardDebtPage for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "runscoreboarddebtpage"
+      ],
+      "grounding": "runScoreboardDebtPage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-gateway-engine-servingengine",
+      "canonical": "gateway-engine implementation surface for servingengine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "ServingEngine is the gateway-engine symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use ServingEngine for the operation evidenced in the repository. Unlike x2-gateway-engine-enginesglang, it names this exact implementation surface; unlike gateway-engine, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginesglang"
+      ],
+      "aliases": [
+        "servingengine"
+      ],
+      "grounding": "ServingEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-session-runtime-sessionaddrexplicit",
+      "canonical": "session-runtime implementation surface for sessionaddrexplicit",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "sessionAddrExplicit is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use sessionAddrExplicit for the operation evidenced in the repository. Unlike cov5303-wt-session, it names this exact implementation surface; unlike session-runtime, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5303-wt-session"
+      ],
+      "aliases": [
+        "sessionaddrexplicit"
+      ],
+      "grounding": "sessionAddrExplicit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-slopdebt",
+      "canonical": "slop debt counter in score debt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "slop_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use slop_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers",
+        "cov-debt-tail-score-debt-mlpdebt"
+      ],
+      "aliases": [
+        "slopdebt"
+      ],
+      "grounding": "slop_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-session-runtime-slotid",
+      "canonical": "session-runtime implementation surface for slotid",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SlotID is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use SlotID for the operation evidenced in the repository. Unlike cov5303-wt-session, it names this exact implementation surface; unlike session-runtime, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5303-wt-session"
+      ],
+      "aliases": [
+        "slotid"
+      ],
+      "grounding": "SlotID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-stabilityscorecard",
+      "canonical": "score-debt implementation surface for stabilityscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "stability_scorecard is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use stability_scorecard for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "stabilityscorecard"
+      ],
+      "grounding": "stability_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-score-debt-steerabilitydebt",
+      "canonical": "score-debt implementation surface for steerabilitydebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "steerability_debt is the score-debt symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use steerability_debt for the operation evidenced in the repository. Unlike x2-score-debt-debtintegers, it names this exact implementation surface; unlike score-debt, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [
+        "steerabilitydebt"
+      ],
+      "grounding": "steerability_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-support-maturity-targetmaturity",
+      "canonical": "support-maturity implementation surface for targetmaturity",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "TargetMaturity is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use TargetMaturity for the operation evidenced in the repository. Unlike cov8145-defaultcoverage, it names this exact implementation surface; unlike support-maturity, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov8145-defaultcoverage"
+      ],
+      "aliases": [
+        "targetmaturity"
+      ],
+      "grounding": "TargetMaturity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-cache-tolerantstickylopuncachedglobalscheduler",
+      "canonical": "cache implementation surface for tolerantstickylopuncachedglobalscheduler",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "tolerantstickylopuncachedglobalscheduler is the cache symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use tolerantstickylopuncachedglobalscheduler for the operation evidenced in the repository. Unlike cov5304-billed-cache-read-share, it names this exact implementation surface; unlike cache, it is not the umbrella domain.",
+      "distinct_from": [
+        "cov5304-billed-cache-read-share"
+      ],
+      "aliases": [
+        "tolerantstickylopuncachedglobalscheduler"
+      ],
+      "grounding": "tolerantstickylopuncachedglobalscheduler",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-context-ctx-withcontext",
+      "canonical": "context-ctx implementation surface for withcontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "WithContext is the context-ctx symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use WithContext for the operation evidenced in the repository. Unlike x2-context-ctx-commandcontext, it names this exact implementation surface; unlike context-ctx, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [
+        "withcontext"
+      ],
+      "grounding": "WithContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-20260903-context-ctx-ctxplanlint",
+      "canonical": "context-ctx implementation surface for ctxplanlint",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ctxplanlint is the context-ctx package declared at internal/ctxplanlint/ctxplans.go. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use ctxplanlint for the package evidenced at internal/ctxplanlint/ctxplans.go. Unlike x2-context-ctx-commandcontext, it names this exact implementation surface; unlike context-ctx, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [
+        "ctxplanlint"
+      ],
+      "grounding": "ctxplanlint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
