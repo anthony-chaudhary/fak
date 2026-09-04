@@ -244,6 +244,72 @@ func TestBudgetDebitingLimits(t *testing.T) {
 	}
 }
 
+func TestRecordTurnBudgetExceededDoesNotPanic(t *testing.T) {
+	cfg := SessionConfig{
+		MaxTurns:       10,
+		MaxTokenBudget: 100,
+	}
+	s := NewSession("sess-record-budget", &cfg)
+
+	// RecordTurn with tokens exceeding budget should cleanly return ErrBudgetExceeded without panicking
+	_, err := s.RecordTurn(context.Background(), "overflow turn", 200, nil)
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("expected ErrBudgetExceeded from RecordTurn, got %v", err)
+	}
+	if s.State() != StateTerminated {
+		t.Fatalf("expected StateTerminated, got %s", s.State())
+	}
+}
+
+func TestCompleteTurnWhilePausedMaintainsPausedState(t *testing.T) {
+	s := NewSession("sess-pause-turn", nil)
+	idx, err := s.BeginTurn("in-flight turn")
+	if err != nil {
+		t.Fatalf("failed to begin turn: %v", err)
+	}
+
+	// Operator pauses session while turn is in-flight
+	if err := s.TransitionTo(StatePaused); err != nil {
+		t.Fatalf("failed to transition to Paused: %v", err)
+	}
+
+	// Complete turn should succeed and maintain Paused state
+	if err := s.CompleteTurn(idx, 50, nil); err != nil {
+		t.Fatalf("complete turn failed: %v", err)
+	}
+	if s.State() != StatePaused {
+		t.Fatalf("expected StatePaused to be maintained, got %s", s.State())
+	}
+}
+
+func TestCompleteTurnNegativeTokensRejected(t *testing.T) {
+	s := NewSession("sess-neg-tokens", nil)
+	idx, err := s.BeginTurn("neg-turn")
+	if err != nil {
+		t.Fatalf("failed to begin turn: %v", err)
+	}
+
+	if err := s.CompleteTurn(idx, -10, nil); err == nil {
+		t.Fatal("expected error on negative tokens in CompleteTurn, got nil")
+	}
+}
+
+func TestCompleteTurnOnTerminatedSessionRejected(t *testing.T) {
+	s := NewSession("sess-term-complete", nil)
+	idx, err := s.BeginTurn("term-turn")
+	if err != nil {
+		t.Fatalf("failed to begin turn: %v", err)
+	}
+
+	if err := s.Terminate(errors.New("shutdown")); err != nil {
+		t.Fatalf("failed to terminate session: %v", err)
+	}
+
+	if err := s.CompleteTurn(idx, 10, nil); !errors.Is(err, ErrSessionTerminated) {
+		t.Fatalf("expected ErrSessionTerminated from CompleteTurn on terminated session, got %v", err)
+	}
+}
+
 func TestSessionTimeoutFailClosed(t *testing.T) {
 	cfg := SessionConfig{
 		MaxTurns:            10,

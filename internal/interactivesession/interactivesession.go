@@ -367,12 +367,20 @@ func (s *Session) CompleteTurn(turnIndex int, tokens int64, turnErr error) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.state == StateTerminated {
+		return ErrSessionTerminated
+	}
+
 	if !s.currentTurnActive {
 		return ErrTurnNotActive
 	}
 
 	if turnIndex != s.currentTurnIndex {
 		return fmt.Errorf("%w: turn index mismatch (expected %d, got %d)", ErrInvalidTransition, s.currentTurnIndex, turnIndex)
+	}
+
+	if tokens < 0 {
+		return errors.New("negative token debit prohibited")
 	}
 
 	// Process token debit.
@@ -409,6 +417,10 @@ func (s *Session) CompleteTurn(turnIndex int, tokens int64, turnErr error) error
 		return nil
 	}
 
+	if s.state == StatePaused {
+		return nil
+	}
+
 	s.state = StateReady
 	return nil
 }
@@ -426,11 +438,15 @@ func (s *Session) RecordTurn(ctx context.Context, prompt string, tokens int64, e
 	}
 
 	completeErr := s.CompleteTurn(turnIdx, tokens, execErr)
-	lastTurn := s.History()[turnIdx-1]
 	if completeErr != nil {
-		return lastTurn, completeErr
+		return TurnRecord{}, completeErr
 	}
-	return lastTurn, execErr
+
+	history := s.History()
+	if turnIdx-1 >= 0 && turnIdx-1 < len(history) {
+		return history[turnIdx-1], execErr
+	}
+	return TurnRecord{}, execErr
 }
 
 // Terminate shuts down the session with a specified terminal error or reason.
