@@ -101,6 +101,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	childMaxMemoryMB := fs.Uint64("child-max-memory-mb", 0, "maximum wrapped-child process-tree memory in MiB (0 uses the host-sized default, which on macOS is derived from physical memory: clamp(physical/4, 1GiB, 64GiB))")
 	childResourcePoll := fs.Duration("child-resource-poll", guardResourcePollDefault, "poll interval for child process-tree resource accounting")
 	childResourceJournal := fs.String("child-resource-journal", "", "optional JSONL path for child process-tree resource-containment receipts")
+	childHeadroomDebounce := fs.Duration("child-headroom-debounce", 0, "debounce window before terminating on system commit headroom exhaustion (default 15s; env FAK_GUARD_HEADROOM_DEBOUNCE)")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens, and session-to-date current/previous/average/median/high/low cache savings), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
 	arbitrateConfig := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
@@ -181,7 +182,13 @@ func cmdManageCommand(commandName string, argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --child-resource-poll must be at least 100ms")
 		os.Exit(2)
 	}
-	setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: *childMaxMemoryMB, PollInterval: *childResourcePoll, ReceiptPath: *childResourceJournal})
+	headroomDebounce := resolveGuardHeadroomDebounce(*childHeadroomDebounce, os.Getenv("FAK_GUARD_HEADROOM_DEBOUNCE"))
+	setGuardResourceConfig(guardResourceConfig{
+		MaxMemoryMB:      *childMaxMemoryMB,
+		PollInterval:     *childResourcePoll,
+		ReceiptPath:      *childResourceJournal,
+		HeadroomDebounce: headroomDebounce,
+	})
 	launchPlan := newGuardLaunchPlan(fs.Args())
 	setLaunchToolGrant(allowTools)
 	rotateSet := false
