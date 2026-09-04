@@ -1,6 +1,7 @@
 package framevisibility
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,5 +45,39 @@ func TestFoldMeasuresMasterVisibilityAndRelevance(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+}
+
+func TestRun(t *testing.T) {
+	root := t.TempDir()
+	project := "C--work-fak"
+	session := "session-1"
+	dir := filepath.Join(root, ".claude-test", "projects", project, session)
+	if err := os.MkdirAll(filepath.Join(dir, "subagents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	master := filepath.Join(filepath.Dir(dir), session+".jsonl")
+	if err := os.WriteFile(master, []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outFile := filepath.Join(root, "out.json")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(&stdout, &stderr, []string{"-homes", root, "-project", project, "-out", outFile})
+	if code != 0 {
+		t.Fatalf("Run returned code %d, stderr: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Fatalf("expected output file %s: %v", outFile, err)
+	}
+
+	code = Run(&stdout, &stderr, []string{"-unrecognized-flag"})
+	if code != 2 {
+		t.Fatalf("Run with invalid flags returned %d, want 2", code)
+	}
+
+	code = Run(&stdout, &stderr, []string{"-homes", filepath.Join(root, "nonexistent")})
+	if code != 1 {
+		t.Fatalf("Run with nonexistent homes returned %d, want 1", code)
 	}
 }

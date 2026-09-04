@@ -120,6 +120,7 @@ func masterRelevant(b block, terminal bool) bool {
 
 // -------------------------------------------------------------------- counts
 
+// Counts tracks event, relevance, and visibility metrics across master and subagent frames.
 type Counts struct {
 	Sessions int `json:"sessions"`
 	Homes    int `json:"homes"`
@@ -331,6 +332,7 @@ func foldSubagent(path string, c *Counts) error {
 
 // ------------------------------------------------------------------- corpus
 
+// SessionRow captures per-session visibility and relevance metrics.
 type SessionRow struct {
 	Home           string `json:"home"`
 	Session        string `json:"session"`
@@ -368,6 +370,7 @@ func subagentFiles(dir string) []string {
 	return out
 }
 
+// Report aggregates totals, rule breakdowns, and individual session rows.
 type Report struct {
 	Totals      *Counts        `json:"totals"`
 	ByRule      map[string]int `json:"by_rule"`
@@ -428,6 +431,7 @@ func Fold(homesRoot, project string) (*Counts, []SessionRow, error) {
 	return total, rows, nil
 }
 
+// Run parses command-line flags, folds qualifying session transcripts, and writes the report.
 func Run(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("frame-visibility", flag.ContinueOnError)
 	fs.SetOutput(stderr)
