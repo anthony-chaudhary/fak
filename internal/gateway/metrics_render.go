@@ -131,6 +131,115 @@ func (s *Server) writeSpendGovernorMetrics(b *strings.Builder) {
 	}
 }
 
+func writeInflightRequestMetrics(b *strings.Builder, m *gatewayMetrics) {
+	// Live-request visibility: derived from the in-flight registry at scrape time.
+	// max_age is the oldest currently-running request's age (0 when idle); it
+	// surfaces a slow or wedged request at the next scrape, where the completion-
+	// time histograms would show nothing until the request finally returned.
+	byRoute, maxAge := m.inflightSnapshot(time.Now())
+	writeHelpType(b, "fak_gateway_inflight_max_age_seconds", "Age of the oldest HTTP request currently in flight (0 when idle).", "gauge")
+	fmt.Fprintf(b, "fak_gateway_inflight_max_age_seconds %s\n", promFloat(maxAge))
+	writeHelpType(b, "fak_gateway_inflight_requests_by_route", "HTTP requests currently executing, by route.", "gauge")
+	inflightRoutes := make([]string, 0, len(byRoute))
+	for route := range byRoute {
+		inflightRoutes = append(inflightRoutes, route)
+	}
+	sort.Strings(inflightRoutes)
+	for _, route := range inflightRoutes {
+		fmt.Fprintf(b, "fak_gateway_inflight_requests_by_route{route=\"%s\"} %d\n", promQuote(route), byRoute[route])
+	}
+}
+
+func writeHttpRequestMetrics(b *strings.Builder, httpRows []httpMetricSnapshot) {
+	writeHelpType(b, "fak_gateway_http_requests_total", "HTTP requests served by route, method, and status.", "counter")
+	for _, row := range httpRows {
+		fmt.Fprintf(b, "fak_gateway_http_requests_total{route=\"%s\",method=\"%s\",status=\"%s\"} %d\n",
+			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status), row.val.count)
+	}
+	writeHelpType(b, "fak_gateway_http_request_duration_seconds", "HTTP request latency by route, method, and status.", "histogram")
+	for _, row := range httpRows {
+		baseLabels := fmt.Sprintf("route=\"%s\",method=\"%s\",status=\"%s\"",
+			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status))
+		writeHistogram(b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
+	}
+}
+
+func writeOperationMetrics(b *strings.Builder, opRows []operationMetricSnapshot) {
+	writeHelpType(b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
+	for _, row := range opRows {
+		fmt.Fprintf(b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
+			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
+	}
+	writeHelpType(b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
+	for _, row := range opRows {
+		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
+			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.disposition), promQuote(row.key.by))
+		writeHistogram(b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
+	}
+}
+
+func (s *Server) writeRungMetrics(b *strings.Builder) {
+	// Per-rung decision distribution (issue #693): which adjudication rung actually
+	// decided each call, bucketed by (rung, kind, reason). Passive — re-derived off the
+	// hot path; a vDSO-served call (no adjudication) lands in rung="vdso". Drill down on
+	// one call with `fak preflight --explain`. nil (older construction) suppresses it.
+	if s.rungObs == nil {
+		return
+	}
+	writeHelpType(b, "fak_kernel_decisions_total", "Kernel decisions by winning adjudication rung, verdict kind, and reason (passive; re-derived off the hot path).", "counter")
+	for _, row := range s.rungObs.Snapshot() {
+		fmt.Fprintf(b, "fak_kernel_decisions_total{rung=\"%s\",kind=\"%s\",reason=\"%s\"} %d\n",
+			promQuote(row.Rung), promQuote(row.Kind), promQuote(row.Reason), row.Count)
+	}
+	fused := s.rungObs.FusedSnapshot()
+	writeCounter(b, "fak_fused_turns_total", "Turns that emitted at least one classical and one weight-classified operation.", fused.FusedTurns)
+	writeCounter(b, "fak_turns_total", "Turns that emitted at least one classified classical or weight operation.", fused.Turns)
+	writeHelpType(b, "fak_turn_ops_total", "Kernel operations by fused-turn concept family (unknown ops do not enter the fused-turn denominator).", "counter")
+	for _, row := range fused.Ops {
+		fmt.Fprintf(b, "fak_turn_ops_total{family=\"%s\"} %d\n", promQuote(row.Family), row.Count)
+	}
+	writeHelpType(b, "fak_fused_turn_rate", "Cumulative fused-turn rate: fak_fused_turns_total / fak_turns_total.", "gauge")
+	fmt.Fprintf(b, "fak_fused_turn_rate %s\n", promFloat(fused.Rate))
+}
+
+func (s *Server) writeTelemetryAndAuditMetrics(b *strings.Builder) {
+	fmt.Fprintf(b, "# HELP fak_traceparent_invalid_total Malformed inbound W3C traceparent headers.\n# TYPE fak_traceparent_invalid_total counter\nfak_traceparent_invalid_total %d\n", atomic.LoadUint64(&s.traceparentInvalid))
+	otlp := s.otlp.stats()
+	fmt.Fprintf(b, "# HELP fak_otlp_spans_total OTLP spans by outcome.\n# TYPE fak_otlp_spans_total counter\n")
+	fmt.Fprintf(b, "fak_otlp_spans_total{outcome=\"accepted\"} %d\n", otlp.Accepted)
+	fmt.Fprintf(b, "fak_otlp_spans_total{outcome=\"exported\"} %d\n", otlp.Exported)
+	fmt.Fprintf(b, "fak_otlp_spans_total{outcome=\"dropped\"} %d\n", otlp.Dropped)
+	fmt.Fprintf(b, "fak_otlp_spans_total{outcome=\"failed\"} %d\n", otlp.Failed)
+	fmt.Fprintf(b, "# HELP fak_otlp_queue_depth Current OTLP span queue depth.\n# TYPE fak_otlp_queue_depth gauge\nfak_otlp_queue_depth %d\n", otlp.QueueDepth)
+	audit := s.orgAudit.Stats()
+	fmt.Fprintf(b, "# HELP fak_org_audit_receipts_total Organization audit receipts by outcome.\n# TYPE fak_org_audit_receipts_total counter\n")
+	fmt.Fprintf(b, "fak_org_audit_receipts_total{outcome=\"accepted\"} %d\n", audit.Accepted)
+	fmt.Fprintf(b, "fak_org_audit_receipts_total{outcome=\"exported\"} %d\n", audit.Exported)
+	fmt.Fprintf(b, "fak_org_audit_receipts_total{outcome=\"buffered\"} %d\n", audit.Buffered)
+	fmt.Fprintf(b, "fak_org_audit_receipts_total{outcome=\"dropped\"} %d\n", audit.Dropped)
+	fmt.Fprintf(b, "fak_org_audit_receipts_total{outcome=\"failed\"} %d\n", audit.Failed)
+	fmt.Fprintf(b, "# HELP fak_org_audit_queue_depth Current organization audit receipt queue depth.\n# TYPE fak_org_audit_queue_depth gauge\nfak_org_audit_queue_depth %d\n", audit.QueueDepth)
+	traj := s.trajctlMetricsSnapshot()
+	fmt.Fprintf(b, "# HELP fak_trajctl_objectives Trajectory objectives by lifecycle status.\n# TYPE fak_trajctl_objectives gauge\n")
+	for _, status := range []string{"abandoned", "active", "met", "paused"} {
+		fmt.Fprintf(b, "fak_trajctl_objectives{status=%q} %d\n", status, traj.Objectives[status])
+	}
+	fmt.Fprintf(b, "# HELP fak_trajctl_score Mean latest open-objective score by bounded objective kind.\n# TYPE fak_trajctl_score gauge\n")
+	for _, kind := range []string{"child", "root", "scorer"} {
+		fmt.Fprintf(b, "fak_trajctl_score{objective_kind=%q} %g\n", kind, traj.Scores[kind])
+	}
+	fmt.Fprintf(b, "# HELP fak_trajctl_signals Trajectory objectives by current health signal.\n# TYPE fak_trajctl_signals gauge\n")
+	for _, signal := range []string{"DRIFT", "HEALTHY", "STALL"} {
+		fmt.Fprintf(b, "fak_trajctl_signals{signal=%q} %d\n", signal, traj.Signals[signal])
+	}
+	fmt.Fprintf(b, "# HELP fak_trajctl_nudges_total Trajectory re-anchor nudges by delivery outcome.\n# TYPE fak_trajctl_nudges_total counter\n")
+	for _, outcome := range []string{"delivered", "failed"} {
+		fmt.Fprintf(b, "fak_trajctl_nudges_total{outcome=%q} %d\n", outcome, traj.Nudges[outcome])
+	}
+}
+
 func (s *Server) renderMetrics() string {
 	m := s.metrics
 	if m == nil {
@@ -146,39 +255,13 @@ func (s *Server) renderMetrics() string {
 	s.writeStartupMetrics(&b)
 	writeHelpType(&b, "fak_gateway_inflight_requests", "HTTP requests currently executing in the fak gateway.", "gauge")
 	fmt.Fprintf(&b, "fak_gateway_inflight_requests %d\n", atomic.LoadInt64(&m.inflight))
-
-	// Live-request visibility: derived from the in-flight registry at scrape time.
-	// max_age is the oldest currently-running request's age (0 when idle); it
-	// surfaces a slow or wedged request at the next scrape, where the completion-
-	// time histograms would show nothing until the request finally returned.
-	byRoute, maxAge := m.inflightSnapshot(time.Now())
-	writeHelpType(&b, "fak_gateway_inflight_max_age_seconds", "Age of the oldest HTTP request currently in flight (0 when idle).", "gauge")
-	fmt.Fprintf(&b, "fak_gateway_inflight_max_age_seconds %s\n", promFloat(maxAge))
-	writeHelpType(&b, "fak_gateway_inflight_requests_by_route", "HTTP requests currently executing, by route.", "gauge")
-	inflightRoutes := make([]string, 0, len(byRoute))
-	for route := range byRoute {
-		inflightRoutes = append(inflightRoutes, route)
-	}
-	sort.Strings(inflightRoutes)
-	for _, route := range inflightRoutes {
-		fmt.Fprintf(&b, "fak_gateway_inflight_requests_by_route{route=\"%s\"} %d\n", promQuote(route), byRoute[route])
-	}
+	writeInflightRequestMetrics(&b, m)
 
 	writeHelpType(&b, "fak_gateway_build_info", "Static fak gateway build and runtime labels.", "gauge")
 	fmt.Fprintf(&b, "fak_gateway_build_info{version=\"%s\",engine=\"%s\",model=\"%s\",vdso=\"%s\"} 1\n",
 		promQuote(s.version), promQuote(s.engineID), promQuote(s.model), promQuote(strconv.FormatBool(s.k.VDSOEnabled())))
 
-	writeHelpType(&b, "fak_gateway_http_requests_total", "HTTP requests served by route, method, and status.", "counter")
-	for _, row := range httpRows {
-		fmt.Fprintf(&b, "fak_gateway_http_requests_total{route=\"%s\",method=\"%s\",status=\"%s\"} %d\n",
-			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status), row.val.count)
-	}
-	writeHelpType(&b, "fak_gateway_http_request_duration_seconds", "HTTP request latency by route, method, and status.", "histogram")
-	for _, row := range httpRows {
-		baseLabels := fmt.Sprintf("route=\"%s\",method=\"%s\",status=\"%s\"",
-			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status))
-		writeHistogram(&b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
-	}
+	writeHttpRequestMetrics(&b, httpRows)
 
 	// Upstream-error visibility (the metric twin of the per-turn FAILED debug line): WHY turns
 	// failed this session, by coarse kind.
@@ -188,19 +271,7 @@ func (s *Server) renderMetrics() string {
 	// last-tick gauge, and liveness — the proof the kernel's loops keep progressing.
 	s.writeBgloopMetrics(&b)
 
-	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
-	for _, row := range opRows {
-		fmt.Fprintf(&b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
-			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
-	}
-	writeHelpType(&b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
-	for _, row := range opRows {
-		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
-			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition), promQuote(row.key.by))
-		writeHistogram(&b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
-	}
+	writeOperationMetrics(&b, opRows)
 
 	c := s.k.Counters()
 	writeCounter(&b, "fak_kernel_submits_total", "Kernel submissions since process start.", c.Submits)
@@ -211,26 +282,7 @@ func (s *Server) renderMetrics() string {
 	writeCounter(&b, "fak_kernel_quarantines_total", "Kernel result admissions quarantined by the result-side stack.", c.Quarantines)
 	writeCounter(&b, "fak_kernel_result_denies_total", "Kernel result admissions hard-refused by the result-side stack.", c.ResultDenies)
 	writeCounter(&b, "fak_kernel_admitted_total", "Kernel result admissions that were accepted or transformed.", c.Admitted)
-	// Per-rung decision distribution (issue #693): which adjudication rung actually
-	// decided each call, bucketed by (rung, kind, reason). Passive — re-derived off the
-	// hot path; a vDSO-served call (no adjudication) lands in rung="vdso". Drill down on
-	// one call with `fak preflight --explain`. nil (older construction) suppresses it.
-	if s.rungObs != nil {
-		writeHelpType(&b, "fak_kernel_decisions_total", "Kernel decisions by winning adjudication rung, verdict kind, and reason (passive; re-derived off the hot path).", "counter")
-		for _, row := range s.rungObs.Snapshot() {
-			fmt.Fprintf(&b, "fak_kernel_decisions_total{rung=\"%s\",kind=\"%s\",reason=\"%s\"} %d\n",
-				promQuote(row.Rung), promQuote(row.Kind), promQuote(row.Reason), row.Count)
-		}
-		fused := s.rungObs.FusedSnapshot()
-		writeCounter(&b, "fak_fused_turns_total", "Turns that emitted at least one classical and one weight-classified operation.", fused.FusedTurns)
-		writeCounter(&b, "fak_turns_total", "Turns that emitted at least one classified classical or weight operation.", fused.Turns)
-		writeHelpType(&b, "fak_turn_ops_total", "Kernel operations by fused-turn concept family (unknown ops do not enter the fused-turn denominator).", "counter")
-		for _, row := range fused.Ops {
-			fmt.Fprintf(&b, "fak_turn_ops_total{family=\"%s\"} %d\n", promQuote(row.Family), row.Count)
-		}
-		writeHelpType(&b, "fak_fused_turn_rate", "Cumulative fused-turn rate: fak_fused_turns_total / fak_turns_total.", "gauge")
-		fmt.Fprintf(&b, "fak_fused_turn_rate %s\n", promFloat(fused.Rate))
-	}
+	s.writeRungMetrics(&b)
 	writeHelpType(&b, "fak_gateway_vdso_hit_ratio", "Current cumulative vDSO hit ratio over kernel submissions.", "gauge")
 	ratio := 0.0
 	if c.Submits > 0 {
@@ -305,39 +357,7 @@ func (s *Server) renderMetrics() string {
 	writeCacheAttributionMetrics(&b, cacheSavings)
 
 	s.writeModelLoadMetrics(&b)
-	fmt.Fprintf(&b, "# HELP fak_traceparent_invalid_total Malformed inbound W3C traceparent headers.\n# TYPE fak_traceparent_invalid_total counter\nfak_traceparent_invalid_total %d\n", atomic.LoadUint64(&s.traceparentInvalid))
-	otlp := s.otlp.stats()
-	fmt.Fprintf(&b, "# HELP fak_otlp_spans_total OTLP spans by outcome.\n# TYPE fak_otlp_spans_total counter\n")
-	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"accepted\"} %d\n", otlp.Accepted)
-	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"exported\"} %d\n", otlp.Exported)
-	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"dropped\"} %d\n", otlp.Dropped)
-	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"failed\"} %d\n", otlp.Failed)
-	fmt.Fprintf(&b, "# HELP fak_otlp_queue_depth Current OTLP span queue depth.\n# TYPE fak_otlp_queue_depth gauge\nfak_otlp_queue_depth %d\n", otlp.QueueDepth)
-	audit := s.orgAudit.Stats()
-	fmt.Fprintf(&b, "# HELP fak_org_audit_receipts_total Organization audit receipts by outcome.\n# TYPE fak_org_audit_receipts_total counter\n")
-	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"accepted\"} %d\n", audit.Accepted)
-	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"exported\"} %d\n", audit.Exported)
-	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"buffered\"} %d\n", audit.Buffered)
-	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"dropped\"} %d\n", audit.Dropped)
-	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"failed\"} %d\n", audit.Failed)
-	fmt.Fprintf(&b, "# HELP fak_org_audit_queue_depth Current organization audit receipt queue depth.\n# TYPE fak_org_audit_queue_depth gauge\nfak_org_audit_queue_depth %d\n", audit.QueueDepth)
-	traj := s.trajctlMetricsSnapshot()
-	fmt.Fprintf(&b, "# HELP fak_trajctl_objectives Trajectory objectives by lifecycle status.\n# TYPE fak_trajctl_objectives gauge\n")
-	for _, status := range []string{"abandoned", "active", "met", "paused"} {
-		fmt.Fprintf(&b, "fak_trajctl_objectives{status=%q} %d\n", status, traj.Objectives[status])
-	}
-	fmt.Fprintf(&b, "# HELP fak_trajctl_score Mean latest open-objective score by bounded objective kind.\n# TYPE fak_trajctl_score gauge\n")
-	for _, kind := range []string{"child", "root", "scorer"} {
-		fmt.Fprintf(&b, "fak_trajctl_score{objective_kind=%q} %g\n", kind, traj.Scores[kind])
-	}
-	fmt.Fprintf(&b, "# HELP fak_trajctl_signals Trajectory objectives by current health signal.\n# TYPE fak_trajctl_signals gauge\n")
-	for _, signal := range []string{"DRIFT", "HEALTHY", "STALL"} {
-		fmt.Fprintf(&b, "fak_trajctl_signals{signal=%q} %d\n", signal, traj.Signals[signal])
-	}
-	fmt.Fprintf(&b, "# HELP fak_trajctl_nudges_total Trajectory re-anchor nudges by delivery outcome.\n# TYPE fak_trajctl_nudges_total counter\n")
-	for _, outcome := range []string{"delivered", "failed"} {
-		fmt.Fprintf(&b, "fak_trajctl_nudges_total{outcome=%q} %d\n", outcome, traj.Nudges[outcome])
-	}
+	s.writeTelemetryAndAuditMetrics(&b)
 	return b.String()
 }
 

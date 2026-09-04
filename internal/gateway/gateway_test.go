@@ -668,6 +668,7 @@ func TestHTTPAuth(t *testing.T) {
 // remote peer (so the counters are never exposed off-box). Driven through the
 // real Handler so the withAuth middleware is exercised, not bypassed.
 func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
+	abi.RegisterEngine("test", echoEngine{})
 	srv, err := New(Config{EngineID: "test", Model: "m", RequireKey: "sekret"})
 	if err != nil {
 		t.Fatal(err)
