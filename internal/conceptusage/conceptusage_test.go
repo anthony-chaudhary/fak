@@ -33,14 +33,14 @@ func TestResultFindingsProjectsOneFailureChannel(t *testing.T) {
 }
 
 // writeJournal drops a .dos/<name> file under root with the given JSONL lines.
-func writeJournal(t *testing.T, root, name string, lines ...string) {
-	t.Helper()
+func writeJournal(tb testing.TB, root, name string, lines ...string) {
+	tb.Helper()
 	dir := filepath.Join(root, ".dos")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 }
 

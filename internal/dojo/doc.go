@@ -26,4 +26,8 @@
 // This package is pure (stdlib only, no clock, no I/O): the corpus scan and the
 // concrete levers live in the cmd/fak/dojo.go shell, exactly as resume's
 // back-test keeps its transcript scan in the cmd shell.
+//
+// Contract: dojo scoring and trend evaluation is fail-closed and deterministic.
+// Invariant: an unmeasured outcome never synthesizes a vacuous passing grade.
+// Guard: intentional floor breaches raise error residuals and never allow silent decay.
 package dojo

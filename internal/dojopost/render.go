@@ -9,10 +9,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
+// Invariant: dojo post formatting and rollup rendering are fail-closed and deterministic.
+// Guard: unmeasured episodes or empty runs safely render diagnostic status without panicking or masking lack of ground truth.
+// Guard: maximum episode limits clamp output to prevent channel flooding while preserving worst-first ordering.
+
 // Post is a render-ready Slack post.
 type Post slackmeta.Post
 
-func (p Post) Text() string  { return slackmeta.Post(p).Text(p.signalNoise()) }
+// Text renders the post as plain text according to signal/noise scoring.
+func (p Post) Text() string { return slackmeta.Post(p).Text(p.signalNoise()) }
+
+// Blocks renders the post as Slack Block Kit structures according to signal/noise scoring.
 func (p Post) Blocks() []any { return slackmeta.Post(p).Blocks(p.signalNoise()) }
 
 func (p Post) signalNoise() slackmeta.Score {

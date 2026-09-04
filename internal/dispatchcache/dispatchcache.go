@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// Invariant: in-memory store eviction is fail-closed; expired or uninitialized entries return zero values.
+
 // Key content-addresses the routed-backlog inputs shared by successive ticks.
 func Key(workspace, view string, issueLimit int) string {
 	h := sha256.Sum256([]byte(workspace + "\x00" + view + "\x00" + strconv.Itoa(issueLimit)))
@@ -26,6 +28,7 @@ type Store[T any] struct {
 	m   map[string]entry[T]
 }
 
+// New allocates an in-memory Store with an optional injectable clock function.
 func New[T any](now func() time.Time) *Store[T] {
 	if now == nil {
 		now = time.Now
@@ -33,6 +36,7 @@ func New[T any](now func() time.Time) *Store[T] {
 	return &Store[T]{now: now, m: map[string]entry[T]{}}
 }
 
+// Get retrieves an unexpired entry for the given key, returning false if expired or missing.
 func (s *Store[T]) Get(key string) (T, bool) {
 	var zero T
 	if s == nil {
@@ -51,6 +55,7 @@ func (s *Store[T]) Get(key string) (T, bool) {
 	return e.value, true
 }
 
+// Put inserts or updates an entry under key with a specified time-to-live duration.
 func (s *Store[T]) Put(key string, value T, ttl time.Duration) {
 	if s == nil || ttl <= 0 {
 		return

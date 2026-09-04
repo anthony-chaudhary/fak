@@ -28,6 +28,12 @@
 //	                  FAK_DOJO_CHANNEL. It deliberately does NOT inherit the generic
 //	                  FAK_SCOREBOARD_CHANNEL (that is the scoreboard CLI's #scoreboard
 //	                  default, so reusing it would misroute the dojo surface).
+//
+// Invariants and Guards:
+//
+// Invariant: dojo post formatting and token/channel resolution are fail-closed and deterministic.
+// Guard: token resolution strictly isolates lab secrets, preventing SLACK_BOT_TOKEN fallback.
+// Guard: channel resolution defaults safely to the public CI/CD reporting sink without misrouting to scoreboard channels.
 package dojopost
 
 import (

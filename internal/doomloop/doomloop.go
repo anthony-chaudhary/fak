@@ -156,6 +156,11 @@ type window struct {
 //     streak and climb the ladder: below TripWindows it is HEALTHY / OBSERVE
 //     (watching, not yet intervening); at TripWindows it is DOOM_LOOP / NUDGE;
 //     at EscalateWindows it is DOOM_LOOP / ESCALATE.
+//
+// Invariant: doom loop detection is fail-closed and bounded. When sample evidence
+// is insufficient, ambiguous, or unreadable, Classify defaults to VerdictUnknown and CorrectNone.
+// Guard: requires at least two samples and at least TripWindows consecutive burning-flat
+// windows before escalating to VerdictDoomLoop and recommending intervention.
 func Classify(samples []Sample, cfg Config) Result {
 	cfg = cfg.withDefaults()
 	if len(samples) < cfg.MinSamples {
