@@ -184,3 +184,45 @@ func (s Store) Save(snapshot Snapshot) error {
 	}
 	return nil
 }
+
+// ReconcileRestart loads the snapshot under the reservation lock, evaluates
+// active attempts and leases for orphaned processes or stale leases, updates the
+// snapshot, and atomically persists it to disk before releasing the lock.
+func (s Store) ReconcileRestart(ctx context.Context, liveness ProcessLivenessChecker, opts RestartOptions) (RestartReconciliation, Snapshot, error) {
+	if s.Path == "" {
+		return RestartReconciliation{}, Snapshot{}, errors.New("agentqueue: snapshot path is required")
+	}
+	lock, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return RestartReconciliation{}, Snapshot{}, fmt.Errorf("agentqueue: open reservation lock: %w", err)
+	}
+	defer lock.Close()
+	for {
+		err = flock.TryLock(lock)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			return RestartReconciliation{}, Snapshot{}, fmt.Errorf("agentqueue: lock reservation: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return RestartReconciliation{}, Snapshot{}, fmt.Errorf("agentqueue: reconcile restart: %w", ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer flock.Unlock(lock)
+
+	snapshot, err := s.Load()
+	if err != nil {
+		return RestartReconciliation{}, Snapshot{}, err
+	}
+	rec, updated, err := ReconcileRestart(snapshot, liveness, opts)
+	if err != nil {
+		return RestartReconciliation{}, snapshot, err
+	}
+	if err := s.Save(updated); err != nil {
+		return RestartReconciliation{}, snapshot, err
+	}
+	return rec, updated, nil
+}

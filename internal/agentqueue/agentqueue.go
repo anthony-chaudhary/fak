@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 )
 
 const Schema = "fak.agentqueue.snapshot.v1"
@@ -43,6 +44,9 @@ type Intent struct {
 	State         IntentState `json:"state"`
 	RetryEligible bool        `json:"retry_eligible,omitempty"`
 	Launch        LaunchSpec  `json:"launch,omitempty"`
+	PID           int         `json:"pid,omitempty"`
+	ExpiresAt     time.Time   `json:"expires_at,omitempty"`
+	LeaseExpires  time.Time   `json:"lease_expires,omitempty"`
 }
 type AttemptState string
 
@@ -54,9 +58,12 @@ const (
 )
 
 type Attempt struct {
-	ID       string       `json:"id"`
-	IntentID string       `json:"intent_id"`
-	State    AttemptState `json:"state"`
+	ID           string       `json:"id"`
+	IntentID     string       `json:"intent_id"`
+	State        AttemptState `json:"state"`
+	PID          int          `json:"pid,omitempty"`
+	ExpiresAt    time.Time    `json:"expires_at,omitempty"`
+	LeaseExpires time.Time    `json:"lease_expires,omitempty"`
 }
 type Snapshot struct {
 	Schema     string    `json:"schema,omitempty"`
