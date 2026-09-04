@@ -10,20 +10,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 )
 
+// Invariant: agent scheduler enforces priority queue ordering and shedder admission fail-closed.
+// Invariant: four admission gates (concurrency, host envelope, provider headroom, lane clearance) evaluate sequentially and fail closed.
+// Invariant: thermal pressure and power sag downscale effective concurrency and inject turn pacing without blocking runnable tasks.
+
 const (
-	// DefaultMaxWorkers is the default worker concurrency ceiling (Gate 1).
+	// DefaultMaxWorkers specifies the default worker concurrency ceiling (Gate 1).
 	DefaultMaxWorkers = 16
 
-	// Thresholds for Gate 2: Host Envelope.
-	MaxCPUPctThreshold       = 85.0
+	// MaxCPUPctThreshold specifies the maximum allowable host CPU percentage before Gate 2 trips.
+	MaxCPUPctThreshold = 85.0
+	// EarlyWarningCPUThreshold specifies the host CPU threshold triggering pre-emptive turn pacing.
 	EarlyWarningCPUThreshold = 75.0
+	// MinFreeRAMBytesThreshold specifies the minimum required free system RAM bytes before Gate 2 trips.
 	MinFreeRAMBytesThreshold = uint64(4 * 1024 * 1024 * 1024) // 4 GB
-	MaxOpenHandlesThreshold  = 130000                         // 130k handles
+	// MaxOpenHandlesThreshold specifies the maximum allowable open file handles before Gate 2 trips.
+	MaxOpenHandlesThreshold = 130000 // 130k handles
 
-	// DefaultPacingModerateMS is injected under moderate host thermal/CPU load.
+	// DefaultPacingModerateMS specifies turn pacing interval in milliseconds injected under moderate host thermal/CPU load.
 	DefaultPacingModerateMS int64 = 100
 
-	// DefaultPacingHighMS is injected under severe host thermal/CPU load.
+	// DefaultPacingHighMS specifies turn pacing interval in milliseconds injected under severe host thermal/CPU load.
 	DefaultPacingHighMS int64 = 250
 )
 
@@ -31,12 +38,17 @@ const (
 type AdmissionGate uint8
 
 const (
+	// GateWorkerConcurrency identifies Gate 1: worker pool saturation ceiling check.
 	GateWorkerConcurrency AdmissionGate = 1
-	GateHostEnvelope      AdmissionGate = 2
-	GateProviderHeadroom  AdmissionGate = 3
-	GateLaneClearance     AdmissionGate = 4
+	// GateHostEnvelope identifies Gate 2: CPU, memory, handle, and thermal health check.
+	GateHostEnvelope AdmissionGate = 2
+	// GateProviderHeadroom identifies Gate 3: provider rate-limit or token budget constraint check.
+	GateProviderHeadroom AdmissionGate = 3
+	// GateLaneClearance identifies Gate 4: conflicting active repository lane lease check.
+	GateLaneClearance AdmissionGate = 4
 )
 
+// String returns the canonical human-readable identifier for the admission gate.
 func (g AdmissionGate) String() string {
 	switch g {
 	case GateWorkerConcurrency:
