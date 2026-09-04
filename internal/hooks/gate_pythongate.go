@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // gate_pythongate.go — the whole-tree gate that catches a NEW tools/*.py before it reaches
@@ -144,6 +146,7 @@ for node in ast.walk(tree):
 raise SystemExit(1)
 `
 	cmd := exec.Command("python3", "-I", "-S", "-c", inspectImports, module)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdin = bytes.NewReader(source)
 	return cmd.Run() == nil
 }
