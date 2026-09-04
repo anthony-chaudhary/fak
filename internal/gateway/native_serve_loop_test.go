@@ -494,3 +494,119 @@ func TestNativeServeFixtureEditTestDiffWitness(t *testing.T) {
 		t.Fatalf("body=%q metrics=%+v", body, metrics)
 	}
 }
+
+type nativeGoTestCompilePlanner struct {
+	turn int
+}
+
+func (p *nativeGoTestCompilePlanner) Model() string { return "native-compile-test" }
+func (p *nativeGoTestCompilePlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.turn++
+	call := func(id, name, args string) (*agent.Completion, error) {
+		return &agent.Completion{
+			Message: agent.Message{
+				Role:      agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{{ID: id, Type: "function", Function: agent.Func{Name: name, Arguments: args}}},
+			},
+			FinishReason: "tool_calls",
+		}, nil
+	}
+	switch p.turn {
+	case 1:
+		return call("test", codetools.ToolBash, `{"command":"go test -c"}`)
+	default:
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "compiled and verified"}, FinishReason: "stop"}, nil
+	}
+}
+
+func TestNativeServeGoTestCompilationContained(t *testing.T) {
+	abi.ResetForTest()
+	agent.Configure()
+	abi.RegisterRegionBackend(inlineBackend{})
+	root := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".gitignore", "/_scratch/\n/_*\n")
+	write("go.mod", "module fixture\n\ngo 1.26\n")
+	write("fixture.go", "package fixture\n\nfunc Value() int { return 1 }\n")
+	write("fixture_test.go", "package fixture\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n")
+	if _, err := codetools.Register(codetools.Config{Root: root, FocusedCommands: true}, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "init", "-q", root).Run(); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "add", ".")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	cmdCommit := exec.Command("git", "-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init", "-q")
+	if out, err := cmdCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+
+	srv, err := New(Config{EngineID: "localtools", Model: "test", VDSO: true, Native: true, NativeMaxTurns: 4, NativeCodeWorkspace: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	srv.planner = &nativeGoTestCompilePlanner{}
+	_, err = srv.runNativeArmSeed(context.Background(), nativeWireSeed{Task: "compile fixture test"}, "containment-witness")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Verify that no binary leaked into package tree
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "_scratch" || name == ".git" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".test") || strings.HasSuffix(lower, ".test.exe") {
+			t.Fatalf("compiled binary %q leaked into package directory %s", name, root)
+		}
+	}
+
+	// 2. Verify binary is in _scratch/gotmp
+	gotmpDir := filepath.Join(root, "_scratch", "gotmp")
+	gotmpEntries, err := os.ReadDir(gotmpDir)
+	if err != nil {
+		t.Fatalf("cannot read gotmp dir %s: %v", gotmpDir, err)
+	}
+	foundBinary := false
+	for _, e := range gotmpEntries {
+		lower := strings.ToLower(e.Name())
+		if strings.HasSuffix(lower, ".test") || strings.HasSuffix(lower, ".test.exe") {
+			foundBinary = true
+			break
+		}
+	}
+	if !foundBinary {
+		t.Fatalf("expected compiled binary in gotmp dir %s, got: %v", gotmpDir, gotmpEntries)
+	}
+
+	// 3. Verify git status has no untracked binaries
+	statusCmd := exec.Command("git", "-C", root, "status", "--porcelain")
+	statusOut, err := statusCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v: %s", err, statusOut)
+	}
+	for _, line := range strings.Split(string(statusOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, ".test") || strings.Contains(lower, ".test.exe") {
+			t.Fatalf("untracked binary artifact in git status: %q", line)
+		}
+	}
+}
