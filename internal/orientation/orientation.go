@@ -9,11 +9,14 @@ import (
 	"time"
 )
 
+// Schema identifies the format version of the orientation snapshot payload.
 const Schema = "fak-orientation/1"
 
 //go:embed orientation.json
 var embedded []byte
 
+// Item represents a single product orientation dimension, defining its lifecycle
+// horizon, active role, rationale, and objective transition rules.
 type Item struct {
 	ID               string   `json:"id"`
 	Label            string   `json:"label"`
@@ -28,6 +31,8 @@ type Item struct {
 	FutureState      string   `json:"future_state"`
 }
 
+// Snapshot represents a validated product orientation document containing
+// invariant promises, the owned mediation seam, and directional items.
 type Snapshot struct {
 	Schema              string `json:"schema"`
 	EffectiveDate       string `json:"effective_date"`
@@ -38,6 +43,7 @@ type Snapshot struct {
 	Items               []Item `json:"items"`
 }
 
+// View wraps a Snapshot with evaluation-time freshness state and review countdowns.
 type View struct {
 	Snapshot
 	AsOf         string `json:"as_of"`
@@ -45,6 +51,7 @@ type View struct {
 	DaysToReview int    `json:"days_to_review"`
 }
 
+// Current loads, decodes, and validates the embedded orientation snapshot.
 func Current() (Snapshot, error) {
 	var s Snapshot
 	if err := json.Unmarshal(embedded, &s); err != nil {
@@ -56,6 +63,8 @@ func Current() (Snapshot, error) {
 	return s, nil
 }
 
+// Validate enforces schema constraints, date formatting, required string fields,
+// unique item identifiers, and recognized horizon and evidence state values.
 func Validate(s Snapshot) error {
 	var problems []string
 	if s.Schema != Schema {
@@ -106,6 +115,8 @@ func Validate(s Snapshot) error {
 	return nil
 }
 
+// Assess computes freshness classification and remaining review days for a Snapshot
+// evaluated against the provided reference timestamp.
 func Assess(s Snapshot, now time.Time) View {
 	review, _ := time.Parse(time.DateOnly, s.ReviewBy)
 	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
@@ -119,6 +130,7 @@ func Assess(s Snapshot, now time.Time) View {
 	return View{Snapshot: s, AsOf: today.Format(time.DateOnly), Freshness: freshness, DaysToReview: days}
 }
 
+// Text renders the evaluated View into a human-readable summary.
 func (v View) Text() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "FAK ORIENTATION — %s (%d days to review)\n", strings.ToUpper(v.Freshness), v.DaysToReview)
