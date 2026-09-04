@@ -19,12 +19,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/serverproduct"
 )
 
-const (
-	BindingSchema    = "fak.harness-server-binding/v1"
-	ResolutionSchema = "fak.harness-server-resolution/v1"
-	BindingFileName  = "server.binding.json"
-	maxDocumentSize  = 1 << 20
-)
+// BindingSchema identifies the versioned JSON schema for harness server bindings.
+const BindingSchema = "fak.harness-server-binding/v1"
+
+// ResolutionSchema identifies the versioned JSON schema for verified harness server resolutions.
+const ResolutionSchema = "fak.harness-server-resolution/v1"
+
+// BindingFileName is the canonical filename for the harness server binding document.
+const BindingFileName = "server.binding.json"
+
+const maxDocumentSize = 1 << 20
 
 var (
 	digestPattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

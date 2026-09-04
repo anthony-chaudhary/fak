@@ -25,8 +25,11 @@ import (
 const ghRunnerTimeout = 60 * time.Second
 
 const (
-	Schema          = "fak.learning-debt-dispatch.v1"
-	SeenSchema      = "fak.learning-debt-dispatch.seen.v1"
+	// Schema identifies the JSON schema for learning-debt dispatch result payloads.
+	Schema = "fak.learning-debt-dispatch.v1"
+	// SeenSchema identifies the schema version for the seen-cache store.
+	SeenSchema = "fak.learning-debt-dispatch.seen.v1"
+	// DefaultCacheRel is the default workspace-relative path for the seen-cache JSON file.
 	DefaultCacheRel = ".fak/learning-debt-dispatch/seen.json"
 )
 
@@ -34,6 +37,7 @@ var defaultTriageLabels = []string{"needs-triage", "triage-only"}
 
 var markerRE = regexp.MustCompile(`<!--\s*fak-learning-debt-key:\s*([^>\s]+)\s*-->`)
 
+// Defect holds a classified learning defect extracted from the scorecard payload.
 type Defect struct {
 	Key    string  `json:"key"`
 	Doc    string  `json:"doc"`
@@ -46,6 +50,7 @@ type Defect struct {
 	Prio   float64 `json:"priority"`
 }
 
+// SeenRecord tracks filing metadata for an issue that has already been dispatched.
 type SeenRecord struct {
 	FiledAt  string `json:"filed_at"`
 	Doc      string `json:"doc"`
@@ -59,6 +64,7 @@ type SeenRecord struct {
 // here (and in cmd/fak) is unchanged, while the format and defaulting live in one place.
 type SeenCache = dogfoodissues.SeenCache[SeenRecord]
 
+// Issue represents minimal GitHub issue data used for existing-marker deduplication.
 type Issue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
@@ -67,6 +73,7 @@ type Issue struct {
 	URL    string `json:"url"`
 }
 
+// PlanRow defines a planned issue creation action.
 type PlanRow struct {
 	Action string `json:"action"`
 	Key    string `json:"key"`
@@ -80,6 +87,7 @@ type PlanRow struct {
 	Grade  string `json:"grade,omitempty"`
 }
 
+// Stats summarizes triage and deduplication counts for a dispatch run.
 type Stats struct {
 	TotalDefects     int `json:"total_defects"`
 	Planned          int `json:"planned"`
@@ -90,6 +98,7 @@ type Stats struct {
 	Cap              int `json:"cap"`
 }
 
+// SyncRow records the dispatch outcome for an individual issue.
 type SyncRow struct {
 	Key    string `json:"key"`
 	OK     bool   `json:"ok"`
@@ -97,6 +106,7 @@ type SyncRow struct {
 	Stderr string `json:"stderr,omitempty"`
 }
 
+// Result encapsulates the complete outcome of a learning-debt dispatch pass.
 type Result struct {
 	Schema    string    `json:"schema"`
 	Mode      string    `json:"mode"`
@@ -107,8 +117,10 @@ type Result struct {
 	Synced    []SyncRow `json:"synced"`
 }
 
+// Runner executes an external command, returning stdout, stderr, and an ok boolean.
 type Runner func(args []string) (stdout, stderr string, ok bool)
 
+// LoadPayload loads and unmarshals a JSON scorecard payload from disk.
 func LoadPayload(path string) (map[string]any, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -137,6 +149,7 @@ func SaveSeen(path string, cache SeenCache) error {
 	return dogfoodissues.SaveSeen(path, SeenSchema, cache)
 }
 
+// ExtractDefects parses and prioritizes learning-debt defects from a scorecard payload.
 func ExtractDefects(payload map[string]any) []Defect {
 	priorities := priorityIndex(payload)
 	var defects []Defect
@@ -209,6 +222,8 @@ func ExtractDefects(payload map[string]any) []Defect {
 	return defects
 }
 
+// BuildPlan computes planned issue creation rows by deduplicating defects
+// against the seen cache and existing issues up to cap.
 func BuildPlan(defects []Defect, seen SeenCache, existing []Issue, cap int, scorecardPath string) ([]PlanRow, Stats) {
 	if cap < 0 {
 		cap = 0
@@ -254,6 +269,7 @@ func BuildPlan(defects []Defect, seen SeenCache, existing []Issue, cap int, scor
 	return plan, stats
 }
 
+// IssueBody renders the GitHub issue markdown body for a defect, embedding its stable marker key.
 func IssueBody(d Defect, scorecardPath string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-learning-debt-key: %s -->\n", d.Key)
@@ -280,6 +296,7 @@ func IssueBody(d Defect, scorecardPath string) string {
 	return b.String()
 }
 
+// MarkerKey extracts the stable deduplication key from an issue body's HTML marker.
 func MarkerKey(body string) string {
 	m := markerRE.FindStringSubmatch(body)
 	if m == nil {
@@ -288,6 +305,7 @@ func MarkerKey(body string) string {
 	return strings.TrimSpace(m[1])
 }
 
+// Sync creates issues for planned rows using the provided runner.
 func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow {
 	run := runner
 	if run == nil {
@@ -331,6 +349,7 @@ func mergeLabels(base, extra []string) []string {
 	return out
 }
 
+// MarkSuccessful updates the seen cache with records for all successfully synced rows.
 func MarkSuccessful(cache *SeenCache, plan []PlanRow, synced []SyncRow, now time.Time) {
 	if cache.Schema == "" {
 		cache.Schema = SeenSchema
@@ -360,6 +379,7 @@ func MarkSuccessful(cache *SeenCache, plan []PlanRow, synced []SyncRow, now time
 	}
 }
 
+// FetchExistingIssues queries GitHub via the default runner for existing issues to deduplicate against.
 func FetchExistingIssues(repo string, limit int) ([]Issue, error) {
 	args := []string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit),
 		"--json", "number,title,body,state,url"}
@@ -380,6 +400,7 @@ func FetchExistingIssues(repo string, limit int) ([]Issue, error) {
 	return issues, nil
 }
 
+// Render produces a human-readable summary of a dispatch result.
 func Render(r Result) string {
 	lines := []string{
 		fmt.Sprintf("learning-debt-dispatch: %s  planned=%d cap=%d total_defects=%d",

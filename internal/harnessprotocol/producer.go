@@ -15,12 +15,17 @@ import (
 )
 
 var (
-	ErrRunMismatch      = errors.New("cursor belongs to another run")
-	ErrBadCheckpoint    = errors.New("invalid checkpoint")
-	ErrCanceled         = errors.New("run canceled")
+	// ErrRunMismatch indicates an input or cursor specifies a different run ID than the producer.
+	ErrRunMismatch = errors.New("cursor belongs to another run")
+	// ErrBadCheckpoint indicates an invalid, forged, or out-of-bounds checkpoint token.
+	ErrBadCheckpoint = errors.New("invalid checkpoint")
+	// ErrCanceled indicates operations are rejected because the run has been canceled.
+	ErrCanceled = errors.New("run canceled")
+	// ErrApprovalBoundary indicates an approval input does not match any pending approval request.
 	ErrApprovalBoundary = errors.New("approval does not match a pending request")
 )
 
+// Producer sequences, validates, and seals protocol event envelopes for a single execution run.
 type Producer struct {
 	mu               sync.Mutex
 	runID            string
@@ -31,6 +36,7 @@ type Producer struct {
 	secret           []byte
 }
 
+// NewProducer initializes a new Producer for the given run ID with an HMAC secret for checkpoint integrity.
 func NewProducer(runID string, secret []byte) *Producer {
 	return &Producer{runID: runID, inputs: map[string]struct{}{}, pendingApprovals: map[string]struct{}{}, secret: append([]byte(nil), secret...)}
 }
@@ -89,11 +95,15 @@ func (p *Producer) cursorLocked(sequence uint64) harnesskit.Cursor {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%s", p.runID, sequence, p.secret)))
 	return harnesskit.Cursor{Version: harnesskit.ProtocolVersion, RunID: p.runID, Sequence: sequence, Checkpoint: hex.EncodeToString(sum[:])}
 }
+
+// Cursor returns the HMAC-authenticated checkpoint representing the producer's current sequence position.
 func (p *Producer) Cursor() harnesskit.Cursor {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cursorLocked(uint64(len(p.events)))
 }
+
+// Resume replays envelopes starting after cursor.Sequence up to the given credit limit.
 func (p *Producer) Resume(ctx context.Context, cursor harnesskit.Cursor, credit uint32) ([]harnesskit.Envelope, harnesskit.Cursor, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

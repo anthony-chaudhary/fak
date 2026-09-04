@@ -1,3 +1,5 @@
+// Package harnesscreationreceipt implements schema parsing, validation,
+// and study-row projection for harness creation trial receipts.
 package harnesscreationreceipt
 
 import (
@@ -8,15 +10,19 @@ import (
 	"time"
 )
 
+// Schema identifies the canonical v1alpha1 harness creation receipt specification.
 const Schema = "fak.harness-creation-receipt/v1alpha1"
 
 var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{5,63}$`)
 var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+// Command records an individual CLI invocation and its exit status.
 type Command struct {
 	Command string `json:"command"`
 	Exit    int    `json:"exit"`
 }
+
+// Receipt holds trial execution evidence, provenance metadata, and verification metrics.
 type Receipt struct {
 	Schema                string    `json:"schema"`
 	RunID                 string    `json:"run_id"`
@@ -52,6 +58,8 @@ type Receipt struct {
 	IndependentAuthorship string    `json:"independent_authorship,omitempty"`
 	Conformance           string    `json:"conformance,omitempty"`
 }
+
+// StudyRow represents a projected comparative trial row for cross-arm study analysis.
 type StudyRow struct {
 	ID               string  `json:"id"`
 	ParticipantID    string  `json:"participant_id"`
@@ -74,12 +82,15 @@ type StudyRow struct {
 	SourceReceipt    string  `json:"source_receipt,omitempty"`
 	SourceDigest     string  `json:"source_digest,omitempty"`
 }
+
+// Result encapsulates the validation outcome and projected study row from evaluating a receipt.
 type Result struct {
 	Schema string   `json:"schema"`
 	Valid  bool     `json:"valid"`
 	Row    StudyRow `json:"study_row"`
 }
 
+// Parse unmarshals receipt JSON and validates field formats, timing intervals, and evidence requirements.
 func Parse(raw []byte) (Receipt, error) {
 	var r Receipt
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -149,6 +160,8 @@ func Parse(raw []byte) (Receipt, error) {
 	}
 	return r, nil
 }
+
+// Evaluate projects an adjudicated Receipt into a validated Result and StudyRow.
 func Evaluate(r Receipt) Result {
 	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{
 		ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, Arm: r.Arm, PairID: r.PairID,
@@ -159,6 +172,8 @@ func Evaluate(r Receipt) Result {
 	}}
 }
 
+// CheckUnique verifies that a projected StudyRow adheres to study protocol constraints,
+// ensuring no duplicate runs, participant collisions, or cross-arm envelope drift occur.
 func CheckUnique(studyRaw []byte, row StudyRow) error {
 	var study struct {
 		Protocol struct {

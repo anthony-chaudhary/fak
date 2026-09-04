@@ -17,11 +17,15 @@ import (
 )
 
 const (
-	SafetyMarginGB    = 2.0
+	// SafetyMarginGB reserves headroom in gigabytes to prevent host thrashing during model execution.
+	SafetyMarginGB = 2.0
+	// HighWiredFraction defines the threshold ratio where wired memory indicates unified GPU residency.
 	HighWiredFraction = 0.40
-	HolderGB          = 1.0
+	// HolderGB sets the minimum RSS gigabytes threshold for reporting high-consumption processes.
+	HolderGB = 1.0
 )
 
+// Memory captures host system memory statistics parsed from kernel and virtual memory subsystems.
 type Memory struct {
 	TotalBytes      int64
 	FreeBytes       int64
@@ -31,12 +35,14 @@ type Memory struct {
 	AvailableBytes  int64
 }
 
+// Holder describes an active operating system process consuming memory above the reporting threshold.
 type Holder struct {
 	PID   int     `json:"pid"`
 	RSSGB float64 `json:"rss_gb"`
 	Comm  string  `json:"comm"`
 }
 
+// Snapshot aggregates host memory metrics, pressure flags, and large resident processes.
 type Snapshot struct {
 	Platform       string   `json:"platform"`
 	TotalGB        float64  `json:"total_gb"`
@@ -54,6 +60,7 @@ type Snapshot struct {
 	ShortfallGB    float64  `json:"shortfall_gb,omitempty"`
 }
 
+// ParseDarwin converts macOS vm_stat output and page configuration into structured memory statistics.
 func ParseDarwin(vmStat string, pageSize, total int64) Memory {
 	vals := map[string]int64{}
 	for _, line := range strings.Split(vmStat, "\n") {
@@ -88,6 +95,7 @@ func ParseDarwin(vmStat string, pageSize, total int64) Memory {
 	}
 }
 
+// ParseLinux extracts system memory metrics from procfs meminfo key-value listings.
 func ParseLinux(meminfo string) Memory {
 	vals := map[string]int64{}
 	sc := bufio.NewScanner(strings.NewReader(meminfo))
@@ -132,6 +140,7 @@ func parseFirstIntField(fields []string) (int64, bool) {
 	return n, true
 }
 
+// ParseHolders scans ps tabular output to extract and sort large resident processes by RSS.
 func ParseHolders(psText string) []Holder {
 	var holders []Holder
 	lines := strings.Split(psText, "\n")
@@ -159,6 +168,7 @@ func ParseHolders(psText string) []Holder {
 	return holders
 }
 
+// BuildSnapshot computes gigabyte-scale memory fields and flags excessive wired GPU memory.
 func BuildSnapshot(platform string, mem Memory, holders []Holder) Snapshot {
 	totalGB := float64(mem.TotalBytes) / 1e9
 	wiredGB := float64(mem.WiredBytes) / 1e9
@@ -185,6 +195,7 @@ func BuildSnapshot(platform string, mem Memory, holders []Holder) Snapshot {
 	}
 }
 
+// Evaluate compares requested gigabytes against available capacity and wired memory constraints.
 func Evaluate(s Snapshot, requireGB float64) Snapshot {
 	ok := s.AvailableGB >= requireGB && !s.HighWired
 	s.RequireGB = requireGB
@@ -195,6 +206,7 @@ func Evaluate(s Snapshot, requireGB float64) Snapshot {
 	return s
 }
 
+// ReadMemory probes platform-specific kernel utilities to obtain raw host memory counters.
 func ReadMemory() (Memory, error) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -224,6 +236,7 @@ func ReadMemory() (Memory, error) {
 	}
 }
 
+// BigHolders queries operating system processes to list processes exceeding the RSS threshold.
 func BigHolders() []Holder {
 	out, err := runOut("ps", "-axo", "pid,rss,comm")
 	if err != nil {
@@ -232,6 +245,7 @@ func BigHolders() []Holder {
 	return ParseHolders(out)
 }
 
+// CurrentSnapshot gathers live platform memory counters and large resident processes into a snapshot.
 func CurrentSnapshot() (Snapshot, error) {
 	mem, err := ReadMemory()
 	if err != nil {

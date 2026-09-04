@@ -10,8 +10,11 @@ import (
 	"strings"
 )
 
+// Schema identifies the schema format for harness pack manifests.
 const Schema = "fak.harness-pack/v1alpha1"
 
+// Blueprint specifies a bounded starter pack definition, including problem statement,
+// capability contracts, owned artifacts, and delivery spines.
 type Blueprint struct {
 	ID                   string   `json:"id"`
 	Name                 string   `json:"name"`
@@ -28,6 +31,7 @@ type Blueprint struct {
 	WeekendExtension     []string `json:"weekend_extension"`
 }
 
+// Pack represents the serialized manifest written to harness.pack.json when initializing a pack.
 type Pack struct {
 	Schema               string   `json:"schema"`
 	BlueprintID          string   `json:"blueprint_id"`
@@ -41,12 +45,14 @@ type Pack struct {
 	Upgrade              string   `json:"upgrade"`
 }
 
+// InitResult records the target directory and files created or preserved during pack initialization.
 type InitResult struct {
 	Directory string   `json:"directory"`
 	Created   []string `json:"created"`
 	Preserved []string `json:"preserved"`
 }
 
+// Builtins returns an isolated, sorted clone of all built-in starter blueprints.
 func Builtins() []Blueprint {
 	out := append([]Blueprint(nil), builtins...)
 	for i := range out {
@@ -60,6 +66,7 @@ func Builtins() []Blueprint {
 	return out
 }
 
+// Find searches the built-in catalog for a blueprint matching the given ID.
 func Find(id string) (Blueprint, bool) {
 	for _, b := range builtins {
 		if b.ID == id {
@@ -69,6 +76,8 @@ func Find(id string) (Blueprint, bool) {
 	return Blueprint{}, false
 }
 
+// Validate verifies structural completeness, non-overlap of capability rules,
+// and artifact path safety across a slice of blueprints.
 func Validate(blueprints []Blueprint) error {
 	seen := map[string]bool{}
 	for _, b := range blueprints {
@@ -101,6 +110,8 @@ func Validate(blueprints []Blueprint) error {
 	return nil
 }
 
+// Init scaffolds a blueprint into target dir, emitting harness.pack.json and README.md
+// while idempotently preserving existing user-authored files.
 func Init(id, dir string) (InitResult, error) {
 	b, ok := Find(id)
 	if !ok {

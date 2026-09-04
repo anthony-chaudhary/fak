@@ -108,11 +108,11 @@ func TestDeriveIsDeterministicAcrossDeltaOrder(t *testing.T) {
 	}
 }
 
-func fixture(t *testing.T, locked, mandatory bool) harnessresolve.Lock {
-	t.Helper()
+func fixture(tb testing.TB, locked, mandatory bool) harnessresolve.Lock {
+	tb.Helper()
 	lock := harnessresolve.Lock{Schema: harnessresolve.LockSchema, Environment: harnessresolve.Environment{OS: "linux", Arch: "amd64", Contract: "v1"}, Components: []harnessresolve.LockedComponent{{ID: "support", Version: "1.0.0", Digest: "sha256:support", Source: "registry/support", Reason: "root", Provider: "support"}}, Assets: []harnesscompose.EffectiveAsset{{Kind: "instruction", ID: "style", Value: "concise", Source: "company:support", Locked: locked, Mandatory: mandatory}}}
 	if err := harnessresolve.ReidentifyLock(&lock); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return lock
 }

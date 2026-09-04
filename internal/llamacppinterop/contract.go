@@ -21,20 +21,26 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
+// Schema identifies the versioned llama.cpp interop contract schema.
 const (
 	Schema = "fak.llamacppinterop/1"
 	// WitnessedQwen38MTPCommit is the llama.cpp runtime measured on the A100 default path.
 	WitnessedQwen38MTPCommit = "8144f31"
 )
 
+// Outcome indicates whether delegation to llama.cpp is accepted, abstained, or refused.
 type Outcome string
 
 const (
+	// OutcomeDelegate accepts delegation to the discovered or planned runtime.
 	OutcomeDelegate Outcome = "delegate"
-	OutcomeAbstain  Outcome = "abstain"
-	OutcomeRefuse   Outcome = "refuse"
+	// OutcomeAbstain skips delegation because prerequisites or hardware features are missing.
+	OutcomeAbstain Outcome = "abstain"
+	// OutcomeRefuse rejects delegation due to invalid configuration or failed probes.
+	OutcomeRefuse Outcome = "refuse"
 )
 
+// Capability captures runtime attributes discovered from a llama.cpp binary.
 type Capability struct {
 	Binary   string `json:"binary"`
 	Version  string `json:"version"`
@@ -43,6 +49,8 @@ type Capability struct {
 	DraftMTP bool   `json:"draft_mtp,omitempty"`
 	CUDA     bool   `json:"cuda,omitempty"`
 }
+
+// Result carries the structured outcome, diagnostic reason, and planned execution argv.
 type Result struct {
 	Schema     string     `json:"schema"`
 	Outcome    Outcome    `json:"outcome"`
@@ -50,11 +58,16 @@ type Result struct {
 	Capability Capability `json:"capability"`
 	Argv       []string   `json:"argv,omitempty"`
 }
+
+// Runner executes command-line probes against a candidate binary.
 type Runner interface {
 	Output(context.Context, string, ...string) ([]byte, error)
 }
+
+// ExecRunner executes binary probes via os/exec commands.
 type ExecRunner struct{}
 
+// Output executes the binary with arguments and returns combined stdout and stderr output.
 func (ExecRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
@@ -64,6 +77,7 @@ var (
 	commitRE  = regexp.MustCompile(`(?i)commit\s+([a-f0-9]{7,40})`)
 )
 
+// Discover probes a candidate binary to extract version, commit, and supported features.
 func Discover(ctx context.Context, r Runner, binary string) Result {
 	if strings.TrimSpace(binary) == "" {
 		return Result{Schema: Schema, Outcome: OutcomeRefuse, Reason: "llama.cpp binary is empty"}
@@ -97,6 +111,7 @@ func WitnessedQwen38MTP(cap Capability) bool {
 	return commit != "" && (strings.HasPrefix(commit, WitnessedQwen38MTPCommit) || strings.HasPrefix(WitnessedQwen38MTPCommit, commit)) && cap.Server && cap.DraftMTP && cap.CUDA
 }
 
+// Plan validates model requirements and constructs command-line arguments for standard delegation.
 func Plan(cap Capability, model string, d quantmeta.Descriptor) Result {
 	if cap.Binary == "" || cap.Version == "" {
 		return Result{Schema: Schema, Outcome: OutcomeRefuse, Reason: "unproven llama.cpp capability"}
@@ -142,10 +157,12 @@ func PlanQwen38MTP(cap Capability, model string, d quantmeta.Descriptor, port, c
 	return base
 }
 
+// Health holds the parsed status response from llama-server's /health endpoint.
 type Health struct {
 	Status string `json:"status"`
 }
 
+// CheckHealth queries a llama-server /health endpoint to verify server readiness.
 func CheckHealth(ctx context.Context, c *http.Client, url string) Result {
 	if c == nil {
 		c = &http.Client{Timeout: 2 * time.Second}
@@ -178,6 +195,7 @@ type Process struct {
 	stopOnce sync.Once
 }
 
+// Start spawns a llama-server subprocess and waits for health readiness until the timeout.
 func Start(ctx context.Context, argv []string, startupTimeout time.Duration) (*Process, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("llama.cpp argv is empty")
@@ -238,13 +256,18 @@ func Start(ctx context.Context, argv []string, startupTimeout time.Duration) (*P
 	}
 }
 
+// BaseURL returns the HTTP base URL for OpenAI-compatible completions.
 func (p *Process) BaseURL() string { return p.url + "/v1" }
+
+// PID returns the OS process ID of the running subprocess, or 0 if inactive.
 func (p *Process) PID() int {
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return 0
 	}
 	return p.cmd.Process.Pid
 }
+
+// Stop terminates the subprocess cleanly with SIGINT, escalating to SIGKILL on timeout.
 func (p *Process) Stop() error {
 	if p == nil {
 		return nil

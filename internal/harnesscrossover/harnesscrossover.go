@@ -7,9 +7,13 @@ import (
 	"strings"
 )
 
+// Schema defines the expected JSON schema identifier for harness crossover studies.
 const Schema = "fak.harness-crossover-study/v1alpha1"
+
+// ReportSchema defines the JSON schema identifier for evaluation reports.
 const ReportSchema = "fak.harness-crossover-report/v1alpha1"
 
+// Study models an empirical crossover trial across tasks, evaluation weights, and candidate systems.
 type Study struct {
 	Schema       string        `json:"schema"`
 	ID           string        `json:"id"`
@@ -17,15 +21,21 @@ type Study struct {
 	Weights      Weights       `json:"weights"`
 	Alternatives []Alternative `json:"alternatives"`
 }
+
+// Task defines an evaluation task associated with a specific operational domain.
 type Task struct {
 	ID     string `json:"id"`
 	Domain string `json:"domain"`
 }
+
+// Weights parameterizes time costs assigned to context switching, layering errors, and token overhead.
 type Weights struct {
 	SwitchActionSeconds float64 `json:"switch_action_seconds"`
 	WrongLayerSeconds   float64 `json:"wrong_layer_seconds"`
 	ContextTokenSeconds float64 `json:"context_token_seconds"`
 }
+
+// Alternative describes a candidate architecture (native profile or contextual harness) evaluated over all tasks.
 type Alternative struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -34,15 +44,21 @@ type Alternative struct {
 	Maintenance   Seconds  `json:"maintenance"`
 	Runs          []Run    `json:"runs"`
 }
+
+// Source records provenance or documentation metadata supporting an alternative's parameters.
 type Source struct {
 	URL       string `json:"url"`
 	Retrieved string `json:"retrieved"`
 	Note      string `json:"note"`
 }
+
+// Seconds captures an elapsed duration in seconds along with its evidence classification.
 type Seconds struct {
 	Value      float64 `json:"value"`
 	Provenance string  `json:"provenance"`
 }
+
+// Run records observed or modeled performance metrics for executing a single task under an alternative.
 type Run struct {
 	TaskID              string  `json:"task_id"`
 	SwitchActions       int     `json:"switch_actions"`
@@ -51,6 +67,8 @@ type Run struct {
 	ContextTokens       int     `json:"context_tokens"`
 	Provenance          string  `json:"provenance"`
 }
+
+// Cost summarizes the aggregate time breakdown incurred by an alternative.
 type Cost struct {
 	SetupSeconds       float64 `json:"setup_seconds"`
 	MaintenanceSeconds float64 `json:"maintenance_seconds"`
@@ -60,12 +78,16 @@ type Cost struct {
 	ContextSeconds     float64 `json:"context_seconds"`
 	TotalSeconds       float64 `json:"total_seconds"`
 }
+
+// Result aggregates the evaluated cost and provenance tiers for a single alternative.
 type Result struct {
 	ID         string   `json:"id"`
 	Kind       string   `json:"kind"`
 	Cost       Cost     `json:"cost"`
 	Provenance []string `json:"provenance"`
 }
+
+// Crossover captures the break-even delta and domain-switch threshold where a contextual harness overtakes a native profile.
 type Crossover struct {
 	ContextualID          string   `json:"contextual_id"`
 	NativeID              string   `json:"native_id"`
@@ -74,6 +96,8 @@ type Crossover struct {
 	BreakEvenSwitches     *float64 `json:"break_even_switches,omitempty"`
 	Interpretation        string   `json:"interpretation"`
 }
+
+// Report presents the evaluation findings, winning alternative, and crossover economics for a study.
 type Report struct {
 	Schema      string     `json:"schema"`
 	StudyID     string     `json:"study_id"`
@@ -85,6 +109,7 @@ type Report struct {
 	Verdict     string     `json:"verdict"`
 }
 
+// Parse decodes and validates a JSON study definition, checking required domains, tasks, and provenance levels.
 func Parse(raw []byte) (Study, error) {
 	var s Study
 	d := json.NewDecoder(strings.NewReader(string(raw)))
@@ -138,6 +163,7 @@ func Parse(raw []byte) (Study, error) {
 	return s, nil
 }
 
+// Evaluate computes the cost breakdown for each alternative and calculates the crossover break-even point.
 func Evaluate(s Study) Report {
 	switches := 0
 	domains := make([]string, len(s.Tasks))

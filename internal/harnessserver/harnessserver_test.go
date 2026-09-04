@@ -182,7 +182,7 @@ func validReceipt(root, model string, generation uint64, capabilities []string) 
 	}
 }
 
-func writeReceipt(t *testing.T, dir string, receipt serverproduct.ServerReceipt) string {
+func writeReceipt(t testing.TB, dir string, receipt serverproduct.ServerReceipt) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func writeReceipt(t *testing.T, dir string, receipt serverproduct.ServerReceipt)
 	return path
 }
 
-func fileDigest(t *testing.T, path string) string {
+func fileDigest(t testing.TB, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {

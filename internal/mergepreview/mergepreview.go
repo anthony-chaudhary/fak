@@ -12,14 +12,19 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// Outcome classifies the simulated three-way merge relationship between HEAD and target.
 type Outcome string
 
 const (
+	// OutcomeEmptyNetDiff indicates target adds no net changes beyond what already exists in HEAD.
 	OutcomeEmptyNetDiff Outcome = "empty_net_diff"
-	OutcomeCleanMerge   Outcome = "clean_merge"
-	OutcomeConflicts    Outcome = "conflicts"
+	// OutcomeCleanMerge indicates the branches combine without conflicts but introduce tree modifications.
+	OutcomeCleanMerge Outcome = "clean_merge"
+	// OutcomeConflicts indicates overlapping conflicting modifications prevent automated three-way combination.
+	OutcomeConflicts Outcome = "conflicts"
 )
 
+// Result describes the dry-run evaluation of merging target into HEAD.
 type Result struct {
 	Head            string   `json:"head"`
 	Target          string   `json:"target"`
@@ -31,14 +36,17 @@ type Result struct {
 	Detail          string   `json:"detail"`
 }
 
+// Runner executes git subcommands in a specified working directory.
 type Runner func(ctx context.Context, dir string, args ...string) (RunResult, error)
 
+// RunResult captures standard streams and exit status from a git subcommand execution.
 type RunResult struct {
 	Stdout []byte
 	Stderr []byte
 	Code   int
 }
 
+// RealRunner executes git subcommands via os/exec with background process configuration.
 func RealRunner(ctx context.Context, dir string, args ...string) (RunResult, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
@@ -58,6 +66,7 @@ func RealRunner(ctx context.Context, dir string, args ...string) (RunResult, err
 	return RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Code: code}, err
 }
 
+// Preview evaluates a three-way merge between HEAD and target without mutating the working tree or index.
 func Preview(ctx context.Context, dir, target string, run Runner) (Result, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -135,7 +144,7 @@ const (
 	ApplyDeferredConflict ApplyOutcome = "deferred_conflict"
 )
 
-// ApplyResult is the outcome of Apply.
+// ApplyResult summarizes the actions taken and generated merge commit details from Apply.
 type ApplyResult struct {
 	Preview      Result       `json:"preview"`
 	ApplyOutcome ApplyOutcome `json:"apply_outcome"`

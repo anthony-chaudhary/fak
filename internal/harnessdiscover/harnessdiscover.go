@@ -15,8 +15,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessselect"
 )
 
+// Schema identifies the v1alpha1 harness discovery manifest format.
 const Schema = "fak.harness-discovery/v1alpha1"
 
+// Registry declares trusted cryptographic signers, revoked content digests,
+// and discoverable harness source locations.
 type Registry struct {
 	Schema          string            `json:"schema"`
 	TrustedSigners  map[string]string `json:"trusted_signers,omitempty"`
@@ -26,6 +29,8 @@ type Registry struct {
 	RepoDeclaration string            `json:"repo_declaration,omitempty"`
 }
 
+// Source specifies a scoped harness configuration source, its trust level,
+// cryptographic signature, and principal admission requirements.
 type Source struct {
 	ID            string   `json:"id"`
 	Scope         string   `json:"scope"`
@@ -39,6 +44,8 @@ type Source struct {
 	Principals    []string `json:"principals,omitempty"`
 }
 
+// Candidate represents a validated, scoped harness manifest discovered from a source,
+// carrying provenance details including its content digest and trust tier.
 type Candidate struct {
 	ID            string `json:"id"`
 	Scope         string `json:"scope"`
@@ -51,12 +58,15 @@ type Candidate struct {
 	Manifest      string `json:"manifest_schema"`
 }
 
+// Result holds the set of discovered candidates ordered deterministically by scope
+// and identity, alongside the merged harness selection manifest.
 type Result struct {
 	Schema     string                 `json:"schema"`
 	Candidates []Candidate            `json:"candidates"`
 	Manifest   harnessselect.Manifest `json:"manifest"`
 }
 
+// Options configures the discovery search paths and caller principal identity.
 type Options struct {
 	RegistryPath string
 	StartPath    string
@@ -66,6 +76,8 @@ type Options struct {
 var scopes = map[string]int{"company": 10, "team": 20, "person": 30, "repo": 40, "project": 50}
 var refreshPolicies = map[string]bool{"immutable": true, "session": true, "manual": true}
 
+// Discover resolves, validates, and orders scoped harness declarations from the
+// specified registry, verifying cryptographic signatures and content digests.
 func Discover(opts Options) (Result, error) {
 	registryPath, err := filepath.Abs(opts.RegistryPath)
 	if err != nil || strings.TrimSpace(opts.RegistryPath) == "" {

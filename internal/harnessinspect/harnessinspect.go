@@ -1,3 +1,5 @@
+// Package harnessinspect produces operator-facing inspection reports and rendered summaries
+// from resolved harness product locks.
 package harnessinspect
 
 import (
@@ -9,8 +11,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
+// Schema defines the canonical schema identifier for harness inspection reports.
 const Schema = "fak-harness-inspection/1"
 
+// Asset represents an effective capability granted or restricted within the inspected harness.
 type Asset struct {
 	Capability string   `json:"capability"`
 	Source     string   `json:"source"`
@@ -20,6 +24,7 @@ type Asset struct {
 	Denies     []string `json:"denies,omitempty"`
 }
 
+// Component represents a resolved harness component and its provenance.
 type Component struct {
 	ID       string   `json:"id"`
 	Version  string   `json:"version"`
@@ -28,6 +33,7 @@ type Component struct {
 	Provides []string `json:"provides,omitempty"`
 }
 
+// Report holds the structured inspection of a resolved harness lock.
 type Report struct {
 	Schema      string                     `json:"schema"`
 	Verified    bool                       `json:"verified"`
@@ -40,6 +46,7 @@ type Report struct {
 	Controls    []string                   `json:"controls"`
 }
 
+// Inspect projects and sorts components, capabilities, and controls from a resolved lock into an inspection report.
 func Inspect(lock harnessresolve.Lock, lockPath string) Report {
 	report := Report{Schema: Schema, Verified: true, LockID: lock.ID, Environment: lock.Environment, Budget: lock.Budget, Decisions: len(lock.Decisions)}
 	for _, component := range lock.Components {
@@ -75,6 +82,7 @@ func inspectAsset(asset harnesscompose.EffectiveAsset) Asset {
 	return Asset{Capability: asset.Kind + ":" + asset.ID, Source: asset.Source, Control: control, Detail: detail, Grants: asset.Grants, Denies: asset.Denies}
 }
 
+// Render formats an inspection report into operator-readable summary text.
 func Render(report Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HARNESS INSPECT | VERIFIED\nlock: %s\nenvironment: %s/%s | contract %s\nbudget: context=%d tokens | memory=%d MiB | workers=%d\n", report.LockID, report.Environment.OS, report.Environment.Arch, report.Environment.Contract, report.Budget.ContextTokens, report.Budget.MemoryMiB, report.Budget.Workers)
