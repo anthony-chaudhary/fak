@@ -304,11 +304,24 @@ _PY_NORM_LLAMA = r'''import json,sys
 raw=json.load(open(sys.argv[1])); gpus=sys.argv[2]; model=sys.argv[3]; out=sys.argv[4]
 def pick(rows,tag):
     for r in (rows if isinstance(rows,list) else []):
+        if tag=="pp" and r.get("n_prompt")==512: return r.get("avg_ts")
+        if tag=="tg" and r.get("n_gen")==128: return r.get("avg_ts")
+    for r in (rows if isinstance(rows,list) else []):
         if r.get("n_prompt") and tag=="pp": return r.get("avg_ts")
         if r.get("n_gen") and tag=="tg": return r.get("avg_ts")
     return None
+sweeps=[]
+for r in (raw if isinstance(raw,list) else []):
+    sweeps.append({
+        "n_prompt": r.get("n_prompt",0),
+        "n_gen": r.get("n_gen",0),
+        "tok_per_sec": r.get("avg_ts"),
+        "stddev": r.get("stddev_ts"),
+        "samples": r.get("samples")
+    })
 json.dump({"engine":"llama","ok":True,"backend":"llama.cpp CUDA","precision":"Q8_0",
   "prefill_tok_per_sec":pick(raw,"pp"),"decode_tok_per_sec":pick(raw,"tg"),
+  "sweeps":sweeps,
   "gpus":gpus,"model":model,"raw":raw,"raw_artifact":"llama-bench.json"},
   open(out,"w"),indent=2)
 '''
@@ -320,8 +333,14 @@ for p in (rep.get("prefill") or []):
     if p.get("tokens")==512: pf=p.get("tok_per_sec")
 if pf is None and rep.get("prefill"): pf=rep["prefill"][-1].get("tok_per_sec")
 dec=(rep.get("decode") or {}).get("tok_per_sec")
+sweeps=[]
+for p in (rep.get("prefill") or []):
+    sweeps.append({"n_prompt":p.get("tokens",0),"n_gen":0,"tok_per_sec":p.get("tok_per_sec"),"samples":p.get("samples")})
+if rep.get("decode"):
+    d=rep["decode"]
+    sweeps.append({"n_prompt":d.get("prompt_tokens",0),"n_gen":d.get("steps",0),"tok_per_sec":d.get("tok_per_sec"),"samples":d.get("samples")})
 json.dump({"engine":key,"ok":True,"backend":rep.get("engine"),"precision":rep.get("precision"),
-  "prefill_tok_per_sec":pf,"decode_tok_per_sec":dec,"workers":rep.get("workers"),
+  "prefill_tok_per_sec":pf,"decode_tok_per_sec":dec,"sweeps":sweeps,"workers":rep.get("workers"),
   "load_ms":rep.get("load_ms"),"raw":rep,"raw_artifact":sys.argv[2].split("/")[-1]},
   open(out,"w"),indent=2)
 '''
@@ -343,9 +362,12 @@ if decode is None:
     tot=g("total_num_tokens","num_tokens","total_tokens"); el=g("elapsed_time","duration","elapsed_s","elapsed")
     if tot and el and el>0:
         decode=tot/el; note="vLLM AGGREGATE total tok/s (total_num_tokens/elapsed fallback)"
+sweeps=[]
+if decode is not None:
+    sweeps.append({"n_prompt":raw.get("input_len",512),"n_gen":raw.get("output_len",128),"tok_per_sec":decode,"concurrency":raw.get("num_prompts",64)})
 json.dump({"engine":"vllm","ok":decode is not None,
   "backend":"vLLM (PagedAttention, continuous batching)","precision":"bf16",
-  "prefill_tok_per_sec":None,"decode_tok_per_sec":decode,
+  "prefill_tok_per_sec":None,"decode_tok_per_sec":decode,"sweeps":sweeps,
   "note":note+"; HF bf16 weights of the SAME model, NOT the GGUF Q8 the llama/fak rows use, and NOT single-stream -- vLLM's edge is concurrency",
   "model":model,"raw":raw,"raw_artifact":sys.argv[1].split("/")[-1]},
   open(out,"w"),indent=2)
@@ -362,16 +384,54 @@ json.dump({"engine":key,"ok":False,"error":key+" failed on VM","log_tail":tail(l
 
 _PY_COMBINE = r'''import json,sys,glob,os
 work,gpus,model,arch=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4]
+base_arm=sys.argv[5] if len(sys.argv)>5 else "llama"
 engines={}
 for f in sorted(glob.glob(os.path.join(work,"engine-*.json"))):
     k=os.path.basename(f)[len("engine-"):-len(".json")]
     try: engines[k]=json.load(open(f))
     except Exception as e: engines[k]={"engine":k,"ok":False,"error":"unreadable: "+str(e)}
 head=None
-for k in (["llama"]+list(engines.keys())):
+for k in ([base_arm,"llama"]+list(engines.keys())):
     e=engines.get(k)
     if e and e.get("ok") and e.get("decode_tok_per_sec") is not None: head=e; break
-out={"schema":"fak.gcp-vm-bench.v2","gpus":gpus,"model":model,"arch":arch,"engines":engines}
+
+paired_report={"schema":"fak.armbench.paired-report/1","tuned_baseline":base_arm,"arms":{}}
+base_engine=engines.get(base_arm)
+if base_engine and base_engine.get("ok"):
+    b_pf=base_engine.get("prefill_tok_per_sec")
+    b_dec=base_engine.get("decode_tok_per_sec")
+    for k,e in engines.items():
+        if k==base_arm or not e.get("ok"): continue
+        t_pf=e.get("prefill_tok_per_sec")
+        t_dec=e.get("decode_tok_per_sec")
+        is_a2a = (k=="fak-cuda-q8" and base_arm=="llama") or (k=="fak-cuda-tf32" and base_arm=="llama")
+        honesty_note = ""
+        if k=="fak-cuda-q8" and base_arm=="llama":
+            honesty_note = "TRUE APPLES-TO-APPLES: matched Q8_0 quantized weights in VRAM, single-stream batch=1"
+        elif k=="fak-cuda-tf32" and base_arm=="llama":
+            honesty_note = "TF32 tensor-core SGEMM math vs FP32 baseline (compute-bound prefill lever)"
+        elif k=="vllm" or base_arm=="vllm":
+            honesty_note = "CROSS-PARADIGM: vLLM continuous batching (bf16) vs single-stream GGUF Q8_0"
+        
+        arm_comp={
+            "treatment_arm": k,
+            "baseline_arm": base_arm,
+            "apples_to_apples": is_a2a,
+            "honesty_note": honesty_note,
+            "treatment_decode": t_dec,
+            "baseline_decode": b_dec,
+            "paired_delta_decode": (t_dec - b_dec) if (t_dec is not None and b_dec is not None) else None,
+            "speedup_decode": (t_dec / b_dec) if (t_dec is not None and b_dec and b_dec > 0) else None,
+            "treatment_prefill": t_pf,
+            "baseline_prefill": b_pf,
+            "paired_delta_prefill": (t_pf - b_pf) if (t_pf is not None and b_pf is not None) else None,
+            "speedup_prefill": (t_pf / b_pf) if (t_pf is not None and b_pf and b_pf > 0) else None,
+        }
+        paired_report["arms"][k]=arm_comp
+
+total_sweep_points = sum(len(e.get("sweeps", [])) for e in engines.values() if e.get("ok"))
+out={"schema":"fak.gcp-vm-bench.v2","gpus":gpus,"model":model,"arch":arch,"engines":engines,
+     "paired_report":paired_report,"total_sweep_points":total_sweep_points}
 n_ok=sum(1 for e in engines.values() if e and e.get("ok"))
 out["ok"]=n_ok>0
 if not engines:
@@ -383,9 +443,19 @@ if head:
     out["decode_tok_per_sec"]=head.get("decode_tok_per_sec")
     out["headline_engine"]=head.get("engine")
 json.dump(out,open(os.path.join(work,"result.json"),"w"),indent=2)
+json.dump(paired_report,open(os.path.join(work,"paired-report.json"),"w"),indent=2)
 print("ENGINES SUMMARY:")
 for k,v in engines.items():
-    print("  %s: ok=%s prefill=%s decode=%s" % (k,v.get("ok"),v.get("prefill_tok_per_sec"),v.get("decode_tok_per_sec")))
+    print("  %s: ok=%s prefill=%s decode=%s (sweeps=%d)" % (k,v.get("ok"),v.get("prefill_tok_per_sec"),v.get("decode_tok_per_sec"),len(v.get("sweeps",[]))))
+if paired_report.get("arms"):
+    print("PAIRED BASE-AND-ARM COMPARISONS (Base: %s):" % base_arm)
+    for k,comp in paired_report["arms"].items():
+        print("  %s vs %s: decode_speedup=%sx (delta=%s tok/s) [a2a=%s]" % (
+            k, base_arm,
+            ("%.3f" % comp["speedup_decode"]) if comp.get("speedup_decode") else "N/A",
+            ("%.2f" % comp["paired_delta_decode"]) if comp.get("paired_delta_decode") else "N/A",
+            comp.get("apples_to_apples")
+        ))
 '''
 
 
@@ -400,7 +470,7 @@ _ENGINE_BASH = {
   cd llama.cpp
   cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="$CUDA_CC"
   cmake --build build --config Release -j"$(nproc)" --target llama-bench
-  ./build/bin/llama-bench -m "$MODEL" -ngl 99 -p 512 -n 128 -o json > "$WORK/llama-bench.json"
+  ./build/bin/llama-bench -m "$MODEL" -ngl 99 -p "$PREFILL_SIZES" -n "$DECODE_STEPS" -r "$BENCH_REPS" -o json > "$WORK/llama-bench.json"
   python3 "$WORK/norm_llama.py" "$WORK/llama-bench.json" "$GPUS" "$MODEL_FILE" "$WORK/engine-llama.json"
 }''',
     # vLLM serves the HF (bf16) form of the SAME model (it does not load the GGUF Q8),
@@ -414,10 +484,10 @@ _ENGINE_BASH = {
   python3 -m pip install -q -U vllm >/dev/null 2>&1 || pip3 install -q -U vllm >/dev/null 2>&1 || pip install -q -U vllm
   # Try the modern `vllm bench throughput` CLI, then the module entrypoint, writing a
   # JSON the normalizer reads. input/output lengths mirror the llama-bench pp512/tg128.
-  vllm bench throughput --model "$VLLM_MODEL" --input-len 512 --output-len 128 \
+  vllm bench throughput --model "$VLLM_MODEL" --input-len "${PREFILL_SIZES%%,*}" --output-len "${DECODE_STEPS%%,*}" \
       --num-prompts 64 --dtype bfloat16 --output-json "$WORK/vllm-throughput.json" \
     || python3 -m vllm.entrypoints.cli.main bench throughput --model "$VLLM_MODEL" \
-        --input-len 512 --output-len 128 --num-prompts 64 --dtype bfloat16 \
+        --input-len "${PREFILL_SIZES%%,*}" --output-len "${DECODE_STEPS%%,*}" --num-prompts 64 --dtype bfloat16 \
         --output-json "$WORK/vllm-throughput.json"
   python3 "$WORK/norm_vllm.py" "$WORK/vllm-throughput.json" "$VLLM_MODEL" "$WORK/engine-vllm.json"
 }''',
@@ -425,7 +495,7 @@ _ENGINE_BASH = {
   cd "$SRC"
   go build -o "$WORK/bin/modelbench" ./cmd/modelbench
   "$WORK/bin/modelbench" -gguf "$MODEL" -lean \
-      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -prefill-sizes "$PREFILL_SIZES" -prefill-reps "$BENCH_REPS" -decode-steps "${DECODE_STEPS%%,*}" -decode-reps "$BENCH_REPS" -decode-prompt 16 \
       -out "$WORK/fak-cpu-report.json"
   python3 "$WORK/norm_fak.py" fak-cpu "$WORK/fak-cpu-report.json" "$WORK/engine-fak-cpu.json"
 }''',
@@ -445,7 +515,7 @@ _ENGINE_BASH = {
   go build -tags cuda -o "$WORK/bin/modelbench-cuda" ./cmd/modelbench
   LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
     "$WORK/bin/modelbench-cuda" -gguf "$MODEL" -backend cuda -require-non-reference \
-      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -prefill-sizes "$PREFILL_SIZES" -prefill-reps "$BENCH_REPS" -decode-steps "${DECODE_STEPS%%,*}" -decode-reps "$BENCH_REPS" -decode-prompt 16 \
       -out "$WORK/fak-cuda-report.json"
   python3 "$WORK/norm_fak.py" fak-cuda "$WORK/fak-cuda-report.json" "$WORK/engine-fak-cuda.json"
 }''',
@@ -466,7 +536,7 @@ _ENGINE_BASH = {
   fi
   LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
     "$WORK/bin/modelbench-cuda" -gguf "$MODEL" -lean -backend cuda -require-non-reference \
-      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -prefill-sizes "$PREFILL_SIZES" -prefill-reps "$BENCH_REPS" -decode-steps "${DECODE_STEPS%%,*}" -decode-reps "$BENCH_REPS" -decode-prompt 16 \
       -out "$WORK/fak-cuda-q8-report.json"
   python3 "$WORK/norm_fak.py" fak-cuda-q8 "$WORK/fak-cuda-q8-report.json" "$WORK/engine-fak-cuda-q8.json"
 }''',
@@ -490,7 +560,7 @@ _ENGINE_BASH = {
   fi
   FAK_CUDA_TF32=1 LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
     "$WORK/bin/modelbench-cuda" -gguf "$MODEL" -backend cuda -require-non-reference \
-      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -prefill-sizes "$PREFILL_SIZES" -prefill-reps "$BENCH_REPS" -decode-steps "${DECODE_STEPS%%,*}" -decode-reps "$BENCH_REPS" -decode-prompt 16 \
       -out "$WORK/fak-cuda-tf32-report.json"
   python3 "$WORK/norm_fak.py" fak-cuda-tf32 "$WORK/fak-cuda-tf32-report.json" "$WORK/engine-fak-cuda-tf32.json"
 }''',
@@ -498,6 +568,25 @@ _ENGINE_BASH = {
 _ENGINE_FN = {"llama": "engine_llama", "vllm": "engine_vllm",
               "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda",
               "fak-cuda-q8": "engine_fak_cuda_q8", "fak-cuda-tf32": "engine_fak_cuda_tf32"}
+
+
+DEFAULT_PREFILL_1X = "512"
+DEFAULT_DECODE_1X = "128"
+DEFAULT_REPS_1X = 5
+
+DEFAULT_PREFILL_100X = "64,128,256,512,1024"
+DEFAULT_DECODE_100X = "16,32,64,128,256"
+DEFAULT_REPS_100X = 5
+
+
+def resolve_bench_params(scale_100x: bool = False, prefill_sizes: Optional[str] = None,
+                         decode_steps: Optional[str] = None,
+                         reps: Optional[int] = None) -> tuple[str, str, int]:
+    """Resolve prefill sizes, decode steps, and repetitions based on scale flag."""
+    pf = prefill_sizes or (DEFAULT_PREFILL_100X if scale_100x else DEFAULT_PREFILL_1X)
+    dec = decode_steps or (DEFAULT_DECODE_100X if scale_100x else DEFAULT_DECODE_1X)
+    r = reps if reps is not None else (DEFAULT_REPS_100X if scale_100x else DEFAULT_REPS_1X)
+    return pf, dec, r
 
 
 _DRIVER_PREAMBLE = r'''#!/usr/bin/env bash
@@ -517,6 +606,12 @@ fatal(){ python3 -c 'import json,sys;open(sys.argv[2],"w").write(json.dumps({"sc
 CUDA_CC="@@CC@@"
 MODEL_FILE="@@HF_FILE@@"
 MODEL_REPO="@@HF_REPO@@"
+PREFILL_SIZES="@@PREFILL_SIZES@@"
+DECODE_STEPS="@@DECODE_STEPS@@"
+BENCH_REPS="@@REPS@@"
+BASE_ARM="@@BASE_ARM@@"
+PAIRED_REPORT="@@PAIRED_REPORT@@"
+SCALE_100X="@@SCALE_100X@@"
 
 log "== fak GCP multi-engine bench (arch sm_$CUDA_CC) =="
 nvidia-smi -L || fatal "no GPU / driver"
@@ -599,18 +694,29 @@ run_one(){
 
 _DRIVER_TAIL = r'''
 # ---- combine every engine row into one result.json -------------------------
-python3 "$WORK/combine.py" "$WORK" "$GPUS" "$MODEL_FILE" "sm_$CUDA_CC"
+python3 "$WORK/combine.py" "$WORK" "$GPUS" "$MODEL_FILE" "sm_$CUDA_CC" "$BASE_ARM"
 log "== done; result at $WORK/result.json =="
 cat "$WORK/result.json"
 '''
 
 
-def render_driver_script(engine_keys: list[str], hf_repo: str, hf_file: str, cc: str) -> str:
+def render_driver_script(engine_keys: list[str], hf_repo: str, hf_file: str, cc: str,
+                         prefill_sizes: Optional[str] = None, decode_steps: Optional[str] = None,
+                         reps: Optional[int] = None,
+                         base_arm: str = "llama", paired_report: bool = False,
+                         scale_100x: bool = False) -> str:
     """Assemble the shared preamble + selected engine fragments + the combiner."""
+    pf, dec, r = resolve_bench_params(scale_100x, prefill_sizes, decode_steps, reps)
     body = _DRIVER_PREAMBLE
     body = body.replace("@@CC@@", cc)
     body = body.replace("@@HF_REPO@@", hf_repo)
     body = body.replace("@@HF_FILE@@", hf_file)
+    body = body.replace("@@PREFILL_SIZES@@", pf)
+    body = body.replace("@@DECODE_STEPS@@", dec)
+    body = body.replace("@@REPS@@", str(r))
+    body = body.replace("@@BASE_ARM@@", base_arm)
+    body = body.replace("@@PAIRED_REPORT@@", "1" if (paired_report or scale_100x) else "0")
+    body = body.replace("@@SCALE_100X@@", "1" if scale_100x else "0")
     body = body.replace("@@PY_NORM_LLAMA@@", _PY_NORM_LLAMA.strip("\n"))
     body = body.replace("@@PY_NORM_FAK@@", _PY_NORM_FAK.strip("\n"))
     body = body.replace("@@PY_NORM_VLLM@@", _PY_NORM_VLLM.strip("\n"))
@@ -634,14 +740,16 @@ def make_source_tarball(dest: Path, dry_run: bool) -> Path:
     # `experiments/` is benchmark DATA (handoff tarballs, GGUFs, oracle dumps --
     # hundreds of MB); the VM builds cmd/modelbench from SOURCE and fetches its own
     # model, so none of it is needed. Excluding it is what keeps the tarball small.
-    exclude_dir_names = {".git", ".cache", "node_modules", "__pycache__", "experiments"}
+    exclude_dir_names = {".git", ".cache", "node_modules", "__pycache__", "experiments",
+                         "_scratch", ".dos", ".opencode", ".venv", "venv",
+                         "fak-orchestration-runs", ".dispatch-runs", ".goal-runs", ".fak"}
     exclude_suffixes = (".test", ".exe", ".o", ".a", ".gguf", ".safetensors",
                         ".bin", ".pt", ".pth", ".onnx", ".log",
                         ".tgz", ".tar", ".gz", ".zip", ".so", ".dylib", ".dll", ".wasm")
 
     def keep(ti: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         parts = ti.name.split("/")
-        if any(p in exclude_dir_names for p in parts):
+        if any(p in exclude_dir_names or p.startswith((".gocache", ".tmp")) for p in parts):
             return None
         # When the source IS the repo root, a compiled `fak` binary may sit at the
         # root; it has no excluded suffix, so drop it explicitly (it would tar as
@@ -1046,6 +1154,8 @@ def collect(tier: gcp_accel.AccelTier, zone: str, result: dict, dry_run: bool,
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     (run_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if result.get("paired_report"):
+        (run_dir / "paired-report.json").write_text(json.dumps(result["paired_report"], indent=2), encoding="utf-8")
     spec_dir = MACHINES_DIR / machine_id
     spec_dir.mkdir(parents=True, exist_ok=True)
     (spec_dir / "specs.json").write_text(json.dumps(specs, indent=2), encoding="utf-8")
@@ -1058,6 +1168,14 @@ def collect(tier: gcp_accel.AccelTier, zone: str, result: dict, dry_run: bool,
             log(f"  {k:9} prefill={e.get('prefill_tok_per_sec')} tok/s  decode={e.get('decode_tok_per_sec')} tok/s")
         else:
             log(f"  {k:9} FAILED: {e.get('error', 'no row')}")
+    paired = result.get("paired_report") or {}
+    if paired.get("arms"):
+        log(f"paired base-and-arm report (baseline: {paired.get('tuned_baseline')}):")
+        for k, comp in paired["arms"].items():
+            sp = f"{comp['speedup_decode']:.3f}x" if comp.get("speedup_decode") else "N/A"
+            delta = f"{comp['paired_delta_decode']:+.2f} tok/s" if comp.get("paired_delta_decode") is not None else "N/A"
+            a2a = "A2A" if comp.get("apples_to_apples") else "CROSS-PARADIGM"
+            log(f"  {k:15} vs {paired.get('tuned_baseline')}: decode_speedup={sp} ({delta}) [{a2a}]")
     log("fold into catalog with: python tools/bench_catalog.py update")
     return run_dir
 
@@ -1065,6 +1183,19 @@ def collect(tier: gcp_accel.AccelTier, zone: str, result: dict, dry_run: bool,
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--scale-100x", action="store_true",
+                    help="100x benchmarking scale: dense sweep grid over context/decode lengths "
+                         "with higher repetitions for statistical power")
+    ap.add_argument("--prefill-sizes", default=None,
+                    help="comma-separated prefill prompt token lengths (default: 512 in 1x; 64,128,256,512,1024,2048 in 100x)")
+    ap.add_argument("--decode-steps", default=None,
+                    help="comma-separated decode step lengths (default: 128 in 1x; 16,32,64,128,256 in 100x)")
+    ap.add_argument("--reps", type=int, default=None,
+                    help="repetitions per sweep cell (default: 5 in 1x; 20 in 100x)")
+    ap.add_argument("--base-arm", default="llama",
+                    help="baseline engine for paired base-and-arm analysis (default: llama)")
+    ap.add_argument("--paired-report", action="store_true",
+                    help="generate paired base-and-arm report conforming to fak.armbench.paired-report/1")
     ap.add_argument("--tier", default=None, help="pin a tier slug (else probe the ladder)")
     ap.add_argument("--blackwell", action="store_true",
                     help="strict: only B200/GB200; STOP if neither is provisionable")
@@ -1176,8 +1307,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     log(f"plan: {tier.slug} ({tier.gpu_count}x {tier.gpu_label}) in {zone}, "
         f"instance {name}, engines={engine_keys}, ~${tier.approx_usd_per_hour:.0f}/hr")
 
+    pf_sizes, dec_steps, bench_reps = resolve_bench_params(
+        args.scale_100x, args.prefill_sizes, args.decode_steps, args.reps)
     startup_body = render_setup_script()
-    driver_body = render_driver_script(engine_keys, args.hf_repo, args.hf_file, cc)
+    driver_body = render_driver_script(
+        engine_keys, args.hf_repo, args.hf_file, cc,
+        prefill_sizes=pf_sizes, decode_steps=dec_steps, reps=bench_reps,
+        base_arm=args.base_arm, paired_report=args.paired_report or args.scale_100x,
+        scale_100x=args.scale_100x)
     startup_path = Path(ROOT / "tools" / f".gcp-startup-{stamp()}.sh")
     driver_path = Path(ROOT / "tools" / f".gcp-driver-{stamp()}.sh")
     tarball_path = Path(ROOT / "tools" / f".gcp-src-{stamp()}.tgz")
