@@ -133,6 +133,125 @@ func HasMultipleParentsRef(root string, ref string) bool {
 	return cmd.Run() == nil
 }
 
+// checkConflictBanners reports whether the commit message contains git conflict template lines or markers (#11306).
+func checkConflictBanners(msg string) (ok bool, why string) {
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.Contains(line, "# Conflicts:") {
+			return false, "MERGE_CONFLICT_TEMPLATE_FORBIDDEN: commit message contains unedited git conflict template ('# Conflicts:')"
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<<<<<<<") || strings.HasPrefix(trimmed, "=======") || strings.HasPrefix(trimmed, ">>>>>>>") {
+			return false, "MERGE_CONFLICT_MARKERS_FORBIDDEN: commit message contains git conflict markers ('<<<<<<<', '=======', or '>>>>>>>')"
+		}
+	}
+	return true, ""
+}
+
+var silentMergeTrailerRE = regexp.MustCompile(`(?im)^\s*(?:merge-strategy\s*:\s*ours|silent-merge\s*:\s*(?:intentional|true|yes|allow))\b`)
+
+func hasSilentMergeTrailer(msg string) bool {
+	return silentMergeTrailerRE.MatchString(msg)
+}
+
+func checkSilentMergeOverride(msg string) bool {
+	if os.Getenv("ALLOW_SILENT_MERGE") == "1" || os.Getenv("FLEET_ALLOW_SILENT_MERGE") == "1" {
+		return true
+	}
+	return hasSilentMergeTrailer(msg)
+}
+
+func hasMergeHead(root string) bool {
+	if root == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Run() == nil
+}
+
+// CheckSilentDropMerge verifies that a merge commit does not silently drop incoming commits
+// by producing a tree identical to parent 1 while parent 2 contains non-empty unique commits (#11306).
+func CheckSilentDropMerge(root string, msg string, ref string) (ok bool, why string) {
+	if root == "" || !isGitDirectory(root) {
+		return true, ""
+	}
+	if checkSilentMergeOverride(msg) {
+		return true, ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Case 1: In-flight merge (ref is empty and MERGE_HEAD exists)
+	if ref == "" {
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if cmd.Run() == nil {
+			cmdStaged := exec.CommandContext(ctx, "git", "-C", root, "write-tree")
+			windowgate.ConfigureBackgroundCommand(cmdStaged)
+			outStaged, err1 := cmdStaged.Output()
+
+			cmdP1 := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "HEAD^{tree}")
+			windowgate.ConfigureBackgroundCommand(cmdP1)
+			outP1, err2 := cmdP1.Output()
+
+			if err1 == nil && err2 == nil && strings.TrimSpace(string(outStaged)) == strings.TrimSpace(string(outP1)) {
+				cmdCnt := exec.CommandContext(ctx, "git", "-C", root, "rev-list", "--count", "HEAD..MERGE_HEAD")
+				windowgate.ConfigureBackgroundCommand(cmdCnt)
+				outCnt, err3 := cmdCnt.Output()
+				if err3 == nil && strings.TrimSpace(string(outCnt)) != "0" {
+					cmdDiff := exec.CommandContext(ctx, "git", "-C", root, "diff", "--name-only", "HEAD...MERGE_HEAD")
+					windowgate.ConfigureBackgroundCommand(cmdDiff)
+					outDiff, err4 := cmdDiff.Output()
+					if err4 == nil && len(strings.TrimSpace(string(outDiff))) > 0 {
+						return false, "SILENT_DROP_MERGE_FORBIDDEN: merge tree matches parent 1 exactly while parent 2 contains non-empty unique commits (silent drop merge); supply 'Merge-Strategy: ours' or 'Silent-Merge: intentional' trailer to allow"
+					}
+				}
+			}
+			return true, ""
+		}
+	}
+
+	// Case 2: Existing commit (ref != "" or HEAD when ref is empty and HEAD^2 exists)
+	target := ref
+	if target == "" {
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "HEAD^2")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if cmd.Run() == nil {
+			target = "HEAD"
+		}
+	}
+	if target != "" {
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", target+"^2")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if cmd.Run() == nil {
+			cmdTree := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", target+"^{tree}")
+			windowgate.ConfigureBackgroundCommand(cmdTree)
+			outTree, err1 := cmdTree.Output()
+
+			cmdP1 := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", target+"^1^{tree}")
+			windowgate.ConfigureBackgroundCommand(cmdP1)
+			outP1, err2 := cmdP1.Output()
+
+			if err1 == nil && err2 == nil && strings.TrimSpace(string(outTree)) == strings.TrimSpace(string(outP1)) {
+				cmdCnt := exec.CommandContext(ctx, "git", "-C", root, "rev-list", "--count", target+"^1.."+target+"^2")
+				windowgate.ConfigureBackgroundCommand(cmdCnt)
+				outCnt, err3 := cmdCnt.Output()
+				if err3 == nil && strings.TrimSpace(string(outCnt)) != "0" {
+					cmdDiff := exec.CommandContext(ctx, "git", "-C", root, "diff", "--name-only", target+"^1..."+target+"^2")
+					windowgate.ConfigureBackgroundCommand(cmdDiff)
+					outDiff, err4 := cmdDiff.Output()
+					if err4 == nil && len(strings.TrimSpace(string(outDiff))) > 0 {
+						return false, "SILENT_DROP_MERGE_FORBIDDEN: merge tree matches parent 1 exactly while parent 2 contains non-empty unique commits (silent drop merge); supply 'Merge-Strategy: ours' or 'Silent-Merge: intentional' trailer to allow"
+					}
+				}
+			}
+		}
+	}
+	return true, ""
+}
+
 // CommitMsgVerdict reports whether a commit message's subject is witness-gradeable, and if not,
 // why. It mirrors check_commit_msg.py verdict() (L61-77).
 func CommitMsgVerdict(msg string) (ok bool, why string) {
@@ -140,19 +259,38 @@ func CommitMsgVerdict(msg string) (ok bool, why string) {
 }
 
 // CommitMsgVerdictWithGit reports whether a commit message's subject is witness-gradeable,
-// taking into account repository git topology for Merge subjects (#10882).
-// When subject starts with "Merge ", it verifies that >= 2 topological parents exist.
-// A single-parent pseudo-merge is rejected with MERGE_WITNESS_FAIL.
+// taking into account repository git topology for Merge subjects (#10882, #11306).
 func CommitMsgVerdictWithGit(msg string, root string) (ok bool, why string) {
+	return CommitMsgVerdictWithGitRef(msg, root, "")
+}
+
+// CommitMsgVerdictWithGitRef reports whether a commit message's subject is witness-gradeable,
+// taking into account repository git topology and commit ref for Merge subjects (#10882, #11306).
+// When subject starts with "Merge ", it verifies that >= 2 topological parents exist and
+// that the merge does not silently drop incoming unique commits without an explicit trailer.
+func CommitMsgVerdictWithGitRef(msg string, root string, ref string) (ok bool, why string) {
+	if ok, why := checkConflictBanners(msg); !ok {
+		return false, why
+	}
 	subject := firstSubjectLine(msg)
 	if subject == "" {
 		return false, "empty subject"
 	}
 	if strings.HasPrefix(subject, "Merge ") {
-		if root != "" && isGitDirectory(root) && !HasMultipleParentsRef(root, "") {
-			return false, "MERGE_WITNESS_FAIL: commit subject starts with 'Merge ' but has fewer than 2 topological parents; pseudo-merges cannot bypass Conventional Commits and DCO"
+		if root != "" && isGitDirectory(root) {
+			if !HasMultipleParentsRef(root, ref) {
+				return false, "MERGE_WITNESS_FAIL: commit subject starts with 'Merge ' but has fewer than 2 topological parents; pseudo-merges cannot bypass Conventional Commits and DCO"
+			}
+			if ok, why := CheckSilentDropMerge(root, msg, ref); !ok {
+				return false, why
+			}
 		}
 		return true, ""
+	}
+	if root != "" && isGitDirectory(root) && hasMergeHead(root) {
+		if ok, why := CheckSilentDropMerge(root, msg, ref); !ok {
+			return false, why
+		}
 	}
 	for _, p := range exemptSubjectPrefixes {
 		if p != "Merge " && strings.HasPrefix(subject, p) {
