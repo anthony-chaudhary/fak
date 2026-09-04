@@ -1,3 +1,8 @@
+// Package cache provides high-performance, tiered caching for agent sessions,
+// tokens, configurations, and external credentials.
+//
+// Invariant: cache operations are fail-closed and bounded; backend failures yield safe fallbacks and bounded memory allocations.
+// Guard: all write operations validate TTL boundaries and enforce concurrency safety across backend implementations.
 package cache
 
 import (
