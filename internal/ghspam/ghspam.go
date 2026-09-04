@@ -1,3 +1,5 @@
+// Package ghspam scans untrusted GitHub issue and PR comments for known abuse
+// patterns, including fake patch/fix lures and malicious release archive links.
 package ghspam
 
 import (
@@ -6,6 +8,7 @@ import (
 	"strings"
 )
 
+// Schema identifies the versioned JSON report payload for spam scans.
 const Schema = "fak.gh_spam_comments/v1"
 
 var releaseArchiveRE = regexp.MustCompile(`(?i)https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^\s)]+?\.(zip|rar|7z|exe|msi|bat|cmd|ps1|scr|dll)(?:[?#][^\s)]*)?`)
@@ -56,10 +59,12 @@ func matchFakePatchLure(body string) (string, bool) {
 	return strings.ToLower(strings.TrimSpace(noun)) + "/" + strings.ToLower(strings.TrimSpace(action)), true
 }
 
+// User identifies the author of a GitHub comment.
 type User struct {
 	Login string `json:"login"`
 }
 
+// Comment represents a GitHub issue or pull request comment payload.
 type Comment struct {
 	ID                int64  `json:"id"`
 	NodeID            string `json:"node_id"`
@@ -71,11 +76,13 @@ type Comment struct {
 	Body              string `json:"body"`
 }
 
+// Options configures insider trust filters and exemption lists during analysis.
 type Options struct {
 	TrustedAssociations []string
 	TrustedUsers        []string
 }
 
+// Finding records a flagged abusive comment and its matching detection rule.
 type Finding struct {
 	ID                int64  `json:"id"`
 	NodeID            string `json:"node_id"`
@@ -89,6 +96,8 @@ type Finding struct {
 	Body              string `json:"body"`
 }
 
+// Action records the outcome of an automated response to a flagged comment,
+// such as minimizing an abusive comment via the GitHub API.
 type Action struct {
 	NodeID          string `json:"node_id"`
 	HTMLURL         string `json:"html_url"`
@@ -98,6 +107,7 @@ type Action struct {
 	Error           string `json:"error,omitempty"`
 }
 
+// Counts summarizes scan and action totals across a set of comments.
 type Counts struct {
 	Scanned        int `json:"scanned"`
 	TrustedSkipped int `json:"trusted_skipped"`
@@ -106,6 +116,7 @@ type Counts struct {
 	Failed         int `json:"failed,omitempty"`
 }
 
+// Report is the structured output containing scan counts, findings, and applied actions.
 type Report struct {
 	Schema   string    `json:"schema"`
 	Mode     string    `json:"mode"`
@@ -115,12 +126,16 @@ type Report struct {
 	Actions  []Action  `json:"actions,omitempty"`
 }
 
+// DefaultOptions returns recommended trust defaults exempting repository owners,
+// collaborators, and organization members.
 func DefaultOptions() Options {
 	return Options{
 		TrustedAssociations: []string{"OWNER", "COLLABORATOR", "MEMBER"},
 	}
 }
 
+// Analyze scans a batch of comments against configured abuse families, skipping
+// trusted authors and returning a structured report ordered by creation time.
 func Analyze(comments []Comment, opt Options) Report {
 	if len(opt.TrustedAssociations) == 0 {
 		opt.TrustedAssociations = DefaultOptions().TrustedAssociations
@@ -173,6 +188,8 @@ func Analyze(comments []Comment, opt Options) Report {
 	return rep
 }
 
+// AppendAction records an action execution result into the report and updates
+// applied or failed counters.
 func AppendAction(rep *Report, action Action) {
 	rep.Actions = append(rep.Actions, action)
 	if action.OK {
