@@ -37,7 +37,10 @@ func cmdChat(argv []string) {
 	tools := fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
 	codeTools := fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	codeWorkspace := fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
+	skills := fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
+	skillsDir := fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
 	_ = fs.Parse(argv)
+
 	applyPolicy(*policyPath)
 
 	providerExplicit := false
@@ -60,7 +63,16 @@ func cmdChat(argv []string) {
 			root, err = os.Getwd()
 			must(err)
 		}
-		catalog, armErr := agent.ArmFocusedCodeTools(root)
+		var extraDirs []string
+		if *skillsDir != "" {
+			extraDirs = append(extraDirs, *skillsDir)
+		}
+		catalog, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
+			Root:         root,
+			Focused:      true,
+			EnableSkills: *skills,
+			ExtraDirs:    extraDirs,
+		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))

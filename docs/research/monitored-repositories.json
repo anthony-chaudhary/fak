@@ -4,6 +4,27 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "davidcanar/vllm-strix-halo",
+      "url": "https://github.com/davidcanar/vllm-strix-halo",
+      "status": "studied",
+      "priority": 1,
+      "why": "Thunderbolt-4 / USB4 RoCE-RDMA TP2 clustering for dual AMD Strix Halo APUs (Ryzen AI MAX+ 395) running 300B-class models (GLM-5.3-Flash, DeepSeek-V4) with custom tbv kernel module and ~105 us low-latency all-reduce hook bypassing RCCL.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "7f4a21e8932c0b653198031d279cfbf440182650",
+      "stars_at_check": 48,
+      "last_push_at_check": "2026-09-03T18:45:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-DAVIDCANAR-STRIX-HALO-ROCE-2026-09-03.md",
+      "receipt_id": "study_e850cd73d04847648bae269686576af4e40464217efd48c4b4821fb1c086f0a4",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "7f4a21e8932c0b653198031d279cfbf440182650",
+        "subsystem_count": 5,
+        "candidate_count": 6,
+        "filed_issue_count": 0,
+        "issue_refs": []
+      }
+    },
+    {
       "repository": "FlashML-org/FreeToken",
       "url": "https://github.com/FlashML-org/FreeToken",
       "status": "studied",

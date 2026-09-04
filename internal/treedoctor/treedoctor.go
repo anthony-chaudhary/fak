@@ -162,7 +162,8 @@ type Report struct {
 	// WIP is the untracked durable-artifact inventory: source, .claude control fuel, and
 	// testdata fixtures classified with a typed cleanup action. Read-only — Sweep never touches it (a load-bearing
 	// unlanded file is byte-indistinguishable from cruft, so acting on it is a human's call).
-	WIP []WIPFile `json:"wip,omitempty"`
+	WIP            []WIPFile            `json:"wip,omitempty"`
+	ScratchHygiene ScratchHygieneReport `json:"scratch_hygiene"`
 }
 
 // StaleLockWedged reports whether the commit lock is currently wedged by a dead holder.
@@ -240,6 +241,7 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 	}
 	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now, opts.ProcessAlive)
 	rep.WIP = diagnoseWIP(ctx, run, opts.RepoRoot, window, now, opts.WIP)
+	rep.ScratchHygiene = diagnoseScratchHygiene(opts.RepoRoot)
 	return rep
 }
 

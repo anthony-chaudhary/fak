@@ -18,7 +18,7 @@ func TestAgentDefaultCodeToolsArmInNonFakWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer agent.DisarmCodeTools()
-	want := map[string]bool{"Read": true, "Write": true, "Edit": true, "Bash": true, "Grep": true, "Glob": true}
+	want := map[string]bool{"Read": true, "Write": true, "Edit": true, "Bash": true, "Grep": true, "Glob": true, "skill": true}
 	for _, def := range catalog {
 		if !want[def.Function.Name] {
 			t.Fatalf("unexpected or duplicate default code tool %q", def.Function.Name)

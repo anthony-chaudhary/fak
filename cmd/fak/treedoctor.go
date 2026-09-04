@@ -366,6 +366,10 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 
 	renderWIPText(w, rep.WIP)
 
+	if rep.ScratchHygiene.Exceeded && rep.ScratchHygiene.Warning != "" {
+		fmt.Fprintf(w, "\nwarning: %s\n", rep.ScratchHygiene.Warning)
+	}
+
 	if len(actions) > 0 {
 		verb := "planned"
 		if apply {

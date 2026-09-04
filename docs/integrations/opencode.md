@@ -105,6 +105,75 @@ curl http://127.0.0.1:8080/healthz
 # verdict=DENY reason=POLICY_BLOCK
 ```
 
+## Disabling workspace snapshotting in large repositories (#11144)
+
+By default, OpenCode captures workspace snapshots across turns and tool executions by running background git diffs and staging operations to record undo checkpoints. In large repositories or repos with large working trees, this default causes severe performance degradation and resource waste:
+- **Disk hammering & I/O latency:** Repetitive tree scans and thousands of full git diff executions stall execution turns, spike disk I/O, and introduce latency into tool call responses.
+- **Multi-GB SQLite database bloat:** Snapshot metadata and diff text accumulate in OpenCode's SQLite database (`~/.local/share/opencode/opencode.db` or platform equivalent), growing the database by multiple gigabytes over long sessions.
+- **Process thrashing:** Rapid-fire child git processes compete with agent tool calls and compiler/test invocations.
+
+To eliminate this overhead, disable workspace snapshotting explicitly in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "snapshot": false
+}
+```
+
+Setting `"snapshot": false`:
+1. Prevents OpenCode from taking redundant background git diff snapshots between turns.
+2. Stops SQLite database bloat, keeping session state lightweight.
+3. Removes disk hammering and file-tree scanning overhead, ensuring fast, deterministic tool execution.
+
+In fak, this invariant is guarded across the codebase:
+- `opencode.json` at repository root sets `"snapshot": false`.
+- `tb4bench.GenerateOpenCodeJSON` includes `"snapshot": false` in synthesized configurations.
+- `tools/extend_preflight.py` enforces the `opencode-snapshot-disabled` check.
+- `projectassets.VerifyOpenCodeSnapshot` verifies that `opencode.json` has snapshotting disabled.
+
+## Reasoning Effort Profiles & Subagent Delegation (#11146)
+
+Modern reasoning models (such as Gemini 3.8 Flash or similar frontier thinking models) support configurable thinking effort variants. However, configuring reasoning effort globally across an entire agent harness creates severe operational trade-offs:
+
+### The problem: global high-effort latency penalty
+Setting `"variant": "high"` globally across all agents introduces a massive latency penalty:
+- **10s–25s thinking token latency on routine tool turns:** Everyday deterministic actions—such as inspecting files (`read`), listing directories (`glob`), grepping patterns, or running tests—do not require multi-step deep reasoning.
+- **Thinking token bloat & quota exhaustion:** High effort forces the model to emit thousands of intermediate reasoning tokens even for simple single-line edits or trivial checks, inflating token spend and draining rate limits prematurely.
+- **Degraded interactive responsiveness:** Developers and automated coordinators experience sluggish turn-by-turn execution during mechanical tool loops.
+
+### The solution: tiered reasoning profiles
+To balance snappy turn latency with deep analytical power, OpenCode configurations establish tiered reasoning profiles across built-in agents and specialized subagents:
+- **Baseline default for routine work (`general` and `explore`):** Configured with `"variant": "default"`, providing instant, low-latency responses for file searches, routine edits, and straightforward tool execution.
+- **On-demand high-effort delegation (`@deep-reason`):** Reserving `"variant": "high"` for a dedicated subagent (`deep-reason`) invoked selectively when tackling complex architectural reasoning, concurrency invariants, frozen ABI modifications (`internal/abi`), or elusive debugging puzzles.
+
+In `opencode.json` (or `~/.config/opencode/opencode.jsonc`):
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "general": {
+      "variant": "default"
+    },
+    "explore": {
+      "variant": "default"
+    },
+    "deep-reason": {
+      "variant": "high",
+      "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
+    }
+  }
+}
+```
+
+### Dynamic overrides and CLI control
+When a full session demands elevated reasoning effort without subagent switching:
+1. **CLI variant override:** Pass `--variant` at launch to override the baseline for the entire session:
+   ```bash
+   opencode run --variant high "Refactor concurrency lock ordering in internal/kernel"
+   ```
+2. **Interactive model picker & variant selection:** In the OpenCode interactive TUI, press `/model` or use the model picker dialog to select reasoning effort variants (`default`, `high`, `low`) dynamically for the active session.
+
 ## Fleet workers use account-bound launch
 
 For unattended super-loop/fleet work, do not run `XDG_CONFIG_HOME=... opencode run`

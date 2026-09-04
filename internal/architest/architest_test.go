@@ -804,7 +804,7 @@ var tier = map[string]int{
 	"promptcomp":                 1,
 	"orgdebt":                    1,
 	"tb4bench":                   4,
-	"agentopt":                   1,
+	"agentopt":                   2, // agent workflow optimization & model routing policies; imports modelroute(2), off the hot path.
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
 	"ctxplanlint":                1,
@@ -2904,6 +2904,9 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
 var engineDriverRole = map[string]map[string]string{
+	"agent.skill": {
+		"agent": "dynamic agent skill loader engine",
+	},
 	"codetools.bash": {
 		"codetools": "bounded coding Bash engine",
 	},

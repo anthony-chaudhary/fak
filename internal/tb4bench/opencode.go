@@ -34,7 +34,8 @@ func GenerateOpenCodeJSON(baseURL, modelID string) ([]byte, error) {
 	}
 
 	cfg := map[string]interface{}{
-		"$schema": "https://opencode.ai/config.json",
+		"$schema":  "https://opencode.ai/config.json",
+		"snapshot": false,
 		"provider": map[string]interface{}{
 			"llamacpp": map[string]interface{}{
 				"npm":  "@ai-sdk/openai-compatible",

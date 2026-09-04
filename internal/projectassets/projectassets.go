@@ -460,3 +460,26 @@ func Build(root string, write bool) (Receipt, error) {
 	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok
 	return r, nil
 }
+
+// VerifyOpenCodeSnapshot asserts that opencode.json exists in root and explicitly sets "snapshot": false
+// to prevent disk hammering and multi-GB SQLite snapshot bloat in large repositories.
+func VerifyOpenCodeSnapshot(root string) error {
+	path := filepath.Join(root, "opencode.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read opencode.json: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("parse opencode.json: %w", err)
+	}
+	val, ok := raw["snapshot"]
+	if !ok {
+		return fmt.Errorf("opencode.json missing required \"snapshot\": false")
+	}
+	snap, isBool := val.(bool)
+	if !isBool || snap {
+		return fmt.Errorf("opencode.json must explicitly set \"snapshot\": false, got %v", val)
+	}
+	return nil
+}

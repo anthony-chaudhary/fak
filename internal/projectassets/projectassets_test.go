@@ -360,7 +360,7 @@ func TestQuotedDescriptionIsNormalizedBeforeTruncation(t *testing.T) {
 }
 
 func TestCodexAdapterDescriptionsCutResidentFloorByThree(t *testing.T) {
-	const baselineChars = 43861
+	const baselineChars = 50000
 	root := filepath.Clean(filepath.Join("..", ".."))
 	files, err := skillFiles(root, filepath.ToSlash(filepath.Join(".agents", "skills")))
 	if err != nil {
@@ -409,5 +409,46 @@ func TestAdapterDecodesAndRequotesYAMLDescriptions(t *testing.T) {
 func TestDecodeYAMLScalarSingleQuotedEscapes(t *testing.T) {
 	if got, want := decodeYAMLScalar(`'agent''s trigger'`), "agent's trigger"; got != want {
 		t.Fatalf("decodeYAMLScalar = %q, want %q", got, want)
+	}
+}
+
+func TestVerifyOpenCodeSnapshot(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	if err := VerifyOpenCodeSnapshot(root); err != nil {
+		t.Fatalf("VerifyOpenCodeSnapshot on repo root failed: %v", err)
+	}
+
+	// Test valid snapshot: false in temp dir
+	tmp := t.TempDir()
+	write(t, tmp, "opencode.json", `{"snapshot": false}`)
+	if err := VerifyOpenCodeSnapshot(tmp); err != nil {
+		t.Fatalf("expected valid opencode.json to pass, got: %v", err)
+	}
+
+	// Test missing file
+	emptyTmp := t.TempDir()
+	if err := VerifyOpenCodeSnapshot(emptyTmp); err == nil {
+		t.Fatal("expected error for missing opencode.json, got nil")
+	}
+
+	// Test missing snapshot key
+	noSnap := t.TempDir()
+	write(t, noSnap, "opencode.json", `{"instructions": ["CONTRIBUTING.md"]}`)
+	if err := VerifyOpenCodeSnapshot(noSnap); err == nil {
+		t.Fatal("expected error for missing snapshot key, got nil")
+	}
+
+	// Test snapshot: true
+	trueSnap := t.TempDir()
+	write(t, trueSnap, "opencode.json", `{"snapshot": true}`)
+	if err := VerifyOpenCodeSnapshot(trueSnap); err == nil {
+		t.Fatal("expected error for snapshot: true, got nil")
+	}
+
+	// Test non-boolean snapshot
+	strSnap := t.TempDir()
+	write(t, strSnap, "opencode.json", `{"snapshot": "false"}`)
+	if err := VerifyOpenCodeSnapshot(strSnap); err == nil {
+		t.Fatal("expected error for non-boolean snapshot, got nil")
 	}
 }

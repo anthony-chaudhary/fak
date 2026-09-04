@@ -94,8 +94,8 @@ func runCodeToolLoop(t *testing.T, root string, script []codeToolScript) (ArmMet
 		t.Fatalf("ArmCodeTools: %v", err)
 	}
 	t.Cleanup(DisarmCodeTools)
-	if len(catalog) != len(codetools.Catalog()) {
-		t.Fatalf("armed catalog has %d tools, want %d", len(catalog), len(codetools.Catalog()))
+	if len(catalog) != len(codetools.Catalog())+1 {
+		t.Fatalf("armed catalog has %d tools, want %d", len(catalog), len(codetools.Catalog())+1)
 	}
 
 	turns := make([]*Completion, 0, len(script)+1)
