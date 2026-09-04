@@ -97,6 +97,9 @@ const guardResourceSampleInterval = 2 * time.Second
 //go:embed guard-default-policy.json
 var guardDefaultPolicyJSON []byte
 
+//go:embed guard-strict-policy.json
+var guardStrictPolicyJSON []byte
+
 // cmdGuard — run any agent command with the kernel adjudicating every tool call it
 // proposes. This is the one-command, cross-platform, productized form of the dogfood
 // path: it starts the SAME gateway `fak serve` runs (in-process, on a private loopback
