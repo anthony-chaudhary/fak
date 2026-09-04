@@ -236,3 +236,49 @@ func TestStore_PutGetList(t *testing.T) {
 		t.Fatal("expected Get on corrupted file to fail")
 	}
 }
+
+func BenchmarkValidate(b *testing.B) {
+	r := validFixture()
+	d, err := studyreceipt.Digest(r)
+	if err != nil {
+		b.Fatalf("digest fixture failed: %v", err)
+	}
+	r.Digest = d
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := studyreceipt.Validate(r); err != nil {
+			b.Fatalf("validate failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkDigest(b *testing.B) {
+	r := validFixture()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := studyreceipt.Digest(r); err != nil {
+			b.Fatalf("digest failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkStorePutGet(b *testing.B) {
+	dir := b.TempDir()
+	store, err := studyreceipt.OpenStore(dir)
+	if err != nil {
+		b.Fatalf("open store failed: %v", err)
+	}
+	r := validFixture()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.ID = "rcpt-bench-001"
+		if _, err := store.Put(r); err != nil {
+			b.Fatalf("put failed: %v", err)
+		}
+		if _, err := store.Get("rcpt-bench-001"); err != nil {
+			b.Fatalf("get failed: %v", err)
+		}
+		// Clean up for the next iteration.
+		_ = os.Remove(filepath.Join(dir, "rcpt-bench-001.json"))
+	}
+}

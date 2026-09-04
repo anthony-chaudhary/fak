@@ -1,5 +1,10 @@
 // Package studyreceipt implements verifiable study receipt tracking, validation,
 // and tamper-evident storage for empirical study artifacts.
+//
+// Contract: study receipts are immutable, cryptographically sealed records of empirical investigation runs.
+// Invariant: receipts must declare matching schema version, valid timestamps, and non-empty sources.
+// Assumption: storage files are hosted on a filesystem supporting atomic renames and POSIX permissions.
+// Guard: validation fails closed on unknown schemas, corrupted hashes, or unevidenced decisions.
 package studyreceipt
 
 import (
@@ -25,25 +30,43 @@ var (
 )
 
 // Common validation errors.
-var (
-	ErrInvalidSchema    = errors.New("studyreceipt: invalid schema")
-	ErrInvalidID        = errors.New("studyreceipt: invalid receipt or study ID")
-	ErrMissingField     = errors.New("studyreceipt: missing required field")
-	ErrInvalidDigest    = errors.New("studyreceipt: invalid sha256 digest format")
-	ErrInvalidTiming    = errors.New("studyreceipt: invalid start/stop timestamps or elapsed duration")
-	ErrInvalidOutcome   = errors.New("studyreceipt: invalid outcome verdict")
-	ErrCorruptedReceipt = errors.New("studyreceipt: receipt content does not match digest")
-	ErrDuplicateReceipt = errors.New("studyreceipt: receipt already exists in store")
-)
+//
+// Invariant: error values are fail-closed sentinels representing specific structural or integrity failures.
+// ErrInvalidSchema indicates that the receipt schema does not match the canonical version.
+var ErrInvalidSchema = errors.New("studyreceipt: invalid schema")
+
+// ErrInvalidID indicates that the receipt identifier does not meet formatting constraints.
+var ErrInvalidID = errors.New("studyreceipt: invalid receipt or study ID")
+
+// ErrMissingField indicates that a required structural field was omitted.
+var ErrMissingField = errors.New("studyreceipt: missing required field")
+
+// ErrInvalidDigest indicates that a cryptographic digest string is malformed.
+var ErrInvalidDigest = errors.New("studyreceipt: invalid sha256 digest format")
+
+// ErrInvalidTiming indicates that timestamps are disordered or durations are negative.
+var ErrInvalidTiming = errors.New("studyreceipt: invalid start/stop timestamps or elapsed duration")
+
+// ErrInvalidOutcome indicates that an outcome string is not a recognized verdict.
+var ErrInvalidOutcome = errors.New("studyreceipt: invalid outcome verdict")
+
+// ErrCorruptedReceipt indicates that the payload content fails verification against its claimed digest.
+var ErrCorruptedReceipt = errors.New("studyreceipt: receipt content does not match digest")
+
+// ErrDuplicateReceipt indicates that a receipt with the same identifier already exists in storage.
+var ErrDuplicateReceipt = errors.New("studyreceipt: receipt already exists in store")
 
 // Outcome represents the final determination of a study execution.
 type Outcome string
 
-const (
-	OutcomeSuccess Outcome = "success"
-	OutcomeFailure Outcome = "failure"
-	OutcomeAbstain Outcome = "abstain"
-)
+// OutcomeSuccess marks a study execution that completed and satisfied its goal criteria.
+const OutcomeSuccess Outcome = "success"
+
+// OutcomeFailure marks a study execution that completed but failed to satisfy its goal criteria.
+const OutcomeFailure Outcome = "failure"
+
+// OutcomeAbstain marks a study execution that aborted or declined evaluation due to missing prerequisites.
+const OutcomeAbstain Outcome = "abstain"
 
 // SourceRef binds an external or internal source input to its immutable cryptographic digest.
 type SourceRef struct {
@@ -104,6 +127,10 @@ func Digest(r Receipt) (string, error) {
 }
 
 // Validate verifies the structural and logical validity of a study receipt.
+//
+// Invariant: any receipt carrying an inline digest must match its freshly computed canonical SHA-256 digest.
+// Assumption: timestamps are formatted in RFC3339 format with completed_at strictly chronologically ordered after started_at.
+// Guard: all structural violations cause Validate to fail closed and return a typed validation error.
 func Validate(r Receipt) error {
 	if r.Schema != Schema {
 		return fmt.Errorf("%w: expected %q, got %q", ErrInvalidSchema, Schema, r.Schema)
@@ -202,6 +229,9 @@ func OpenStore(dir string) (*Store, error) {
 }
 
 // Put validates, seals with digest, and durably writes a receipt.
+//
+// Invariant: stored receipts are tamper-evident and sealed with their canonical SHA-256 digest before write.
+// Guard: Put refuses duplicate receipt identifiers and fails closed on filesystem write or rename errors.
 func (s *Store) Put(r Receipt) (Receipt, error) {
 	if err := Validate(r); err != nil {
 		return Receipt{}, err
@@ -234,6 +264,9 @@ func (s *Store) Put(r Receipt) (Receipt, error) {
 }
 
 // Get reads and validates a receipt from the store by ID.
+//
+// Invariant: returned receipts are guaranteed to pass schema and digest verification.
+// Guard: Get refuses invalid identifier formats and fails closed when reading corrupted files.
 func (s *Store) Get(id string) (Receipt, error) {
 	if !idRegex.MatchString(id) {
 		return Receipt{}, fmt.Errorf("%w: %q", ErrInvalidID, id)
