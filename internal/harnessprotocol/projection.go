@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
+// Projection is the materialized view of an ordered sequence of harness envelopes for a single run.
 type Projection struct {
 	RunID     string                                `json:"run_id"`
 	Cursor    uint64                                `json:"cursor"`
@@ -22,6 +23,8 @@ type Projection struct {
 	Usage     harnesskit.UsagePayload               `json:"usage"`
 }
 
+// Project folds an ordered sequence of harness envelopes into a single run projection,
+// validating sequence monotonicity and event ordering.
 func Project(events []harnesskit.Envelope) (Projection, error) {
 	p := Projection{Messages: map[string]string{}, Tools: map[string]harnesskit.ToolPayload{}, Approvals: map[string]harnesskit.ApprovalPayload{}}
 	for _, e := range events {
@@ -100,6 +103,7 @@ func Project(events []harnesskit.Envelope) (Projection, error) {
 	return p, nil
 }
 
+// CLIText formats a Projection into a plain-text line-oriented summary suitable for CLI output.
 func CLIText(p Projection) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "run %s %s\n", p.RunID, p.Status)
@@ -113,6 +117,8 @@ func CLIText(p Projection) string {
 	fmt.Fprintf(&b, "usage %d/%d\n", p.Usage.InputTokens, p.Usage.OutputTokens)
 	return b.String()
 }
+
+// TUIText formats a Projection into structured, bracketed sections suitable for terminal UI displays.
 func TUIText(p Projection) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[RUN] %s | %s\n", p.RunID, p.Status)
