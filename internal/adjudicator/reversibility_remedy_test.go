@@ -17,6 +17,7 @@ var familyRemedyCommands = map[string][]string{
 	"issue-create-tool": {"fak issue create --title x --body-file /tmp/b"},
 	"slack":             {"fak slack send -c ops hi"},
 	"git-push":          {"fak sync push", "git push --dry-run"},
+	"git-pull":          {"fak sync apply --fetch"},
 	"gh-write":          {}, // "read instead (gh api GET), or review the repo/endpoint/method" — prose hint, no single runnable command
 	"npm-publish":       {"npm publish --dry-run"},
 	"mail":              {}, // "review recipient/body in a draft" — no runnable command

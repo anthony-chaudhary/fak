@@ -405,6 +405,37 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// Decode args once for the structural checks.
 	args := decodeArgs(ctx, c)
 
+	// In-syscall transparent transform from Read to fak_read (#11150).
+	if lowerTool == "read" && args != nil {
+		var pathVal any
+		found := false
+		for _, key := range []string{"file_path", "filePath", "path"} {
+			if v, ok := args[key]; ok && v != nil {
+				pathVal = v
+				found = true
+				break
+			}
+		}
+		if found {
+			normalizedArgs := make(map[string]any, len(args))
+			for k, v := range args {
+				if k == "filePath" || k == "path" {
+					continue
+				}
+				normalizedArgs[k] = v
+			}
+			normalizedArgs["file_path"] = pathVal
+			if ref, ok := putJSON(ctx, normalizedArgs); ok {
+				return abi.Verdict{
+					Kind:    abi.VerdictTransform,
+					By:      "monitor/read_to_fak_read",
+					Payload: abi.TransformPayload{NewTool: "fak_read", NewArgs: ref},
+					Meta:    map[string]string{"reversibility_autorepair": "read_to_fak_read"},
+				}
+			}
+		}
+	}
+
 	// Coarse risk class for the RungProfile (#666). Computed ONCE from the DECODED
 	// args (never model-controlled Meta), and ONLY when a profile is installed — a
 	// nil profile runs every rung regardless (pr.runs == true), so the default floor

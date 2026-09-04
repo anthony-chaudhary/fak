@@ -61,12 +61,30 @@ func TestSidestepRewriteAbsentOnDangerousPush(t *testing.T) {
 	}
 }
 
+func TestSidestepRewriteOnSafeBarePull(t *testing.T) {
+	for _, cmd := range []string{
+		"git pull",
+		"git pull origin",
+		"git pull origin main",
+		"  git   pull   origin   main  ",
+		"GIT_SSH_COMMAND=ssh git pull",
+		"env git pull origin",
+	} {
+		env := ClassifyReversibility("Bash", map[string]any{"command": cmd})
+		if env.RewriteCommand != gitPullSidestepCommand {
+			t.Errorf("safe pull %q: RewriteCommand = %q, want %q", cmd, env.RewriteCommand, gitPullSidestepCommand)
+		}
+		if env.RewriteTool != "Bash" {
+			t.Errorf("safe pull %q: RewriteTool = %q, want Bash", cmd, env.RewriteTool)
+		}
+	}
+}
+
 func TestSidestepRewriteAbsentOnUnrelatedCalls(t *testing.T) {
-	// A rewrite target is a git-push-only affordance: no other command, and no
+	// A rewrite target is a git-push/git-pull affordance: no other command, and no
 	// argument-less tool call, may pick one up.
 	for _, cmd := range []string{
 		"git status",
-		"git pull",
 		"gh pr create --title x",
 		"fak sync push",
 		"pushd /tmp",
@@ -102,5 +120,20 @@ func TestSidestepRewriteMatchesRemedyTable(t *testing.T) {
 	}
 	if env.ConfirmToken == "" {
 		t.Fatal("bare push carries no confirm token — the preview-confirm hold was dropped")
+	}
+
+	wantPull := familyRemedyCommands["git-pull"][0]
+	if gitPullSidestepCommand != wantPull {
+		t.Fatalf("sidestep verb = %q, remedy table git-pull[0] = %q — the rewrite drifted from the advertised remedy", gitPullSidestepCommand, wantPull)
+	}
+	envPull := ClassifyReversibility("Bash", map[string]any{"command": "git pull origin main"})
+	if envPull.RewriteCommand != wantPull {
+		t.Fatalf("classifier rewrite = %q, remedy table = %q", envPull.RewriteCommand, wantPull)
+	}
+	if envPull.Class == ReversibilityReversible {
+		t.Fatalf("bare pull classified %q — a rewrite target must not relax the class", envPull.Class)
+	}
+	if envPull.ConfirmToken == "" {
+		t.Fatal("bare pull carries no confirm token — the preview-confirm hold was dropped")
 	}
 }

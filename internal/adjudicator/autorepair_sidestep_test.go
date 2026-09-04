@@ -60,6 +60,28 @@ func TestAutoRepairSidestepSubstitutesBarePush(t *testing.T) {
 	}
 }
 
+func TestAutoRepairSidestepSubstitutesBarePull(t *testing.T) {
+	a := New(Policy{Allow: map[string]bool{"Bash": true}, AutoRepairSidestep: true})
+	ctx := context.Background()
+
+	for _, cmd := range []string{"git pull", "git pull origin", "git pull origin main"} {
+		b, _ := json.Marshal(map[string]any{"command": cmd})
+		v := a.Adjudicate(ctx, inlineCall("Bash", string(b)))
+		if v.Kind != abi.VerdictTransform {
+			t.Fatalf("opt-in safe pull %q: got %v/%s, want Transform (auto-substitute)", cmd, v.Kind, abi.ReasonName(v.Reason))
+		}
+		if got := transformCommand(t, ctx, v); got != "fak sync apply --fetch" {
+			t.Fatalf("substituted command = %q, want %q", got, "fak sync apply --fetch")
+		}
+		if tp := v.Payload.(abi.TransformPayload); tp.NewTool != "" {
+			t.Fatalf("NewTool = %q, want empty for a Bash→Bash rewrite", tp.NewTool)
+		}
+		if v.Meta["reversibility_autorepair"] != "sidestep" {
+			t.Fatalf("transform must record the auto-repair, meta=%v", v.Meta)
+		}
+	}
+}
+
 func TestAutoRepairSidestepPreservesDescription(t *testing.T) {
 	a := New(Policy{Allow: map[string]bool{"Bash": true}, AutoRepairSidestep: true})
 	ctx := context.Background()
