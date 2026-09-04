@@ -13,6 +13,11 @@
 //     Key, deduped and updated in place on re-run. The local half of "sinks can be a local db
 //     and also GitHub issues".
 //   - GitHubSink  -- adapts Findings onto internal/dogfoodissues and reuses its dedup + gh sync.
+//
+// Invariant: Finding sink operations are fail-closed and deterministic across dry-run and live modes.
+// Contract: Dry-run sinks guarantee that no persistent storage, local ledger, or remote issues are modified.
+// Precondition: Each finding emitted to a sink must define a unique key identifying the debt unit.
+// Guard: Sinks enforce bounds on finding batch size and gracefully quarantine corrupt record entries.
 package findingsink
 
 import (
@@ -158,8 +163,10 @@ func capped(findings []Finding, cap int) []Finding {
 // StdoutSink prints the planned findings and mutates nothing. It is the safe default.
 type StdoutSink struct{ W io.Writer }
 
+// Name returns the canonical identifier token for the stdout destination.
 func (s StdoutSink) Name() string { return "stdout" }
 
+// Emit prints the planned findings to the configured writer without modifying persistent state.
 func (s StdoutSink) Emit(findings []Finding, opt EmitOptions) (Report, error) {
 	findings = capped(findings, opt.Cap)
 	w := s.W
@@ -188,6 +195,7 @@ type LocalDBSink struct {
 	File string
 }
 
+// Name returns the canonical identifier token for the local JSONL database sink.
 func (s LocalDBSink) Name() string { return "localdb" }
 
 // ledgerRecord is one durable row: the neutral finding plus a monotone emit Count (deterministic
@@ -239,6 +247,7 @@ func (s LocalDBSink) load(path string) (map[string]ledgerRecord, []string, error
 	return byKey, order, sc.Err()
 }
 
+// Emit upserts findings into the local JSONL ledger or reports planned operations in dry-run mode.
 func (s LocalDBSink) Emit(findings []Finding, opt EmitOptions) (Report, error) {
 	findings = capped(findings, opt.Cap)
 	path := s.path(opt)
@@ -321,8 +330,10 @@ func (s LocalDBSink) write(path string, byKey map[string]ledgerRecord, order []s
 // dedups, and syncs.
 type GitHubSink struct{}
 
+// Name returns the canonical identifier token for the GitHub issue sink.
 func (s GitHubSink) Name() string { return "github" }
 
+// Emit synchronizes findings against GitHub issues, building plans or applying remote edits.
 func (s GitHubSink) Emit(findings []Finding, opt EmitOptions) (Report, error) {
 	findings = capped(findings, opt.Cap)
 	rep := Report{Sink: s.Name(), Mode: mode(opt.Live), Planned: len(findings)}
