@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -241,29 +242,32 @@ type policyState struct {
 }
 
 type Adjudicator struct {
-	state atomic.Pointer[policyState]
-	// authored is the per-run ledger of agent-authored script paths (#543): the set
-	// of scripts THIS agent wrote earlier in the run, used to recognize a later
-	// `python helper.py` as a self-synthesized-tool invocation rather than an opaque
-	// binary exec (see synthtool.go). A sync.Map gives a lock-free concurrent set
-	// alongside the policy RWMutex; its zero value is a ready empty ledger, so New
-	// need not initialize it. Cleared at a task boundary via ResetRun.
+	state       atomic.Pointer[policyState]
 	authored    sync.Map
 	devEdit     atomic.Pointer[devEditAttestationState]
 	receiptRoot string
+	recovery    *RecoveryAuditLedger
 }
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
 	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
-	a := &Adjudicator{receiptRoot: receiptWorkspaceRoot()}
+	a := &Adjudicator{
+		receiptRoot: receiptWorkspaceRoot(),
+		recovery:    NewRecoveryAuditLedger(),
+	}
 	a.state.Store(&policyState{
 		policy:     p,
 		argByTool:  indexArgPredicates(p.ArgPredicates),
 		egressList: compileEgressList(p),
 	})
 	return a
+}
+
+// RecoveryLedger returns the failure-recovery audit ledger for refusal effectiveness.
+func (a *Adjudicator) RecoveryLedger() *RecoveryAuditLedger {
+	return a.recovery
 }
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
@@ -386,9 +390,59 @@ func targetPath(args map[string]any) string {
 	return ""
 }
 
+// AdjudicateWithFSM evaluates the tool call through the decision table and tracks
+// its lifecycle state through a LifecycleFSM instance.
+func (a *Adjudicator) AdjudicateWithFSM(ctx context.Context, c *abi.ToolCall) (abi.Verdict, *LifecycleFSM) {
+	fsm := NewLifecycleFSM()
+	_, _ = fsm.Transition(EventEvaluate)
+	v := a.Adjudicate(ctx, c)
+	switch v.Kind {
+	case abi.VerdictDeny:
+		_, _ = fsm.Transition(EventDeny)
+	case abi.VerdictQuarantine:
+		_, _ = fsm.Transition(EventQuarantine)
+	default:
+		_, _ = fsm.Transition(EventAllow)
+		_, _ = fsm.Transition(EventExecute)
+	}
+	_, _ = fsm.Transition(EventFinish)
+	return v, fsm
+}
+
 // Adjudicate is the decision. It is pure and allocation-light on the deny/allow
 // paths; only the (rare) TRANSFORM path resolves + re-stores args.
-func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict abi.Verdict) {
+	if a.recovery != nil && c != nil {
+		defer func() {
+			sessionID := c.TraceID
+			if sessionID == "" && c.Meta != nil {
+				sessionID = c.Meta["session_id"]
+			}
+			turn := 0
+			if c.Meta != nil && c.Meta["turn"] != "" {
+				if t, err := strconv.Atoi(c.Meta["turn"]); err == nil {
+					turn = t
+				}
+			}
+			switch verdict.Kind {
+			case abi.VerdictDeny:
+				reason := abi.ReasonName(verdict.Reason)
+				nextAction := ""
+				if verdict.Meta != nil {
+					nextAction = verdict.Meta["fix"]
+					if nextAction == "" {
+						nextAction = verdict.Meta["remedy"]
+					}
+				}
+				a.recovery.RecordRefusal(sessionID, turn, reason, nextAction)
+			case abi.VerdictQuarantine:
+				// no recovery recorded
+			default:
+				a.recovery.RecordOutcome(sessionID, turn, c.Tool, OutcomeRecovered)
+			}
+		}()
+	}
+
 	lowerTool := strings.ToLower(c.Tool) // folded ONCE; every case-insensitive rung below reuses it (#4007)
 
 	state := a.state.Load()
@@ -520,9 +574,14 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// this call ultimately resolves to — if it is an admit. A later hard deny
 	// stands on its own (the deny already names its offense).
 	var advisoryNotes []string
+	if cmd, ok := commandArg(args); ok {
+		if nudge := CheckShellEditNudge(cmd, false); nudge.IsShellEdit {
+			advisoryNotes = append(advisoryNotes, nudge.Suggestion)
+		}
+	}
 	if pr.runs(cl, rungArgPredicate) && len(argPreds) > 0 {
 		v, denied, notes := evalArgPredicates(argPreds, c.Tool, args)
-		advisoryNotes = notes
+		advisoryNotes = append(advisoryNotes, notes...)
 		if denied {
 			return p.soften(v, advisoryNotes)
 		}

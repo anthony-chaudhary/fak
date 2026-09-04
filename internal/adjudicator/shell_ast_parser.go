@@ -163,7 +163,26 @@ func parseCommandStage(stage string) ([]BashWriteTarget, bool, error) {
 	}
 
 	head := normalizeExecutable(rawHead)
-	args := words[start+1:]
+	rawArgs := words[start+1:]
+
+	var args []shellWord
+	skipNext := false
+	for _, w := range rawArgs {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if !w.quoted {
+			if w.text == "<" {
+				skipNext = true
+				continue
+			}
+			if strings.HasPrefix(w.text, "<") {
+				continue
+			}
+		}
+		args = append(args, w)
+	}
 
 	// Subshell unwrapping: bash -c "...", sh -c '...'
 	if isSubshell(head) {

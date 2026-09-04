@@ -307,6 +307,18 @@ func commandWriteTargetsWithSpecs(cmd string, extra []InlineEvalSpec) []string {
 	for _, target := range fileWriteRedirectTargets(cmd) {
 		add(target)
 	}
+	for _, ht := range ExtractHeredocTargets(cmd) {
+		if ht.Path != "" {
+			add(ht.Path)
+		}
+	}
+	if parsed, _, err := ParseBashWriteTargets(cmd); err == nil {
+		for _, pt := range parsed {
+			if pt.Path != "" {
+				add(pt.Path)
+			}
+		}
+	}
 	for _, segment := range shellSegments(cmd) {
 		for _, target := range segmentWriteTargetsWithSpecs(segment, extra) {
 			add(target)
