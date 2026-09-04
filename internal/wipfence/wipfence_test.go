@@ -1,6 +1,10 @@
 package wipfence
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -288,5 +292,201 @@ func TestIsFenced(t *testing.T) {
 				t.Errorf("IsFenced(%q) = (%q, %v), want (%q, %v)", tc.content, tag, ok, tc.wantTag, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestIsolateAndStrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "my_file.go")
+	const original = "package main\n\nfunc hello() {}\n"
+	if err := os.WriteFile(p, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Isolate with explicit session
+	if err := Isolate(p, "sess1"); err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	content, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, ok := IsFenced(string(content))
+	if !ok || tag != "wip_sess1" {
+		t.Fatalf("IsFenced = (%q, %v), want (\"wip_sess1\", true)", tag, ok)
+	}
+
+	// Idempotent Isolate
+	if err := Isolate(p, "sess1"); err != nil {
+		t.Fatalf("idempotent Isolate: %v", err)
+	}
+
+	// StripSession mismatch does not strip
+	if err := StripSession(p, "other_sess"); err != nil {
+		t.Fatalf("StripSession: %v", err)
+	}
+	content, _ = os.ReadFile(p)
+	if _, ok := IsFenced(string(content)); !ok {
+		t.Fatal("StripSession stripped mismatched session tag")
+	}
+
+	// StripSession matching strips
+	if err := StripSession(p, "sess1"); err != nil {
+		t.Fatalf("StripSession: %v", err)
+	}
+	content, _ = os.ReadFile(p)
+	if string(content) != original {
+		t.Fatalf("content after StripSession = %q, want %q", string(content), original)
+	}
+
+	// Isolate with empty session derives from path
+	if err := Isolate(p, ""); err != nil {
+		t.Fatalf("Isolate with empty session: %v", err)
+	}
+	content, _ = os.ReadFile(p)
+	tag, ok = IsFenced(string(content))
+	if !ok || tag != "wip_my_file" {
+		t.Fatalf("IsFenced = (%q, %v), want (\"wip_my_file\", true)", tag, ok)
+	}
+
+	// Plain Strip
+	if err := Strip(p); err != nil {
+		t.Fatalf("Strip: %v", err)
+	}
+	content, _ = os.ReadFile(p)
+	if string(content) != original {
+		t.Fatalf("content after Strip = %q, want %q", string(content), original)
+	}
+}
+
+func TestDetectAndIsolateUntracked(t *testing.T) {
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "f1.go")
+	f2 := filepath.Join(dir, "sub", "f2.go")
+	if err := os.MkdirAll(filepath.Dir(f2), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const src = "package p\n"
+	if err := os.WriteFile(f1, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f2, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := DetectUntracked(dir)
+	if err != nil {
+		t.Fatalf("DetectUntracked: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("DetectUntracked found %d files, want 2 (%v)", len(files), files)
+	}
+
+	modified, err := IsolateUntracked(dir, "session_test")
+	if err != nil {
+		t.Fatalf("IsolateUntracked: %v", err)
+	}
+	if len(modified) != 2 {
+		t.Fatalf("IsolateUntracked modified %d files, want 2 (%v)", len(modified), modified)
+	}
+
+	// Check files are fenced
+	for _, f := range modified {
+		full := filepath.Join(dir, filepath.FromSlash(f))
+		b, _ := os.ReadFile(full)
+		if tag, ok := IsFenced(string(b)); !ok || tag != "wip_session_test" {
+			t.Errorf("file %s tag=(%q, %v), want (\"wip_session_test\", true)", f, tag, ok)
+		}
+	}
+
+	// StripUntracked
+	stripped, err := StripUntracked(dir, "session_test")
+	if err != nil {
+		t.Fatalf("StripUntracked: %v", err)
+	}
+	if len(stripped) != 2 {
+		t.Fatalf("StripUntracked stripped %d files, want 2 (%v)", len(stripped), stripped)
+	}
+	for _, f := range stripped {
+		full := filepath.Join(dir, filepath.FromSlash(f))
+		b, _ := os.ReadFile(full)
+		if _, ok := IsFenced(string(b)); ok {
+			t.Errorf("file %s is still fenced after StripUntracked", f)
+		}
+	}
+}
+
+func TestWIPFenceHidesUntrackedFromPeerBuild(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH; skipping build test")
+	}
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	write("go.mod", "module testwipfence\n\ngo 1.21\n")
+	write("main.go", "package main\n\nfunc main() {}\n")
+	badPath := write("broken.go", "package main\n\nthis is invalid syntax !!!\n")
+
+	nullDev := "/dev/null"
+	if runtime.GOOS == "windows" {
+		nullDev = "NUL"
+	}
+
+	runBuild := func(tags string) (string, error) {
+		t.Helper()
+		args := []string{"build"}
+		if tags != "" {
+			args = append(args, "-tags", tags)
+		}
+		args = append(args, "-o", nullDev, "./...")
+		cmd := exec.Command(goBin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+		out, berr := cmd.CombinedOutput()
+		return string(out), berr
+	}
+
+	// 1. Without wipfence, the untracked syntax-broken file must fail native go build
+	out, err := runBuild("")
+	if err == nil {
+		t.Fatalf("expected native go build to fail with syntax-broken file, but got exit 0:\n%s", out)
+	}
+
+	// 2. Enable wipfence on the untracked broken file using Isolate
+	session := "session_11231"
+	if err := Isolate(badPath, session); err != nil {
+		t.Fatalf("Isolate(%q, %q) failed: %v", badPath, session, err)
+	}
+
+	// 3. With wipfence enabled, peer build without the tag must exit 0!
+	out, err = runBuild("")
+	if err != nil {
+		t.Fatalf("expected peer build without tag to exit 0 with wipfence enabled, but failed:\n%s", out)
+	}
+
+	// 4. Verifying with the tag compiles the broken file back in (fails as expected)
+	out, err = runBuild("wip_" + session)
+	if err == nil {
+		t.Fatalf("expected build with tag wip_%s to fail, but succeeded:\n%s", session, out)
+	}
+
+	// 5. Strip the fence: native build should fail again
+	if err := Strip(badPath); err != nil {
+		t.Fatalf("Strip(%q) failed: %v", badPath, err)
+	}
+	out, err = runBuild("")
+	if err == nil {
+		t.Fatalf("expected native go build to fail after Strip, but succeeded:\n%s", out)
 	}
 }

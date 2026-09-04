@@ -3,9 +3,10 @@
 // Work-in-progress Go that cannot yet compile against committed symbols is
 // kept on the trunk behind a `//go:build wip_<slug>` constraint as the file's
 // very first line, followed by a blank line, then the package clause — so the
-// default `go build` stays green while the WIP lives on disk. This package is
-// the pure text engine behind that convention: callers hand it file content
-// and a slug and get transformed content back. No git, no filesystem, no I/O.
+// default `go build` stays green while the WIP lives on disk. This package provides
+// pure text transforms (Fence, Unfence, IsFenced, SlugFromPath) as well as filesystem
+// and untracked file management (Isolate, Strip, StripSession, DetectUntracked,
+// IsolateUntracked, StripUntracked).
 //
 // Invariant: WIP fence transformations are fail-closed and idempotent. Existing
 // non-WIP build constraints and mismatched WIP tags are refused rather than clobbered.
@@ -15,7 +16,12 @@ package wipfence
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 )
 
 // constraintPrefix marks any Go build constraint line, wip_ or not.
@@ -167,4 +173,215 @@ func isTagIdent(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// Isolate applies a `//go:build wip_<session>` fence to the .go file at path.
+// If session is empty, the slug is derived from path using SlugFromPath.
+// If the file is already fenced with this exact tag, it is a no-op (idempotent).
+// File permissions are preserved when modifying the file.
+func Isolate(path string, session string) error {
+	slug := session
+	if slug == "" {
+		slug = SlugFromPath(path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out, changed, err := Fence(string(b), slug)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	perm := os.FileMode(0o644)
+	if fi, serr := os.Stat(path); serr == nil {
+		perm = fi.Mode().Perm()
+	}
+	return os.WriteFile(path, []byte(out), perm)
+}
+
+// Strip removes any leading `//go:build wip_<...>` fence line (and the following
+// blank line) from the .go file at path. Non-WIP build constraints are left
+// untouched. If the file is not fenced, it is a no-op (idempotent).
+// File permissions are preserved when modifying the file.
+func Strip(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out, changed, err := Unfence(string(b))
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	perm := os.FileMode(0o644)
+	if fi, serr := os.Stat(path); serr == nil {
+		perm = fi.Mode().Perm()
+	}
+	return os.WriteFile(path, []byte(out), perm)
+}
+
+// StripSession removes the leading `//go:build wip_<session>` fence line from the
+// .go file at path ONLY if it matches the specified session tag. If session is empty,
+// any wip_ tag is stripped (identical to Strip).
+func StripSession(path string, session string) error {
+	if session == "" {
+		return Strip(path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	tag, ok := IsFenced(string(b))
+	if !ok {
+		return nil
+	}
+	expected := tagPrefix + sanitizeSlug(trimWipPrefix(session))
+	if tag != expected {
+		return nil
+	}
+	return Strip(path)
+}
+
+// DetectUntracked returns repo-relative, forward-slash separated untracked .go files
+// under root. If root is managed by Git, it queries git ls-files. Otherwise, it
+// scans the directory tree for .go files (excluding hidden, vendor, or testdata directories).
+func DetectUntracked(root string) ([]string, error) {
+	files, err := buildoverlay.UntrackedGoFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) > 0 {
+		return files, nil
+	}
+	managed, err := hasGitDir(root)
+	if err == nil && managed {
+		return files, nil
+	}
+	var fallback []string
+	err = filepath.Walk(root, func(p string, fi os.FileInfo, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if fi.IsDir() {
+			base := fi.Name()
+			if (strings.HasPrefix(base, ".") && base != ".") || base == "vendor" || base == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(p, ".go") {
+			rel, relErr := filepath.Rel(root, p)
+			if relErr == nil {
+				fallback = append(fallback, filepath.ToSlash(rel))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(fallback)
+	return fallback, nil
+}
+
+func hasGitDir(root string) (bool, error) {
+	dir, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	for {
+		_, err := os.Stat(filepath.Join(dir, ".git"))
+		switch {
+		case err == nil:
+			return true, nil
+		case !os.IsNotExist(err):
+			return false, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false, nil
+		}
+		dir = parent
+	}
+}
+
+// IsolateUntracked discovers untracked .go files in root and fences them with
+// `//go:build wip_<session>` (or SlugFromPath if session is empty).
+// Returns the repo-relative paths of all files modified.
+func IsolateUntracked(root, session string) ([]string, error) {
+	files, err := DetectUntracked(root)
+	if err != nil {
+		return nil, err
+	}
+	var modified []string
+	for _, f := range files {
+		target := filepath.Join(root, filepath.FromSlash(f))
+		b, rerr := os.ReadFile(target)
+		if rerr != nil {
+			return modified, rerr
+		}
+		slug := session
+		if slug == "" {
+			slug = SlugFromPath(target)
+		}
+		out, changed, ferr := Fence(string(b), slug)
+		if ferr != nil || !changed {
+			continue
+		}
+		perm := os.FileMode(0o644)
+		if fi, serr := os.Stat(target); serr == nil {
+			perm = fi.Mode().Perm()
+		}
+		if err := os.WriteFile(target, []byte(out), perm); err != nil {
+			return modified, err
+		}
+		modified = append(modified, f)
+	}
+	return modified, nil
+}
+
+// StripUntracked discovers untracked .go files in root and strips `//go:build wip_<session>`
+// (or any wip_ fence if session is empty). Returns the repo-relative paths of all files modified.
+func StripUntracked(root, session string) ([]string, error) {
+	files, err := DetectUntracked(root)
+	if err != nil {
+		return nil, err
+	}
+	var modified []string
+	for _, f := range files {
+		target := filepath.Join(root, filepath.FromSlash(f))
+		b, rerr := os.ReadFile(target)
+		if rerr != nil {
+			continue
+		}
+		content := string(b)
+		tag, ok := IsFenced(content)
+		if !ok {
+			continue
+		}
+		if session != "" {
+			expected := tagPrefix + sanitizeSlug(trimWipPrefix(session))
+			if tag != expected {
+				continue
+			}
+		}
+		out, changed, uerr := Unfence(content)
+		if uerr != nil || !changed {
+			continue
+		}
+		perm := os.FileMode(0o644)
+		if fi, serr := os.Stat(target); serr == nil {
+			perm = fi.Mode().Perm()
+		}
+		if err := os.WriteFile(target, []byte(out), perm); err != nil {
+			return modified, err
+		}
+		modified = append(modified, f)
+	}
+	return modified, nil
 }
