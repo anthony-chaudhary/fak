@@ -1743,6 +1743,32 @@ summary  = "A commit claiming to be a Merge has fewer than 2 topological parents
 fix      = "Use a standard Conventional-Commits subject (`type(scope): <verb> <what> (fak <leaf>)`) with DCO signoff for single-parent commits, or perform a real multi-parent merge (`git merge`). Floor: `internal/hooks`."
 see_also = ["tools/githooks/commit-msg", "internal/hooks", "dos review"]
 
+# Git conflict template banner rejection (#11306): commit messages containing unedited
+# git conflict template comments ('# Conflicts:') from unresolved or discarded merges.
+[reasons.MERGE_CONFLICT_TEMPLATE_FORBIDDEN]
+category = "MISROUTE"
+refusal  = true
+summary  = "A commit message contains unedited git conflict template comments ('# Conflicts:') from an unresolved or unedited merge."
+fix      = "Remove or edit the git conflict template comments from the commit message before committing. Floor: `internal/hooks`."
+see_also = ["tools/githooks/commit-msg", "tools/check_commit_msg.py", "internal/hooks"]
+
+# Git conflict marker rejection (#11306): commit messages containing unresolved conflict markers.
+[reasons.MERGE_CONFLICT_MARKERS_FORBIDDEN]
+category = "MISROUTE"
+refusal  = true
+summary  = "A commit message contains git conflict markers ('<<<<<<<', '=======', or '>>>>>>>')."
+fix      = "Resolve and remove all git conflict markers from the commit message before committing. Floor: `internal/hooks`."
+see_also = ["tools/githooks/commit-msg", "tools/check_commit_msg.py", "internal/hooks"]
+
+# Silent dropped-branch merge rejection (#11306): merge commits whose tree matches parent 1
+# exactly while parent 2 contains non-empty unique commits, discarding incoming changes without evidence.
+[reasons.SILENT_DROP_MERGE_FORBIDDEN]
+category = "MISROUTE"
+refusal  = true
+summary  = "A merge commit resulted in a tree identical to parent 1 while parent 2 had unique non-empty commits, silently dropping incoming changes."
+fix      = "Properly resolve merge conflicts to include intended changes from parent 2, or supply an explicit 'Merge-Strategy: ours' or 'Silent-Merge: intentional' trailer (or set ALLOW_SILENT_MERGE=1) if the drop was intentional. Floor: `internal/hooks`."
+see_also = ["tools/githooks/commit-msg", "tools/check_commit_msg.py", "internal/hooks"]
+
 [reasons.VALUECHAIN_UNWITNESSED]
 category = "STALE_CLAIM"
 refusal = false

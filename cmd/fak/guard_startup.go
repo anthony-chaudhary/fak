@@ -411,6 +411,7 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	// The refusal is an error (not a warning) so the watcher reports "rejected; keeping
 	// last-good floor" and the reload route answers non-2xx rather than silently no-oping.
 	current := adjudicator.Default.PolicySnapshot()
+	rt.Adjudicator.Posture = current.Posture
 	if admit, reason := guardCoreLockAllAdmitAmendment(current, rt.Adjudicator); !admit {
 		err := fmt.Errorf("guard floor reload refused: %s", reason)
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapRejected, err.Error())

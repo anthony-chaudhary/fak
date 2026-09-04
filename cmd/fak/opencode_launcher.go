@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 type opencodeLaunchOptions struct {
@@ -198,13 +201,26 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 }
 
 func execOpencodeLaunchChild(stdout, stderr io.Writer, argv, env []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
+	defer stop()
+	return execOpencodeLaunchChildContext(ctx, stdout, stderr, argv, env)
+}
+
+func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Writer, argv, env []string) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "fak opencode: empty command")
 		return 2
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	if err := cmd.Run(); err != nil {
 		code := childprocess.ExitCode(err, 1)
 		if code == 1 {

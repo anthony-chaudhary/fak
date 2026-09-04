@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/orgdebt"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -54,5 +56,37 @@ func TestRunOrgDebtScoreUnexpectedArg(t *testing.T) {
 	code := runOrgDebtScore(&stdout, &stderr, []string{"unexpected_extra"})
 	if code != 2 {
 		t.Fatalf("expected exit code 2 for unexpected arg, got %d", code)
+	}
+}
+
+func TestFetchRecentCommitsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	start := time.Now()
+	commits, err := fetchRecentCommitsContext(ctx, repoRoot(), 10)
+	dur := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error with cancelled context, got nil")
+	}
+	if commits != nil {
+		t.Fatalf("expected nil commits on error, got %v", commits)
+	}
+	if dur >= 5*time.Second {
+		t.Fatalf("cancelled fetchRecentCommitsContext took too long: %v", dur)
+	}
+}
+
+func TestFetchRecentCommitsContextSuccess(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	commits, err := fetchRecentCommitsContext(ctx, repoRoot(), 5)
+	if err != nil {
+		t.Fatalf("fetchRecentCommitsContext failed: %v", err)
+	}
+	if len(commits) == 0 {
+		t.Fatal("expected at least one commit in repository history")
 	}
 }

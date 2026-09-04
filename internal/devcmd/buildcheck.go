@@ -45,6 +45,7 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -68,6 +69,8 @@ var (
 	buildCheckLoadBearing  = buildoverlay.LoadBearingUntrackedFiles
 	buildCheckRun          = runGoBuildCheck
 	buildCheckNow          = time.Now
+	buildCheckAcquireSlot  = AcquireBuildSlot
+	buildCheckSlotTimeout  = 5 * time.Minute
 )
 
 type isolateWIPFlag struct {
@@ -198,6 +201,32 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	if capture {
 		runOut, runErr = &buf, &buf
 	}
+
+	releaseSlot, slotErr := buildCheckAcquireSlot(context.Background(), buildCheckSlotTimeout)
+	if slotErr != nil {
+		elapsed := buildCheckNow().Sub(start)
+		if *asJSON {
+			rep := buildCheckReport{
+				Schema:           "fak.buildcheck.v1",
+				Mode:             mode,
+				Packages:         pkgs,
+				Isolate:          *isolate,
+				Output:           outTarget,
+				Command:          append([]string{"go"}, args...),
+				ElapsedMS:        elapsed.Milliseconds(),
+				Verdict:          "BUILD_SLOT_UNAVAILABLE",
+				ExitCode:         1,
+				Reason:           fmt.Sprintf("host-wide build concurrency governor: %v", slotErr),
+				CompileManifests: compileManifests,
+			}
+			_ = writeIndentedJSONNoEscape(stdout, rep)
+		} else {
+			fmt.Fprintf(stderr, "fak buildcheck: host-wide build concurrency governor: %v\n", slotErr)
+		}
+		return 1
+	}
+	defer releaseSlot()
+
 	code, execErr := buildCheckRun(root, args, runOut, runErr)
 
 	verdict, reason := "OK", ""

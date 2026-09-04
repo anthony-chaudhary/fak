@@ -2,6 +2,7 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -10,9 +11,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
-	"time"
 )
 
 // argsHave reports whether flag and its value appear adjacently in args.
@@ -171,14 +172,15 @@ func TestJoinReason(t *testing.T) {
 // with in-flight tracked edits (nil = none, i.e. mask every untracked sibling).
 func withBuildCheckSeams(t *testing.T, untracked []string, modifiedDirs map[string]bool, runFn func(root string, args []string, stdout, stderr io.Writer) (int, error)) {
 	t.Helper()
-	origU, origM, origR, origN := buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow
+	origU, origM, origR, origN, origS := buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow, buildCheckAcquireSlot
 	t.Cleanup(func() {
-		buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow = origU, origM, origR, origN
+		buildCheckUntracked, buildCheckModifiedDirs, buildCheckRun, buildCheckNow, buildCheckAcquireSlot = origU, origM, origR, origN, origS
 	})
 	buildCheckUntracked = func(string) ([]string, error) { return untracked, nil }
 	buildCheckModifiedDirs = func(string) (map[string]bool, error) { return modifiedDirs, nil }
 	buildCheckRun = runFn
 	buildCheckNow = func() time.Time { return time.Unix(0, 0) }
+	buildCheckAcquireSlot = func(context.Context, time.Duration) (func(), error) { return func() {}, nil }
 }
 
 func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
@@ -581,5 +583,63 @@ func TestRunBuildCheckCompileManifestIncludesAdmittedSource(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"admitted_files"`) || !strings.Contains(out.String(), "admitted.go") {
 		t.Fatalf("out = %s", out.String())
+	}
+}
+
+func TestRunBuildCheckAcquiresSlot(t *testing.T) {
+	acquired := false
+	released := false
+	withBuildCheckSeams(t, nil, nil, func(_ string, _ []string, _, _ io.Writer) (int, error) {
+		if !acquired {
+			t.Error("expected slot to be acquired before buildCheckRun executes")
+		}
+		if released {
+			t.Error("expected slot to remain held while buildCheckRun is executing")
+		}
+		return 0, nil
+	})
+	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration) (func(), error) {
+		acquired = true
+		return func() {
+			released = true
+		}, nil
+	}
+
+	var out, errb bytes.Buffer
+	rc := RunBuildCheck(&out, &errb, []string{"./cmd/fak"})
+	if rc != 0 {
+		t.Fatalf("rc = %d, want 0", rc)
+	}
+	if !acquired {
+		t.Error("buildCheckAcquireSlot was not invoked")
+	}
+	if !released {
+		t.Error("build slot was not released after RunBuildCheck returned")
+	}
+}
+
+func TestRunBuildCheckSlotUnavailable(t *testing.T) {
+	withBuildCheckSeams(t, nil, nil, func(_ string, _ []string, _, _ io.Writer) (int, error) {
+		t.Fatal("buildCheckRun should not execute when slot acquisition fails")
+		return 0, nil
+	})
+	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration) (func(), error) {
+		return nil, ErrBuildSlotTimeout
+	}
+
+	var out, errb bytes.Buffer
+	rc := RunBuildCheck(&out, &errb, []string{"--json", "./cmd/fak"})
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if rep.Verdict != "BUILD_SLOT_UNAVAILABLE" {
+		t.Fatalf("verdict = %q, want BUILD_SLOT_UNAVAILABLE", rep.Verdict)
+	}
+	if !strings.Contains(rep.Reason, "timed out") {
+		t.Fatalf("rep.Reason = %q, want timeout explanation", rep.Reason)
 	}
 }

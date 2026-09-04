@@ -544,7 +544,8 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 	}
 	if ok, why := hooks.CommitMsgVerdictWithGit(msg, r); !ok {
 		fmt.Fprintf(stderr, "COMMIT_MSG: %s\n", why)
-		if msgMode == "block" || strings.HasPrefix(why, "MERGE_WITNESS_FAIL") {
+		if msgMode == "block" || strings.HasPrefix(why, "MERGE_WITNESS_FAIL") ||
+			strings.HasPrefix(why, "MERGE_CONFLICT_") || strings.HasPrefix(why, "SILENT_DROP_MERGE_") {
 			fmt.Fprintln(stderr, "  (FLEET_MSG_GUARD=warn softens; =off disables; FLEET_ALLOW_MSG=1 overrides once)")
 			return 1
 		}

@@ -766,7 +766,7 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 			Metric:            procguard.MemoryMetricCommit,
 			MaxTreeBytes:      1000,
 			MinSystemHeadroom: 100,
-			HeadroomDebounce:  60 * time.Millisecond,
+			HeadroomDebounce:  1 * time.Second,
 			Stop:              stop,
 		}
 
@@ -789,7 +789,7 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 		})
 
 		// Wait for both suspension and resumption to occur
-		deadline := time.Now().Add(500 * time.Millisecond)
+		deadline := time.Now().Add(1 * time.Second)
 		for time.Now().Before(deadline) {
 			if len(suspendedPIDs) > 0 && len(resumedPIDs) > 0 {
 				break
@@ -814,10 +814,22 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 	t.Run("deferred resumption on monitor exit when suspended", func(t *testing.T) {
 		stop := make(chan struct{})
 
-		var resumedPIDs []int
+		suspended := make(chan struct{})
+		oldSuspend := guardSuspendProcess
+		guardSuspendProcess = func(pid int) error {
+			select {
+			case <-suspended:
+			default:
+				close(suspended)
+			}
+			return nil
+		}
+		t.Cleanup(func() { guardSuspendProcess = oldSuspend })
+
+		resumed := make(chan int, 1)
 		oldResume := guardResumeProcess
 		guardResumeProcess = func(pid int) error {
-			resumedPIDs = append(resumedPIDs, pid)
+			resumed <- pid
 			return nil
 		}
 		t.Cleanup(func() { guardResumeProcess = oldResume })
@@ -842,12 +854,21 @@ func TestGuardChildResourceHeadroomDebounceAndRecovery(t *testing.T) {
 			}, true, ""
 		})
 
-		time.Sleep(25 * time.Millisecond) // wait for at least one tick which suspends
-		close(stop)                       // close stop channel to exit monitor
-		time.Sleep(25 * time.Millisecond) // wait for defer to run
+		select {
+		case <-suspended:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for process suspension")
+		}
 
-		if len(resumedPIDs) == 0 || resumedPIDs[0] != 42 {
-			t.Fatalf("expected deferred guardResumeProcess on monitor exit, got %v", resumedPIDs)
+		close(stop)
+
+		select {
+		case pid := <-resumed:
+			if pid != 42 {
+				t.Fatalf("expected deferred guardResumeProcess for PID 42, got %d", pid)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for deferred guardResumeProcess on monitor exit")
 		}
 	})
 }

@@ -234,3 +234,134 @@ func TestCommitMsgVerdict_rejectsSingleParentPseudoMerge(t *testing.T) {
 		t.Fatalf("CommitMsgVerdictWithGit rejected committed multi-parent merge: %s", why)
 	}
 }
+
+// TestCommitMsgVerdict_rejectsConflictBanners proves issue #11306:
+// Unedited git conflict templates ('# Conflicts:') and conflict markers ('<<<<<<<', '=======', '>>>>>>>')
+// are rejected at the commit-msg boundary with closed refusal reasons.
+func TestCommitMsgVerdict_rejectsConflictBanners(t *testing.T) {
+	// 1. Conflict template # Conflicts:
+	casesTemplate := []string{
+		"Merge remote-tracking branch 'origin/main'\n\n# Conflicts:\n#\tcmd/fak/serve.go",
+		"# Conflicts:\n",
+		"feat(core): add something\n\n# Conflicts:\n",
+	}
+	for _, msg := range casesTemplate {
+		ok, why := CommitMsgVerdict(msg)
+		if ok {
+			t.Errorf("CommitMsgVerdict accepted message with conflict template: %q", msg)
+		}
+		if !strings.Contains(why, "MERGE_CONFLICT_TEMPLATE_FORBIDDEN") {
+			t.Errorf("expected MERGE_CONFLICT_TEMPLATE_FORBIDDEN in why; got %q", why)
+		}
+	}
+
+	// 2. Conflict markers
+	casesMarkers := []string{
+		"feat(core): add feature\n\n<<<<<<< HEAD\nfoo\n=======\nbar\n>>>>>>> main",
+		"<<<<<<< HEAD",
+		"=======",
+		">>>>>>> branch",
+	}
+	for _, msg := range casesMarkers {
+		ok, why := CommitMsgVerdict(msg)
+		if ok {
+			t.Errorf("CommitMsgVerdict accepted message with conflict marker: %q", msg)
+		}
+		if !strings.Contains(why, "MERGE_CONFLICT_MARKERS_FORBIDDEN") {
+			t.Errorf("expected MERGE_CONFLICT_MARKERS_FORBIDDEN in why; got %q", why)
+		}
+	}
+}
+
+// TestCommitMsgVerdict_rejectsSilentDropMerge proves issue #11306:
+// Merge commits whose tree SHA matches parent 1 exactly while parent 2 contains non-empty unique commits
+// are rejected with SILENT_DROP_MERGE_FORBIDDEN unless an explicit override trailer or env flag is supplied.
+func TestCommitMsgVerdict_rejectsSilentDropMerge(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init", "-q")
+	runGit("config", "user.name", "Test")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "commit.gpgsign", "false")
+
+	// 1. Base commit
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "a.txt")
+	runGit("commit", "-m", "feat(core): base commit (fak core)")
+
+	// 2. Side branch with real file change
+	mainBranch := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	runGit("checkout", "-q", "-b", "side-branch")
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("side change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "b.txt")
+	runGit("commit", "-m", "feat(side): add b (fak core)")
+
+	// 3. Main branch with real file change
+	runGit("checkout", "-q", mainBranch)
+	if err := os.WriteFile(filepath.Join(root, "c.txt"), []byte("main change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "c.txt")
+	runGit("commit", "-m", "feat(main): add c (fak core)")
+
+	// 4. Start merge with -s ours --no-commit (drops side-branch completely)
+	runGit("merge", "-s", "ours", "--no-commit", "side-branch")
+
+	// In-flight merge check should reject without trailer
+	ok, why := CommitMsgVerdictWithGit("Merge branch 'side-branch'", root)
+	if ok {
+		t.Fatalf("CommitMsgVerdictWithGit accepted silent drop in-flight merge")
+	}
+	if !strings.Contains(why, "SILENT_DROP_MERGE_FORBIDDEN") {
+		t.Errorf("why %q does not contain SILENT_DROP_MERGE_FORBIDDEN", why)
+	}
+
+	// In-flight merge check should accept with Merge-Strategy: ours trailer
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'side-branch'\n\nMerge-Strategy: ours", root)
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGit rejected merge with Merge-Strategy: ours: %s", why)
+	}
+
+	// In-flight merge check should accept with Silent-Merge: intentional trailer
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'side-branch'\n\nSilent-Merge: intentional", root)
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGit rejected merge with Silent-Merge: intentional: %s", why)
+	}
+
+	// In-flight merge check should accept with ALLOW_SILENT_MERGE=1 env var
+	t.Setenv("ALLOW_SILENT_MERGE", "1")
+	ok, why = CommitMsgVerdictWithGit("Merge branch 'side-branch'", root)
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGit rejected merge with ALLOW_SILENT_MERGE=1: %s", why)
+	}
+	t.Setenv("ALLOW_SILENT_MERGE", "")
+
+	// 5. Commit with trailer and check existing commit
+	runGit("commit", "-m", "Merge branch 'side-branch'\n\nMerge-Strategy: ours")
+	ok, why = CommitMsgVerdictWithGitRef("Merge branch 'side-branch'\n\nMerge-Strategy: ours", root, "HEAD")
+	if !ok {
+		t.Fatalf("CommitMsgVerdictWithGitRef rejected committed merge with trailer: %s", why)
+	}
+
+	// Existing commit without trailer should be rejected
+	ok, why = CommitMsgVerdictWithGitRef("Merge branch 'side-branch'", root, "HEAD")
+	if ok {
+		t.Fatalf("CommitMsgVerdictWithGitRef accepted committed silent drop merge without trailer")
+	}
+	if !strings.Contains(why, "SILENT_DROP_MERGE_FORBIDDEN") {
+		t.Errorf("why %q does not contain SILENT_DROP_MERGE_FORBIDDEN", why)
+	}
+}
