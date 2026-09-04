@@ -1,6 +1,15 @@
 // Package issuecatalog is the durable bridge from a reviewable catalog of
 // performance-enablement gap rows to a stable, deduplicated GitHub issue per row.
 //
+// # Invariants and Guarantees
+//
+// Invariant: issue catalog operations are fail-closed and immutable. Unvalidated or
+// incomplete rows are dropped as skipped triage entries and never dispatched as public issues
+// without meeting every requirement of the issuecontract gate.
+//
+// Guard: external mutations to GitHub require an explicit --live opt-in flag; default execution
+// is strictly dry-run with verified zero side effects.
+//
 // # Why it exists
 //
 // fak's performance value is largely built but under-shipped: features that are

@@ -319,6 +319,9 @@ func existingByKey(issues []Issue) map[string]Issue {
 	return out
 }
 
+// Invariant: issue catalog operations are fail-closed and immutable; unvalidated catalog
+// candidates are rejected before reaching any external synchronization surface.
+//
 // BuildPlan reviews each row against the issue contract, then diffs the dispatchable
 // rows against the existing issues (matched by marker key) to decide create vs
 // update. Non-dispatchable rows are returned as skipped triage rows.
