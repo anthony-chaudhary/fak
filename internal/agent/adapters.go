@@ -85,6 +85,8 @@ type adapterRequest struct {
 	// accept tool schemas but reject OpenAI's continuation fields. It is opt-in only;
 	// the default OpenAI/vLLM/SGLang wire keeps native tool_calls + role=tool.
 	OpenAIToolMessagesAsText bool
+	ReasoningEffort          string
+	ThinkingBudget           *int
 }
 
 // NewTranscriptAdapter returns the adapter for a provider.
@@ -1175,12 +1177,18 @@ type geminiRequest struct {
 	GenerationConfig  *geminiConfig   `json:"generationConfig,omitempty"`
 }
 
+type geminiThinkingConfig struct {
+	ThinkingBudget *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel  string `json:"thinkingLevel,omitempty"`
+}
+
 type geminiConfig struct {
-	Temperature   float64  `json:"temperature"`
-	MaxTokens     int      `json:"maxOutputTokens,omitempty"`
-	TopP          *float64 `json:"topP,omitempty"`
-	TopK          *int     `json:"topK,omitempty"`
-	StopSequences []string `json:"stopSequences,omitempty"`
+	Temperature    float64               `json:"temperature"`
+	MaxTokens      int                   `json:"maxOutputTokens,omitempty"`
+	TopP           *float64              `json:"topP,omitempty"`
+	TopK           *int                  `json:"topK,omitempty"`
+	StopSequences  []string              `json:"stopSequences,omitempty"`
+	ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
 type geminiContent struct {
@@ -1260,6 +1268,16 @@ func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 			TopK:          positiveTopK(r.TopK),
 			StopSequences: r.Stop,
 		},
+	}
+	if r.ThinkingBudget != nil || r.ReasoningEffort != "" {
+		tc := &geminiThinkingConfig{}
+		if r.ThinkingBudget != nil {
+			tc.ThinkingBudget = r.ThinkingBudget
+		}
+		if r.ReasoningEffort != "" {
+			tc.ThinkingLevel = strings.ToLower(r.ReasoningEffort)
+		}
+		req.GenerationConfig.ThinkingConfig = tc
 	}
 	for _, m := range r.Messages {
 		switch m.Role {

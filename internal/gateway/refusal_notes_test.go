@@ -3,6 +3,8 @@ package gateway
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 // The whole point of the refusal-note seam (#2750): a BRAND-NEW refusal kind
@@ -450,4 +452,66 @@ Caller: agent-worker-4`
 			t.Fatalf("failed to reframe negative idiom affordance-first: %q", lines[0])
 		}
 	})
+}
+
+func TestIFCSinkRefusalNoteSurfacesRemedy(t *testing.T) {
+	// A refusal on By == "ifc-sink" with Meta["fix"] renders the clear remedy note instead of bare "TRUST_VIOLATION"
+	fixText := "IFC egress block: parameter 'to' contains external destination; strip off-box destination keys from send_email or authorize tool in policy"
+	v := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonTrustViolation,
+		By:     "ifc-sink",
+		Meta: map[string]string{
+			"subsystem":         "ifc-sink",
+			"deny_rule":         "ifc_taint_egress",
+			"taint_source_tool": "read_webpage",
+			"offending_arg":     "to",
+			"fix":               fixText,
+		},
+	}
+	wv := renderVerdict(v, nil)
+	adj := ToolAdjudication{
+		Tool:     "send_email",
+		Admitted: false,
+		Verdict:  wv,
+	}
+
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+	} {
+		wantSanctioned := "sanctioned alternative: " + fixText
+		if !strings.Contains(got, wantSanctioned) {
+			t.Fatalf("%s missing clear remedy note %q:\n%s", name, wantSanctioned, got)
+		}
+		if !strings.Contains(got, "TRUST_VIOLATION") {
+			t.Fatalf("%s missing reason TRUST_VIOLATION:\n%s", name, got)
+		}
+		affordance := errorAffordance("TRUST_VIOLATION")
+		if strings.Contains(got, affordance) {
+			t.Fatalf("%s should render remedy from Meta[fix], but found fallback affordance %q:\n%s", name, affordance, got)
+		}
+	}
+
+	// Without Meta["fix"], it falls back to the TRUST_VIOLATION errorAffordance rather than bare token
+	bareV := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonTrustViolation,
+		By:     "ifc-sink",
+	}
+	bareWV := renderVerdict(bareV, nil)
+	bareAdj := ToolAdjudication{
+		Tool:     "send_email",
+		Admitted: false,
+		Verdict:  bareWV,
+	}
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{bareAdj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{bareAdj}),
+	} {
+		affordance := errorAffordance("TRUST_VIOLATION")
+		if !strings.Contains(got, affordance) {
+			t.Fatalf("%s bare refusal missing errorAffordance %q:\n%s", name, affordance, got)
+		}
+	}
 }

@@ -302,6 +302,17 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 	if route.ConsultOnly {
 		return receipt, fmt.Errorf("SOL_ROUTE_PRO_CONSULT_ONLY: Codex cannot transmit reasoning.mode=pro; launch a separately metered Pro consultation instead")
 	}
+	managerModel := route.Model
+	if managerModel == "" {
+		managerModel = guardCodexDefaultModelID
+	}
+	workerModel, workerEffort := orchestration.ChildWorkerRoute(managerModel, route.WorkerModel, route.WorkerReasoningEffort)
+	if envModel := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_MODEL")); envModel != "" {
+		workerModel = envModel
+	}
+	if envEffort := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_EFFORT")); envEffort != "" {
+		workerEffort = strings.ToLower(envEffort)
+	}
 	var emptyUsageWindow time.Duration
 	workload, workloadErr := orchestrationWorkloadFromEnv()
 	if workloadErr != nil {
@@ -361,16 +372,16 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		}
 		request := orchestrationWorkerLaunchRequest{
 			Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText,
-			Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort,
+			Root: root, RunDir: runDir, Model: workerModel, Mode: route.Mode, Effort: workerEffort,
 			TokenBudget: childBudgets[role.ID].ReservedTokens, DeadlineAt: receipt.Budget.DeadlineAt,
 			RemainingWall: remainingWall, RunID: receipt.RunID, OutputProfile: outputProfile, WorkProfile: workProfile,
 		}
 		joinWorker := func(launched codexOrchestrationWorkerLaunch) codexOrchestrationWorkerLaunch {
 			launched.OutputProfile = outputProfile
 			launched.WorkProfile = workProfile
-			launched.Model = route.Model
+			launched.Model = workerModel
 			launched.Mode = string(route.Mode)
-			launched.Effort = route.ReasoningEffort
+			launched.Effort = workerEffort
 			launched.AccessMode = string(access.Mode)
 			launched.ReadOnly = access.Admission.ReadOnly
 			launched.PolicyPath = access.PolicyPath
@@ -509,7 +520,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			launched.Status = "terminal"
 			launched.Terminal = &qwenEmptyUsageTerminalReceipt{
 				Schema: qwenEmptyUsageTerminalSchema, Reason: qwenEmptyUsageTerminalReason,
-				RunID: receipt.RunID, RoleID: role.ID, WorkerModel: route.Model,
+				RunID: receipt.RunID, RoleID: role.ID, WorkerModel: workerModel,
 				TargetModelFamily: receipt.Workload.TargetModelFamily,
 				Attempts:          attempt, RecoveryAttempts: attempt - 1, MaxRecoveryAttempts: maxRecoveryAttempts,
 				EmittedAt: orchestrationLaunchNow().UTC(), Assessment: assessment,

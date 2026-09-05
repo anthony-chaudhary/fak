@@ -13,6 +13,7 @@ func TestErrorAffordanceKnownReasons(t *testing.T) {
 		"OVERHEAD_BUDGET_EXCEEDED": "measure against the declared budget, then reduce the overhead or update the witnessed envelope",
 		"INVALID_TOOL_ARGUMENTS":   "correct the tool arguments to match the declared schema and retry",
 		"SELF_MODIFY":              "route an authorized core-lock edit through fak commit --core-lock-maintenance-witness, or send an outward message with fak slack send",
+		"TRUST_VIOLATION":          "Action violates trust or Information Flow Control (IFC) boundary. Check taint source, avoid outbound egress of untrusted data, or request policy authorization.",
 	}
 	for reason, want := range cases {
 		if got := errorAffordance(reason); got != want {

@@ -54,14 +54,17 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 		t.Fatalf("receipt lacks join identity: %+v", receipt)
 	}
 	for _, worker := range receipt.Workers {
-		if worker.Model != "gpt-5.6-sol" || worker.Mode != "ultra" || worker.Effort != "high" {
-			t.Fatalf("grind worker route = %s/%s/%s, want gpt-5.6-sol/ultra/high: %+v", worker.Model, worker.Mode, worker.Effort, worker)
+		if worker.Model != "gemini-3.8-flash" || worker.Mode != "ultra" || worker.Effort != "medium" {
+			t.Fatalf("grind worker route = %s/%s/%s, want gemini-3.8-flash/ultra/medium: %+v", worker.Model, worker.Mode, worker.Effort, worker)
 		}
 	}
 	if len(launchedRequests) != 3 {
 		t.Fatalf("launched requests=%d, want 3", len(launchedRequests))
 	}
 	for _, req := range launchedRequests {
+		if req.Model != "gemini-3.8-flash" || req.Effort != "medium" {
+			t.Fatalf("grind worker request = %s/%s, want gemini-3.8-flash/medium: %+v", req.Model, req.Effort, req)
+		}
 		if req.Access.Mode != orchestration.ChildAccessObserve || !req.Access.Admission.ReadOnly ||
 			len(req.Access.Admission.Tree) != 0 {
 			t.Fatalf("--task-text inferred write authority for %+v", req)
@@ -69,6 +72,84 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 		prompt := orchestrationWorkerPrompt(req)
 		if !strings.Contains(prompt, "Work read-only") || !strings.Contains(prompt, "Do not edit files") {
 			t.Fatalf("observe-only prompt = %q", prompt)
+		}
+	}
+}
+
+func TestOrchestrationLaunchAstraManagerDelegatesToGeminiWorker(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	t.Setenv("CODEX_THREAD_ID", "session-astra-gemini")
+	old := orchestrationWorkerLauncher
+	var launchedRequests []orchestrationWorkerLaunchRequest
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		launchedRequests = append(launchedRequests, req)
+		return codexOrchestrationWorkerLaunch{
+			RoleID:  req.Role.ID,
+			PID:     200 + len(req.Role.ID),
+			Status:  "started",
+			LogPath: filepath.Join(req.RunDir, req.Role.ID+".jsonl"),
+		}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = old })
+
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{
+		"plan",
+		"--task-text", "parallel grind implementation and testing",
+		"--codex-home", home,
+		"--launch",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	receipt, ok := readCodexOrchestrationLaunchReceipt(home, "session-astra-gemini")
+	if !ok {
+		t.Fatal("missing valid launch receipt")
+	}
+	if len(receipt.Workers) == 0 {
+		t.Fatal("expected launched workers, got 0")
+	}
+	for _, worker := range receipt.Workers {
+		if worker.Model != "gemini-3.8-flash" || worker.Effort != "medium" {
+			t.Errorf("worker %s: got model=%q effort=%q, want gemini-3.8-flash/medium", worker.RoleID, worker.Model, worker.Effort)
+		}
+	}
+	for _, req := range launchedRequests {
+		if req.Model != "gemini-3.8-flash" || req.Effort != "medium" {
+			t.Errorf("worker req %s: got model=%q effort=%q, want gemini-3.8-flash/medium", req.Role.ID, req.Model, req.Effort)
+		}
+	}
+
+	// Explicit override preserved
+	launchedRequests = nil
+	t.Setenv("CODEX_THREAD_ID", "session-astra-override")
+	stdout.Reset()
+	stderr.Reset()
+	code = runOrchestration(&stdout, &stderr, []string{
+		"plan",
+		"--task-text", "parallel grind implementation and testing",
+		"--codex-home", home,
+		"--worker-model", "custom-override-model",
+		"--worker-effort", "high",
+		"--launch",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	receiptOverride, ok := readCodexOrchestrationLaunchReceipt(home, "session-astra-override")
+	if !ok {
+		t.Fatal("missing valid override launch receipt")
+	}
+	for _, worker := range receiptOverride.Workers {
+		if worker.Model != "custom-override-model" || worker.Effort != "high" {
+			t.Errorf("override worker %s: got model=%q effort=%q, want custom-override-model/high", worker.RoleID, worker.Model, worker.Effort)
+		}
+	}
+	for _, req := range launchedRequests {
+		if req.Model != "custom-override-model" || req.Effort != "high" {
+			t.Errorf("override req %s: got model=%q effort=%q, want custom-override-model/high", req.Role.ID, req.Model, req.Effort)
 		}
 	}
 }
