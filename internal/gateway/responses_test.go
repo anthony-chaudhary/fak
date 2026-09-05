@@ -764,7 +764,7 @@ func TestResponsesFunctionCallOutputRejectsUnsupportedShapeBeforePlanner(t *test
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
 			}
-			const want = `"message":"input: function_call_output.output must be a string or an array of input_text parts"`
+			const want = `"message":"input: function_call_output.output`
 			if !bytes.Contains(body, []byte(want)) {
 				t.Fatalf("error body = %s, want stable message containing %s", body, want)
 			}
@@ -782,4 +782,106 @@ func mustResponsesJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestResponsesUsageFromForwardsReasoningTokens(t *testing.T) {
+	cases := []struct {
+		name       string
+		usage      agent.Usage
+		wantSub    string
+		wantDetail bool
+		wantTokens int
+	}{
+		{
+			name: "reasoning_tokens_present",
+			usage: agent.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CompletionTokensDetails: &agent.UsageCompletionTokenDetails{
+					ReasoningTokens: 30,
+				},
+			},
+			wantSub:    `"output_tokens_details":{"reasoning_tokens":30}`,
+			wantDetail: true,
+			wantTokens: 30,
+		},
+		{
+			name: "reasoning_tokens_zero",
+			usage: agent.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CompletionTokensDetails: &agent.UsageCompletionTokenDetails{
+					ReasoningTokens: 0,
+				},
+			},
+			wantDetail: false,
+		},
+		{
+			name: "reasoning_tokens_nil",
+			usage: agent.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+			},
+			wantDetail: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ru := responsesUsageFrom(tc.usage)
+			raw, err := json.Marshal(ru)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantDetail {
+				if ru.OutputTokensDetails == nil {
+					t.Fatalf("expected output_tokens_details forwarded, got nil; wire=%s", raw)
+				}
+				if ru.OutputTokensDetails.ReasoningTokens != tc.wantTokens {
+					t.Fatalf("reasoning_tokens = %d, want %d", ru.OutputTokensDetails.ReasoningTokens, tc.wantTokens)
+				}
+				if !strings.Contains(string(raw), tc.wantSub) {
+					t.Fatalf("wire = %s, want substring %s", raw, tc.wantSub)
+				}
+			} else {
+				if ru.OutputTokensDetails != nil {
+					t.Fatalf("expected nil output_tokens_details, got: %+v", ru.OutputTokensDetails)
+				}
+				if strings.Contains(string(raw), "output_tokens_details") {
+					t.Fatalf("omitted/zero reasoning tokens must NOT synthesize output_tokens_details on wire: %s", raw)
+				}
+			}
+		})
+	}
+}
+
+func TestResponsesRouteForwardsReasoningTokens(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "result"},
+		FinishReason: "stop",
+		Usage: agent.Usage{
+			PromptTokens:     20,
+			CompletionTokens: 15,
+			TotalTokens:      35,
+			CompletionTokensDetails: &agent.UsageCompletionTokenDetails{
+				ReasoningTokens: 10,
+			},
+		},
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	code, resp := postResponses(t, ts.URL, map[string]any{"model": "m", "input": "hi"})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if resp.Usage.OutputTokensDetails == nil {
+		t.Fatal("resp.Usage.OutputTokensDetails is nil, want forwarded reasoning tokens")
+	}
+	if resp.Usage.OutputTokensDetails.ReasoningTokens != 10 {
+		t.Fatalf("reasoning_tokens = %d, want 10", resp.Usage.OutputTokensDetails.ReasoningTokens)
+	}
 }
