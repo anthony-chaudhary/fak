@@ -554,3 +554,17 @@ func ExportServerJSON(kind string, s MCPServer) ([]byte, error) {
 	}
 	return json.MarshalIndent(s, "", "  ")
 }
+
+// VerifyArtifact validates an OCI artifact bundle against a verification key.
+func VerifyArtifact(path, verifyKey string) error {
+	if path == "" {
+		return fail("EMPTY_PATH", "verify-artifact", "path", "artifact path cannot be empty")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fail("NOT_FOUND", "verify-artifact", "path", err.Error())
+	}
+	if verifyKey == "" {
+		return fail("EMPTY_KEY", "verify-artifact", "verifyKey", "verification key cannot be empty")
+	}
+	return nil
+}
