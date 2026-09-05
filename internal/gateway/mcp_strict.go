@@ -44,7 +44,13 @@ func ToOpenAIStrictSchema(raw json.RawMessage) (json.RawMessage, error) {
 // tool's inputSchema has been transformed via ToOpenAIStrictSchema and
 // "strict": true is added.
 func StrictToolDescriptors() []map[string]any {
-	rawList := toolDescriptors()
+	return ToStrictToolDescriptors(toolDescriptors())
+}
+
+// ToStrictToolDescriptors transforms a slice of tool descriptors so that every
+// tool's inputSchema has been transformed via ToOpenAIStrictSchema and
+// "strict": true is added.
+func ToStrictToolDescriptors(rawList []map[string]any) []map[string]any {
 	res := make([]map[string]any, len(rawList))
 	for i, td := range rawList {
 		cp := make(map[string]any, len(td)+1)

@@ -239,6 +239,7 @@ func TestMCPToolDescriptorsReadOnlyAnnotations(t *testing.T) {
 		"fak_tools_search",
 		"fak_read",
 		"fak_adjudicate",
+		"fak_changes",
 		"fak_memory_drivers",
 		"fak_memory_explain",
 		"fak_feature_query",
@@ -260,6 +261,15 @@ func TestMCPToolDescriptorsReadOnlyAnnotations(t *testing.T) {
 		if !ok {
 			t.Fatalf("tool %q missing annotations map", name)
 		}
+		if ann["readOnly"] != true {
+			t.Errorf("tool %q annotations[readOnly] = %v, want true", name, ann["readOnly"])
+		}
+		if ann["idempotent"] != true {
+			t.Errorf("tool %q annotations[idempotent] = %v, want true", name, ann["idempotent"])
+		}
+		if ann["consequential"] != false {
+			t.Errorf("tool %q annotations[consequential] = %v, want false", name, ann["consequential"])
+		}
 		if ann["readOnlyHint"] != true {
 			t.Errorf("tool %q annotations[readOnlyHint] = %v, want true", name, ann["readOnlyHint"])
 		}
@@ -271,7 +281,6 @@ func TestMCPToolDescriptorsReadOnlyAnnotations(t *testing.T) {
 	mutatingTools := []string{
 		"fak_syscall",
 		"fak_admit",
-		"fak_changes",
 		"fak_revoke",
 		"fak_session_reset",
 		"fak_context_change",
@@ -282,10 +291,104 @@ func TestMCPToolDescriptorsReadOnlyAnnotations(t *testing.T) {
 		if !ok {
 			t.Fatalf("mutating tool %q not found in descriptors", name)
 		}
-		if ann, ok := td["annotations"].(map[string]any); ok {
-			if ann["readOnlyHint"] == true || ann["read_only_hint"] == true {
-				t.Errorf("mutating tool %q must not have readOnlyHint or read_only_hint: %v", name, ann)
+		ann, ok := td["annotations"].(map[string]any)
+		if !ok {
+			t.Fatalf("mutating tool %q missing annotations map", name)
+		}
+		if ann["readOnly"] != false {
+			t.Errorf("mutating tool %q annotations[readOnly] = %v, want false", name, ann["readOnly"])
+		}
+		if ann["consequential"] != true {
+			t.Errorf("mutating tool %q annotations[consequential] = %v, want true", name, ann["consequential"])
+		}
+		if ann["readOnlyHint"] == true || ann["read_only_hint"] == true {
+			t.Errorf("mutating tool %q must not have readOnlyHint or read_only_hint: %v", name, ann)
+		}
+	}
+}
+
+func TestMCPToolsListReturnsAnnotationsAndStrictCompliance(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	// 1. Standard tools/list: check annotations on returned tools
+	res, rerr := srv.handleMethod(ctx, "tools/list", nil)
+	if rerr != nil {
+		t.Fatalf("tools/list error: %v", rerr)
+	}
+	respMap, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list response not map: %T", res)
+	}
+	tools, ok := respMap["tools"].([]map[string]any)
+	if !ok {
+		t.Fatalf("tools not []map[string]any: %T", respMap["tools"])
+	}
+
+	for _, tool := range tools {
+		name, _ := tool["name"].(string)
+		ann, hasAnn := tool["annotations"].(map[string]any)
+		if !hasAnn {
+			t.Fatalf("tool %q missing annotations map", name)
+		}
+		switch name {
+		case "fak_adjudicate", "fak_read", "fak_tools_search":
+			if ann["readOnly"] != true {
+				t.Errorf("tool %q readOnly = %v, want true", name, ann["readOnly"])
 			}
+			if ann["consequential"] != false {
+				t.Errorf("tool %q consequential = %v, want false", name, ann["consequential"])
+			}
+			if ann["idempotent"] != true {
+				t.Errorf("tool %q idempotent = %v, want true", name, ann["idempotent"])
+			}
+		case "fak_syscall":
+			if ann["readOnly"] != false {
+				t.Errorf("tool %q readOnly = %v, want false", name, ann["readOnly"])
+			}
+			if ann["consequential"] != true {
+				t.Errorf("tool %q consequential = %v, want true", name, ann["consequential"])
+			}
+		}
+	}
+
+	// 2. Strict tools/list: request strict schemas via params {"strict": true}
+	strictParams := json.RawMessage(`{"strict": true}`)
+	resStrict, rerrStrict := srv.handleMethod(ctx, "tools/list", strictParams)
+	if rerrStrict != nil {
+		t.Fatalf("tools/list strict error: %v", rerrStrict)
+	}
+	respMapStrict := resStrict.(map[string]any)
+	strictTools := respMapStrict["tools"].([]map[string]any)
+	for _, tool := range strictTools {
+		name, _ := tool["name"].(string)
+		if strictVal, _ := tool["strict"].(bool); !strictVal {
+			t.Errorf("tool %q missing strict: true in strict mode", name)
+		}
+		schemaRaw, ok := tool["inputSchema"].(json.RawMessage)
+		if !ok {
+			t.Fatalf("tool %q missing json.RawMessage inputSchema", name)
+		}
+		errs := ValidateOpenAIStrictMode(schemaRaw)
+		if len(errs) > 0 {
+			t.Errorf("tool %q strict mode validation failed: %v", name, errs)
+		}
+	}
+
+	// 3. All registered descriptors pass strict mode via StrictToolDescriptors()
+	allStrict := StrictToolDescriptors()
+	if len(allStrict) == 0 {
+		t.Fatal("StrictToolDescriptors returned 0 tools")
+	}
+	for _, tool := range allStrict {
+		name, _ := tool["name"].(string)
+		schemaRaw, ok := tool["inputSchema"].(json.RawMessage)
+		if !ok {
+			t.Fatalf("tool %q inputSchema is not json.RawMessage", name)
+		}
+		errs := ValidateOpenAIStrictMode(schemaRaw)
+		if len(errs) > 0 {
+			t.Errorf("StrictToolDescriptors tool %q failed ValidateOpenAIStrictMode: %v", name, errs)
 		}
 	}
 }
