@@ -35,6 +35,9 @@ func TestScanClassifies(t *testing.T) {
 		{"todo", "TODO: handle the timeout later.", DeferredWork},
 		{"suggest", "You may want to add caching.", SuggestionPunt},
 		{"offer", "Let me know if you want more.", OpenOffer},
+		{"surrender-giving-up", "I am giving up on this task.", PrematureSurrender},
+		{"surrender-cannot-complete", "I cannot complete the goal.", PrematureSurrender},
+		{"surrender-unable-proceed", "I am unable to proceed.", PrematureSurrender},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

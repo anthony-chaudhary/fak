@@ -75,6 +75,11 @@ const (
 	// approval".
 	ConfirmationWait Class = "CONFIRMATION_WAIT"
 
+	// PrematureSurrender prematurely surrenders or gives up without attempting an
+	// allowed alternative or decomposing the goal: "giving up", "cannot complete
+	// the task", "unable to proceed".
+	PrematureSurrender Class = "PREMATURE_SURRENDER"
+
 	// DeferredWork punts real work to "later"/a TODO with no bounded ticket:
 	// "TODO: handle this later", "left as a follow-up", "can be addressed later".
 	DeferredWork Class = "DEFERRED_WORK"
@@ -220,6 +225,21 @@ var specs = []classSpec{
 			re(`\blet me pause\b`),
 			re(`\bpause here\b`),
 			re(`\bstanding by\b`),
+		},
+	},
+	{
+		class:    PrematureSurrender,
+		baseline: choicetriage.TakeObvious,
+		reason:   "prematurely surrenders or gives up without attempting an allowed alternative or decomposing the goal",
+		resolve:  "do not surrender: break the goal into atomic sub-steps, try alternative tools/approaches, or delegate to subagents",
+		res: []*regexp.Regexp{
+			re(`\b(i am |i'm |im )?giving up\b`),
+			re(`\b(give|gives) up\b`),
+			re(`\b(cannot|can't|unable to|am unable to) (complete|solve|resolve|fix|achieve|proceed with|fulfill) (the |this |my )?(task|goal|issue|problem|work)\b`),
+			re(`\b(i|we) (cannot|can't|am unable to|are unable to) (proceed|continue|go further|solve this)\b`),
+			re(`\b(i'll|i will|let me) stop here (because|due to|since|as|and give up)\b`),
+			re(`\b(i surrender|surrendering)\b`),
+			re(`\bfailed to (find a way|complete the goal|solve the issue)\b`),
 		},
 	},
 	{
