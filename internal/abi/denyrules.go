@@ -72,6 +72,7 @@ const (
 	DenyRuleSelfModifyPath      = "self_modify_path"      // a write-shaped tool's path arg matched a guarded glob
 	DenyRuleSelfModifyCommand   = "self_modify_command"   // a shell command's write verb targeted a guarded glob
 	DenyRuleSelfModifySynthTool = "self_modify_synthtool" // an exec of an agent-authored script reached a guarded glob
+	DenyRuleCredentialPathBlock = "credential_path_block" // a tool call targeted a guarded credential or host-config path
 )
 
 // Trunk-discipline law ids (internal/gitgate). Every gitgate law is AUTHORED as
@@ -122,6 +123,7 @@ var coreDenyRules = map[string]bool{
 	DenyRuleSelfModifyPath:      true,
 	DenyRuleSelfModifyCommand:   true,
 	DenyRuleSelfModifySynthTool: true,
+	DenyRuleCredentialPathBlock: true,
 
 	DenyRuleSkipHooks:            true,
 	DenyRuleSkipSigning:          true,

@@ -264,6 +264,9 @@ func (residencyGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdic
 	if c == nil || c.Engine == "" || !sensitiveRoute(c) || !remoteRoute(c.Engine) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-residency"}
 	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && pc.Posture == abi.PostureDefaultOpen {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-residency(default-open)"}
+	}
 	// The ONE operator-declared widening (#5421): an org-operated fleet host the
 	// operator declared INSIDE the org trust boundary over authenticated transport
 	// (fleet_trust.go). It admits the payload because the operator vouched for the
@@ -276,7 +279,7 @@ func (residencyGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdic
 	}
 	return abi.Verdict{
 		Kind:   abi.VerdictDeny,
-		Reason: abi.ReasonTrustViolation,
+		Reason: abi.ReasonScopeCrossing,
 		By:     "engine-residency",
 		Payload: abi.WitnessPayload{
 			Claim: "tenant-scoped payload routed to remote engine",

@@ -13,8 +13,8 @@ func TestResidencyGateDeniesTenantScopeRemoteRoute(t *testing.T) {
 		Engine: "remote",
 		Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeTenant},
 	})
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("tenant scope to remote route: got %v/%s, want Deny/TRUST_VIOLATION", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("tenant scope to remote route: got %v/%s, want Deny/SCOPE_CROSSING", v.Kind, abi.ReasonName(v.Reason))
 	}
 	if v.Meta["engine_route"] != "remote" || v.Meta["scope"] != "tenant" {
 		t.Fatalf("residency witness metadata = %+v", v.Meta)
@@ -28,8 +28,8 @@ func TestResidencyGateDeniesSensitiveTagRemoteRoute(t *testing.T) {
 		Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeFleet},
 		Meta:   map[string]string{"sensitivity": "pii"},
 	})
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("sensitive tag to remote route: got %v/%s, want Deny/TRUST_VIOLATION", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("sensitive tag to remote route: got %v/%s, want Deny/SCOPE_CROSSING", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
 
@@ -40,8 +40,8 @@ func TestResidencyGateDeniesSensitiveLLMDRoute(t *testing.T) {
 		Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeFleet},
 		Meta:   map[string]string{"sensitivity": "tenant"},
 	})
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("sensitive tag to llm-d route: got %v/%s, want Deny/TRUST_VIOLATION", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("sensitive tag to llm-d route: got %v/%s, want Deny/SCOPE_CROSSING", v.Kind, abi.ReasonName(v.Reason))
 	}
 	if v.Meta["engine_route"] != LLMDEngineID {
 		t.Fatalf("llm-d residency witness metadata = %+v", v.Meta)
@@ -84,8 +84,8 @@ func TestResidencyGateDeniesAggregatorAndCustomRoutes(t *testing.T) {
 			Engine: engine,
 			Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeTenant},
 		})
-		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("tenant scope to %q: got %v/%s, want Deny/TRUST_VIOLATION", engine, v.Kind, abi.ReasonName(v.Reason))
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+			t.Fatalf("tenant scope to %q: got %v/%s, want Deny/SCOPE_CROSSING", engine, v.Kind, abi.ReasonName(v.Reason))
 		}
 	}
 }

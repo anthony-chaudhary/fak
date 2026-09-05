@@ -98,7 +98,7 @@ func (screenAdapter) ScreenResult(ctx context.Context, c *abi.ToolCall, body []b
 		}
 		if flagged, _ := s.Flag(ctx, body, tool); flagged {
 			atomic.AddInt64(&flags, 1)
-			return abi.ScreenAdvice{Disposition: abi.ScreenQuarantine, Reason: abi.ReasonTrustViolation, By: "wirescreen:" + s.Name()}
+			return abi.ScreenAdvice{Disposition: abi.ScreenQuarantine, Reason: abi.ReasonPromptInjection, By: "wirescreen:" + s.Name()}
 		}
 	}
 	// Rung 3 (issue #570): a Digester — selected by the SAME FAK_WIRE_SCREEN gate — may

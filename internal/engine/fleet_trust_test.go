@@ -55,8 +55,8 @@ func TestFleetTrustBoundaryDefaultIsClosed(t *testing.T) {
 	}
 	route := fleetRoute(t, "gpu07", "glm-5.2")
 	v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("undeclared fleet route %q: got %v/%s, want Deny/TRUST_VIOLATION",
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("undeclared fleet route %q: got %v/%s, want Deny/SCOPE_CROSSING",
 			route, v.Kind, abi.ReasonName(v.Reason))
 	}
 }
@@ -86,8 +86,8 @@ func TestUndeclaredFleetHostStaysDenied(t *testing.T) {
 	for _, account := range []string{"gpu99", "gpu0", "gpu077", "GPU07-staging"} {
 		route := fleetRoute(t, account, "glm-5.2")
 		v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("undeclared fleet account %q (route %q): got %v/%s, want Deny/TRUST_VIOLATION",
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+			t.Fatalf("undeclared fleet account %q (route %q): got %v/%s, want Deny/SCOPE_CROSSING",
 				account, route, v.Kind, abi.ReasonName(v.Reason))
 		}
 	}
@@ -138,8 +138,8 @@ func TestFleetTrustBoundaryNeedsAnAccountNamingRoute(t *testing.T) {
 			t.Fatalf("route %q must not resolve into the trust boundary — it names no declared fleet account", route)
 		}
 		v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("route %q: got %v/%s, want Deny/TRUST_VIOLATION",
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+			t.Fatalf("route %q: got %v/%s, want Deny/SCOPE_CROSSING",
 				route, v.Kind, abi.ReasonName(v.Reason))
 		}
 	}
@@ -232,8 +232,8 @@ func TestFleetTrustBoundaryClosesWhenTheCredentialIsWithdrawn(t *testing.T) {
 		t.Fatalf("route %q must fall outside the boundary once its credential is withdrawn", route)
 	}
 	v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("withdrawn credential for %q: got %v/%s, want Deny/TRUST_VIOLATION",
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("withdrawn credential for %q: got %v/%s, want Deny/SCOPE_CROSSING",
 			route, v.Kind, abi.ReasonName(v.Reason))
 	}
 }
@@ -254,8 +254,8 @@ func TestFleetTrustBoundaryClearsBackToTheClosedDefault(t *testing.T) {
 		t.Fatalf("cleared boundary still reads %+v", hosts)
 	}
 	v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("cleared boundary for %q: got %v/%s, want Deny/TRUST_VIOLATION",
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("cleared boundary for %q: got %v/%s, want Deny/SCOPE_CROSSING",
 			route, v.Kind, abi.ReasonName(v.Reason))
 	}
 }
@@ -270,8 +270,8 @@ func TestFleetTrustBoundaryNeverWidensANonFleetRemoteRoute(t *testing.T) {
 		"litellm/gpt-4o", "openrouter/anthropic/claude-3.5", "my-proxy", LLMDEngineID,
 	} {
 		v := (residencyGate{}).Adjudicate(context.Background(), sensitiveFleetCall(route))
-		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("remote route %q under a declared boundary: got %v/%s, want Deny/TRUST_VIOLATION",
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonScopeCrossing {
+			t.Fatalf("remote route %q under a declared boundary: got %v/%s, want Deny/SCOPE_CROSSING",
 				route, v.Kind, abi.ReasonName(v.Reason))
 		}
 	}

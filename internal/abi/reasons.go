@@ -28,7 +28,11 @@ const (
 	ReasonShellDialect                       // a command in the wrong shell dialect for the tool (a PowerShell cmdlet submitted to the POSIX Bash tool) — it fails `command not found` (exit 127) before doing anything; MODEL-FIXABLE by re-routing to the PowerShell tool or the POSIX equivalent [#3941]
 	ReasonPIIRedacted                        // a general-PII span (email/phone/national-id/PAN/IBAN) in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, the PII twin of ReasonSecretRedacted [#5378]
 	ReasonPIIExfil                           // result/args matched a general-PII pattern and the fail-closed posture (or an obfuscation-only hit) SEALED the whole result, the PII twin of ReasonSecretExfil [#5378]
-	// 19.. reserved for additive core reasons; register out-of-tree names via
+	ReasonTaintEgress                        // sensitive-sink call carrying tainted data, or result exceeding taint ceiling
+	ReasonScopeCrossing                      // payload routed or shared wider than its declared isolation scope
+	ReasonPromptInjection                    // tool result or payload contains prompt injection markers
+	ReasonIntegrityRefuted                   // witness resolver actively refuted the claimed effect
+	// 22.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
@@ -52,6 +56,10 @@ var coreReasonNames = map[ReasonCode]string{
 	ReasonShellDialect:     "SHELL_DIALECT",
 	ReasonPIIRedacted:      "PII_REDACTED",
 	ReasonPIIExfil:         "PII_EXFIL",
+	ReasonTaintEgress:      "TAINT_EGRESS",
+	ReasonScopeCrossing:    "SCOPE_CROSSING",
+	ReasonPromptInjection:  "PROMPT_INJECTION",
+	ReasonIntegrityRefuted: "INTEGRITY_REFUTED",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -128,4 +136,4 @@ func sortStrings(s []string) {
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
-const CoreReasonCount = 17
+const CoreReasonCount = 21

@@ -66,8 +66,8 @@ func TestPreSendQuarantineFoldsRealNormgateAcrossProviders(t *testing.T) {
 	// injection seals as Quarantine/TRUST_VIOLATION, attributed to normgate. This is
 	// the load-bearing attribution — it does not depend on chain ordering.
 	v := normgate.Default.Admit(context.Background(), &abi.ToolCall{Tool: "lookup"}, syntheticOutboundResult([]byte(poison)))
-	if v.Kind != abi.VerdictQuarantine || v.By != "normgate" || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("normgate verdict = %+v, want Quarantine/TRUST_VIOLATION by normgate", v)
+	if v.Kind != abi.VerdictQuarantine || v.By != "normgate" || v.Reason != abi.ReasonPromptInjection {
+		t.Fatalf("normgate verdict = %+v, want Quarantine/PROMPT_INJECTION by normgate", v)
 	}
 
 	// Boundary integration: the obfuscated tool result is held out before serialization.
@@ -75,8 +75,8 @@ func TestPreSendQuarantineFoldsRealNormgateAcrossProviders(t *testing.T) {
 	if len(qs) != 1 {
 		t.Fatalf("quarantines = %d, want 1 (the obfuscated tool result)", len(qs))
 	}
-	if qs[0].Reason != "TRUST_VIOLATION" {
-		t.Fatalf("quarantine reason = %q, want TRUST_VIOLATION", qs[0].Reason)
+	if qs[0].Reason != "PROMPT_INJECTION" {
+		t.Fatalf("quarantine reason = %q, want PROMPT_INJECTION", qs[0].Reason)
 	}
 	if strings.Contains(safe[3].Content, "vault token") || strings.Contains(safe[3].Content, poison) {
 		t.Fatalf("safe transcript leaked the obfuscated payload: %s", safe[3].Content)

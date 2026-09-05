@@ -52,7 +52,7 @@ func TestClosedReasonVocabulary(t *testing.T) {
 	if len(coreReasonNames)-1 != CoreReasonCount { // -1 for ReasonNone
 		t.Fatalf("closed reason vocabulary size = %d, want %d", len(coreReasonNames)-1, CoreReasonCount)
 	}
-	for c := ReasonDefaultDeny; c <= ReasonPIIExfil; c++ {
+	for c := ReasonDefaultDeny; c <= ReasonIntegrityRefuted; c++ {
 		if n := ReasonName(c); n == "" || n[0:1] == "R" && n[0:7] == "REASON_" {
 			t.Fatalf("core reason %d has no stable name: %q", c, n)
 		}

@@ -210,7 +210,7 @@ func TestResultSideFloorClassifiesEachPoisonRung(t *testing.T) {
 		}
 		seen[reason]++
 	}
-	for _, want := range []abi.ReasonCode{abi.ReasonTrustViolation, abi.ReasonSecretExfil} {
+	for _, want := range []abi.ReasonCode{abi.ReasonPromptInjection, abi.ReasonSecretExfil} {
 		if seen[want] == 0 {
 			t.Errorf("corpus never exercised floor rung %s — the gate would not catch a regression there", abi.ReasonName(want))
 		}

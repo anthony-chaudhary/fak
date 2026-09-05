@@ -201,8 +201,8 @@ func TestEnsembleResidencyDeniesRemoteMembers(t *testing.T) {
 	if wv.Kind != "DENY" || wv.By != "engine-residency" {
 		t.Fatalf("all-remote sensitive ensemble must fail closed via residency, got %+v", wv)
 	}
-	if wv.Reason != abi.ReasonName(abi.ReasonTrustViolation) {
-		t.Fatalf("deny reason = %q, want TRUST_VIOLATION", wv.Reason)
+	if wv.Reason != abi.ReasonName(abi.ReasonScopeCrossing) {
+		t.Fatalf("deny reason = %q, want SCOPE_CROSSING", wv.Reason)
 	}
 	if env == nil || env.Status != "ERROR" {
 		t.Fatalf("failed-closed ensemble status = %q, want ERROR", envStatus(env))

@@ -50,8 +50,8 @@ const (
 // gateSend is the send-time capability floor. Fail-closed:
 //   - no CapA2ASend advertised (or it is not a registered/negotiable cap) → deny
 //     with ReasonDefaultDeny (no affirmative send-right);
-//   - a TaintQuarantined body → deny with ReasonTrustViolation (poison never sent);
-//   - a ScopeAgent body to a non-self destination → deny with ReasonTrustViolation
+//   - a TaintQuarantined body → deny with ReasonPromptInjection (poison never sent);
+//   - a ScopeAgent body to a non-self destination → deny with ReasonScopeCrossing
 //     (a private payload cannot cross agents; the sender must widen Scope to share).
 //
 // allowSelfChannel gates the ONE exception, and it is true ONLY for point-to-point
@@ -71,11 +71,11 @@ func gateSend(from string, to ChannelKey, body abi.Ref, caps []abi.Capability, a
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "a2achan/gate"}
 	}
 	if body.Taint == abi.TaintQuarantined {
-		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "a2achan/gate"}
+		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPromptInjection, By: "a2achan/gate"}
 	}
 	selfChannel := allowSelfChannel && from != "" && to.ID == from
 	if body.Scope == abi.ScopeAgent && !selfChannel {
-		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "a2achan/gate"}
+		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonScopeCrossing, By: "a2achan/gate"}
 	}
 	return abi.Verdict{Kind: abi.VerdictAllow, By: "a2achan/gate"}
 }
@@ -98,7 +98,7 @@ func screenIngress(body abi.Ref) abi.Verdict {
 		return abi.Verdict{
 			Kind:    abi.VerdictQuarantine,
 			Payload: abi.QuarantinePayload{PageOut: true},
-			Reason:  abi.ReasonTrustViolation,
+			Reason:  abi.ReasonPromptInjection,
 			By:      "a2achan/ingress",
 		}
 	}

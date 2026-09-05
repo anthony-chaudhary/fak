@@ -90,8 +90,8 @@ func TestRouteSensitiveRemoteDeniedByResidency(t *testing.T) {
 	if v.Kind != abi.VerdictDeny || v.By != "engine-residency" {
 		t.Fatalf("sensitive->remote must be denied by engine-residency, got kind=%v by=%q", v.Kind, v.By)
 	}
-	if v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("residency deny reason = %v, want TRUST_VIOLATION", v.Reason)
+	if v.Reason != abi.ReasonScopeCrossing {
+		t.Fatalf("residency deny reason = %v, want SCOPE_CROSSING", v.Reason)
 	}
 
 	// Non-sensitive on the SAME remote route: residency must NOT be the denier.

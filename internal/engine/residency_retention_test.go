@@ -43,7 +43,7 @@ func TestResidencyGateDeniesZeroRetentionRemoteRoute(t *testing.T) {
 			Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeFleet},
 			Meta:   map[string]string{c.key: c.value},
 		})
-		gotDeny := v.Kind == abi.VerdictDeny && v.Reason == abi.ReasonTrustViolation
+		gotDeny := v.Kind == abi.VerdictDeny && v.Reason == abi.ReasonScopeCrossing
 		if gotDeny != c.sensitive {
 			t.Fatalf("%s=%q remote: gotDeny=%v want=%v (v=%v/%s)",
 				c.key, c.value, gotDeny, c.sensitive, v.Kind, abi.ReasonName(v.Reason))

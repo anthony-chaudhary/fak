@@ -108,6 +108,18 @@ func TestFoldDefaultDenyEmptyPolicy(t *testing.T) {
 	}
 }
 
+func TestFoldDefaultOpenOnAllDefer(t *testing.T) {
+	ctx := abi.ContextWithPolicy(context.Background(), abi.PolicyContext{Posture: abi.PostureDefaultOpen})
+	chain := []abi.Adjudicator{fakeAdj{abi.Verdict{Kind: abi.VerdictDefer}}}
+	v := Fold(ctx, chain, call("x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("all-defer under default-open must ALLOW, got %v", v.Kind)
+	}
+	if v.By != "all-defer(default-open)" {
+		t.Fatalf("all-defer under default-open By = %q, want all-defer(default-open)", v.By)
+	}
+}
+
 func TestFoldMostRestrictiveWins(t *testing.T) {
 	chain := []abi.Adjudicator{
 		fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}},
@@ -689,11 +701,13 @@ func TestResultLadderParity(t *testing.T) {
 
 func TestDispositionMapping(t *testing.T) {
 	cases := map[abi.ReasonCode]string{
-		abi.ReasonMisroute:     "RETRYABLE",
-		abi.ReasonShellDialect: "RETRYABLE", // #3941: wrong-shell-dialect is model-fixable (re-route the tool)
-		abi.ReasonRateLimited:  "WAIT",
-		abi.ReasonSelfModify:   "ESCALATE",
-		abi.ReasonPolicyBlock:  "RETRYABLE",
+		abi.ReasonMisroute:         "RETRYABLE",
+		abi.ReasonShellDialect:     "RETRYABLE", // #3941: wrong-shell-dialect is model-fixable (re-route the tool)
+		abi.ReasonRateLimited:      "WAIT",
+		abi.ReasonSelfModify:       "ESCALATE",
+		abi.ReasonPolicyBlock:      "RETRYABLE",
+		abi.ReasonTaintEgress:      "RETRYABLE",
+		abi.ReasonIntegrityRefuted: "ESCALATE",
 	}
 	for r, want := range cases {
 		if got := Disposition(r); got != want {
