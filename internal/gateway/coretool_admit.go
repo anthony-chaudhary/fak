@@ -49,8 +49,10 @@ const ReasonMCPCatalogCovers = "MCP_CATALOG_COVERS"
 // optional free phrase of what it would do, whose significant terms widen the match so a
 // proposer can state intent even when the name is opaque.
 type ProposedCoreTool struct {
-	Name       string
-	Capability string
+	Name            string
+	Capability      string
+	DestructiveHint bool
+	OpenWorldHint   bool
 }
 
 // CoreToolAdmissionError is a structured refusal: the proposed tool, the specific MCP
@@ -249,5 +251,131 @@ func tokenSlice(m map[string]bool) []string {
 		out = append(out, t)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// CoreToolsPalette defines the core tools palette annotated with granular capability
+// hints (DestructiveHint for mutating operations and OpenWorldHint for network or
+// arbitrary shell execution tools).
+var CoreToolsPalette = []MCPToolDescriptor{
+	{
+		Name:            "read",
+		Description:     "Read file contents without modifying the workspace",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "write",
+		Description:     "Write or overwrite file contents in the workspace",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "edit",
+		Description:     "Apply exact string replacements in existing files",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "bash",
+		Description:     "Execute arbitrary shell commands in persistent session",
+		DestructiveHint: true,
+		OpenWorldHint:   true,
+	},
+	{
+		Name:            "exec",
+		Description:     "Execute arbitrary command in the host environment",
+		DestructiveHint: true,
+		OpenWorldHint:   true,
+	},
+	{
+		Name:            "web_fetch",
+		Description:     "Fetch content from a remote URL over the network",
+		DestructiveHint: false,
+		OpenWorldHint:   true,
+	},
+	{
+		Name:            "fetch",
+		Description:     "Fetch network resource",
+		DestructiveHint: false,
+		OpenWorldHint:   true,
+	},
+	{
+		Name:            "fak_syscall",
+		Description:     "Adjudicate and execute tool call through fak kernel",
+		DestructiveHint: true,
+		OpenWorldHint:   true,
+	},
+	{
+		Name:            "fak_admit",
+		Description:     "Admit out-of-band tool results into context",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_revoke",
+		Description:     "Evict and refute world-state witness",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_context_change",
+		Description:     "Mutate persisted recall core image context",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_session_reset",
+		Description:     "Reset and rearm session carryover window",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_memory_run",
+		Description:     "Run memory query with applied mutations",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_read",
+		Description:     "Read files with verified-fresh cache reuse",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_adjudicate",
+		Description:     "Adjudicate proposed tool call without executing",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_tools_search",
+		Description:     "Search and retrieve tool schemas",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+}
+
+// LookupCoreTool finds a core tool in CoreToolsPalette by name.
+func LookupCoreTool(name string) (MCPToolDescriptor, bool) {
+	for _, tool := range CoreToolsPalette {
+		if tool.Name == name {
+			return tool, true
+		}
+	}
+	return MCPToolDescriptor{}, false
+}
+
+// CoreToolsPaletteProposed returns the core tools palette mapped to []ProposedCoreTool.
+func CoreToolsPaletteProposed() []ProposedCoreTool {
+	out := make([]ProposedCoreTool, 0, len(CoreToolsPalette))
+	for _, tool := range CoreToolsPalette {
+		out = append(out, ProposedCoreTool{
+			Name:            tool.Name,
+			Capability:      tool.Description,
+			DestructiveHint: tool.DestructiveHint,
+			OpenWorldHint:   tool.OpenWorldHint,
+		})
+	}
 	return out
 }

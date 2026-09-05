@@ -392,3 +392,215 @@ func TestMCPToolsListReturnsAnnotationsAndStrictCompliance(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPProtocolGranularCapabilityAnnotations verifies that MCPToolDescriptor,
+// ToolRegistration, and registered tools properly serialize and expose destructive_hint
+// and open_world_hint.
+func TestMCPProtocolGranularCapabilityAnnotations(t *testing.T) {
+	// 1. Verify serialization of destructive and open-world hints
+	desc := MCPToolDescriptor{
+		Name:            "test_dangerous_tool",
+		Description:     "A test tool that mutates disk and makes network calls",
+		DestructiveHint: true,
+		OpenWorldHint:   true,
+	}
+	data, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("json.Marshal(desc) failed: %v", err)
+	}
+	var unmarshaled map[string]any
+	if err := json.Unmarshal(data, &unmarshaled); err != nil {
+		t.Fatalf("json.Unmarshal(data) failed: %v", err)
+	}
+	if dest, ok := unmarshaled["destructive_hint"].(bool); !ok || !dest {
+		t.Errorf("destructive_hint not serialized as true: %v", unmarshaled["destructive_hint"])
+	}
+	if ow, ok := unmarshaled["open_world_hint"].(bool); !ok || !ow {
+		t.Errorf("open_world_hint not serialized as true: %v", unmarshaled["open_world_hint"])
+	}
+
+	// 2. Verify omitempty behavior when hints are false
+	safeDesc := MCPToolDescriptor{
+		Name:            "test_safe_tool",
+		Description:     "A read-only tool",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	}
+	safeData, err := json.Marshal(safeDesc)
+	if err != nil {
+		t.Fatalf("json.Marshal(safeDesc) failed: %v", err)
+	}
+	var safeUnmarshaled map[string]any
+	if err := json.Unmarshal(safeData, &safeUnmarshaled); err != nil {
+		t.Fatalf("json.Unmarshal(safeData) failed: %v", err)
+	}
+	if _, has := safeUnmarshaled["destructive_hint"]; has {
+		t.Errorf("destructive_hint should be omitted when false: %v", safeUnmarshaled)
+	}
+	if _, has := safeUnmarshaled["open_world_hint"]; has {
+		t.Errorf("open_world_hint should be omitted when false: %v", safeUnmarshaled)
+	}
+
+	// 3. Verify ToolRegistration schema descriptor
+	reg := ToolRegistration{
+		Name:            "test_reg_tool",
+		DestructiveHint: true,
+		OpenWorldHint:   false,
+	}
+	regData, err := json.Marshal(reg)
+	if err != nil {
+		t.Fatalf("json.Marshal(reg) failed: %v", err)
+	}
+	var regMap map[string]any
+	if err := json.Unmarshal(regData, &regMap); err != nil {
+		t.Fatalf("json.Unmarshal(regData) failed: %v", err)
+	}
+	if dest, ok := regMap["destructive_hint"].(bool); !ok || !dest {
+		t.Errorf("ToolRegistration destructive_hint not true: %v", regMap)
+	}
+	if _, has := regMap["open_world_hint"]; has {
+		t.Errorf("ToolRegistration open_world_hint should be omitted when false: %v", regMap)
+	}
+}
+
+// TestCoretoolPaletteCapabilityAnnotations verifies that the core tools palette
+// has mutating tools marked with DestructiveHint: true and network/arbitrary shell
+// tools marked with OpenWorldHint: true.
+func TestCoretoolPaletteCapabilityAnnotations(t *testing.T) {
+	if len(CoreToolsPalette) == 0 {
+		t.Fatal("CoreToolsPalette must not be empty")
+	}
+
+	paletteMap := make(map[string]MCPToolDescriptor)
+	for _, tool := range CoreToolsPalette {
+		paletteMap[tool.Name] = tool
+	}
+
+	// Mutating tools must have DestructiveHint: true
+	mutatingTools := []string{
+		"write",
+		"edit",
+		"bash",
+		"exec",
+		"fak_syscall",
+		"fak_admit",
+		"fak_revoke",
+		"fak_context_change",
+		"fak_session_reset",
+		"fak_memory_run",
+	}
+	for _, name := range mutatingTools {
+		tool, ok := paletteMap[name]
+		if !ok {
+			t.Errorf("expected tool %q in CoreToolsPalette", name)
+			continue
+		}
+		if !tool.DestructiveHint {
+			t.Errorf("mutating tool %q in CoreToolsPalette must have DestructiveHint: true", name)
+		}
+	}
+
+	// Network / arbitrary shell execution tools must have OpenWorldHint: true
+	openWorldTools := []string{
+		"bash",
+		"exec",
+		"web_fetch",
+		"fetch",
+		"fak_syscall",
+	}
+	for _, name := range openWorldTools {
+		tool, ok := paletteMap[name]
+		if !ok {
+			t.Errorf("expected tool %q in CoreToolsPalette", name)
+			continue
+		}
+		if !tool.OpenWorldHint {
+			t.Errorf("open-world tool %q in CoreToolsPalette must have OpenWorldHint: true", name)
+		}
+	}
+
+	// Pure read-only tools must have both hints false
+	readOnlyTools := []string{
+		"read",
+		"fak_read",
+		"fak_adjudicate",
+		"fak_tools_search",
+	}
+	for _, name := range readOnlyTools {
+		tool, ok := paletteMap[name]
+		if !ok {
+			t.Errorf("expected tool %q in CoreToolsPalette", name)
+			continue
+		}
+		if tool.DestructiveHint {
+			t.Errorf("read-only tool %q must have DestructiveHint: false", name)
+		}
+		if tool.OpenWorldHint {
+			t.Errorf("read-only tool %q must have OpenWorldHint: false", name)
+		}
+	}
+}
+
+// TestMCPRegisteredToolsExposeCapabilityHintsInToolList verifies that registered tools
+// expose destructive_hint and open_world_hint in their schema descriptors and tool list representations.
+func TestMCPRegisteredToolsExposeCapabilityHintsInToolList(t *testing.T) {
+	toolList := RegisteredMCPToolListRepresentations()
+	if len(toolList) == 0 {
+		t.Fatal("RegisteredMCPToolListRepresentations returned empty list")
+	}
+
+	byName := make(map[string]map[string]any)
+	for _, tool := range toolList {
+		if name, ok := tool["name"].(string); ok {
+			byName[name] = tool
+		}
+	}
+
+	// bash: destructive and open-world
+	bashTool, ok := byName["bash"]
+	if !ok {
+		t.Fatal("bash tool not found in registered tool list")
+	}
+	if dest, _ := bashTool["destructive_hint"].(bool); !dest {
+		t.Errorf("bash tool list representation missing destructive_hint: true, got %v", bashTool["destructive_hint"])
+	}
+	if ow, _ := bashTool["open_world_hint"].(bool); !ow {
+		t.Errorf("bash tool list representation missing open_world_hint: true, got %v", bashTool["open_world_hint"])
+	}
+
+	// web_fetch: open-world, not destructive
+	fetchTool, ok := byName["web_fetch"]
+	if !ok {
+		t.Fatal("web_fetch tool not found in registered tool list")
+	}
+	if dest, _ := fetchTool["destructive_hint"].(bool); dest {
+		t.Errorf("web_fetch tool list representation should not have destructive_hint: true")
+	}
+	if ow, _ := fetchTool["open_world_hint"].(bool); !ow {
+		t.Errorf("web_fetch tool list representation missing open_world_hint: true, got %v", fetchTool["open_world_hint"])
+	}
+
+	// write: destructive, not open-world
+	writeTool, ok := byName["write"]
+	if !ok {
+		t.Fatal("write tool not found in registered tool list")
+	}
+	if dest, _ := writeTool["destructive_hint"].(bool); !dest {
+		t.Errorf("write tool list representation missing destructive_hint: true, got %v", writeTool["destructive_hint"])
+	}
+	if ow, _ := writeTool["open_world_hint"].(bool); ow {
+		t.Errorf("write tool list representation should not have open_world_hint: true")
+	}
+
+	// read: neither destructive nor open-world
+	readTool, ok := byName["read"]
+	if !ok {
+		t.Fatal("read tool not found in registered tool list")
+	}
+	if dest, _ := readTool["destructive_hint"].(bool); dest {
+		t.Errorf("read tool list representation should not have destructive_hint: true")
+	}
+	if ow, _ := readTool["open_world_hint"].(bool); ow {
+		t.Errorf("read tool list representation should not have open_world_hint: true")
+	}
+}
