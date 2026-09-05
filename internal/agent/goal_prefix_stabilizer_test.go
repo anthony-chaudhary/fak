@@ -834,3 +834,84 @@ func TestGoalPrefix(t *testing.T) {
 	t.Run("RedundantWorldStateDedupAcrossTurns", TestRedundantWorldStateDedupAcrossTurns)
 	t.Run("GoalContinuationWithCodexTags", TestGoalContinuationWithCodexTags)
 }
+
+func makeStabilizerBenchMessages(size int) []Message {
+	if size <= 0 {
+		return nil
+	}
+	msgs := make([]Message, 0, size)
+	msgs = append(msgs, Message{
+		Role: "user",
+		Content: `<codex_internal_context source="goal">
+Goal: Implement authentication and authorization middleware
+<turn>1</turn>
+<step>1</step>
+<budget>5000 tokens remaining</budget>
+<tokens_used>120</tokens_used>
+<progress>10% complete</progress>
+<status>in_progress</status>
+<cost>$0.01</cost>
+<elapsed>5s</elapsed>
+<timestamp>2026-09-04T12:00:00Z</timestamp>
+</codex_internal_context>`,
+	})
+
+	wsFull := `<world_state full="true">
+branch: main
+commit: 10671abc4d
+tree_dirty: false
+subsystems:
+  gateway: healthy
+  adjudicator: healthy
+  engine: healthy
+</world_state>`
+
+	for i := 1; i < size; i++ {
+		turnNum := (i / 2) + 1
+		if i%2 == 1 {
+			msgs = append(msgs, Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("Turn %d completed step %d of the implementation.", turnNum, i),
+			})
+		} else {
+			switch {
+			case i%6 == 0:
+				msgs = append(msgs, Message{
+					Role:    "user",
+					Content: fmt.Sprintf("Turn %d context update:\n%s", turnNum, wsFull),
+				})
+			case i%4 == 0:
+				msgs = append(msgs, Message{
+					Role: "user",
+					Content: fmt.Sprintf(`<codex_internal_context source="goal">
+Goal: Implement authentication and authorization middleware
+<turn>%d</turn>
+<step>%d</step>
+<budget>%d tokens remaining</budget>
+<progress>%d%% complete</progress>
+</codex_internal_context>`, turnNum, i, 5000-i*40, (i*100)/size),
+				})
+			default:
+				msgs = append(msgs, Message{
+					Role:    "user",
+					Content: fmt.Sprintf("Goal: Implement authentication and authorization middleware | Turn: %d | Budget left: %d | Progress: %d%%", turnNum, 5000-i*40, (i*100)/size),
+				})
+			}
+		}
+	}
+	return msgs
+}
+
+func BenchmarkStabilizePromptPrefix(b *testing.B) {
+	for _, size := range []int{1, 10, 100} {
+		msgs := makeStabilizerBenchMessages(size)
+		b.Run(fmt.Sprintf("history_%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, _ = StabilizePromptPrefix(msgs)
+			}
+		})
+	}
+}
+
