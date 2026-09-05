@@ -2214,6 +2214,77 @@ class DefaultMaxWorkersTest(unittest.TestCase):
             self.assertEqual(mod._default_max_workers("darwin"), 7)
 
 
+class ArbitrateLaneLeasesTest(unittest.TestCase):
+    def test_arbitrate_lane_passes_short_leases_inline(self) -> None:
+        mod = load()
+        seen = {}
+
+        def fake_run_json(cmd, root, timeout=90):
+            seen["cmd"] = list(cmd)
+            return {"outcome": "acquire", "lane": "docs"}
+
+        mod.run_json = fake_run_json
+        short_leases = [{"lane": "docs", "lane_kind": "cluster", "tree": ["docs/**"]}]
+        res = mod.arbitrate_lane(ROOT, "docs", ["docs/**"], short_leases)
+
+        self.assertIn("--leases", seen["cmd"])
+        idx = seen["cmd"].index("--leases")
+        self.assertEqual(seen["cmd"][idx + 1], json.dumps(short_leases))
+        self.assertTrue(res["admitted"])
+
+    def test_arbitrate_lane_spills_large_leases_to_temp_file_and_cleans_up(self) -> None:
+        mod = load()
+        seen = {}
+        file_existed_during_run = []
+        file_content_during_run = []
+
+        def fake_run_json(cmd, root, timeout=90):
+            seen["cmd"] = list(cmd)
+            idx = cmd.index("--leases")
+            arg = cmd[idx + 1]
+            if arg.startswith("@"):
+                p = Path(arg[1:])
+                file_existed_during_run.append(p.is_file())
+                if p.is_file():
+                    file_content_during_run.append(p.read_text(encoding="utf-8"))
+            return {"outcome": "acquire", "lane": "tools"}
+
+        mod.run_json = fake_run_json
+        large_leases = [{"lane": f"lane_{i}", "lane_kind": "cluster", "tree": [f"path/to/resource_{i}/**"]} for i in range(100)]
+        payload = json.dumps(large_leases)
+        self.assertGreater(len(payload), 2048)
+
+        res = mod.arbitrate_lane(ROOT, "tools", ["tools/**"], large_leases)
+
+        self.assertIn("--leases", seen["cmd"])
+        idx = seen["cmd"].index("--leases")
+        arg = seen["cmd"][idx + 1]
+        self.assertTrue(arg.startswith("@"))
+        temp_path = Path(arg[1:])
+        self.assertTrue(file_existed_during_run and file_existed_during_run[0])
+        self.assertEqual(json.loads(file_content_during_run[0]), large_leases)
+        self.assertFalse(temp_path.exists())
+        self.assertTrue(res["admitted"])
+
+    def test_arbitrate_lane_cleans_up_temp_file_on_exception(self) -> None:
+        mod = load()
+        captured_path = []
+
+        def fake_run_json(cmd, root, timeout=90):
+            idx = cmd.index("--leases")
+            arg = cmd[idx + 1]
+            if arg.startswith("@"):
+                captured_path.append(Path(arg[1:]))
+            raise RuntimeError("simulated error during arbitrate")
+
+        mod.run_json = fake_run_json
+        large_leases = [{"lane": f"lane_{i}", "lane_kind": "cluster", "tree": [f"path/to/resource_{i}/**"]} for i in range(100)]
+        with self.assertRaises(RuntimeError):
+            mod.arbitrate_lane(ROOT, "tools", ["tools/**"], large_leases)
+
+        self.assertTrue(captured_path)
+        self.assertFalse(captured_path[0].exists())
+
 
 if __name__ == "__main__":
     unittest.main()

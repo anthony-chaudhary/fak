@@ -55,6 +55,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -1370,11 +1371,29 @@ def arbitrate_lane(root: Path, lane: str, tree: list[str],
     granted the REQUESTED lane. Read-only: a decision, not a held lease — the spawned
     worker materializes its own lane lease on start (the dos-dispatch-loop skill),
     while this priced partition guarantees the K trees are pairwise-disjoint."""
-    cmd = [*_dos_cmd(), "arbitrate", "--workspace", str(root), "--lane", lane,
-           "--kind", "cluster", "--leases", json.dumps(leases), "--output", "json"]
-    if tree:
-        cmd += ["--tree", *tree]
-    doc = run_json(cmd, root, timeout=90)
+    tmp_path: str | None = None
+    try:
+        cmd = [*_dos_cmd(), "arbitrate", "--workspace", str(root), "--lane", lane,
+               "--kind", "cluster"]
+        if leases is not None:
+            payload = json.dumps(leases)
+            if len(payload) > 2048:
+                with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
+                    f.write(payload)
+                    tmp_path = f.name
+                cmd += ["--leases", f"@{tmp_path}"]
+            else:
+                cmd += ["--leases", payload]
+        cmd += ["--output", "json"]
+        if tree:
+            cmd += ["--tree", *tree]
+        doc = run_json(cmd, root, timeout=90)
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
     got = doc.get("lane")
     admitted = (doc.get("outcome") == "acquire" and not doc.get("auto_picked")
                 and got == lane)
