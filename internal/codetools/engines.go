@@ -42,6 +42,7 @@ func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 // read decodes, confines, and executes a Read, returning the JSON payload and whether it
 // is an error.
 func (t *Toolset) read(ctx context.Context, body []byte) ([]byte, bool) {
+	RecordSubprocessAvoided()
 	var a ReadArgs
 	if r := decodeArgs(body, &a); r != nil {
 		return r.JSON(), true

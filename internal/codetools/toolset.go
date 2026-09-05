@@ -204,6 +204,31 @@ func (t *Toolset) Root() string { return t.root }
 // Limits reports the bounds in force.
 func (t *Toolset) Limits() Limits { return t.limits }
 
+// Read executes a Read operation with JSON body arguments.
+func (t *Toolset) Read(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.read(ctx, body)
+}
+
+// Grep executes a Grep operation with JSON body arguments.
+func (t *Toolset) Grep(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.grep(ctx, body)
+}
+
+// Glob executes a Glob operation with JSON body arguments.
+func (t *Toolset) Glob(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.glob(ctx, body)
+}
+
+// Write executes a Write operation with JSON body arguments.
+func (t *Toolset) Write(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.write(ctx, body)
+}
+
+// Edit executes an Edit operation with JSON body arguments.
+func (t *Toolset) Edit(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.edit(ctx, body)
+}
+
 // RegisterEngines binds the engines into the abi registry under their own ids, so a
 // kernel dispatching a call whose Engine names one of them reaches this toolset. Mirrors
 // RegisterReadEngine: re-registering replaces the driver, so arming twice is safe.

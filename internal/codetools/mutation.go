@@ -1,13 +1,13 @@
 package codetools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -41,6 +41,7 @@ type mutationResult struct {
 }
 
 func (t *Toolset) write(ctx context.Context, body []byte) ([]byte, bool) {
+	RecordSubprocessAvoided()
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
 	}
@@ -149,6 +150,7 @@ func (t *Toolset) writeLocked(ctx context.Context, a WriteArgs, target mutationT
 }
 
 func (t *Toolset) edit(ctx context.Context, body []byte) ([]byte, bool) {
+	RecordSubprocessAvoided()
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
 	}
@@ -200,7 +202,9 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 		return staleVersion("Edit target changed since it was read")
 	}
 	b := observed.Content
-	n := strings.Count(string(b), a.OldString)
+	oldBytes := []byte(a.OldString)
+	newBytes := []byte(a.NewString)
+	n := bytes.Count(b, oldBytes)
 	if n == 0 {
 		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
 	}
@@ -208,11 +212,13 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 		return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched %d occurrences; want exactly 1; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and extend old_string with exact unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.", n)).JSON(), true
 	}
 	limit := 1
+	repCount := 1
 	if a.ReplaceAll {
 		limit = -1
+		repCount = n
 	}
-	next := strings.Replace(string(b), a.OldString, a.NewString, limit)
-	if int64(len(next)) > t.limits.MaxWriteBytes {
+	newLen := len(b) + repCount*(len(newBytes)-len(oldBytes))
+	if int64(newLen) > t.limits.MaxWriteBytes {
 		return refuse(CodeTooLarge, "Edit result exceeds byte bound").JSON(), true
 	}
 	if r := canceled(ctx); r != nil {
@@ -232,19 +238,35 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 	if current.Version != observed.Version {
 		return staleVersion("Edit target changed before publication")
 	}
-	if err := atomicReplace(fresh.Abs, []byte(next), true, info.Mode().Perm()); err != nil {
+
+	buf := AcquireBuffer(newLen)
+	defer ReleaseBuffer(buf)
+
+	w := 0
+	rem := b
+	for i := 0; limit < 0 || i < limit; i++ {
+		idx := bytes.Index(rem, oldBytes)
+		if idx < 0 {
+			break
+		}
+		copy(buf[w:], rem[:idx])
+		w += idx
+		copy(buf[w:], newBytes)
+		w += len(newBytes)
+		rem = rem[idx+len(oldBytes):]
+	}
+	copy(buf[w:], rem)
+	w += len(rem)
+	next := buf[:w]
+
+	if err := atomicReplace(fresh.Abs, next, true, info.Mode().Perm()); err != nil {
 		return refuse(CodeIO, err.Error()).JSON(), true
 	}
 	after, r := observeFile(context.WithoutCancel(ctx), fresh.Abs, 0)
 	if r != nil {
 		return r.JSON(), true
 	}
-	return okJSON(mutationResult{Path: fresh.Rel, Bytes: len(next), Replacements: func() int {
-		if a.ReplaceAll {
-			return n
-		}
-		return 1
-	}(), Version: after.Version}), false
+	return okJSON(mutationResult{Path: fresh.Rel, Bytes: len(next), Replacements: repCount, Version: after.Version}), false
 }
 
 func staleVersion(detail string) ([]byte, bool) {

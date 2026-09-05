@@ -22,6 +22,7 @@ type fileObservation struct {
 // retained memory; the digest still covers the complete file so a change beyond a Read
 // window invalidates a later mutation.
 func observeFile(ctx context.Context, path string, captureLimit int64) (fileObservation, *Refusal) {
+	RecordSubprocessAvoided()
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -62,7 +63,8 @@ func observeFile(ctx context.Context, path string, captureLimit int64) (fileObse
 		}
 		content = make([]byte, 0, int(capacity))
 	}
-	buf := make([]byte, 32*1024)
+	buf := AcquireBuffer(ArenaClass64K)
+	defer ReleaseBuffer(buf)
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
