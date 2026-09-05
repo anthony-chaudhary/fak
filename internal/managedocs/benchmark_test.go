@@ -47,6 +47,18 @@ func BenchmarkManageDocs(b *testing.B) {
 	}
 }
 
+// BenchmarkAudit measures documentation audit throughput across repository surfaces.
+func BenchmarkAudit(b *testing.B) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := Audit(root); err != nil {
+			b.Fatalf("Audit failed: %v", err)
+		}
+	}
+}
+
 // BenchmarkAuditDocumentSets measures document set validation on varied directory depths.
 func BenchmarkAuditDocumentSets(b *testing.B) {
 	root := b.TempDir()
