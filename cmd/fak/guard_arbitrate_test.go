@@ -219,3 +219,245 @@ func TestGuardArbitrateFlagValueRejectsUnknownField(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestGuardArbitrateDetachedWorktreeEnforce(t *testing.T) {
+	root := guardArbitrateTestRepo(t)
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	runGit(root, "add", "dos.toml")
+	runGit(root, "-c", "user.name=Tester", "-c", "user.email=tester@example.com", "commit", "-m", "initial")
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	runGit(root, "worktree", "add", "--detach", wtPath, "HEAD")
+
+	gitMarker := filepath.Join(wtPath, ".git")
+	fi, err := os.Stat(gitMarker)
+	if err != nil {
+		t.Fatalf("stat worktree .git: %v", err)
+	}
+	if fi.IsDir() {
+		t.Fatalf("worktree .git is a directory, want file")
+	}
+
+	// 1. Call guardArbitrateAcquire in guardArbitrateModeEnforce from wtPath.
+	lease, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: wtPath,
+		Tree: []string{"cmd/**"},
+	})
+	if err != nil {
+		t.Fatalf("worktree acquire: %v", err)
+	}
+	if lease == nil {
+		t.Fatal("worktree acquire returned nil lease")
+	}
+
+	// Verify lease was published and retrievable.
+	leaseID := lease.record.ID
+	if _, ok, err := lease.store.Get(context.Background(), leaseID); err != nil || !ok {
+		t.Fatalf("worktree lease read-back: ok=%v err=%v", ok, err)
+	}
+
+	// 2. Verify concurrent overlapping acquire from primary repo is refused with COLLISION_RISK.
+	rootOverlap, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: root,
+		Tree: []string{"cmd/fak/**"},
+	})
+	if rootOverlap != nil {
+		rootOverlap.Close()
+		t.Fatal("overlapping acquire from root unexpectedly succeeded")
+	}
+	if err == nil || !strings.Contains(err.Error(), "COLLISION_RISK") {
+		t.Fatalf("overlapping acquire from root error = %v, want COLLISION_RISK", err)
+	}
+
+	// 3. Verify concurrent overlapping acquire from worktree is refused with COLLISION_RISK.
+	wtOverlap, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: wtPath,
+		Tree: []string{"cmd/**"},
+	})
+	if wtOverlap != nil {
+		wtOverlap.Close()
+		t.Fatal("overlapping acquire from worktree unexpectedly succeeded")
+	}
+	if err == nil || !strings.Contains(err.Error(), "COLLISION_RISK") {
+		t.Fatalf("overlapping acquire from worktree error = %v, want COLLISION_RISK", err)
+	}
+
+	// 4. Close the lease and verify it releases.
+	lease.Close()
+	if _, ok, err := lease.store.Get(context.Background(), leaseID); err != nil || ok {
+		t.Fatalf("released worktree lease read-back: ok=%v err=%v", ok, err)
+	}
+
+	// Verify acquiring after release succeeds.
+	afterRelease, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: wtPath,
+		Tree: []string{"cmd/**"},
+	})
+	if err != nil {
+		t.Fatalf("acquire after release failed: %v", err)
+	}
+	if afterRelease == nil {
+		t.Fatal("acquire after release returned nil lease")
+	}
+	afterRelease.Close()
+
+	// 5. Also verify non-busy lock failure in enforce mode fails closed with COLLISION_RISK.
+	commonDir, err := resolveGitCommonDir(wtPath)
+	if err != nil {
+		t.Fatalf("resolveGitCommonDir: %v", err)
+	}
+	lockPath := filepath.Join(commonDir, "fak-guard-arbitrate.lock")
+	_ = os.RemoveAll(lockPath)
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatalf("mkdir lockPath: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(lockPath)
+	})
+
+	failLease, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: wtPath,
+		Tree: []string{"cmd/**"},
+	})
+	if failLease != nil {
+		failLease.Close()
+		t.Fatal("acquire unexpectedly succeeded when lock path was a directory")
+	}
+	if err == nil || !strings.Contains(err.Error(), "COLLISION_RISK: guard admission serialization is unavailable") {
+		t.Fatalf("non-busy lock failure error = %v, want COLLISION_RISK: guard admission serialization is unavailable", err)
+	}
+}
+
+func TestGuardArbitrateResolveGitCommonDir(t *testing.T) {
+	root := guardArbitrateTestRepo(t)
+
+	// Primary repo directory.
+	dir, err := resolveGitCommonDir(root)
+	if err != nil {
+		t.Fatalf("resolveGitCommonDir(root): %v", err)
+	}
+	if want := filepath.Clean(filepath.Join(root, ".git")); dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+
+	// Missing commondir falls back to gitDir.
+	tempDir := t.TempDir()
+	fakeGitDir := filepath.Join(tempDir, "fake-git")
+	if err := os.Mkdir(fakeGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".git"), []byte("gitdir: "+fakeGitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveGitCommonDir(tempDir)
+	if err != nil {
+		t.Fatalf("fallback to gitDir: %v", err)
+	}
+	if want := filepath.Clean(fakeGitDir); got != want {
+		t.Fatalf("got = %q, want %q", got, want)
+	}
+
+	// Relative commondir resolved against gitDir.
+	subGit := filepath.Join(fakeGitDir, "sub")
+	if err := os.Mkdir(subGit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subGit, "commondir"), []byte("..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".git"), []byte("gitdir: fake-git/sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gotSub, err := resolveGitCommonDir(tempDir)
+	if err != nil {
+		t.Fatalf("relative commondir: %v", err)
+	}
+	if want := filepath.Clean(fakeGitDir); gotSub != want {
+		t.Fatalf("gotSub = %q, want %q", gotSub, want)
+	}
+
+	// Invalid .git file returns error.
+	if err := os.WriteFile(filepath.Join(tempDir, ".git"), []byte("not-a-gitdir-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveGitCommonDir(tempDir); err == nil {
+		t.Fatal("expected error for invalid .git pointer")
+	}
+}
+
+func TestGuardArbitrateGitDirFailureModes(t *testing.T) {
+	invalidRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(invalidRoot, "dos.toml"), []byte("[lanes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalidRoot, ".git"), []byte("not-a-gitdir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enforce mode fails closed.
+	lease, err := guardArbitrateAcquire(context.Background(), io.Discard, guardArbitrateConfig{
+		Mode: guardArbitrateModeEnforce,
+		Root: invalidRoot,
+		Tree: []string{"cmd/**"},
+	})
+	if lease != nil {
+		lease.Close()
+		t.Fatal("acquire unexpectedly returned a lease")
+	}
+	if err == nil || !strings.Contains(err.Error(), "COLLISION_RISK: guard admission git directory unavailable") {
+		t.Fatalf("err = %v, want COLLISION_RISK: guard admission git directory unavailable", err)
+	}
+
+	// Shadow mode fails open and logs.
+	var stderr strings.Builder
+	lease, err = guardArbitrateAcquire(context.Background(), &stderr, guardArbitrateConfig{
+		Mode: guardArbitrateModeShadow,
+		Root: invalidRoot,
+		Tree: []string{"cmd/**"},
+	})
+	if err != nil || lease != nil {
+		t.Fatalf("shadow lease=%v err=%v, want nil, nil", lease, err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "fak guard: arbitrate fail-open; git directory unavailable") {
+		t.Fatalf("shadow log = %q, want 'git directory unavailable'", got)
+	}
+}
+
+func TestGuardArbitrateNonBusyLockFailureShadowFailsOpen(t *testing.T) {
+	root := guardArbitrateTestRepo(t)
+	lockPath := filepath.Join(root, ".git", "fak-guard-arbitrate.lock")
+	_ = os.RemoveAll(lockPath)
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(lockPath)
+	})
+
+	var stderr strings.Builder
+	lease, err := guardArbitrateAcquire(context.Background(), &stderr, guardArbitrateConfig{
+		Mode: guardArbitrateModeShadow,
+		Root: root,
+		Tree: []string{"cmd/**"},
+	})
+	if err != nil || lease != nil {
+		t.Fatalf("shadow lease=%v err=%v, want nil, nil", lease, err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "fak guard: arbitrate fail-open; admission lock unavailable") {
+		t.Fatalf("shadow log = %q, want 'admission lock unavailable'", got)
+	}
+}
