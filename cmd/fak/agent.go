@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -53,6 +56,9 @@ type agentFlags struct {
 	memoryStore           *string
 	posture               *string
 	mcpConfig             *string
+	session               *string
+	resume                *string
+	sessionDir            *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -95,6 +101,9 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	af.posture = fs.String("posture", "default_open", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	af.mcpConfig = fs.String("mcp-config", os.Getenv("FAK_MCP_CONFIG"), "optional path to MCP client configuration file")
+	af.session = fs.String("session", "", "session ID for durable checkpointing in .fak/sessions/ (generates unique ID if 'auto' or empty with flag)")
+	af.resume = fs.String("resume", "", "resume from existing session ID or checkpoint path")
+	af.sessionDir = fs.String("session-dir", ".fak/sessions", "directory for session checkpoints (default: .fak/sessions)")
 	return fs, af
 }
 
@@ -116,15 +125,87 @@ func runAgent(argv []string) {
 		}
 		return
 	}
+	if len(argv) > 0 && argv[0] == "resume" {
+		if len(argv) < 2 || strings.HasPrefix(argv[1], "-") {
+			fmt.Fprintln(os.Stderr, "fak agent resume: requires a session ID or checkpoint path")
+			os.Exit(2)
+		}
+		argv = append([]string{"--resume", argv[1]}, argv[2:]...)
+	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
 
+	if *af.resume == "" && fs.NArg() > 0 && fs.Arg(0) == "resume" {
+		if fs.NArg() < 2 || strings.HasPrefix(fs.Arg(1), "-") {
+			fmt.Fprintln(os.Stderr, "fak agent resume: requires a session ID or checkpoint path")
+			os.Exit(2)
+		}
+		*af.resume = fs.Arg(1)
+	}
+
 	postureExplicit := false
+	taskExplicit := false
+	modelExplicit := false
+	providerExplicit := false
+	baseURLExplicit := false
+	sessionExplicit := false
+	sessionDirExplicit := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "posture" {
+		switch f.Name {
+		case "posture":
 			postureExplicit = true
+		case "task":
+			taskExplicit = true
+		case "model":
+			modelExplicit = true
+		case "provider":
+			providerExplicit = true
+		case "base-url":
+			baseURLExplicit = true
+		case "session":
+			sessionExplicit = true
+		case "session-dir":
+			sessionDirExplicit = true
 		}
 	})
+
+	defaultSessionDir := *af.sessionDir
+	if defaultSessionDir == "" {
+		defaultSessionDir = agent.DefaultSessionCheckpointDir
+	}
+
+	var resumedCP *agent.SessionCheckpoint
+	if *af.resume != "" {
+		if !sessionDirExplicit {
+			if dir := filepath.Dir(*af.resume); dir != "." && dir != "" && dir != string(filepath.Separator) {
+				defaultSessionDir = dir
+			}
+		}
+		cp, err := agent.LoadSessionCheckpoint(*af.resume, defaultSessionDir)
+		must(err)
+		resumedCP = cp
+
+		if *af.session == "" {
+			*af.session = cp.SessionID
+		}
+		if !taskExplicit && cp.Task != "" {
+			*af.task = cp.Task
+		}
+		if !modelExplicit && cp.Model != "" {
+			*af.model = cp.Model
+		}
+		if !providerExplicit && cp.Provider != "" {
+			*af.provider = cp.Provider
+		}
+		if !baseURLExplicit && cp.BaseURL != "" {
+			*af.baseURL = cp.BaseURL
+		}
+	} else if sessionExplicit || *af.session != "" {
+		if *af.session == "" || strings.EqualFold(*af.session, "auto") {
+			*af.session = generateAgentSessionID()
+		}
+	}
+
 	rawPosture := *af.posture
 	if !postureExplicit {
 		if env := os.Getenv("FAK_AGENT_POSTURE"); env != "" {
@@ -265,12 +346,19 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, memOpt)
 	}
 
-	providerExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "provider" {
-			providerExplicit = true
+	if resumedCP != nil {
+		runOpts = append(runOpts, agent.WithSessionCheckpointState(resumedCP, defaultSessionDir))
+		msgs := append([]agent.Message(nil), resumedCP.Messages...)
+		if taskExplicit && *af.task != "" && *af.task != resumedCP.Task {
+			if len(msgs) > 0 && msgs[len(msgs)-1].Role == agent.RoleAssistant {
+				msgs = append(msgs, agent.Message{Role: agent.RoleUser, Content: *af.task})
+			}
 		}
-	})
+		runOpts = append(runOpts, agent.WithConversation(msgs))
+	} else if *af.session != "" {
+		runOpts = append(runOpts, agent.WithSessionCheckpoint(*af.session, defaultSessionDir))
+	}
+
 	effectiveBaseURL := *af.baseURL
 	if effectiveBaseURL == "" {
 		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
@@ -278,6 +366,12 @@ func runAgent(argv []string) {
 		} else if providerExplicit && !*af.offline {
 			effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
 		}
+	}
+	if *af.provider != "" {
+		runOpts = append(runOpts, agent.WithProvider(*af.provider))
+	}
+	if effectiveBaseURL != "" {
+		runOpts = append(runOpts, agent.WithBaseURL(effectiveBaseURL))
 	}
 
 	var planner agent.Planner
@@ -451,4 +545,12 @@ func resolveAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err 
 
 func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
 	return resolveAgentMode(raw, native, mode)
+}
+
+func generateAgentSessionID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return fmt.Sprintf("session-%s-%s", time.Now().UTC().Format("20060102-150405"), hex.EncodeToString(b[:]))
+	}
+	return fmt.Sprintf("session-%s-%x", time.Now().UTC().Format("20060102-150405"), time.Now().UnixNano())
 }

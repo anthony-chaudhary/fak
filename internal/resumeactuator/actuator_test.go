@@ -27,6 +27,16 @@ func TestManagedArgvKeepsFAKOuterAndHarnessAdjustmentSmall(t *testing.T) {
 			req:  Request{Harness: "OpenCode", Session: "opencode-session", Prompt: "continue", OpenCodeExe: "opencode-bin"},
 			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "opencode-bin", "run", "--session", "opencode-session", "continue"},
 		},
+		{
+			name: "fak",
+			req:  Request{Harness: HarnessFak, Session: "fak-session", Prompt: "continue", FakExe: "fak-custom"},
+			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "fak-custom", "agent", "--native", "--resume", "fak-session", "--task", "continue"},
+		},
+		{
+			name: "fak-native",
+			req:  Request{Harness: HarnessFakNative, Session: "native-session"},
+			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "fak-bin", "agent", "--native", "--resume", "native-session"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,5 +80,61 @@ func TestOpenCodeResumeRequiresSession(t *testing.T) {
 	_, err := (Request{Harness: HarnessOpenCode}).ManagedArgv("fak", nil, nil)
 	if !errors.Is(err, ErrMissingCoordinate) {
 		t.Fatalf("error = %v, want ErrMissingCoordinate", err)
+	}
+}
+
+func TestFakResumeRequiresSession(t *testing.T) {
+	_, err := (Request{Harness: HarnessFak}).ManagedArgv("fak", nil, nil)
+	if !errors.Is(err, ErrMissingCoordinate) {
+		t.Fatalf("error = %v, want ErrMissingCoordinate", err)
+	}
+	_, err = (Request{Harness: HarnessFakNative}).ManagedArgv("fak", nil, nil)
+	if !errors.Is(err, ErrMissingCoordinate) {
+		t.Fatalf("error = %v, want ErrMissingCoordinate", err)
+	}
+}
+
+func TestFakHarnessNormalization(t *testing.T) {
+	variants := []string{"fak", "FAK", "fak-native", "FaK-NaTiVe", "  fak  ", "  fak-native  "}
+	for _, v := range variants {
+		name, err := (Request{Harness: v}).HarnessName()
+		if err != nil {
+			t.Fatalf("variant %q failed: %v", v, err)
+		}
+		if name != HarnessFak {
+			t.Errorf("variant %q got %q, want %q", v, name, HarnessFak)
+		}
+	}
+}
+
+func TestFakContinuationArgv(t *testing.T) {
+	// 1. Without prompt, default fakExe
+	got, err := (Request{Harness: HarnessFak, Session: "s1"}).ContinuationArgv("fak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"fak", "agent", "--native", "--resume", "s1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	// 2. With prompt
+	got, err = (Request{Harness: HarnessFakNative, Session: "s2", Prompt: "do work"}).ContinuationArgv("fak-bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"fak-bin", "agent", "--native", "--resume", "s2", "--task", "do work"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	// 3. With explicit FakExe override in Request
+	got, err = (Request{Harness: HarnessFak, Session: "s3", FakExe: "/usr/local/bin/fak"}).ContinuationArgv("fak-bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"/usr/local/bin/fak", "agent", "--native", "--resume", "s3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

@@ -234,6 +234,70 @@ type runConfig struct {
 	reasoningProfile string
 	goalAnchor       *GoalAnchor
 	auditJournal     *journal.Journal
+
+	sessionCheckpointID          string
+	sessionCheckpointDir         string
+	sessionCheckpointInitialTurn int
+	sessionCheckpointCreatedAt   time.Time
+	provider                     string
+	baseURL                      string
+}
+
+// WithSessionCheckpoint configures durable FAK-native session checkpointing.
+// The checkpoint is saved to dir/<sessionID>.json after each turn.
+func WithSessionCheckpoint(sessionID string, dir string) RunOption {
+	return func(c *runConfig) {
+		c.sessionCheckpointID = sessionID
+		c.sessionCheckpointDir = dir
+	}
+}
+
+// WithSessionCheckpointState restores checkpoint metadata for session continuation.
+func WithSessionCheckpointState(cp *SessionCheckpoint, dir string) RunOption {
+	return func(c *runConfig) {
+		if cp == nil {
+			return
+		}
+		c.sessionCheckpointID = cp.SessionID
+		c.sessionCheckpointDir = dir
+		c.sessionCheckpointInitialTurn = cp.Turn
+		c.sessionCheckpointCreatedAt = cp.CreatedAt
+		if c.provider == "" {
+			c.provider = cp.Provider
+		}
+		if c.baseURL == "" {
+			c.baseURL = cp.BaseURL
+		}
+	}
+}
+
+// WithProvider sets the provider wire name for this run configuration.
+func WithProvider(provider string) RunOption {
+	return func(c *runConfig) {
+		c.provider = provider
+	}
+}
+
+// WithBaseURL sets the base URL for this run configuration.
+func WithBaseURL(baseURL string) RunOption {
+	return func(c *runConfig) {
+		c.baseURL = baseURL
+	}
+}
+
+func (c runConfig) HasSessionCheckpoint() bool {
+	return c.sessionCheckpointID != ""
+}
+
+func (c runConfig) SessionCheckpointID() string {
+	return c.sessionCheckpointID
+}
+
+func (c runConfig) SessionCheckpointDir() string {
+	if c.sessionCheckpointDir != "" {
+		return c.sessionCheckpointDir
+	}
+	return DefaultSessionCheckpointDir
 }
 
 // ReasoningProfile returns the active ReasoningProfile for this run configuration, if any.
