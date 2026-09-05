@@ -18,6 +18,7 @@ var errorAffordances = map[string]string{
 	"SELF_MODIFY":              "route an authorized core-lock edit through fak commit --core-lock-maintenance-witness, or send an outward message with fak slack send",
 	"OVERHEAD_BUDGET_EXCEEDED": "measure against the declared budget, then reduce the overhead or update the witnessed envelope",
 	"INVALID_TOOL_ARGUMENTS":   "correct the tool arguments to match the declared schema and retry",
+	"TRUST_VIOLATION":          "Action violates trust or Information Flow Control (IFC) boundary. Check taint source, avoid outbound egress of untrusted data, or request policy authorization.",
 }
 
 // errorAffordance returns a positive next action for a known reason. Unknown
