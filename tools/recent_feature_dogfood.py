@@ -286,6 +286,12 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
                 validator="exit_only",
             ),
             Probe(
+                key="go-test-responses-elide-cas-restore",
+                description="end-to-end multi-turn dogfood probe for Responses tool elision and CAS restore (#11645)",
+                command=["go", "test", "-v", "./internal/gateway", "-run", "TestResponsesToolElisionAndCASRestoreDogfoodProbe"],
+                validator="exit_only",
+            ),
+            Probe(
                 key="go-test-fak-loop-vcache-benchmarks",
                 description="unit-test the loop, vCache, and benchmark CLI surfaces in an owned-path isolated checkout",
                 command=fak + [
