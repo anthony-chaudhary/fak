@@ -11,7 +11,7 @@ import (
 
 // grHome builds a live, serveable Claude seat at dir logged into account uuid — the minimal
 // shape Plan/NextRotationDecision/Serve read (status active, disk identity with creds). No
-// disk I/O: the plan reads these fields directly.
+// disk I/O: fixtures carry in-memory identities and require no .Refresh().
 func grHome(name, dir, uuid string) accounts.Home {
 	return accounts.Home{
 		Name:     name,
@@ -54,7 +54,7 @@ func TestPlanRotatesOffCooledSeat(t *testing.T) {
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
 		grHome("bob", "/home/.claude-bob", "u-bob"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	// alice's bucket is cooled; the ambient CLAUDE_CONFIG_DIR points at alice's dir.
 	store := grStore(t, now, reset, "uuid:u-alice")
 	// Headroom mirrors what rotationHeadroom would produce: alice walled by cooldown, bob free.
@@ -254,7 +254,7 @@ func TestPlanNotCooledIsNoop(t *testing.T) {
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
 		grHome("bob", "/home/.claude-bob", "u-bob"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	store := grStore(t, now, now.Add(time.Hour)) // nothing cooled
 	hr := accounts.RotationHeadroom{"uuid:u-alice": 1.9, "uuid:u-bob": 1.5}
 
@@ -274,7 +274,7 @@ func TestPlanCooledButNoAlternateFailsOpen(t *testing.T) {
 	now := grMustTime(t, "2026-07-07T12:00:00Z")
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	store := grStore(t, now, now.Add(time.Hour), "uuid:u-alice")
 	hr := accounts.RotationHeadroom{"uuid:u-alice": -1}
 
@@ -294,7 +294,7 @@ func TestPlanCooledAllOthersWalledFailsOpen(t *testing.T) {
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
 		grHome("bob", "/home/.claude-bob", "u-bob"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	store := grStore(t, now, now.Add(time.Hour), "uuid:u-alice", "uuid:u-bob")
 	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": -1}
 
@@ -314,7 +314,7 @@ func TestPlanUnenrolledDirFailsOpen(t *testing.T) {
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
 		grHome("bob", "/home/.claude-bob", "u-bob"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	store := grStore(t, now, now.Add(time.Hour), "uuid:u-alice")
 	hr := accounts.RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1.5}
 
@@ -333,7 +333,7 @@ func TestPlanNilStoreFailsOpen(t *testing.T) {
 	now := grMustTime(t, "2026-07-07T12:00:00Z")
 	reg := accounts.Registry{Homes: []accounts.Home{
 		grHome("alice", "/home/.claude", "u-alice"),
-	}} // fixtures carry full in-memory identities; no .Refresh() (it would re-derive from a non-existent test disk and wipe them)
+	}}
 	dir, _, ok := Plan(reg, nil, nil, "/home/.claude", now)
 	if ok {
 		t.Fatalf("nil store must fail open, got ok=true dir=%q", dir)
