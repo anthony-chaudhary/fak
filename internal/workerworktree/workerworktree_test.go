@@ -1380,3 +1380,78 @@ func TestLandDoesNotInheritUnrelatedCommitSubject(t *testing.T) {
 		t.Fatalf("must not call git log when HEAD == baseSHA (would inherit unrelated commit subject); calls=%v", g.calls)
 	}
 }
+
+func TestMaterializeOwned_IndexLockContentionRetried(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+	base := "0123456789abcdef0123456789abcdef01234567"
+	lane := "tools"
+	key := "retry-test"
+
+	var addCalls int
+	var decoupledAttempted bool
+
+	git := func(dir string, args []string) (int, string) {
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "worktree add") && !strings.Contains(joined, "--no-checkout") {
+			addCalls++
+			if addCalls == 1 {
+				return 1, "fatal: Unable to create '.git/index.lock': File exists."
+			}
+			return 0, ""
+		}
+		if strings.Contains(joined, "--no-checkout") {
+			decoupledAttempted = true
+			return 0, ""
+		}
+		return 0, ""
+	}
+
+	res := gitWorktree{}.MaterializeOwned(root, lane, key, base, wtRoot, git, defaultOwnerStamp(lane))
+	if !res.OK {
+		t.Fatalf("expected MaterializeOwned to succeed on retry, got: %+v", res)
+	}
+	if addCalls != 2 {
+		t.Fatalf("expected 2 worktree add attempts, got %d", addCalls)
+	}
+	if decoupledAttempted {
+		t.Fatalf("did not expect decoupled --no-checkout fallback when retry succeeds")
+	}
+}
+
+func TestVerifyPreparedWorktree_IndexLockTransientPoll(t *testing.T) {
+	wt := t.TempDir()
+	base := "0123456789abcdef0123456789abcdef01234567"
+	gitDir := filepath.Join(wt, ".gitdir")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	git := func(root string, args []string) (int, string) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return 0, base + "\n"
+		case "status --porcelain":
+			return 0, ""
+		case "rev-parse --git-dir":
+			return 0, gitDir
+		}
+		return 1, "unexpected"
+	}
+
+	lock := filepath.Join(gitDir, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Release the lock after 60ms to simulate transient Windows file handle release
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		_ = os.Remove(lock)
+	}()
+
+	res := verifyPreparedWorktree(Result{OK: true, Path: wt, BaseSHA: base}, git)
+	if !res.OK {
+		t.Fatalf("expected verifyPreparedWorktree to succeed after lock released, got %+v", res)
+	}
+}

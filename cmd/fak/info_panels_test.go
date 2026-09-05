@@ -311,9 +311,9 @@ func TestGuardInfoTrendsPanelCapturesPerTurnPhaseAndCost(t *testing.T) {
 	rows := guardInfoTrendsPanelRows(ctx, guardPanelFull)
 	got := strings.Join(rows, "\n")
 	for _, exact := range []string{
-		" prefill ▁█  120 tok/turn",
-		" decode  ▁█  30 tok/turn",
-		" cost    ▁█  150 tok-eq/turn · avg 135 · trend ↑ +25%",
+		" uncached ▁█  120 tok/reply",
+		" output   ▁█  30 tok/reply",
+		" usage    ▁█  150 tok/reply · avg 135 · trend ↑ +25%",
 	} {
 		if !strings.Contains(got, exact) {
 			t.Errorf("captured panel missing exact row %q:\n%s", exact, got)

@@ -204,9 +204,9 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 	if len(ctx.tr.costPerTurn) > 0 {
 		last := len(ctx.tr.costPerTurn) - 1
 		rows = append(rows,
-			fmt.Sprintf(" prefill %s  %.0f tok/turn", sparklineTUI(ctx.tr.prefillPerTurn, ctx.sparkW), ctx.tr.prefillPerTurn[last]),
-			fmt.Sprintf(" decode  %s  %.0f tok/turn", sparklineTUI(ctx.tr.decodePerTurn, ctx.sparkW), ctx.tr.decodePerTurn[last]),
-			fmt.Sprintf(" cost    %s  %.0f tok-eq/turn · avg %.0f · trend %s", sparklineTUI(ctx.tr.costPerTurn, ctx.sparkW), ctx.tr.costPerTurn[last], meanTUI(ctx.tr.costPerTurn), trendTUI(ctx.tr.costPerTurn)),
+			fmt.Sprintf(" uncached %s  %.0f tok/reply", sparklineTUI(ctx.tr.prefillPerTurn, ctx.sparkW), ctx.tr.prefillPerTurn[last]),
+			fmt.Sprintf(" output   %s  %.0f tok/reply", sparklineTUI(ctx.tr.decodePerTurn, ctx.sparkW), ctx.tr.decodePerTurn[last]),
+			fmt.Sprintf(" usage    %s  %.0f tok/reply · avg %.0f · trend %s", sparklineTUI(ctx.tr.costPerTurn, ctx.sparkW), ctx.tr.costPerTurn[last], meanTUI(ctx.tr.costPerTurn), trendTUI(ctx.tr.costPerTurn)),
 		)
 	}
 	rows = append(rows, infoTokenDestinationRows(v.TokenDestination, ctx.width)...)
